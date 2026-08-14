@@ -1,0 +1,5 @@
+# offset=281704292
+
+```
+ge"};if(lz(e,"document_block"))return{kind:"document"};if(lz(e,"media_budget"))return{kind:"document"};return U4s(e)}function N7o(e){if(!(e instanceof ps)||e.status!==400)return;return jfa(e.message)}function l8o(e){return e.isApiErrorMessage===!0&&e.errorDetails!==void 0&&c1b(e.errorDetails)}function LRr(e){if(!(e instanceof Error))return!1;return v$o(e.message)||lz(e.message,"prompt_too_long")}function y9t(e){return e instanceof Error&&(N4s(e.message)||lz(e.message,"max_tokens_context_overflow"))}function nZs(e){return e instanceof Error&&e.message.toLowerCase().includes("credit balance is t
+```

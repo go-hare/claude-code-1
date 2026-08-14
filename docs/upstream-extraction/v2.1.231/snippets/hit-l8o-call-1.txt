@@ -1,0 +1,38 @@
+# offset=280854742
+
+```
+ncept 1]
+   - [Concept 2]
+
+3. Files and Code Sections:
+   - [File Name 1]
+      - [Summary of why this file is important]
+      - [Important Code Snippet]
+
+4. Errors and fixes:
+    - [Error description]:
+      - [How you fixed it]
+
+5. Problem Solving:
+   [Description]
+
+6. All user messages:
+    - [Detailed non tool use user message]
+
+7. Pending Tasks:
+   - [Task 1]
+
+8. Work Completed:
+   [Description of what was accomplished]
+
+9. Context for Continuing Work:
+   [Key context, decisions, or state needed to continue the work]
+
+</summary>
+</example>
+
+Please provide your summary following this structure, ensuring precision and thoroughness in your response.
+`,vup=`
+
+REMINDER: Do NOT call any tools. Respond with plain text only \u2014 `+"an <analysis> block followed by a <summary> block. Tool calls will be rejected and you will fail the task."});async function EAb(e,t,r,n){let o=b8o(r),i=vn({content:o}),s;try{s=await AG({promptMessages:[i],cacheSafeParams:{...t,forkContextMessages:n?vaa(e):e},canUseTool:Saa(),querySource:"compact",forkLabel:"reactive-compact",maxTurns:1,fallbackModel:v8o(t.toolUseContext.options.mainLoopModel,t.toolUseContext.options.fallbackModel),skipTranscript:!0,skipCacheWrite:!0,overrides:{onRetryStatus:t.toolUseContext.onRetryStatus}})}catch(d){let p=ue(d);if(Ene(p))w(`Reactive compact API call failed: ${p}`,{level:"error"});else He(d);return{ok:!1,reason:"error",detail:p,status:void 0,isTimeout:!1}}if(t.toolUseContext.abortController.signal.aborted)return{ok:!1,reason:"aborted"};let a=tO(s.messages);if(!a)return He(Error(`Reactive compact: no assistant message in summarization response (${s.messages.length} messages, types: ${s.messages.map((d)=>d.type).join(", ")})`)),{ok:!1,reason:"error",detail:"no assistant message in summarization response",status:void 0,isTimeout:!1};if(e8e(a))return{ok:!1,reason:"prompt_too_long",tokenGap:CPr(a)};if(wup(a)){let d=q1(e)-yfe;return{ok:!1,reason:"prompt_too_long",tokenGap:d>0?d:void 0,viaCreditsBoundary:!0}}if(l8o(a))return{ok:!1,reason:"media_too_large"};if(a.isApiErrorMessage){let d=Ece(a)??"API error";return w(`Reactive compact: summarization returned API error: ${d}`,{level:"error"}),{ok:!1,reason:"error",detail:d,status:a.apiErrorStatus,isTimeout:d===vxt}}let l=_8o(s.messages);if(!l)return He(Error("Reactive compact: empty summary text in summarization response")),{ok:!1,reason:"error",detail:"summarization produced empty response",status:void 0,isTimeout:!1};let c=xv(),u=RU()&&Qvn(t.toolUseContext.getReplContexts(),t.toolUseContext.agentId);return{ok:!0,summaryText:l,forkAssistantMessageCount:ur(s.messages,(d)=>d.type==="assistant"&&!d.isApiErrorMessage),totalUsage:s.totalUsage,messages:[vn({content:BCn(l,{suppressFollowUpQuestions:!0,transcriptPath:c,replStateCleared:u}),isCompactSummary:!0,isVisibleInTranscriptOnly:!0})]}}function Eup(e,t,r){let n=0,o=0;for(let i=t-1;i>=0;i--)if(n+=e[i],o++,n>=r)break;if(o>=t-1)return Math.max(1,Math.floor(t/2));return o}function wAb(e,t,r){if(e===void 0)return{mode:"gap_unparseable",step:1};return{mode:"gap_guided",step:Eup(t,r,e)}}async function i8o(e,t,r){let n=UCn(e),o=n.length;if(o<2)return w("Reactive compact: fewer than 2 groups, nothing to compact",{level:"info"}),{ok:!1,reason:"too_few_groups",attempts:0,totalGroups:o};let i=t.toolUseContext.abortController.signal,s=1,a=0,l=void 0,c,u=!1,d=!1;if(r?.initialTokenGap!==void 0&&o>3){c=n.map((f)=>q1(f));let p=r.initialTokenGap-(c[o-1]??0);if(p>0){let f=Eup(c,o-1,p);s=1+f,l={mode:"seeded",step:f,tokenGap:r.initialTokenGap}}}while(s<o){if(i.aborted)return{ok:!1,reason:"aborted",attempts:a,totalGroups:o};a++;let p=o-s,f=n.slice(0,p),m=n.slice(p),h=f.flat();if(!h.some((S)=>S.type==="assistant")){if(w("Reactive compact: no assistant messages in summarize set, bailing",{level:"info"}),d)O("tengu_compact_credits_clamp_rescue",{outcome:ke("failed"),attempts:a-1});return{ok:!1,reason:a>1?"exhausted":"too_few_groups",attempts:a-1,totalGroups:o}}O("tengu_reactive_compact_attempt",{attempt:a,groupsToSummarize:f.length,groupsToPreserve:m.length,messagesToSummarize:h.length,strippedMedia:u,stepMode:Oo(l?.mode),stepSize:l?.step,tokenGap:l?.tokenGap});let g=await EAb(h,t,r?.customInstructions,u);if(g.ok){if(d)O("tengu_compact_credits_clamp_rescue",{outcome:ke("ok"),attempts:a});return{ok:!0,result:{summaryMessages:g.messages,summaryText:g.summaryText,messagesToPreserve:m.flat(),attempt:a,totalUsage:g.totalUsage,forkAssistantMessageCount:g.forkAssistantMessageCount,groupsPreserved:s,
+```

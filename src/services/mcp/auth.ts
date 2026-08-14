@@ -46,7 +46,11 @@ import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { emitMcpNeedsReauth } from './mcpReauthSignal.js'
-import { buildRedirectUri, findAvailablePort } from './oauthPort.js'
+import {
+  buildRedirectUri,
+  findAvailablePort,
+  getPortFromLoopbackRedirectUri,
+} from './oauthPort.js'
 import type { McpHTTPServerConfig, McpSSEServerConfig } from './types.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
 import { performCrossAppAccess, XaaTokenExchangeError } from './xaa.js'
@@ -747,20 +751,49 @@ export async function revokeServerTokens(
   }
 }
 
+/**
+ * densable PMa — clear local OAuth storage for a server.
+ *
+ * When `preserveClientRegistration` is true and a clientId exists, wipe access
+ * tokens but keep clientId/clientSecret/redirectUri so pre-registered /
+ * previously DCR'd clients re-auth with the same redirect_uri (densable 2.1.231 #1).
+ */
 export function clearServerTokensFromLocalStorage(
   serverName: string,
   serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+  opts?: { preserveClientRegistration?: boolean },
 ): void {
   const storage = getSecureStorage()
   const existingData = storage.read()
   if (!existingData?.mcpOAuth) return
 
   const serverKey = getServerKey(serverName, serverConfig)
-  if (existingData.mcpOAuth[serverKey]) {
-    delete existingData.mcpOAuth[serverKey]
+  const entry = existingData.mcpOAuth[serverKey]
+  if (!entry) return
+
+  if (opts?.preserveClientRegistration && entry.clientId) {
+    // densable: if already tokenless stub, leave as-is
+    if (!entry.accessToken && !entry.refreshToken) {
+      return
+    }
+    existingData.mcpOAuth[serverKey] = {
+      ...entry,
+      accessToken: '',
+      refreshToken: undefined,
+      expiresAt: 0,
+      scope: undefined,
+    }
     storage.update(existingData)
-    logMCPDebug(serverName, 'Cleared stored tokens')
+    logMCPDebug(
+      serverName,
+      'Cleared stored tokens (preserved client registration)',
+    )
+    return
   }
+
+  delete existingData.mcpOAuth[serverKey]
+  storage.update(existingData)
+  logMCPDebug(serverName, 'Cleared stored tokens')
 }
 
 type WWWAuthenticateParams = {
@@ -981,6 +1014,11 @@ export async function performMCPOAuthFlow(
   abortSignal?: AbortSignal,
   options?: {
     skipBrowserOpen?: boolean
+    /**
+     * densable `o?.redirectUri` — external/custom redirect (no localhost
+     * callback listener). Caller receives the auth code out-of-band.
+     */
+    redirectUri?: string
     onWaitingForCallback?: (submit: (callbackUrl: string) => void) => void
   },
 ): Promise<void> {
@@ -1030,20 +1068,19 @@ export async function performMCPOAuthFlow(
     return
   }
 
-  // Check for cached step-up scope and resource metadata URL before clearing
-  // tokens. The transport-attached auth provider persists scope when it receives
-  // a step-up 401, so we can use it here instead of making an extra probe request.
+  // densable FLv: read cached OAuth entry BEFORE clear — port/client reuse for
+  // pre-registered clients (Slack) depends on prior redirectUri + clientId.
   const storage = getSecureStorage()
   const serverKey = getServerKey(serverName, serverConfig)
   const cachedEntry = storage.read()?.mcpOAuth?.[serverKey]
   const cachedStepUpScope = cachedEntry?.stepUpScope
   const cachedResourceMetadataUrl =
     cachedEntry?.discoveryState?.resourceMetadataUrl
-
-  // Clear any existing stored credentials to ensure fresh client registration.
-  // Note: this deletes the entire entry (including discoveryState/stepUpScope),
-  // but we already read the cached values above.
-  clearServerTokensFromLocalStorage(serverName, serverConfig)
+  // densable u: prior loopback redirect port when client was registered
+  const preferredPort =
+    cachedEntry?.clientId && cachedEntry?.redirectUri
+      ? getPortFromLoopbackRedirectUri(cachedEntry.redirectUri)
+      : undefined
 
   // Use cached step-up scope and resource metadata URL if available.
   // The transport-attached auth provider caches these when it receives a
@@ -1086,14 +1123,47 @@ export async function performMCPOAuthFlow(
   let authorizationCodeObtained = false
 
   try {
-    // Use configured callback port for pre-configured OAuth, otherwise find an available port
+    // densable FLv redirect selection (2.1.231 #1 pre-registered / Slack):
+    //   h = oauth.callbackPort (config)
+    //   g = !!options.redirectUri (custom — no localhost listener)
+    //   y = g ? 0 : h ?? gIt(u)   // u = preferred port from stored redirect
+    //   S = options.redirectUri ?? JFr(y)
+    //   v = !clientId || y===u || stored.redirectUri===S  → preserveClientRegistration
     const configuredCallbackPort = serverConfig.oauth?.callbackPort
-    const port = configuredCallbackPort ?? (await findAvailablePort())
-    const redirectUri = buildRedirectUri(port)
+    const hasCustomRedirectUri = Boolean(options?.redirectUri)
+    const port = hasCustomRedirectUri
+      ? 0
+      : (configuredCallbackPort ?? (await findAvailablePort(preferredPort)))
+    const redirectUri = options?.redirectUri ?? buildRedirectUri(port)
     logMCPDebug(
       serverName,
-      `Using redirect port: ${port}${configuredCallbackPort ? ' (from config)' : ''}`,
+      hasCustomRedirectUri
+        ? `Using custom redirectUri: ${redirectUri} (no localhost listener)`
+        : `Using redirect port: ${port}${
+            configuredCallbackPort
+              ? ' (from config)'
+              : preferredPort !== undefined && port === preferredPort
+                ? ' (reusing registered port)'
+                : ''
+          }`,
     )
+
+    // densable v / PMa: keep DCR client when redirect stable so pre-registered
+    // (or prior dynamic) client_id still matches the redirect_uri we send.
+    const preserveClientRegistration =
+      !cachedEntry?.clientId ||
+      port === preferredPort ||
+      cachedEntry?.redirectUri === redirectUri
+    try {
+      clearServerTokensFromLocalStorage(serverName, serverConfig, {
+        preserveClientRegistration,
+      })
+    } catch (clearErr) {
+      logMCPDebug(
+        serverName,
+        `clear stored credentials failed: ${errorMessage(clearErr)}`,
+      )
+    }
 
     const provider = new ClaudeAuthProvider(
       serverName,
@@ -1155,7 +1225,8 @@ export async function performMCPOAuthFlow(
       logMCPDebug(serverName, `MCP OAuth server cleaned up`)
     }
 
-    // Setup a server to receive the callback
+    // densable: custom redirectUri (g) skips localhost listener — auth code
+    // arrives via onWaitingForCallback / external channel only.
     const authorizationCode = await new Promise<string>((resolve, reject) => {
       let resolved = false
       const resolveOnce = (code: string) => {
@@ -1182,7 +1253,8 @@ export async function performMCPOAuthFlow(
       }
 
       // Allow manual callback URL paste for remote/browser-based environments
-      // where localhost is not reachable from the user's browser.
+      // where localhost is not reachable from the user's browser. densable also
+      // uses this when options.redirectUri is set (no localhost listener).
       if (options?.onWaitingForCallback) {
         options.onWaitingForCallback((callbackUrl: string) => {
           try {
@@ -1226,79 +1298,7 @@ export async function performMCPOAuthFlow(
         })
       }
 
-      server = createServer((req, res) => {
-        const parsedUrl = parse(req.url || '', true)
-
-        if (parsedUrl.pathname === '/callback') {
-          const code = parsedUrl.query.code as string
-          const state = parsedUrl.query.state as string
-          const error = parsedUrl.query.error
-          const errorDescription = parsedUrl.query.error_description as string
-          const errorUri = parsedUrl.query.error_uri as string
-
-          // Validate OAuth state to prevent CSRF attacks
-          if (!error && state !== oauthState) {
-            res.writeHead(400, { 'Content-Type': 'text/html' })
-            res.end(
-              `<h1>Authentication Error</h1><p>Invalid state parameter. Please try again.</p><p>You can close this window.</p>`,
-            )
-            cleanup()
-            rejectOnce(new Error('OAuth state mismatch - possible CSRF attack'))
-            return
-          }
-
-          if (error) {
-            res.writeHead(200, { 'Content-Type': 'text/html' })
-            // Sanitize error messages to prevent XSS
-            const sanitizedError = xss(String(error))
-            const sanitizedErrorDescription = errorDescription
-              ? xss(String(errorDescription))
-              : ''
-            res.end(
-              `<h1>Authentication Error</h1><p>${sanitizedError}: ${sanitizedErrorDescription}</p><p>You can close this window.</p>`,
-            )
-            cleanup()
-            let errorMessage = `OAuth error: ${error}`
-            if (errorDescription) {
-              errorMessage += ` - ${errorDescription}`
-            }
-            if (errorUri) {
-              errorMessage += ` (See: ${errorUri})`
-            }
-            rejectOnce(new Error(errorMessage))
-            return
-          }
-
-          if (code) {
-            res.writeHead(200, { 'Content-Type': 'text/html' })
-            res.end(
-              `<h1>Authentication Successful</h1><p>You can close this window. Return to Claude Code.</p>`,
-            )
-            cleanup()
-            resolveOnce(code)
-          }
-        }
-      })
-
-      server.on('error', (err: NodeJS.ErrnoException) => {
-        cleanup()
-        if (err.code === 'EADDRINUSE') {
-          const findCmd =
-            getPlatform() === 'windows'
-              ? `netstat -ano | findstr :${port}`
-              : `lsof -ti:${port} -sTCP:LISTEN`
-          rejectOnce(
-            new Error(
-              `OAuth callback port ${port} is already in use — another process may be holding it. ` +
-                `Run \`${findCmd}\` to find it.`,
-            ),
-          )
-        } else {
-          rejectOnce(new Error(`OAuth callback server failed: ${err.message}`))
-        }
-      })
-
-      server.listen(port, '127.0.0.1', async () => {
+      const startSdkAuth = async () => {
         try {
           logMCPDebug(serverName, `Starting SDK auth`)
           logMCPDebug(serverName, `Server URL: ${serverConfig.url}`)
@@ -1323,18 +1323,103 @@ export async function performMCPOAuthFlow(
           cleanup()
           rejectOnce(new Error(`SDK auth failed: ${errorMessage(error)}`))
         }
-      })
+      }
 
-      // Don't let the callback server or timeout pin the event loop — if the UI
-      // component unmounts without aborting (e.g. parent intercepts Esc), we'd
-      // rather let the process exit than stay alive for 5 minutes holding the
-      // port. The abortSignal is the intended lifecycle management.
-      server.unref()
+      // densable: if(g)U(); else listen+U — custom redirect skips localhost server
+      if (hasCustomRedirectUri) {
+        void startSdkAuth()
+      } else {
+        server = createServer((req, res) => {
+          const parsedUrl = parse(req.url || '', true)
+
+          if (parsedUrl.pathname === '/callback') {
+            const code = parsedUrl.query.code as string
+            const state = parsedUrl.query.state as string
+            const error = parsedUrl.query.error
+            const errorDescription = parsedUrl.query.error_description as string
+            const errorUri = parsedUrl.query.error_uri as string
+
+            // Validate OAuth state to prevent CSRF attacks
+            if (!error && state !== oauthState) {
+              res.writeHead(400, { 'Content-Type': 'text/html' })
+              res.end(
+                `<h1>Authentication Error</h1><p>Invalid state parameter. Please try again.</p><p>You can close this window.</p>`,
+              )
+              cleanup()
+              rejectOnce(
+                new Error('OAuth state mismatch - possible CSRF attack'),
+              )
+              return
+            }
+
+            if (error) {
+              res.writeHead(200, { 'Content-Type': 'text/html' })
+              // Sanitize error messages to prevent XSS
+              const sanitizedError = xss(String(error))
+              const sanitizedErrorDescription = errorDescription
+                ? xss(String(errorDescription))
+                : ''
+              res.end(
+                `<h1>Authentication Error</h1><p>${sanitizedError}: ${sanitizedErrorDescription}</p><p>You can close this window.</p>`,
+              )
+              cleanup()
+              let errorMessage = `OAuth error: ${error}`
+              if (errorDescription) {
+                errorMessage += ` - ${errorDescription}`
+              }
+              if (errorUri) {
+                errorMessage += ` (See: ${errorUri})`
+              }
+              rejectOnce(new Error(errorMessage))
+              return
+            }
+
+            if (code) {
+              res.writeHead(200, { 'Content-Type': 'text/html' })
+              res.end(
+                `<h1>Authentication Successful</h1><p>You can close this window. Return to Claude Code.</p>`,
+              )
+              cleanup()
+              resolveOnce(code)
+            }
+          }
+        })
+
+        server.on('error', (err: NodeJS.ErrnoException) => {
+          cleanup()
+          if (err.code === 'EADDRINUSE') {
+            const findCmd =
+              getPlatform() === 'windows'
+                ? `netstat -ano | findstr :${port}`
+                : `lsof -ti:${port} -sTCP:LISTEN`
+            rejectOnce(
+              new Error(
+                `OAuth callback port ${port} is already in use — another process may be holding it. ` +
+                  `Run \`${findCmd}\` to find it.`,
+              ),
+            )
+          } else {
+            rejectOnce(
+              new Error(`OAuth callback server failed: ${err.message}`),
+            )
+          }
+        })
+
+        server.listen(port, '127.0.0.1', () => {
+          void startSdkAuth()
+        })
+
+        // Don't let the callback server or timeout pin the event loop — if the UI
+        // component unmounts without aborting (e.g. parent intercepts Esc), we'd
+        // rather let the process exit than stay alive for 5 minutes holding the
+        // port. The abortSignal is the intended lifecycle management.
+        server.unref()
+      }
 
       timeoutId = setTimeout(
-        (cleanup, rejectOnce) => {
-          cleanup()
-          rejectOnce(new Error('Authentication timeout'))
+        (cleanupFn, rejectFn) => {
+          cleanupFn()
+          rejectFn(new Error('Authentication timeout'))
         },
         5 * 60 * 1000, // 5 minutes
         cleanup,
@@ -1657,6 +1742,8 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           serverUrl: this.serverConfig.url,
           clientId: clientInformation.client_id,
           clientSecret: clientInformation.client_secret,
+          // densable: persist redirect used for this registration (port reuse)
+          redirectUri: this.redirectUri,
           // Provide default values for required fields if not present
           accessToken: existingData.mcpOAuth?.[serverKey]?.accessToken || '',
           expiresAt: existingData.mcpOAuth?.[serverKey]?.expiresAt || 0,
@@ -1853,6 +1940,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           refreshToken: tokens.refresh_token,
           expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
           scope: tokens.scope,
+          // Keep redirectUri across token refresh for densable port reuse
+          redirectUri:
+            existingData.mcpOAuth?.[serverKey]?.redirectUri ?? this.redirectUri,
         },
       },
     }

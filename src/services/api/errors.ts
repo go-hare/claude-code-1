@@ -142,8 +142,9 @@ export function getPromptTooLongTokenGap(
 }
 
 /**
- * densable Gvg — media / request-body size rejections that stripImagesFromMessages
- * can fix. Reactive compact uses this to strip+retry vs bail.
+ * densable Gvg / l8o — media / request-body size rejections. densable recovery
+ * withholds via r8o then n8o (full tryReactiveCompact), not a separate
+ * query-level stripImagesFromMessages path (stripImages is compact hygiene).
  *
  * Patterns MUST stay in sync with getAssistantMessageFromError branches that
  * populate errorDetails (PDF / image / many-image / densable 413 X8i

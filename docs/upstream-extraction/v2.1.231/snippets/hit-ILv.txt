@@ -1,0 +1,5 @@
+# offset=285865300
+
+```
+urn`${t.protocol}//${t.hostname}`}catch{return e}}function ILv(e){let t=IMa(e);return t==="http://127.0.0.1"||t==="http://localhost"}function PLv(e){return efi.get(e)}function DLv(e,t){tfi.set(e,t),t.finally(()=>{if(tfi.get(e)===t)tfi.delete(e)}).catch(()=>{})}function MLv(e){return tfi.get(e)}async function ifi(e,t){let r=dh(e,t),n=(await Pa().readAsync())?.mcpOAuth?.[r];if(!n||n.accessToken||n.refreshToken)return;try{await Pa().mutate((o)=>{let i=o.mcpOAuth?.[r];if(!i||i.accessToken||i.refreshToken)return o;let s={...o.mcpOAuth};return delete s[r],{...o,mcpOAuth:s}})}catch(o){Ht(e,`clear tokenless stub failed: ${ue(o)}`)}}async function mmf({serverName:e,endpoint:t,token:r,tokenTypeHint:n,clientId:o,clientSecret:i,accessToken:s,authMethod:a="client_secret_basic"}){let l=new URLSearchParams;l.set("token",r),l.set("token_type_hint",n);let
+```

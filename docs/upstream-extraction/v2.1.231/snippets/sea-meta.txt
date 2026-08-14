@@ -1,0 +1,4 @@
+size=307186848
+sha256=99dbf97ef1b03ca94db818977bfc0970889bb5bbe6e981405a55f225d0fbf603
+version_hits=3
+path=C:\Users\Administrator\AppData\Local\Temp\official-231\plat\package\claude.exe

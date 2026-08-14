@@ -1,0 +1,14 @@
+# offset=155380805
+
+```
+ables:
+  claude mcp add my-server -e API_KEY=xxx -- npx my-mcp-server
+
+  # Add stdio server with subprocess flags:
+  claude mcp add my-server -- my-command --some-flag arg1................e......-s, --scope <scope>................G-...Configuration scope (local, user, or project)...........	A_....local...........	.......-t, --transport <transport>.................F...Transport type (stdio, sse, http). Defaults to stdio if not specified..............\....-e, --env <env...>..............	.n.-...Set environment variables (e.g. -e KEY=value)...........	.......-H, --header <header...>........I..`H...Set WebSocket headers (e.g. -H "X-Api-Key: abc123" -H "X-Custom: value")........	.......--client-id <clientId>..........I..\$...OAuth client ID for HTTP/SSE servers............IJ......--client-secret.........	,b.A...Prompt for OAuth client secret (or set MCP_CLIENT_SECRET env var)...............	.......--callback-port <port>..........	...R...Fixed port for OAuth callback (for servers requiring pre-registered redirect URIs).Z..............g[
+...-h, --helpZZ............I.h^....Display help for command........	.......--xaa..............\....Enable XAA (SEP-990) for this server. Requires 'claude mcp xaa setup' first. Also requires --client-id and --client-secret (for the MCP server's AS)....
+...................................@....................@P..H...g.L..|>.......L1...;......<O.G...p|.......<h.Q...pd.
+.....<F._...pdC......<gLi...pd.......<A.w...pd.+.....<....W.....pdW...W......<^...o.....pdo..........<.....).d.....
+.>...5.........(...	.<...4.......;...................<...........<....).....pT.................................................................................................................................................fT.....................x.........................P.....................................	.E.
+...helpOption$.............	...	...addOption...............	.......hideHelp...................3n......C......."...8n..Yy.......D..H.......................................................h...................................................................................................................,...............................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p.......0...0...0...0................................................................................................................................................................................
+```

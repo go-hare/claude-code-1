@@ -1,0 +1,34 @@
+# offset=201615325
+
+```
+.......6.
+..........7...............8.!.................9.........:.
+....	..............;......<.....=........>.
+....
+..............?......@.....A......B.....C.........D 
+...................E......F!....G......H"....I.........J#
+.................K...............L..... M$.....N%....O......P&....Q.........R'
+..................S......T(....U......V)....W.........X*
+..........Y+..............Z.!.................[.........\,
+...................]......^-...._.........`.
+..........a/..............b.!.................c.........d0
+...................e......f1....g... .....h2
+..........i3..............j.!.................k...!.....l4
+...................m......n5....o...".....p6
+..........q7...... .......r !.........!.......s!..#.... t8
+..........u9....v...$.....w:......".......x"!.........#.......y#..%.....z;
+...........$.......{$.... |<....}...&.....~=
+...........>......%........%!.........&........&..'......?
+...........'........'.... .@........(......A
+...........B......(........(!..	......)........)..)....$.C
+...........*........*....*.D......a...!..
+
+..*......(.E........+..,..-j.......$.F
+..........+.......+......,........,....*.G....(.H.............$.I
+...........-........-....$.J..........".K
+......... .L..... ../......M"..
+........Ni..................................................8...............h...............p...............................P...............................................................................................................................................................0...............@............................................... 	..............0	..............h
+..............x
+..............................................................p.............................8...............h.......................	.......source..........	.......url.............	...#...Direct URL to marketplace.json file.............	.......Custom HTTP headers (e.g., for authentication)..........	.......github..........	...4...GitHub repository in owner/repo format. ONLY in the managed-settings policy lists (strictKnownMarketplaces / blockedMarketplaces) the owner-wildcard form "owner/*" matches every repository under exactly that owner. Everywhere else (marketplace add, extraKnownMarketplaces, known_marketplaces.json) the value ................Q...m.u.s.t. .n.a.m.e. .a. .s.i.n.g.l.e. .r.e.p.o.s.i.t.o.r.y. ..  .a. .w.i.l.d.c.a.r.d. .i.s. .t.a.k.e.n. .l.i.t.e.r.a.l.l.y. .a.n.d. .f.a.i.l.s. .t.o. .c.l.o.n.e.................	...Y...Git branch or tag to use (e.g., "main", "v1.0.0"). Defaults to repository default branch................	...R...Path to marketplace.json within repo (defaults to .claude-plugin/marketplace.json)..............	.......Directories to include via git sparse-checkout (cone mode). Use for monorepos where the marketplace lives in a subdirectory. Example: [".claude-plugin", "plugins"]. If omitted, the full repository is cloned..........	.......Skip Git LFS smudge during clone and update (sets GIT_LFS_SKIP_SMUDGE=1) so LFS pointer files stay as pointers instead of downloading their content. Use for marketplaces hosted in repos with large LFS objects................	.......git.............	.......Full git repository URL.........	.......npm.............	...'...NPM package containing marketplace.json.........	.......file............	...#...Local file path to marketplace.json.............	...	...directory...............	...:...Local directory containing .claude-plugin/marketplace.json..............	...
+...skills-dir..............	.......Policy-list sentinel for the ~/.claude/skills/ auto-load (@skills-dir plugins). In strictKnownMarketplaces: opt the scan back IN (by default any allowlist blocks it). In blockedMarketplaces: turn the scan OFF without otherwise restricting marketplaces. Only meaningful in those two managed-settings lists (areLocalPluginDirsAllowedByPolicy); known_marketplaces.json / marketplace add etc. ignore it..........	.......hostPattern.............	...8...Regex pattern to match the host/domain extracted from any marketplace source type. For github sources, matches against github.com. For git sources (SSH or HTTPS), extracts the hostname from the URL. Use in strictKnownMarketplaces to allow all marketplaces from a specific host (e.g., "^github\.mycompany\.com$").........	.......pathPattern.............	...G...Regex pattern matched against the .path field of file and directory sources. Use in strictKnownMarketplaces to allow filesystem-based marketplaces alongside hostPattern restrictions for network sources. Use ".*" to allow all filesystem paths, or a narrower pattern (e.g., "^/opt/approved/") to restrict to specific directories..........	.......settings........	.......Reserved marketplace names cannot be used with settings sources. validateOfficialNameSource only accepts github/git sources from anthropics/* for these names; a settings source would be rejected after loadAndCacheMarketplace has already written to disk with cleanupNeeded=false...........	....
+```

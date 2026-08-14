@@ -2467,21 +2467,22 @@ async function* queryLoop(
       // drain first (cheap, keeps granular context), then reactive compact
       // (full summary). Single-shot on each — if a retry still 413's,
       // the next stage handles it or the error surfaces.
+      // densable cup: e?.type==="assistant" && e8e(e) — optional outer.
       const isWithheld413 =
-        lastMessage?.type === 'assistant' &&
-        lastMessage.isApiErrorMessage &&
-        isPromptTooLongMessage(lastMessage)
-      // Media-size rejections (image/PDF/many-image) are recoverable via
-      // reactive compact's strip-retry. Unlike PTL, media errors skip the
-      // collapse drain — collapse doesn't strip images. mediaRecoveryEnabled
-      // is the hoisted gate from before the stream loop (same value as the
-      // withholding check — these two must agree or a withheld message is
-      // lost). If the oversized media is in the preserved tail, the
-      // post-compact turn will media-error again; hasAttemptedReactiveCompact
-      // prevents a spiral and the error surfaces.
+        reactiveCompact?.isWithheldPromptTooLong(lastMessage) === true ||
+        (reactiveCompact == null &&
+          lastMessage?.type === 'assistant' &&
+          lastMessage.isApiErrorMessage &&
+          isPromptTooLongMessage(lastMessage))
+      // densable r8o: e?.type==="assistant" && l8o(e). Media and PTL both enter
+      // n8o/tryReactiveCompact (full summary) — not query-level stripImages.
+      // SEA has strippedMedia only inside compact group retries. Collapse drain
+      // still PTL-only (media skip collapse). mediaRecoveryEnabled must match
+      // stream withhold (module present). Tail-preserved media may re-error once;
+      // hasAttemptedReactiveCompact prevents a spiral.
       const isWithheldMedia =
         mediaRecoveryEnabled &&
-        reactiveCompact?.isWithheldMediaSizeError(lastMessage as Message)
+        reactiveCompact?.isWithheldMediaSizeError(lastMessage) === true
       if (isWithheld413) {
         // First: drain all staged context-collapses. Gated on the PREVIOUS
         // transition not being collapse_drain_retry — if we already drained
@@ -2573,11 +2574,12 @@ async function* queryLoop(
         // so hooks have nothing meaningful to evaluate. Running stop hooks
         // on prompt-too-long creates a death spiral: error → hook blocking
         // → retry → error → … (the hook injects more tokens each cycle).
-        // densable Ysa/bua (#25): when compact failed with error+detail and the
-        // last message is a PTL api error, annotate content so the user sees
-        // "Prompt is too long · automatic compaction failed: …".
+        // densable SEA: dl=$n?oaa(ia):void 0 — Ysa only for PTL ($n), never media.
+        // oaa only when failure.reason==="error"+detail (aborted keeps bare PTL).
+        // Terminal reason is still image_error|prompt_too_long (not aborted_streaming).
         let surfaced: AssistantMessage = lastMessage as AssistantMessage
         if (
+          isWithheld413 &&
           lastMessage &&
           lastMessage.type === 'assistant' &&
           lastMessage.isApiErrorMessage &&
@@ -2591,7 +2593,7 @@ async function* queryLoop(
         yield surfaced
         void executeStopFailureHooks(surfaced, toolUseContext)
         return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
-      } else if (feature('CONTEXT_COLLAPSE') && isWithheld413) {
+      } else if (feature('CONTEXT_COLLAPSE') && isWithheld413 && lastMessage) {
         // reactiveCompact compiled out but contextCollapse withheld and
         // couldn't recover (staged queue empty/stale). Surface. Same
         // early-return rationale — don't fall through to stop hooks.

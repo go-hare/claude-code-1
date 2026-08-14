@@ -1,0 +1,42 @@
+# offset=84908200
+
+```
+rror reading -f/--file from stdin: stdin has already been consumed.. is not <= ..error: attempted to read patterns from stdin while also searching stdin!number of paths given to search: ..Yusing heuristics to determine whether to read from stdin or search ./ (is_readable_stdin=.., stdin_consumed=.., mode=..).heuristic chose to search stdinheuristic chose to search ./is_one_file? ..internal buffer should never be exhausted..: binary detection: ..ripgrep::search[Omitted long context line][Omitted long matching line].[Omitted long line with .	 matches]. [... omitted end of long line]. [... .. more ..].:WARNING: stopped searching binary file after match (found .. byte around offset ..)
+..binary file matches (found .. byte around offset ..)
+.separator must be valid UTF-8 (use escape sequences to provide a separator that is not valid UTF-8)internal error: entered unreachable code: got switch but expected flag valueinternal error: entered unreachable code: got flag value but expected switch.............................0$.B....*sorting by last modified isn't supported: ..*sorting by last accessed isn't supported: ..*sorting by creation time isn't supported: ...[40m.[44m.[46m.[45m.[43m.[47m.[48;5;8m.[38;5;8m.[48;5;12m.[38;5;12m.[48;5;10m.[38;5;10m.[48;5;9m.[38;5;9m.[48;5;14m.[38;5;14m.[48;5;13m.[38;5;13m.[48;5;11m.[38;5;11m.[48;5;15m.[38;5;15mvalid UTF-8 capture namefewer than u32::MAX flags"similar flags that are available: ...failed to initialize logger: ..no extra arguments found from configuration fileripgrep::flags::parsenot reading config files because --no-config is presentRIPGREP_CONFIG_PATH.%: arguments loaded from config file: ..ripgrep::flags::config..:..
+.:failed to read the file specified in RIPGREP_CONFIG_PATH: ..
+.)failed to get current working directory: ..
+did your CWD get deleted?.pattern contains "\0"....
+
+Consider enabling text mode with the --text flag (or -a for short). Otherwise,
+binary detection is enabled and matching a NUL byte is impossible..backreferenceslook-around.a
+
+Consider enabling PCRE2 with the --pcre2 flag, which can handle backreferences
+and look-around..got hostname .., but it's not valid UTF-8..could not get hostname: ..the literalnot allowed....
+
+Consider enabling multiline mode with the --multiline flag (or -U for short).
+When multiline mode is enabled, new line characters can be matched..,found hostname for hyperlink configuration: ...hyperlink format: ...output from command '.]' is empty after trimming leading and trailing whitespace (falling back to platform hostname).$failed to read output from command '.7' to get hostname (falling back to platform hostname): ...failed to spawn command '.7' to get hostname (falling back to platform hostname): ...failed to run command '.7' to get hostname (falling back to platform hostname): ..# This is impossible to read, but these encodings rarely if ever change, so
+# it probably does not matter. They are derived from the list given here:
+# https://encoding.spec.whatwg.org/#concept-encoding-get
+#
+# The globbing here works in both fish and zsh (though they expand it in
+# different orders). It may work in other shells too.
+
+{{,us-}ascii,arabic,chinese,cyrillic,greek{,8},hebrew,korean}
+logical visual mac {,cs}macintosh x-mac-{cyrillic,roman,ukrainian}
+866 ibm{819,866} csibm866
+big5{,-hkscs} {cn-,cs}big5 x-x-big5
+cp{819,866,125{0,1,2,3,4,5,6,7,8}} x-cp125{0,1,2,3,4,5,6,7,8}
+csiso2022{jp,kr} csiso8859{6,8}{e,i}
+csisolatin{1,2,3,4,5,6,9} csisolatin{arabic,cyrillic,greek,hebrew}
+ecma-{114,118} asmo-708 elot_928 sun_eu_greek
+euc-{jp,kr} x-euc-jp cseuckr cseucpkdfmtjapanese
+{,x-}gbk csiso58gb231280 gb18030 {,cs}gb2312 gb_2312{,-80} hz-gb-2312
+iso-2022-{cn,cn-ext,jp,kr}
+iso8859{,-}{1,2,3,4,5,6,7,8,9,10,11,13,14,15}
+iso-8859-{1,2,3,4,5,6,7,8,9,10,11,{6,8}-{e,i},13,14,15,16} iso_8859-{1,2,3,4,5,6,7,8,9,15}
+iso_8859-{1,2,6,7}:1987 iso_8859-{3,4,5,8}:1988 iso_8859-9:1989
+iso-ir-{58,100,101,109,110,126,127,138,144,148,149,157}
+koi{,8,8-r,8-ru,8-u,8_r} cskoi8r
+ks_c_5601-
+```

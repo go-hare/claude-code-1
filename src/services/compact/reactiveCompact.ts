@@ -5,7 +5,12 @@ import {
   PROMPT_TOO_LONG_ERROR_MESSAGE,
 } from '../api/errors.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
-import { type CompactionResult, compactConversation } from './compact.js'
+import {
+  type CompactionResult,
+  compactConversation,
+  ERROR_MESSAGE_INCOMPLETE_RESPONSE,
+  ERROR_MESSAGE_USER_ABORT,
+} from './compact.js'
 import { isAutoCompactEnabled } from './autoCompact.js'
 import { logError } from '../../utils/log.js'
 import { logForDebugging } from '../../utils/debug.js'
@@ -14,6 +19,7 @@ import { createAssistantAPIErrorMessage } from '../../utils/messages.js'
 import { stringWidth } from '@anthropic/ink'
 import { truncateToWidth } from '../../utils/truncate.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { hasExactErrorMessage, isAbortError } from '../../utils/errors.js'
 
 export const isReactiveOnlyMode: () => boolean = () => false
 
@@ -183,10 +189,12 @@ export function isReactiveCompactRemoteAllowed(): boolean {
   if (!isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
     return true
   }
+  // densable Rhe: GB tengu_reactive_compact_remote must be strictly true.
+  // Cast: getFeatureValue typed with false default can collapse to literal false.
   return (
     getFeatureValue_CACHED_MAY_BE_STALE(
       'tengu_reactive_compact_remote',
-      false,
+      false as boolean,
     ) === true
   )
 }
@@ -228,17 +236,31 @@ export function canAttemptReactiveCompact(params: {
   return true
 }
 
-export const isWithheldPromptTooLong: (message: Message) => boolean =
-  message => {
-    if (message.type !== 'assistant' || !message.isApiErrorMessage) return false
-    return isPromptTooLongMessage(message as AssistantMessage)
-  }
+/**
+ * densable `cup(e){return e?.type==="assistant"&&e8e(e)}` — PTL withhold gate.
+ * Optional-chain outer so `undefined` lastMessage does not throw (query recovery).
+ * Inner e8e still assumes a real assistant when type matches.
+ */
+export const isWithheldPromptTooLong: (
+  message: Message | null | undefined,
+) => boolean = message => {
+  // densable cup: e?.type==="assistant" && e8e(e)
+  if (message?.type !== 'assistant' || !message.isApiErrorMessage) return false
+  return isPromptTooLongMessage(message as AssistantMessage)
+}
 
-export const isWithheldMediaSizeError: (message: Message) => boolean =
-  message => {
-    if (message.type !== 'assistant' || !message.isApiErrorMessage) return false
-    return isMediaSizeErrorMessage(message as AssistantMessage)
-  }
+/**
+ * densable `r8o(e){return e?.type==="assistant"&&l8o(e)}` — media-size withhold.
+ * Same optional outer as cup. densable recovery: media and PTL both enter n8o
+ * (full tryReactiveCompact), not a separate query-level stripImages path.
+ */
+export const isWithheldMediaSizeError: (
+  message: Message | null | undefined,
+) => boolean = message => {
+  // densable r8o: e?.type==="assistant" && l8o(e)
+  if (message?.type !== 'assistant' || !message.isApiErrorMessage) return false
+  return isMediaSizeErrorMessage(message as AssistantMessage)
+}
 
 export type TryReactiveCompactOutcome = {
   result: CompactionResult | null
@@ -287,6 +309,16 @@ export const tryReactiveCompact: (params: {
     )
     return { result }
   } catch (error) {
+    // densable: user Esc / incomplete compact → reason "aborted" so Ysa (oaa)
+    // stays off (Ysa only annotates reason==="error"+detail). Terminal query
+    // reason may still be prompt_too_long|image_error (SEA 231).
+    if (
+      isAbortError(error) ||
+      hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT) ||
+      hasExactErrorMessage(error, ERROR_MESSAGE_INCOMPLETE_RESPONSE)
+    ) {
+      return { result: null, failure: { reason: 'aborted' } }
+    }
     const detail = error instanceof Error ? error.message : String(error)
     logForDebugging(
       `reactiveCompact: emergency compaction failed — ${detail}`,
