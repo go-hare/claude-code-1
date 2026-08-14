@@ -59,6 +59,21 @@ describe('truncateToWidth', () => {
   test('passes through single emoji at sufficient width', () => {
     expect(truncateToWidth('👋', 2)).toBe('👋')
   })
+
+  // densable 2.1.232 #28 — mid-emoji / ZWJ family must not leave lone surrogates
+  test('ZWJ family emoji is kept or dropped as a whole grapheme', () => {
+    const family = '👨‍👩‍👧‍👦' // multi-code-unit grapheme cluster
+    const result = truncateToWidth(`hi ${family} bye`, 5)
+    // No lone high/low surrogates in result
+    for (let i = 0; i < result.length; i++) {
+      const c = result.charCodeAt(i)
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = result.charCodeAt(i + 1)
+        expect(next >= 0xdc00 && next <= 0xdfff).toBe(true)
+      }
+    }
+    expect(result.endsWith('…')).toBe(true)
+  })
 })
 
 // ─── truncateStartToWidth ───────────────────────────────────────────────

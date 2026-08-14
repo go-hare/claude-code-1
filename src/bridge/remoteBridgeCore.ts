@@ -38,6 +38,31 @@ import { buildCCRv2SdkUrl } from './workSecret.js'
 import { toCompatSessionId } from './sessionIdCompat.js'
 import { FlushGate } from './flushGate.js'
 import { createTokenRefreshScheduler } from './jwtUtils.js'
+import {
+  CLOSE_CODE_RECOVERY,
+  computeRecoveryLeakCeilingMs,
+  createHeartbeatRecoveryBudget,
+  createRecoveryFlight,
+  type DeferredClose,
+  disposeTransportClose,
+  evaluateEpochStaleRecoveryBudget,
+  evaluateRecoverableCloseBudgets,
+  formatOAuthAdoptRetryStatus,
+  formatRemintExhaustedMessage,
+  formatRemintRetryStatus,
+  isEpochStaleRecoverableClose,
+  isRecoverableCloseCode,
+  noteHealthyAuthBeat,
+  noteRecoverySuccess,
+  OAUTH_REAUTH_REQUIRED_DETAIL,
+  oauthAdoptBackoffMs,
+  type RecoveryBudgetCounters,
+  REMINT_EXHAUSTED_DETAIL,
+  remintBackoffMs,
+  SESSION_TELEPORTED_DETAIL,
+} from './remintRecovery.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { isTeleportedSessionId } from '../bootstrap/state.js'
 import { getTrustedDeviceToken } from './trustedDevice.js'
 import {
   getEnvLessBridgeConfig,
@@ -467,7 +492,46 @@ export async function initEnvLessBridgeCore(
 
   let initialFlushDone = false
   let tornDown = false
-  let authRecoveryInFlight = false
+  // densable Tr / Fi / Xn / To / Vo — recovery ownership (not bare bool).
+  const recoveryFlight = createRecoveryFlight()
+  const authRecoveryInFlight = () => recoveryFlight.state.inFlight
+  /**
+   * densable 232 #39 — transport generation for onClose filtering.
+   * Bumped when wiring a new transport; stale callbacks (old gen) are ignored
+   * so rebuild/close of the previous transport cannot fail the session.
+   */
+  let transportGeneration = 0
+  /**
+   * densable Ei — close observed on the *current* generation while recovery
+   * is in flight. Re-dispatched after recovery clears authRecoveryInFlight
+   * so a new transport that dies mid-rebuild is not swallowed.
+   */
+  let deferredClose: DeferredClose | undefined
+  // densable ms — leak ceiling for authRecoveryInFlight (Ls).
+  const recoveryLeakCeilingMs = computeRecoveryLeakCeilingMs(cfg)
+  // densable Ua / _o / Ws / Ba — recovery budgets.
+  const heartbeatBudget = createHeartbeatRecoveryBudget()
+  let recoveryBudgets: RecoveryBudgetCounters = {
+    consecutiveRecoveries: 0,
+    cred4094WithoutBeat: 0,
+    epochStaleTimestamps: [],
+  }
+  // densable Ot() = tengu_bridge_recover_stale_epoch, default **false**.
+  const recoverStaleEpochEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_bridge_recover_stale_epoch',
+    false,
+  )
+  // densable ut() = tengu_bridge_recovery_patience, default true.
+  const recoveryPatienceEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_bridge_recovery_patience',
+    true,
+  )
+  /** densable ul() + th onConnect `_o=0` after a live transport is up. */
+  function onHealthyTransport(): void {
+    recoveryBudgets = noteRecoverySuccess(
+      noteHealthyAuthBeat(recoveryBudgets, heartbeatBudget),
+    )
+  }
   // Latch for onUserMessage — flips true when the callback returns true
   // (policy says "done deriving"). sessionId is const (no re-create path —
   // rebuildTransport swaps JWT/epoch, same session), so no reset needed.
@@ -529,13 +593,13 @@ export async function initEnvLessBridgeCore(
         // Claim the flag BEFORE the /bridge fetch so the other path skips
         // entirely — prevents double epoch bump (each /bridge call bumps; if
         // both fetch, the first rebuild gets a stale epoch and 409s).
-        if (authRecoveryInFlight || tornDown) {
+        if (authRecoveryInFlight() || tornDown) {
           logForDebugging(
             '[remote-bridge] Recovery already in flight, skipping proactive refresh',
           )
           return
         }
-        authRecoveryInFlight = true
+        const flightGen = recoveryFlight.begin()
         try {
           const fresh = await withRetry(
             () =>
@@ -549,7 +613,14 @@ export async function initEnvLessBridgeCore(
             cfg,
           )
           if (!fresh || tornDown) return
-          await rebuildTransport(fresh, 'proactive_refresh')
+          const rebuilt = await rebuildTransport(fresh, 'proactive_refresh')
+          if (rebuilt === 'suppressed_teleported') {
+            if (!tornDown) {
+              onStateChange?.('failed', SESSION_TELEPORTED_DETAIL)
+            }
+            return
+          }
+          // densable: _o / Ws reset on connect (th/ul), not at rebuild return.
           logForDebugging(
             '[remote-bridge] Transport rebuilt (proactive refresh)',
           )
@@ -566,7 +637,7 @@ export async function initEnvLessBridgeCore(
             onStateChange?.('failed', `Refresh failed: ${errorMessage(err)}`)
           }
         } finally {
-          authRecoveryInFlight = false
+          recoveryFlight.endIfOwner(flightGen)
         }
       })()
     },
@@ -585,6 +656,9 @@ export async function initEnvLessBridgeCore(
         cause:
           connectCause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
+      // densable th(): _o=0; densable ul() via onRequestAuthOk: Ws=0 + noteHealthyBeat.
+      // Local transport has no separate auth-ok hook — onConnect is the live signal.
+      onHealthyTransport()
 
       // densable: !ur && f.length > 0 && !Ge — skip flush when Ge (mint-after-gone).
       if (
@@ -611,7 +685,7 @@ export async function initEnvLessBridgeCore(
             if (
               transport !== flushTransport ||
               tornDown ||
-              authRecoveryInFlight
+              authRecoveryInFlight()
             ) {
               return
             }
@@ -652,22 +726,136 @@ export async function initEnvLessBridgeCore(
       )
     })
 
+    // Capture generation for this wiring; rebuild bumps generation so this
+    // callback becomes stale and cannot fail the session mid-rebuild.
+    const myGen = ++transportGeneration
     transport.setOnClose((code?: number) => {
       clearTimeout(connectDeadline)
-      if (tornDown) return
-      logForDebugging(`[remote-bridge] v2 transport closed (code=${code})`)
-      logEvent('tengu_bridge_repl_ws_closed', { code, v2: true })
-      // onClose fires only for TERMINAL failures: 401 (JWT invalid),
-      // 4090 (CCR epoch mismatch), 4091 (CCR init failed), or SSE 10-min
-      // reconnect budget exhausted. Transient disconnects are handled
-      // transparently inside SSETransport. 401 we can recover from (fetch
-      // fresh JWT, rebuild transport); all other codes are dead-ends.
-      if (code === 401 && !authRecoveryInFlight) {
-        void recoverFromAuthFailure()
-        return
-      }
-      onStateChange?.('failed', `Transport closed (code ${code})`)
+      // densable Ls — cause is only present on deferred re-dispatch (Ei).
+      // Transport SSE path only surfaces the close code.
+      handleTransportClose(code, undefined, {
+        staleTransport: myGen !== transportGeneration,
+        reentry: false,
+      })
     })
+  }
+
+  /**
+   * densable Ls($t, Jr, qo=!1) — onClose disposition with leak ceiling + budgets.
+   * Structure: defer/leak gate → kd budgets+nn → else epoch_stale+Ot → else fail.
+   */
+  function handleTransportClose(
+    code: number | undefined,
+    cause: string | undefined,
+    opts: { staleTransport: boolean; reentry: boolean },
+  ): boolean {
+    if (tornDown) return false
+    if (!opts.reentry) {
+      logForDebugging(
+        `[remote-bridge] v2 transport closed (code=${code}, gen=${transportGeneration})`,
+      )
+      logEvent('tengu_bridge_repl_ws_closed', {
+        code,
+        v2: true,
+        close_cause: (cause ??
+          '') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        recovery_in_flight: authRecoveryInFlight(),
+      })
+    }
+
+    // densable: stale transport (our gen filter) is local; densable has no gen.
+    // Treat stale as ignore before Tr/leak handling.
+    if (opts.staleTransport) return false
+
+    const disposition = disposeTransportClose({
+      tornDown,
+      staleTransport: false,
+      authRecoveryInFlight: authRecoveryInFlight(),
+      code,
+      recoveryStartedAtMs: recoveryFlight.state.startedAtMs,
+      leakCeilingMs: recoveryLeakCeilingMs,
+      // recover disposition is unused below — we re-check kd / epoch_stale
+      isRecoverable: () => false,
+    })
+
+    if (disposition === 'ignore') return false
+
+    if (disposition === 'defer') {
+      // densable: Ei={code: $t??4092, cause: Jr}
+      deferredClose = { code: code ?? 4092, cause }
+      return false
+    }
+
+    if (disposition === 'leak') {
+      // densable: held > ms → treating as leaked, Vo(), continue handle.
+      // qo (reentry) still false here — 4093/4094 budgets still charge.
+      const started = recoveryFlight.state.startedAtMs
+      const held = started ? Date.now() - started : recoveryLeakCeilingMs
+      logForDebugging(
+        `[remote-bridge] authRecoveryInFlight held ${Math.round(held / 1000)}s (> ceiling ${Math.round(recoveryLeakCeilingMs / 1000)}s) — treating as leaked, handling close directly`,
+        { level: 'error' },
+      )
+      logForDiagnosticsNoPII('error', 'bridge_repl_v2_recovery_flag_leaked')
+      recoveryFlight.forceClear()
+      deferredClose = undefined
+    }
+
+    // densable: if(kd($t)) { budgets; _o++; nn($t) }
+    if (code !== undefined && isRecoverableCloseCode(code)) {
+      const budget = evaluateRecoverableCloseBudgets({
+        code,
+        reentry: opts.reentry,
+        counters: recoveryBudgets,
+        heartbeatBudget,
+        recoveryPatienceEnabled,
+      })
+      if (!budget.ok) {
+        logForDebugging(`[remote-bridge] ${budget.message}`, {
+          level: 'error',
+        })
+        logForDiagnosticsNoPII('error', budget.diagnostic)
+        logEvent(
+          budget.event as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          budget.eventMeta ?? {},
+        )
+        if (!tornDown) onStateChange?.('failed', budget.message)
+        return false
+      }
+      recoveryBudgets = budget.counters
+      void recoverFromCloseCode(code, budget.delayMs)
+      return false
+    }
+
+    // densable: else if 4090+epoch_stale+Ot() { Ba; _o++; nn(4090, jitter) }
+    // SSE path has no cause today — without cause this branch never fires
+    // (matches densable: Jr must be "epoch_stale").
+    if (isEpochStaleRecoverableClose(code, cause, recoverStaleEpochEnabled)) {
+      const budget = evaluateEpochStaleRecoveryBudget({
+        counters: recoveryBudgets,
+      })
+      if (!budget.ok) {
+        logForDebugging(`[remote-bridge] ${budget.message}`, {
+          level: 'error',
+        })
+        logForDiagnosticsNoPII('error', budget.diagnostic)
+        logEvent(
+          budget.event as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          budget.eventMeta ?? {},
+        )
+        if (!tornDown) onStateChange?.('failed', budget.message)
+        return false
+      }
+      recoveryBudgets = budget.counters
+      void recoverFromCloseCode(4090, budget.delayMs)
+      return false
+    }
+
+    // densable fail path
+    onStateChange?.(
+      'failed',
+      `Transport closed (code ${code}${cause ? `, ${cause}` : ''})`,
+    )
+    return false
   }
 
   // ── 7. Transport rebuild (shared by proactive refresh + 401 recovery) ──
@@ -679,10 +867,21 @@ export async function initEnvLessBridgeCore(
   // before any await) and clear it in a finally. This function doesn't manage
   // the flag — moving it here would be too late to prevent a double /bridge
   // fetch, and each fetch bumps epoch.
+  /**
+   * densable Xl — rebuild transport after fresh /bridge creds.
+   * Returns `suppressed_teleported` when densable G7(Er) (session teleported).
+   */
   async function rebuildTransport(
     fresh: RemoteCredentials,
     cause: Exclude<ConnectCause, 'initial'>,
-  ): Promise<void> {
+  ): Promise<'rebuilt' | 'suppressed_teleported'> {
+    // densable Xl: if(G7(Er)) return "suppressed_teleported"
+    if (isTeleportedSessionId(sessionId)) {
+      logForDebugging(
+        `[remote-bridge] Rebuild suppressed for teleported session ${sessionId}`,
+      )
+      return 'suppressed_teleported'
+    }
     connectCause = cause
     // Queue writes during rebuild — once /bridge returns, the old transport's
     // epoch is stale and its next write/heartbeat 409s. Without this gate,
@@ -691,6 +890,11 @@ export async function initEnvLessBridgeCore(
     flushGate.start()
     try {
       const seq = transport.getLastSequenceNum()
+      // Invalidate old onClose callbacks before close (sse.close may not fire
+      // onClose, but epoch-mismatch / hybrid paths can). Stale gen → ignore.
+      // densable keeps Ei across rebuild; stale gen onClose is ignored so it
+      // cannot overwrite deferredClose — do NOT clear Ei here.
+      transportGeneration++
       transport.close()
       transport = await createV2ReplTransport({
         sessionUrl: buildCCRv2SdkUrl(fresh.api_base_url, sessionId),
@@ -708,7 +912,7 @@ export async function initEnvLessBridgeCore(
         // Don't wire/connect/schedule — we'd re-arm timers after cancelAll()
         // and fire onInboundMessage into a torn-down bridge.
         transport.close()
-        return
+        return 'rebuilt'
       }
       wireTransportCallbacks()
       transport.connect()
@@ -724,6 +928,7 @@ export async function initEnvLessBridgeCore(
       // init fails (4091), events drop — but only recentPostedUUIDs
       // (per-instance) is populated, so re-enabling the bridge re-flushes.
       drainFlushGate()
+      return 'rebuilt'
     } finally {
       // End the gate on failure paths too — drainFlushGate already ended
       // it on success. Queued messages are dropped (transport still dead).
@@ -731,66 +936,327 @@ export async function initEnvLessBridgeCore(
     }
   }
 
-  // ── 8. 401 recovery (OAuth refresh + rebuild) ───────────────────────────
+  // ── 8. Close-code recovery (401 + densable 232 #39 remint table) ──────────
   async function recoverFromAuthFailure(): Promise<void> {
-    // setOnClose already guards `!authRecoveryInFlight` but that check and
-    // this set must be atomic against onRefresh — claim synchronously before
-    // any await. Laptop wake fires both paths ~simultaneously.
-    if (authRecoveryInFlight) return
-    authRecoveryInFlight = true
-    onStateChange?.('reconnecting', 'JWT expired — refreshing')
-    logForDebugging('[remote-bridge] 401 on SSE — attempting JWT refresh')
+    return recoverFromCloseCode(401)
+  }
+
+  /**
+   * densable nn / oa/kd recovery for close codes 401/4090/4091/4093/4094.
+   *
+   * densable shape:
+   *   Xn claim → optional pre-delay → OAuth (needsOAuthRefresh) → /bridge
+   *   → if null/reject + needsOAuth + first refresh failed: adopt-loop
+   *     (oauth_retry_max_attempts × backoff+jitter, wait for fresh login)
+   *   → remintCap loop only when fetchFailure==="retry" && ut() patience
+   *   → Xl rebuild; To(gen) finally + re-dispatch Ei
+   *
+   * Optional delayMs = densable epoch_stale jitter (nn($t, Jr)).
+   */
+  async function recoverFromCloseCode(
+    code: number,
+    delayMs?: number,
+  ): Promise<void> {
+    // densable nn: if(G7(Er)){Ds("Session teleported to cloud");return}
+    // before Tr / Xn claim.
+    if (isTeleportedSessionId(sessionId)) {
+      logForDebugging(
+        `[remote-bridge] ${SESSION_TELEPORTED_DETAIL} — remint suppressed`,
+      )
+      logForDiagnosticsNoPII('info', 'bridge_repl_v2_remint_loop_teleported')
+      if (!tornDown) {
+        onStateChange?.('failed', SESSION_TELEPORTED_DETAIL)
+      }
+      return
+    }
+    // densable: if(Tr)return; let wi=Xn()
+    if (authRecoveryInFlight() || tornDown) return
+    const flightGen = recoveryFlight.begin()
+    const policy = CLOSE_CODE_RECOVERY[code] ?? CLOSE_CODE_RECOVERY[401]!
+    onStateChange?.('reconnecting', policy.reconnectingDetail)
+    logForDebugging(
+      `[remote-bridge] ${code} on transport — attempting credential refresh + rebuild`,
+    )
+    logForDiagnosticsNoPII('info', 'bridge_repl_v2_remint_loop_entered')
+    const startedAt = Date.now()
+    let remintAttempts = 0
     try {
-      // Unconditionally try OAuth refresh — getAccessToken() returns expired
-      // tokens as non-null strings, so !oauthToken doesn't catch expiry.
-      // Pass the stale token so handleOAuth401Error's keychain-comparison
-      // can detect if another tab already refreshed.
-      const stale = getAccessToken()
-      if (onAuth401) await onAuth401(stale ?? '')
-      const oauthToken = getAccessToken() ?? stale
-      if (!oauthToken || tornDown) {
+      if (delayMs !== undefined && delayMs > 0) {
+        await sleep(delayMs)
+        if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+        // densable remint loop mid-check G7(Er)
+        if (isTeleportedSessionId(sessionId)) {
+          logForDiagnosticsNoPII(
+            'info',
+            'bridge_repl_v2_remint_loop_teleported',
+          )
+          if (!tornDown) onStateChange?.('failed', SESSION_TELEPORTED_DETAIL)
+          return
+        }
+      }
+
+      // densable: first OAuth refresh when needsOAuthRefresh (m)
+      let firstOAuthOk = true
+      const staleBefore = getAccessToken()
+      if (policy.needsOAuthRefresh && onAuth401) {
+        try {
+          firstOAuthOk = (await onAuth401(staleBefore ?? '')) !== false
+        } catch (err) {
+          firstOAuthOk = false
+          logForDebugging(
+            `[remote-bridge] ${code} recovery OAuth refresh threw: ${errorMessage(err)}`,
+            { level: 'error' },
+          )
+        }
+      }
+      if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+
+      let oauthToken = getAccessToken() ?? staleBefore
+      if (!oauthToken) {
+        logForDiagnosticsNoPII('error', 'bridge_repl_v2_remint_loop_no_oauth')
         if (!tornDown) {
-          onStateChange?.('failed', 'JWT refresh failed: no OAuth token')
+          onStateChange?.(
+            'failed',
+            policy.needsOAuthRefresh
+              ? 'JWT refresh failed: no OAuth token'
+              : 'Remote credentials fetch failed: no OAuth token',
+          )
         }
         return
       }
 
-      const fresh = await withRetry(
+      // densable: first /bridge fetch (RFr/Me)
+      let fresh = await withRetry(
         () =>
           fetchRemoteCredentials(
             sessionId,
             baseUrl,
-            oauthToken,
+            oauthToken!,
             cfg.http_timeout_ms,
           ),
-        'fetchRemoteCredentials (recovery)',
+        `fetchRemoteCredentials (${policy.cause})`,
         cfg,
       )
-      if (!fresh || tornDown) {
+      if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+
+      // densable adopt-loop: (!tu||Hde(tu)) && needsOAuthRefresh && m && !Va
+      // Local Hde≈null (malformed/rejected collapse to null).
+      if (!fresh && policy.needsOAuthRefresh && onAuth401 && !firstOAuthOk) {
+        let adopted = false
+        const maxAdopt = cfg.oauth_retry_max_attempts
+        for (let mt = 1; mt <= maxAdopt && !tornDown; mt++) {
+          onStateChange?.(
+            'reconnecting',
+            formatOAuthAdoptRetryStatus(mt, maxAdopt),
+          )
+          await sleep(
+            oauthAdoptBackoffMs(
+              mt,
+              cfg.oauth_retry_base_delay_ms,
+              cfg.init_retry_jitter_fraction,
+            ),
+          )
+          if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+          let nextToken: string | undefined
+          try {
+            const ok = await onAuth401(staleBefore ?? '')
+            const candidate = getAccessToken()
+            if (
+              ok !== false &&
+              candidate !== undefined &&
+              candidate !== (staleBefore ?? '')
+            ) {
+              nextToken = candidate
+            }
+          } catch (err) {
+            logForDebugging(
+              `[remote-bridge] Adopt-loop token read threw (attempt ${mt}): ${errorMessage(err)}`,
+              { level: 'error' },
+            )
+          }
+          if (!nextToken) continue
+          adopted = true
+          oauthToken = nextToken
+          fresh = await withRetry(
+            () =>
+              fetchRemoteCredentials(
+                sessionId,
+                baseUrl,
+                oauthToken!,
+                cfg.http_timeout_ms,
+              ),
+            'fetchRemoteCredentials (recovery re-poll)',
+            cfg,
+          )
+          break
+        }
+        if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+        if (!fresh && !adopted) {
+          if (!tornDown) {
+            onStateChange?.('failed', OAUTH_REAUTH_REQUIRED_DETAIL)
+            logForDiagnosticsNoPII(
+              'error',
+              'bridge_repl_v2_recovery_reauth_required',
+            )
+          }
+          return
+        }
+      }
+
+      // densable: remintCap only when fetchFailure==="retry" && ut()
+      // When patience off, a single null fetch fails without multi-attempt remint.
+      const remintCap =
+        policy.fetchFailure === 'retry' && recoveryPatienceEnabled
+          ? policy.remintCap
+          : undefined
+      const maxAttempts = remintCap?.attempts ?? 1
+
+      // If first fetch already succeeded, skip the while and rebuild below.
+      while (!fresh && remintAttempts < maxAttempts && !tornDown) {
+        remintAttempts++
+        if (remintCap && remintAttempts > 1) {
+          const elapsed = Date.now() - startedAt
+          onStateChange?.(
+            'reconnecting',
+            formatRemintRetryStatus(remintAttempts, elapsed),
+          )
+          await sleep(remintBackoffMs(remintAttempts - 1))
+          if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+        } else if (!remintCap) {
+          // terminal single-shot already failed
+          break
+        }
+
+        if (policy.needsOAuthRefresh && onAuth401) {
+          const stale = getAccessToken()
+          try {
+            await onAuth401(stale ?? '')
+          } catch (err) {
+            logForDebugging(
+              `[remote-bridge] ${code} remint OAuth refresh threw: ${errorMessage(err)}`,
+              { level: 'error' },
+            )
+          }
+        }
+        oauthToken = getAccessToken()
+        if (!oauthToken) {
+          logForDiagnosticsNoPII('error', 'bridge_repl_v2_remint_loop_no_oauth')
+          if (!tornDown) {
+            onStateChange?.(
+              'failed',
+              'Remote credentials fetch failed: no OAuth token',
+            )
+          }
+          return
+        }
+        fresh = await withRetry(
+          () =>
+            fetchRemoteCredentials(
+              sessionId,
+              baseUrl,
+              oauthToken!,
+              cfg.http_timeout_ms,
+            ),
+          `fetchRemoteCredentials (${policy.cause})`,
+          cfg,
+        )
+        if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+        if (fresh) break
+        if (!remintCap) break
+      }
+
+      if (fresh) {
+        // densable: await Xl(...)==="suppressed_teleported" → Ds teleported
+        if (isTeleportedSessionId(sessionId)) {
+          logForDiagnosticsNoPII(
+            'info',
+            'bridge_repl_v2_remint_loop_teleported',
+          )
+          if (!tornDown) onStateChange?.('failed', SESSION_TELEPORTED_DETAIL)
+          return
+        }
+        initialFlushDone = false
+        const rebuilt = await rebuildTransport(
+          fresh,
+          code === 401 ? 'auth_401_recovery' : 'proactive_refresh',
+        )
+        if (rebuilt === 'suppressed_teleported') {
+          if (!tornDown) onStateChange?.('failed', SESSION_TELEPORTED_DETAIL)
+          return
+        }
+        // densable: _o=0 on connect (th), not at rebuild return.
+        const attemptLabel = Math.max(1, remintAttempts)
+        logForDebugging(
+          `[remote-bridge] Transport rebuilt after ${code} (attempt ${attemptLabel})`,
+        )
+        logForDiagnosticsNoPII('info', policy.recoveredCode)
+        logEvent(
+          policy.recoveredCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          remintAttempts > 0
+            ? {
+                remint_attempts: attemptLabel,
+              }
+            : {},
+        )
+        return
+      }
+
+      // terminal fail or remint exhausted
+      if (!remintCap) {
+        logForDiagnosticsNoPII('error', policy.failureDiagnostic)
         if (!tornDown) {
-          onStateChange?.('failed', 'JWT refresh failed after 401')
+          onStateChange?.(
+            'failed',
+            code === 401
+              ? 'JWT refresh failed after 401'
+              : `could not fetch fresh session credentials after code ${code}`,
+          )
         }
         return
       }
-      // If 401 interrupted the initial flush, writeBatch may have silently
-      // no-op'd on the closed uploader (ccr.close() ran in the SSE wrapper
-      // before our setOnClose callback). Reset so the new onConnect re-flushes.
-      // (v1 scopes initialFlushDone inside the per-transport closure at
-      // replBridge.ts:1027 so it resets naturally; v2 has it at outer scope.)
-      initialFlushDone = false
-      await rebuildTransport(fresh, 'auth_401_recovery')
-      logForDebugging('[remote-bridge] Transport rebuilt after 401')
-    } catch (err) {
+
+      const elapsed = Date.now() - startedAt
+      const detail = remintCap.exhaustedDetail ?? REMINT_EXHAUSTED_DETAIL
       logForDebugging(
-        `[remote-bridge] 401 recovery failed: ${errorMessage(err)}`,
+        `[remote-bridge] ${formatRemintExhaustedMessage(code, remintAttempts, elapsed, detail)}`,
         { level: 'error' },
       )
-      logForDiagnosticsNoPII('error', 'bridge_repl_v2_jwt_refresh_failed')
+      logForDiagnosticsNoPII('error', 'bridge_repl_v2_remint_loop_exhausted')
+      logEvent('tengu_bridge_repl_v2_remint_loop_exhausted', {
+        code,
+        attempts: remintAttempts,
+        elapsed_ms: elapsed,
+      })
       if (!tornDown) {
-        onStateChange?.('failed', `JWT refresh failed: ${errorMessage(err)}`)
+        onStateChange?.(
+          'failed',
+          formatRemintExhaustedMessage(code, remintAttempts, elapsed, detail),
+        )
+      }
+    } catch (err) {
+      logForDebugging(
+        `[remote-bridge] ${code} recovery failed: ${errorMessage(err)}`,
+        { level: 'error' },
+      )
+      logForDiagnosticsNoPII('error', policy.failureDiagnostic)
+      if (!tornDown) {
+        onStateChange?.(
+          'failed',
+          `Transport recovery failed (${code}): ${errorMessage(err)}`,
+        )
       }
     } finally {
-      authRecoveryInFlight = false
+      // densable To(wi): only owner clears; then re-dispatch Ei
+      if (recoveryFlight.endIfOwner(flightGen)) {
+        if (!tornDown && deferredClose !== undefined) {
+          const deferred = deferredClose
+          deferredClose = undefined
+          handleTransportClose(deferred.code, deferred.cause, {
+            staleTransport: false,
+            reentry: true,
+          })
+        }
+      }
     }
   }
 
@@ -1145,7 +1611,7 @@ export async function initEnvLessBridgeCore(
       void transport.writeBatch(events)
     },
     sendControlRequest(request: SDKControlRequest) {
-      if (authRecoveryInFlight) {
+      if (authRecoveryInFlight()) {
         logForDebugging(
           `[remote-bridge] Dropping control_request during 401 recovery: ${request.request_id}`,
         )
@@ -1167,7 +1633,7 @@ export async function initEnvLessBridgeCore(
       )
     },
     sendControlResponse(response: SDKControlResponse) {
-      if (authRecoveryInFlight) {
+      if (authRecoveryInFlight()) {
         logForDebugging(
           '[remote-bridge] Dropping control_response during 401 recovery',
         )
@@ -1182,7 +1648,7 @@ export async function initEnvLessBridgeCore(
       logForDebugging('[remote-bridge] Sent control_response')
     },
     sendControlCancelRequest(requestId: string) {
-      if (authRecoveryInFlight) {
+      if (authRecoveryInFlight()) {
         logForDebugging(
           `[remote-bridge] Dropping control_cancel_request during 401 recovery: ${requestId}`,
         )
@@ -1203,7 +1669,7 @@ export async function initEnvLessBridgeCore(
       )
     },
     sendResult() {
-      if (authRecoveryInFlight) {
+      if (authRecoveryInFlight()) {
         logForDebugging('[remote-bridge] Dropping result during 401 recovery')
         return
       }

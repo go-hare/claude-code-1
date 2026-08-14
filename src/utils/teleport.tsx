@@ -2,7 +2,12 @@ import axios from 'axios';
 import chalk from 'chalk';
 import { randomUUID } from 'crypto';
 import React from 'react';
-import { getIsNonInteractiveSession, getOriginalCwd, getSessionId } from 'src/bootstrap/state.js';
+import {
+  getIsNonInteractiveSession,
+  getOriginalCwd,
+  getSessionId,
+  markTeleportedSessionId,
+} from 'src/bootstrap/state.js';
 import { checkGate_CACHED_OR_BLOCKING } from 'src/services/analytics/growthbook.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1943,6 +1948,12 @@ export async function teleportToRemote(options: {
       },
     );
     logForDebugging(`Successfully created remote session: ${sessionData.id}`);
+    // densable zNn(success.sessionId) — register remote id so local bridge G7
+    // suppresses remint/rebuild for this teleported session.
+    markTeleportedSessionId(sessionData.id);
+    // Also mark the local session that initiated teleport (densable zNn before
+    // WPh uses local id when starting tengu_teleport_to_cloud).
+    markTeleportedSessionId(getSessionId());
     return {
       id: sessionData.id,
       title: sessionData.title || requestBody.title,

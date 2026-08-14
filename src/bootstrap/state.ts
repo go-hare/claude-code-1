@@ -251,6 +251,12 @@ type State = {
     hasLoggedFirstMessage: boolean
     sessionId: string | null
   } | null
+  /**
+   * densable `rg().teleportedSessionIds` — session ids (Dm-normalized) that
+   * have been teleported to cloud. Bridge remint/rebuild consults this via G7.
+   * Cap 64 (FIFO) matches densable zNn.
+   */
+  teleportedSessionIds: Set<string>
   // Track invoked skills for preservation across compaction
   // Keys are composite: `${agentId ?? ''}:${skillName}` to prevent cross-agent overwrites
   invokedSkills: Map<
@@ -516,6 +522,7 @@ function getInitialState(): State {
     planSlugCache: new Map(),
     // Track teleported session for reliability logging
     teleportedSessionInfo: null,
+    teleportedSessionIds: new Set(),
     // Track invoked skills for preservation across compaction
     invokedSkills: new Map(),
     // Track slow operations for dev bar display
@@ -2022,6 +2029,10 @@ export function setTeleportedSessionInfo(info: {
     hasLoggedFirstMessage: false,
     sessionId: info.sessionId,
   }
+  // densable zNn: register id for bridge G7 remint suppression
+  if (info.sessionId) {
+    markTeleportedSessionId(info.sessionId)
+  }
 }
 
 export function getTeleportedSessionInfo(): {
@@ -2036,6 +2047,44 @@ export function markFirstTeleportMessageLogged(): void {
   if (STATE.teleportedSessionInfo) {
     STATE.teleportedSessionInfo.hasLoggedFirstMessage = true
   }
+}
+
+/** densable Dm — strip session_/cse_ prefix for teleportedSessionIds key. */
+export function normalizeTeleportedSessionId(id: string): string {
+  return id.replace(/^(?:session|cse)_/, '')
+}
+
+const TELEPORTED_SESSION_IDS_CAP = 64
+
+/**
+ * densable zNn — mark session as teleported to cloud (FIFO cap 64).
+ * Call on teleport start (local id) and success/may-have-committed (remote id).
+ */
+export function markTeleportedSessionId(sessionId: string): void {
+  if (!sessionId) return
+  const key = normalizeTeleportedSessionId(sessionId)
+  if (!key) return
+  const set = STATE.teleportedSessionIds
+  // Re-add to move to insertion end (freshest) when already present
+  if (set.has(key)) set.delete(key)
+  set.add(key)
+  while (set.size > TELEPORTED_SESSION_IDS_CAP) {
+    const oldest = set.values().next().value
+    if (oldest === undefined) break
+    set.delete(oldest)
+  }
+}
+
+/** densable G7 — true if session was teleported to cloud. */
+export function isTeleportedSessionId(sessionId: string): boolean {
+  if (!sessionId) return false
+  return STATE.teleportedSessionIds.has(normalizeTeleportedSessionId(sessionId))
+}
+
+/** densable Ljp — clear teleported mark (rare; tests / session recycle). */
+export function clearTeleportedSessionId(sessionId: string): void {
+  if (!sessionId) return
+  STATE.teleportedSessionIds.delete(normalizeTeleportedSessionId(sessionId))
 }
 
 // Invoked skills tracking for preservation across compaction

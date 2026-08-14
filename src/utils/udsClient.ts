@@ -247,6 +247,11 @@ export type SendToUdsSocketOptions = {
    * selfSent only via kernel peer-cred ancestry (UTf/zTf), never forgeable `from`.
    */
   selfSent?: boolean
+  /**
+   * densable uEn fromName override (e.g. jid rename notice stamps new session name).
+   * When omitted, falls back to current session title.
+   */
+  fromName?: string
 }
 
 /**
@@ -287,13 +292,15 @@ export async function sendToUdsSocket(
   const ownSocket = getUdsMessagingSocketPath()
   // densable n5s/fbr: wrap body with from= own uds address + optional from-name
   // (session title) so the receiver UI can show sender name inline.
-  let fromName: string | undefined
-  try {
-    const { getSessionId } = await import('../bootstrap/state.js')
-    const { getCurrentSessionTitle } = await import('./sessionStorage.js')
-    fromName = getCurrentSessionTitle(getSessionId())
-  } catch {
-    // title optional
+  let fromName: string | undefined = opts.fromName
+  if (fromName === undefined) {
+    try {
+      const { getSessionId } = await import('../bootstrap/state.js')
+      const { getCurrentSessionTitle } = await import('./sessionStorage.js')
+      fromName = getCurrentSessionTitle(getSessionId())
+    } catch {
+      // title optional
+    }
   }
   const { wrapCrossSessionMessage } = await import('./crossSessionMessage.js')
   const fromAddr = ownSocket ? `uds:${ownSocket}` : undefined
@@ -309,6 +316,27 @@ export async function sendToUdsSocket(
     ts: new Date().toISOString(),
   }
   udsMsg.from = ownSocket
+
+  // densable $id — track outbound peer as rename-notice correspondent.
+  try {
+    const { noteSessionNameCorrespondent } = await import(
+      './sessionNameUniqueness.js'
+    )
+    const peerAddr = `uds:${target.socketPath}`
+    // Resolve pid from live registry when possible (jid validates pid→sock).
+    let peerPid = 0
+    try {
+      const { listLiveSessionRecords } = await import('./concurrentSessions.js')
+      const live = await listLiveSessionRecords()
+      const hit = live.find(r => r.messagingSocketPath === target.socketPath)
+      if (hit) peerPid = hit.pid
+    } catch {
+      // optional
+    }
+    noteSessionNameCorrespondent(peerAddr, peerPid)
+  } catch {
+    // optional uniqueness tracking
+  }
 
   return new Promise<void>((resolve, reject) => {
     let settled = false

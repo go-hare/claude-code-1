@@ -51,6 +51,7 @@ import {
   applyHostManagedPolicyModelPrecedence,
   buildHostModelOverlay,
 } from './hostModelOverlay.js'
+import { applySettingsKeyAliases } from './settingsAliases.js'
 import {
   filterInvalidPermissionRules,
   formatZodError,
@@ -391,6 +392,16 @@ function parseSettingsFileUncached(path: string): {
 
     const data = safeParseJSON(content, false)
 
+    // densable 2.1.232 #8 sRe — alias keys → canonical before schema parse
+    const aliasWarnings: ValidationError[] = applySettingsKeyAliases(
+      data,
+      path,
+    ).map(w => ({
+      file: w.file,
+      path: w.path,
+      message: w.message,
+    }))
+
     // Filter invalid permission rules before schema validation so one bad
     // rule doesn't cause the entire settings file to be rejected.
     const ruleWarnings = filterInvalidPermissionRules(data, path)
@@ -399,10 +410,16 @@ function parseSettingsFileUncached(path: string): {
 
     if (!result.success) {
       const errors = formatZodError(result.error, path)
-      return { settings: null, errors: [...ruleWarnings, ...errors] }
+      return {
+        settings: null,
+        errors: [...aliasWarnings, ...ruleWarnings, ...errors],
+      }
     }
 
-    return { settings: result.data, errors: ruleWarnings }
+    return {
+      settings: result.data,
+      errors: [...aliasWarnings, ...ruleWarnings],
+    }
   } catch (error) {
     handleFileSystemError(error, path)
     return { settings: null, errors: [] }

@@ -54,7 +54,10 @@ import {
   createShutdownRequestMessage,
   writeToMailbox,
 } from 'src/utils/teammateMailbox.js'
-import { resumeAgentBackground } from '../AgentTool/resumeAgent.js'
+import {
+  formatResumedAgentMessage,
+  resumeAgentBackground,
+} from '../AgentTool/resumeAgent.js'
 import {
   SEND_MESSAGE_SUMMARY_MAX_CHARS,
   SEND_MESSAGE_TOOL_NAME,
@@ -178,6 +181,12 @@ export type MessageOutput = {
   msg_id?: string
   /** densable errorClass — e.g. mailbox_write_failed / not_reachable. */
   errorClass?: string
+  /**
+   * densable agent-stopped resume: when the lifecycle was not awaited to a
+   * finalText (async bg resume), expose the agent id for follow-up if the
+   * task is unowned / owned by main.
+   */
+  resumedAgentId?: string
 }
 
 export type BroadcastOutput = {
@@ -878,6 +887,8 @@ async function tryDeliverToLocalAgent(
       }
     }
     try {
+      // densable agent-stopped → Y8a = X8a(..., "reply"): awaitCompletion + D5f.
+      // No continueInterruptedTurn — always append the SendMessage body and re-run.
       const result = await resumeAgentBackground({
         agentId,
         prompt: sendBody,
@@ -886,11 +897,21 @@ async function tryDeliverToLocalAgent(
         invokingRequestId: assistantMessage?.requestId as string | undefined,
         promptOrigin: sendOrigin,
         promptIsMeta: true,
+        // densable X8a(K="reply") awaits lifecycle → finalText for D5f
+        awaitCompletion: true,
       })
+      const blockedWait = result.finalText !== undefined
+      const after = context.getAppState().tasks[agentId]
+      const exposeResumedId =
+        !blockedWait &&
+        (!isLocalAgentTask(after) ||
+          !after.ownerAgentId ||
+          after.ownerAgentId === getMainThreadAgentId())
       return {
         data: {
           success: true,
-          message: `Agent "${to}" was stopped (${task.status}); resumed it in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
+          message: formatResumedAgentMessage(to, result.finalText),
+          ...(exposeResumedId ? { resumedAgentId: agentId } : {}),
         },
       }
     } catch (e) {
@@ -908,6 +929,7 @@ async function tryDeliverToLocalAgent(
     const { origin: sendOrigin, body: sendBody } =
       resolveSendMessageOriginAndBody(context, message)
     try {
+      // densable agent-evicted cold path — same Y8a reply await + D5f surface
       const result = await resumeAgentBackground({
         agentId,
         prompt: sendBody,
@@ -916,11 +938,15 @@ async function tryDeliverToLocalAgent(
         invokingRequestId: assistantMessage?.requestId as string | undefined,
         promptOrigin: sendOrigin,
         promptIsMeta: true,
+        awaitCompletion: true,
       })
+      const blockedWait = result.finalText !== undefined
       return {
         data: {
           success: true,
-          message: `Agent "${to}" had no active task; resumed from transcript in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
+          message: formatResumedAgentMessage(to, result.finalText),
+          // densable: ...I?{}:{resumedAgentId:S} when no finalText
+          ...(!blockedWait ? { resumedAgentId: agentId } : {}),
         },
       }
     } catch (e) {

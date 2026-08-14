@@ -17,6 +17,8 @@ const NULL_RENDERING_TYPES = [
   'hook_cancelled',
   'command_permissions',
   'agent_mention',
+  // densable 2.1.232 #2 peer_mention — model-facing only
+  'peer_mention',
   'budget_usd',
   'critical_system_reminder',
   'edited_image_file',

@@ -540,8 +540,8 @@ describe('memoryStoreGates', () => {
   })
 })
 
-describe('forkSubagentGate', () => {
-  test('env force', () => {
+describe('forkSubagentGate densable 232 #1 Drb/FDd', () => {
+  test('env force on / off', () => {
     expect(
       resolveForkSubagentSource({
         env: { CLAUDE_CODE_FORK_SUBAGENT: '1' },
@@ -550,7 +550,41 @@ describe('forkSubagentGate', () => {
     expect(
       isForkSubagentEnabled({
         env: { CLAUDE_CODE_FORK_SUBAGENT: '0' },
-        gbValue: true,
+      }),
+    ).toBe(false)
+    expect(
+      resolveForkSubagentSource({
+        env: { CLAUDE_CODE_FORK_SUBAGENT: '0' },
+      }),
+    ).toBe('disabled')
+  })
+
+  test('non-ant default is default (enabled) — densable Drb', () => {
+    expect(
+      resolveForkSubagentSource({
+        env: {},
+        isAnt: false,
+      }),
+    ).toBe('default')
+    expect(
+      isForkSubagentEnabled({
+        env: {},
+        isAnt: false,
+      }),
+    ).toBe(true)
+  })
+
+  test('ant disabled — densable Nn()', () => {
+    expect(
+      resolveForkSubagentSource({
+        env: {},
+        isAnt: true,
+      }),
+    ).toBe('disabled_ant')
+    expect(
+      isForkSubagentEnabled({
+        env: {},
+        isAnt: true,
       }),
     ).toBe(false)
   })

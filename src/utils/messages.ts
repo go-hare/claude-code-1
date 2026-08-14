@@ -4972,6 +4972,29 @@ You have exited auto mode. The user may now want to interact more directly. You 
         }),
       ])
     }
+    case 'peer_mention': {
+      // densable 2.1.232 #2 — resolved → SendMessage bare name; ask → disambiguate.
+      if (attachment.status === 'resolved') {
+        const target = attachment.candidates[0]?.token ?? attachment.mention
+        const where = attachment.candidates[0]?.where
+        const whereNote = where ? ` (${where})` : ''
+        return wrapMessagesInSystemReminder([
+          createUserMessage({
+            content: `The user @-mentioned another live Claude session: ${attachment.mention}${whereNote}. Address them with the SendMessage tool using to="${target}" (bare unique name; append [ref] only if ListAgents shows multiple peers with that name). Do not invent a reply from them — send a message and wait for their response.`,
+            isMeta: true,
+          }),
+        ])
+      }
+      const opts = attachment.candidates
+        .map(c => `  ${c.token} (${c.where})`)
+        .join('\n')
+      return wrapMessagesInSystemReminder([
+        createUserMessage({
+          content: `The user @-mentioned "${attachment.mention}", which matches ${attachment.total} live session(s). Ask which one to message (or re-send with a ListAgents ref). Candidates:\n${opts}`,
+          isMeta: true,
+        }),
+      ])
+    }
     case 'task_status': {
       const displayStatus =
         attachment.status === 'killed' ? 'stopped' : attachment.status

@@ -191,6 +191,12 @@ describe('runSessionStartupSideEffects', () => {
       updateSessionName,
       countConcurrentSessions,
       onConcurrentSessions,
+      // Inject Bid so this test does not load sessionNameUniqueness / GrowthBook.
+      runSessionNameStartupUniqueness: async ({ sessionNameArg }) => {
+        if (sessionNameArg) {
+          await updateSessionName(sessionNameArg)
+        }
+      },
     })
 
     expect(calls.slice(0, 4)).toEqual([
@@ -200,8 +206,10 @@ describe('runSessionStartupSideEffects', () => {
       'register',
     ])
 
-    await Promise.resolve()
-    await Promise.resolve()
+    // Drain async Bid + fire-and-forget countConcurrentSessions chain.
+    for (let i = 0; i < 20 && !calls.includes('concurrent:3'); i++) {
+      await Promise.resolve()
+    }
 
     expect(calls).toContain('update')
     expect(calls).toContain('count')

@@ -466,13 +466,32 @@ export const SandboxSettingsSchema = lazySchema(() =>
             '**Reduces security** — opens a potential data exfiltration vector through the trustd service. Default: false',
         ),
       excludedCommands: z.array(z.string()).optional(),
+      // densable 2.1.232 #48 — sJc includes ripgrep; rkt() layers only
+      // (policy + flag + user). Project/local must not override the binary.
       ripgrep: z
         .object({
           command: z.string(),
           args: z.array(z.string()).optional(),
         })
         .optional()
-        .describe('Custom ripgrep configuration for bundled ripgrep support'),
+        .describe(
+          'Custom ripgrep configuration for bundled ripgrep support. ' +
+            'Only honored from user, managed/policy, or CLI (`--settings`) settings — ' +
+            'project settings (.claude/settings.json and .claude/settings.local.json) are ignored.',
+        ),
+      // densable bwrapPath / socatPath (sJc) — managed/admin only
+      bwrapPath: z
+        .string()
+        .optional()
+        .describe(
+          'Linux/WSL only: Absolute path to the bwrap (bubblewrap) binary. Overrides auto-detection via PATH. Only honored from admin-controlled managed settings.',
+        ),
+      socatPath: z
+        .string()
+        .optional()
+        .describe(
+          'Linux/WSL only: Absolute path to the socat binary used for the sandbox network proxy. Overrides auto-detection via PATH. Only honored from admin-controlled managed settings.',
+        ),
     })
     .passthrough(),
 )

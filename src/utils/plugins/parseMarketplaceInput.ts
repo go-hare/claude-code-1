@@ -4,6 +4,65 @@ import { getErrnoCode } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
 import type { MarketplaceSource } from './schemas.js'
 
+/** densable `H9S` — bare GitLab host accepted for nested-subgroup clone. */
+const GITLAB_COM = 'gitlab.com'
+
+/**
+ * densable `gEt` + `Sws` — host equality after lowercase / strip www.
+ * Used for github.com and gitlab.com marketplace HTTPS clone classification.
+ */
+export function isExactMarketplaceHost(
+  hostname: string,
+  target: string,
+): boolean {
+  let h = hostname.replace(/[\t\n\r]/g, '').toLowerCase()
+  while (h.startsWith('www.')) {
+    h = h.slice(4)
+  }
+  return h === target
+}
+
+/**
+ * densable `WSr` — reject URLs whose host segment contains a backslash
+ * (host/path confusion / SSRF-style tricks).
+ */
+export function urlHostContainsBackslash(rawUrl: string): boolean {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable WSr leading C0/space strip before host parse
+  const e = rawUrl.replace(/^[\x00-\x20]+/, '')
+  const schemeEnd = e.indexOf('://')
+  if (schemeEnd === -1) return false
+  let rest = e.slice(schemeEnd + 3)
+  const scheme = e.slice(0, schemeEnd).toLowerCase()
+  // densable RRy: for schemes that allow authority, strip leading slashes
+  if (
+    scheme === 'http' ||
+    scheme === 'https' ||
+    scheme === 'git' ||
+    scheme === 'ssh'
+  ) {
+    const leading = rest.match(/^[/\s\\]+/)?.[0] ?? ''
+    if (leading.includes('\\')) return true
+    rest = rest.slice(leading.length)
+  }
+  const cut = rest.search(/[/?#]/)
+  const host = cut === -1 ? rest : rest.slice(0, cut)
+  return host.includes('\\')
+}
+
+/**
+ * densable `I9S` — hostname is exactly gitlab.com (www-stripped).
+ */
+export function isGitlabComHost(hostname: string): boolean {
+  return isExactMarketplaceHost(hostname, GITLAB_COM)
+}
+
+/**
+ * densable GitHub owner/repo shorthand (no nested groups).
+ * `owner` must start/end alnum; `repo` alnum + ._- .
+ */
+const GITHUB_SHORTHAND_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/
+
 /**
  * Parses a marketplace input string and returns the appropriate marketplace source type.
  * Handles various input formats:
@@ -12,10 +71,13 @@ import type { MarketplaceSource } from './schemas.js'
  *   - GitHub Enterprise SSH certificates: org-123456@github.com:owner/repo.git
  *   - Custom usernames: deploy@gitlab.com:group/project.git
  *   - Self-hosted: user@192.168.10.123:path/to/repo
- * - HTTP/HTTPS URLs
+ * - HTTP/HTTPS URLs (github.com + gitlab.com nested subgroups → git clone)
  * - GitHub shorthand (owner/repo)
  * - Local file paths (.json files)
  * - Local directory paths
+ *
+ * densable 2.1.232 #7 (`QDi` / `I9S`): bare `gitlab.com` repo URLs including
+ * nested subgroups clone like `github.com` (source:'git' + `.git` suffix).
  *
  * @param input The marketplace source input string
  * @returns MarketplaceSource object, error object, or null if format is unrecognized
@@ -71,9 +133,10 @@ export async function parseMarketplaceInput(
       return { source: 'url', url: urlWithoutFragment }
     }
 
-    if (url.hostname === 'github.com' || url.hostname === 'www.github.com') {
+    // densable Em: github.com (www-stripped) → git clone for owner/repo
+    if (isExactMarketplaceHost(url.hostname, 'github.com')) {
       const match = url.pathname.match(/^\/([^/]+\/[^/]+?)(\/|\.git|$)/)
-      if (match?.[1]) {
+      if (match?.[1] && !urlHostContainsBackslash(urlWithoutFragment)) {
         // User explicitly provided HTTPS URL - keep it as HTTPS via 'git' type
         // Add .git suffix if not present for proper git clone
         const gitUrl = urlWithoutFragment.endsWith('.git')
@@ -84,6 +147,44 @@ export async function parseMarketplaceInput(
           : { source: 'git', url: gitUrl }
       }
     }
+
+    // densable I9S / QDi gitlab.com branch — nested subgroups (≥2 path segments)
+    if (isGitlabComHost(url.hostname)) {
+      const segments = url.pathname.split('/').filter(Boolean)
+      const authorityStart = urlWithoutFragment.indexOf(
+        '/',
+        urlWithoutFragment.indexOf('://') + 3,
+      )
+      const pathPart =
+        authorityStart === -1
+          ? ''
+          : urlWithoutFragment.slice(authorityStart).replace(/\/+$/, '')
+      const decoded = segments.map(seg => {
+        try {
+          return decodeURIComponent(seg)
+        } catch {
+          return null
+        }
+      })
+      // densable guards: path reconstructs, no control chars, no backslash host,
+      // no leading "api", no bare "-" segment (GitLab reserved)
+      if (
+        segments.length >= 2 &&
+        pathPart === `/${segments.join('/')}` &&
+        !/[\t\n\r]/.test(urlWithoutFragment) &&
+        !urlHostContainsBackslash(urlWithoutFragment) &&
+        decoded.every(s => s !== null) &&
+        decoded[0] !== 'api' &&
+        !decoded.includes('-')
+      ) {
+        const cleaned = urlWithoutFragment.replace(/\/+$/, '')
+        const gitUrl = cleaned.endsWith('.git') ? cleaned : `${cleaned}.git`
+        return ref
+          ? { source: 'git', url: gitUrl, ref }
+          : { source: 'git', url: gitUrl }
+      }
+    }
+
     return { source: 'url', url: urlWithoutFragment }
   }
 
@@ -143,6 +244,8 @@ export async function parseMarketplaceInput(
   // Handle GitHub shorthand (owner/repo, owner/repo#ref, or owner/repo@ref)
   // Accept both # and @ as ref separators — the display formatter uses @, so users
   // naturally type @ when copying from error messages or managed settings.
+  // densable: invalid multi-segment (e.g. gitlab group/sub/repo bare) errors with
+  // guidance to use full https:// clone URL — does not invent github source.
   if (trimmed.includes('/') && !trimmed.startsWith('@')) {
     if (trimmed.includes(':')) {
       return null
@@ -151,7 +254,11 @@ export async function parseMarketplaceInput(
     const fragmentMatch = trimmed.match(/^([^#@]+)(?:[#@](.+))?$/)
     const repo = fragmentMatch?.[1] || trimmed
     const ref = fragmentMatch?.[2]
-    // Assume it's a GitHub repo
+    if (!GITHUB_SHORTHAND_RE.test(repo)) {
+      return {
+        error: `'${trimmed}' is not a valid GitHub owner/repo shorthand. For a git repo, use the full https:// clone URL from your host (typically ending in .git — some hosts like Azure DevOps omit it). For a hosted marketplace.json, use its https:// URL. For a local path, use ./ or an absolute path.`,
+      }
+    }
     return ref ? { source: 'github', repo, ref } : { source: 'github', repo }
   }
 

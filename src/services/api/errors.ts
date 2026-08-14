@@ -1392,11 +1392,17 @@ export function classifyAPIError(error: unknown): string {
     return 'aborted'
   }
 
-  // Timeout errors
+  // Timeout errors — densable YLr/P5p:
+  //   P5p(e) || Error.message.startsWith("Stream idle timeout") → api_timeout
+  // P5p ≈ APIConnectionTimeoutError | APIConnectionError+timeout |
+  // BodyIdleTimeoutError (byte-stream idle, recoverable for 3P providers).
   if (
     error instanceof APIConnectionTimeoutError ||
     (error instanceof APIConnectionError &&
-      error.message.toLowerCase().includes('timeout'))
+      error.message.toLowerCase().includes('timeout')) ||
+    (error instanceof Error &&
+      error.message.startsWith('Stream idle timeout')) ||
+    (error instanceof Error && error.name === 'BodyIdleTimeoutError')
   ) {
     return 'api_timeout'
   }

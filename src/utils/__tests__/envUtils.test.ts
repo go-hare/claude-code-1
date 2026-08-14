@@ -10,6 +10,8 @@ import {
   getDefaultVertexRegion,
   getVertexRegionForModel,
   isBareMode,
+  isValidCloudRegion,
+  sanitizeCloudRegion,
   shouldMaintainProjectWorkingDir,
   getClaudeConfigHomeDir,
 } from '../envUtils'
@@ -234,6 +236,47 @@ describe('getAWSRegion', () => {
     delete process.env.AWS_DEFAULT_REGION
     expect(getAWSRegion()).toBe('us-east-1')
   })
+
+  test('densable 2.1.232: malformed AWS_REGION falls back to default region', () => {
+    // pure env bag — no process.env pollution
+    expect(
+      getAWSRegion({
+        AWS_REGION: 'us east 1',
+        AWS_DEFAULT_REGION: 'not/a/region',
+      }),
+    ).toBe('us-east-1')
+    expect(getAWSRegion({ AWS_REGION: ',,,', AWS_DEFAULT_REGION: 'x' })).toBe(
+      'us-east-1',
+    )
+    // invalid primary, valid secondary
+    expect(
+      getAWSRegion({
+        AWS_REGION: 'bad region',
+        AWS_DEFAULT_REGION: 'eu-central-1',
+      }),
+    ).toBe('eu-central-1')
+  })
+})
+
+// ─── densable NNe / C5g region shape ──────────────────────────────────
+
+describe('sanitizeCloudRegion (densable NNe)', () => {
+  test('accepts multi-segment cloud regions', () => {
+    expect(isValidCloudRegion('us-east-1')).toBe(true)
+    expect(isValidCloudRegion('us-east5')).toBe(true)
+    expect(isValidCloudRegion('europe-west4')).toBe(true)
+    expect(isValidCloudRegion('global')).toBe(true)
+    expect(sanitizeCloudRegion('us-central1')).toBe('us-central1')
+  })
+
+  test('rejects empty / spaced / path-like values', () => {
+    expect(sanitizeCloudRegion(undefined)).toBeUndefined()
+    expect(sanitizeCloudRegion('')).toBeUndefined()
+    expect(sanitizeCloudRegion('us east 1')).toBeUndefined()
+    expect(sanitizeCloudRegion('us/east/1')).toBeUndefined()
+    expect(sanitizeCloudRegion('x')).toBeUndefined() // needs ≥2 letter prefix
+    expect(sanitizeCloudRegion(',,,')).toBeUndefined()
+  })
 })
 
 // ─── getDefaultVertexRegion ────────────────────────────────────────────
@@ -253,6 +296,15 @@ describe('getDefaultVertexRegion', () => {
   test('defaults to us-east5', () => {
     delete process.env.CLOUD_ML_REGION
     expect(getDefaultVertexRegion()).toBe('us-east5')
+  })
+
+  test('densable 2.1.232: malformed CLOUD_ML_REGION falls back to us-east5', () => {
+    expect(getDefaultVertexRegion({ CLOUD_ML_REGION: 'bad region' })).toBe(
+      'us-east5',
+    )
+    expect(getDefaultVertexRegion({ CLOUD_ML_REGION: '  us-east5  ' })).toBe(
+      'us-east5',
+    )
   })
 })
 
@@ -300,6 +352,21 @@ describe('getVertexRegionForModel', () => {
   test('returns default region for undefined model', () => {
     delete process.env.CLOUD_ML_REGION
     expect(getVertexRegionForModel(undefined)).toBe('us-east5')
+  })
+
+  test('densable 2.1.232: malformed model override falls back to Vgo', () => {
+    expect(
+      getVertexRegionForModel('claude-haiku-4-5-20251001', {
+        VERTEX_REGION_CLAUDE_HAIKU_4_5: 'not a region',
+        CLOUD_ML_REGION: 'europe-west4',
+      }),
+    ).toBe('europe-west4')
+    expect(
+      getVertexRegionForModel('claude-haiku-4-5-20251001', {
+        VERTEX_REGION_CLAUDE_HAIKU_4_5: '///',
+        CLOUD_ML_REGION: 'also bad',
+      }),
+    ).toBe('us-east5')
   })
 })
 

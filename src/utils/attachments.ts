@@ -370,6 +370,18 @@ export type AgentMentionAttachment = {
   agentType: string
 }
 
+/**
+ * densable 2.1.232 #2 `_mv` — user @-mentioned another live Claude session.
+ * status resolved → SendMessage to candidate.token; ask → disambiguate.
+ */
+export type PeerMentionAttachment = {
+  type: 'peer_mention'
+  mention: string
+  status: 'resolved' | 'ask'
+  candidates: Array<{ token: string; where: string }>
+  total: number
+}
+
 export type AsyncHookResponseAttachment = {
   type: 'async_hook_response'
   processId: string
@@ -692,6 +704,7 @@ export type Attachment =
       model?: string
     }
   | AgentMentionAttachment
+  | PeerMentionAttachment
   | {
       type: 'task_status'
       taskId: string
@@ -996,6 +1009,44 @@ export async function getAttachments(
   // Process user input attachments first (includes @mentioned files)
   // This ensures files are added to nestedMemoryAttachmentTriggers before nested_memory processes them
   const userAttachmentResults = await Promise.all(userInputAttachments)
+
+  // densable 2.1.232 #2 `_mv` peer_mentions: human-typed only, uses preExpansionInput.
+  // Runs after file mentions so we can drop tokens that already resolved as files.
+  // feature() must sit alone in an if condition (bun:bundle restriction).
+  if (feature('UDS_INBOX')) {
+    if (
+      !skipAtMentions &&
+      options?.isHumanTypedPrompt === true &&
+      options.preExpansionInput !== undefined
+    ) {
+      try {
+        const { processPeerMentions } = await import('./peerAtMention.js')
+        const fileTokens = new Set<string>()
+        for (const batch of userAttachmentResults) {
+          for (const a of batch) {
+            if ('displayPath' in a && typeof a.displayPath === 'string') {
+              fileTokens.add(a.displayPath)
+            }
+            if ('filename' in a && typeof a.filename === 'string') {
+              fileTokens.add(a.filename)
+            }
+            if (a.type === 'directory' && 'path' in a) {
+              fileTokens.add(String((a as { path: string }).path))
+            }
+          }
+        }
+        const peerAttachments = await processPeerMentions(
+          options.preExpansionInput,
+          fileTokens,
+        )
+        if (peerAttachments.length > 0) {
+          userAttachmentResults.push(peerAttachments as Attachment[])
+        }
+      } catch {
+        // peer mention optional
+      }
+    }
+  }
 
   // Thread-safe attachments available in sub-agents
   // NOTE: These must be created AFTER userInputAttachments completes to ensure

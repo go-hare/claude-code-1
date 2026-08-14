@@ -172,7 +172,7 @@ function isTransientCapacityError(error: unknown): boolean {
 }
 
 /**
- * densable Cye — codes treated as stale keep-alive / dead pooled socket.
+ * densable Cye / Goe base — codes treated as stale keep-alive / dead pooled socket.
  * densable EYy: APIConnectionError + T2(code) ∈ Cye → disableKeepAlive + reconnect.
  */
 const STALE_CONNECTION_CODES = new Set([
@@ -192,6 +192,22 @@ function isStaleConnectionError(error: unknown): boolean {
   }
   const details = extractConnectionErrorDetails(error)
   return details !== null && STALE_CONNECTION_CODES.has(details.code)
+}
+
+/**
+ * densable g3b — TLS/stale connection that may need mTLS cert rotation reload.
+ * Cye ∪ {EPROTO, FailedToOpenSocket, ERR_OSSL_*, ERR_SSL_*}.
+ */
+function isMtlsStaleTlsConnectionError(error: unknown): boolean {
+  if (!(error instanceof APIConnectionError)) {
+    return false
+  }
+  const details = extractConnectionErrorDetails(error)
+  if (!details) return false
+  const code = details.code
+  if (STALE_CONNECTION_CODES.has(code)) return true
+  if (code === 'EPROTO' || code === 'FailedToOpenSocket') return true
+  return code.startsWith('ERR_OSSL_') || code.startsWith('ERR_SSL_')
 }
 
 export interface RetryContext {
@@ -319,6 +335,8 @@ export async function* withRetry<T>(
   // densable 2.1.228 #14: cap GCP/AWS auth refresh retries (x6S/k6S = 2)
   let awsAuthRetryCount = 0
   let gcpAuthRetryCount = 0
+  // densable y3b `h` — report mTLS material failure analytics at most once
+  let mtlsReloadFailureReported = false
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (options.signal?.aborted) {
       throw new APIUserAbortError()
@@ -354,13 +372,48 @@ export async function* withRetry<T>(
         disableKeepAlive()
       }
 
+      // densable 2.1.232 #24 / y3b: on TLS stale errors, reload rotated client certs
+      let mtlsReloadAttempted = false
+      if (isMtlsStaleTlsConnectionError(lastError)) {
+        const { tryReloadMtlsOnStaleTlsConnection } = await import(
+          '../../utils/mtls.js'
+        )
+        const mtls = await tryReloadMtlsOnStaleTlsConnection({
+          reportFailure: !mtlsReloadFailureReported,
+          onMaterialChanged: () => {
+            // densable bqe()+ece() — drop pooled agents so new cert is used
+            disableKeepAlive()
+          },
+          logEventOk: () => {
+            logEvent(
+              'tengu_api_mtls_cert_reload' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              {},
+            )
+          },
+          logEventBad: code => {
+            logEvent(
+              'tengu_api_mtls_cert_reload_bad' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              {
+                error_code:
+                  code as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              },
+            )
+          },
+        })
+        mtlsReloadAttempted = mtls.attempted
+        if (mtls.reportedFailure) {
+          mtlsReloadFailureReported = true
+        }
+      }
+
       if (
         client === null ||
         (lastError instanceof APIError && lastError.status === 401) ||
         isOAuthTokenRevokedError(lastError) ||
         isBedrockAuthError(lastError) ||
         isVertexAuthError(lastError) ||
-        isStaleConnection
+        isStaleConnection ||
+        mtlsReloadAttempted
       ) {
         // On 401 "token expired" or 403 "token revoked", force a token refresh
         if (

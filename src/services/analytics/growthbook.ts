@@ -473,6 +473,11 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_birch_trellis: true, // Tree-sitter bash security analysis
   tengu_collage_kaleidoscope: true, // macOS clipboard image reading
   tengu_compact_cache_prefix: true, // Reuse prompt cache during compaction
+  // densable reactive-only experiment: when true + REACTIVE_COMPACT, shouldAutoCompact
+  // returns false (proactive auto-compact off). Anthropic GB often ships true to
+  // external clients; self-hosted / custom ANTHROPIC_BASE_URL users still need
+  // proactive compact (Grok/gateway PTL shapes differ). LOCAL wins over disk/remote.
+  tengu_cobalt_raccoon: false,
   tengu_kairos_assistant: true, // KAIROS assistant mode activation
   tengu_kairos_cron_durable: true, // Persistent cron tasks
   // KAIROS periphery: RC "session ready" push (remoteControlReadyPush nZp).
@@ -596,11 +601,10 @@ const getGrowthBookClient = memoize(
 
     const attributes = getUserAttributes()
     const clientKey = getGrowthBookClientKey()
-    const baseUrl =
-      process.env.CLAUDE_GB_ADAPTER_URL ||
-      (false
-        ? process.env.CLAUDE_CODE_GB_BASE_URL || 'https://api.anthropic.com/'
-        : 'https://api.anthropic.com/')
+    // Do not phone home to api.anthropic.com for GrowthBook. Only hit a host
+    // when CLAUDE_GB_ADAPTER_URL is set (self-hosted adapter). Empty apiHost
+    // prevents remoteEval against official Anthropic.
+    const baseUrl = process.env.CLAUDE_GB_ADAPTER_URL || ''
     const isAdapterMode = !!(
       process.env.CLAUDE_GB_ADAPTER_URL && process.env.CLAUDE_GB_ADAPTER_KEY
     )
@@ -673,9 +677,10 @@ const getGrowthBookClient = memoize(
     })
     client = thisClient
 
-    if (!hasAuth) {
-      // No auth available yet — skip HTTP init, rely on disk-cached values.
-      // initializeGrowthBook() will reset and re-create with auth when available.
+    if (!hasAuth || !baseUrl) {
+      // No auth, or apiHost deliberately empty (no official GB phone-home) —
+      // skip HTTP init; rely on LOCAL_GATE_DEFAULTS + disk-cached values.
+      // initializeGrowthBook() will reset and re-create when auth/adapter is available.
       return { client: thisClient, initialized: Promise.resolve() }
     }
 
@@ -1235,6 +1240,10 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
   if (!isGrowthBookEnabled()) {
     return
   }
+  // No remote host (official apiHost emptied) — nothing to refresh over the wire.
+  if (!process.env.CLAUDE_GB_ADAPTER_URL) {
+    return
+  }
 
   try {
     // densable X8n: if (q8n) { checkAndRefreshOAuth…; if Authorization rotated → Iwe }
@@ -1331,6 +1340,10 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
  */
 export function setupPeriodicGrowthBookRefresh(): void {
   if (!isGrowthBookEnabled()) {
+    return
+  }
+  // Skip timer when there is no remote GrowthBook host to poll.
+  if (!process.env.CLAUDE_GB_ADAPTER_URL) {
     return
   }
 

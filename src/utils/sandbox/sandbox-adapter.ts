@@ -859,19 +859,23 @@ export function convertToSandboxRuntimeConfig(
     denyWrite.push(githubEventPath)
   }
 
-  // Credential directories — SSH keys, GitHub CLI tokens, netrc passwords
+  // Credential directories — SSH keys, GitHub/GitLab CLI tokens, netrc passwords.
+  // densable 2.1.232 #6: glab-cli is peer to gh (SEA denyWrite list).
   denyWrite.push(
     join(home, '.config', 'gh'),
+    join(home, '.config', 'glab-cli'),
     join(home, '.netrc'),
     join(home, '.ssh'),
   )
 
-  // Git internals in project directory — hooks, config, modules, exclude
+  // Git internals in project directory — hooks, config, modules, exclude.
+  // densable 2.1.232 #6: project-local glab-cli store (`.git/glab-cli`).
   denyWrite.push(
     join(originalCwd, '.git', 'hooks'),
     join(originalCwd, '.git', 'config'),
     join(originalCwd, '.gitmodules'),
     join(originalCwd, '.git', 'info', 'exclude'),
+    join(originalCwd, '.git', 'glab-cli'),
   )
 
   // When GITHUB_WORKSPACE differs from cwd (e.g. reusable workflows,
@@ -966,10 +970,11 @@ export function convertToSandboxRuntimeConfig(
     // at enforcement time (Vzi). When filesystem.disabled, Gvg drops both FS
     // denyRead and credential file denies; env scrub still applies.
   }
-  // Ripgrep config for sandbox. User settings take priority; otherwise pass our rg.
+  // densable 2.1.232 #48: rkt().map(s => s?.sandbox?.ripgrep).find(...)
+  // — policy / flag / user only; project+local must not override the binary.
   // In embedded mode (argv0='rg' dispatch), sandbox-runtime spawns with argv0 set.
   const { rgPath, rgArgs, argv0 } = ripgrepCommand()
-  const ripgrepConfig = settings.sandbox?.ripgrep ?? {
+  const ripgrepConfig = resolveSandboxRipgrep() ?? {
     command: rgPath,
     args: rgArgs,
     argv0,
@@ -1089,6 +1094,44 @@ export function resolveSandboxStrictAllowlist(): boolean {
   return trustedSandboxNetworkSources().some(
     s => s?.sandbox?.network?.strictAllowlist === true,
   )
+}
+
+/**
+ * densable 2.1.232 #48 — sandbox.ripgrep via rkt() layers:
+ * policy tiers + flagSettings + enabled userSettings; project/local ignored.
+ * First defined wins (policy → flag → user), matching densable `.find`.
+ */
+export function resolveSandboxRipgrep():
+  | { command: string; args?: string[] }
+  | undefined {
+  const raw = trustedSandboxNetworkSources()
+    .map(s => s?.sandbox?.ripgrep)
+    .find(v => v !== undefined && v !== null)
+  if (!raw || typeof raw !== 'object') return undefined
+  const command = (raw as { command?: unknown }).command
+  if (typeof command !== 'string' || command.length === 0) return undefined
+  const argsRaw = (raw as { args?: unknown }).args
+  const args = Array.isArray(argsRaw)
+    ? argsRaw.filter((a): a is string => typeof a === 'string')
+    : undefined
+  return args !== undefined ? { command, args } : { command }
+}
+
+/**
+ * densable XEn — sandbox.bwrapPath from managed/policy tiers only.
+ * Project/user/flag ignored (schema: admin-controlled managed settings).
+ */
+export function resolveSandboxBwrapPath(): string | undefined {
+  const v = getSettingsForSource('policySettings')?.sandbox?.bwrapPath
+  return typeof v === 'string' && v.length > 0 ? v : undefined
+}
+
+/**
+ * densable Mad — sandbox.socatPath from managed/policy tiers only.
+ */
+export function resolveSandboxSocatPath(): string | undefined {
+  const v = getSettingsForSource('policySettings')?.sandbox?.socatPath
+  return typeof v === 'string' && v.length > 0 ? v : undefined
 }
 
 /**

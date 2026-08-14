@@ -64,7 +64,15 @@ import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import { SearchBox } from '../SearchBox.js';
 import { isSupportedTerminal, hasAccessToIDEExtensionDiffFeature } from '../../utils/ide.js';
-import { getInitialSettings, getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
+import {
+  getInitialSettings,
+  getSettingsForSource,
+  updateSettingsForSource,
+  type CrossSessionInbound,
+  type DialogExpiry,
+} from '../../utils/settings/settings.js';
+import { isSettingSourceEnabled } from '../../utils/settings/constants.js';
+import type { SettingsJson } from '../../utils/settings/types.js';
 import { getUserMsgOptIn, setUserMsgOptIn } from '../../bootstrap/state.js';
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
 import { isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
@@ -97,6 +105,32 @@ import {
   resolveSessionWorkflowSizeGuideline,
   WORKFLOW_SIZE_GUIDELINE_ENUM_OPTIONS,
 } from '../../utils/workflowSizeGuideline.js';
+
+/**
+ * densable `rDa` — hide /config row when the key is set by a non-user source
+ * (policy/flag). User-only overrides remain editable.
+ */
+function isConfigSettingManagedOutsideUser(key: keyof SettingsJson): boolean {
+  for (const source of ['policySettings', 'flagSettings'] as const) {
+    if (!isSettingSourceEnabled(source)) continue;
+    if (getSettingsForSource(source)?.[key] !== undefined) return true;
+  }
+  return false;
+}
+
+/**
+ * densable `ig` / `crossSessionInboxRowVisible` — product surface for inbound
+ * peer messages. Local: UDS_INBOX feature (DEFAULT ON). densable also has
+ * CLAUDE_CODE_HARBOR_KITE env + tengu_harbor_kite GB; honor env override.
+ */
+function isCrossSessionInboxConfigRowVisible(): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_HARBOR_KITE)) return true;
+  if (feature('UDS_INBOX')) return true;
+  if (getPlatform() === 'windows' && !getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite_win', false)) {
+    return false;
+  }
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_kite', false);
+}
 
 type Props = {
   onClose: (result?: string, options?: { display?: CommandResultDisplay }) => void;
@@ -991,6 +1025,64 @@ export function Config({
         });
       },
     },
+    // densable 2.1.232 #5 / 2.1.224: Dialog expiry (l9p) — hide when managed outside userSettings (rDa)
+    ...(!isConfigSettingManagedOutsideUser('dialogExpiry')
+      ? [
+          {
+            id: 'dialogExpiry',
+            label: 'Dialog expiry',
+            value: settingsData?.dialogExpiry ?? 'default',
+            options: ['default', '60s', '5m', '10m', 'never'],
+            type: 'enum' as const,
+            onChange(value: string) {
+              const next: DialogExpiry | undefined =
+                value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : undefined;
+              setSettingsData(prev => ({
+                ...prev,
+                dialogExpiry: next,
+              }));
+              updateSettingsForSource('userSettings', {
+                dialogExpiry: next,
+              });
+              logEvent('tengu_dialog_expiry_changed', {
+                value: (value === 'default'
+                  ? 'default'
+                  : next) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              });
+            },
+          },
+        ]
+      : []),
+    // densable: Messages from your other sessions (c9p) — gated by ig + rDa
+    ...(isCrossSessionInboxConfigRowVisible() && !isConfigSettingManagedOutsideUser('crossSessionInbound')
+      ? [
+          {
+            id: 'crossSessionInbound',
+            label: 'Messages from your other sessions',
+            value: settingsData?.crossSessionInbound ?? 'default',
+            options: ['default', 'accept', 'hold', 'refuse'],
+            type: 'enum' as const,
+            onChange(value: string) {
+              const next: CrossSessionInbound | undefined =
+                value === 'accept' || value === 'hold' || value === 'refuse' ? value : undefined;
+              setSettingsData(prev => ({
+                ...prev,
+                crossSessionInbound: next,
+              }));
+              updateSettingsForSource('userSettings', {
+                crossSessionInbound: next,
+              });
+              logEvent('tengu_cross_session_inbound_changed', {
+                value: (value === 'default'
+                  ? 'default'
+                  : next) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              });
+            },
+          },
+        ]
+      : []),
     {
       id: 'prStatusFooterEnabled',
       label: 'Show PR status footer',

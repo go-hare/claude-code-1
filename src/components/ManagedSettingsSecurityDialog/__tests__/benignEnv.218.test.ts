@@ -9,9 +9,12 @@ import {
   SAFE_WHEN_TRUTHY_ENV_VARS,
 } from '../../../utils/managedEnvConstants.js'
 import type { SettingsJson } from '../../../utils/settings/types.js'
+import { jsonStringify } from '../../../utils/slowOperations.js'
 import {
+  coerceSandboxBinarySettingValue,
   extractDangerousSettings,
   formatDangerousSettingsList,
+  hasDangerousSandboxBinarySettings,
   hasDangerousSettings,
   hasDangerousSettingsChanged,
 } from '../utils.js'
@@ -124,5 +127,53 @@ describe('densable 2.1.218 #32 LEh/MEh / hFt', () => {
       },
     } as SettingsJson
     expect(hasDangerousSettingsChanged(oldS, newS)).toBe(true)
+  })
+
+  test('densable 232 #34: sandbox bwrap/socat/ripgrep enter dangerous shell keys', () => {
+    const d = extractDangerousSettings({
+      sandbox: {
+        bwrapPath: '/usr/local/bin/bwrap',
+        socatPath: '/usr/bin/socat',
+        ripgrep: '/opt/rg',
+      },
+    } as SettingsJson)
+    expect(d.shellSettings['sandbox.bwrapPath']).toBe('/usr/local/bin/bwrap')
+    expect(d.shellSettings['sandbox.socatPath']).toBe('/usr/bin/socat')
+    expect(d.shellSettings['sandbox.ripgrep']).toBe('/opt/rg')
+    expect(hasDangerousSettings(d)).toBe(true)
+    const list = formatDangerousSettingsList(d)
+    expect(list).toContain('sandbox.bwrapPath')
+    expect(list).toContain('sandbox.socatPath')
+    expect(list).toContain('sandbox.ripgrep')
+  })
+
+  test('densable Owv/Dwv: object command form + hasDangerousSandboxBinarySettings', () => {
+    expect(
+      coerceSandboxBinarySettingValue({
+        command: '/bin/bwrap',
+        args: ['--ro-bind', '/'],
+      }),
+    ).toBe(jsonStringify(['/bin/bwrap', '--ro-bind', '/']))
+    expect(
+      hasDangerousSandboxBinarySettings({
+        sandbox: { bwrapPath: '/x' },
+      } as SettingsJson),
+    ).toBe(true)
+    expect(
+      hasDangerousSandboxBinarySettings({
+        sandbox: {},
+      } as SettingsJson),
+    ).toBe(false)
+    // empty string / empty command must match extract (not dangerous)
+    expect(
+      hasDangerousSandboxBinarySettings({
+        sandbox: { bwrapPath: '' },
+      } as SettingsJson),
+    ).toBe(false)
+    expect(
+      hasDangerousSandboxBinarySettings({
+        sandbox: { bwrapPath: { command: '' } },
+      } as SettingsJson),
+    ).toBe(false)
   })
 })

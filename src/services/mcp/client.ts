@@ -38,6 +38,20 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { listAllWithCursorPagination } from './listPagination.js'
 import { extractMcpConnectionErrorCode } from './mcpConnectionIssue.js'
+import {
+  classifyMcpAutoProbeFallback,
+  createMcpConnectionTimeoutError,
+  formatMcpProbeFallbackDebugMessage,
+  formatPinnedLegacyRetryPreserveTimeoutLog,
+  getMcpClientConnectTimeoutMs,
+  getMcpPinnedLegacyRetryTimeoutMs,
+  getMcpTimeoutMs,
+  resolveMcpProtocolNegotiationPlan,
+  shouldPreserveConnectTimeoutAfterPinnedLegacyRetry,
+  truncateMcpErrorSnippet,
+  type McpProbeFallbackReason,
+  type McpProbeTimedOutTransport,
+} from './mcpConnectTimeout.js'
 import mapValues from 'lodash-es/mapValues.js'
 import memoize from 'lodash-es/memoize.js'
 import zipObject from 'lodash-es/zipObject.js'
@@ -545,8 +559,9 @@ const IMAGE_MIME_TYPES = new Set([
   'image/webp',
 ])
 
+/** densable y0 — outer MCP connection race (MCP_TIMEOUT, default 30s). */
 function getConnectionTimeoutMs(): number {
-  return parseInt(process.env.MCP_TIMEOUT || '', 10) || 30000
+  return getMcpTimeoutMs()
 }
 
 /**
@@ -702,7 +717,7 @@ export const connectToServer = memoize(
       | { connect(t: Transport): Promise<void>; close(): Promise<void> }
       | undefined
     try {
-      let transport
+      let transport: Transport
 
       // If we have the session ingress JWT, we will connect via the session ingress rather than
       // to remote MCP's directly.
@@ -1130,40 +1145,48 @@ export const connectToServer = memoize(
         }
       }
 
-      const client = new Client(
-        {
-          name: 'claude-code',
-          title: 'Claude Code',
-          version: MACRO.VERSION ?? 'unknown',
-          description: "Anthropic's agentic coding tool",
-          websiteUrl: PRODUCT_URL,
-        },
-        {
-          capabilities: {
-            roots: {},
-            // Empty object declares the capability. Sending {form:{},url:{}}
-            // breaks Java MCP SDK servers (Spring AI) whose Elicitation class
-            // has zero fields and fails on unknown properties.
-            elicitation: {},
+      const createMcpSdkClient = (): Client =>
+        new Client(
+          {
+            name: 'claude-code',
+            title: 'Claude Code',
+            version: MACRO.VERSION ?? 'unknown',
+            description: "Anthropic's agentic coding tool",
+            websiteUrl: PRODUCT_URL,
           },
-        },
-      )
+          {
+            capabilities: {
+              roots: {},
+              // Empty object declares the capability. Sending {form:{},url:{}}
+              // breaks Java MCP SDK servers (Spring AI) whose Elicitation class
+              // has zero fields and fails on unknown properties.
+              elicitation: {},
+            },
+          },
+        )
+
+      const attachListRootsHandler = (c: Client): void => {
+        c.setRequestHandler(ListRootsRequestSchema, async () => {
+          logMCPDebug(name, `Received ListRoots request from server`)
+          return {
+            roots: [
+              {
+                uri: `file://${getOriginalCwd()}`,
+              },
+            ],
+          }
+        })
+      }
+
+      // densable C — reassigned on pinned-legacy reconnect.
+      let client = createMcpSdkClient()
 
       // Add debug logging for client events if available
       if (serverRef.type === 'http') {
         logMCPDebug(name, `Client created, setting up request handler`)
       }
 
-      client.setRequestHandler(ListRootsRequestSchema, async () => {
-        logMCPDebug(name, `Received ListRoots request from server`)
-        return {
-          roots: [
-            {
-              uri: `file://${getOriginalCwd()}`,
-            },
-          ],
-        }
-      })
+      attachListRootsHandler(client)
 
       // Add a timeout to connection attempts to prevent tests from hanging indefinitely
       logMCPDebug(
@@ -1193,39 +1216,283 @@ export const connectToServer = memoize(
         }
       }
 
-      const connectPromise = client.connect(transport)
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        const timeoutId = setTimeout(() => {
-          const elapsed = Date.now() - connectStartTime
-          logMCPDebug(
-            name,
-            `Connection timeout triggered after ${elapsed}ms (limit: ${getConnectionTimeoutMs()}ms)`,
-          )
-          if (inProcessServer) {
-            inProcessServer.close().catch(() => {})
-          }
-          transport.close().catch(() => {})
-          reject(
-            new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-              `MCP server "${name}" connection timed out after ${getConnectionTimeoutMs()}ms`,
-              'MCP connection timeout',
-            ),
-          )
-        }, getConnectionTimeoutMs())
+      // densable 2.1.232 #16: protocol plan picks initialize timeout (y0 vs IiS);
+      // outer race always uses y0. Auto probe fail/timeout → pinned-legacy reconnect
+      // within remaining budget (SEA residual).
+      const protocolPlan = resolveMcpProtocolNegotiationPlan(serverRef.type)
+      const initializeTimeoutMs = getMcpClientConnectTimeoutMs(
+        protocolPlan.mode,
+      )
+      const outerTimeoutMs = getConnectionTimeoutMs()
+      // probeFellBack retained for densable analytics shape (negotiation.probeFellBack).
+      let probeFellBack: McpProbeFallbackReason | undefined
 
-        // Clean up timeout if connect resolves or rejects
-        connectPromise.then(
-          () => {
-            clearTimeout(timeoutId)
-          },
-          _error => {
-            clearTimeout(timeoutId)
-          },
-        )
-      })
+      const raceConnect = async (
+        c: Client,
+        t: Transport,
+        initTimeoutMs: number,
+        raceTimeoutMs: number,
+      ): Promise<void> => {
+        const connectPromise = c.connect(t, { timeout: initTimeoutMs })
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          const timeoutId = setTimeout(() => {
+            const elapsed = Date.now() - connectStartTime
+            logMCPDebug(
+              name,
+              `Connection timeout triggered after ${elapsed}ms (limit: ${raceTimeoutMs}ms)`,
+            )
+            if (inProcessServer) {
+              inProcessServer.close().catch(() => {})
+            }
+            t.close().catch(() => {})
+            // densable oMf — tag CONNECT_TIMEOUT when GB default true
+            reject(
+              createMcpConnectionTimeoutError(
+                `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
+              ),
+            )
+          }, raceTimeoutMs)
+          connectPromise.then(
+            () => {
+              clearTimeout(timeoutId)
+            },
+            _error => {
+              clearTimeout(timeoutId)
+            },
+          )
+        })
+        await Promise.race([connectPromise, timeoutPromise])
+      }
+
+      const recreateTransportForPinnedLegacy = async (): Promise<Transport> => {
+        // densable `l=u()` / `l=new por(c)` — rebuild same transport kind for legacy.
+        if (serverRef.type === 'http') {
+          const authProvider = new ClaudeAuthProvider(name, serverRef)
+          const combinedHeaders = await getMcpServerHeaders(name, serverRef)
+          const hasOAuthTokens = !!(await authProvider.tokens())
+          const proxyOptions = getProxyFetchOptions()
+          const transportOptions: StreamableHTTPClientTransportOptions = {
+            authProvider,
+            fetch: wrapFetchWithTimeout(
+              wrapFetchWithStepUpDetection(createFetchWithInit(), authProvider),
+            ),
+            requestInit: {
+              ...proxyOptions,
+              headers: {
+                'User-Agent': getMCPUserAgent(),
+                ...(sessionIngressToken &&
+                  !hasOAuthTokens && {
+                    Authorization: `Bearer ${sessionIngressToken}`,
+                  }),
+                ...combinedHeaders,
+              },
+            },
+          }
+          return new StreamableHTTPClientTransport(
+            new URL(serverRef.url),
+            transportOptions,
+          )
+        }
+        if (serverRef.type === 'claudeai-proxy') {
+          const tokens = getClaudeAIOAuthTokens()
+          if (!tokens) {
+            throw new Error('No claude.ai OAuth token found')
+          }
+          const oauthConfig = getOauthConfig()
+          const proxyUrl = `${oauthConfig.MCP_PROXY_URL}${oauthConfig.MCP_PROXY_PATH.replace('{server_id}', serverRef.id)}`
+          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+          const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
+          const proxyOptions = getProxyFetchOptions()
+          const transportOptions: StreamableHTTPClientTransportOptions = {
+            fetch: wrapFetchWithTimeout(fetchWithAuth),
+            requestInit: {
+              ...proxyOptions,
+              headers: {
+                'User-Agent': getMCPUserAgent(),
+                'X-Mcp-Client-Session-Id': getSessionId(),
+              },
+            },
+          }
+          return new StreamableHTTPClientTransport(
+            new URL(proxyUrl),
+            transportOptions,
+          )
+        }
+        // stdio (or untyped stdio)
+        const stdioRef = serverRef as McpStdioServerConfig
+        let shellPrefix: string | null =
+          process.env.CLAUDE_CODE_SHELL_PREFIX || null
+        try {
+          const { resolveShellPrefix } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+          shellPrefix = resolveShellPrefix()
+        } catch {
+          // keep raw env fallback
+        }
+        const finalCommand = shellPrefix || stdioRef.command
+        const finalArgs = shellPrefix
+          ? [[stdioRef.command, ...stdioRef.args].join(' ')]
+          : stdioRef.args
+        let stdioEnv: Record<string, string>
+        try {
+          const {
+            shouldEnforceMcpAllowlistEnv,
+            buildMcpStdioBaseEnv,
+            buildMcpStdioTransportEnv,
+          } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
+          const base = buildMcpStdioBaseEnv({
+            enforceAllowlist: shouldEnforceMcpAllowlistEnv(),
+            processEnv: process.env,
+            injectedEnv: getRegisteredUpstreamProxyEnv(),
+            managedEnv: subprocessEnv(),
+          })
+          stdioEnv = buildMcpStdioTransportEnv({
+            baseEnv: base,
+            projectDir: getProjectRoot(),
+            sessionId: getSessionId(),
+            serverEnv: stdioRef.env ?? null,
+          })
+        } catch {
+          const { CLAUDE_CODE_CHILD_SESSION: _child, ...rest } =
+            subprocessEnv() as Record<string, string | undefined>
+          stdioEnv = {
+            ...(Object.fromEntries(
+              Object.entries(rest).filter(
+                (e): e is [string, string] => e[1] !== undefined,
+              ),
+            ) as Record<string, string>),
+            CLAUDE_PROJECT_DIR: getProjectRoot(),
+            CLAUDE_CODE_SESSION_ID: getSessionId(),
+            CLAUDECODE: '1',
+            ...stdioRef.env,
+          }
+        }
+        return new StdioClientTransport({
+          command: finalCommand,
+          args: finalArgs,
+          env: stdioEnv,
+          stderr: 'pipe',
+        })
+      }
+
+      const canRecreateForPinnedLegacy =
+        serverRef.type === 'http' ||
+        serverRef.type === 'claudeai-proxy' ||
+        serverRef.type === 'stdio' ||
+        !serverRef.type
 
       try {
-        await Promise.race([connectPromise, timeoutPromise])
+        try {
+          await raceConnect(
+            client,
+            transport,
+            initializeTimeoutMs,
+            outerTimeoutMs,
+          )
+        } catch (firstError) {
+          const decision = classifyMcpAutoProbeFallback(
+            protocolPlan,
+            firstError,
+            {
+              transportType: serverRef.type,
+              transport: transport as McpProbeTimedOutTransport,
+              canRecreateTransport: canRecreateForPinnedLegacy,
+            },
+          )
+          if (!decision.shouldFallback) {
+            throw firstError
+          }
+          probeFellBack = decision.reason
+          logMCPDebug(
+            name,
+            formatMcpProbeFallbackDebugMessage(
+              decision.reason,
+              serverRef.type || 'stdio',
+            ),
+          )
+          if (decision.reason === 'closed' && stderrOutput) {
+            logMCPDebug(name, `Probe-closed server stderr: ${stderrOutput}`)
+            stderrOutput = ''
+          }
+          await transport.close().catch(() => {})
+          if (stderrHandler) {
+            const stdioT = transport as StdioClientTransport
+            stdioT.stderr?.off('data', stderrHandler)
+          }
+          transport = await recreateTransportForPinnedLegacy()
+          if (
+            (serverRef.type === 'stdio' || !serverRef.type) &&
+            transport instanceof StdioClientTransport &&
+            transport.stderr
+          ) {
+            stderrHandler = (data: Buffer) => {
+              if (stderrOutput.length < 64 * 1024 * 1024) {
+                try {
+                  stderrOutput += data.toString()
+                } catch {
+                  // ignore
+                }
+              }
+            }
+            transport.stderr.on('data', stderrHandler)
+          }
+          // densable C=k({mode:"legacy"}) — new client, pinned legacy mode.
+          client = createMcpSdkClient()
+          attachListRootsHandler(client)
+          const retryTimeoutMs =
+            getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
+          let outerTimedOut = false
+          try {
+            // densable: race remaining budget; oMf message still cites y0()
+            const connectPromise = client.connect(transport, {
+              timeout: retryTimeoutMs,
+            })
+            await Promise.race([
+              connectPromise,
+              new Promise<never>((_, reject) => {
+                const timeoutId = setTimeout(() => {
+                  outerTimedOut = true
+                  transport.close().catch(() => {})
+                  reject(
+                    createMcpConnectionTimeoutError(
+                      `MCP server "${name}" connection timed out after ${outerTimeoutMs}ms`,
+                    ),
+                  )
+                }, retryTimeoutMs)
+                connectPromise.then(
+                  () => clearTimeout(timeoutId),
+                  () => clearTimeout(timeoutId),
+                )
+              }),
+            ])
+          } catch (retryError) {
+            if (
+              shouldPreserveConnectTimeoutAfterPinnedLegacyRetry(
+                decision.reason,
+                retryError,
+                { outerTimedOut },
+              )
+            ) {
+              const snippet = truncateMcpErrorSnippet(
+                retryError instanceof Error
+                  ? retryError.message
+                  : String(retryError),
+              )
+              logMCPDebug(
+                name,
+                formatPinnedLegacyRetryPreserveTimeoutLog(snippet),
+              )
+              throw firstError
+            }
+            throw retryError
+          }
+        }
+        // silence unused until analytics wiring; densable passes probeFellBack out.
+        void probeFellBack
+
         if (stderrOutput) {
           logMCPError(name, `Server stderr: ${stderrOutput}`)
           stderrOutput = '' // Release accumulated string to prevent memory growth

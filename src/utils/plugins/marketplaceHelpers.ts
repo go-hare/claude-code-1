@@ -35,6 +35,36 @@ export function parseOwnerWildcardRepo(repo: string): string | null {
 }
 
 /**
+ * densable U4u / qOd — collapse `.` / `..` path segments (no leading slash).
+ */
+export function collapseUrlPathSegments(path: string): string {
+  const parts: string[] = []
+  for (const seg of path.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(seg)
+  }
+  return parts.join('/')
+}
+
+/**
+ * densable KOd — repeatedly strip trailing `/` and trailing `.git` suffix.
+ */
+export function stripTrailingSlashesAndGitSuffix(path: string): string {
+  let t = path.length
+  for (;;) {
+    let r = t
+    while (r > 0 && path.charCodeAt(r - 1) === 47 /* / */) r--
+    if (r >= 4 && path.startsWith('.git', r - 4)) r -= 4
+    if (r === t) return t === path.length ? path : path.slice(0, t)
+    t = r
+  }
+}
+
+/**
  * densable U4u — normalize a github-form repo path (decode, collapse . / .., strip .git).
  */
 export function normalizeGithubRepoPath(repo: string): string {
@@ -44,17 +74,82 @@ export function normalizeGithubRepoPath(repo: string): string {
   } catch {
     // keep raw
   }
-  const parts: string[] = []
-  for (const seg of decoded.split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      parts.pop()
-      continue
-    }
-    parts.push(seg)
+  return stripTrailingSlashesAndGitSuffix(collapseUrlPathSegments(decoded))
+}
+
+/** densable BJs / Ly — fold ssh.github.com + www into github.com for policy compare. */
+const GITHUB_COM = 'github.com'
+const SSH_GITHUB_COM = 'ssh.github.com'
+
+/**
+ * densable gEt + LWo + $Od — hostname for marketplace policy URL compare.
+ * Lowercase / strip www; map github hosts (incl. ssh.github.com) to github.com.
+ */
+export function normalizeMarketplacePolicyHostname(hostname: string): string {
+  let h = hostname.replace(/[\t\n\r]/g, '').toLowerCase()
+  while (h.startsWith('www.')) {
+    h = h.slice(4)
   }
-  const joined = parts.join('/')
-  return joined.endsWith('.git') ? joined.slice(0, -4) : joined
+  // trailing dots (DNS absolute)
+  h = h.replace(/\.+$/, '')
+  if (h === GITHUB_COM || h === SSH_GITHUB_COM) {
+    return GITHUB_COM
+  }
+  return h
+}
+
+/**
+ * densable CWo — normalize a marketplace URL for blocklist equivalence.
+ * Clears credentials / search / hash; folds github host aliases; collapses path;
+ * optionally strips trailing `.git` (used when comparing git clone URL ↔ url block).
+ */
+export function normalizeMarketplaceUrlForBlocklist(
+  url: string,
+  options?: { stripDotGit?: boolean },
+): string {
+  if (url.includes('://')) {
+    try {
+      const n = new URL(url)
+      n.hostname = normalizeMarketplacePolicyHostname(n.hostname)
+      n.username = ''
+      n.password = ''
+      n.search = ''
+      n.hash = ''
+      try {
+        n.pathname = decodeURIComponent(n.pathname)
+      } catch {
+        // keep pathname
+      }
+      const collapsed = collapseUrlPathSegments(n.pathname)
+      // URL.pathname must start with /
+      const pathBody = options?.stripDotGit
+        ? stripTrailingSlashesAndGitSuffix(collapsed)
+        : collapsed
+      n.pathname = pathBody ? `/${pathBody}` : '/'
+      return n.toString()
+    } catch {
+      return url
+    }
+  }
+  // densable SSH form without :// → host + path tail (no user@)
+  const ssh = url.match(/^[^@]+@([^:]+)(:.*)$/s)
+  if (ssh) {
+    return `${normalizeMarketplacePolicyHostname(ssh[1] ?? '')}${ssh[2] ?? ''}`
+  }
+  return url
+}
+
+/**
+ * densable HWo — lighter hostname-only normalize for same-type url block entries.
+ */
+export function normalizeMarketplaceUrlHostnameOnly(url: string): string {
+  try {
+    const t = new URL(url)
+    t.hostname = normalizeMarketplacePolicyHostname(t.hostname)
+    return t.toString()
+  } catch {
+    return url
+  }
 }
 
 /**
@@ -557,7 +652,11 @@ function blockedConstraintMatches(
  * - If blocklist entry has no ref/path, it blocks ALL refs/paths (wildcard)
  * - If blocklist entry has a specific ref/path, only that exact value is blocked
  */
-function areSourcesEquivalentForBlocklist(
+/**
+ * densable `Qob` — pure blocklist entry equivalence (no settings I/O).
+ * Exported for unit tests; production uses `isSourceInBlocklist`.
+ */
+export function areSourcesEquivalentForBlocklist(
   source: MarketplaceSource,
   blocked: MarketplaceSource,
 ): boolean {
@@ -579,8 +678,10 @@ function areSourcesEquivalentForBlocklist(
       }
       case 'git': {
         const b = blocked as typeof source
+        // densable NOd on policy url (reject owner/* in git form) + FJs extract
         const blockedRepo = extractGitHubRepoFromGitUrl(b.url)
-        const sourceRepo = extractGitHubRepoFromGitUrl(source.url)
+        const sourceRepo =
+          blockedRepo === null ? null : extractGitHubRepoFromGitUrl(source.url)
         if (blockedRepo !== null && sourceRepo !== null) {
           if (
             !githubRepoPolicyMatches(
@@ -591,7 +692,11 @@ function areSourcesEquivalentForBlocklist(
           ) {
             return false
           }
-        } else if (source.url !== b.url) {
+        } else if (
+          // densable CWo equality when either side is not a plain github.com repo
+          normalizeMarketplaceUrlForBlocklist(source.url) !==
+          normalizeMarketplaceUrlForBlocklist(b.url)
+        ) {
           return false
         }
         return (
@@ -600,7 +705,11 @@ function areSourcesEquivalentForBlocklist(
         )
       }
       case 'url':
-        return source.url === (blocked as typeof source).url
+        // densable HWo — hostname-normalized equality (www / case)
+        return (
+          normalizeMarketplaceUrlHostnameOnly(source.url) ===
+          normalizeMarketplaceUrlHostnameOnly((blocked as typeof source).url)
+        )
       case 'npm':
         return source.package === (blocked as typeof source).package
       case 'file':
@@ -644,6 +753,18 @@ function areSourcesEquivalentForBlocklist(
         blockedConstraintMatches(blocked.path, source.path)
       )
     }
+  }
+
+  // densable 2.1.232 #9 Qob: git clone URL vs blockedMarketplaces url entry.
+  // Bare github/gitlab HTTPS clones become source:'git' (+ optional .git);
+  // enterprise may still list them as source:'url'. Compare with stripDotGit.
+  if (source.source === 'git' && blocked.source === 'url') {
+    if (!source.url.includes('://')) return false
+    const opts = { stripDotGit: true as const }
+    return (
+      normalizeMarketplaceUrlForBlocklist(source.url, opts) ===
+      normalizeMarketplaceUrlForBlocklist(blocked.url, opts)
+    )
   }
 
   return false

@@ -35,6 +35,22 @@ describe('resolveAdvisorModelForBase (densable nZn body)', () => {
     expect(result).toBeTruthy()
     expect(String(result)).toContain('opus')
   })
+
+  test('densable 232 #12: Fable 5 re-enters advisor base + advisor allowlists', () => {
+    // densable catalog advisor_rank:5 + alias "fable" in _Nb
+    expect(modelSupportsAdvisor('claude-fable-5')).toBe(true)
+    expect(modelSupportsAdvisor('fable')).toBe(true)
+    expect(isValidAdvisorModel('claude-fable-5')).toBe(true)
+    expect(isValidAdvisorModel('fable')).toBe(true)
+    expect(isValidAdvisorModel('fable-5')).toBe(true)
+    // Full id path (alias expansion is catalog-dependent)
+    const result = resolveAdvisorModelForBase(
+      'claude-fable-5',
+      'claude-opus-4-7',
+    )
+    expect(result).toBeTruthy()
+    expect(String(result).toLowerCase()).toMatch(/fable/)
+  })
 })
 
 describe('resolveAppliedAdvisorModel (densable nZn enablement)', () => {

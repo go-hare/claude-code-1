@@ -798,3 +798,15 @@ export function generateShortWordSlug(): string {
   const noun = pickRandom(NOUNS)
   return `${adjective}-${noun}`
 }
+
+/** densable `fWu` — true when `adj-noun` is a known short-slug pair. */
+export function isKnownShortWordSlug(pair: string): boolean {
+  const m = /^([a-z]+)-([a-z]+)$/i.exec(pair.trim())
+  if (!m) return false
+  const adj = m[1]!.toLowerCase()
+  const noun = m[2]!.toLowerCase()
+  return (
+    (ADJECTIVES as readonly string[]).includes(adj) &&
+    (NOUNS as readonly string[]).includes(noun)
+  )
+}

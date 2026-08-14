@@ -107,7 +107,11 @@ export const DEFAULT_BUILD_FEATURES = [
   // 'HISTORY_SNIP', // 已禁用：snip 功能暂时关闭
   // 'CONTEXT_COLLAPSE', // 已禁用：实现是空壳 stub，启用后会抑制 auto compact 导致上下文管理完全失效
   'MONITOR_TOOL', // Monitor 工具，流式监控后台进程输出
-  // 'FORK_SUBAGENT',            // 已禁用：通过 Agent tool 的特殊方式实现了等效功能，无需再开
+  // densable 2.1.232 #1: product fork default is runtime Drb "default" ON
+  // (forkSubagentGate), not compile feature. Keep compile flag optional —
+  // AgentTool ORs feature('FORK_SUBAGENT') || gate. FEATURE_FORK_SUBAGENT=1
+  // still force-enables compile path.
+  // 'FORK_SUBAGENT',
   'KAIROS', // Kairos 定时任务系统核心
   // KAIROS 外围（densable SEA 有 SendUserFile/PushNotification/channel 产品串；
   // 本地实现已 feature 门控。2026-08-12 默认 ON 对齐 densable 产品面）。

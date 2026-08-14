@@ -21,7 +21,7 @@ import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { ConfigParseError, getErrnoCode } from './errors.js'
 import { writeFileSyncAndFlush_DEPRECATED } from './file.js'
 import { getFsImplementation } from './fsOperations.js'
-import { findCanonicalGitRoot } from './git.js'
+import { findCanonicalGitRoot, findGitRoot } from './git.js'
 import { safeParseJSON } from './json.js'
 import { stripBOM } from './jsonRead.js'
 import * as lockfile from './lockfile.js'
@@ -832,9 +832,10 @@ export type ProjectConfigKey = (typeof PROJECT_CONFIG_KEYS)[number]
 /**
  * Check if the user has already accepted the trust dialog for the cwd.
  *
- * This function traverses parent directories to check if a parent directory
- * had approval. Accepting trust for a directory implies trust for child
- * directories.
+ * densable 2.1.232 #15 (`ged`/`yed`/`TR_`): accepting trust for a directory
+ * implies trust for child paths **within the same git repository**. Nested
+ * repositories (their own `.git`) do **not** inherit parent-directory trust —
+ * the walk stops at the current `findGitRoot` and never crosses above it.
  *
  * @returns Whether the trust dialog has been accepted (i.e. "should not be shown")
  */
@@ -870,44 +871,98 @@ function computeTrustDialogAccepted(): boolean {
     return true
   }
 
-  // Now check from current working directory and its parents
-  // Normalize paths for consistent JSON key lookup
-  let currentPath = normalizePathForConfigKey(getCwd())
+  // densable ged(or(), cwd): walk with git-root bound
+  return walkHasTrustDialogAccepted(config, getCwd())
+}
 
-  // Traverse all parent directories
+/**
+ * densable `yed` — walk ancestors for hasTrustDialogAccepted, optionally
+ * bounded by git root `gitRootKey` (normalized). When bound is set, never
+ * accept trust outside that repository and stop at the root without matching.
+ */
+export function walkHasTrustDialogAccepted(
+  config: { projects?: Record<string, ProjectConfig | undefined> | null },
+  dir: string,
+  options?: {
+    /**
+     * densable v6e advisoryNoFsProbe: skip findGitRoot and walk unbounded
+     * (legacy parent-inherit). Default false = densable ged (bound by git root).
+     */
+    advisoryNoFsProbe?: boolean
+  },
+): boolean {
+  const resolved = resolve(dir)
+  const startKey = normalizePathForConfigKey(resolved)
+  let gitRootKey: string | null = null
+  if (!options?.advisoryNoFsProbe) {
+    const root = findGitRoot(resolved)
+    if (root) {
+      gitRootKey = normalizePathForConfigKey(resolve(root))
+    }
+  }
+  return walkHasTrustDialogAcceptedBounded(config, startKey, gitRootKey)
+}
+
+/**
+ * Pure densable `yed(config, pathKey, gitRootKey|null)`.
+ * Exported for unit tests without filesystem git probes.
+ */
+export function walkHasTrustDialogAcceptedBounded(
+  config: { projects?: Record<string, ProjectConfig | undefined> | null },
+  startPathKey: string,
+  gitRootKey: string | null,
+): boolean {
+  let currentPath = startPathKey
   while (true) {
-    const pathConfig = config.projects?.[currentPath]
-    if (pathConfig?.hasTrustDialogAccepted) {
+    // densable: if bound, only consider paths inside the git root
+    if (gitRootKey !== null) {
+      const rootPrefix = gitRootKey.endsWith('/')
+        ? gitRootKey
+        : `${gitRootKey}/`
+      if (currentPath !== gitRootKey && !currentPath.startsWith(rootPrefix)) {
+        return false
+      }
+    }
+
+    if (config.projects?.[currentPath]?.hasTrustDialogAccepted) {
       return true
     }
 
+    // densable: at git root without a match — do not walk into parent repo
+    if (gitRootKey !== null && currentPath === gitRootKey) {
+      return false
+    }
+
     const parentPath = normalizePathForConfigKey(resolve(currentPath, '..'))
-    // Stop if we've reached the root (when parent is same as current)
     if (parentPath === currentPath) {
-      break
+      return false
     }
     currentPath = parentPath
   }
-
-  return false
 }
 
 /**
  * Check trust for an arbitrary directory (not the session cwd).
- * Walks up from `dir`, returning true if any ancestor has trust persisted.
+ * densable `v6e`/`ged`: walks up from `dir` within the same git repository only.
  * Unlike checkHasTrustDialogAccepted, this does NOT consult session trust or
  * the memoized project path — use when the target dir differs from cwd (e.g.
  * /assistant installing into a user-typed path).
  */
-export function isPathTrusted(dir: string): boolean {
+export function isPathTrusted(
+  dir: string,
+  options?: { advisoryNoFsProbe?: boolean },
+): boolean {
   const config = getGlobalConfig()
-  let currentPath = normalizePathForConfigKey(resolve(dir))
-  while (true) {
-    if (config.projects?.[currentPath]?.hasTrustDialogAccepted) return true
-    const parentPath = normalizePathForConfigKey(resolve(currentPath, '..'))
-    if (parentPath === currentPath) return false
-    currentPath = parentPath
+  // densable: exact project key first when not advisory
+  if (!options?.advisoryNoFsProbe) {
+    const key = normalizePathForConfigKey(
+      findCanonicalGitRoot(dir) ?? resolve(dir),
+    )
+    if (config.projects?.[key]?.hasTrustDialogAccepted) {
+      return true
+    }
   }
+  return walkHasTrustDialogAccepted(config, dir, options)
 }
 
 // We have to put this test code here because Jest doesn't support mocking ES modules :O

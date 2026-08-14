@@ -11,11 +11,13 @@ import type { InternalPermissionMode } from 'src/types/permissions.js'
 import { registerAsyncAgent } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { assembleToolPool } from 'src/tools.js'
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js'
-import { asAgentId } from 'src/types/ids.js'
+import { asAgentId, toAgentId } from 'src/types/ids.js'
 import { MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js'
 import { runWithAgentContext } from 'src/utils/agentContext.js'
 import { runWithCwdOverride } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { extractTextContent } from 'src/utils/messages.js'
+import { truncateCodeUnitsSafe } from 'src/utils/stringUtils.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -63,6 +65,33 @@ export type ResumeAgentResult = {
    * assistant turn, skip re-run and only report completion (orphan path).
    */
   alreadyCompleted?: boolean
+  /**
+   * densable Y8a/X8a `finalText` — only set when awaitCompletion awaited the
+   * lifecycle. Present (possibly empty string) → SendMessage D5f "Resumed…Result".
+   * Absent → D5f "Resuming…".
+   */
+  finalText?: string
+}
+
+/**
+ * densable `D5f(e,t)` — short SendMessage resume surface for completed bg agents.
+ *
+ * - `resultText === undefined` → `Resuming agent ${display}`
+ * - otherwise → `Resumed agent ${display}. Result:\n${text||"(no text output)"}`
+ * - agent-id shaped names are truncated to 7 code units (`hi(e,7)` / `truncateCodeUnitsSafe`)
+ */
+export function formatResumedAgentMessage(
+  agentName: string,
+  resultText?: string,
+): string {
+  const hasResult = resultText !== undefined
+  const display = toAgentId(agentName)
+    ? truncateCodeUnitsSafe(agentName, 7)
+    : agentName
+  if (hasResult) {
+    return `Resumed agent ${display}. Result:\n${resultText || '(no text output)'}`
+  }
+  return `Resuming agent ${display}`
 }
 /** Concurrent resume / already running / setup failures. */
 export class ResumeAgentStateError extends Error {
@@ -963,10 +992,25 @@ async function resumeAgentBackgroundAfterClaim({
     ),
   )
 
-  // awaitCompletion: await lifecycle, then mark notified + grace
+  // awaitCompletion: await lifecycle, then mark notified + grace.
+  // densable X8a(K=true): finalText from lifecycle return (preferred) then
+  // AppState task.result fallback — avoids racing completeAgentTask writes.
+  let finalText: string | undefined
   if (awaitCompletion) {
     try {
-      await lifecyclePromise
+      const settled = await lifecyclePromise
+      if (settled?.finalText !== undefined) {
+        finalText = settled.finalText
+      } else {
+        const task = toolUseContext.getAppState().tasks?.[agentId] as
+          | {
+              result?: {
+                content?: ReadonlyArray<{ type: string; text?: string }>
+              }
+            }
+          | undefined
+        finalText = extractTextContent(task?.result?.content ?? [], '\n')
+      }
     } finally {
       try {
         const { PANEL_GRACE_MS } = await import('src/utils/task/framework.js')
@@ -1003,5 +1047,6 @@ async function resumeAgentBackgroundAfterClaim({
     agentId,
     description: uiDescription,
     outputFile: getTaskOutputPath(agentId),
+    ...(finalText !== undefined ? { finalText } : {}),
   }
 }

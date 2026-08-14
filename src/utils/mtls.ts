@@ -1,3 +1,4 @@
+import { createPrivateKey, X509Certificate } from 'crypto'
 import type * as https from 'https'
 import { Agent as HttpsAgent } from 'https'
 import memoize from 'lodash-es/memoize.js'
@@ -6,6 +7,7 @@ import type * as undici from 'undici'
 import { getCACertificates } from './caCerts.js'
 import { logForDebugging } from './debug.js'
 import { getFsImplementation } from './fsOperations.js'
+import { isEnvTruthy } from './envUtils.js'
 
 export type MTLSConfig = {
   cert?: string
@@ -22,6 +24,27 @@ export type MtlsCertFileCacheEntry = {
   path: string
   content: string
 }
+
+/** densable XEt reload result — used by y3b stale-TLS rotation path. */
+export type MtlsClientMaterialReloadResult = {
+  changed: boolean
+  /** densable `readFailed` — load failed and/or cert/key mid-rotation mismatch. */
+  readFailed: boolean
+  mismatched: boolean
+}
+
+/** densable y3b return — whether a reload was attempted / failure already reported. */
+export type MtlsStaleConnectionReloadResult = {
+  reportedFailure: boolean
+  attempted: boolean
+}
+
+/** densable QQc — max cert/key file size (1 MiB). */
+export const MTLS_CERT_MAX_BYTES = 1_048_576
+
+/** densable $0o — PEM certificate blocks for pair check. */
+const PEM_CERTIFICATE_BLOCK_RE =
+  /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g
 
 // Official WKe / GKe file caches (path + content)
 let cachedClientCert: MtlsCertFileCacheEntry | null = null
@@ -51,19 +74,98 @@ export function didMtlsCertCacheChange(input: {
 }
 
 /**
+ * densable neu — PEM has a complete BEGIN/END pair (not truncated mid-write).
+ */
+export function isCompletePemMaterial(content: string): boolean {
+  const begin = '-----BEGIN '
+  const start = content.lastIndexOf(begin)
+  if (start === -1) return false
+  const afterBegin = start + begin.length
+  const dash = content.indexOf('-----', afterBegin)
+  if (dash === -1) return false
+  const label = content.slice(afterBegin, dash)
+  return content.includes(`-----END ${label}-----`, dash)
+}
+
+/**
+ * densable oeu — regular file and under size cap.
+ */
+export function isValidMtlsCertFileStat(
+  stat: { isFile(): boolean; size: number },
+  label: string,
+  maxBytes: number = MTLS_CERT_MAX_BYTES,
+  log?: (msg: string, level?: 'error' | 'debug') => void,
+): boolean {
+  const write =
+    log ??
+    ((msg: string, level?: 'error' | 'debug') => {
+      if (level) logForDebugging(msg, { level })
+      else logForDebugging(msg)
+    })
+  if (!stat.isFile() || stat.size > maxBytes) {
+    write(
+      `mTLS: Ignoring ${label} — not a regular file or over ${maxBytes} bytes`,
+      'error',
+    )
+    return false
+  }
+  return true
+}
+
+/**
+ * densable DDy — true when cert PEM and private key do not form a pair
+ * (mid-rotation read). Returns false on key parse failure or matched pair.
+ */
+export function isMtlsCertKeyMismatched(
+  certPem: string,
+  keyPem: string,
+  passphrase?: string,
+): boolean {
+  let privateKey: ReturnType<typeof createPrivateKey>
+  try {
+    privateKey = createPrivateKey({
+      key: keyPem,
+      ...(passphrase ? { passphrase } : {}),
+    })
+  } catch {
+    return false
+  }
+  let sawParsedCert = false
+  let sawParseError = false
+  for (const block of certPem.match(PEM_CERTIFICATE_BLOCK_RE) ?? []) {
+    try {
+      const cert = new X509Certificate(block)
+      if (cert.checkPrivateKey(privateKey)) {
+        return false
+      }
+      sawParsedCert = true
+    } catch {
+      sawParseError = true
+    }
+  }
+  return sawParsedCert && !sawParseError
+}
+
+/**
  * Official zsl densable — sync load cert/key file into cache entry.
+ * densable eeu: reject non-file / oversize / incomplete PEM.
  */
 export function loadMtlsCertFileSync(
   path: string,
   label: string,
   deps?: {
     readFileSync?: (p: string, opts: { encoding: 'utf8' }) => string
+    statSync?: (p: string) => { isFile(): boolean; size: number }
     log?: (msg: string, level?: 'error' | 'debug') => void
   },
 ): MtlsCertFileCacheEntry | null {
   const read =
     deps?.readFileSync ??
     ((p, opts) => getFsImplementation().readFileSync(p, opts))
+  const stat =
+    deps?.statSync ??
+    ((p: string) =>
+      getFsImplementation().statSync(p) as { isFile(): boolean; size: number })
   const log =
     deps?.log ??
     ((msg: string, level?: 'error' | 'debug') => {
@@ -71,7 +173,14 @@ export function loadMtlsCertFileSync(
       else logForDebugging(msg)
     })
   try {
+    if (!isValidMtlsCertFileStat(stat(path), label, MTLS_CERT_MAX_BYTES, log)) {
+      return null
+    }
     const content = read(path, { encoding: 'utf8' })
+    if (!isCompletePemMaterial(content)) {
+      log(`mTLS: Ignoring incomplete ${label} — no PEM block`, 'error')
+      return null
+    }
     log(`mTLS: Loaded ${label}`)
     return { path, content }
   } catch (error) {
@@ -82,12 +191,14 @@ export function loadMtlsCertFileSync(
 
 /**
  * Official Ksl densable — async load cert/key file into cache entry.
+ * densable teu: reject non-file / oversize / incomplete PEM.
  */
 export async function loadMtlsCertFileAsync(
   path: string,
   label: string,
   deps?: {
     readFile?: (p: string, opts: { encoding: 'utf8' }) => Promise<string>
+    stat?: (p: string) => Promise<{ isFile(): boolean; size: number }>
     log?: (msg: string, level?: 'error' | 'debug') => void
   },
 ): Promise<MtlsCertFileCacheEntry | null> {
@@ -100,6 +211,15 @@ export async function loadMtlsCertFileAsync(
       }
       return fs.readFileSync(p, opts)
     })
+  const stat =
+    deps?.stat ??
+    (async (p: string) => {
+      const fs = getFsImplementation()
+      if (typeof fs.stat === 'function') {
+        return (await fs.stat(p)) as { isFile(): boolean; size: number }
+      }
+      return fs.statSync(p) as { isFile(): boolean; size: number }
+    })
   const log =
     deps?.log ??
     ((msg: string, level?: 'error' | 'debug') => {
@@ -107,7 +227,21 @@ export async function loadMtlsCertFileAsync(
       else logForDebugging(msg)
     })
   try {
+    if (
+      !isValidMtlsCertFileStat(
+        await stat(path),
+        label,
+        MTLS_CERT_MAX_BYTES,
+        log,
+      )
+    ) {
+      return null
+    }
     const content = await read(path, { encoding: 'utf8' })
+    if (!isCompletePemMaterial(content)) {
+      log(`mTLS: Ignoring incomplete ${label} — no PEM block`, 'error')
+      return null
+    }
     log(`mTLS: Loaded ${label}`)
     return { path, content }
   } catch (error) {
@@ -184,17 +318,17 @@ export const getMTLSConfig = memoize((): MTLSConfig | undefined => {
 })
 
 /**
- * Official b4t densable — async reload cert/key from env; returns whether
- * content/path changed (caller clears agent caches when true).
+ * densable XEt — async reload client cert/key from env with mid-rotation
+ * safety: on load failure or cert/key mismatch keep previous material.
  */
-export async function reloadMtlsCertsFromEnvAsync(input?: {
+export async function reloadMtlsClientMaterialFromEnvAsync(input?: {
   env?: NodeJS.ProcessEnv
   loadFile?: (
     path: string,
     label: string,
   ) => Promise<MtlsCertFileCacheEntry | null>
   onChanged?: () => void
-}): Promise<boolean> {
+}): Promise<MtlsClientMaterialReloadResult> {
   const env = input?.env ?? process.env
   const load =
     input?.loadFile ?? ((path, label) => loadMtlsCertFileAsync(path, label))
@@ -208,19 +342,142 @@ export async function reloadMtlsCertsFromEnvAsync(input?: {
       ? load(keyPath, 'client key from CLAUDE_CODE_CLIENT_KEY')
       : Promise.resolve(null),
   ])
+  const loadFailed = Boolean((certPath && !nextCert) || (keyPath && !nextKey))
+  const mismatched = Boolean(
+    !loadFailed &&
+      nextCert &&
+      nextKey &&
+      isMtlsCertKeyMismatched(
+        nextCert.content,
+        nextKey.content,
+        env.CLAUDE_CODE_CLIENT_KEY_PASSPHRASE,
+      ),
+  )
+  if (mismatched) {
+    logForDebugging(
+      'mTLS: Ignoring mismatched client cert/key pair — mid-rotation read',
+      { level: 'error' },
+    )
+  }
+  const readFailed = loadFailed || mismatched
+  // densable: on fail keep prior cache (lqe/cqe); on success take new material
+  const appliedCert = certPath
+    ? readFailed
+      ? cachedClientCert
+      : nextCert
+    : null
+  const appliedKey = keyPath ? (readFailed ? cachedClientKey : nextKey) : null
   const changed = didMtlsCertCacheChange({
     prevCert: cachedClientCert,
     prevKey: cachedClientKey,
-    nextCert,
-    nextKey,
+    nextCert: appliedCert,
+    nextKey: appliedKey,
   })
-  cachedClientCert = nextCert
-  cachedClientKey = nextKey
+  cachedClientCert = appliedCert
+  cachedClientKey = appliedKey
   if (changed) {
     clearMTLSCache()
     input?.onChanged?.()
   }
-  return changed
+  return { changed, readFailed, mismatched }
+}
+
+/**
+ * Official b4t densable — async reload cert/key from env; returns whether
+ * content/path changed. Prefer `reloadMtlsClientMaterialFromEnvAsync` when
+ * mid-rotation mismatch must keep previous material (232 XEt).
+ */
+export async function reloadMtlsCertsFromEnvAsync(input?: {
+  env?: NodeJS.ProcessEnv
+  loadFile?: (
+    path: string,
+    label: string,
+  ) => Promise<MtlsCertFileCacheEntry | null>
+  onChanged?: () => void
+}): Promise<boolean> {
+  const result = await reloadMtlsClientMaterialFromEnvAsync(input)
+  return result.changed
+}
+
+/**
+ * densable g3b — TLS/connection errors that may indicate rotated client certs.
+ * Extends stale keep-alive codes with EPROTO / FailedToOpenSocket / ERR_OSSL_* / ERR_SSL_*.
+ */
+export function isMtlsTlsConnectionError(
+  error: unknown,
+  extractCode: (error: unknown) => string | null,
+): boolean {
+  const code = extractCode(error)
+  if (!code) return false
+  if (
+    code === 'ECONNRESET' ||
+    code === 'EPIPE' ||
+    code === 'ConnectionClosed' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNABORTED' ||
+    code === 'ERR_SOCKET_CLOSED' ||
+    code === 'StreamSuspended' ||
+    code === 'EPROTO' ||
+    code === 'FailedToOpenSocket'
+  ) {
+    return true
+  }
+  return code.startsWith('ERR_OSSL_') || code.startsWith('ERR_SSL_')
+}
+
+/**
+ * densable y3b — on stale TLS connection, reload rotated mTLS client material.
+ * Gate: CLAUDE_CODE_CLIENT_CERT set and not CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION.
+ */
+export async function tryReloadMtlsOnStaleTlsConnection(input?: {
+  /** densable `e` — report material failure analytics once. */
+  reportFailure?: boolean
+  env?: NodeJS.ProcessEnv
+  reload?: () => Promise<MtlsClientMaterialReloadResult>
+  onMaterialChanged?: () => void
+  logEventOk?: () => void
+  logEventBad?: (code: string) => void
+}): Promise<MtlsStaleConnectionReloadResult> {
+  const env = input?.env ?? process.env
+  if (
+    !env.CLAUDE_CODE_CLIENT_CERT ||
+    isEnvTruthy(env.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION)
+  ) {
+    return { reportedFailure: false, attempted: false }
+  }
+  const reportFailure = input?.reportFailure === true
+  try {
+    const reload =
+      input?.reload ?? (() => reloadMtlsClientMaterialFromEnvAsync({ env }))
+    const { changed, readFailed, mismatched } = await reload()
+    if (changed) {
+      input?.onMaterialChanged?.()
+    }
+    if (readFailed) {
+      if (reportFailure) {
+        input?.logEventBad?.(
+          mismatched ? 'material_mismatched' : 'material_read_failed',
+        )
+      }
+      return { reportedFailure: reportFailure, attempted: true }
+    }
+    if (changed) {
+      logForDebugging(
+        'Stale connection — reloaded rotated mTLS client material',
+      )
+      input?.logEventOk?.()
+    }
+    return { reportedFailure: false, attempted: true }
+  } catch (err) {
+    logForDebugging(
+      `mTLS stale-connection reload failed: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+    if (reportFailure) {
+      input?.logEventBad?.('reload_failed')
+    }
+    return { reportedFailure: reportFailure, attempted: true }
+  }
 }
 
 /**

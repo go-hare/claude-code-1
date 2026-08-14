@@ -1,0 +1,77 @@
+# offset=99571111
+
+```
+commandElements = @(Get-RawCommandElements -CmdAst $cmd)
+                    redirections = @(Get-RawRedirections -Redirections $cmd.Redirections)
+                }
+                [void]$nestedCmds.Add($nested)
+            }
+            if ($nestedCmds.Count -gt 0) {
+                $statement.nestedCommands = @($nestedCmds)
+            }
+            $r = $trap.FindAll({param($n) $n -is [System.Management.Automation.Language.FileRedirectionAst]}, $true)
+            if ($r.Count -gt 0) { $statement.redirections = @(Get-RawRedirections -Redirections $r) }
+            $sp = Get-SecurityPatterns $trap
+            if ($sp) { $statement.securityPatterns = $sp }
+            [void]$statements.Add($statement)
+        }
+    }
+}
+
+Process-BlockStatements -Block $ast.BeginBlock
+Process-BlockStatements -Block $ast.ProcessBlock
+Process-BlockStatements -Block $ast.EndBlock
+Process-BlockStatements -Block $ast.CleanBlock
+Process-BlockStatements -Block $ast.DynamicParamBlock
+
+if ($ast.ParamBlock) {
+  $pb = $ast.ParamBlock
+  $pn = [System.Collections.ArrayList]::new()
+  foreach ($c in $pb.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]}, $true)) {
+    [void]$pn.Add(@{type='CommandAst';text=$c.Extent.Text;commandElements=@(Get-RawCommandElements -CmdAst $c);redirections=@(Get-RawRedirections -Redirections $c.Redirections)})
+  }
+  $pr = $pb.FindAll({param($n) $n -is [System.Management.Automation.Language.FileRedirectionAst]}, $true)
+  $ps = Get-SecurityPatterns $pb
+  $st = @{type='ParamBlockAst';text=$pb.Extent.Text}
+  if ($pn.Count -gt 0) { $st.nestedCommands = @($pn) }
+  if ($pr.Count -gt 0) { $st.redirections = @(Get-RawRedirections -Redirections $pr) }
+  if ($ps) { $st.securityPatterns = $ps }
+  [void]$statements.Add($st)
+}
+
+$hasUsingStatements = $ast.UsingStatements -and $ast.UsingStatements.Count -gt 0
+$hasScriptRequirements = $ast.ScriptRequirements -ne $null
+
+$output = @{
+    valid = ($parseErrors.Count -eq 0)
+    errors = @($parseErrors | ForEach-Object {
+        @{
+            message = $_.Message
+            errorId = $_.ErrorId
+        }
+    })
+    statements = @($statements)
+    variables = @($allVariables)
+    hasStopParsing = $hasStopParsing
+    originalCommand = $Command
+    typeLiterals = @($typeLiterals)
+    hasUsingStatements = [bool]$hasUsingStatements
+    hasScriptRequirements = [bool]$hasScriptRequirements
+    hasBackgroundJob = [bool]$script:hasBg
+}
+
+$output | ConvertTo-Json -Depth 10 -Compress
+................	...-...try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; ....................y$.....Notebook file is not a valid Jupyter notebook (top-level "cells" must be an array of cell objects, each with a string or string-array "source")..........
+..?...E.d.i.t. .a. .c.e.l.l. .i.n. .a. .J.u.p.y.t.e.r. .n.o.t.e.b.o.o.k. ..  .r.e.p.l.a.c.e.,. .i.n.s.e.r.t.,. .o.r. .d.e.l.e.t.e.............	.......cacheProjectDir..........|$.....clearProjectDirCache............	.......setAgentTranscriptSubdir........I}$.....clearAgentTranscriptSubdir......................flag:idle-window............0...anthropic-ratelimit-unified-representative-claim........I...*...anthropic-ratelimit-unified-overage-status$..............~$.3...anthropic-ratelimit-unified-overage-disabled-reason.............	...-...The socket connection was closed unexpectedly...........	...E...Failed to resolve AWS credentials from the credential provider chain............	...+...Failed to acquire Google OAuth credentials........I.............	.......claude-opus-4-8..2.............?........	.......tengu_amber_moleskin............Im......Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh................	...#...tengu_usage_overage_included_models...............
+.....tengu_rate_limit_promo_notices..........(...................
+....................3......................I.	.....X-Amz-Algorithm..........K......X-Amz-Credential............
+...X-Amz-Date......................X-Amz-SignedHeaders.............	......X-Amz-Expires...........	.......X-Amz-Signature.........	.......X-Amz-Security-Token...................authorization...........I.......x-amz-content-sha256............	.......AWS4-HMAC-SHA256-PAYLOAD........I.......aws4_request.....:	.............(...................
+..................../......................	...	...signEvent...............	.......signMessage.............	...
+...signString..............	.......signRequest.............	.......createCanonicalRequest..........I.......createStringToSign..............	.......getCanonicalPath........	.......getSignature............	......getSigningKey...........	.......validateResolvedCredentials.............(...................
+....................@......................	.......bedrock-2023-05-31......................bedrock-mantle..........I.......4.10.1..........	...$...04b07795-8ddb-461a-bbee-02f9e1bf7b46....................common..........	.......login.microsoftonline.com...............	.......cae...............
+.....nocae...........	...
+...msal.cache..............	.......CredentialUnavailableError..............	.......AuthenticationError.....................AggregateAuthenticationError............(...................
+....................@......................	..	...addPolicy................Y......removePolicy............	.......getOrderedPolicies..............	......orderPolicies...........	.......sanitize................sanitizeUrl.............I=......sanitizeHeaders................sanitizeQuery...................REDACTED........	.......getOrCreateAgent........	.......The operation was aborted...............	.......Retry-After.............................retryPolicy.....................defaultRetryPolicy..............	.......formDataPolicy..........	...	...logPolicy...............	.......multipartPolicy.........	.......HTTPS_PROXY.............	...
+...HTTP_PROXY..............	...	...ALL_PROXY...............	.......NO_PROXY................proxyPolicy.....................1.21.0..........	.......userAgentPolicy.........	.......The delay was aborted...........(...................
+..................
+```

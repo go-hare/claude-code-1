@@ -40,6 +40,33 @@ function isDoubaoProvider(): boolean {
   return getInitialSettings().voiceProvider === 'doubao'
 }
 
+/**
+ * densable M5h — empty-transcript error taxonomy after finalize.
+ * Order: no audio signal → connection failed → no speech.
+ */
+export function formatEmptyVoiceTranscriptError(input: {
+  hadAudioSignal: boolean
+  wsConnected: boolean
+}): { message: string; errorCode: string } {
+  if (!input.hadAudioSignal) {
+    return {
+      message:
+        'No audio detected from microphone. Check that the correct input device is selected and that Claude Code has microphone access.',
+      errorCode: 'voice_transcription_no_audio_signal',
+    }
+  }
+  if (!input.wsConnected) {
+    return {
+      message: 'Voice connection failed. Check your network and try again.',
+      errorCode: 'voice_transcription_connection_failed',
+    }
+  }
+  return {
+    message: 'No speech detected.',
+    errorCode: 'voice_transcription_no_speech',
+  }
+}
+
 // ─── Language normalization ─────────────────────────────────────────────
 
 const DEFAULT_STT_LANGUAGE = 'en'
@@ -502,24 +529,19 @@ export function useVoice({
           )
           onTranscriptRef.current(text)
         } else if (focusFlushedChars === 0 && recordingDurationMs > 2000) {
-          // Only warn about empty transcript if nothing was flushed in focus
-          // mode either, and recording was > 2s (short recordings = accidental
-          // taps → silently return to idle).
+          // densable M5h({hadAudioSignal, wsConnected}) — empty-transcript taxonomy.
+          // Only warn when nothing was flushed in focus mode either, and
+          // recording was > 2s (short recordings = accidental taps → idle).
+          const empty = formatEmptyVoiceTranscriptError({
+            hadAudioSignal,
+            wsConnected,
+          })
           if (!wsConnected) {
             // WS never connected → audio never reached backend. Not a silent
             // drop; a connection failure (slow OAuth refresh, network, etc).
             recordVoiceEarlyFailure()
-            onErrorRef.current?.(
-              'Voice connection failed. Check your network and try again.',
-            )
-          } else if (!hadAudioSignal) {
-            // Distinguish silent mic (capture issue) from speech not recognized.
-            onErrorRef.current?.(
-              'No audio detected from microphone. Check that the correct input device is selected and that Claude Code has microphone access.',
-            )
-          } else {
-            onErrorRef.current?.('No speech detected.')
           }
+          onErrorRef.current?.(empty.message)
         }
 
         accumulatedRef.current = ''
@@ -1027,33 +1049,58 @@ export function useVoice({
           language: stt.code,
           keyterms,
         },
-      ).then(conn => {
-        if (isStale()) {
-          conn?.close()
-          return
-        }
-        if (!conn) {
-          logForDebugging(
-            '[voice] Failed to connect to voice_stream (no OAuth token?)',
-          )
+      )
+        .then(conn => {
+          if (isStale()) {
+            conn?.close()
+            return
+          }
+          if (!conn) {
+            logForDebugging(
+              '[voice] Failed to connect to voice_stream (no OAuth token?)',
+            )
+            logEvent('tengu_voice_stream_connect', {
+              error_code:
+                'voice_stream_no_auth' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            onErrorRef.current?.(
+              'Voice mode requires a Claude.ai account. Please run /login to sign in.',
+            )
+            // Clear the audio buffer on failure
+            audioBuffer.length = 0
+            cleanup()
+            updateState('idle')
+            return
+          }
+
+          // Safety check: if the user released the key before connectVoiceStream
+          // resolved (but after onReady already ran), close the connection.
+          if (stateRef.current !== 'recording') {
+            audioBuffer.length = 0
+            conn.close()
+            return
+          }
+        })
+        .catch((err: unknown) => {
+          // densable 2.1.232 #23 — connect promise rejection (e.g. network /
+          // ECONNREFUSED during OAuth refresh or WS setup) must surface
+          // immediately and leave recording, not sit in "recording"/listening.
+          logError(toError(err))
+          logEvent('tengu_voice_stream_connect', {
+            error_code:
+              'voice_stream_connect_exception' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          if (isStale()) return
+          if (stateRef.current !== 'recording') return
+          recordVoiceEarlyFailure()
           onErrorRef.current?.(
-            'Voice mode requires a Claude.ai account. Please run /login to sign in.',
+            'Voice connection failed. Check your network and try again.',
           )
-          // Clear the audio buffer on failure
           audioBuffer.length = 0
+          focusTriggeredRef.current = false
           cleanup()
           updateState('idle')
-          return
-        }
-
-        // Safety check: if the user released the key before connectVoiceStream
-        // resolved (but after onReady already ran), close the connection.
-        if (stateRef.current !== 'recording') {
-          audioBuffer.length = 0
-          conn.close()
-          return
-        }
-      })
+        })
     }
 
     // Doubao backend doesn't use keyterms — skip the async fetch

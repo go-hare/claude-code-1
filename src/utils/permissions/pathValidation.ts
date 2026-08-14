@@ -13,6 +13,11 @@ import { containsPathTraversal } from '../path.js'
 import { SandboxManager } from '../sandbox/sandbox-adapter.js'
 import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.js'
 import {
+  expandCygwinCookieChain,
+  findCygwinEmulatedSymlink,
+  formatCygwinSymlinkMessage,
+} from './cygwinSymlinkCookie.js'
+import {
   checkEditableInternalPath,
   checkPathSafetyForAutoEdit,
   checkReadableInternalPath,
@@ -485,6 +490,20 @@ export function validatePath(
     )
   }
 
+  // densable IRr / SAn: `..` after a real directory segment can follow a
+  // symlink outside the working directory — always ask.
+  if (containsPathTraversal(cleanPath)) {
+    return {
+      allowed: false,
+      resolvedPath: cleanPath,
+      decisionReason: {
+        type: 'other',
+        reason:
+          "Path contains '..' traversal after a directory segment, which may follow a symlink outside the working directory",
+      },
+    }
+  }
+
   // Resolve path
   // SECURITY: On Windows, normalize MinGW-style absolute paths
   // (`/c/Users/foo`, `/cygdrive/c/Users/foo`) to Windows paths
@@ -507,6 +526,49 @@ export function validatePath(
   const absolutePath = isAbsolute(pathForResolve)
     ? pathForResolve
     : resolve(cwd, pathForResolve)
+
+  // densable 2.1.232 #14 IRr Windows branch: Yun → Xun → always ask on cookie.
+  // Git Bash follows Cygwin-emulated `!<symlink>` cookies and .lnk files that
+  // Node treats as ordinary files — TOCTOU if we only realpath via Node.
+  if (getPlatform() === 'windows') {
+    const fs = getFsImplementation()
+    let cookieRemainder: string[] | undefined
+    const cookieHit = findCygwinEmulatedSymlink(fs, absolutePath, {
+      onCookieRemainder: rem => {
+        cookieRemainder = rem
+      },
+    })
+    if (cookieHit !== undefined) {
+      const permissionType = operationType === 'read' ? 'read' : 'edit'
+      const chain = expandCygwinCookieChain(fs, cookieHit, cookieRemainder)
+      const pathsToScan = [absolutePath, cookieHit, ...chain.scanCandidates]
+      for (const p of pathsToScan) {
+        const denyRule = matchingRuleForInput(
+          p,
+          toolPermissionContext,
+          permissionType,
+          'deny',
+        )
+        if (denyRule !== null) {
+          return {
+            allowed: false,
+            resolvedPath: cookieHit,
+            decisionReason: { type: 'rule', rule: denyRule },
+          }
+        }
+      }
+      return {
+        allowed: false,
+        resolvedPath: cookieHit,
+        decisionReason: {
+          type: 'safetyCheck',
+          reason: formatCygwinSymlinkMessage(chain.displayTarget),
+          classifierApprovable: false,
+        },
+      }
+    }
+  }
+
   const { resolvedPath, isCanonical } = safeResolvePath(
     getFsImplementation(),
     absolutePath,

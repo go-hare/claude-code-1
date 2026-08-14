@@ -111,13 +111,52 @@ const SECRET_RULES: SecretRule[] = [
     id: 'github-refresh-token',
     source: 'ghr_[0-9a-zA-Z]{36}',
   },
+  // densable 2.1.232 #6 — GitLab token families (prefixes from SEA gitleaks table).
+  // Full redaction of routable glpat-/gldt-; additional families below.
   {
     id: 'gitlab-pat',
-    source: 'glpat-[\\w-]{20}',
+    // densable: full redaction of routable glpat-
+    source: 'glpat-[\\w-]{20,}',
   },
   {
     id: 'gitlab-deploy-token',
-    source: 'gldt-[0-9a-zA-Z_\\-]{20}',
+    source: 'gldt-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-runner-authentication-token',
+    source: 'glrt-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-oauth-app-secret',
+    source: 'gloas-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-pipeline-trigger-token',
+    source: 'glptt-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-kubernetes-agent-token',
+    source: 'glagent-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-incoming-mail-token',
+    source: 'glimt-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-scim-oauth-token',
+    source: 'glsoat-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-ci-build-token',
+    source: 'glcbt-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-feed-token',
+    source: 'glft-[0-9a-zA-Z_\\-]{20,}',
+  },
+  {
+    id: 'gitlab-feature-flag-client-token',
+    source: 'glffct-[0-9a-zA-Z_\\-]{20,}',
   },
 
   // — Communication —

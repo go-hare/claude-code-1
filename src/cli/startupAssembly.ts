@@ -70,16 +70,30 @@ export function runSessionStartupSideEffects(options: {
   logPermissionContext: () => void
   logManagedSettings: () => void
   sessionNameArg?: string
+  /** densable Bid only runs when interactive (non -p). Default true. */
+  interactive?: boolean
   registerSession: () => Promise<boolean>
-  updateSessionName: (name: string) => Promise<unknown> | undefined
+  updateSessionName: (
+    name: string,
+    source?: 'user' | 'collision' | 'derived' | 'auto',
+  ) => Promise<unknown> | undefined
   countConcurrentSessions: () => Promise<number>
   onConcurrentSessions: (count: number) => void
+  /**
+   * densable Bid — optional override (tests). Default imports
+   * `runSessionNameStartupUniqueness`.
+   */
+  runSessionNameStartupUniqueness?: (input: {
+    sessionNameArg?: string
+    interactive: boolean
+  }) => Promise<void>
 }): void {
   const {
     logContextMetrics,
     logPermissionContext,
     logManagedSettings,
     sessionNameArg,
+    interactive = true,
     registerSession,
     updateSessionName,
     countConcurrentSessions,
@@ -90,10 +104,33 @@ export function runSessionStartupSideEffects(options: {
   logPermissionContext()
   logManagedSettings()
 
-  void registerSession().then(registered => {
+  void registerSession().then(async registered => {
     if (!registered) return
-    if (sessionNameArg) {
-      void updateSessionName(sessionNameArg)
+    // densable Bid: uniqueness for interactive names (CLI --name / existing claim).
+    // Falls back to plain updateSessionName when Bid module fails to load.
+    try {
+      if (options.runSessionNameStartupUniqueness) {
+        await options.runSessionNameStartupUniqueness({
+          sessionNameArg,
+          interactive,
+        })
+      } else {
+        const { runSessionNameStartupUniqueness } = await import(
+          '../utils/sessionNameUniqueness.js'
+        )
+        await runSessionNameStartupUniqueness({
+          sessionNameArg,
+          interactive,
+          // Use injected updateSessionName so callers/tests can observe writes.
+          writeName: async (name, source) => {
+            await updateSessionName(name, source)
+          },
+        })
+      }
+    } catch {
+      if (sessionNameArg) {
+        void updateSessionName(sessionNameArg, 'user')
+      }
     }
     void countConcurrentSessions().then(count => {
       if (count >= 2) {

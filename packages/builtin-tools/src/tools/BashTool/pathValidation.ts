@@ -1064,6 +1064,74 @@ export function validateOutputRedirections(
 }
 
 /**
+ * densable 2.1.232 #43 — validate Bash input redirections (`< file`) as reads.
+ * Matches argument-form path checks: deny rules → deny; outside working dirs → ask.
+ * `/dev/null` is always safe. Heredoc (`<<`/`<<<`) and fd dup (`<&`) are not
+ * file-path reads here (densable only gates `op === "<"`).
+ */
+export function validateInputRedirections(
+  redirections: Array<{ target: string }>,
+  cwd: string,
+  toolPermissionContext: ToolPermissionContext,
+): PermissionResult {
+  for (const { target } of redirections) {
+    if (target === '/dev/null') {
+      continue
+    }
+    const { allowed, resolvedPath, decisionReason } = validatePath(
+      target,
+      cwd,
+      toolPermissionContext,
+      'read',
+    )
+
+    if (!allowed) {
+      const message =
+        decisionReason?.type === 'other' ||
+        decisionReason?.type === 'safetyCheck'
+          ? decisionReason.reason
+          : decisionReason?.type === 'rule'
+            ? `Input redirection from '${resolvedPath}' was blocked by a deny rule.`
+            : `Input redirection from '${resolvedPath}' was blocked. For security, Claude Code may only read files in the allowed working directories for this session.`
+
+      if (decisionReason?.type === 'rule') {
+        return {
+          behavior: 'deny',
+          message,
+          decisionReason,
+        }
+      }
+
+      // densable lkt(rZ(y)): session Read suggestion for parent dir when no
+      // decisionReason (working-dir restriction, not rule/safety).
+      const suggestions: PermissionUpdate[] = []
+      if (decisionReason === undefined) {
+        const readSuggestion = createReadRuleSuggestion(
+          getDirectoryForPath(resolvedPath),
+          'session',
+        )
+        if (readSuggestion) {
+          suggestions.push(readSuggestion)
+        }
+      }
+
+      return {
+        behavior: 'ask',
+        message,
+        blockedPath: resolvedPath,
+        decisionReason,
+        ...(suggestions.length > 0 ? { suggestions } : {}),
+      }
+    }
+  }
+
+  return {
+    behavior: 'passthrough',
+    message: 'No unsafe input redirections found',
+  }
+}
+
+/**
  * Checks path constraints for commands that access the filesystem (cd, ls, find).
  * Also validates output redirections to ensure they're within allowed directories.
  *
@@ -1137,6 +1205,25 @@ export function checkPathConstraints(
   )
   if (redirectionResult.behavior !== 'passthrough') {
     return redirectionResult
+  }
+
+  // densable 2.1.232 #43 auS: when AST redirects are available, permission-check
+  // input redirections (`< file`) as reads — same as argument spellings.
+  // Non-AST / shell-quote path does not extract `<` targets (densable A2e).
+  if (astRedirects) {
+    const inputTargets = astRedirects
+      .filter(r => r.op === '<' && r.target !== '/dev/null')
+      .map(r => ({ target: r.target }))
+    if (inputTargets.length > 0) {
+      const inputResult = validateInputRedirections(
+        inputTargets,
+        cwd,
+        toolPermissionContext,
+      )
+      if (inputResult.behavior !== 'passthrough') {
+        return inputResult
+      }
+    }
   }
 
   // SECURITY: When AST-derived commands are available, iterate them with

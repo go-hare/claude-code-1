@@ -836,11 +836,14 @@ export async function runAsyncAgentLifecycle({
    * release (2.1.217 #18 takeConcurrencySlot).
    */
   onRunSettled?: () => void
-}): Promise<void> {
+}): Promise<{ finalText: string } | undefined> {
   let stopSummarization: (() => void) | undefined
   const agentMessages: MessageType[] = []
   // densable Yqe D — shared tracker (also used by mid-bg path in AgentTool)
   const isIdleTracker = createLocalAgentIsIdleTracker(taskId, rootSetAppState)
+  // densable X8a finalText — return extracted text so awaitCompletion callers
+  // do not race task.result AppState writes after lifecycle settles.
+  let settledFinalText: string | undefined
   try {
     const tracker = createProgressTracker()
     const resolveActivity = createActivityDescriptionResolver(
@@ -950,6 +953,9 @@ export async function runAsyncAgentLifecycle({
     // not gate the status transition (gh-20236).
     // skipJeo: Jeo already ran above for Z.
     completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true })
+    // densable X8a finalText = md(result.content, "\n") — capture before park
+    // so awaitCompletion does not race AppState task.result writes.
+    settledFinalText = extractTextContent(agentResult.content, '\n')
 
     // densable: if (Z) CWr(pe) + defer owner BRt — same Z as suppressTelemetry.
     // Bot idle-window alone is NOT JXt (only agent: reasons count).
@@ -959,7 +965,9 @@ export async function runAsyncAgentLifecycle({
         agentResult.totalDurationMs,
         rootSetAppState,
       )
-      return
+      return settledFinalText !== undefined
+        ? { finalText: settledFinalText }
+        : undefined
     }
 
     // Official observer densable: stop armed pairing when observed agent ends.
@@ -975,6 +983,7 @@ export async function runAsyncAgentLifecycle({
     }
 
     let finalMessage = extractTextContent(agentResult.content, '\n')
+    settledFinalText = finalMessage
 
     if (feature('TRANSCRIPT_CLASSIFIER')) {
       const handoffWarning = await classifyHandoffIfNeeded({
@@ -988,6 +997,7 @@ export async function runAsyncAgentLifecycle({
       })
       if (handoffWarning) {
         finalMessage = `${handoffWarning}\n\n${finalMessage}`
+        settledFinalText = finalMessage
       }
     }
 
@@ -1108,4 +1118,8 @@ export async function runAsyncAgentLifecycle({
     clearInvokedSkillsForAgent(agentIdForCleanup)
     clearDumpState(agentIdForCleanup)
   }
+  // densable X8a: only successful complete/park paths set settledFinalText
+  return settledFinalText !== undefined
+    ? { finalText: settledFinalText }
+    : undefined
 }

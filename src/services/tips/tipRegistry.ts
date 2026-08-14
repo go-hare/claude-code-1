@@ -418,16 +418,9 @@ const externalTips: Tip[] = [
     cooldownSessions: 20,
     isRelevant: async () => true,
   },
-  {
-    id: 'custom-agents',
-    content: async () =>
-      'Use /agents to optimize specific tasks. Eg. Software Architect, Code Writer, Code Reviewer',
-    cooldownSessions: 15,
-    async isRelevant() {
-      const config = getGlobalConfig()
-      return config.numStartups > 5
-    },
-  },
+  // densable 2.1.232 #49: removed custom-agents startup tip (Use /agents …).
+  // Keep agent-flag (--agent <name>); powerup-onboarding remains densable-side only
+  // (tengu_alder_compass GB, default false) — local has no powerup tip id.
   {
     id: 'agent-flag',
     content: async () =>

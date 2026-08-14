@@ -9,12 +9,21 @@ import type {
   LocalJSXCommandContext,
   LocalJSXCommandOnDone,
 } from '../../types/command.js'
+import { listLiveSessionRecords } from '../../utils/concurrentSessions.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js'
 import {
   getTranscriptPath,
   saveAgentName,
   saveCustomTitle,
 } from '../../utils/sessionStorage.js'
+import {
+  formatSessionRenamedMessage,
+  resolveUniqueSessionName,
+  scheduleSessionNameRenameRecheck,
+  sessionNameState,
+} from '../../utils/sessionNameUniqueness.js'
+import { updateSessionName } from '../../utils/concurrentSessions.js'
 import {
   RENAME_EMPTY_AFTER_SANITIZE_MESSAGE,
   sanitizeSessionTitle,
@@ -28,15 +37,16 @@ export async function call(
   args: string,
 ): Promise<null> {
   // Prevent teammates from renaming - their names are set by team leader
+  // densable: "Cannot rename: This session is a teammate. ..."
   if (isTeammate()) {
     onDone(
-      'Cannot rename: This session is a swarm teammate. Teammate names are set by the team leader.',
+      'Cannot rename: This session is a teammate. Teammate names are set by the team leader.',
       { display: 'system' },
     )
     return null
   }
 
-  let newName: string
+  let requestedName: string
   if (!args || args.trim() === '') {
     const generated = await generateSessionName(
       getMessagesAfterCompactBoundary(context.messages),
@@ -49,14 +59,46 @@ export async function call(
       )
       return null
     }
-    newName = generated
+    requestedName = generated
   } else {
     // densable 2.1.221: shared uge (ly/vhn) before persist — FXe funnel.
-    newName = sanitizeSessionTitle(args)
-    if (!newName) {
+    requestedName = sanitizeSessionTitle(args)
+    if (!requestedName) {
       onDone(RENAME_EMPTY_AFTER_SANITIZE_MESSAGE, { display: 'system' })
       return null
     }
+  }
+
+  // densable 2.1.232 #4 kxr/mEn/ZM_: yield name-word-word when another live
+  // session already holds the requested name.
+  let newName = requestedName
+  let yieldedFrom: string | undefined
+  try {
+    const live = await listLiveSessionRecords()
+    const self =
+      live.find(r => r.pid === process.pid) ??
+      ({
+        pid: process.pid,
+        startedAt: Date.now(),
+        name: undefined,
+      } as const)
+    const resolved = resolveUniqueSessionName({
+      desiredName: requestedName,
+      self,
+      live,
+      moment: 'rename',
+    })
+    newName = resolved.name
+    if (resolved.yielded) {
+      yieldedFrom = requestedName
+      logForDebugging(
+        `[session-name] "${requestedName}" is held by live pid ${resolved.holders[0]?.pid}; this session takes "${newName}"`,
+      )
+    }
+  } catch (e) {
+    logForDebugging(
+      `[session-name] uniqueness check failed, keeping "${requestedName}": ${e instanceof Error ? e.message : String(e)}`,
+    )
   }
 
   const sessionId = getSessionId() as UUID
@@ -82,7 +124,11 @@ export async function call(
   }
 
   // Also persist as the session's agent name for prompt-bar display
+  // (updateSessionName → PID registry so peers see the claim).
   await saveAgentName(sessionId, newName, fullPath)
+  // densable nameSource: collision when yielded, else user.
+  await updateSessionName(newName, yieldedFrom ? 'collision' : 'user')
+  sessionNameState.userTypedName = newName
   context.setAppState(prev => ({
     ...prev,
     standaloneAgentContext: {
@@ -91,6 +137,35 @@ export async function call(
     },
   }))
 
-  onDone(`Session renamed to: ${newName}`, { display: 'system' })
+  // densable kxr/announceYield — notify UDS correspondents when we yielded.
+  if (yieldedFrom) {
+    sessionNameState.announceYield(newName, yieldedFrom)
+  }
+
+  // densable G$o — recheck after rename; if another live session steals the
+  // name within eO_=3s, yield again and rewrite registry.
+  scheduleSessionNameRenameRecheck({
+    name: newName,
+    suffixBase: requestedName,
+    onYield: async (yielded, previous) => {
+      await updateSessionName(yielded, 'collision')
+      await saveAgentName(sessionId, yielded, fullPath)
+      context.setAppState(prev => ({
+        ...prev,
+        standaloneAgentContext: {
+          ...prev.standaloneAgentContext,
+          name: yielded,
+        },
+      }))
+      // densable announceYield on recheck path is also fired inside G$o
+      logForDebugging(
+        `[session-name] recheck yielded "${previous}" → "${yielded}"`,
+      )
+    },
+  })
+
+  onDone(formatSessionRenamedMessage(newName, yieldedFrom), {
+    display: 'system',
+  })
   return null
 }

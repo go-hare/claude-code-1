@@ -1,3 +1,4 @@
+import { feature } from 'bun:bundle';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNotifications } from 'src/context/notifications.js';
 import { Text } from '@anthropic/ink';
@@ -675,7 +676,7 @@ export function useTypeahead({
         }
       }
 
-      // Check for @ to trigger team member / named subagent suggestions
+      // Check for @ to trigger team member / named subagent / peer session suggestions
       // Must check before @ file symbol to prevent conflict
       // Skip in bash mode - @ has no special meaning in shell commands
       const atMatch = mode !== 'bash' ? value.substring(0, effectiveCursorOffset).match(/(^|\s)@([\w-]*)$/) : null;
@@ -709,6 +710,33 @@ export function useTypeahead({
             displayText: `@${name}`,
             description: status ? `send message · ${status}` : 'send message',
           });
+        }
+
+        // densable 2.1.232 #2 d4p — cross-session peer typeahead (dm-peer-…)
+        // feature() must sit alone in an if condition (bun:bundle restriction).
+        if (feature('UDS_INBOX')) {
+          if (partialName.length > 0) {
+            try {
+              const { isPeerAtMentionEnabled, processPeerMentionsTypeahead } = await import(
+                '../utils/peerAtMention.js'
+              );
+              if (isPeerAtMentionEnabled()) {
+                const peerRows = await processPeerMentionsTypeahead(partialName, [...seen]);
+                for (const row of peerRows) {
+                  const bare = row.displayText.replace(/^@"?|"$/g, '');
+                  if (seen.has(bare)) continue;
+                  seen.add(bare);
+                  members.push({
+                    id: row.id,
+                    displayText: row.displayText,
+                    description: row.description,
+                  });
+                }
+              }
+            } catch {
+              // peer typeahead optional
+            }
+          }
         }
 
         if (members.length > 0) {

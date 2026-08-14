@@ -4,6 +4,7 @@
  */
 
 import type { FailedMCPServer } from './types.js'
+import { isMcpConnectTimeoutRetryEnabled } from './mcpConnectTimeout.js'
 
 /** densable `O_o` — hard cap before ellipsis. */
 const ISSUE_HARD_MAX = 2000
@@ -106,15 +107,28 @@ export function formatFailedMcpReconnectIssue(
 /**
  * Pull a densable-style errorCode from a thrown connection error.
  * HTTP 404 on http transport without session → ENDPOINT_NOT_FOUND.
+ * densable 2.1.232: McpError RequestTimeout (-32001) → CONNECT_TIMEOUT when
+ * `tengu_mcp_connect_timeout_retry` is enabled (default true).
  */
 export function extractMcpConnectionErrorCode(
   error: unknown,
-  opts?: { transportType?: string | undefined; hasSessionId?: boolean },
+  opts?: {
+    transportType?: string | undefined
+    hasSessionId?: boolean
+    mapRequestTimeoutToConnectTimeout?: boolean
+  },
 ): string | undefined {
   if (!error || typeof error !== 'object') return undefined
   const withCode = error as { code?: string | number }
   if (withCode.code === undefined || withCode.code === null) return undefined
   let code = String(withCode.code)
+  // densable: h instanceof rd && h.code === Mu.RequestTimeout && GB → CONNECT_TIMEOUT
+  const mapTimeout =
+    opts?.mapRequestTimeoutToConnectTimeout !== false &&
+    (code === '-32001' || code === 'RequestTimeout')
+  if (mapTimeout && isMcpConnectTimeoutRetryEnabled()) {
+    code = 'CONNECT_TIMEOUT'
+  }
   if (opts?.transportType === 'http' && code === '404' && !opts.hasSessionId) {
     code = 'ENDPOINT_NOT_FOUND'
   }

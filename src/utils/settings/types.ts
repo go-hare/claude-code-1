@@ -805,8 +805,12 @@ export const SettingsSchema = lazySchema(() =>
         })
         .optional()
         .describe(
-          'Additional marketplaces to make available for this repository. Typically used in repository .claude/settings.json to ensure team members have required plugin sources.',
+          'Additional marketplaces to make available for this repository. Typically used in repository .claude/settings.json to ensure team members have required plugin sources. Alias: additionalMarketplaces (densable 2.1.232).',
         ),
+      // densable 2.1.232 #8 — public alias names are rewritten to canonical keys
+      // by applySettingsKeyAliases (sRe) before SettingsSchema parse. Do not
+      // add additionalMarketplaces/allowedMarketplaces as schema fields:
+      // after sRe they are deleted and only extraKnown/strictKnown remain.
       // Enterprise strict list of allowed marketplace sources (policy settings only)
       // When set, ONLY these exact sources can be added. Check happens BEFORE download.
       strictKnownMarketplaces: z
@@ -820,7 +824,8 @@ export const SettingsSchema = lazySchema(() =>
             'to allow every repository under that owner. The check happens BEFORE downloading, so ' +
             'blocked sources never touch the filesystem. ' +
             'Note: this is a policy gate only — it does NOT register marketplaces. ' +
-            'To pre-register allowed marketplaces for users, also set extraKnownMarketplaces.',
+            'To pre-register allowed marketplaces for users, also set extraKnownMarketplaces. ' +
+            'Alias: allowedMarketplaces (densable 2.1.232).',
         ),
       // Enterprise blocklist of marketplace sources (policy settings only)
       // When set, these exact sources are blocked. Check happens BEFORE download.

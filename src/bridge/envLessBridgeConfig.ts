@@ -31,6 +31,10 @@ export type EnvLessBridgeConfig = {
   // — the only telemetry for the ~1% of sessions that emit `started` then
   // go silent (no error, no event, just nothing).
   connect_timeout_ms: number
+  // densable oauth_retry_* — feed recovery-flag leak ceiling ms formula
+  // (ms=2*(15000+So+Qn)) in remintRecovery.computeRecoveryLeakCeilingMs.
+  oauth_retry_max_attempts: number
+  oauth_retry_base_delay_ms: number
   // Semver floor for the env-less bridge path. Separate from the v1
   // tengu_bridge_min_version config so a v2-specific bug can force upgrades
   // without blocking v1 (env-based) clients, and vice versa.
@@ -53,6 +57,9 @@ export const DEFAULT_ENV_LESS_BRIDGE_CONFIG: EnvLessBridgeConfig = {
   token_refresh_buffer_ms: 300_000,
   teardown_archive_timeout_ms: 1500,
   connect_timeout_ms: 15_000,
+  // densable Ojp defaults
+  oauth_retry_max_attempts: 3,
+  oauth_retry_base_delay_ms: 2000,
   min_version: '0.0.0',
   should_show_app_upgrade_message: false,
 }
@@ -101,6 +108,14 @@ const envLessBridgeConfigSchema = lazySchema(() =>
     // false-positive rate under transient slowness; cap 60s bounds how long
     // a truly-stalled session stays dark.
     connect_timeout_ms: z.number().int().min(5_000).max(60_000).default(15_000),
+    // densable: oauth_retry_max_attempts 0–6 default 3; base 100–10000 default 2000
+    oauth_retry_max_attempts: z.number().int().min(0).max(6).default(3),
+    oauth_retry_base_delay_ms: z
+      .number()
+      .int()
+      .min(100)
+      .max(10_000)
+      .default(2000),
     min_version: z
       .string()
       .refine(v => {

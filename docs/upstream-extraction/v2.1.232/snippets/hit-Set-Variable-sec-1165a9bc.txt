@@ -1,0 +1,31 @@
+# offset=291875260
+
+```
+atements = $ast.UsingStatements -and $ast.UsingStatements.Count -gt 0
+$hasScriptRequirements = $ast.ScriptRequirements -ne $null
+
+$output = @{
+    valid = ($parseErrors.Count -eq 0)
+    errors = @($parseErrors | ForEach-Object {
+        @{
+            message = $_.Message
+            errorId = $_.ErrorId
+        }
+    })
+    statements = @($statements)
+    variables = @($allVariables)
+    hasStopParsing = $hasStopParsing
+    originalCommand = $Command
+    typeLiterals = @($typeLiterals)
+    hasUsingStatements = [bool]$hasUsingStatements
+    hasScriptRequirements = [bool]$hasScriptRequirements
+    hasBackgroundJob = [bool]$script:hasBg
+}
+
+$output | ConvertTo-Json -Depth 10 -Compress
+`,jFb=32767,zFb=200,WFb=21,GFb=100,VFb,qFb,KFb,Bma,YFb,r2b,n2b,$Pe,Foe;var FPe=E(()=>{Ke();yl();zme();oZ();nut();vr();VFb=(jFb-zFb)*3/8,qFb=VFb-fdp.length-WFb,KFb=Math.max(0,Math.floor(qFb*3/4)-GFb),Bma=KFb,YFb={valid:!1,statements:[],variables:[],hasStopParsing:!1};r2b=new Set(["PwshSpawnError","PwshError","PwshTimeout","EmptyOutput","InvalidJson"]);n2b=new mdp;$Pe=Object.assign(Object.create(null),{ls:"Get-ChildItem",dir:"Get-ChildItem",gci:"Get-ChildItem",cat:"Get-Content",type:"Get-Content",gc:"Get-Content",cd:"Set-Location",sl:"Set-Location",chdir:"Set-Location",pushd:"Push-Location",popd:"Pop-Location",pwd:"Get-Location",gl:"Get-Location",gi:"Get-Item",gp:"Get-ItemProperty",ni:"New-Item",mkdir:"New-Item",md:"New-Item",ri:"Remove-Item",del:"Remove-Item",rd:"Remove-Item",rmdir:"Remove-Item",rm:"Remove-Item",erase:"Remove-Item",mi:"Move-Item",mv:"Move-Item",move:"Move-Item",ci:"Copy-Item",cp:"Copy-Item",copy:"Copy-Item",cpi:"Copy-Item",si:"Set-Item",rni:"Rename-Item",ren:"Rename-Item",ps:"Get-Process",gps:"Get-Process",kill:"Stop-Process",spps:"Stop-Process",start:"Start-Process",saps:"Start-Process",sajb:"Start-Job",ipmo:"Import-Module",echo:"Write-Output",write:"Write-Output",sleep:"Start-Sleep",help:"Get-Help",man:"Get-Help",gcm:"Get-Command",gsv:"Get-Service",gv:"Get-Variable",sv:"Set-Variable",h:"Get-History",history:"Get-History",iex:"Invoke-Expression",iwr:"Invoke-WebRequest",irm:"Invoke-RestMethod",icm:"Invoke-Command",ii:"Invoke-Item",iwmi:"Invoke-WmiMethod",icim:"Invoke-CimMethod",nsn:"New-PSSession",etsn:"Enter-PSSession",exsn:"Exit-PSSession",gsn:"Get-PSSession",rsn:"Remove-PSSession",cls:"Clear-Host",clear:"Clear-Host",select:"Select-Object",where:"Where-Object",foreach:"ForEach-Object","%":"ForEach-Object","?":"Where-Object",measure:"Measure-Object",ft:"Format-Table",fl:"Format-List",fw:"Format-Wide",oh:"Out-Host",ogv:"Out-GridView",ac:"Add-Content",clc:"Clear-Content",tee:"Tee-Object",epcsv:"Export-Csv",sp:"Set-ItemProperty",rp:"Remove-ItemProperty",cli:"Clear-Item",epal:"Export-Alias",sls:"Select-String"});Foe=new Set(["-","\u2013","\u2014","\u2015"])});function jHt(e,t="value"){let r=i2b.exec(e);if(r){let n=(r[0].codePointAt(0)??0).toString(16).toUpperCase().padStart(4,"0");throw new Rt(`Cannot safely quote ${t} in a PowerShell single-quoted string literal: it contains U+${n}, which PowerShell's tokenizer treats as a quote delimiter`,"psSingleQuotedLiteral: rejected a PowerShell quote-variant codepoint (U+2018..U+201F)")}return`'${e.replaceAll("'","''")}'`}var i2b;var XPn=E(()=>{pt();i2b=/[\u2018-\u201F]/});function qma(){let e=["-NoProfile","-NonInteractive"];if(!X.CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY)e.push("-ExecutionPolicy","Bypass");return e}function JPn(e){return[...qma(),"-Command",e]}function _dp(e,t){return{binShell:{exe:e,args:[...qma(),"-EncodedCommand"]},command:J7o(t)}}function a2b(e){let t=0;for(;;){while(t<e.length&&/[\s;]/.test(e[t]))t++;if(e[t]==="#"){while(t<e.length&&e[t]!==`
+`)t++;continue}if(e.startsWith("<#",t)){let n=e.indexOf("#>",t+2);t=n===-1?e.length:n+2;continue}break}let r=e.slice(t);return/^using\s+(namespace|module|assembly)\b/i.test(r)||/^param\s*\(/i.test(r)||/^(begin|process|end|clean|dynamicparam)\s*\{/i.test(r)||/^\[\w/.test(r)&&!/^\[[\w.]+\]::/.test(r)}function bdp(e){let t;return{type:"powershell",shellPath:e,detached:!1,stdin:"ignore",async buildExecCommand(r,n){t=n.useSandbox?n.sandboxTmpDir:void 0;let o;if(n.useSandbox&&n.sandboxTmpDir)o=(Yt()==="windows"?Vma.join:ydp.join)(n.sandboxTmpDir,`claude-pwd-ps-${n.id}`);else{let u=Mk();await gdp.mkdir(u,{recursive:!0,mode:448}).catch(()=>{}),o=Vma.join(u,`claude-pwd-ps-${n.id}`)}let s=`
+; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
+; (Get-Location).Path | Out-File -FilePath ${jHt(o,"the temp-directory path (override with CLAUDE_CODE_TMPDIR)")} -Encoding utf8 -NoNewline
+; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $host.SetShouldExit($_ec) } else { exit $_ec }`,l=(a2b(r)?"":s2b)+r+s;return{commandString:n.useSandbox&&Yt()!=="windows"?[`'${e.replace(/'/g,"'\\''")}'`,...qma(),"-EncodedCommand",J7o(l)].join(" "):l,cwdFilePath:o}},getSpawnArgs(r){return JPn(r)},async getEnvironmentOverrides(r,n,o){let i={...I9d(process.env)},s=process.env.FORCE_COLOR!==void 0||o?.has("FORCE_COLOR");for(let[a,l]of Object.entries(l2b)){if(process.env[a]!==void 0)continue;if(a==="NO_COLOR"&&s)continue;i[a]=l}if(o)for(let[a,l]of o)i[a]=l;if(t)i.TMPDIR=t,i.CLAUDE_CODE_TMPDIR=Mk();return i}}}var gdp,Vma,ydp,s2b="try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; ",l2b;var eXo=E(()=>{yl();Li();L9e();FPe();aI();XPn();gdp=require("fs/promises"),Vma=require("path"),ydp=require("path/posix");l2b={PYTHONIOENCODING:"utf-8:surrogateescape",NO_COLOR:"1"}});async function Kma(e){try{return Edp.accessSync(e,bLr.constants.X_OK),!0}catch(t){let{code:r}=await eo(e,["--version"],{timeout:1000,useCwd:!1});return r===0}}async function d2b(){let e=X.CLAUDE_CODE_SHELL;if(e)if((e.includes("bash")||e.includes("zsh"))&&await Kma(e))re
+```

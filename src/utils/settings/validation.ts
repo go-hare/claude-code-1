@@ -4,6 +4,7 @@ import { jsonParse } from '../slowOperations.js'
 import { plural } from '../stringUtils.js'
 import { validatePermissionRule } from './permissionValidation.js'
 import { generateSettingsJSONSchema } from './schemaOutput.js'
+import { applySettingsKeyAliases } from './settingsAliases.js'
 import type { SettingsJson } from './types.js'
 import { SettingsSchema } from './types.js'
 import { getValidationTip } from './validationTips.js'
@@ -194,6 +195,9 @@ export function validateSettingsFileContent(content: string):
   try {
     // Parse the JSON first
     const jsonData = jsonParse(content)
+
+    // densable 2.1.232 #8 — alias → canonical before strict schema
+    applySettingsKeyAliases(jsonData)
 
     // Validate against SettingsSchema in strict mode
     const result = SettingsSchema().strict().safeParse(jsonData)

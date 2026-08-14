@@ -168,11 +168,24 @@ async function updatePidFile(patch: Record<string, unknown>): Promise<void> {
   }
 }
 
+/** densable pid registry `nameSource` for uniqueness / Bid. */
+export type SessionNameSource = 'user' | 'collision' | 'derived' | 'auto'
+
+/**
+ * densable `JEe` subset — persist session display name into the PID registry
+ * so ListAgents / uniqueness see the claim. Optional `nameSource` + `nameSince`
+ * align densable 2.1.232 #4.
+ */
 export async function updateSessionName(
   name: string | undefined,
+  source?: SessionNameSource,
 ): Promise<void> {
   if (!name) return
-  await updatePidFile({ name })
+  await updatePidFile({
+    name,
+    nameSince: Date.now(),
+    ...(source !== undefined ? { nameSource: source } : {}),
+  })
 }
 
 /**
@@ -238,6 +251,102 @@ export async function updateSessionActivity(patch: {
 }): Promise<void> {
   if (!feature('BG_SESSIONS')) return
   await updatePidFile({ ...patch, updatedAt: Date.now() })
+}
+
+/**
+ * densable 2.1.232 #4 `u2e` / `listLive` — live session records from the PID
+ * registry (`~/.claude/sessions/<pid>.json`), including names for uniqueness.
+ * Stale PID files are swept (same rules as {@link countConcurrentSessions}).
+ */
+export type LiveSessionRecord = {
+  pid: number
+  sessionId?: string
+  name?: string
+  startedAt: number
+  nameSince?: number
+  procStart?: string
+  /** densable nameSource: user | collision | derived | auto */
+  nameSource?: SessionNameSource
+  kind?: SessionKind
+  messagingSocketPath?: string
+}
+
+export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
+  const dir = getSessionsDir()
+  let files: string[]
+  try {
+    files = await readdir(dir)
+  } catch (e) {
+    if (!isFsInaccessible(e)) {
+      logForDebugging(
+        `[concurrentSessions] listLive readdir failed: ${errorMessage(e)}`,
+      )
+    }
+    return []
+  }
+
+  const live: LiveSessionRecord[] = []
+  for (const file of files) {
+    if (!/^\d+\.json$/.test(file)) continue
+    const pid = parseInt(file.slice(0, -5), 10)
+    if (Number.isNaN(pid)) continue
+    if (pid !== process.pid && !isProcessRunning(pid)) {
+      if (getPlatform() !== 'wsl') {
+        void unlink(join(dir, file)).catch(() => {})
+      }
+      continue
+    }
+    try {
+      const data = jsonParse(await readFile(join(dir, file), 'utf8')) as Record<
+        string,
+        unknown
+      >
+      const startedAt =
+        typeof data.startedAt === 'number' ? data.startedAt : Date.now()
+      const name = typeof data.name === 'string' ? data.name : undefined
+      const nameSince =
+        typeof data.nameSince === 'number' ? data.nameSince : undefined
+      const procStart =
+        typeof data.procStart === 'string' ? data.procStart : undefined
+      const nameSourceRaw = data.nameSource
+      const nameSource =
+        nameSourceRaw === 'user' ||
+        nameSourceRaw === 'collision' ||
+        nameSourceRaw === 'derived' ||
+        nameSourceRaw === 'auto'
+          ? nameSourceRaw
+          : undefined
+      const sessionId =
+        typeof data.sessionId === 'string' ? data.sessionId : undefined
+      const kind =
+        data.kind === 'interactive' ||
+        data.kind === 'bg' ||
+        data.kind === 'daemon' ||
+        data.kind === 'daemon-worker'
+          ? data.kind
+          : undefined
+      const messagingSocketPath =
+        typeof data.messagingSocketPath === 'string'
+          ? data.messagingSocketPath
+          : undefined
+      live.push({
+        pid,
+        sessionId,
+        name,
+        startedAt,
+        nameSince,
+        procStart,
+        nameSource,
+        kind,
+        messagingSocketPath,
+      })
+    } catch (e) {
+      logForDebugging(
+        `[concurrentSessions] listLive read ${file} failed: ${errorMessage(e)}`,
+      )
+    }
+  }
+  return live
 }
 
 /**

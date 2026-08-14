@@ -26,7 +26,10 @@ import {
   GIT_READ_ONLY_COMMANDS,
   validateFlags,
 } from 'src/utils/shell/readOnlyCommandValidation.js'
-import { COMMON_PARAMETERS } from './commonParameters.js'
+import {
+  COMMON_PARAMETERS,
+  hasDangerousVariableWriteCommonParam,
+} from './commonParameters.js'
 
 const DOTNET_READ_ONLY_FLAGS = new Set([
   '--version',
@@ -1442,6 +1445,17 @@ export function isAllowlistedCommand(
   // not a flag. We detect cmdlets by checking if the command resolves to a
   // Verb-Noun canonical name (either directly or via alias).
   const isCmdlet = canonical.includes('-')
+
+  // densable 2.1.232 #13 `Cer` — BEFORE allowAllFlags (densable `Ter` order:
+  // Cer then allowAllFlags). Variable-writing common params targeting
+  // preference vars (PSDefaultParameterValues, ErrorActionPreference, …)
+  // must not auto-allow as read-only.
+  if (
+    isCmdlet &&
+    hasDangerousVariableWriteCommonParam(cmd.args, cmd.elementTypes)
+  ) {
+    return false
+  }
 
   // SECURITY: if allowAllFlags is set, skip flag validation (command's entire
   // flag surface is read-only). Otherwise, missing/empty safeFlags means

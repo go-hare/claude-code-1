@@ -34,11 +34,13 @@ import {
   updateInstallationPathOnDisk,
 } from '../../utils/plugins/installedPluginsManager.js'
 import { isSourceAllowedByPolicy } from '../../utils/plugins/marketplaceHelpers.js'
+import { logEvent } from '../analytics/index.js'
 import {
   getMarketplace,
   getPluginById,
   loadKnownMarketplacesConfig,
-  tryRefreshMarketplaceOnCatalogMiss,
+  logScopedInstallRefreshOutcome,
+  tryRefreshMarketplaceBeforeScopedInstall,
 } from '../../utils/plugins/marketplaceManager.js'
 import { deletePluginDataDir } from '../../utils/plugins/pluginDirectories.js'
 import type { CommandSourceConsent } from '../../utils/plugins/pluginCommandSource.js'
@@ -344,14 +346,15 @@ export function getPluginInstallationFromV2(pluginId: string): {
  * Install a plugin (settings-first).
  *
  * Order of operations:
- *   1. Search materialized marketplaces for the plugin
- *   2. densable 2.1.221 #29: on scoped miss, tryRefreshMarketplaceOnCatalogMiss → retry
+ *   1. densable 2.1.232 #36 / `gvm`+`zqr`: **scoped** install refreshes the
+ *      marketplace first (before catalog lookup), not only on miss
+ *   2. Search materialized marketplaces for the plugin
  *   3. Write settings (THE ACTION — declares intent)
  *   4. Cache plugin + record version hint (materialization)
  *
  * Marketplace reconciliation is NOT this function's responsibility — startup
  * reconcile handles declared-but-not-materialized marketplaces. If the
- * marketplace isn't found after refresh-retry, "not found" is the correct error.
+ * marketplace isn't found after refresh, "not found" is the correct error.
  *
  * @param plugin Plugin identifier (name or plugin@marketplace)
  * @param scope Installation scope: user, project, or local (defaults to 'user')
@@ -379,31 +382,39 @@ export async function installPluginOp(
   let foundPlugin: PluginMarketplaceEntry | undefined
   let foundMarketplace: string | undefined
   let marketplaceInstallLocation: string | undefined
-  // densable: catalog-miss refresh outcome for scoped stale-hint branching
-  let catalogMissOutcome: 'refreshed' | 'refresh-failed' | 'ineligible' | null =
-    null
+  // densable gvm: pre-install refresh flags for scoped path
+  let preInstallRefreshed = false
+  let preInstallRefreshFailed = false
+  let preInstallRefreshWarning: string | undefined
+  let marketplacePolicyBlocked = false
 
   if (marketplaceName) {
-    // densable scoped path: getPluginById → on miss zIr → retry getPluginById
-    let pluginInfo = await getPluginById(plugin)
-    if (!pluginInfo) {
-      const marketplaces = await loadKnownMarketplacesConfig()
-      const mktEntry = marketplaces[marketplaceName]
-      const outcome = await tryRefreshMarketplaceOnCatalogMiss(
-        marketplaceName,
-        mktEntry,
-      )
-      catalogMissOutcome = outcome
-      if (outcome === 'refreshed') {
-        pluginInfo = await getPluginById(plugin)
-      }
+    // densable gvm/zqr: always attempt refresh before lookup (not miss-only)
+    const marketplaces = await loadKnownMarketplacesConfig()
+    const mktEntry = marketplaces[marketplaceName]
+    marketplacePolicyBlocked =
+      mktEntry !== undefined && !isSourceAllowedByPolicy(mktEntry.source)
+    const refresh = await tryRefreshMarketplaceBeforeScopedInstall(
+      marketplaceName,
+      mktEntry,
+    )
+    logScopedInstallRefreshOutcome(refresh.outcome)
+    if (refresh.outcome === 'refreshed') {
+      preInstallRefreshed = true
+    } else if (refresh.outcome === 'refresh-failed') {
+      preInstallRefreshFailed = true
+      preInstallRefreshWarning = `marketplace not refreshed (${refresh.errorMessage})`
     }
+
+    const pluginInfo = await getPluginById(plugin)
     if (pluginInfo) {
       foundPlugin = pluginInfo.entry
       foundMarketplace = marketplaceName
       marketplaceInstallLocation = pluginInfo.marketplaceInstallLocation
     }
   } else {
+    // Unscoped: densable still walks known marketplaces without zqr-first
+    // (UI discovery path uses pvm on miss). Keep cache walk + policy filter.
     const marketplaces = await loadKnownMarketplacesConfig()
     for (const [mktName, mktConfig] of Object.entries(marketplaces)) {
       // densable l0: require source + policy allowlist
@@ -429,19 +440,20 @@ export async function installPluginOp(
     const location = marketplaceName
       ? `marketplace "${marketplaceName}"`
       : 'any configured marketplace'
-    // densable: stale-local-copy hint only when we actually tried a refresh
-    // and it failed (or refreshed but plugin still missing). Do not claim
-    // "out of date" for ineligible (autoUpdate off / policy / offline) or
-    // missing marketplace entry.
+    // densable gvm: scoped miss stale hint when refresh did NOT succeed.
+    // Successful refresh that still misses → no "out of date" claim.
     let staleHint = ''
-    if (marketplaceName && catalogMissOutcome === 'refresh-failed') {
-      staleHint =
-        '. Your local copy may be out of date — update it from /plugin > Marketplaces'
-    } else if (marketplaceName && catalogMissOutcome === 'refreshed') {
-      // refreshed but still miss — optional CLI update nudge (not "failed")
-      staleHint =
-        '. Your local copy may be out of date — try `claude plugin marketplace update` or update it from /plugin > Marketplaces'
+    if (marketplaceName && !preInstallRefreshed) {
+      const cliUpdate = `claude plugin marketplace update ${marketplaceName}`
+      staleHint = `. Your local copy may be out of date — try \`${cliUpdate}\`.`
     }
+    // densable gvm resolve telemetry (reason tag only — no paths)
+    logEvent('plugin_marketplace_resolve', {
+      scoped: marketplaceName !== undefined,
+      marketplace_policy_blocked: marketplacePolicyBlocked,
+      refresh_failed_stale_lookup: preInstallRefreshFailed,
+      not_found: !marketplacePolicyBlocked && !preInstallRefreshFailed,
+    })
     return {
       success: false,
       message: `Plugin "${pluginName}" not found in ${location}${staleHint}`,
@@ -509,9 +521,14 @@ export async function installPluginOp(
     }
   }
 
+  // densable gvm: warn when install used cached catalog after failed pre-refresh
+  const staleInstallWarning = preInstallRefreshWarning
+    ? `. Warning: ${preInstallRefreshWarning} — installed from the cached catalog, so the version may be stale`
+    : ''
+
   return {
     success: true,
-    message: `Successfully installed plugin: ${pluginId} (scope: ${scope})${(result as Extract<typeof result, { ok: true }>).depNote}`,
+    message: `Successfully installed plugin: ${pluginId} (scope: ${scope})${(result as Extract<typeof result, { ok: true }>).depNote}${staleInstallWarning}`,
     pluginId,
     pluginName: entry.name,
     scope,

@@ -23,6 +23,7 @@ import { writeFile } from 'fs/promises'
 import isEqual from 'lodash-es/isEqual.js'
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
+import { logEvent } from '../../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
@@ -41,6 +42,7 @@ import {
 import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { gitExe } from '../git.js'
+import * as lockfile from '../lockfile.js'
 import { logError } from '../log.js'
 import {
   getInitialSettings,
@@ -357,6 +359,164 @@ export async function saveKnownMarketplacesConfig(
 }
 
 /**
+ * densable `TL` — per-key in-process serial queue.
+ * Concurrent `run(key, fn)` for the same key chain; different keys run in parallel.
+ * `drain` settles queued work (used on process exit / tests).
+ */
+const KEYED_SERIAL_DRAIN_MAX = 5
+
+export type KeyedSerialQueue = {
+  run<T>(key: string, fn: () => Promise<T>): Promise<T>
+  has(key: string): boolean
+  readonly size: number
+  settle(): Promise<void>
+  drain(): Promise<void>
+  clearForTest(): void
+}
+
+export function createKeyedSerialQueue(): KeyedSerialQueue {
+  const map = new Map<string, Promise<void>>()
+  return {
+    run<T>(key: string, fn: () => Promise<T>): Promise<T> {
+      const next = (map.get(key) ?? Promise.resolve()).then(() => fn())
+      // densable: store a never-rejecting settled promise so a failed job
+      // does not poison subsequent queue entries for this key.
+      const settled = next.then(
+        () => {},
+        () => {},
+      )
+      map.set(key, settled)
+      void settled.then(() => {
+        if (map.get(key) === settled) {
+          map.delete(key)
+        }
+      })
+      return next
+    },
+    has(key: string): boolean {
+      return map.has(key)
+    },
+    get size(): number {
+      return map.size
+    },
+    async settle(): Promise<void> {
+      await Promise.all([...map.values()])
+    },
+    async drain(): Promise<void> {
+      for (let t = 0; t < KEYED_SERIAL_DRAIN_MAX; t++) {
+        const r = [...map.values()]
+        if (r.length === 0) return
+        await Promise.all(r)
+      }
+    },
+    clearForTest(): void {
+      map.clear()
+    },
+  }
+}
+
+/** densable `KKd` — process-wide queue for known_marketplaces RMW. */
+const knownMarketplacesSerialQueue = createKeyedSerialQueue()
+
+/**
+ * densable known_marketplaces lock options (`G_` call site in `ict`):
+ * separate `${path}.lock`, no realpath, 5 retries 100–1000ms, compromise log.
+ */
+const KNOWN_MARKETPLACES_LOCK_OPTIONS = {
+  realpath: false as const,
+  retries: {
+    retries: 5,
+    minTimeout: 100,
+    maxTimeout: 1000,
+  },
+}
+
+/**
+ * densable `yY` — release a proper-lockfile handle; warn if already released
+ * or cleanup fails. No-op when release is undefined (lock never acquired).
+ */
+async function releaseKnownMarketplacesLock(
+  release: (() => Promise<void>) | undefined,
+  label: string,
+): Promise<void> {
+  if (!release) return
+  try {
+    await release()
+  } catch (err) {
+    let detail: string
+    try {
+      const code = getErrnoCode(err)
+      detail =
+        code === 'ERELEASED' || code === 'ENOTACQUIRED'
+          ? `lock was no longer held at release (${code}); the locked section may have run without exclusivity`
+          : `lock directory could not be removed and is left to go stale: ${errorMessage(err)}`
+    } catch {
+      detail = 'lock release rejected with a value that cannot be described'
+    }
+    logForDebugging(`${label}: ${detail}`, { level: 'warn' })
+  }
+}
+
+/**
+ * densable `ict` — atomic load→mutate→save for known_marketplaces.json.
+ *
+ * 1. Per-path in-process serial queue (`KKd.run`) so same-process concurrent
+ *    mutators never interleave RMW.
+ * 2. Cross-process proper-lockfile on `${config}.lock` (retries 5, 100–1000ms).
+ * 3. If lock acquire fails (missing target file, ELOCKED exhaustion, etc.),
+ *    still write (fallback) and emit `tengu_known_marketplaces_fallback_write`.
+ * 4. Mutator receives fresh disk config; return `null` to skip write (no-op).
+ *
+ * @returns true if a write occurred, false if mutator returned null
+ */
+export async function updateKnownMarketplacesConfig(
+  mutator: (
+    config: KnownMarketplacesConfig,
+  ) => KnownMarketplacesConfig | null | Promise<KnownMarketplacesConfig | null>,
+): Promise<boolean> {
+  const configFile = getKnownMarketplacesFile()
+  return knownMarketplacesSerialQueue.run(configFile, async () => {
+    const fs = getFsImplementation()
+    await fs.mkdir(join(configFile, '..'))
+
+    let release: (() => Promise<void>) | undefined
+    let wroteWithoutLock = false
+    try {
+      release = await lockfile.lock(configFile, {
+        ...KNOWN_MARKETPLACES_LOCK_OPTIONS,
+        lockfilePath: `${configFile}.lock`,
+        onCompromised: (err: Error) => {
+          logForDebugging(`known_marketplaces.json lock compromised: ${err}`, {
+            level: 'error',
+          })
+        },
+      })
+    } catch (err) {
+      logForDebugging(
+        `Failed to acquire known_marketplaces.json lock, writing without it: ${errorMessage(err)}`,
+        { level: 'error' },
+      )
+      wroteWithoutLock = true
+    }
+
+    try {
+      const current = await loadKnownMarketplacesConfig()
+      const next = await mutator(current)
+      if (next === null) {
+        return false
+      }
+      await saveKnownMarketplacesConfig(next)
+      if (wroteWithoutLock) {
+        logEvent('tengu_known_marketplaces_fallback_write', {})
+      }
+      return true
+    } finally {
+      await releaseKnownMarketplacesLock(release, 'known_marketplaces.json')
+    }
+  })
+}
+
+/**
  * Register marketplaces from the read-only seed directories into the primary
  * known_marketplaces.json.
  *
@@ -388,11 +548,11 @@ export async function registerSeedMarketplaces(): Promise<boolean> {
   const seedDirs = getPluginSeedDirs()
   if (seedDirs.length === 0) return false
 
-  const primary = await loadKnownMarketplacesConfig()
+  // densable e8o: gather seed entries outside the lock, then RMW under ict.
   // First-seed-wins across this registration pass. Can't use the isEqual check
   // alone — two seeds with the same name will have different installLocations.
   const claimed = new Set<string>()
-  let changed = 0
+  const pending: Array<[string, KnownMarketplace]> = []
 
   for (const seedDir of seedDirs) {
     const seedConfig = await readSeedKnownMarketplaces(seedDir)
@@ -416,24 +576,34 @@ export async function registerSeedMarketplaces(): Promise<boolean> {
       }
       claimed.add(name)
 
-      const desired: KnownMarketplace = {
-        source: seedEntry.source,
-        installLocation: resolvedLocation,
-        lastUpdated: seedEntry.lastUpdated,
-        autoUpdate: false,
-      }
+      pending.push([
+        name,
+        {
+          source: seedEntry.source,
+          installLocation: resolvedLocation,
+          lastUpdated: seedEntry.lastUpdated,
+          autoUpdate: false,
+        },
+      ])
+    }
+  }
 
+  if (pending.length === 0) return false
+
+  let changed = 0
+  const wrote = await updateKnownMarketplacesConfig(primary => {
+    changed = 0
+    for (const [name, desired] of pending) {
       // Skip if primary already matches — idempotent no-op, no write.
       if (isEqual(primary[name], desired)) continue
-
       // Seed wins — admin-managed. Overwrite any existing primary entry.
       primary[name] = desired
       changed++
     }
-  }
+    return changed > 0 ? primary : null
+  })
 
-  if (changed > 0) {
-    await saveKnownMarketplacesConfig(primary)
+  if (wrote && changed > 0) {
     logForDebugging(`Synced ${changed} marketplace(s) from seed dir(s)`)
     return true
   }
@@ -791,10 +961,61 @@ function isAuthenticationError(stderr: string): boolean {
 /**
  * Extract the SSH host from a git URL for error messaging.
  * Matches the SSH format user@host:path (e.g., git@github.com:owner/repo.git).
+ * densable `GKd` — returns null for URLs with `://` (HTTPS path uses URL parse).
  */
 function extractSshHost(gitUrl: string): string | null {
+  if (gitUrl.includes('://')) return null
   const match = gitUrl.match(/^[^@]+@([^:]+):/)
   return match?.[1] ?? null
+}
+
+/**
+ * densable `Yob`/`EIr` (git-url host only) — hostname for clone error hints.
+ * densable `WSr`/backslash host → null (fail closed to generic wording).
+ */
+function extractGitUrlHostForHint(gitUrl: string): string | null {
+  if (gitUrl.includes('://')) {
+    // densable OWo/WSr: backslash-in-host → do not trust hostname
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: densable WSr strips leading C0/space before scheme
+    if (/^[\x00-\x20]*[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*\\/.test(gitUrl)) {
+      return null
+    }
+    try {
+      return new URL(gitUrl).hostname || null
+    } catch {
+      return null
+    }
+  }
+  return extractSshHost(gitUrl)
+}
+
+/**
+ * densable `sTb` — display name of the git host for auth-failure hints.
+ * GitHub → "GitHub"; gitlab.com → "gitlab.com"; unknown → "your git host".
+ */
+function formatCloneGitHostLabel(gitUrl: string): string {
+  const host = extractGitUrlHostForHint(gitUrl)
+  if (host === null) return 'your git host'
+  let h = host.replace(/[\t\n\r]/g, '').toLowerCase()
+  while (h.startsWith('www.')) h = h.slice(4)
+  if (h === 'github.com') return 'GitHub'
+  return h
+}
+
+/**
+ * densable `aTb` — HTTPS credential-helper wording names the actual host
+ * (GitLab/self-hosted get PAT wording; GitHub keeps `gh auth login`).
+ */
+function formatHttpsCredentialHelperHint(gitUrl: string): string {
+  const host = extractGitUrlHostForHint(gitUrl)
+  if (host !== null) {
+    let h = host.replace(/[\t\n\r]/g, '').toLowerCase()
+    while (h.startsWith('www.')) h = h.slice(4)
+    if (h === 'github.com') {
+      return 'your credential helper is configured (e.g., gh auth login)'
+    }
+  }
+  return `your git credential helper has valid credentials for ${host ?? 'this host'} (e.g., a personal access token)`
 }
 
 /**
@@ -959,16 +1180,18 @@ export async function gitClone(
       result.stderr.includes('Permission denied (publickey)') ||
       result.stderr.includes('Could not read from remote repository')
     ) {
+      // densable sTb: name the actual host (gitlab.com, not always "GitHub")
       return {
         ...result,
-        stderr: `SSH authentication failed. Please ensure your SSH keys are configured for GitHub, or use an HTTPS URL instead.\n\nOriginal error: ${result.stderr}`,
+        stderr: `SSH authentication failed. Please ensure your SSH keys are configured for ${formatCloneGitHostLabel(gitUrl)}, or use an HTTPS URL instead.\n\nOriginal error: ${result.stderr}`,
       }
     }
 
     if (isAuthenticationError(result.stderr)) {
+      // densable aTb: host-aware credential helper hint
       return {
         ...result,
-        stderr: `HTTPS authentication failed. Please ensure your credential helper is configured (e.g., gh auth login).\n\nOriginal error: ${result.stderr}`,
+        stderr: `HTTPS authentication failed. Please ensure ${formatHttpsCredentialHelperHint(gitUrl)}.\n\nOriginal error: ${result.stderr}`,
       }
     }
 
@@ -1916,65 +2139,71 @@ export async function addMarketplaceSource(
 
   // Name collision with different source: overwrite (settings intent wins).
   // Seed-managed entries are admin-controlled and cannot be overwritten.
-  // Re-read config after clone (may take a while; another process may have written).
-  const config = await loadKnownMarketplacesConfig()
-  const oldEntry = config[marketplace.name]
-  if (oldEntry) {
-    const seedDir = seedDirFor(oldEntry.installLocation)
-    if (seedDir) {
-      throw new Error(
-        `Marketplace '${marketplace.name}' is seed-managed (${seedDir}). ` +
-          `To use a different source, ask your admin to update the seed, ` +
-          `or use a different marketplace name.`,
-      )
-    }
-    logForDebugging(
-      `Marketplace '${marketplace.name}' exists with different source — overwriting`,
-    )
-    // Clean up the old cache if it's not a user-owned local path AND it
-    // actually differs from the new cachePath. loadAndCacheMarketplace writes
-    // to cachePath BEFORE we get here — rm-ing the same dir deletes the fresh
-    // write. Settings sources always land on the same dir (name → path);
-    // git sources hit this latently when the source repo changes but the
-    // fetched marketplace.json declares the same name. Only rm when locations
-    // genuinely differ (the only case where there's a stale dir to clean).
-    //
-    // Defensively validate the stored path before rm: a corrupted
-    // installLocation (gh-32793, gh-32661) could point at the user's project
-    // dir. If it's outside the cache dir, skip cleanup — the stale dir (if
-    // any) is harmless, and blocking the re-add would prevent the user from
-    // fixing the corruption.
-    if (!isLocalMarketplaceSource(oldEntry.source)) {
-      const cacheDir = resolve(getMarketplacesCacheDir())
-      const resolvedOld = resolve(oldEntry.installLocation)
-      const resolvedNew = resolve(cachePath)
-      if (resolvedOld === resolvedNew) {
-        // Same dir — loadAndCacheMarketplace already overwrote in place.
-        // Nothing to clean.
-      } else if (
-        resolvedOld === cacheDir ||
-        resolvedOld.startsWith(cacheDir + sep)
-      ) {
-        const fs = getFsImplementation()
-        await fs.rm(oldEntry.installLocation, { recursive: true, force: true })
-      } else {
-        logForDebugging(
-          `Skipping cleanup of old installLocation (${oldEntry.installLocation}) — ` +
-            `outside ${cacheDir}. The path is corrupted; leaving it alone and ` +
-            `overwriting the config entry.`,
-          { level: 'warn' },
+  // densable ict: re-read config under lock after clone (may take a while;
+  // another process may have written). Cleanup of old cache is best-effort
+  // based on the disk snapshot under the same RMW.
+  await updateKnownMarketplacesConfig(async config => {
+    const oldEntry = config[marketplace.name]
+    if (oldEntry) {
+      const seedDir = seedDirFor(oldEntry.installLocation)
+      if (seedDir) {
+        throw new Error(
+          `Marketplace '${marketplace.name}' is seed-managed (${seedDir}). ` +
+            `To use a different source, ask your admin to update the seed, ` +
+            `or use a different marketplace name.`,
         )
       }
+      logForDebugging(
+        `Marketplace '${marketplace.name}' exists with different source — overwriting`,
+      )
+      // Clean up the old cache if it's not a user-owned local path AND it
+      // actually differs from the new cachePath. loadAndCacheMarketplace writes
+      // to cachePath BEFORE we get here — rm-ing the same dir deletes the fresh
+      // write. Settings sources always land on the same dir (name → path);
+      // git sources hit this latently when the source repo changes but the
+      // fetched marketplace.json declares the same name. Only rm when locations
+      // genuinely differ (the only case where there's a stale dir to clean).
+      //
+      // Defensively validate the stored path before rm: a corrupted
+      // installLocation (gh-32793, gh-32661) could point at the user's project
+      // dir. If it's outside the cache dir, skip cleanup — the stale dir (if
+      // any) is harmless, and blocking the re-add would prevent the user from
+      // fixing the corruption.
+      if (!isLocalMarketplaceSource(oldEntry.source)) {
+        const cacheDir = resolve(getMarketplacesCacheDir())
+        const resolvedOld = resolve(oldEntry.installLocation)
+        const resolvedNew = resolve(cachePath)
+        if (resolvedOld === resolvedNew) {
+          // Same dir — loadAndCacheMarketplace already overwrote in place.
+          // Nothing to clean.
+        } else if (
+          resolvedOld === cacheDir ||
+          resolvedOld.startsWith(cacheDir + sep)
+        ) {
+          const fs = getFsImplementation()
+          await fs.rm(oldEntry.installLocation, {
+            recursive: true,
+            force: true,
+          })
+        } else {
+          logForDebugging(
+            `Skipping cleanup of old installLocation (${oldEntry.installLocation}) — ` +
+              `outside ${cacheDir}. The path is corrupted; leaving it alone and ` +
+              `overwriting the config entry.`,
+            { level: 'warn' },
+          )
+        }
+      }
     }
-  }
 
-  // Update config using the marketplace's actual name
-  config[marketplace.name] = {
-    source: resolvedSource,
-    installLocation: cachePath,
-    lastUpdated: new Date().toISOString(),
-  }
-  await saveKnownMarketplacesConfig(config)
+    // Update config using the marketplace's actual name
+    config[marketplace.name] = {
+      source: resolvedSource,
+      installLocation: cachePath,
+      lastUpdated: new Date().toISOString(),
+    }
+    return config
+  })
 
   logForDebugging(`Added marketplace source: ${marketplace.name}`)
 
@@ -1993,28 +2222,29 @@ export async function addMarketplaceSource(
  * @throws If marketplace with given name is not found
  */
 export async function removeMarketplaceSource(name: string): Promise<void> {
-  const config = await loadKnownMarketplacesConfig()
+  // densable ict: load→delete→save under lock so concurrent add/update
+  // cannot resurrect or race the removal.
+  await updateKnownMarketplacesConfig(config => {
+    if (!config[name]) {
+      throw new Error(`Marketplace '${name}' not found`)
+    }
 
-  if (!config[name]) {
-    throw new Error(`Marketplace '${name}' not found`)
-  }
+    // Seed-registered marketplaces are admin-baked into the container — removing
+    // them is a category error. They'd resurrect on next startup anyway. Guide
+    // the user to the right action instead.
+    const entry = config[name]
+    const seedDir = seedDirFor(entry.installLocation)
+    if (seedDir) {
+      throw new Error(
+        `Marketplace '${name}' is registered from the read-only seed directory ` +
+          `(${seedDir}) and will be re-registered on next startup. ` +
+          `To stop using its plugins: claude plugin disable <plugin>@${name}`,
+      )
+    }
 
-  // Seed-registered marketplaces are admin-baked into the container — removing
-  // them is a category error. They'd resurrect on next startup anyway. Guide
-  // the user to the right action instead.
-  const entry = config[name]
-  const seedDir = seedDirFor(entry.installLocation)
-  if (seedDir) {
-    throw new Error(
-      `Marketplace '${name}' is registered from the read-only seed directory ` +
-        `(${seedDir}) and will be re-registered on next startup. ` +
-        `To stop using its plugins: claude plugin disable <plugin>@${name}`,
-    )
-  }
-
-  // Remove from config
-  delete config[name]
-  await saveKnownMarketplacesConfig(config)
+    delete config[name]
+    return config
+  })
 
   // Clean up cached files (both directory and JSON formats)
   const fs = getFsImplementation()
@@ -2227,9 +2457,14 @@ export const getMarketplace = memoize(
       )
     }
 
-    // Update lastUpdated only when we actually fetch
-    config[name]!.lastUpdated = new Date().toISOString()
-    await saveKnownMarketplacesConfig(config)
+    // densable ysa: bump lastUpdated under ict so concurrent mutators
+    // don't clobber other fields with a stale in-memory snapshot.
+    await updateKnownMarketplacesConfig(fresh => {
+      const n = fresh[name]
+      if (!n) return null
+      fresh[name] = { ...n, lastUpdated: new Date().toISOString() }
+      return fresh
+    })
 
     return marketplace
   },
@@ -2352,7 +2587,13 @@ export async function getPluginById(pluginId: string): Promise<{
  * @returns Promise that resolves when all refresh attempts complete
  */
 export async function refreshAllMarketplaces(): Promise<void> {
+  // Network/git work stays outside the lock; only the final RMW is under ict
+  // so concurrent add/remove cannot be lost to a stale full-file overwrite.
   const config = await loadKnownMarketplacesConfig()
+  const updates: Record<
+    string,
+    { lastUpdated: string; installLocation?: string }
+  > = {}
 
   for (const [name, entry] of Object.entries(config)) {
     // Seed-managed marketplaces are controlled by the seed image — refreshing
@@ -2375,7 +2616,7 @@ export async function refreshAllMarketplaces(): Promise<void> {
         getMarketplacesCacheDir(),
       )
       if (sha !== null) {
-        config[name]!.lastUpdated = new Date().toISOString()
+        updates[name] = { lastUpdated: new Date().toISOString() }
         continue
       }
       if (
@@ -2393,8 +2634,10 @@ export async function refreshAllMarketplaces(): Promise<void> {
     }
     try {
       const { cachePath } = await loadAndCacheMarketplace(entry.source)
-      config[name]!.lastUpdated = new Date().toISOString()
-      config[name]!.installLocation = cachePath
+      updates[name] = {
+        lastUpdated: new Date().toISOString(),
+        installLocation: cachePath,
+      }
     } catch (error) {
       logForDebugging(
         `Failed to refresh marketplace ${name}: ${errorMessage(error)}`,
@@ -2405,7 +2648,24 @@ export async function refreshAllMarketplaces(): Promise<void> {
     }
   }
 
-  await saveKnownMarketplacesConfig(config)
+  if (Object.keys(updates).length === 0) return
+
+  await updateKnownMarketplacesConfig(fresh => {
+    let changed = false
+    for (const [name, patch] of Object.entries(updates)) {
+      const entry = fresh[name]
+      if (!entry) continue
+      fresh[name] = {
+        ...entry,
+        lastUpdated: patch.lastUpdated,
+        ...(patch.installLocation !== undefined
+          ? { installLocation: patch.installLocation }
+          : {}),
+      }
+      changed = true
+    }
+    return changed ? fresh : null
+  })
 }
 
 /**
@@ -2458,6 +2718,76 @@ export async function tryRefreshMarketplaceOnCatalogMiss(
     )
     return 'refresh-failed'
   }
+}
+
+/**
+ * densable 2.1.232 `zqr` outcome for **pre-install** scoped refresh
+ * (`/plugin install name@marketplace` always attempts refresh first).
+ */
+export type ScopedInstallRefreshResult =
+  | { outcome: 'refreshed' }
+  | { outcome: 'refresh-failed'; errorMessage: string }
+  | { outcome: 'ineligible' }
+
+/**
+ * densable 2.1.232 `zqr` — refresh marketplace **before** scoped plugin install.
+ *
+ * Gates (stricter / different from catalog-miss `zIr`/`pvm`):
+ * - essential-traffic → ineligible (**no** FORCE_AUTOUPDATE_PLUGINS exception)
+ * - missing source / policy blocked → ineligible
+ * - seed-managed installLocation → ineligible
+ * - source not github|git|url → ineligible (local/settings clear memo cache)
+ * - else refresh with skipIfRecent; cache cleared on success
+ */
+export async function tryRefreshMarketplaceBeforeScopedInstall(
+  name: string,
+  entry: KnownMarketplace | undefined,
+): Promise<ScopedInstallRefreshResult> {
+  // densable Pa(): essential-traffic only (no FORCE exception)
+  if (isEssentialTrafficOnly()) {
+    return { outcome: 'ineligible' }
+  }
+  if (!entry?.source || !isSourceAllowedByPolicy(entry.source)) {
+    return { outcome: 'ineligible' }
+  }
+  if (entry.installLocation && seedDirFor(entry.installLocation)) {
+    return { outcome: 'ineligible' }
+  }
+  const kind = entry.source.source
+  if (kind !== 'github' && kind !== 'git' && kind !== 'url') {
+    // densable: local or settings → drop memoized marketplace then ineligible
+    if (isLocalMarketplaceSource(entry.source) || kind === 'settings') {
+      getMarketplace.cache?.delete?.(name)
+    }
+    return { outcome: 'ineligible' }
+  }
+  try {
+    await refreshMarketplace(name, undefined, { skipIfRecent: true })
+    getMarketplace.cache?.delete?.(name)
+    return { outcome: 'refreshed' }
+  } catch (error) {
+    logForDebugging(
+      `Failed to refresh marketplace '${name}' before scoped install; using cached data: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
+    return {
+      outcome: 'refresh-failed',
+      errorMessage: errorMessage(error),
+    }
+  }
+}
+
+/**
+ * densable `jqr` — analytics for pre-install refresh outcome.
+ */
+export function logScopedInstallRefreshOutcome(
+  outcome: ScopedInstallRefreshResult['outcome'],
+): void {
+  logEvent('plugin_install_refresh_first', {
+    refreshed: outcome === 'refreshed',
+    refresh_failed: outcome === 'refresh-failed',
+    ineligible: outcome === 'ineligible',
+  })
 }
 
 /**
@@ -2560,8 +2890,12 @@ export async function refreshMarketplace(
         getMarketplacesCacheDir(),
       )
       if (sha !== null) {
-        config[name] = { ...entry, lastUpdated: new Date().toISOString() }
-        await saveKnownMarketplacesConfig(config)
+        await updateKnownMarketplacesConfig(fresh => {
+          const n = fresh[name]
+          if (!n) return null
+          fresh[name] = { ...n, lastUpdated: new Date().toISOString() }
+          return fresh
+        })
         return
       }
       // GCS failed — fall through to git ONLY if the kill-switch allows.
@@ -2685,9 +3019,13 @@ export async function refreshMarketplace(
       throw new Error(`Unsupported marketplace source type for refresh`)
     }
 
-    // Update lastUpdated timestamp
-    config[name]!.lastUpdated = new Date().toISOString()
-    await saveKnownMarketplacesConfig(config)
+    // densable ysa-style lastUpdated bump under ict
+    await updateKnownMarketplacesConfig(fresh => {
+      const n = fresh[name]
+      if (!n) return null
+      fresh[name] = { ...n, lastUpdated: new Date().toISOString() }
+      return fresh
+    })
 
     logForDebugging(`Successfully refreshed marketplace: ${name}`)
   } catch (error) {
@@ -2713,37 +3051,46 @@ export async function setMarketplaceAutoUpdate(
   name: string,
   autoUpdate: boolean,
 ): Promise<void> {
-  const config = await loadKnownMarketplacesConfig()
-  const entry = config[name]
+  // densable ict RMW for autoUpdate flag (null mutator = no-op / not found handled).
+  let availableKeys: string[] = []
+  const wrote = await updateKnownMarketplacesConfig(config => {
+    availableKeys = Object.keys(config)
+    const entry = config[name]
 
-  if (!entry) {
-    throw new Error(
-      `Marketplace '${name}' not found. Available marketplaces: ${Object.keys(config).join(', ')}`,
-    )
-  }
+    if (!entry) {
+      throw new Error(
+        `Marketplace '${name}' not found. Available marketplaces: ${availableKeys.join(', ')}`,
+      )
+    }
 
-  // Seed-managed marketplaces always have autoUpdate: false (read-only, git-pull
-  // would fail). Toggle appears to work but registerSeedMarketplaces overwrites
-  // it on next startup. Error with guidance instead of silent revert.
-  const seedDir = seedDirFor(entry.installLocation)
-  if (seedDir) {
-    throw new Error(
-      `Marketplace '${name}' is seed-managed (${seedDir}) and ` +
-        `auto-update is always disabled for seed content. ` +
-        `To update: ask your admin to update the seed.`,
-    )
-  }
+    // Seed-managed marketplaces always have autoUpdate: false (read-only, git-pull
+    // would fail). Toggle appears to work but registerSeedMarketplaces overwrites
+    // it on next startup. Error with guidance instead of silent revert.
+    const seedDir = seedDirFor(entry.installLocation)
+    if (seedDir) {
+      throw new Error(
+        `Marketplace '${name}' is seed-managed (${seedDir}) and ` +
+          `auto-update is always disabled for seed content. ` +
+          `To update: ask your admin to update the seed.`,
+      )
+    }
 
-  // Only update if the value is actually changing
-  if (entry.autoUpdate === autoUpdate) {
+    // Only update if the value is actually changing
+    if (entry.autoUpdate === autoUpdate) {
+      return null
+    }
+
+    config[name] = {
+      ...entry,
+      autoUpdate,
+    }
+    return config
+  })
+
+  if (!wrote) {
+    // No-op path (value already set) still succeeds.
     return
   }
-
-  config[name] = {
-    ...entry,
-    autoUpdate,
-  }
-  await saveKnownMarketplacesConfig(config)
 
   // Also update intent in settings if declared there — write to the SAME
   // source that declared it to avoid creating duplicates at wrong scope
@@ -2765,4 +3112,7 @@ export async function setMarketplaceAutoUpdate(
 
 export const _test = {
   redactUrlCredentials,
+  createKeyedSerialQueue,
+  knownMarketplacesSerialQueue,
+  updateKnownMarketplacesConfig,
 }

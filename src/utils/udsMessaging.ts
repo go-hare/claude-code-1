@@ -550,6 +550,40 @@ export async function startUdsMessaging(
               closeWithError('inbox full')
               return
             }
+            // densable $id / Nid.noteCorrespondent — track UDS peers for rename notice
+            try {
+              const fromRaw = sanitizedMessage.from
+              if (typeof fromRaw === 'string' && fromRaw.length > 0) {
+                const addr = fromRaw.startsWith('uds:')
+                  ? fromRaw
+                  : fromRaw.startsWith('/')
+                    ? `uds:${fromRaw}`
+                    : null
+                if (addr) {
+                  const sockPath = addr.slice(4)
+                  void import('./sessionNameUniqueness.js').then(
+                    async ({ noteSessionNameCorrespondent }) => {
+                      let peerPid = 0
+                      try {
+                        const { listLiveSessionRecords } = await import(
+                          './concurrentSessions.js'
+                        )
+                        const live = await listLiveSessionRecords()
+                        const hit = live.find(
+                          r => r.messagingSocketPath === sockPath,
+                        )
+                        if (hit) peerPid = hit.pid
+                      } catch {
+                        // optional
+                      }
+                      noteSessionNameCorrespondent(addr, peerPid)
+                    },
+                  )
+                }
+              }
+            } catch {
+              // optional uniqueness tracking
+            }
             logForDebugging(
               `[udsMessaging] enqueued message type=${msg.type} from=${msg.from ?? 'unknown'}`,
             )

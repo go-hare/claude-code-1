@@ -1,0 +1,5 @@
+# offset=284132710
+
+```
+t r of e.split(/[\\/]+/)){if(r===""||r===".")continue;if(r===".."){if(t)return!0}else t=!0}return!1}function Ag(e,t){if(Fu(t)&&!Th(t)||Sg(t))return{resolvedPath:t,isSymlink:!1,isCanonical:!1};let r=JM(e,t);if(r!==void 0)return{resolvedPath:r,isSymlink:!0,isCanonical:!1};try{let n=e.realpathSync(t);return{resolvedPath:n,isSymlink:n!==t,isCanonical:!0}}catch(n){return{resolvedPath:t,isSymlink:!1,isCanonical:!1}}}function XNe(e,t,r){let{resolvedPath:n}=Ag(e,t);if(r.has(n))return!0;return r.add(n),!1}function c8g(e,t="win32"){let r=e.replace(t==="win32"?/[\\/]\.(?=[\\/]|$)/g:/\/\.(?=\/|$)/g,"");if(r==="")return e[0];if(t==="win32"&&/^[A-Za-z]:$/.test(r))return r+e[2];return r}function GJ(e,t,r){let n=WFc(r);if(Fu(t)&&!Th(t)||Sg(t)){if(n!==void 0&&(Sg(t)&&!Kun(t,n)||Fu(t)&&!Th(t)&&!a_o(t,n)))return JM(e,t,{anchors:n,surfaceNetworkRaw:r?.surfaceNetworkRaw});return t}let o=JM(e,t,r?.surfaceNetw
+```

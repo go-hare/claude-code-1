@@ -131,18 +131,51 @@ export function parseEnvVars(
 }
 
 /**
- * Get the AWS region with fallback to default
- * Matches the Anthropic Bedrock SDK's region behavior
+ * densable 2.1.232 `x5g` / `C5g` — region token shape for URL-safe AWS/Vertex
+ * env values. Rejects spaces, commas, slashes, empty, etc. so malformed env
+ * cannot be interpolated into request hostnames.
  */
-export function getAWSRegion(): string {
-  return process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1'
+const CLOUD_REGION_SHAPE = /^[a-z]{2,}(?:-[a-z0-9]+){0,4}$/i
+
+/**
+ * densable `C5g` — truthy only when non-empty and matches region shape.
+ */
+export function isValidCloudRegion(value: string | undefined | null): boolean {
+  return !!value && CLOUD_REGION_SHAPE.test(value)
 }
 
 /**
- * Get the default Vertex AI region
+ * densable `NNe` — return the region string only when valid; else undefined
+ * so callers fall back to the product default.
  */
-export function getDefaultVertexRegion(): string {
-  return process.env.CLOUD_ML_REGION || 'us-east5'
+export function sanitizeCloudRegion(
+  value: string | undefined | null,
+): string | undefined {
+  if (!isValidCloudRegion(value)) return undefined
+  return value as string
+}
+
+/**
+ * densable `HSs`/`A5t` — AWS region with fallback to default.
+ * Malformed `AWS_REGION` / `AWS_DEFAULT_REGION` fall through to `us-east-1`
+ * instead of being used to build Bedrock URLs.
+ */
+export function getAWSRegion(env: NodeJS.ProcessEnv = process.env): string {
+  return (
+    sanitizeCloudRegion(env.AWS_REGION) ||
+    sanitizeCloudRegion(env.AWS_DEFAULT_REGION) ||
+    'us-east-1'
+  )
+}
+
+/**
+ * densable `Vgo` — default Vertex AI region.
+ * Malformed `CLOUD_ML_REGION` falls back to `us-east5`.
+ */
+export function getDefaultVertexRegion(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return sanitizeCloudRegion(env.CLOUD_ML_REGION?.trim()) || 'us-east5'
 }
 
 /**
@@ -206,19 +239,23 @@ const VERTEX_REGION_OVERRIDES: ReadonlyArray<[string, string]> = [
 ]
 
 /**
- * Get the Vertex AI region for a specific model.
- * Different models may be available in different regions.
+ * densable `oVe` — Vertex AI region for a specific model.
+ * Model-specific override env is NNe-sanitized; malformed falls back to Vgo.
  */
 export function getVertexRegionForModel(
   model: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   if (model) {
     const match = VERTEX_REGION_OVERRIDES.find(([prefix]) =>
       model.startsWith(prefix),
     )
     if (match) {
-      return process.env[match[1]] || getDefaultVertexRegion()
+      return (
+        sanitizeCloudRegion(env[match[1]]?.trim()) ||
+        getDefaultVertexRegion(env)
+      )
     }
   }
-  return getDefaultVertexRegion()
+  return getDefaultVertexRegion(env)
 }

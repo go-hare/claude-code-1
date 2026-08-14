@@ -91,6 +91,26 @@ export function getExperimentAdvisorModels():
     : undefined
 }
 
+/**
+ * densable 2.1.232 — Fable 5 re-enters advisor surface.
+ * Catalog: claude-fable-5 advisor_rank:5; alias list _Nb includes "fable".
+ * densable Xct/Zlp: base needs advisor_rank ≥ yNb(2); Fable rank 5 qualifies.
+ * densable Xct/FBe: valid advisor models include fable family.
+ */
+function isFableAdvisorFamily(model: string): boolean {
+  const m = model
+    .toLowerCase()
+    .replace(/\[1m\]$/i, '')
+    .trim()
+  return (
+    m === 'fable' ||
+    m === 'fable5' ||
+    m.includes('fable-5') ||
+    m.includes('fable_5') ||
+    m.includes('claude-fable')
+  )
+}
+
 // @[MODEL LAUNCH]: Add the new model if it supports the advisor tool.
 // Checks whether the main loop model supports calling the advisor tool.
 export function modelSupportsAdvisor(model: string): boolean {
@@ -99,6 +119,7 @@ export function modelSupportsAdvisor(model: string): boolean {
     m.includes('opus-4-7') ||
     m.includes('opus-4-6') ||
     m.includes('sonnet-4-6') ||
+    isFableAdvisorFamily(model) ||
     process.env.USER_TYPE === 'ant'
   )
 }
@@ -110,9 +131,16 @@ export function isValidAdvisorModel(model: string): boolean {
     m.includes('opus-4-7') ||
     m.includes('opus-4-6') ||
     m.includes('sonnet-4-6') ||
+    isFableAdvisorFamily(model) ||
     process.env.USER_TYPE === 'ant'
   )
 }
+
+/**
+ * densable gJt — Fable-as-advisor usage-credits notice (consent / setup).
+ */
+export const FABLE_ADVISOR_CREDITS_NOTICE =
+  'Fable 5 as the advisor bills to usage credits, which need to be set up for your account.'
 
 export function getInitialAdvisorSetting(): string | undefined {
   if (!isAdvisorEnabled()) {

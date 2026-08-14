@@ -5,10 +5,30 @@ import {
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 
+/**
+ * densable sJc — sandbox binary / ripgrep overrides that require managed-settings
+ * approval (2.1.232 #34). Project settings cannot set these for runtime (#48);
+ * when present on managed payload they still surface as dangerous shell keys
+ * `sandbox.${key}` in d7e.
+ */
+export const DANGEROUS_SANDBOX_BINARY_KEYS = [
+  'bwrapPath',
+  'ripgrep',
+  'socatPath',
+] as const
+
+export type DangerousSandboxBinaryKey =
+  (typeof DANGEROUS_SANDBOX_BINARY_KEYS)[number]
+
 type DangerousShellSetting = (typeof DANGEROUS_SHELL_SETTINGS)[number]
 
+/** densable shellSettings keys: S3l helpers + `sandbox.${sJc}` dotted keys. */
+export type DangerousShellKey =
+  | DangerousShellSetting
+  | `sandbox.${DangerousSandboxBinaryKey}`
+
 export type DangerousSettings = {
-  shellSettings: Partial<Record<DangerousShellSetting, string>>
+  shellSettings: Partial<Record<DangerousShellKey, string>>
   envVars: Record<string, string>
   hasHooks: boolean
   hooks?: unknown
@@ -18,11 +38,61 @@ export type DangerousSettings = {
 }
 
 /**
- * densable hFt — extract dangerous settings from a settings object.
+ * densable Dwv — coerce sandbox binary field to a non-empty display string.
+ * string path → path; {command, args?} → JSON-array form for hash/UI.
+ */
+export function coerceSandboxBinarySettingValue(
+  value: unknown,
+): string | undefined {
+  if (typeof value === 'string') {
+    return value.length > 0 ? value : undefined
+  }
+  // densable Dwv: string path or {command, args?}. booleans/numbers/null → ignore
+  // (schema is string | {command}; truthy boolean alone is not a binary override).
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    'command' in value &&
+    typeof (value as { command: unknown }).command === 'string'
+  ) {
+    const command = (value as { command: string }).command
+    if (!command) return undefined
+    const args =
+      'args' in value && Array.isArray((value as { args: unknown }).args)
+        ? (value as { args: unknown[] }).args.map(String)
+        : []
+    // densable Dwv: always JSON array of [command, ...args]
+    return jsonStringify([command, ...args])
+  }
+  return undefined
+}
+
+/**
+ * densable Owv — managed sandbox binary override present (bwrap/socat/ripgrep).
+ * Used with benign-env-only short-circuit: env-only URL allowlist cannot skip
+ * approval when sandbox binaries are set.
+ */
+export function hasDangerousSandboxBinarySettings(
+  settings: SettingsJson | null | undefined,
+): boolean {
+  // densable Owv — true iff d7e would emit any sandbox.${sJc} shell key.
+  // Share coerceSandboxBinarySettingValue so object/string rules match extract.
+  const sandbox = (settings as { sandbox?: unknown } | null | undefined)
+    ?.sandbox
+  if (sandbox === null || typeof sandbox !== 'object') return false
+  const s = sandbox as Record<string, unknown>
+  return DANGEROUS_SANDBOX_BINARY_KEYS.some(
+    key => coerceSandboxBinarySettingValue(s[key]) !== undefined,
+  )
+}
+
+/**
+ * densable hFt/d7e — extract dangerous settings from a settings object.
  *
  * Dangerous env vars: any env NOT safe via densable B7t
  * (SAFE_ENV_VARS / LEh, or SAFE_WHEN_TRUTHY / MEh when truthy).
  * Shell helpers: densable S3l string or {command:string}.
+ * Sandbox binaries: densable sJc → shellSettings[`sandbox.${key}`] (232 #34).
  * Also: hooks object + non-empty claudeMd string.
  */
 export function extractDangerousSettings(
@@ -37,7 +107,7 @@ export function extractDangerousSettings(
     }
   }
 
-  const shellSettings: Partial<Record<DangerousShellSetting, string>> = {}
+  const shellSettings: Partial<Record<DangerousShellKey, string>> = {}
   const settingsRecord = settings as Record<string, unknown>
   for (const key of DANGEROUS_SHELL_SETTINGS) {
     const value = settingsRecord[key]
@@ -54,6 +124,18 @@ export function extractDangerousSettings(
     }
     if (command !== undefined && command.length > 0) {
       shellSettings[key] = command
+    }
+  }
+
+  // densable d7e: sandbox sJc keys → shellSettings[`sandbox.${s}`]
+  const sandbox = settingsRecord.sandbox
+  if (sandbox !== null && typeof sandbox === 'object') {
+    const sandboxRec = sandbox as Record<string, unknown>
+    for (const key of DANGEROUS_SANDBOX_BINARY_KEYS) {
+      const coerced = coerceSandboxBinarySettingValue(sandboxRec[key])
+      if (coerced) {
+        shellSettings[`sandbox.${key}`] = coerced
+      }
     }
   }
 
