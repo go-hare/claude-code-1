@@ -101,8 +101,40 @@ export function isPromptTooLongMessage(msg: AssistantMessage): boolean {
 }
 
 /**
+ * True when a raw API/SDK error string is a context-window / prompt-length
+ * overflow (Anthropic, Vertex, OpenAI, Grok, etc.).
+ *
+ * Anthropic/Vertex: "prompt is too long: N tokens > M maximum"
+ * OpenAI/Grok-style: "This model's maximum prompt length is M but the request contains N tokens."
+ *
+ * Used by getAssistantMessageFromError so reactive compact can withhold + n8o
+ * instead of surfacing a raw API Error 400 that the user retries with 「继续」.
+ */
+export function isPromptTooLongErrorMessage(raw: string): boolean {
+  const lower = raw.toLowerCase()
+  if (lower.includes('prompt is too long')) return true
+  // OpenAI / xAI Chat Completions style
+  if (
+    lower.includes('maximum prompt length') ||
+    lower.includes('max prompt length')
+  ) {
+    return true
+  }
+  // "request contains N tokens" near context/prompt length wording
+  if (
+    lower.includes('request contains') &&
+    lower.includes('token') &&
+    (lower.includes('prompt') || lower.includes('context'))
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
  * Parse actual/limit token counts from a raw prompt-too-long API error
- * message like "prompt is too long: 137500 tokens > 135000 maximum".
+ * message like "prompt is too long: 137500 tokens > 135000 maximum" or
+ * "maximum prompt length is 500000 but the request contains 500193 tokens".
  * The raw string may be wrapped in SDK prefixes or JSON envelopes, or
  * have different casing (Vertex), so this is intentionally lenient.
  */
@@ -110,12 +142,39 @@ export function parsePromptTooLongTokenCounts(rawMessage: string): {
   actualTokens: number | undefined
   limitTokens: number | undefined
 } {
-  const match = rawMessage.match(
+  // Anthropic / Vertex
+  let match = rawMessage.match(
     /prompt is too long[^0-9]*(\d+)\s*tokens?\s*>\s*(\d+)/i,
   )
+  if (match) {
+    return {
+      actualTokens: parseInt(match[1]!, 10),
+      limitTokens: parseInt(match[2]!, 10),
+    }
+  }
+  // OpenAI / Grok: maximum prompt length is LIMIT … request contains ACTUAL
+  match = rawMessage.match(
+    /maximum prompt length is\s*(\d+)[\s\S]*?request contains\s*(\d+)\s*tokens?/i,
+  )
+  if (match) {
+    return {
+      limitTokens: parseInt(match[1]!, 10),
+      actualTokens: parseInt(match[2]!, 10),
+    }
+  }
+  // Alternate order: request contains N … maximum … M
+  match = rawMessage.match(
+    /request contains\s*(\d+)\s*tokens?[\s\S]*?maximum[^\d]*(\d+)/i,
+  )
+  if (match) {
+    return {
+      actualTokens: parseInt(match[1]!, 10),
+      limitTokens: parseInt(match[2]!, 10),
+    }
+  }
   return {
-    actualTokens: match ? parseInt(match[1]!, 10) : undefined,
-    limitTokens: match ? parseInt(match[2]!, 10) : undefined,
+    actualTokens: undefined,
+    limitTokens: undefined,
   }
 }
 
@@ -831,12 +890,13 @@ export function getAssistantMessageFromError(
     })
   }
 
-  // Handle prompt too long errors (Vertex returns 413, direct API returns 400)
-  // Use case-insensitive check since Vertex returns "Prompt is too long" (capitalized)
-  if (
-    error instanceof Error &&
-    error.message.toLowerCase().includes('prompt is too long')
-  ) {
+  // Handle prompt too long / max prompt length errors.
+  // Anthropic/Vertex: "prompt is too long" (400/413).
+  // OpenAI/Grok: "maximum prompt length is N but the request contains M tokens"
+  // (often nested in JSON). Must normalize to PROMPT_TOO_LONG so query.ts
+  // reactive compact (cup/n8o) can withhold and recover — otherwise the UI
+  // shows raw API Error 400 and 「继续」only grows the context.
+  if (error instanceof Error && isPromptTooLongErrorMessage(error.message)) {
     // Content stays generic (UI matches on exact string). The raw error with
     // token counts goes into errorDetails — reactive compact's retry loop
     // parses the gap from there via getPromptTooLongTokenGap.

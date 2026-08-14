@@ -1,0 +1,32 @@
+# offset=99571111
+
+```
+ps) { $st.securityPatterns = $ps }
+  [void]$statements.Add($st)
+}
+
+$hasUsingStatements = $ast.UsingStatements -and $ast.UsingStatements.Count -gt 0
+$hasScriptRequirements = $ast.ScriptRequirements -ne $null
+
+$output = @{
+    valid = ($parseErrors.Count -eq 0)
+    errors = @($parseErrors | ForEach-Object {
+        @{
+            message = $_.Message
+            errorId = $_.ErrorId
+        }
+    })
+    statements = @($statements)
+    variables = @($allVariables)
+    hasStopParsing = $hasStopParsing
+    originalCommand = $Command
+    typeLiterals = @($typeLiterals)
+    hasUsingStatements = [bool]$hasUsingStatements
+    hasScriptRequirements = [bool]$hasScriptRequirements
+    hasBackgroundJob = [bool]$script:hasBg
+}
+
+$output | ConvertTo-Json -Depth 10 -Compress
+................	...-...try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; ....................y$.....Notebook file is not a valid Jupyter notebook (top-level "cells" must be an array of cell objects, each with a string or string-array "source")..........
+..?...E.d.i.t. .a. .c.e.l.l. .i.n. .a. .J.u.p.y.t.e.r. .n.o.t.e.b.o.o.k. ..  .r.e.p.l.a.c.e.,. .i.n.s.e.r.t.,. .o.r. .d.e.l.e.t.e.............	.......cacheProjectDir..........|$.....clearProjectDirCache............	.......setAgentTranscriptSubdir........I}$.....clearAgentTranscriptSubdir......................flag:idle-window............0...anthropic-ratelimit-unified-representative-claim........I...*...anthropic-ratelimit-unified-overage-status$..............~$.3...anthropic-ratelimit-unified-overage-disabled-reason.............	...-...The socket connection was closed unexpectedly...........	...E...Failed to resolve AWS credentials from the credential provider chain............	...+...Failed to acquire Google OAuth 
+```

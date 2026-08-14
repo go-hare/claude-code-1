@@ -1,0 +1,19 @@
+# offset=86568725
+
+```
+...........................X.......................`...............X.......h.......................................1.......................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................@2.@....8..................A....bitbucket.orgbitbucket:gist.github.comgist:github.comgitlab.comgitlab:git.sr.htsourcehut:Duplicate catalogMissing overridden package nameBun currently does not support nested "overrides"overrideBun currently does not support patched package "overrides".Invalid override value for "..".Missing resolution package nameBun currently does not support nested "resolutions".Invalid package name "..".resolutionBun currently does not support patched package "resolutions"&Expected string value for resolution "..".optionalpeerDependenciesMeta9warn: CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+..J.[33mwarn.[0m.[2m:.[0m CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+../Refusing to install package with invalid name ".."..Refusing to install "..": tarball root directory ".." is not a valid folder name.Tried to delete root and stopped it."package.json" for ".." failed to resolve: ..."package.json" for ".." failed to open: ..!failed to resolve cache dir for "..": .. failed to verify cache dir for "..": ...moving ".." to cache dir failed
+.	
+  From: .	
+    To: ...moving ".." to cache dir failed
+..
+ From: ..
+   To: .. 
+	@airbnb/node-memwatch
+@anthropic-ai/claude-code
+@apollo/protobufjs
+@apollo/rover
+@appsignal/nodejs
+@arkweid/le
+```
