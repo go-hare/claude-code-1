@@ -14,7 +14,7 @@ import {
   getTask,
   getTaskOwnedFiles,
   getTaskListId,
-  isTodoV2Enabled,
+  isTodoV2ToolsEnabled,
   listTasks,
   type TaskStatus,
   TaskStatusSchema,
@@ -108,8 +108,9 @@ export const TaskUpdateTool = buildTool({
     return 'TaskUpdate'
   },
   shouldDefer: true,
+  // densable 2.1.233 Eee: h5() && uX()
   isEnabled() {
-    return isTodoV2Enabled()
+    return isTodoV2ToolsEnabled()
   },
   isConcurrencySafe() {
     return true

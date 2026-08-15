@@ -22,8 +22,13 @@ import { posixPathToWindowsPath } from './windowsPaths.js'
  * - `\\?\UNC\server\share` → `\\server\share`
  * - `\\?\C:\Users\...` → `C:\Users\...`
  * - `\\?\volume{...}` → `volume{...}` (caller may still treat as device path)
+ * - densable 2.1.233 #11: `\??\UNC\server\share` / `\??\C:\...` NT object prefix
  */
 export function stripWindowsExtendedPathPrefix(path: string): string {
+  // NT object manager device prefix `\??\` (and `/??/`) — before classic `\\?\`
+  // `\??\UNC\server` → slice(8) past `\??\UNC\` then re-prefix `\\`
+  if (/^[\\/]\?\?[\\/]unc[\\/]/i.test(path)) return '\\\\' + path.slice(8)
+  if (/^[\\/]\?\?[\\/]/.test(path)) return path.slice(4)
   if (/^\\\\\?\\unc\\/i.test(path)) return '\\\\' + path.slice(8)
   if (path.startsWith('\\\\?\\')) return path.slice(4)
   return path

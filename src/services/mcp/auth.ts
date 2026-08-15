@@ -1,29 +1,21 @@
+// densable single-stack: OAuth from @modelcontextprotocol/client@2.
+// No local zod Schema bags — structural checks only (v2 has types + parseErrorResponse,
+// not OAuthTokensSchema exports).
 import {
   discoverAuthorizationServerMetadata,
   discoverOAuthServerInfo,
-  type OAuthClientProvider,
-  type OAuthDiscoveryState,
+  OAuthError,
+  OAuthErrorCode,
   auth as sdkAuth,
   refreshAuthorization as sdkRefreshAuthorization,
-} from '@modelcontextprotocol/sdk/client/auth.js'
-import {
-  InvalidGrantError,
-  OAuthError,
-  ServerError,
-  TemporarilyUnavailableError,
-  TooManyRequestsError,
-} from '@modelcontextprotocol/sdk/server/auth/errors.js'
-import {
   type AuthorizationServerMetadata,
+  type FetchLike,
   type OAuthClientInformation,
   type OAuthClientInformationFull,
   type OAuthClientMetadata,
-  OAuthErrorResponseSchema,
-  OAuthMetadataSchema,
+  type OAuthClientProvider,
   type OAuthTokens,
-  OAuthTokensSchema,
-} from '@modelcontextprotocol/sdk/shared/auth.js'
-import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js'
+} from '@modelcontextprotocol/client'
 import axios from 'axios'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { mkdir } from 'fs/promises'
@@ -46,6 +38,55 @@ import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { emitMcpNeedsReauth } from './mcpReauthSignal.js'
+
+/** densable retained opaque discovery bag across auth() steps. */
+type OAuthDiscoveryState = Record<string, unknown>
+
+function oauthErrorCodeOf(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  const e = error as { code?: unknown; errorCode?: unknown }
+  if (typeof e.code === 'string') return e.code
+  if (typeof e.errorCode === 'string') return e.errorCode
+  return undefined
+}
+
+/** RFC 6749 token response: access_token + token_type required. */
+function isOAuthTokenResponse(value: unknown): value is OAuthTokens {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  return typeof v.access_token === 'string' && typeof v.token_type === 'string'
+}
+
+/** RFC 6749 error response: { error: string, ... } without access_token. */
+function asOAuthErrorBody(
+  value: unknown,
+):
+  | { error: string; error_description?: string; error_uri?: string }
+  | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const v = value as Record<string, unknown>
+  if (typeof v.error !== 'string') return undefined
+  if (typeof v.access_token === 'string') return undefined
+  return {
+    error: v.error,
+    ...(typeof v.error_description === 'string'
+      ? { error_description: v.error_description }
+      : {}),
+    ...(typeof v.error_uri === 'string' ? { error_uri: v.error_uri } : {}),
+  }
+}
+
+function parseAuthorizationServerMetadata(
+  value: unknown,
+): AuthorizationServerMetadata {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Invalid authorization server metadata: not an object')
+  }
+  // densable/v2 discoverAuthorizationServerMetadata returns the same bag;
+  // configuredMetadataUrl path only needs a structural object for the SDK auth().
+  return value as AuthorizationServerMetadata
+}
+
 import {
   buildRedirectUri,
   findAvailablePort,
@@ -136,21 +177,19 @@ function redactSensitiveUrlParams(url: string): string {
  * Some OAuth servers (notably Slack) return HTTP 200 for all responses,
  * signaling errors via the JSON body instead. The SDK's executeTokenRequest
  * only calls parseErrorResponse when !response.ok, so a 200 with
- * {"error":"invalid_grant"} gets fed to OAuthTokensSchema.parse() and
- * surfaces as a ZodError — which the refresh retry/invalidation logic
- * treats as opaque request_failed instead of invalid_grant.
+ * {"error":"invalid_grant"} gets treated as a token body and
+ * surfaces as opaque request_failed instead of invalid_grant.
  *
  * This wrapper peeks at 2xx POST response bodies and rewrites ones that
- * match OAuthErrorResponseSchema (but not OAuthTokensSchema) to a 400
- * Response, so the SDK's normal error-class mapping applies. The same
- * fetchFn is also used for DCR POSTs, but DCR success responses have no
- * {error: string} field so they don't match the rewrite condition.
+ * look like OAuth error objects (not token responses) to a 400 Response,
+ * so the client auth error-class mapping applies. The same fetchFn is also
+ * used for DCR POSTs, but DCR success responses have no {error: string}
+ * field so they don't match the rewrite condition.
  *
  * Slack uses non-standard error codes (invalid_refresh_token observed live
  * at oauth.v2.user.access; expired_refresh_token/token_expired per Slack's
  * token rotation docs) where RFC 6749 specifies invalid_grant. We normalize
- * those so OAUTH_ERRORS['invalid_grant'] → InvalidGrantError matches and
- * token invalidation fires correctly.
+ * those so invalid_grant handling / token invalidation fires correctly.
  */
 const NONSTANDARD_INVALID_GRANT_ALIASES = new Set([
   'invalid_refresh_token',
@@ -175,21 +214,21 @@ export async function normalizeOAuthErrorBody(
   } catch {
     return new Response(text, response)
   }
-  if (OAuthTokensSchema.safeParse(parsed).success) {
+  if (isOAuthTokenResponse(parsed)) {
     return new Response(text, response)
   }
-  const result = OAuthErrorResponseSchema.safeParse(parsed)
-  if (!result.success) {
+  const errBody = asOAuthErrorBody(parsed)
+  if (!errBody) {
     return new Response(text, response)
   }
-  const normalized = NONSTANDARD_INVALID_GRANT_ALIASES.has(result.data.error)
+  const normalized = NONSTANDARD_INVALID_GRANT_ALIASES.has(errBody.error)
     ? {
         error: 'invalid_grant',
         error_description:
-          result.data.error_description ??
-          `Server returned non-standard error code: ${result.data.error}`,
+          errBody.error_description ??
+          `Server returned non-standard error code: ${errBody.error}`,
       }
-    : result.data
+    : errBody
   return new Response(jsonStringify(normalized), {
     status: 400,
     statusText: 'Bad Request',
@@ -279,7 +318,7 @@ async function fetchAuthServerMetadata(
       headers: { Accept: 'application/json' },
     })
     if (response.ok) {
-      return OAuthMetadataSchema.parse(await response.json())
+      return parseAuthorizationServerMetadata(await response.json())
     }
     throw new Error(
       `HTTP ${response.status} fetching configured auth server metadata from ${configuredMetadataUrl}`,
@@ -1505,21 +1544,15 @@ export async function performMCPOAuthFlow(
       }
     }
 
-    // sdkAuth uses native fetch and throws OAuthError subclasses (InvalidGrantError,
-    // ServerError, InvalidClientError, etc.) via parseErrorResponse. Extract the
-    // OAuth error code directly from the SDK error instance.
+    // v2 client: OAuthError uses .code (OAuthErrorCode). densable same era.
     if (error instanceof OAuthError) {
-      oauthErrorCode = error.errorCode
-      // SDK does not attach HTTP status as a property, but the fallback ServerError
-      // embeds it in the message as "HTTP {status}:" when the response body was
-      // unparseable. Best-effort extraction.
+      oauthErrorCode = oauthErrorCodeOf(error)
       const statusMatch = error.message.match(/^HTTP (\d{3}):/)
       if (statusMatch) {
         httpStatus = Number(statusMatch[1])
       }
-      // If client not found, clear the stored client ID and suggest retry
       if (
-        error.errorCode === 'invalid_client' &&
+        oauthErrorCode === OAuthErrorCode.InvalidClient &&
         error.message.includes('Client not found')
       ) {
         const storage = getSecureStorage()
@@ -2545,16 +2578,18 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         return undefined
       } catch (error) {
         // Invalid grant means the refresh token itself is invalid/revoked/expired.
-        // But another process may have already refreshed successfully — check first.
         // densable 2.1.216: on permanent clear → t7r.emit(serverName) for UI reauth.
-        if (error instanceof InvalidGrantError) {
+        const refreshErrCode = oauthErrorCodeOf(error)
+        if (
+          error instanceof OAuthError &&
+          refreshErrCode === OAuthErrorCode.InvalidGrant
+        ) {
           logMCPDebug(
             this.serverName,
             `Token refresh failed with invalid_grant: ${error.message}`,
           )
           const { freshTokens } = await this.readConcurrentRefreshWinner()
           if (freshTokens) {
-            // Concurrent winner — do not emit reauth toast or failure.
             return freshTokens
           }
           logMCPDebug(
@@ -2567,12 +2602,11 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           return undefined
         }
 
-        // densable: invalid_client / unauthorized_client → clear all + t7r.emit
-        // (DCR client expired). Concurrent re-register preserves without emit.
+        // densable: invalid_client / unauthorized_client → clear all + reauth
         if (
           error instanceof OAuthError &&
-          (error.errorCode === 'invalid_client' ||
-            error.errorCode === 'unauthorized_client')
+          (refreshErrCode === OAuthErrorCode.InvalidClient ||
+            refreshErrCode === OAuthErrorCode.UnauthorizedClient)
         ) {
           logMCPDebug(
             this.serverName,
@@ -2596,7 +2630,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
             return undefined
           }
           const reason: MCPRefreshFailureReason =
-            error.errorCode === 'unauthorized_client'
+            refreshErrCode === OAuthErrorCode.UnauthorizedClient
               ? 'unauthorized_client'
               : 'invalid_client'
           emitRefreshEvent('failure', reason)
@@ -2605,14 +2639,15 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           return undefined
         }
 
-        // Retry on timeouts or transient server errors
+        // Retry on timeouts or transient server errors (v2 OAuthErrorCode)
         const isTimeoutError =
           error instanceof Error &&
           /timeout|timed out|etimedout|econnreset/i.test(error.message)
         const isTransientServerError =
-          error instanceof ServerError ||
-          error instanceof TemporarilyUnavailableError ||
-          error instanceof TooManyRequestsError
+          error instanceof OAuthError &&
+          (refreshErrCode === OAuthErrorCode.ServerError ||
+            refreshErrCode === OAuthErrorCode.TemporarilyUnavailable ||
+            refreshErrCode === OAuthErrorCode.TooManyRequests)
         const isRetryable = isTimeoutError || isTransientServerError
 
         if (!isRetryable || attempt >= MAX_ATTEMPTS) {

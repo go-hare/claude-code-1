@@ -4,39 +4,29 @@ import type {
   ContentBlockParam,
   MessageParam,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+// densable 2.1.233: single-stack MCP client package (listen / modern era).
 import {
+  Client,
+  createFetchWithInit,
+  ProtocolErrorCode,
   SSEClientTransport,
   type SSEClientTransportOptions,
-} from '@modelcontextprotocol/sdk/client/sse.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import {
   StreamableHTTPClientTransport,
   type StreamableHTTPClientTransportOptions,
-} from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import {
-  createFetchWithInit,
+  UnauthorizedError,
+  UrlElicitationRequiredError,
   type FetchLike,
   type Transport,
-} from '@modelcontextprotocol/sdk/shared/transport.js'
-import {
-  CallToolResultSchema,
-  ElicitRequestSchema,
-  type ElicitRequestURLParams,
-  type ElicitResult,
-  ErrorCode,
-  type JSONRPCMessage,
-  type ListPromptsResult,
-  ListPromptsResultSchema,
-  ListResourcesResultSchema,
-  ListRootsRequestSchema,
-  type ListToolsResult,
-  ListToolsResultSchema,
-  McpError,
-  type PromptMessage,
-  type ResourceLink,
-} from '@modelcontextprotocol/sdk/types.js'
-import { listAllWithCursorPagination } from './listPagination.js'
+} from '@modelcontextprotocol/client'
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
+import { createDensableMcpClient } from './mcpV2Client.js'
+import type {
+  ElicitRequestURLParams,
+  ElicitResult,
+  JSONRPCMessage,
+  PromptMessage,
+  ResourceLink,
+} from './types.js'
 import { extractMcpConnectionErrorCode } from './mcpConnectionIssue.js'
 import {
   classifyMcpAutoProbeFallback,
@@ -63,7 +53,6 @@ import {
 } from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import { getOauthConfig } from '../../constants/oauth.js'
-import { PRODUCT_URL } from '../../constants/product.js'
 import type { AppState } from '../../state/AppState.js'
 import {
   type Tool,
@@ -157,7 +146,6 @@ const fetchMcpSkillsForClient = feature('MCP_SKILLS')
     ).fetchMcpSkillsForClient
   : null
 
-import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { AssistantMessage } from 'src/types/message.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { classifyMcpToolForCollapse } from '@claude-code/builtin-tools/tools/MCPTool/classifyForCollapse.js'
@@ -1145,28 +1133,42 @@ export const connectToServer = memoize(
         }
       }
 
-      const createMcpSdkClient = (): Client =>
-        new Client(
-          {
-            name: 'claude-code',
-            title: 'Claude Code',
-            version: MACRO.VERSION ?? 'unknown',
-            description: "Anthropic's agentic coding tool",
-            websiteUrl: PRODUCT_URL,
-          },
-          {
-            capabilities: {
-              roots: {},
-              // Empty object declares the capability. Sending {form:{},url:{}}
-              // breaks Java MCP SDK servers (Spring AI) whose Elicitation class
-              // has zero fields and fails on unknown properties.
-              elicitation: {},
-            },
-          },
-        )
+      // densable BNf transport kind for BVa negotiation plan
+      const negotiationTransportKind = (() => {
+        if (inProcessServer) return 'in-process'
+        switch (serverRef.type) {
+          case 'http':
+            return 'http'
+          case 'sse':
+            return 'sse'
+          case 'ws':
+            return 'ws'
+          case 'sse-ide':
+          case 'ws-ide':
+            return 'ide'
+          case 'claudeai-proxy':
+            return 'claudeai-proxy'
+          case 'sdk':
+            return 'sdk-control'
+          case 'stdio':
+          case undefined:
+            return 'stdio'
+          default:
+            return serverRef.type ?? 'stdio'
+        }
+      })()
 
-      const attachListRootsHandler = (c: Client): void => {
-        c.setRequestHandler(ListRootsRequestSchema, async () => {
+      // densable 2.1.232/233: protocol plan → Client versionNegotiation + init timeout
+      const protocolPlan = resolveMcpProtocolNegotiationPlan(
+        negotiationTransportKind,
+      )
+      // densable k(Z) — factory takes versionNegotiation plan (BVa)
+      const createMcpSdkClient = (
+        plan: typeof protocolPlan = protocolPlan,
+      ): Client => {
+        const c = createDensableMcpClient(plan)
+        // densable: setRequestHandler("roots/list", ...)
+        c.setRequestHandler('roots/list', async () => {
           logMCPDebug(name, `Received ListRoots request from server`)
           return {
             roots: [
@@ -1176,6 +1178,7 @@ export const connectToServer = memoize(
             ],
           }
         })
+        return c
       }
 
       // densable C — reassigned on pinned-legacy reconnect.
@@ -1185,8 +1188,6 @@ export const connectToServer = memoize(
       if (serverRef.type === 'http') {
         logMCPDebug(name, `Client created, setting up request handler`)
       }
-
-      attachListRootsHandler(client)
 
       // Add a timeout to connection attempts to prevent tests from hanging indefinitely
       logMCPDebug(
@@ -1216,10 +1217,6 @@ export const connectToServer = memoize(
         }
       }
 
-      // densable 2.1.232 #16: protocol plan picks initialize timeout (y0 vs IiS);
-      // outer race always uses y0. Auto probe fail/timeout → pinned-legacy reconnect
-      // within remaining budget (SEA residual).
-      const protocolPlan = resolveMcpProtocolNegotiationPlan(serverRef.type)
       const initializeTimeoutMs = getMcpClientConnectTimeoutMs(
         protocolPlan.mode,
       )
@@ -1440,8 +1437,7 @@ export const connectToServer = memoize(
             transport.stderr.on('data', stderrHandler)
           }
           // densable C=k({mode:"legacy"}) — new client, pinned legacy mode.
-          client = createMcpSdkClient()
-          attachListRootsHandler(client)
+          client = createMcpSdkClient({ mode: 'legacy' })
           const retryTimeoutMs =
             getMcpPinnedLegacyRetryTimeoutMs(connectStartTime)
           let outerTimedOut = false
@@ -1612,7 +1608,8 @@ export const connectToServer = memoize(
       // Register default elicitation handler that returns cancel during the
       // window before registerElicitationHandler overwrites it in
       // onConnectionAttempt (useManageMCPConnections).
-      client.setRequestHandler(ElicitRequestSchema, async request => {
+      // densable: setRequestHandler("elicitation/create", ...)
+      client.setRequestHandler('elicitation/create', async request => {
         logMCPDebug(
           name,
           `Elicitation request received during initialization: ${jsonStringify(request)}`,
@@ -2026,6 +2023,27 @@ export const connectToServer = memoize(
         wsIdeCount: serverStats?.wsIdeCount,
         ...mcpBaseUrlAnalytics(serverRef),
       })
+
+      // densable 2.1.233 #6 — hNf: subscriptions/listen re-open / park watcher.
+      // densable opS uses timeout:k0() ≡ getMcpTimeoutMs() (MCP_TIMEOUT / y0).
+      // No-ops on legacy era without autoOpenedSubscription (list_changed via
+      // unsolicited notifications + setNotificationHandler still works).
+      try {
+        const { attachMcpListenReopenWatcher } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./mcpListenReopen.js') as typeof import('./mcpListenReopen.js')
+        attachMcpListenReopenWatcher(
+          client as import('./mcpListenReopen.js').McpListenCapableClient,
+          name,
+          { timeoutMs: getMcpTimeoutMs() },
+        )
+      } catch (err) {
+        logMCPDebug(
+          name,
+          `subscriptions/listen re-open watcher attach failed: ${errorMessage(err)}`,
+        )
+      }
+
       return {
         name,
         client,
@@ -2133,6 +2151,15 @@ export async function clearServerCache(
   if (feature('MCP_SKILLS')) {
     fetchMcpSkillsForClient!.cache.delete(name)
   }
+  // densable xVa entry lifecycle — drop post-reopen list handlers with connection
+  try {
+    const { clearMcpListenPostReopenHandlers } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./mcpListenReopen.js') as typeof import('./mcpListenReopen.js')
+    clearMcpListenPostReopenHandlers(name)
+  } catch {
+    // optional
+  }
 }
 
 /**
@@ -2212,29 +2239,11 @@ export const fetchToolsForClient = memoizeWithLRU(
         return []
       }
 
-      // Official 2.1.144: paginate tools/list via nextCursor (page-1-only was silent drop).
-      const listedTools = await listAllWithCursorPagination(
-        async cursor => {
-          const result = (await client.client.request(
-            cursor
-              ? { method: 'tools/list', params: { cursor } }
-              : { method: 'tools/list' },
-            ListToolsResultSchema,
-          )) as ListToolsResult
-          return {
-            items: result.tools ?? [],
-            nextCursor: result.nextCursor,
-          }
-        },
-        {
-          onCapped: pages => {
-            logForDebugging(
-              `[MCP] ${client.name}: tools/list still returning nextCursor after ${pages} pages; stopping`,
-              { level: 'warn' },
-            )
-          },
-        },
-      )
+      // densable: Client.listTools aggregates pages (KdS uses cacheMode refresh).
+      const listResult = await client.client.listTools(undefined, {
+        cacheMode: 'refresh',
+      })
+      const listedTools = listResult.tools ?? []
 
       // densable: successful tools/list clears discovery degradation flags
       client.toolsListError = undefined
@@ -2799,29 +2808,11 @@ export const fetchResourcesForClient = memoizeWithLRU(
         return []
       }
 
-      // Official 2.1.144/147: paginate resources/list via nextCursor.
-      const resources = await listAllWithCursorPagination(
-        async cursor => {
-          const result = await client.client.request(
-            cursor
-              ? { method: 'resources/list', params: { cursor } }
-              : { method: 'resources/list' },
-            ListResourcesResultSchema,
-          )
-          return {
-            items: result.resources ?? [],
-            nextCursor: result.nextCursor,
-          }
-        },
-        {
-          onCapped: pages => {
-            logForDebugging(
-              `[MCP] ${client.name}: resources/list still returning nextCursor after ${pages} pages; stopping`,
-              { level: 'warn' },
-            )
-          },
-        },
-      )
+      // densable: Client.listResources aggregates pages.
+      const listResult = await client.client.listResources(undefined, {
+        cacheMode: 'refresh',
+      })
+      const resources = listResult.resources ?? []
 
       if (resources.length === 0) return []
 
@@ -2853,29 +2844,11 @@ export const fetchCommandsForClient = memoizeWithLRU(
         return []
       }
 
-      // Official 2.1.144/147: paginate prompts/list via nextCursor.
-      const listedPrompts = await listAllWithCursorPagination(
-        async cursor => {
-          const result = (await client.client.request(
-            cursor
-              ? { method: 'prompts/list', params: { cursor } }
-              : { method: 'prompts/list' },
-            ListPromptsResultSchema,
-          )) as ListPromptsResult
-          return {
-            items: result.prompts ?? [],
-            nextCursor: result.nextCursor,
-          }
-        },
-        {
-          onCapped: pages => {
-            logForDebugging(
-              `[MCP] ${client.name}: prompts/list still returning nextCursor after ${pages} pages; stopping`,
-              { level: 'warn' },
-            )
-          },
-        },
-      )
+      // densable: Client.listPrompts aggregates pages.
+      const listResult = await client.client.listPrompts(undefined, {
+        cacheMode: 'refresh',
+      })
+      const listedPrompts = listResult.prompts ?? []
 
       if (listedPrompts.length === 0) return []
 
@@ -3801,12 +3774,16 @@ export async function callMCPToolWithUrlElicitationRetry({
         hasResultSizeAnnotation,
       })
     } catch (error) {
-      // The MCP SDK's Protocol creates plain McpError (not UrlElicitationRequiredError)
-      // for error responses, so we check the error code instead of instanceof.
-      if (
-        !(error instanceof McpError) ||
-        error.code !== ErrorCode.UrlElicitationRequired
-      ) {
+      // densable / v2: UrlElicitationRequiredError or ProtocolErrorCode.
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? (error as { code?: unknown }).code
+          : undefined
+      const isUrlElicit =
+        error instanceof UrlElicitationRequiredError ||
+        code === ProtocolErrorCode.UrlElicitationRequired ||
+        code === -32042
+      if (!isUrlElicit) {
         throw error
       }
 
@@ -4098,13 +4075,13 @@ async function callMCPTool({
     })
 
     const races: Promise<unknown>[] = [
+      // densable: callTool(params, options) — no result schema arg on v2.
       client.callTool(
         {
           name: tool,
           arguments: args,
           _meta: meta,
         },
-        CallToolResultSchema,
         {
           signal,
           timeout: timeoutMs,
@@ -4311,18 +4288,8 @@ export async function setupSdkMcpClients(
     Object.entries(sdkMcpConfigs).map(async ([name, config]) => {
       const transport = new SdkControlClientTransport(name, sendMcpMessage)
 
-      const client = new Client(
-        {
-          name: 'claude-code',
-          title: 'Claude Code',
-          version: MACRO.VERSION ?? 'unknown',
-          description: "Anthropic's agentic coding tool",
-          websiteUrl: PRODUCT_URL,
-        },
-        {
-          capabilities: {},
-        },
-      )
+      // densable: sdk-control transport is always legacy negotiation.
+      const client = createDensableMcpClient({ mode: 'legacy' })
 
       try {
         // Connect the client

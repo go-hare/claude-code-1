@@ -376,7 +376,13 @@ describe('convertToSandboxRuntimeConfig with filesystem.disabled', () => {
         p => p.includes('shadow') || p === '/etc/shadow',
       ),
     ).toBe(true)
-    expect(cfg.filesystem.allowWrite).toContain('/tmp/only')
+    // expandPath is host-native: win32 turns /tmp/only → \tmp\only even when
+    // platformOverride is macos (sandbox product platform ≠ path expander OS).
+    expect(
+      cfg.filesystem.allowWrite.some(
+        p => p === '/tmp/only' || p.replace(/\\/g, '/') === '/tmp/only',
+      ),
+    ).toBe(true)
     expect(cfg.filesystem.allowWrite).toContain('.')
     // network still applied
     expect(cfg.network.allowedDomains).toContain('api.example.com')
@@ -446,7 +452,9 @@ describe('convertToSandboxRuntimeConfig with filesystem.disabled', () => {
         p => p.includes('shadow') || p === '/etc/shadow',
       ),
     ).toBe(true)
-    expect(cfg.filesystem.allowWrite).toContain('/tmp/only')
+    const isTmpOnly = (p: string) =>
+      p === '/tmp/only' || p.replace(/\\/g, '/') === '/tmp/only'
+    expect(cfg.filesystem.allowWrite.some(isTmpOnly)).toBe(true)
 
     // (B) diagnostic stash keeps configured + defaults
     const diag = getDisabledFsDiagnosticLists()
@@ -454,11 +462,14 @@ describe('convertToSandboxRuntimeConfig with filesystem.disabled', () => {
     expect(
       diag!.denyRead.some(p => p.includes('shadow') || p === '/etc/shadow'),
     ).toBe(true)
-    expect(diag!.allowWrite).toContain('/tmp/only')
+    expect(diag!.allowWrite.some(isTmpOnly)).toBe(true)
     expect(diag!.allowWrite).toContain('.')
-    expect(diag!.denyWrite.some(p => p === '/etc' || p.endsWith('/etc'))).toBe(
-      true,
-    )
+    expect(
+      diag!.denyWrite.some(p => {
+        const n = p.replace(/\\/g, '/')
+        return n === '/etc' || n.endsWith('/etc')
+      }),
+    ).toBe(true)
 
     // OUTER getFs* returns diagnostic (not empty Gvg)
     const read = SandboxManager.getFsReadConfig()

@@ -9,7 +9,7 @@ import { callIdeRpc } from '../services/mcp/client.js';
 import type { ConnectedMCPServer, MCPServerConnection } from '../services/mcp/types.js';
 import type { PermissionMode } from '../types/permissions.js';
 import { CLAUDE_IN_CHROME_MCP_SERVER_NAME, isTrackedClaudeInChromeTabId } from '../utils/claudeInChrome/common.js';
-import type { AnyObjectSchema } from '@modelcontextprotocol/sdk/server/zod-compat.js';
+import type { AnyObjectSchema } from 'src/services/mcp/types.js';
 import { lazySchema } from '../utils/lazySchema.js';
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js';
 

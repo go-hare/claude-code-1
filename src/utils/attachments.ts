@@ -80,7 +80,6 @@ import {
   getDefaultHaikuModel,
   getDefaultOpusModel,
 } from './model/model.js'
-import type { ReadResourceResult } from '@modelcontextprotocol/sdk/types.js'
 import { getSkillToolCommands, getMcpSkillCommands } from '../commands.js'
 import type { Command } from '../types/command.js'
 import uniqBy from 'lodash-es/uniqBy.js'

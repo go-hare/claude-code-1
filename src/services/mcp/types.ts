@@ -1,10 +1,37 @@
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type {
+  CallToolResult,
+  Client,
+  ElicitResult,
+  JSONRPCMessage,
+  PromptMessage,
   Resource,
+  ResourceLink,
   ServerCapabilities,
-} from '@modelcontextprotocol/sdk/types.js'
+  ToolAnnotations,
+} from '@modelcontextprotocol/client'
 import { z } from 'zod/v4'
 import { lazySchema } from '../../utils/lazySchema.js'
+
+/**
+ * densable/v2: re-export protocol types from `@modelcontextprotocol/client@2`.
+ * No local invent of CallToolResult/JSONRPCMessage/etc. No sdk 1.x bag.
+ */
+export type {
+  CallToolResult,
+  ElicitResult,
+  JSONRPCMessage,
+  PromptMessage,
+  Resource,
+  ResourceLink,
+  ServerCapabilities,
+  ToolAnnotations,
+}
+
+/** densable URL elicitation params — structural bag (v2 method handlers). */
+export type ElicitRequestURLParams = Record<string, unknown>
+
+/** Channel / IDE notification schema bag (local zod, not sdk zod-compat). */
+export type AnyObjectSchema = z.ZodType
 
 // Configuration schemas and types
 export const ConfigScopeSchema = lazySchema(() =>

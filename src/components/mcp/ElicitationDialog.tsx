@@ -1,9 +1,3 @@
-import type {
-  ElicitRequestFormParams,
-  ElicitRequestURLParams,
-  ElicitResult,
-  PrimitiveSchemaDefinition,
-} from '@modelcontextprotocol/sdk/types.js';
 import figures from 'figures';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRegisterOverlay } from '../../context/overlayContext.js';

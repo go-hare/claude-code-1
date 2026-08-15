@@ -389,3 +389,170 @@ describe('remintRecovery densable 232 #39', () => {
     expect(OAUTH_REAUTH_REQUIRED_DETAIL).toContain('run /login')
   })
 })
+
+/**
+ * densable 232 #39 residual close — Ls + Xn/To/Vo flight as bridge would wire:
+ * transport onClose → disposeTransportClose → defer/leak/recover; flight owns gen.
+ * (Not a full remoteBridgeCore e2e — pure orchestrator integration.)
+ */
+describe('remint Ls+flight bridge orchestration densable 232 #39', () => {
+  const leakCeilingMs = 362_000
+  const t0 = 10_000_000
+
+  test('recover → begin flight → mid-recovery closes defer until To', () => {
+    const flight = createRecoveryFlight()
+    // Idle recoverable close → enter recovery
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: flight.state.inFlight,
+        code: 4093,
+      }),
+    ).toBe('recover')
+
+    const gen = flight.begin()
+    expect(flight.state.inFlight).toBe(true)
+    expect(flight.state.startedAtMs).toBeGreaterThan(0)
+
+    // Same generation transport dies again while recovering → defer (not fail)
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: flight.state.inFlight,
+        code: 1006,
+        recoveryStartedAtMs: t0,
+        leakCeilingMs,
+        nowMs: t0 + 30_000,
+      }),
+    ).toBe('defer')
+
+    // Stale endIfOwner cannot clear — still defer
+    expect(flight.endIfOwner(gen + 99)).toBe(false)
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: flight.state.inFlight,
+        code: 4093,
+        recoveryStartedAtMs: t0,
+        leakCeilingMs,
+        nowMs: t0 + 60_000,
+      }),
+    ).toBe('defer')
+
+    // Owner completes recovery → idle recoverable again
+    expect(flight.endIfOwner(gen)).toBe(true)
+    expect(flight.state.inFlight).toBe(false)
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: flight.state.inFlight,
+        code: 4093,
+      }),
+    ).toBe('recover')
+  })
+
+  test('stale transport close ignored even when flight in progress', () => {
+    const flight = createRecoveryFlight()
+    flight.begin()
+    // Previous transport generation fires onClose after rebuild
+    expect(
+      disposeTransportClose({
+        staleTransport: true,
+        authRecoveryInFlight: flight.state.inFlight,
+        code: 4093,
+        recoveryStartedAtMs: t0,
+        leakCeilingMs,
+        nowMs: t0 + 1_000,
+      }),
+    ).toBe('ignore')
+    // Flight still owned — not force-cleared by stale close
+    expect(flight.state.inFlight).toBe(true)
+  })
+
+  test('leak past ceiling Vo forceClear then re-dispatch recover', () => {
+    const flight = createRecoveryFlight()
+    const gen = flight.begin()
+    // Past densable ms leak ceiling → leak
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: true,
+        code: 4093,
+        recoveryStartedAtMs: t0,
+        leakCeilingMs,
+        nowMs: t0 + leakCeilingMs + 1,
+      }),
+    ).toBe('leak')
+
+    // densable Vo — force clear stuck flag
+    flight.forceClear()
+    expect(flight.state.inFlight).toBe(false)
+    expect(flight.endIfOwner(gen)).toBe(false)
+
+    // After leak clear, next close can recover again
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: flight.state.inFlight,
+        code: 4093,
+      }),
+    ).toBe('recover')
+  })
+
+  test('rebuild supersedes gen: old To fails; new owner To succeeds', () => {
+    const flight = createRecoveryFlight()
+    const genOld = flight.begin()
+    // Rebuild starts a new recovery generation (densable Xn again)
+    const genNew = flight.begin()
+    expect(genNew).toBeGreaterThan(genOld)
+
+    // Old recovery completing must not clear new flight
+    expect(flight.endIfOwner(genOld)).toBe(false)
+    expect(flight.state.inFlight).toBe(true)
+    expect(flight.state.activeGen).toBe(genNew)
+
+    // Mid-recovery close still defers under new owner
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: flight.state.inFlight,
+        code: 1006,
+        recoveryStartedAtMs: flight.state.startedAtMs,
+        leakCeilingMs,
+        nowMs: flight.state.startedAtMs + 10_000,
+      }),
+    ).toBe('defer')
+
+    expect(flight.endIfOwner(genNew)).toBe(true)
+    expect(flight.state.activeGen).toBe(0)
+  })
+
+  test('4093 remint loop: budget charge then retry status gold', () => {
+    const hb = createHeartbeatRecoveryBudget()
+    let counters = {
+      consecutiveRecoveries: 0,
+      cred4094WithoutBeat: 0,
+      epochStaleTimestamps: [] as number[],
+    }
+    const flight = createRecoveryFlight()
+    // First recoverable 4093 → recover + begin
+    expect(
+      disposeTransportClose({
+        authRecoveryInFlight: false,
+        code: 4093,
+      }),
+    ).toBe('recover')
+    const gen = flight.begin()
+    const gate = evaluateRecoverableCloseBudgets({
+      code: 4093,
+      counters,
+      heartbeatBudget: hb,
+      recoveryPatienceEnabled: true,
+      nowMs: t0,
+    })
+    expect(gate.ok).toBe(true)
+    if (gate.ok) counters = gate.counters
+
+    // Unreachable retry UI
+    expect(formatRemintRetryStatus(1, 0)).toContain('retrying (attempt 1)')
+    expect(formatRemintRetryStatus(3, 120_000)).toContain('2m elapsed')
+
+    // Success clears consecutive via noteRecoverySuccess + To
+    counters = noteRecoverySuccess(counters)
+    expect(flight.endIfOwner(gen)).toBe(true)
+    expect(counters.consecutiveRecoveries).toBe(0)
+  })
+})

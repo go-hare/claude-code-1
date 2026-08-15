@@ -304,10 +304,7 @@ import {
 import { clearMemoryFileCaches } from 'src/utils/claudemd.js'
 import { applyPermissionUpdate } from 'src/utils/permissions/PermissionUpdate.js'
 import { handleRegisterRepoRoot } from 'src/commands/add-dir/registerRepoRoot.js'
-import {
-  ElicitRequestSchema,
-  ElicitationCompleteNotificationSchema,
-} from '@modelcontextprotocol/sdk/types.js'
+// densable: string notification/request methods (no sdk schema bag)
 import { getMcpPrefix } from 'src/services/mcp/mcpStringUtils.js'
 import {
   commandBelongsToServer,
@@ -1758,8 +1755,9 @@ function runHeadlessStreaming(
       // Wrapped in try/catch because setRequestHandler throws if the client wasn't
       // created with elicitation capability declared (e.g., SDK-created clients).
       try {
+        // densable: setRequestHandler("elicitation/create", ...)
         connection.client.setRequestHandler(
-          ElicitRequestSchema,
+          'elicitation/create',
           async (request, extra) => {
             logMCPDebug(
               serverName,
@@ -1836,10 +1834,13 @@ function runHeadlessStreaming(
         )
 
         // Surface completion notifications to SDK consumers (URL mode)
+        // densable: setNotificationHandler("notifications/elicitation/complete", ...)
         connection.client.setNotificationHandler(
-          ElicitationCompleteNotificationSchema,
+          'notifications/elicitation/complete',
           notification => {
-            const { elicitationId } = notification.params
+            const elicitationId = (
+              notification as { params?: { elicitationId?: string } }
+            ).params?.elicitationId
             logMCPDebug(
               serverName,
               `Elicitation completion notification: ${elicitationId}`,
@@ -4224,7 +4225,7 @@ function runHeadlessStreaming(
               sdkClient.client?.transport?.onmessage
             ) {
               sdkClient.client.transport.onmessage(
-                mcpRequest.message as import('@modelcontextprotocol/sdk/types.js').JSONRPCMessage,
+                mcpRequest.message as Record<string, unknown>,
               )
             }
             sendControlResponseSuccess(msg)

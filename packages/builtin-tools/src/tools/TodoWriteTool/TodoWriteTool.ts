@@ -4,7 +4,7 @@ import { getSessionId } from 'src/bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
-import { isTodoV2Enabled } from 'src/utils/tasks.js'
+import { isTodoWriteToolEnabled } from 'src/utils/tasks.js'
 import { TodoListSchema } from 'src/utils/todo/types.js'
 import { VERIFICATION_AGENT_TYPE } from '../AgentTool/constants.js'
 import { TODO_WRITE_TOOL_NAME } from './constants.js'
@@ -49,8 +49,9 @@ export const TodoWriteTool = buildTool({
     return ''
   },
   shouldDefer: true,
+  // densable 2.1.233: !h5() && uX()
   isEnabled() {
-    return !isTodoV2Enabled()
+    return isTodoWriteToolEnabled()
   },
   toAutoClassifierInput(input) {
     return `${input.todos.length} items`

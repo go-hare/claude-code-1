@@ -36,6 +36,17 @@ describe('densable 2.1.229 #9 stripWindowsExtendedPathPrefix (Rwr)', () => {
       '\\\\server\\share',
     )
   })
+
+  // densable 2.1.233 #11 — NT object `\??\` strip
+  test('strips \\??\\UNC\\ and \\??\\ drive forms', () => {
+    expect(stripWindowsExtendedPathPrefix('\\??\\UNC\\server\\share')).toBe(
+      '\\\\server\\share',
+    )
+    expect(stripWindowsExtendedPathPrefix('\\??\\C:\\Users\\x')).toBe(
+      'C:\\Users\\x',
+    )
+    expect(stripWindowsExtendedPathPrefix('/??/C:/Users/x')).toBe('C:/Users/x')
+  })
 })
 
 describe('densable 2.1.229 #9 stripWindowsLongPathPrefixXpr (Xpr)', () => {

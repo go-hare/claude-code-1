@@ -6,8 +6,7 @@ import {
 } from 'fs/promises'
 import { basename, extname, resolve as pathResolve } from 'path'
 
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-
+import type { CallToolResult } from '@modelcontextprotocol/server'
 import { BRIDGE_ONLY_BROWSER_TOOLS } from './browserTools.js'
 import { SocketConnectionError } from './mcpSocketClient.js'
 import type {

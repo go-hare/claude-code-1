@@ -9,12 +9,23 @@
 import {
   exchangeAuthorization,
   startAuthorization,
-} from '@modelcontextprotocol/sdk/client/auth.js'
-import {
   type OAuthClientInformation,
   type OpenIdProviderDiscoveryMetadata,
-  OpenIdProviderDiscoveryMetadataSchema,
-} from '@modelcontextprotocol/sdk/shared/auth.js'
+} from '@modelcontextprotocol/client'
+
+/** Structural OIDC discovery — required token_endpoint for XAA HTTPS gate. */
+function parseOpenIdProviderDiscoveryMetadata(
+  value: unknown,
+): OpenIdProviderDiscoveryMetadata {
+  if (!value || typeof value !== 'object') {
+    throw new Error('XAA IdP: invalid OIDC metadata: not an object')
+  }
+  const v = value as Record<string, unknown>
+  if (typeof v.token_endpoint !== 'string' || v.token_endpoint.length === 0) {
+    throw new Error('XAA IdP: invalid OIDC metadata: missing token_endpoint')
+  }
+  return value as OpenIdProviderDiscoveryMetadata
+}
 import { randomBytes } from 'crypto'
 import { createServer, type Server } from 'http'
 import { parse } from 'url'
@@ -232,16 +243,13 @@ export async function discoverOidc(
       `XAA IdP: OIDC discovery returned non-JSON at ${url} (captive portal or proxy?)`,
     )
   }
-  const parsed = OpenIdProviderDiscoveryMetadataSchema.safeParse(body)
-  if (!parsed.success) {
-    throw new Error(`XAA IdP: invalid OIDC metadata: ${parsed.error.message}`)
-  }
-  if (new URL(parsed.data.token_endpoint).protocol !== 'https:') {
+  const parsed = parseOpenIdProviderDiscoveryMetadata(body)
+  if (new URL(parsed.token_endpoint).protocol !== 'https:') {
     throw new Error(
-      `XAA IdP: refusing non-HTTPS token endpoint: ${parsed.data.token_endpoint}`,
+      `XAA IdP: refusing non-HTTPS token endpoint: ${parsed.token_endpoint}`,
     )
   }
-  return parsed.data
+  return parsed
 }
 
 /**

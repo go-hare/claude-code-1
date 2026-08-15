@@ -1,12 +1,15 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import {
-  CallToolRequestSchema,
-  type CallToolResult,
-  ListToolsRequestSchema,
-  type ListToolsResult,
-  type Tool,
-} from '@modelcontextprotocol/sdk/types.js'
+import { Server } from '@modelcontextprotocol/server'
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
+import type { CallToolResult } from 'src/services/mcp/types.js'
+
+type ListToolsResult = { tools: Array<Record<string, unknown>> }
+type Tool = {
+  name: string
+  description?: string
+  inputSchema?: unknown
+  outputSchema?: unknown
+  [key: string]: unknown
+}
 import { getDefaultAppState } from 'src/state/AppStateStore.js'
 import review from '../commands/review.js'
 import type { Command } from '../commands.js'
@@ -56,49 +59,55 @@ export async function startMCPServer(
     },
   )
 
-  server.setRequestHandler(
-    ListToolsRequestSchema,
-    async (): Promise<ListToolsResult> => {
-      // TODO: Also re-expose any MCP tools
-      const toolPermissionContext = getEmptyToolPermissionContext()
-      const tools = getTools(toolPermissionContext)
-      return {
-        tools: await Promise.all(
-          tools.map(async tool => {
-            let outputSchema: ToolOutput | undefined
-            if (tool.outputSchema) {
-              const convertedSchema = zodToJsonSchema(tool.outputSchema)
-              // MCP SDK requires outputSchema to have type: "object" at root level
-              // Skip schemas with anyOf/oneOf at root (from z.union, z.discriminatedUnion, etc.)
-              // See: https://github.com/anthropics/claude-code/issues/8014
-              if (
-                typeof convertedSchema === 'object' &&
-                convertedSchema !== null &&
-                'type' in convertedSchema &&
-                convertedSchema.type === 'object'
-              ) {
-                outputSchema = convertedSchema as ToolOutput
-              }
+  // densable: setRequestHandler("tools/list", ...)
+  server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => {
+    // TODO: Also re-expose any MCP tools
+    const toolPermissionContext = getEmptyToolPermissionContext()
+    const tools = getTools(toolPermissionContext)
+    return {
+      tools: await Promise.all(
+        tools.map(async tool => {
+          let outputSchema: ToolOutput | undefined
+          if (tool.outputSchema) {
+            const convertedSchema = zodToJsonSchema(tool.outputSchema)
+            // MCP SDK requires outputSchema to have type: "object" at root level
+            // Skip schemas with anyOf/oneOf at root (from z.union, z.discriminatedUnion, etc.)
+            // See: https://github.com/anthropics/claude-code/issues/8014
+            if (
+              typeof convertedSchema === 'object' &&
+              convertedSchema !== null &&
+              'type' in convertedSchema &&
+              convertedSchema.type === 'object'
+            ) {
+              outputSchema = convertedSchema as ToolOutput
             }
-            return {
-              ...tool,
-              description: await tool.prompt({
-                getToolPermissionContext: async () => toolPermissionContext,
-                tools,
-                agents: [],
-              }),
-              inputSchema: zodToJsonSchema(tool.inputSchema) as ToolInput,
-              outputSchema,
-            }
-          }),
-        ),
-      }
-    },
-  )
+          }
+          return {
+            ...tool,
+            description: await tool.prompt({
+              getToolPermissionContext: async () => toolPermissionContext,
+              tools,
+              agents: [],
+            }),
+            inputSchema: zodToJsonSchema(tool.inputSchema) as ToolInput,
+            outputSchema,
+          }
+        }),
+      ),
+    }
+  })
 
+  // densable: setRequestHandler("tools/call", ...)
   server.setRequestHandler(
-    CallToolRequestSchema,
-    async ({ params: { name, arguments: args } }): Promise<CallToolResult> => {
+    'tools/call',
+    async (request): Promise<CallToolResult> => {
+      const params = (
+        request as {
+          params?: { name?: string; arguments?: Record<string, unknown> }
+        }
+      ).params
+      const name = params?.name ?? ''
+      const args = params?.arguments
       const toolPermissionContext = getEmptyToolPermissionContext()
       // TODO: Also re-expose any MCP tools
       const tools = getTools(toolPermissionContext)

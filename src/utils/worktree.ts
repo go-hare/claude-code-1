@@ -619,15 +619,27 @@ async function getOrCreateWorktree(
   let baseBranch: string
   let baseSha: string | null = null
   if (options?.prNumber) {
-    const { code: prFetchCode, stderr: prFetchStderr } =
-      await execFileNoThrowWithCwd(
-        gitExe(),
-        ['fetch', 'origin', `pull/${options.prNumber}/head`],
-        { cwd: repoRoot, stdin: 'ignore', env: fetchEnv },
-      )
-    if (prFetchCode !== 0) {
+    // densable 2.1.233 #1: provider-aware fetch refs (NEr/Hod/Oxr).
+    // gitlab → merge-requests only; github → pull only; other → [pull, mr].
+    const fetchSpecs = await resolvePrFetchSpecs(repoRoot, options.prNumber)
+    let lastErr = ''
+    let fetched = false
+    for (const spec of fetchSpecs) {
+      const { code: prFetchCode, stderr: prFetchStderr } =
+        await execFileNoThrowWithCwd(gitExe(), ['fetch', 'origin', spec], {
+          cwd: repoRoot,
+          stdin: 'ignore',
+          env: fetchEnv,
+        })
+      if (prFetchCode === 0) {
+        fetched = true
+        break
+      }
+      lastErr = prFetchStderr.trim()
+    }
+    if (!fetched) {
       throw new Error(
-        `Failed to fetch PR #${options.prNumber}: ${prFetchStderr.trim() || 'PR may not exist or the repository may not have a remote named "origin"'}`,
+        `Failed to fetch PR/MR #${options.prNumber}: ${lastErr || 'it may not exist, the fetch may have timed out, or the repository may not have a remote named "origin"'}`,
       )
     }
     baseBranch = 'FETCH_HEAD'
@@ -999,16 +1011,167 @@ async function performPostCreationSetup(
 }
 
 /**
- * Parses a PR reference from a string.
- * Accepts GitHub-style PR URLs (e.g., https://github.com/owner/repo/pull/123,
- * or GHE equivalents like https://ghe.example.com/owner/repo/pull/123)
- * or `#N` format (e.g., #123).
- * Returns the PR number or null if the string is not a recognized PR reference.
+ * densable 2.1.233 `tVo` / `rVo` / `Npb` — PR/MR URL parse for --worktree.
+ *
+ * Accepts:
+ * - GitHub / GHE: `…/owner/repo/pull/123`
+ * - GitLab: `…/group/project/-/merge_requests/123` (nested groups ok)
+ * - Bitbucket: `…/owner/repo/pull-requests/123`
+ * - `#N` / `!N` short forms
+ */
+export type CodeChangeProvider =
+  | 'github'
+  | 'github-enterprise'
+  | 'gitlab'
+  | 'bitbucket'
+
+export type ParsedCodeChangeRef = {
+  prNumber: number
+  prUrl: string
+  prRepository: string
+  provider: CodeChangeProvider
+}
+
+/** densable tVo — capture repo path + number from PR/MR URLs */
+const CODE_CHANGE_URL_RE =
+  /https?:\/\/[^/\s"]+\/([^\s"]+?)\/(?:pull|pull-requests|-\/merge_requests)\/(\d+)/i
+
+/** densable Npb */
+export function codeChangeProviderFromUrl(url: string): CodeChangeProvider {
+  if (url.includes('/-/merge_requests/')) return 'gitlab'
+  if (url.includes('/pull-requests/')) return 'bitbucket'
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    if (host === 'github.com' || host.endsWith('.github.com')) return 'github'
+  } catch {
+    return 'github-enterprise'
+  }
+  return 'github-enterprise'
+}
+
+/**
+ * densable Hod — extract hostname from a git remote URL (https or scp-like).
+ * Returns null for file:// / invalid.
+ */
+export function gitRemoteHostname(remoteUrl: string): string | null {
+  const t = remoteUrl.trim()
+  if (!t || t.startsWith('file:')) return null
+  if (t.includes('://')) {
+    try {
+      return new URL(t).hostname || null
+    } catch {
+      return null
+    }
+  }
+  // scp-like: git@host:owner/repo
+  const m = /^(?:[^@:/]+@)?([^:/]+):/.exec(t)
+  return m?.[1] ?? null
+}
+
+/**
+ * densable Oxr / dm — forge kind from hostname (not full URL path).
+ * github.com (+ www.) → github; gitlab.com → gitlab; bitbucket.org → bitbucket.
+ */
+export function codeChangeProviderFromHostname(
+  hostname: string | null | undefined,
+): 'github' | 'gitlab' | 'bitbucket' | 'other' {
+  if (!hostname) return 'other'
+  let t = hostname.toLowerCase()
+  while (t.startsWith('www.')) t = t.slice(4)
+  // densable dm(e) — github.com and common GH enterprise-looking hosts treated as github for fetch ref
+  if (t === 'github.com' || t.endsWith('.github.com')) return 'github'
+  if (t === 'gitlab.com' || t.endsWith('.gitlab.com')) return 'gitlab'
+  if (t === 'bitbucket.org' || t.endsWith('.bitbucket.org')) return 'bitbucket'
+  // many self-hosted still use github-style pull/ refs; densable "other" tries both
+  return 'other'
+}
+
+/**
+ * densable worktree PR fetch ref list:
+ *   gitlab → [merge-requests/N/head]
+ *   github → [pull/N/head]
+ *   other  → [pull/N/head, merge-requests/N/head]
+ *
+ * densable does not try bitbucket pull-requests/from in this path.
+ */
+export function prFetchSpecsForProvider(
+  provider: 'github' | 'gitlab' | 'bitbucket' | 'other',
+  prNumber: number,
+): string[] {
+  const pull = `pull/${prNumber}/head`
+  const mr = `merge-requests/${prNumber}/head`
+  if (provider === 'gitlab') return [mr]
+  if (provider === 'github') return [pull]
+  // other (and bitbucket in densable) try github then gitlab shapes
+  return [pull, mr]
+}
+
+/**
+ * densable NEr + Oxr — resolve origin URL at repoRoot and pick fetch specs.
+ */
+export async function resolvePrFetchSpecs(
+  repoRoot: string,
+  prNumber: number,
+): Promise<string[]> {
+  const { code, stdout } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['remote', 'get-url', 'origin'],
+    { cwd: repoRoot, preserveOutputOnError: false, env: gitWorktreeEnv() },
+  )
+  let remoteUrl: string | null =
+    code === 0 && stdout.trim() ? stdout.trim() : null
+  if (!remoteUrl) {
+    // densable NEr: fall back to first named remote
+    const listed = await execFileNoThrowWithCwd(gitExe(), ['remote'], {
+      cwd: repoRoot,
+      preserveOutputOnError: false,
+      env: gitWorktreeEnv(),
+    })
+    const first =
+      listed.code === 0
+        ? listed.stdout
+            .trim()
+            .split(/\r?\n/)
+            .map(s => s.trim())
+            .find(Boolean)
+        : undefined
+    if (first) {
+      const u = await execFileNoThrowWithCwd(
+        gitExe(),
+        ['remote', 'get-url', first],
+        { cwd: repoRoot, preserveOutputOnError: false, env: gitWorktreeEnv() },
+      )
+      if (u.code === 0 && u.stdout.trim()) remoteUrl = u.stdout.trim()
+    }
+  }
+  const host = remoteUrl ? gitRemoteHostname(remoteUrl) : null
+  const provider = codeChangeProviderFromHostname(host)
+  return prFetchSpecsForProvider(provider, prNumber)
+}
+
+/** densable rVo — full parse from a URL string */
+export function parseCodeChangeUrl(input: string): ParsedCodeChangeRef | null {
+  const t = input.match(CODE_CHANGE_URL_RE)
+  if (t?.[1] && t?.[2]) {
+    return {
+      prNumber: parseInt(t[2], 10),
+      prUrl: t[0],
+      prRepository: t[1],
+      provider: codeChangeProviderFromUrl(t[0]),
+    }
+  }
+  return null
+}
+
+/**
+ * Parses a PR/MR reference from a string for --worktree.
+ * Returns the PR/MR number or null if the string is not a recognized reference.
  */
 export function parsePRReference(input: string): number | null {
-  // GitHub-style PR URL: https://<host>/owner/repo/pull/123 (with optional trailing slash, query, hash)
-  // The /pull/N path shape is specific to GitHub — GitLab uses /-/merge_requests/N,
-  // Bitbucket uses /pull-requests/N — so matching any host here is safe.
+  const fromUrl = parseCodeChangeUrl(input.trim())
+  if (fromUrl) return fromUrl.prNumber
+
+  // GitHub-style PR URL (strict path: owner/repo/pull/N only)
   const urlMatch = input.match(
     /^https?:\/\/[^/]+\/[^/]+\/[^/]+\/pull\/(\d+)\/?(?:[?#].*)?$/i,
   )
@@ -1016,13 +1179,20 @@ export function parsePRReference(input: string): number | null {
     return parseInt(urlMatch[1], 10)
   }
 
-  // #N format
-  const hashMatch = input.match(/^#(\d+)$/)
-  if (hashMatch?.[1]) {
-    return parseInt(hashMatch[1], 10)
+  // #N (GitHub) or !N (GitLab MR shorthand)
+  const shortMatch = input.match(/^[#!](\d+)$/)
+  if (shortMatch?.[1]) {
+    return parseInt(shortMatch[1], 10)
   }
 
   return null
+}
+
+/** densable identifier prefix for agents display: GitLab uses !N, else #N */
+export function codeChangeNumberPrefix(
+  provider: CodeChangeProvider,
+): '!' | '#' {
+  return provider === 'gitlab' ? '!' : '#'
 }
 
 export async function isTmuxAvailable(): Promise<boolean> {

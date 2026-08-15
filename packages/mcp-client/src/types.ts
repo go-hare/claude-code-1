@@ -1,12 +1,14 @@
 // MCP configuration types, schemas, and connection state types
 // Adapted from src/services/mcp/types.ts — uses zod directly instead of lazySchema
 
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type {
+  Client,
   Resource,
   ServerCapabilities,
-} from '@modelcontextprotocol/sdk/types.js'
+} from '@modelcontextprotocol/client'
 import { z } from 'zod/v4'
+
+export type { Resource, ServerCapabilities }
 
 // ============================================================================
 // Configuration scope

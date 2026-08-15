@@ -64,8 +64,10 @@ export type LiveSessionNameRecord = {
   pid: number
   name?: string
   startedAt: number
-  /** densable `procStart` — process start token for tie-break; optional. */
+  /** densable `procStart` — unix / non-FFI win32 process-start identity. */
   procStart?: string
+  /** densable `procStartFt` — win32 kernel32 FFI FILETIME identity. */
+  procStartFt?: string
   /** densable `nameSince` — when this name was claimed. */
   nameSince?: number
   /** densable nameSource — Bid skips `derived`. */
@@ -75,21 +77,43 @@ export type LiveSessionNameRecord = {
 }
 
 /**
+ * densable process-start stamp for YM_/Lid.
+ * Any non-empty `procStart` **or** `procStartFt` counts — densable YM_ only
+ * requires "has process-start identity", not the AFe/kUe lock-pick exclusivity
+ * (win32 FFI rejects legacy `procStart` when matching live process locks).
+ */
+export function sessionRecordProcessStartIdentity(
+  rec: LiveSessionNameRecord,
+): string | undefined {
+  if (typeof rec.procStartFt === 'string' && rec.procStartFt.length > 0) {
+    return rec.procStartFt
+  }
+  if (typeof rec.procStart === 'string' && rec.procStart.length > 0) {
+    return rec.procStart
+  }
+  return undefined
+}
+
+/**
  * densable `Lid` — whether `a` is strictly older / lower-priority than `b`
- * (started earlier wins the name; then procStart; then pid).
+ * (started earlier wins the name; then process-start identity; then pid).
  */
 export function isOlderSessionRecord(
   a: LiveSessionNameRecord,
   b: LiveSessionNameRecord,
 ): boolean {
   if (a.startedAt !== b.startedAt) return a.startedAt < b.startedAt
-  const ra = a.procStart ?? ''
-  const rb = b.procStart ?? ''
+  const ra = sessionRecordProcessStartIdentity(a) ?? ''
+  const rb = sessionRecordProcessStartIdentity(b) ?? ''
   if (ra !== rb) return ra < rb
   return a.pid < b.pid
 }
 
-/** densable `YM_` — live holders of normalized name excluding self. */
+/**
+ * densable `YM_` — live holders of normalized name excluding self.
+ * Requires process-start identity (procStart / procStartFt) so a recycled PID
+ * without a stamped start token cannot hold a name.
+ */
 export function findNameHolders(
   nameKey: string,
   live: readonly LiveSessionNameRecord[],
@@ -99,14 +123,15 @@ export function findNameHolders(
     n =>
       n.pid !== selfPid &&
       n.name !== undefined &&
-      n.procStart !== undefined &&
+      sessionRecordProcessStartIdentity(n) !== undefined &&
       normalizeSessionNameKey(n.name) === nameKey,
   )
 }
 
 /**
- * Like densable YM_ but when `procStart` is absent locally, still match by name.
- * densable requires procStart; our PID registry may not always write it.
+ * Lenient holders: match by name even without process-start identity.
+ * densable product path uses strict {@link findNameHolders}; keep for tests
+ * and intentional migration fallbacks.
  */
 export function findNameHoldersLenient(
   nameKey: string,
@@ -182,8 +207,8 @@ export function decideSessionNameUniqueness(input: {
   suffixBase?: string
   slug?: () => string
   /**
-   * When true (default), match holders even if `procStart` is missing
-   * (local registry). densable strict mode requires procStart.
+   * densable product path is **strict** (requires process-start identity).
+   * Pass `true` only for migration/tests without stamped registry rows.
    */
   lenientHolders?: boolean
 }): SessionNameUniquenessDecision {
@@ -191,8 +216,9 @@ export function decideSessionNameUniqueness(input: {
   const key = normalizeSessionNameKey(input.desiredName)
   if (!key) return { kind: 'keep' }
 
+  // densable YM_ default: strict (procStart/procStartFt required).
   const find =
-    input.lenientHolders === false ? findNameHolders : findNameHoldersLenient
+    input.lenientHolders === true ? findNameHoldersLenient : findNameHolders
   const holders = find(key, input.live, input.self.pid)
 
   let contested: LiveSessionNameRecord[]
@@ -312,6 +338,7 @@ const defaultDeps: SessionNameUniquenessDeps = {
       startedAt: r.startedAt,
       nameSince: r.nameSince,
       procStart: r.procStart,
+      procStartFt: r.procStartFt,
       nameSource: r.nameSource,
       sock: r.messagingSocketPath,
     }))

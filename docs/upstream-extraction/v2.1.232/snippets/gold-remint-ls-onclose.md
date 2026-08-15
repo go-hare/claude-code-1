@@ -109,5 +109,7 @@ Tests: `src/bridge/__tests__/remintRecovery.232.test.ts`
   - `fetchRemoteCredentials` → `BridgeCredentialResult` (`terminal:!0/!1` | creds | null)
   - `isNonTerminalBridgeFailure` / `isTerminalBridgeFailure` / adopt + late-refresh paths
   - `CLASSIFIED_CLOSE_REASON_CODES` gzp; CCRClient `onEpochMismatch(reason)`; transport `setOnClose(code, cause)`
-- **Still residual**
-  - no `remoteBridgeCore` integration tests yet (defer/leak/stale gen e2e)
+- **Tests**
+  - `remintRecovery.232` — Ls+flight pure orchestration (defer/leak/stale gen)
+  - `remoteBridgeCoreRemintWiring.232` — source lock that core wires remintRecovery
+  - **Not targeted**: live network e2e (no invent cloud harness)

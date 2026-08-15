@@ -647,8 +647,13 @@ describe('task notifications', () => {
 // ---------------------------------------------------------------------------
 // isTodoV2Enabled
 // ---------------------------------------------------------------------------
-describe('isTodoV2Enabled', () => {
-  test('returns true when CLAUDE_CODE_ENABLE_TASKS is set', () => {
+describe('isTodoV2Enabled densable h5', () => {
+  test('default true (Task* surface on)', () => {
+    delete process.env.CLAUDE_CODE_ENABLE_TASKS
+    expect(isTodoV2Enabled()).toBe(true)
+  })
+
+  test('ENABLE_TASKS=1 still true', () => {
     process.env.CLAUDE_CODE_ENABLE_TASKS = '1'
     try {
       expect(isTodoV2Enabled()).toBe(true)
@@ -657,10 +662,15 @@ describe('isTodoV2Enabled', () => {
     }
   })
 
-  test('returns true in interactive sessions by default', () => {
-    delete process.env.CLAUDE_CODE_ENABLE_TASKS
-    // getIsNonInteractiveSession is mocked to return false
-    expect(isTodoV2Enabled()).toBe(true)
+  test('ENABLE_TASKS explicit falsy → false (legacy TodoWrite)', () => {
+    for (const v of ['0', 'false', 'no', 'off']) {
+      process.env.CLAUDE_CODE_ENABLE_TASKS = v
+      try {
+        expect(isTodoV2Enabled()).toBe(false)
+      } finally {
+        delete process.env.CLAUDE_CODE_ENABLE_TASKS
+      }
+    }
   })
 })
 

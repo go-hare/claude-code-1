@@ -34,7 +34,7 @@
  *   c. Pixel-validation staleness check (sub-gated).
  */
 
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import type { CallToolResult } from '@modelcontextprotocol/server'
 import { randomUUID } from 'node:crypto'
 
 /** Detect actual image MIME type from base64 data by decoding the magic bytes. */

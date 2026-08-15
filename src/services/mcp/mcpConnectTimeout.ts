@@ -1,8 +1,11 @@
 /**
  * densable 2.1.232 #16 — MCP connect timeout helpers (y0 / Obf / IiS / oMf / k5a)
- * + auto-probe → pinned-legacy residual (classify / remaining budget / preserve
- * CONNECT_TIMEOUT). Full SDK era-negotiation transport is residual; product
- * reconnect orchestration lives in `client.ts`.
+ * + auto-probe → pinned-legacy (classify / remaining budget / preserve
+ * CONNECT_TIMEOUT). Product reconnect orchestration lives in `client.ts`.
+ * v2 `@modelcontextprotocol/client@2` emits `SdkErrorCode.EraNegotiationFailed`
+ * (`ERA_NEGOTIATION_FAILED`) and probe-timeout `REQUEST_TIMEOUT` with a
+ * "Version negotiation probe timed out" message (no densable
+ * `_anthropicProbeTimedOut` stamp required).
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
@@ -23,23 +26,33 @@ const MCP_TIMEOUT_HARD_CAP_MS = 2_147_483_647
 
 export type McpProtocolNegotiationMode = 'legacy' | 'auto'
 
+/**
+ * densable BVa versionNegotiation plan shape:
+ * `{mode:'legacy'} | {mode:'auto', probe:{timeoutMs}}`.
+ */
 export type McpProtocolNegotiationPlan =
   | { mode: 'legacy' }
-  | { mode: 'auto'; probeTimeoutMs: number }
+  | { mode: 'auto'; probe: { timeoutMs: number } }
 
 /** densable probeFellBack reason: closed | probe_timeout | probe_failed. */
 export type McpProbeFallbackReason = 'closed' | 'probe_timeout' | 'probe_failed'
 
 /**
- * densable transport probe marker (SDK residual). When present on a transport
+ * densable transport probe marker (SEA residual). When present on a transport
  * after auto connect, RequestTimeout is treated as probe_timeout not outer hang.
+ * Public client@2 does not stamp this — see message/code arms below.
  */
 export type McpProbeTimedOutTransport = {
   _anthropicProbeTimedOut?: boolean
 }
 
-/** densable `Mu.EraNegotiationFailed` surface (numeric or named). */
+/**
+ * densable `Mu.EraNegotiationFailed` named surface (SEA / older bags).
+ * Public client@2 uses `SdkErrorCode.EraNegotiationFailed === 'ERA_NEGOTIATION_FAILED'`.
+ */
 export const MCP_ERA_NEGOTIATION_FAILED_CODE = 'EraNegotiationFailed'
+/** v2 `@modelcontextprotocol/client` SdkErrorCode.EraNegotiationFailed wire value. */
+export const MCP_ERA_NEGOTIATION_FAILED_SDK_CODE = 'ERA_NEGOTIATION_FAILED'
 
 /** densable floor for pinned-legacy remaining budget. */
 export const MCP_PINNED_LEGACY_RETRY_MIN_MS = 1_000
@@ -165,10 +178,10 @@ export function resolveMcpProtocolNegotiationPlan(
   if (envMode === 'auto') {
     // densable HiS.has(e) — only http/stdio/claudeai-proxy auto-capable; else legacy.
     if (kind === 'stdio') {
-      return { mode: 'auto', probeTimeoutMs: stdioProbe }
+      return { mode: 'auto', probe: { timeoutMs: stdioProbe } }
     }
     if (kind === 'http' || kind === 'claudeai-proxy') {
-      return { mode: 'auto', probeTimeoutMs: httpProbe }
+      return { mode: 'auto', probe: { timeoutMs: httpProbe } }
     }
     return { mode: 'legacy' }
   }
@@ -176,15 +189,15 @@ export function resolveMcpProtocolNegotiationPlan(
   switch (kind) {
     case 'http':
       return isFeatureEnabled('tengu_mcp_protocol_negotiation_http', false)
-        ? { mode: 'auto', probeTimeoutMs: httpProbe }
+        ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
     case 'claudeai-proxy':
       return isFeatureEnabled('tengu_mcp_protocol_negotiation_claudeai', false)
-        ? { mode: 'auto', probeTimeoutMs: httpProbe }
+        ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
     case 'stdio':
       return isFeatureEnabled('tengu_mcp_protocol_negotiation_stdio', false)
-        ? { mode: 'auto', probeTimeoutMs: stdioProbe }
+        ? { mode: 'auto', probe: { timeoutMs: stdioProbe } }
         : { mode: 'legacy' }
     default:
       // sse / ws / ide / in-process / sdk-control / ccr-proxy → legacy
@@ -209,11 +222,16 @@ function readErrorCause(error: unknown): unknown {
 
 /**
  * densable: `ee instanceof rd && ee.code === Mu.EraNegotiationFailed`.
- * Public MCP SDK has no EraNegotiationFailed enum; accept named code / message.
+ * v2 client: `SdkError` / `SdkHttpError` with `code === 'ERA_NEGOTIATION_FAILED'`.
  */
 export function isMcpEraNegotiationFailedError(error: unknown): boolean {
   const code = readErrorCode(error)
-  if (code === MCP_ERA_NEGOTIATION_FAILED_CODE) return true
+  if (
+    code === MCP_ERA_NEGOTIATION_FAILED_CODE ||
+    code === MCP_ERA_NEGOTIATION_FAILED_SDK_CODE
+  ) {
+    return true
+  }
   if (typeof code === 'string' && /era.?negotiation.?failed/i.test(code)) {
     return true
   }
@@ -223,24 +241,55 @@ export function isMcpEraNegotiationFailedError(error: unknown): boolean {
   ) {
     return true
   }
+  // v2 SdkError name + era code already covered; also message from SdkHttpError.
+  if (
+    error &&
+    typeof error === 'object' &&
+    (error as { name?: string }).name === 'SdkError' &&
+    typeof code === 'string' &&
+    code.includes('ERA_NEGOTIATION')
+  ) {
+    return true
+  }
   return false
+}
+
+function readErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object' && 'message' in error) {
+    const m = (error as { message?: unknown }).message
+    return typeof m === 'string' ? m : ''
+  }
+  return ''
 }
 
 /**
  * densable: auto + RequestTimeout + `l?._anthropicProbeTimedOut === true`.
- * Also treat explicit CONNECT_TIMEOUT / -32001 as probe_timeout candidates when
- * the transport marker is set (SDK residual path).
+ * v2 client@2: probe timeout is `SdkErrorCode.RequestTimeout` (`REQUEST_TIMEOUT`)
+ * with message `Version negotiation probe timed out after …ms` (no stamp).
+ * Also treat explicit CONNECT_TIMEOUT / -32001 when the densable stamp is set.
  */
 export function isMcpProtocolProbeTimeoutError(
   error: unknown,
   transport?: McpProbeTimedOutTransport | null,
 ): boolean {
-  if (transport?._anthropicProbeTimedOut !== true) return false
   const code = readErrorCode(error)
+  const msg = readErrorMessage(error)
+  // Public v2 probe classifier — message is authoritative without SEA stamp.
+  if (/version negotiation probe timed out/i.test(msg)) {
+    return true
+  }
+  if (
+    (code === 'REQUEST_TIMEOUT' || code === 'RequestTimeout') &&
+    /version negotiation probe/i.test(msg)
+  ) {
+    return true
+  }
+  if (transport?._anthropicProbeTimedOut !== true) return false
   if (code === 'CONNECT_TIMEOUT' || code === -32001 || code === '-32001') {
     return true
   }
-  if (code === 'RequestTimeout') return true
+  if (code === 'RequestTimeout' || code === 'REQUEST_TIMEOUT') return true
   // McpError RequestTimeout enum value
   if (typeof code === 'number' && code === -32001) return true
   return false

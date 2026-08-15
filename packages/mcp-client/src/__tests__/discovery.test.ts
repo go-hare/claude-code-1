@@ -31,7 +31,7 @@ describe('discoverTools', () => {
 
   test('fetches and transforms tools from server', async () => {
     const mockClient = {
-      request: mock(() =>
+      listTools: mock(() =>
         Promise.resolve({
           tools: [
             {
@@ -73,7 +73,7 @@ describe('discoverTools', () => {
 
   test('respects skipPrefix option', async () => {
     const mockClient = {
-      request: mock(() =>
+      listTools: mock(() =>
         Promise.resolve({
           tools: [{ name: 'search', description: 'Search' }],
         }),
@@ -93,7 +93,7 @@ describe('discoverTools', () => {
 
   test('returns empty array on fetch error', async () => {
     const mockClient = {
-      request: mock(() => Promise.reject(new Error('Connection lost'))),
+      listTools: mock(() => Promise.reject(new Error('Connection lost'))),
     }
     const deps = createMockDeps()
 
@@ -110,7 +110,7 @@ describe('discoverTools', () => {
 
   test('sanitizes tool data', async () => {
     const mockClient = {
-      request: mock(() =>
+      listTools: mock(() =>
         Promise.resolve({
           tools: [
             {
@@ -138,15 +138,16 @@ describe('createCachedToolDiscovery', () => {
     const deps = createMockDeps()
     const { discover, cache } = createCachedToolDiscovery(deps)
 
+    const listTools = mock(() =>
+      Promise.resolve({
+        tools: [{ name: 'tool1', description: 'Tool 1' }],
+      }),
+    )
     const mockConn = {
       type: 'connected' as const,
       name: 'cached-server',
       client: {
-        request: mock(() =>
-          Promise.resolve({
-            tools: [{ name: 'tool1', description: 'Tool 1' }],
-          }),
-        ),
+        listTools,
       },
       capabilities: { tools: {} },
     } as unknown as ConnectedMCPServer
@@ -159,13 +160,13 @@ describe('createCachedToolDiscovery', () => {
     const result2 = await discover(mockConn)
     expect(result2).toHaveLength(1)
 
-    // Request was called only once
-    expect(mockConn.client.request).toHaveBeenCalledTimes(1)
+    // listTools was called only once
+    expect(listTools).toHaveBeenCalledTimes(1)
 
     // Cache delete works
     cache.delete('cached-server')
     const result3 = await discover(mockConn)
     expect(result3).toHaveLength(1)
-    expect(mockConn.client.request).toHaveBeenCalledTimes(2)
+    expect(listTools).toHaveBeenCalledTimes(2)
   })
 })

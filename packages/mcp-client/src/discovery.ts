@@ -1,11 +1,7 @@
 // MCP tool discovery — fetch and process tools from connected MCP servers
 // Extracted from src/services/mcp/client.ts (fetchToolsForClient)
 
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import {
-  ListToolsResultSchema,
-  type ListToolsResult,
-} from '@modelcontextprotocol/sdk/types.js'
+import type { Client } from '@modelcontextprotocol/client'
 import type { CoreTool } from '@claude-code/agent-tools'
 import type { ConnectedMCPServer } from './types.js'
 import type { McpClientDependencies } from './interfaces.js'
@@ -54,13 +50,11 @@ export async function discoverTools(
   }
 
   try {
-    const result = (await client.request(
-      { method: 'tools/list' },
-      ListToolsResultSchema,
-    )) as ListToolsResult
+    // densable/v2: Client.listTools aggregates pages
+    const result = await client.listTools(undefined, { cacheMode: 'refresh' })
 
     // Sanitize tool data from MCP server
-    const toolsToProcess = recursivelySanitizeUnicode(result.tools)
+    const toolsToProcess = recursivelySanitizeUnicode(result.tools ?? [])
 
     return toolsToProcess.map((tool): CoreTool => {
       const fullyQualifiedName = buildMcpToolName(serverName, tool.name)

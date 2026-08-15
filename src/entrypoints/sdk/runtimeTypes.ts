@@ -6,11 +6,8 @@
  * re-exported from `agentSdkTypes.ts` (densable fVp / agent-sdk hl product).
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type {
-  CallToolResult,
-  ToolAnnotations,
-} from '@modelcontextprotocol/sdk/types.js'
+import type { McpServer } from '@modelcontextprotocol/server'
+import type { CallToolResult, ToolAnnotations } from 'src/services/mcp/types.js'
 
 export type AnyZodRawShape = Record<string, unknown>
 export type InferShape<T extends AnyZodRawShape> = { [K in keyof T]: unknown }

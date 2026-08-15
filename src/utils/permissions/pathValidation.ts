@@ -12,11 +12,7 @@ import {
 import { containsPathTraversal } from '../path.js'
 import { SandboxManager } from '../sandbox/sandbox-adapter.js'
 import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.js'
-import {
-  expandCygwinCookieChain,
-  findCygwinEmulatedSymlink,
-  formatCygwinSymlinkMessage,
-} from './cygwinSymlinkCookie.js'
+// densable 2.1.233: cygwinSymlinkCookie product path reverted; module kept for residual/tests.
 import {
   checkEditableInternalPath,
   checkPathSafetyForAutoEdit,
@@ -527,47 +523,12 @@ export function validatePath(
     ? pathForResolve
     : resolve(cwd, pathForResolve)
 
-  // densable 2.1.232 #14 IRr Windows branch: Yun → Xun → always ask on cookie.
-  // Git Bash follows Cygwin-emulated `!<symlink>` cookies and .lnk files that
-  // Node treats as ordinary files — TOCTOU if we only realpath via Node.
-  if (getPlatform() === 'windows') {
-    const fs = getFsImplementation()
-    let cookieRemainder: string[] | undefined
-    const cookieHit = findCygwinEmulatedSymlink(fs, absolutePath, {
-      onCookieRemainder: rem => {
-        cookieRemainder = rem
-      },
-    })
-    if (cookieHit !== undefined) {
-      const permissionType = operationType === 'read' ? 'read' : 'edit'
-      const chain = expandCygwinCookieChain(fs, cookieHit, cookieRemainder)
-      const pathsToScan = [absolutePath, cookieHit, ...chain.scanCandidates]
-      for (const p of pathsToScan) {
-        const denyRule = matchingRuleForInput(
-          p,
-          toolPermissionContext,
-          permissionType,
-          'deny',
-        )
-        if (denyRule !== null) {
-          return {
-            allowed: false,
-            resolvedPath: cookieHit,
-            decisionReason: { type: 'rule', rule: denyRule },
-          }
-        }
-      }
-      return {
-        allowed: false,
-        resolvedPath: cookieHit,
-        decisionReason: {
-          type: 'safetyCheck',
-          reason: formatCygwinSymlinkMessage(chain.displayTarget),
-          classifierApprovable: false,
-        },
-      }
-    }
-  }
+  // densable 2.1.233: REVERTED 2.1.232 Windows Cygwin/Git-Bash cookie+.lnk
+  // permission gate. Official: "Reverted the 2.1.232 Bash permission changes
+  // for Cygwin-style symlinks on Windows and for input redirections (`< file`);
+  // a narrower version will return in a later release."
+  // Module cygwinSymlinkCookie.ts + tests retained for residual/revive; product
+  // validatePath no longer calls findCygwinEmulatedSymlink until densable returns.
 
   const { resolvedPath, isCanonical } = safeResolvePath(
     getFsImplementation(),

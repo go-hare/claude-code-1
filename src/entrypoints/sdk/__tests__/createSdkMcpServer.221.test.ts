@@ -4,7 +4,7 @@
  * null-proto McpServer maps here.
  */
 import { describe, expect, test } from 'bun:test'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { Client } from '@modelcontextprotocol/client'
 import { createLinkedTransportPair } from '@claude-code/mcp-client'
 import { z } from 'zod/v4'
 import { createSdkMcpServer, tool } from '../createSdkMcpServer.js'

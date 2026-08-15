@@ -83,6 +83,11 @@ import {
   planStreamCloseAfterComplete,
   withStreamKeepAlivePings,
 } from '../../utils/streamKeepAlive.js'
+import {
+  planThinkingOnlyStreamRetry,
+  ThinkingOnlyStreamRetryError,
+} from './thinkingOnlyStreamRetry.js'
+import { sleep } from '../../utils/sleep.js'
 import { getOrCreateUserID } from '../../utils/config.js'
 import {
   CAPPED_DEFAULT_MAX_TOKENS,
@@ -1303,6 +1308,17 @@ async function* queryModel(
         options.model)
       : options.model
 
+  // densable 2.1.233 #16 FRi — print stderr [claude-code:unrecognized_model]
+  // once per stripped model id (before tool schema build).
+  try {
+    const { signalUnrecognizedModel } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/model/unrecognizedModelSignal.js') as typeof import('src/utils/model/unrecognizedModelSignal.js')
+    signalUnrecognizedModel(options.model, options.querySource)
+  } catch {
+    // optional diagnostic
+  }
+
   queryCheckpoint('query_tool_schema_build_start')
   const isAgenticQuery =
     options.querySource.startsWith('repl_main_thread') ||
@@ -2273,740 +2289,2064 @@ async function* queryModel(
     agentId: options.agentId,
   })
 
-  try {
-    queryCheckpoint('query_client_creation_start')
-    const generator = withRetry(
-      () =>
-        getAnthropicClient({
-          maxRetries: 0, // Disabled auto-retry in favor of manual implementation
-          model: options.model,
-          fetchOverride: options.fetchOverride,
-          source: options.querySource,
-        }),
-      async (anthropic, attempt, context) => {
-        attemptNumber = attempt
-        isFastModeRequest = context.fastMode ?? false
-        start = Date.now()
-        attemptStartTimes.push(start)
-        // Client has been created by withRetry's getClient() call. This fires
-        // once per attempt; on retries the client is usually cached (withRetry
-        // only calls getClient() again after auth errors), so the delta from
-        // client_creation_start is meaningful on attempt 1.
-        queryCheckpoint('query_client_creation_end')
+  // densable 2.1.232 #26 — Tn/oo thinking-only stream re-loop (Po=1, sr=2)
+  let thinkingOnlyWatchdogRetryCount = 0
+  let thinkingOnlyStaleRetryCount = 0
 
-        const params = paramsFromContext(context)
-        captureAPIRequest(params, options.querySource) // Capture for bug reports
+  // densable labeled stream loop (`e:`): withRetry + for-await + partial path.
+  while (true) {
+    try {
+      try {
+        queryCheckpoint('query_client_creation_start')
+        const generator = withRetry(
+          () =>
+            getAnthropicClient({
+              maxRetries: 0, // Disabled auto-retry in favor of manual implementation
+              model: options.model,
+              fetchOverride: options.fetchOverride,
+              source: options.querySource,
+            }),
+          async (anthropic, attempt, context) => {
+            attemptNumber = attempt
+            isFastModeRequest = context.fastMode ?? false
+            start = Date.now()
+            attemptStartTimes.push(start)
+            // Client has been created by withRetry's getClient() call. This fires
+            // once per attempt; on retries the client is usually cached (withRetry
+            // only calls getClient() again after auth errors), so the delta from
+            // client_creation_start is meaningful on attempt 1.
+            queryCheckpoint('query_client_creation_end')
 
-        maxOutputTokens = params.max_tokens
+            const params = paramsFromContext(context)
+            captureAPIRequest(params, options.querySource) // Capture for bug reports
 
-        // Fire immediately before the fetch is dispatched. .withResponse() below
-        // awaits until response headers arrive, so this MUST be before the await
-        // or the "Network TTFB" phase measurement is wrong.
-        queryCheckpoint('query_api_request_sent')
-        if (!options.agentId) {
-          headlessProfilerCheckpoint('api_request_sent')
-        }
+            maxOutputTokens = params.max_tokens
 
-        // Generate and track client request ID so timeouts (which return no
-        // server request ID) can still be correlated with server logs.
-        // First-party only — 3P providers don't log it (inc-4029 class).
-        clientRequestId =
-          getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
-            ? randomUUID()
-            : undefined
-
-        // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
-        // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
-        // since we handle tool input accumulation ourselves
-        try {
-          const result = await anthropic.beta.messages
-            .create(
-              { ...params, stream: true },
-              {
-                signal,
-                ...(clientRequestId && {
-                  headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
-                }),
-              },
-            )
-            .withResponse()
-          queryCheckpoint('query_response_headers_received')
-          streamRequestId = result.request_id
-          streamResponse = result.response
-          return result.data
-        } catch (createError) {
-          // densable vi() — sticky mid-conv system / api_system cache demote.
-          // Latch + rewrite body/betas, then MidConvSystemRetryError → withRetry continue.
-          if (createError instanceof APIError && createError.status === 400) {
-            const roleRejected = isMidConvSystemRoleRejected(createError)
-            if (midConvFallback && roleRejected) {
-              messagesForAPI = midConvFallback()
-              midConvFallback = null
-              latchMidConvSystemRejected()
-              // densable: p = p.filter o3; getAllModelBetas is memoized — clear so
-              // subsequent turns re-run J8t against sticky reject.
-              clearBetasCaches()
-              betas = betas.filter(
-                b => b !== MID_CONVERSATION_SYSTEM_BETA_HEADER,
-              )
-              logForDebugging(
-                '[mid-conv-system] server rejected role:"system" — falling back to a body with no {role:"system"} turn, sticky-rejecting the beta until /clear or /compact',
-                { level: 'warn' },
-              )
-              logEvent('tengu_mid_conv_system_fallback_retry', {
-                per_turn_effort:
-                  false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              })
-              throw new MidConvSystemRetryError('mid-conv-system')
+            // Fire immediately before the fetch is dispatched. .withResponse() below
+            // awaits until response headers arrive, so this MUST be before the await
+            // or the "Network TTFB" phase measurement is wrong.
+            queryCheckpoint('query_api_request_sent')
+            if (!options.agentId) {
+              headlessProfilerCheckpoint('api_request_sent')
             }
-            // densable e9i: proxy rejected cache_control on api_system tail
-            // only when we actually promoted cache_control onto a system message.
-            // densable Q — last request put cache_control on a role:system block.
-            // MessageParam is user|assistant; api_system is cast through as system.
-            const requestHasApiSystemCache =
-              shouldCacheControlOnApiSystem() &&
-              (
-                params.messages as Array<{
-                  role?: string
-                  content?: unknown
-                }>
-              ).some(m => {
-                if (m.role !== 'system' || !Array.isArray(m.content)) {
-                  return false
-                }
-                return (m.content as Array<Record<string, unknown>>).some(
-                  block =>
-                    block &&
-                    typeof block === 'object' &&
-                    'cache_control' in block &&
-                    block.cache_control != null,
+
+            // Generate and track client request ID so timeouts (which return no
+            // server request ID) can still be correlated with server logs.
+            // First-party only — 3P providers don't log it (inc-4029 class).
+            clientRequestId =
+              getAPIProvider() === 'firstParty' &&
+              isFirstPartyAnthropicBaseUrl()
+                ? randomUUID()
+                : undefined
+
+            // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
+            // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
+            // since we handle tool input accumulation ourselves
+            try {
+              const result = await anthropic.beta.messages
+                .create(
+                  { ...params, stream: true },
+                  {
+                    signal,
+                    ...(clientRequestId && {
+                      headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
+                    }),
+                  },
                 )
-              })
-            if (
-              requestHasApiSystemCache &&
-              isApiSystemCacheControlRejected(createError)
-            ) {
-              latchMidConvCachePromotionRejected()
-              logForDebugging(
-                '[mid-conv-system] proxy rejected cache_control on the api_system tail — demoting the breakpoint to the trailing message for this conversation',
-                { level: 'warn' },
-              )
-              logEvent('tengu_mid_conv_system_fallback_retry', {
-                // densable Be("api_midconv_cache_proxy","proxy_rejected")
-                // local analytics: same event family, reason via string field
-                per_turn_effort:
-                  false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              })
-              throw new MidConvSystemRetryError('api-system-cache-demote')
+                .withResponse()
+              queryCheckpoint('query_response_headers_received')
+              streamRequestId = result.request_id
+              streamResponse = result.response
+              return result.data
+            } catch (createError) {
+              // densable vi() — sticky mid-conv system / api_system cache demote.
+              // Latch + rewrite body/betas, then MidConvSystemRetryError → withRetry continue.
+              if (
+                createError instanceof APIError &&
+                createError.status === 400
+              ) {
+                const roleRejected = isMidConvSystemRoleRejected(createError)
+                if (midConvFallback && roleRejected) {
+                  messagesForAPI = midConvFallback()
+                  midConvFallback = null
+                  latchMidConvSystemRejected()
+                  // densable: p = p.filter o3; getAllModelBetas is memoized — clear so
+                  // subsequent turns re-run J8t against sticky reject.
+                  clearBetasCaches()
+                  betas = betas.filter(
+                    b => b !== MID_CONVERSATION_SYSTEM_BETA_HEADER,
+                  )
+                  logForDebugging(
+                    '[mid-conv-system] server rejected role:"system" — falling back to a body with no {role:"system"} turn, sticky-rejecting the beta until /clear or /compact',
+                    { level: 'warn' },
+                  )
+                  logEvent('tengu_mid_conv_system_fallback_retry', {
+                    per_turn_effort:
+                      false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  })
+                  throw new MidConvSystemRetryError('mid-conv-system')
+                }
+                // densable e9i: proxy rejected cache_control on api_system tail
+                // only when we actually promoted cache_control onto a system message.
+                // densable Q — last request put cache_control on a role:system block.
+                // MessageParam is user|assistant; api_system is cast through as system.
+                const requestHasApiSystemCache =
+                  shouldCacheControlOnApiSystem() &&
+                  (
+                    params.messages as Array<{
+                      role?: string
+                      content?: unknown
+                    }>
+                  ).some(m => {
+                    if (m.role !== 'system' || !Array.isArray(m.content)) {
+                      return false
+                    }
+                    return (m.content as Array<Record<string, unknown>>).some(
+                      block =>
+                        block &&
+                        typeof block === 'object' &&
+                        'cache_control' in block &&
+                        block.cache_control != null,
+                    )
+                  })
+                if (
+                  requestHasApiSystemCache &&
+                  isApiSystemCacheControlRejected(createError)
+                ) {
+                  latchMidConvCachePromotionRejected()
+                  logForDebugging(
+                    '[mid-conv-system] proxy rejected cache_control on the api_system tail — demoting the breakpoint to the trailing message for this conversation',
+                    { level: 'warn' },
+                  )
+                  logEvent('tengu_mid_conv_system_fallback_retry', {
+                    // densable Be("api_midconv_cache_proxy","proxy_rejected")
+                    // local analytics: same event family, reason via string field
+                    per_turn_effort:
+                      false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  })
+                  throw new MidConvSystemRetryError('api-system-cache-demote')
+                }
+              }
+              throw createError
             }
+          },
+          {
+            model: options.model,
+            fallbackModel: options.fallbackModel,
+            thinkingConfig,
+            ...(isFastModeEnabled() ? { fastMode: isFastMode } : false),
+            signal,
+            querySource: options.querySource,
+          },
+        )
+
+        let e
+        do {
+          e = await generator.next()
+
+          // yield API error messages (the stream has a 'controller' property, error messages don't)
+          if (!('controller' in e.value)) {
+            yield e.value
           }
-          throw createError
-        }
-      },
-      {
-        model: options.model,
-        fallbackModel: options.fallbackModel,
-        thinkingConfig,
-        ...(isFastModeEnabled() ? { fastMode: isFastMode } : false),
-        signal,
-        querySource: options.querySource,
-      },
-    )
+        } while (!e.done)
+        stream = e.value as Stream<BetaRawMessageStreamEvent>
 
-    let e
-    do {
-      e = await generator.next()
+        // reset state
+        newMessages.length = 0
+        ttftMs = 0
+        partialMessage = undefined
+        contentBlocks.length = 0
+        textDeltas.clear()
+        usage = EMPTY_USAGE
+        stopReason = null
+        // densable To / at — #5 close-after-complete (Br=stopReason)
+        let messageDeltaCompleted = false
+        let openContentBlockIndex: number | null = null
+        streamCostCredit = 'none'
+        isAdvisorInProgress = false
 
-      // yield API error messages (the stream has a 'controller' property, error messages don't)
-      if (!('controller' in e.value)) {
-        yield e.value
-      }
-    } while (!e.done)
-    stream = e.value as Stream<BetaRawMessageStreamEvent>
-
-    // reset state
-    newMessages.length = 0
-    ttftMs = 0
-    partialMessage = undefined
-    contentBlocks.length = 0
-    textDeltas.clear()
-    usage = EMPTY_USAGE
-    stopReason = null
-    // densable To / at — #5 close-after-complete (Br=stopReason)
-    let messageDeltaCompleted = false
-    let openContentBlockIndex: number | null = null
-    streamCostCredit = 'none'
-    isAdvisorInProgress = false
-
-    // Streaming idle timeout watchdog: abort the stream if no chunks arrive
-    // for STREAM_IDLE_TIMEOUT_MS. Unlike the stall detection below (which only
-    // fires when the *next* chunk arrives), this uses setTimeout to actively
-    // kill hung streams. Without this, a silently dropped connection can hang
-    // the session indefinitely since the SDK's request timeout only covers the
-    // initial fetch(), not the streaming body.
-    // Official 2.1.207: STREAM_WATCHDOG default ON (va); IAi floor 5 min.
-    // BYTE body idle densable lives in streamWatchdogGates (Zgc/k_h/HAi).
-    // densable 2.1.214 #39: Rn = at._chunkTimes; ss poll Avs + advisor Vr/Gt.
-    let streamWatchdogEnabled = !isEnvDefinedFalsy(
-      process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
-    )
-    let STREAM_IDLE_TIMEOUT_MS = Math.max(
-      parseInt(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '', 10) || 0,
-      300_000,
-    )
-    let byteStreamIdleTimeoutMs = STREAM_IDLE_TIMEOUT_MS
-    try {
-      const {
-        isStreamWatchdogEnabled,
-        resolveStreamIdleTimeoutMs,
-        resolveByteStreamIdleTimeoutMs,
-      } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../../utils/streamWatchdogGates.js') as typeof import('../../utils/streamWatchdogGates.js')
-      streamWatchdogEnabled = isStreamWatchdogEnabled()
-      STREAM_IDLE_TIMEOUT_MS = resolveStreamIdleTimeoutMs()
-      byteStreamIdleTimeoutMs = resolveByteStreamIdleTimeoutMs({
-        provider: getAPIProvider(),
-      })
-    } catch {
-      // densable optional — keep inline fallbacks above
-    }
-    const STREAM_IDLE_WARNING_MS = STREAM_IDLE_TIMEOUT_MS / 2
-    // densable: Rn = at?._chunkTimes; la = performance.now()
-    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-    const streamResponseForChunkTimes = streamResponse as Response | undefined
-    let chunkTimes: { lastAt: number } | undefined
-    try {
-      const { getResponseChunkTimes } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../../utils/bodyIdleWatchdog.js') as typeof import('../../utils/bodyIdleWatchdog.js')
-      chunkTimes = getResponseChunkTimes(streamResponseForChunkTimes)
-    } catch {
-      chunkTimes = undefined
-    }
-    const streamLoopStartedAt = performance.now()
-    let stallPollTimer: ReturnType<typeof setTimeout> | null = null
-    let stallStatusActive = false
-    let stallPollMs = 20_000
-    let stallDt = byteStreamIdleTimeoutMs
-    let stallGraceMs = 0
-    try {
-      const { ADVISOR_STALL_POLL_MS, resolveAdvisorStallGraceMs } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../../utils/advisorNetworkStall.js') as typeof import('../../utils/advisorNetworkStall.js')
-      stallPollMs = ADVISOR_STALL_POLL_MS
-      const grace = resolveAdvisorStallGraceMs({
-        byteIdleTimeoutMs: byteStreamIdleTimeoutMs,
-        streamWatchdogEnabled,
-        streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
-        pollMs: stallPollMs,
-      })
-      stallDt = grace.dt
-      stallGraceMs = grace.graceMs
-    } catch {
-      // pure helper optional
-    }
-    let streamIdleAborted = false
-    // performance.now() snapshot when watchdog fires, for measuring abort propagation delay
-    let streamWatchdogFiredAt: number | null = null
-    let streamIdleWarningTimer: ReturnType<typeof setTimeout> | null = null
-    let streamIdleTimer: ReturnType<typeof setTimeout> | null = null
-    // densable $o — clear stall + stream idle timers; clear stalled UI if shown
-    function clearStreamIdleTimers(): void {
-      if (stallPollTimer !== null) {
-        clearTimeout(stallPollTimer)
-        stallPollTimer = null
-      }
-      if (stallStatusActive) {
-        stallStatusActive = false
-        options.onRetryStatus?.(null)
-      }
-      if (streamIdleWarningTimer !== null) {
-        clearTimeout(streamIdleWarningTimer)
-        streamIdleWarningTimer = null
-      }
-      if (streamIdleTimer !== null) {
-        clearTimeout(streamIdleTimer)
-        streamIdleTimer = null
-      }
-    }
-    // densable ss — schedule Avs poll on Rn.lastAt with advisor Vr grace
-    function scheduleNetworkStallPoll(): void {
-      if (!options.onRetryStatus || !chunkTimes) return
-      const lastAtAtSchedule = chunkTimes.lastAt
-      const armedAt = performance.now()
-      stallPollTimer = setTimeout(() => {
-        // densable: if (performance.now()-sl < Avs/2) return
-        if (performance.now() - armedAt < stallPollMs / 2) return
+        // Streaming idle timeout watchdog: abort the stream if no chunks arrive
+        // for STREAM_IDLE_TIMEOUT_MS. Unlike the stall detection below (which only
+        // fires when the *next* chunk arrives), this uses setTimeout to actively
+        // kill hung streams. Without this, a silently dropped connection can hang
+        // the session indefinitely since the SDK's request timeout only covers the
+        // initial fetch(), not the streaming body.
+        // Official 2.1.207: STREAM_WATCHDOG default ON (va); IAi floor 5 min.
+        // BYTE body idle densable lives in streamWatchdogGates (Zgc/k_h/HAi).
+        // densable 2.1.214 #39: Rn = at._chunkTimes; ss poll Avs + advisor Vr/Gt.
+        let streamWatchdogEnabled = !isEnvDefinedFalsy(
+          process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
+        )
+        let STREAM_IDLE_TIMEOUT_MS = Math.max(
+          parseInt(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '', 10) || 0,
+          300_000,
+        )
+        let byteStreamIdleTimeoutMs = STREAM_IDLE_TIMEOUT_MS
         try {
-          const { decideAdvisorNetworkStallPoll } =
+          const {
+            isStreamWatchdogEnabled,
+            resolveStreamIdleTimeoutMs,
+            resolveByteStreamIdleTimeoutMs,
+          } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/streamWatchdogGates.js') as typeof import('../../utils/streamWatchdogGates.js')
+          streamWatchdogEnabled = isStreamWatchdogEnabled()
+          STREAM_IDLE_TIMEOUT_MS = resolveStreamIdleTimeoutMs()
+          byteStreamIdleTimeoutMs = resolveByteStreamIdleTimeoutMs({
+            provider: getAPIProvider(),
+          })
+        } catch {
+          // densable optional — keep inline fallbacks above
+        }
+        const STREAM_IDLE_WARNING_MS = STREAM_IDLE_TIMEOUT_MS / 2
+        // densable: Rn = at?._chunkTimes; la = performance.now()
+        // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+        const streamResponseForChunkTimes = streamResponse as
+          | Response
+          | undefined
+        let chunkTimes: { lastAt: number } | undefined
+        try {
+          const { getResponseChunkTimes } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/bodyIdleWatchdog.js') as typeof import('../../utils/bodyIdleWatchdog.js')
+          chunkTimes = getResponseChunkTimes(streamResponseForChunkTimes)
+        } catch {
+          chunkTimes = undefined
+        }
+        const streamLoopStartedAt = performance.now()
+        let stallPollTimer: ReturnType<typeof setTimeout> | null = null
+        let stallStatusActive = false
+        let stallPollMs = 20_000
+        let stallDt = byteStreamIdleTimeoutMs
+        let stallGraceMs = 0
+        try {
+          const { ADVISOR_STALL_POLL_MS, resolveAdvisorStallGraceMs } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             require('../../utils/advisorNetworkStall.js') as typeof import('../../utils/advisorNetworkStall.js')
-          const decision = decideAdvisorNetworkStallPoll({
-            lastAtAtSchedule,
-            lastAtNow: chunkTimes!.lastAt,
-            streamStartedAt: streamLoopStartedAt,
-            now: performance.now(),
-            wallNow: Date.now(),
-            isAdvisorInProgress,
-            graceMs: stallGraceMs,
-            dt: stallDt,
+          stallPollMs = ADVISOR_STALL_POLL_MS
+          const grace = resolveAdvisorStallGraceMs({
+            byteIdleTimeoutMs: byteStreamIdleTimeoutMs,
+            streamWatchdogEnabled,
+            streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
+            pollMs: stallPollMs,
           })
-          if (decision.action === 'reschedule') {
-            scheduleNetworkStallPoll()
+          stallDt = grace.dt
+          stallGraceMs = grace.graceMs
+        } catch {
+          // pure helper optional
+        }
+        let streamIdleAborted = false
+        // performance.now() snapshot when watchdog fires, for measuring abort propagation delay
+        let streamWatchdogFiredAt: number | null = null
+        let streamIdleWarningTimer: ReturnType<typeof setTimeout> | null = null
+        let streamIdleTimer: ReturnType<typeof setTimeout> | null = null
+        // densable $o — clear stall + stream idle timers; clear stalled UI if shown
+        function clearStreamIdleTimers(): void {
+          if (stallPollTimer !== null) {
+            clearTimeout(stallPollTimer)
+            stallPollTimer = null
+          }
+          if (stallStatusActive) {
+            stallStatusActive = false
+            options.onRetryStatus?.(null)
+          }
+          if (streamIdleWarningTimer !== null) {
+            clearTimeout(streamIdleWarningTimer)
+            streamIdleWarningTimer = null
+          }
+          if (streamIdleTimer !== null) {
+            clearTimeout(streamIdleTimer)
+            streamIdleTimer = null
+          }
+        }
+        // densable ss — schedule Avs poll on Rn.lastAt with advisor Vr grace
+        function scheduleNetworkStallPoll(): void {
+          if (!options.onRetryStatus || !chunkTimes) return
+          const lastAtAtSchedule = chunkTimes.lastAt
+          const armedAt = performance.now()
+          stallPollTimer = setTimeout(() => {
+            // densable: if (performance.now()-sl < Avs/2) return
+            if (performance.now() - armedAt < stallPollMs / 2) return
+            try {
+              const { decideAdvisorNetworkStallPoll } =
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                require('../../utils/advisorNetworkStall.js') as typeof import('../../utils/advisorNetworkStall.js')
+              const decision = decideAdvisorNetworkStallPoll({
+                lastAtAtSchedule,
+                lastAtNow: chunkTimes!.lastAt,
+                streamStartedAt: streamLoopStartedAt,
+                now: performance.now(),
+                wallNow: Date.now(),
+                isAdvisorInProgress,
+                graceMs: stallGraceMs,
+                dt: stallDt,
+              })
+              if (decision.action === 'reschedule') {
+                scheduleNetworkStallPoll()
+                return
+              }
+              stallStatusActive = true
+              options.onRetryStatus?.(decision.status)
+            } catch {
+              // helper unavailable — skip UI
+            }
+          }, stallPollMs)
+          stallPollTimer.unref?.()
+        }
+        // densable ks — $o(); ss(); stream watchdog timers if Te
+        function resetStreamIdleTimer(): void {
+          clearStreamIdleTimers()
+          scheduleNetworkStallPoll()
+          if (!streamWatchdogEnabled) {
             return
           }
-          stallStatusActive = true
-          options.onRetryStatus?.(decision.status)
-        } catch {
-          // helper unavailable — skip UI
-        }
-      }, stallPollMs)
-      stallPollTimer.unref?.()
-    }
-    // densable ks — $o(); ss(); stream watchdog timers if Te
-    function resetStreamIdleTimer(): void {
-      clearStreamIdleTimers()
-      scheduleNetworkStallPoll()
-      if (!streamWatchdogEnabled) {
-        return
-      }
-      streamIdleWarningTimer = setTimeout(
-        warnMs => {
-          logForDebugging(
-            `Streaming idle warning: no chunks received for ${warnMs / 1000}s`,
-            { level: 'warn' },
+          streamIdleWarningTimer = setTimeout(
+            warnMs => {
+              logForDebugging(
+                `Streaming idle warning: no chunks received for ${warnMs / 1000}s`,
+                { level: 'warn' },
+              )
+              logForDiagnosticsNoPII('warn', 'cli_streaming_idle_warning')
+            },
+            STREAM_IDLE_WARNING_MS,
+            STREAM_IDLE_WARNING_MS,
           )
-          logForDiagnosticsNoPII('warn', 'cli_streaming_idle_warning')
-        },
-        STREAM_IDLE_WARNING_MS,
-        STREAM_IDLE_WARNING_MS,
-      )
-      streamIdleTimer = setTimeout(() => {
-        streamIdleAborted = true
-        streamWatchdogFiredAt = performance.now()
-        logForDebugging(
-          `Streaming idle timeout: no chunks received for ${STREAM_IDLE_TIMEOUT_MS / 1000}s, aborting stream`,
-          { level: 'error' },
-        )
-        logForDiagnosticsNoPII('error', 'cli_streaming_idle_timeout')
-        logEvent('tengu_streaming_idle_timeout', {
-          model:
-            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          request_id: (streamRequestId ??
-            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          timeout_ms: STREAM_IDLE_TIMEOUT_MS,
-        })
-        releaseStreamResources()
-      }, STREAM_IDLE_TIMEOUT_MS)
-    }
-    resetStreamIdleTimer()
-
-    // Official $Qn("api_call", HOn(agentContext) ?? (isBackgroundAgent ? agentId))
-    startSessionActivity('api_call', sessionActivityAgentId)
-    try {
-      // stream in and accumulate state
-      let isFirstChunk = true
-      let lastEventTime: number | null = null // Set after first chunk to avoid measuring TTFB as a stall
-      const STALL_THRESHOLD_MS = 30_000 // 30 seconds
-      let totalStallTime = 0
-      let stallCount = 0
-
-      // densable Tfb(Ne, So) — synthetic keep-alive pings when body bytes advance
-      // without SSE events (custom gateway / ANTHROPIC_BASE_URL proxies).
-      for await (const partOrPing of withStreamKeepAlivePings(
-        stream,
-        chunkTimes,
-      )) {
-        // densable Gi() then _0r(us) → yield stream_event + continue
-        resetStreamIdleTimer()
-        if (isStreamPingEvent(partOrPing)) {
-          yield {
-            type: 'stream_event',
-            event: partOrPing,
-          } as StreamEvent
-          continue
-        }
-        const part = partOrPing
-        const now = Date.now()
-
-        // Detect and log streaming stalls (only after first event to avoid counting TTFB)
-        if (lastEventTime !== null) {
-          const timeSinceLastEvent = now - lastEventTime
-          if (timeSinceLastEvent > STALL_THRESHOLD_MS) {
-            stallCount++
-            totalStallTime += timeSinceLastEvent
+          streamIdleTimer = setTimeout(() => {
+            streamIdleAborted = true
+            streamWatchdogFiredAt = performance.now()
             logForDebugging(
-              `Streaming stall detected: ${(timeSinceLastEvent / 1000).toFixed(1)}s gap between events (stall #${stallCount})`,
+              `Streaming idle timeout: no chunks received for ${STREAM_IDLE_TIMEOUT_MS / 1000}s, aborting stream`,
+              { level: 'error' },
+            )
+            logForDiagnosticsNoPII('error', 'cli_streaming_idle_timeout')
+            logEvent('tengu_streaming_idle_timeout', {
+              model:
+                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              request_id: (streamRequestId ??
+                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              timeout_ms: STREAM_IDLE_TIMEOUT_MS,
+            })
+            releaseStreamResources()
+          }, STREAM_IDLE_TIMEOUT_MS)
+        }
+        resetStreamIdleTimer()
+
+        // Official $Qn("api_call", HOn(agentContext) ?? (isBackgroundAgent ? agentId))
+        startSessionActivity('api_call', sessionActivityAgentId)
+        try {
+          // stream in and accumulate state
+          let isFirstChunk = true
+          let lastEventTime: number | null = null // Set after first chunk to avoid measuring TTFB as a stall
+          const STALL_THRESHOLD_MS = 30_000 // 30 seconds
+          let totalStallTime = 0
+          let stallCount = 0
+
+          // densable Tfb(Ne, So) — synthetic keep-alive pings when body bytes advance
+          // without SSE events (custom gateway / ANTHROPIC_BASE_URL proxies).
+          for await (const partOrPing of withStreamKeepAlivePings(
+            stream,
+            chunkTimes,
+          )) {
+            // densable Gi() then _0r(us) → yield stream_event + continue
+            resetStreamIdleTimer()
+            if (isStreamPingEvent(partOrPing)) {
+              yield {
+                type: 'stream_event',
+                event: partOrPing,
+              } as StreamEvent
+              continue
+            }
+            const part = partOrPing
+            const now = Date.now()
+
+            // Detect and log streaming stalls (only after first event to avoid counting TTFB)
+            if (lastEventTime !== null) {
+              const timeSinceLastEvent = now - lastEventTime
+              if (timeSinceLastEvent > STALL_THRESHOLD_MS) {
+                stallCount++
+                totalStallTime += timeSinceLastEvent
+                logForDebugging(
+                  `Streaming stall detected: ${(timeSinceLastEvent / 1000).toFixed(1)}s gap between events (stall #${stallCount})`,
+                  { level: 'warn' },
+                )
+                logEvent('tengu_streaming_stall', {
+                  stall_duration_ms: timeSinceLastEvent,
+                  stall_count: stallCount,
+                  total_stall_time_ms: totalStallTime,
+                  event_type:
+                    part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  model:
+                    options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  request_id: (streamRequestId ??
+                    'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+              }
+            }
+            lastEventTime = now
+
+            if (isFirstChunk) {
+              logForDebugging('Stream started - received first chunk')
+              queryCheckpoint('query_first_chunk_received')
+              if (!options.agentId) {
+                headlessProfilerCheckpoint('first_chunk')
+              }
+              endQueryProfile()
+              isFirstChunk = false
+            }
+
+            // densable V2s/ikd: materialize server-lane fallback content_block_start
+            // into QueryEvent server_fallback (midStream salvage / deferred hd).
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const {
+                parseServerFallbackContentBlockStart,
+                isMalformedServerFallbackBlockStart,
+                buildMidStreamServerFallbackEvent,
+                isServerFallbackHopReason,
+              } =
+                require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+              const hop = parseServerFallbackContentBlockStart(part)
+              const malformed =
+                !hop && isMalformedServerFallbackBlockStart(part)
+              if (hop || malformed) {
+                isAdvisorInProgress = false
+              }
+              if (hop) {
+                logEvent('tengu_rotunda_pennant_materialized', {
+                  armed: options.serverRefusalFallback !== undefined,
+                  block_index: hop.index ?? -1,
+                  non_streaming: false,
+                })
+                // densable: if not armed, ignore hop (continue without yield)
+                if (options.serverRefusalFallback === undefined) {
+                  continue
+                }
+                if (isServerFallbackHopReason(hop.reason)) {
+                  // hi — server hop served on refusal/sticky
+                }
+                lastServerFallbackHop = hop
+                // densable: rewrite partial + yielded models to hop.model
+                if (partialMessage !== undefined) {
+                  partialMessage = {
+                    ...(partialMessage as object),
+                    model: hop.model,
+                  } as typeof partialMessage
+                }
+                for (const msg of newMessages) {
+                  if (msg.message) {
+                    msg.message.model = hop.model as typeof msg.message.model
+                  }
+                }
+                if (newMessages.length === 0) {
+                  // densable hd — defer until Xs flush (no partials yet)
+                  deferredServerFallbackHop = hop
+                } else if (!isServerFallbackHopReason(hop.reason)) {
+                  serverFallbackEmitted = true
+                  deferredServerFallbackHop = undefined
+                  yield buildMidStreamServerFallbackEvent({
+                    hop,
+                    messages: [],
+                    requestId: streamRequestId ?? null,
+                  }) as unknown as StreamEvent
+                } else {
+                  serverFallbackEmitted = true
+                  deferredServerFallbackHop = undefined
+                  const sf = buildMidStreamServerFallbackEvent({
+                    hop,
+                    messages: newMessages as unknown as Array<{
+                      uuid?: string
+                      isApiErrorMessage?: boolean
+                      message?: { content?: unknown; model?: string }
+                    }>,
+                    requestId: streamRequestId ?? null,
+                  })
+                  // densable: drop discarded (tool-bearing) from Al / He
+                  if (sf.discardedMessages.length > 0) {
+                    const drop = new Set(
+                      sf.discardedMessages.map(
+                        m => (m as { uuid?: string }).uuid,
+                      ),
+                    )
+                    for (let i = newMessages.length - 1; i >= 0; i--) {
+                      if (drop.has(newMessages[i]!.uuid)) {
+                        newMessages.splice(i, 1)
+                      }
+                    }
+                  }
+                  yield sf as unknown as StreamEvent
+                }
+                continue
+              }
+              if (malformed) {
+                const idx =
+                  typeof (part as { index?: unknown }).index === 'number'
+                    ? (part as { index: number }).index
+                    : -1
+                if (idx >= 0) malformedFallbackBlockIndexes.add(idx)
+                logForDebugging('cli_malformed_fallback_block', {
+                  level: 'warn',
+                })
+                logEvent('tengu_rotunda_pennant_malformed', {
+                  block_index: idx,
+                  non_streaming: false,
+                })
+                continue
+              }
+              // densable: skip content_block_stop for malformed fallback indexes
+              if (
+                part.type === 'content_block_stop' &&
+                malformedFallbackBlockIndexes.has(part.index)
+              ) {
+                continue
+              }
+            } catch {
+              // densable optional — production path must not break stream
+            }
+
+            switch (part.type) {
+              case 'message_start': {
+                partialMessage = part.message
+                ttftMs = Date.now() - start
+                usage = updateUsage(usage, part.message?.usage)
+                // Capture research from message_start if available (internal only).
+                // Always overwrite with the latest value.
+                if (
+                  process.env.USER_TYPE === 'ant' &&
+                  'research' in
+                    (part.message as unknown as Record<string, unknown>)
+                ) {
+                  research = (
+                    part.message as unknown as Record<string, unknown>
+                  ).research
+                }
+                break
+              }
+              case 'content_block_start':
+                // densable: switch(To=!1, us.content_block.type); at=us.index
+                messageDeltaCompleted = false
+                openContentBlockIndex = part.index
+                switch (part.content_block.type) {
+                  case 'tool_use':
+                    contentBlocks[part.index] = {
+                      ...part.content_block,
+                      input: '',
+                    }
+                    break
+                  case 'server_tool_use':
+                    contentBlocks[part.index] = {
+                      ...part.content_block,
+                      input: '' as unknown as { [key: string]: unknown },
+                    }
+                    if ((part.content_block.name as string) === 'advisor') {
+                      isAdvisorInProgress = true
+                      logForDebugging(`[AdvisorTool] Advisor tool called`)
+                      logEvent('tengu_advisor_tool_call', {
+                        model:
+                          options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        advisor_model: (advisorModel ??
+                          'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      })
+                    }
+                    break
+                  case 'text':
+                    textDeltas.set(part.index, [])
+                    contentBlocks[part.index] = {
+                      ...part.content_block,
+                      // awkwardly, the sdk sometimes returns text as part of a
+                      // content_block_start message, then returns the same text
+                      // again in a content_block_delta message. we ignore it here
+                      // since there doesn't seem to be a way to detect when a
+                      // content_block_delta message duplicates the text.
+                      text: '',
+                    }
+                    break
+                  case 'thinking':
+                    contentBlocks[part.index] = {
+                      ...part.content_block,
+                      // also awkward
+                      thinking: '',
+                      // initialize signature to ensure field exists even if signature_delta never arrives
+                      signature: '',
+                    }
+                    break
+                  default:
+                    // even more awkwardly, the sdk mutates the contents of text blocks
+                    // as it works. we want the blocks to be immutable, so that we can
+                    // accumulate state ourselves.
+                    contentBlocks[part.index] = { ...part.content_block }
+                    if (
+                      (part.content_block.type as string) ===
+                      'advisor_tool_result'
+                    ) {
+                      isAdvisorInProgress = false
+                      logForDebugging(
+                        `[AdvisorTool] Advisor tool result received`,
+                      )
+                    }
+                    break
+                }
+                break
+              case 'content_block_delta': {
+                const contentBlock = contentBlocks[part.index]
+                const delta = part.delta as
+                  | typeof part.delta
+                  | ConnectorTextDelta
+                if (!contentBlock) {
+                  logEvent('tengu_streaming_error', {
+                    error_type:
+                      'content_block_not_found_delta' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    part_type:
+                      part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    part_index: part.index,
+                  })
+                  throw new RangeError('Content block not found')
+                }
+                if (
+                  feature('CONNECTOR_TEXT') &&
+                  delta.type === 'connector_text_delta'
+                ) {
+                  if (contentBlock.type !== 'connector_text') {
+                    logEvent('tengu_streaming_error', {
+                      error_type:
+                        'content_block_type_mismatch_connector_text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      expected_type:
+                        'connector_text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      actual_type:
+                        contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    })
+                    throw new Error(
+                      'Content block is not a connector_text block',
+                    )
+                  }
+                  ;(
+                    contentBlock as { connector_text: string }
+                  ).connector_text += delta.connector_text
+                } else {
+                  switch (delta.type) {
+                    case 'citations_delta':
+                      // TODO: handle citations
+                      break
+                    case 'input_json_delta':
+                      if (
+                        contentBlock.type !== 'tool_use' &&
+                        contentBlock.type !== 'server_tool_use'
+                      ) {
+                        logEvent('tengu_streaming_error', {
+                          error_type:
+                            'content_block_type_mismatch_input_json' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          expected_type:
+                            'tool_use' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          actual_type:
+                            contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        })
+                        throw new Error(
+                          'Content block is not a input_json block',
+                        )
+                      }
+                      if (typeof contentBlock.input !== 'string') {
+                        logEvent('tengu_streaming_error', {
+                          error_type:
+                            'content_block_input_not_string' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          input_type:
+                            typeof contentBlock.input as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        })
+                        throw new Error('Content block input is not a string')
+                      }
+                      contentBlock.input += delta.partial_json
+                      break
+                    case 'text_delta':
+                      if (contentBlock.type !== 'text') {
+                        logEvent('tengu_streaming_error', {
+                          error_type:
+                            'content_block_type_mismatch_text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          expected_type:
+                            'text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          actual_type:
+                            contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        })
+                        throw new Error('Content block is not a text block')
+                      }
+                      textDeltas.get(part.index)?.push(delta.text!)
+                      break
+                    case 'signature_delta':
+                      if (
+                        feature('CONNECTOR_TEXT') &&
+                        contentBlock.type === 'connector_text'
+                      ) {
+                        contentBlock.signature = delta.signature
+                        break
+                      }
+                      if (contentBlock.type !== 'thinking') {
+                        logEvent('tengu_streaming_error', {
+                          error_type:
+                            'content_block_type_mismatch_thinking_signature' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          expected_type:
+                            'thinking' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          actual_type:
+                            contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        })
+                        throw new Error('Content block is not a thinking block')
+                      }
+                      contentBlock.signature = delta.signature
+                      break
+                    case 'thinking_delta':
+                      if (contentBlock.type !== 'thinking') {
+                        logEvent('tengu_streaming_error', {
+                          error_type:
+                            'content_block_type_mismatch_thinking_delta' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          expected_type:
+                            'thinking' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          actual_type:
+                            contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        })
+                        throw new Error('Content block is not a thinking block')
+                      }
+                      ;(contentBlock as { thinking: string }).thinking +=
+                        delta.thinking
+                      break
+                  }
+                }
+                // Capture research from content_block_delta if available (internal only).
+                // Always overwrite with the latest value.
+                if (process.env.USER_TYPE === 'ant' && 'research' in part) {
+                  research = (part as { research: unknown }).research
+                }
+                break
+              }
+              case 'content_block_stop': {
+                // densable: To=!1, at=null
+                messageDeltaCompleted = false
+                openContentBlockIndex = null
+                const contentBlock = contentBlocks[part.index]
+                if (!contentBlock) {
+                  logEvent('tengu_streaming_error', {
+                    error_type:
+                      'content_block_not_found_stop' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    part_type:
+                      part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    part_index: part.index,
+                  })
+                  throw new RangeError('Content block not found')
+                }
+                if (!partialMessage) {
+                  logEvent('tengu_streaming_error', {
+                    error_type:
+                      'partial_message_not_found' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    part_type:
+                      part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  })
+                  throw new Error('Message not found')
+                }
+                // Merge accumulated text deltas into the content block (O(n) join instead of O(n^2) +=)
+                const deltas = textDeltas.get(part.index)
+                if (deltas) {
+                  ;(contentBlock as { text: string }).text = deltas.join('')
+                  textDeltas.delete(part.index)
+                }
+                // Prefer the stream-accumulated `usage` over message_start's partial
+                // usage so background-agent progress tracking sees non-zero
+                // input tokens as soon as they are known. message_delta still
+                // mutates this object in place with final output_tokens later.
+                const m: AssistantMessage = {
+                  message: {
+                    ...partialMessage,
+                    usage: { ...usage },
+                    content: normalizeContentFromAPI(
+                      [contentBlock] as BetaContentBlock[],
+                      tools,
+                      options.agentId,
+                    ) as MessageContent,
+                  },
+                  requestId: streamRequestId ?? undefined,
+                  type: 'assistant',
+                  uuid: randomUUID(),
+                  timestamp: new Date().toISOString(),
+                  ...(research !== undefined && { research }),
+                  ...(advisorModel && { advisorModel }),
+                  // densable ...Ie!==void 0&&{effort:Ie}
+                  ...(effortLevelForTranscript !== undefined && {
+                    effort: effortLevelForTranscript,
+                  }),
+                }
+                newMessages.push(m)
+                yield m
+                break
+              }
+              case 'message_delta': {
+                usage = updateUsage(usage, part.usage)
+                // Capture research from message_delta if available (internal only).
+                // Always overwrite with the latest value. Also write back to
+                // already-yielded messages since message_delta arrives after
+                // content_block_stop.
+                if (
+                  process.env.USER_TYPE === 'ant' &&
+                  'research' in (part as unknown as Record<string, unknown>)
+                ) {
+                  research = (part as unknown as Record<string, unknown>)
+                    .research
+                  for (const msg of newMessages) {
+                    msg.research = research
+                  }
+                }
+
+                // Write final usage and stop_reason back to ALL yielded messages.
+                // densable: for (let Qo of ve) Qo.message.usage=tt, stop_reason=wt
+                // Messages are created at content_block_stop from partialMessage
+                // (output_tokens: 0, stop_reason: null). message_delta arrives
+                // after with the real cumulative values.
+                //
+                // IMPORTANT: Use direct property mutation, not object replacement.
+                // The transcript write queue holds a reference to message.message
+                // and serializes it lazily (100ms flush interval). Object
+                // replacement ({ ...lastMsg.message, usage }) would disconnect
+                // the queued reference; direct mutation ensures the transcript
+                // captures the final values.
+                stopReason = part.delta.stop_reason
+                // densable: if(Br=us.delta.stop_reason, Br!==null) To=!0
+                if (stopReason != null) {
+                  messageDeltaCompleted = true
+                }
+
+                for (const msg of newMessages) {
+                  msg.message.usage = usage
+                  msg.message.stop_reason = stopReason
+                }
+
+                // densable G2s — mint fallback_credit_token from stop_details once
+                try {
+                  const delta = part.delta as {
+                    stop_details?: unknown & {
+                      fallback_credit_token?: unknown
+                    }
+                  }
+                  if (delta.stop_details !== undefined) {
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const { planFallbackCreditMint } =
+                      require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                    const mint = planFallbackCreditMint({
+                      stopDetails: delta.stop_details,
+                      alreadyMinted: fallbackCreditMinted,
+                    })
+                    // scrub token from live delta (privacy; densable deletes in place)
+                    if (
+                      typeof delta.stop_details === 'object' &&
+                      delta.stop_details !== null &&
+                      'fallback_credit_token' in delta.stop_details
+                    ) {
+                      delete (
+                        delta.stop_details as {
+                          fallback_credit_token?: unknown
+                        }
+                      ).fallback_credit_token
+                    }
+                    if (mint.creditCode !== undefined) {
+                      mintedFallbackCreditCode = mint.creditCode
+                      if (mint.shouldLogMint) {
+                        fallbackCreditMinted = true
+                        logEvent('tengu_fallback_credit_minted', {
+                          request_id: (streamRequestId ??
+                            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          model:
+                            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          fallback_target_model:
+                            (options.refusalFallbackModel ??
+                              options.serverRefusalFallback?.model ??
+                              'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          token_length: mint.creditCode.length,
+                          query_source:
+                            options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        })
+                      }
+                    }
+                  }
+                } catch {
+                  // densable optional
+                }
+
+                // densable non-mid end hop: !ui && di (lastHop / deferred)
+                if (
+                  options.serverRefusalFallback !== undefined &&
+                  !serverFallbackEmitted
+                ) {
+                  try {
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const {
+                      buildNonMidStreamServerFallbackEvent,
+                      planDeferredServerFallbackFlush,
+                    } =
+                      require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                    const hop =
+                      lastServerFallbackHop ?? deferredServerFallbackHop
+                    if (hop !== undefined) {
+                      serverFallbackEmitted = true
+                      deferredServerFallbackHop = undefined
+                      yield buildNonMidStreamServerFallbackEvent({
+                        fromModel: hop.fromModel,
+                        toModel: hop.model,
+                        reason: hop.reason,
+                        apiRefusalCategory: hop.category,
+                        requestId: streamRequestId ?? null,
+                        finalStopReason: stopReason,
+                      }) as unknown as StreamEvent
+                    } else {
+                      const deferred = planDeferredServerFallbackFlush({
+                        deferredHop: deferredServerFallbackHop,
+                        alreadyEmitted: serverFallbackEmitted,
+                        requestId: streamRequestId ?? null,
+                      })
+                      if (deferred) {
+                        serverFallbackEmitted = true
+                        deferredServerFallbackHop = undefined
+                        yield deferred as unknown as StreamEvent
+                      }
+                    }
+                  } catch {
+                    // densable optional
+                  }
+                }
+
+                // densable #38 cost credit gate (gr) — pure transition in streamCostCredit.ts
+                {
+                  const credit = onMessageDeltaCostCredit(
+                    streamCostCredit,
+                    stopReason,
+                  )
+                  streamCostCredit = credit.next
+                  if (credit.shouldCredit) {
+                    const costUSDForPart = calculateUSDCost(
+                      resolvedModel,
+                      usage as unknown as BetaUsage,
+                    )
+                    costUSD += addToTotalSessionCost(
+                      costUSDForPart,
+                      usage as unknown as BetaUsage,
+                      options.model,
+                      {
+                        activeMcpServer: options.activeMcpServer,
+                        activeMcpTool: options.activeMcpTool,
+                      },
+                    )
+                  }
+                }
+
+                const refusalMessage = getErrorMessageIfRefusal(
+                  part.delta.stop_reason,
+                  options.model,
+                )
+                if (refusalMessage) {
+                  // Official FXl + silent-arm densable consumer: when refusal
+                  // fallback is on and an armed model is available (refusal
+                  // lane or generic fallbackModel), park dialog (or silent
+                  // auto-switch) and throw FallbackTriggeredError so query.ts
+                  // retries on fallback. Full rewind/latch/session supersede
+                  // and stream fallback_request yield remain denser.
+                  let refusalHandledByFallback = false
+                  try {
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const {
+                      isRefusalFallbackEnabled,
+                      runRefusalFallbackDialogFlow,
+                      getProviderRefusalFallbackGuidanceText,
+                      resolveStreamRefusalFallbackTarget,
+                      resolveRefusalSilentAttempt,
+                      normalizeApiRefusalCategory,
+                    } =
+                      require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                    const stopDetails = (
+                      part.delta as {
+                        stop_details?: {
+                          category?: string | null
+                          explanation?: string | null
+                        }
+                      }
+                    ).stop_details
+                    const apiRefusalCategory = stopDetails?.category ?? null
+                    const armedFallback =
+                      options.refusalFallbackModel ?? options.fallbackModel
+                    if (
+                      isRefusalFallbackEnabled() &&
+                      armedFallback &&
+                      armedFallback !== options.model
+                    ) {
+                      const isMainThread = options.agentId === undefined
+                      const silentAttempt = resolveRefusalSilentAttempt({
+                        silentArmActive: options.refusalFallbackSilentArmActive,
+                        modelLane: options.refusalFallbackModelLane,
+                      })
+                      // Official g_i when category present; without category keep
+                      // the armed model (partial densable — full stream path
+                      // always runs g_i and may decline unmapped).
+                      let targetModel: string | undefined = armedFallback
+                      if (apiRefusalCategory != null) {
+                        const routed = resolveStreamRefusalFallbackTarget({
+                          originalModel: options.model,
+                          armedFallbackModel: armedFallback,
+                          apiRefusalCategory,
+                        })
+                        void normalizeApiRefusalCategory(apiRefusalCategory)
+                        if (routed.route?.matched === 'none') {
+                          targetModel = undefined
+                        } else {
+                          targetModel = routed.fallbackModel ?? armedFallback
+                        }
+                      }
+                      if (targetModel === undefined) {
+                        // densable: route declined / not armed → refusal_no_fallback
+                        try {
+                          const { buildRefusalNoFallbackEvent } =
+                            // eslint-disable-next-line @typescript-eslint/no-require-imports
+                            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                          yield buildRefusalNoFallbackEvent(
+                            'route_declined',
+                          ) as unknown as StreamEvent
+                        } catch {
+                          // densable optional
+                        }
+                      } else {
+                        const flow = await runRefusalFallbackDialogFlow({
+                          decision: {
+                            isMainThread,
+                            requestDialog: options.requestDialog,
+                            silentAttempt,
+                            // Setting not fully plumbed; silentAttempt drives OXl silent_ab.
+                            // No-dialog-host still auto-switches via Gi default.
+                            switchModelsOnFlag: false,
+                          },
+                          requestDialog: options.requestDialog,
+                          signal,
+                          payload: {
+                            originalModel: options.model,
+                            fallbackModel: targetModel,
+                            apiRefusalCategory,
+                            guidanceText:
+                              getProviderRefusalFallbackGuidanceText(
+                                getAPIProvider() === 'firstParty',
+                              ),
+                          },
+                        })
+                        if (flow.shouldSwitchToFallback) {
+                          refusalHandledByFallback = true
+                          // Official stream fallback_request yield densable (query
+                          // consumer handles dialog telemetry / salvage denser).
+                          try {
+                            const {
+                              buildFallbackRequestEvent,
+                              matchRefusalFallbackRoute,
+                            } =
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                            let routeMatched:
+                              | 'category'
+                              | 'catch_all'
+                              | 'none'
+                              | null = null
+                            if (apiRefusalCategory != null) {
+                              const route = matchRefusalFallbackRoute({
+                                originalModelCanonical: options.model,
+                                armedFallbackModel: targetModel,
+                                apiRefusalCategory,
+                              })
+                              routeMatched =
+                                route.matched === 'none'
+                                  ? 'none'
+                                  : route.matched === 'category'
+                                    ? 'category'
+                                    : route.matched === 'catch_all'
+                                      ? 'catch_all'
+                                      : null
+                            }
+                            yield buildFallbackRequestEvent({
+                              originalModel: options.model,
+                              fallbackModel: targetModel,
+                              requestId: streamRequestId ?? null,
+                              apiRefusalCategory,
+                              apiRefusalExplanation:
+                                stopDetails?.explanation ?? null,
+                              creditCode: mintedFallbackCreditCode ?? null,
+                              silentArmAtTrigger: silentAttempt,
+                              routeMatched,
+                            }) as unknown as StreamEvent
+                          } catch (e) {
+                            if (e instanceof FallbackTriggeredError) throw e
+                            // densable yield optional
+                          }
+                          // Official Ryn + b$t latch densable (session restore denser)
+                          try {
+                            const {
+                              getMainLoopModelOverride,
+                              markRefusalFallbackOccurred,
+                              setMainLoopModelOverride,
+                              setRefusalFallbackModelLatch,
+                            } =
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+                            const { applyRefusalFallbackLatchArm } =
+                              // already loaded densables above; re-require for latch arm
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                            applyRefusalFallbackLatchArm({
+                              fallbackModel: targetModel,
+                              previousOverride: getMainLoopModelOverride(),
+                              setLatch: setRefusalFallbackModelLatch,
+                              setMainLoopModelOverride,
+                              markOccurred: markRefusalFallbackOccurred,
+                            })
+                          } catch {
+                            // bootstrap latch optional
+                          }
+                          throw new FallbackTriggeredError(
+                            options.model,
+                            targetModel,
+                          )
+                        }
+                        // densable: dialog declined / cancelled → refusal_no_fallback
+                        if (
+                          !flow.shouldSwitchToFallback &&
+                          flow.choice !== 'retry_fallback'
+                        ) {
+                          try {
+                            const { buildRefusalNoFallbackEvent } =
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                            const reason =
+                              flow.suppressReason === 'no_consumer_capability'
+                                ? 'no_consumer_capability'
+                                : flow.choice === 'edit_prompt'
+                                  ? 'dialog_declined'
+                                  : 'dialog_declined'
+                            yield buildRefusalNoFallbackEvent(
+                              reason,
+                            ) as unknown as StreamEvent
+                          } catch {
+                            // densable optional
+                          }
+                        }
+                      }
+                    } else if (
+                      isRefusalFallbackEnabled() &&
+                      (!armedFallback || armedFallback === options.model)
+                    ) {
+                      // densable: not_armed / client_chain_exhausted
+                      try {
+                        const { buildRefusalNoFallbackEvent } =
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                        yield buildRefusalNoFallbackEvent(
+                          'not_armed',
+                        ) as unknown as StreamEvent
+                      } catch {
+                        // densable optional
+                      }
+                    }
+                  } catch (e) {
+                    if (e instanceof FallbackTriggeredError) throw e
+                    // densable optional
+                  }
+                  if (!refusalHandledByFallback) {
+                    yield refusalMessage
+                  }
+                }
+
+                if (stopReason === 'max_tokens') {
+                  logEvent('tengu_max_tokens_reached', {
+                    max_tokens: maxOutputTokens,
+                  })
+                  yield createAssistantAPIErrorMessage({
+                    content: `${API_ERROR_MESSAGE_PREFIX}: Claude's response exceeded the ${
+                      maxOutputTokens
+                    } output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.`,
+                    apiError: 'max_output_tokens',
+                    error: 'max_output_tokens',
+                  })
+                }
+
+                if (stopReason === 'model_context_window_exceeded') {
+                  logEvent('tengu_context_window_exceeded', {
+                    max_tokens: maxOutputTokens,
+                    output_tokens: usage.output_tokens,
+                  })
+                  // Reuse the max_output_tokens recovery path — from the model's
+                  // perspective, both mean "response was cut off, continue from
+                  // where you left off."
+                  yield createAssistantAPIErrorMessage({
+                    content: `${API_ERROR_MESSAGE_PREFIX}: The model has reached its context window limit.`,
+                    apiError: 'max_output_tokens',
+                    error: 'max_output_tokens',
+                  })
+                }
+                break
+              }
+              case 'message_stop':
+                // densable: if (gr==="pending") gr="credited"; tr+=Zce(...)
+                {
+                  const credit = onMessageStopCostCredit(streamCostCredit)
+                  streamCostCredit = credit.next
+                  if (credit.shouldCredit) {
+                    const costUSDForStop = calculateUSDCost(
+                      resolvedModel,
+                      usage as unknown as BetaUsage,
+                    )
+                    costUSD += addToTotalSessionCost(
+                      costUSDForStop,
+                      usage as unknown as BetaUsage,
+                      options.model,
+                      {
+                        activeMcpServer: options.activeMcpServer,
+                        activeMcpTool: options.activeMcpTool,
+                      },
+                    )
+                  }
+                }
+                break
+            }
+
+            yield {
+              type: 'stream_event',
+              event: part,
+              ...(part.type === 'message_start' ? { ttftMs } : undefined),
+            }
+          }
+          // densable Xs() — flush deferred server_fallback hop when stream ends
+          // without midStream emission (no assistant partials at hop time).
+          if (
+            options.serverRefusalFallback !== undefined &&
+            !serverFallbackEmitted &&
+            deferredServerFallbackHop !== undefined
+          ) {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { planDeferredServerFallbackFlush } =
+                require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+              const deferred = planDeferredServerFallbackFlush({
+                deferredHop: deferredServerFallbackHop,
+                alreadyEmitted: serverFallbackEmitted,
+                requestId: streamRequestId ?? null,
+              })
+              if (deferred) {
+                serverFallbackEmitted = true
+                deferredServerFallbackHop = undefined
+                yield deferred as unknown as StreamEvent
+              }
+            } catch {
+              // densable optional
+            }
+          }
+          // Clear the idle timeout watchdog now that the stream loop has exited
+          clearStreamIdleTimers()
+
+          // If the stream was aborted by our idle timeout watchdog, fall back to
+          // non-streaming retry rather than treating it as a completed stream.
+          if (streamIdleAborted) {
+            // Instrumentation: proves the for-await exited after the watchdog fired
+            // (vs. hung forever). exit_delay_ms measures abort propagation latency:
+            // 0-10ms = abort worked; >>1000ms = something else woke the loop.
+            const exitDelayMs =
+              streamWatchdogFiredAt !== null
+                ? Math.round(performance.now() - streamWatchdogFiredAt)
+                : -1
+            logForDiagnosticsNoPII(
+              'info',
+              'cli_stream_loop_exited_after_watchdog_clean',
+            )
+            logEvent('tengu_stream_loop_exited_after_watchdog', {
+              request_id: (streamRequestId ??
+                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              exit_delay_ms: exitDelayMs,
+              exit_path:
+                'clean' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              model:
+                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            // Prevent double-emit: this throw lands in the catch block below,
+            // whose exit_path='error' probe guards on streamWatchdogFiredAt.
+            streamWatchdogFiredAt = null
+            throw new Error('Stream idle timeout - no chunks received')
+          }
+
+          // Detect when the stream completed without producing any assistant messages.
+          // This covers two proxy failure modes:
+          // 1. No events at all (!partialMessage): proxy returned 200 with non-SSE body
+          // 2. Partial events (partialMessage set but no content blocks completed AND
+          //    no stop_reason received): proxy returned message_start but stream ended
+          //    before content_block_stop and before message_delta with stop_reason
+          // BetaMessageStream had the first check in _endRequest() but the raw Stream
+          // does not - without it the generator silently returns no assistant messages,
+          // causing "Execution error" in -p mode.
+          // Note: We must check stopReason to avoid false positives. For example, with
+          // structured output (--json-schema), the model calls a StructuredOutput tool
+          // on turn 1, then on turn 2 responds with end_turn and no content blocks.
+          // That's a legitimate empty response, not an incomplete stream.
+          if (!partialMessage || (newMessages.length === 0 && !stopReason)) {
+            logForDebugging(
+              !partialMessage
+                ? 'Stream completed without receiving message_start event - triggering non-streaming fallback'
+                : 'Stream completed with message_start but no content blocks completed - triggering non-streaming fallback',
+              { level: 'error' },
+            )
+            logEvent('tengu_stream_no_events', {
+              model:
+                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              request_id: (streamRequestId ??
+                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            throw new Error('Stream ended without receiving any events')
+          }
+
+          // Log summary if any stalls occurred during streaming
+          if (stallCount > 0) {
+            logForDebugging(
+              `Streaming completed with ${stallCount} stall(s), total stall time: ${(totalStallTime / 1000).toFixed(1)}s`,
               { level: 'warn' },
             )
-            logEvent('tengu_streaming_stall', {
-              stall_duration_ms: timeSinceLastEvent,
+            logEvent('tengu_streaming_stall_summary', {
               stall_count: stallCount,
               total_stall_time_ms: totalStallTime,
-              event_type:
-                part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               model:
                 options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               request_id: (streamRequestId ??
                 'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             })
           }
-        }
-        lastEventTime = now
 
-        if (isFirstChunk) {
-          logForDebugging('Stream started - received first chunk')
-          queryCheckpoint('query_first_chunk_received')
-          if (!options.agentId) {
-            headlessProfilerCheckpoint('first_chunk')
+          // Check if the cache actually broke based on response tokens
+          if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
+            void checkResponseForCacheBreak(
+              options.querySource,
+              usage.cache_read_input_tokens,
+              usage.cache_creation_input_tokens,
+              messages,
+              options.agentId,
+              streamRequestId,
+            )
           }
-          endQueryProfile()
-          isFirstChunk = false
-        }
 
-        // densable V2s/ikd: materialize server-lane fallback content_block_start
-        // into QueryEvent server_fallback (midStream salvage / deferred hd).
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const {
-            parseServerFallbackContentBlockStart,
-            isMalformedServerFallbackBlockStart,
-            buildMidStreamServerFallbackEvent,
-            isServerFallbackHopReason,
-          } =
-            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-          const hop = parseServerFallbackContentBlockStart(part)
-          const malformed = !hop && isMalformedServerFallbackBlockStart(part)
-          if (hop || malformed) {
-            isAdvisorInProgress = false
+          // Process fallback percentage header and quota status if available
+          // streamResponse is set when the stream is created in the withRetry callback above
+          // TypeScript's control flow analysis can't track that streamResponse is set in the callback
+          // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+          const resp = streamResponse as unknown as Response | undefined
+          if (resp) {
+            extractQuotaStatusFromHeaders(resp.headers)
+            // Non-Anthropic providers that flow through this same client path
+            // (Bedrock) expose their own throttle headers — let their adapter
+            // overwrite the store with its bucket(s). Anthropic's adapter runs
+            // inside extractQuotaStatusFromHeaders.
+            if (getAPIProvider() === 'bedrock') {
+              updateProviderBuckets(
+                'bedrock',
+                bedrockAdapter.parseHeaders(resp.headers),
+              )
+            }
+            // Store headers for gateway detection
+            responseHeaders = resp.headers
           }
-          if (hop) {
-            logEvent('tengu_rotunda_pennant_materialized', {
-              armed: options.serverRefusalFallback !== undefined,
-              block_index: hop.index ?? -1,
-              non_streaming: false,
+        } catch (streamingError) {
+          // Clear the idle timeout watchdog on error path too
+          clearStreamIdleTimers()
+
+          // Instrumentation: if the watchdog had already fired and the for-await
+          // threw (rather than exiting cleanly), record that the loop DID exit and
+          // how long after the watchdog. Distinguishes true hangs from error exits.
+          if (streamIdleAborted && streamWatchdogFiredAt !== null) {
+            const exitDelayMs = Math.round(
+              performance.now() - streamWatchdogFiredAt,
+            )
+            logForDiagnosticsNoPII(
+              'info',
+              'cli_stream_loop_exited_after_watchdog_error',
+            )
+            logEvent('tengu_stream_loop_exited_after_watchdog', {
+              request_id: (streamRequestId ??
+                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              exit_delay_ms: exitDelayMs,
+              exit_path:
+                'error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              error_name:
+                streamingError instanceof Error
+                  ? (streamingError.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+                  : ('unknown' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS),
+              model:
+                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             })
-            // densable: if not armed, ignore hop (continue without yield)
-            if (options.serverRefusalFallback === undefined) {
-              continue
-            }
-            if (isServerFallbackHopReason(hop.reason)) {
-              // hi — server hop served on refusal/sticky
-            }
-            lastServerFallbackHop = hop
-            // densable: rewrite partial + yielded models to hop.model
-            if (partialMessage !== undefined) {
-              partialMessage = {
-                ...(partialMessage as object),
-                model: hop.model,
-              } as typeof partialMessage
-            }
-            for (const msg of newMessages) {
-              if (msg.message) {
-                msg.message.model = hop.model as typeof msg.message.model
+          }
+
+          if (streamingError instanceof APIUserAbortError) {
+            // Check if the abort signal was triggered by the user (ESC key)
+            // If the signal is aborted, it's a user-initiated abort
+            // If not, it's likely a timeout from the SDK
+            if (signal.aborted) {
+              // This is a real user abort (ESC key was pressed)
+              logForDebugging(
+                `Streaming aborted by user: ${errorMessage(streamingError)}`,
+              )
+              if (isAdvisorInProgress) {
+                logEvent('tengu_advisor_tool_interrupted', {
+                  model:
+                    options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  advisor_model: (advisorModel ??
+                    'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
               }
-            }
-            if (newMessages.length === 0) {
-              // densable hd — defer until Xs flush (no partials yet)
-              deferredServerFallbackHop = hop
-            } else if (!isServerFallbackHopReason(hop.reason)) {
-              serverFallbackEmitted = true
-              deferredServerFallbackHop = undefined
-              yield buildMidStreamServerFallbackEvent({
-                hop,
-                messages: [],
-                requestId: streamRequestId ?? null,
-              }) as unknown as StreamEvent
+              throw streamingError
             } else {
-              serverFallbackEmitted = true
-              deferredServerFallbackHop = undefined
-              const sf = buildMidStreamServerFallbackEvent({
-                hop,
-                messages: newMessages as unknown as Array<{
-                  uuid?: string
-                  isApiErrorMessage?: boolean
-                  message?: { content?: unknown; model?: string }
-                }>,
-                requestId: streamRequestId ?? null,
+              // The SDK threw APIUserAbortError but our signal wasn't aborted
+              // This means it's a timeout from the SDK's internal timeout
+              logForDebugging(
+                `Streaming timeout (SDK abort): ${streamingError.message}`,
+                { level: 'error' },
+              )
+              // Throw a more specific error for timeout
+              throw new APIConnectionTimeoutError({
+                message: 'Request timed out',
               })
-              // densable: drop discarded (tool-bearing) from Al / He
-              if (sf.discardedMessages.length > 0) {
-                const drop = new Set(
-                  sf.discardedMessages.map(m => (m as { uuid?: string }).uuid),
-                )
-                for (let i = newMessages.length - 1; i >= 0; i--) {
-                  if (drop.has(newMessages[i]!.uuid)) {
-                    newMessages.splice(i, 1)
-                  }
-                }
-              }
-              yield sf as unknown as StreamEvent
             }
-            continue
           }
-          if (malformed) {
-            const idx =
-              typeof (part as { index?: unknown }).index === 'number'
-                ? (part as { index: number }).index
-                : -1
-            if (idx >= 0) malformedFallbackBlockIndexes.add(idx)
-            logForDebugging('cli_malformed_fallback_block', { level: 'warn' })
-            logEvent('tengu_rotunda_pennant_malformed', {
-              block_index: idx,
-              non_streaming: false,
-            })
-            continue
-          }
-          // densable: skip content_block_stop for malformed fallback indexes
-          if (
-            part.type === 'content_block_stop' &&
-            malformedFallbackBlockIndexes.has(part.index)
-          ) {
-            continue
-          }
-        } catch {
-          // densable optional — production path must not break stream
-        }
 
-        switch (part.type) {
-          case 'message_start': {
-            partialMessage = part.message
-            ttftMs = Date.now() - start
-            usage = updateUsage(usage, part.message?.usage)
-            // Capture research from message_start if available (internal only).
-            // Always overwrite with the latest value.
-            if (
-              process.env.USER_TYPE === 'ant' &&
-              'research' in (part.message as unknown as Record<string, unknown>)
-            ) {
-              research = (part.message as unknown as Record<string, unknown>)
-                .research
+          // densable 2.1.219 #7 — mid-stream partial finalize:
+          // When assistant content was already yielded and the stream dies via
+          // watchdog / stale-or-network connection / server api_error, keep the
+          // partial text and append an isApiErrorMessage banner instead of
+          // discarding it via non-streaming fallback (which would re-run tools).
+          {
+            const connDetails = extractConnectionErrorDetails(streamingError)
+            const connCode = connDetails?.code
+            const isStaleConn =
+              connCode !== undefined &&
+              STREAM_STALE_CONNECTION_CODES.has(connCode)
+            const isNetworkDown =
+              connCode !== undefined && STREAM_NETWORK_DOWN_CODES.has(connCode)
+            const isStaleOrNetwork = isStaleConn || isNetworkDown
+            const isServerApiErrorPartial =
+              streamingError instanceof APIError &&
+              (streamingError as { type?: string }).type === 'api_error' &&
+              newMessages.length > 0
+            const contentBlocks = (
+              msg: (typeof newMessages)[number],
+            ): Array<{ type: string; text?: string }> => {
+              const c = msg.message?.content
+              return Array.isArray(c)
+                ? (c as Array<{ type: string; text?: string }>)
+                : []
             }
-            break
-          }
-          case 'content_block_start':
-            // densable: switch(To=!1, us.content_block.type); at=us.index
-            messageDeltaCompleted = false
-            openContentBlockIndex = part.index
-            switch (part.content_block.type) {
-              case 'tool_use':
-                contentBlocks[part.index] = {
-                  ...part.content_block,
-                  input: '',
-                }
-                break
-              case 'server_tool_use':
-                contentBlocks[part.index] = {
-                  ...part.content_block,
-                  input: '' as unknown as { [key: string]: unknown },
-                }
-                if ((part.content_block.name as string) === 'advisor') {
-                  isAdvisorInProgress = true
-                  logForDebugging(`[AdvisorTool] Advisor tool called`)
-                  logEvent('tengu_advisor_tool_call', {
+            const hasYieldedContent = newMessages.some(msg =>
+              contentBlocks(msg).some(
+                block =>
+                  block.type !== 'thinking' &&
+                  block.type !== 'redacted_thinking' &&
+                  !(
+                    block.type === 'text' &&
+                    (block.text === '' || block.text === NO_CONTENT_MESSAGE)
+                  ),
+              ),
+            )
+            const hasAnyYieldedBlocks = newMessages.length > 0
+            if (
+              (hasAnyYieldedBlocks || hasYieldedContent) &&
+              (streamIdleAborted || isStaleOrNetwork || isServerApiErrorPartial)
+            ) {
+              const hasToolUse = newMessages.some(msg =>
+                contentBlocks(msg).some(b => b.type === 'tool_use'),
+              )
+              const hasNonThinkingOutput = newMessages.some(msg =>
+                contentBlocks(msg).some(
+                  b =>
+                    b.type !== 'thinking' &&
+                    b.type !== 'redacted_thinking' &&
+                    !(
+                      b.type === 'text' &&
+                      (b.text === '' || b.text === NO_CONTENT_MESSAGE)
+                    ),
+                ),
+              )
+              const cause:
+                | 'watchdog'
+                | 'server_error'
+                | 'network_down'
+                | 'stale_connection' = streamIdleAborted
+                ? 'watchdog'
+                : isServerApiErrorPartial
+                  ? 'server_error'
+                  : isNetworkDown
+                    ? 'network_down'
+                    : 'stale_connection'
+
+              // densable 2.1.232 #26 / 219+: thinking-only → re-stream under Po/sr
+              // if (!ke && Br === null && (xo ? Tn < Po : oo < sr)) continue e
+              {
+                const thinkingOnlyPlan = planThinkingOnlyStreamRetry({
+                  streamIdleAborted,
+                  isStaleOrNetwork,
+                  hasNonThinkingOutput,
+                  stopReason,
+                  watchdogRetryCount: thinkingOnlyWatchdogRetryCount,
+                  staleRetryCount: thinkingOnlyStaleRetryCount,
+                  connectionCode: connCode,
+                })
+                if (thinkingOnlyPlan.shouldRetry) {
+                  if (thinkingOnlyPlan.kind === 'watchdog') {
+                    thinkingOnlyWatchdogRetryCount =
+                      thinkingOnlyPlan.retryAttempt
+                  } else {
+                    thinkingOnlyStaleRetryCount = thinkingOnlyPlan.retryAttempt
+                  }
+                  logForDebugging(thinkingOnlyPlan.debugMessage, {
+                    level: 'warn',
+                  })
+                  logEvent(thinkingOnlyPlan.eventName, {
                     model:
                       options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    advisor_model: (advisorModel ??
+                    retry_attempt: thinkingOnlyPlan.retryAttempt,
+                    request_id: (streamRequestId ??
                       'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    after_thinking_only: true,
+                    ...(thinkingOnlyPlan.kind === 'stale' && {
+                      error_code: (connCode ??
+                        'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    }),
+                  })
+                  if (openContentBlockIndex !== null) {
+                    yield {
+                      type: 'stream_event',
+                      event: {
+                        type: 'content_block_stop',
+                        index: openContentBlockIndex,
+                      },
+                    } as StreamEvent
+                    openContentBlockIndex = null
+                  }
+                  yield {
+                    type: 'stream_event',
+                    event: { type: 'message_stop' },
+                  } as StreamEvent
+                  releaseStreamResources()
+                  clearStreamIdleTimers()
+                  // densable continue e — outer catch rethrows ThinkingOnlyStreamRetryError
+                  throw new ThinkingOnlyStreamRetryError(thinkingOnlyPlan)
+                }
+              }
+
+              // densable 2.1.222 #5: La&&To&&at===null → already complete, no truncation
+              // if(La&&To&&at===null){ T(...response already complete...);
+              //   N("tengu_streaming_close_after_complete",...); break e }
+              const closePlan = planStreamCloseAfterComplete({
+                stopReason,
+                messageDeltaCompleted,
+                openContentBlockIndex,
+              })
+              if (closePlan.alreadyComplete) {
+                logForDebugging(
+                  `Stream ${
+                    streamIdleAborted
+                      ? 'stalled'
+                      : `connection closed (${connCode ?? 'unknown'})`
+                  } after message_delta (stop_reason=${stopReason}) — response already complete, no truncation`,
+                  { level: 'info' },
+                )
+                logEvent('tengu_streaming_close_after_complete', {
+                  model:
+                    options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  blocks_yielded: newMessages.length,
+                  cause:
+                    cause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  error_code: (connCode ??
+                    'none') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  request_id: (streamRequestId ??
+                    'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+                // densable break e — success exit, no mid-response banner
+                return
+              }
+
+              const synthesizedStop = hasToolUse ? 'tool_use' : 'end_turn'
+              // densable: if stop_reason not already set on yielded messages, stamp it
+              for (const msg of newMessages) {
+                if (msg.message && msg.message.stop_reason == null) {
+                  msg.message.stop_reason = synthesizedStop
+                }
+              }
+              const hasOutput = hasNonThinkingOutput || hasYieldedContent
+              logForDebugging(
+                streamIdleAborted
+                  ? `Stream idle timeout after ${newMessages.length} block(s) yielded — finalizing partial response`
+                  : isServerApiErrorPartial
+                    ? `Mid-stream server error after ${newMessages.length} block(s) yielded — finalizing partial response`
+                    : `Stream connection closed (${connCode ?? 'unknown'}) after ${newMessages.length} block(s) yielded — finalizing partial response`,
+                { level: 'warn' },
+              )
+              logEvent('tengu_streaming_partial_finalized', {
+                model:
+                  options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                blocks_yielded: newMessages.length,
+                has_output: hasOutput,
+                synthesized_stop_reason:
+                  synthesizedStop as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                cause:
+                  cause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                request_id: (streamRequestId ??
+                  'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+              const incompleteBanner = hasOutput
+                ? streamIdleAborted
+                  ? `${API_ERROR_MESSAGE_PREFIX}: Response stalled mid-stream. The response above may be incomplete.`
+                  : isServerApiErrorPartial
+                    ? `${API_ERROR_MESSAGE_PREFIX}: Server error mid-response. The response above may be incomplete.`
+                    : `${API_ERROR_MESSAGE_PREFIX}: Connection closed mid-response. The response above may be incomplete.`
+                : streamIdleAborted
+                  ? `${API_ERROR_MESSAGE_PREFIX}: Response stalled while thinking, before producing a response. Try again.`
+                  : `${API_ERROR_MESSAGE_PREFIX}: Connection closed while thinking, before producing a response. Try again.`
+              yield createAssistantAPIErrorMessage({
+                content: incompleteBanner,
+                apiError: 'server_error',
+                error: 'server_error',
+              })
+              // densable `break e` — exit streaming successfully with partial kept
+              return
+            }
+          }
+
+          // When the flag is enabled, skip the non-streaming fallback and let the
+          // error propagate to withRetry. The mid-stream fallback causes double tool
+          // execution when streaming tool execution is active: the partial stream
+          // starts a tool, then the non-streaming retry produces the same tool_use
+          // and runs it again. See inc-4258.
+          // Official DISABLE_NONSTREAMING_FALLBACK densable.
+          let nonstreamingFallbackDisabled = isEnvTruthy(
+            process.env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK,
+          )
+          try {
+            const { isNonstreamingFallbackDisabled } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+            nonstreamingFallbackDisabled = isNonstreamingFallbackDisabled()
+          } catch {
+            // residual helpers optional
+          }
+          // densable: also skip non-streaming when watchdog fired under GB flag
+          const watchdogSkipNonstreaming =
+            getFeatureValue_CACHED_MAY_BE_STALE(
+              'tengu_watchdog_skip_nonstreaming_fallback',
+              true,
+            ) && streamIdleAborted
+          const disableFallback =
+            nonstreamingFallbackDisabled ||
+            watchdogSkipNonstreaming ||
+            getFeatureValue_CACHED_MAY_BE_STALE(
+              'tengu_disable_streaming_to_non_streaming_fallback',
+              false,
+            )
+
+          if (disableFallback) {
+            logForDebugging(
+              `Error streaming (non-streaming fallback disabled): ${errorMessage(streamingError)}`,
+              { level: 'error' },
+            )
+            logEvent('tengu_streaming_fallback_to_non_streaming', {
+              model:
+                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              error:
+                streamingError instanceof Error
+                  ? (streamingError.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+                  : (String(
+                      streamingError,
+                    ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS),
+              attemptNumber,
+              maxOutputTokens,
+              thinkingType:
+                thinkingConfig.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              ...(thinkingConfig.type === 'enabled' && {
+                thinkingBudgetTokens: thinkingConfig.budgetTokens,
+              }),
+              fallback_disabled: true,
+              request_id: (streamRequestId ??
+                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              fallback_cause: (streamIdleAborted
+                ? 'watchdog'
+                : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            throw streamingError
+          }
+
+          logForDebugging(
+            `Error streaming, falling back to non-streaming mode: ${errorMessage(streamingError)}`,
+            { level: 'error' },
+          )
+          didFallBackToNonStreaming = true
+          if (options.onStreamingFallback) {
+            options.onStreamingFallback()
+          }
+
+          logEvent('tengu_streaming_fallback_to_non_streaming', {
+            model:
+              options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error:
+              streamingError instanceof Error
+                ? (streamingError.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+                : (String(
+                    streamingError,
+                  ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS),
+            attemptNumber,
+            maxOutputTokens,
+            thinkingType:
+              thinkingConfig.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...(thinkingConfig.type === 'enabled' && {
+              thinkingBudgetTokens: thinkingConfig.budgetTokens,
+            }),
+            fallback_disabled: false,
+            request_id: (streamRequestId ??
+              'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            fallback_cause: (streamIdleAborted
+              ? 'watchdog'
+              : newMessages.length > 0
+                ? 'partial_yield'
+                : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+
+          // Fall back to non-streaming mode with retries.
+          // If the streaming failure was itself a 529, count it toward the
+          // consecutive-529 budget so total 529s-before-model-fallback is the
+          // same whether the overload was hit in streaming or non-streaming mode.
+          // This is a speculative fix for https://github.com/anthropics/claude-code/issues/1513
+          // Instrumentation: proves executeNonStreamingRequest was entered (vs. the
+          // fallback event firing but the call itself hanging at dispatch).
+          logForDiagnosticsNoPII('info', 'cli_nonstreaming_fallback_started')
+          logEvent('tengu_nonstreaming_fallback_started', {
+            request_id: (streamRequestId ??
+              'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            model:
+              options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            fallback_cause: (streamIdleAborted
+              ? 'watchdog'
+              : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          const result = yield* executeNonStreamingRequest(
+            { model: options.model, source: options.querySource },
+            {
+              model: options.model,
+              fallbackModel: options.fallbackModel,
+              thinkingConfig,
+              ...(isFastModeEnabled() && { fastMode: isFastMode }),
+              signal,
+              initialConsecutive529Errors: is529Error(streamingError) ? 1 : 0,
+              querySource: options.querySource,
+            },
+            paramsFromContext,
+            (attempt, _startTime, tokens) => {
+              attemptNumber = attempt
+              maxOutputTokens = tokens
+            },
+            params => captureAPIRequest(params, options.querySource),
+            streamRequestId,
+          )
+
+          // densable fa — materialize non-streaming fallback content blocks
+          // then yield assistant, then wa() server_fallback (order matches densable)
+          let nonStreamContent: unknown[] = Array.isArray(result.content)
+            ? [...result.content]
+            : []
+          let nonStreamLastHop:
+            | {
+                fromModel: string
+                model: string
+                reason: string
+                category: string | null
+              }
+            | undefined
+          // densable G2s non-stream: mint from stop_details before fa/wa
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { planFallbackCreditMint } =
+              require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+            const stopDetails = (result as { stop_details?: unknown })
+              .stop_details
+            if (stopDetails !== undefined) {
+              const mint = planFallbackCreditMint({
+                stopDetails,
+                alreadyMinted: fallbackCreditMinted,
+              })
+              if (
+                typeof stopDetails === 'object' &&
+                stopDetails !== null &&
+                'fallback_credit_token' in stopDetails
+              ) {
+                delete (stopDetails as { fallback_credit_token?: unknown })
+                  .fallback_credit_token
+              }
+              if (mint.creditCode !== undefined) {
+                mintedFallbackCreditCode = mint.creditCode
+                if (mint.shouldLogMint) {
+                  fallbackCreditMinted = true
+                  logEvent('tengu_fallback_credit_minted', {
+                    request_id: (streamRequestId ??
+                      'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    model:
+                      options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    fallback_target_model: (options.refusalFallbackModel ??
+                      options.serverRefusalFallback?.model ??
+                      'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    token_length: mint.creditCode.length,
+                    query_source:
+                      options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                   })
                 }
-                break
-              case 'text':
-                textDeltas.set(part.index, [])
-                contentBlocks[part.index] = {
-                  ...part.content_block,
-                  // awkwardly, the sdk sometimes returns text as part of a
-                  // content_block_start message, then returns the same text
-                  // again in a content_block_delta message. we ignore it here
-                  // since there doesn't seem to be a way to detect when a
-                  // content_block_delta message duplicates the text.
-                  text: '',
-                }
-                break
-              case 'thinking':
-                contentBlocks[part.index] = {
-                  ...part.content_block,
-                  // also awkward
-                  thinking: '',
-                  // initialize signature to ensure field exists even if signature_delta never arrives
-                  signature: '',
-                }
-                break
-              default:
-                // even more awkwardly, the sdk mutates the contents of text blocks
-                // as it works. we want the blocks to be immutable, so that we can
-                // accumulate state ourselves.
-                contentBlocks[part.index] = { ...part.content_block }
-                if (
-                  (part.content_block.type as string) === 'advisor_tool_result'
-                ) {
-                  isAdvisorInProgress = false
-                  logForDebugging(`[AdvisorTool] Advisor tool result received`)
-                }
-                break
-            }
-            break
-          case 'content_block_delta': {
-            const contentBlock = contentBlocks[part.index]
-            const delta = part.delta as typeof part.delta | ConnectorTextDelta
-            if (!contentBlock) {
-              logEvent('tengu_streaming_error', {
-                error_type:
-                  'content_block_not_found_delta' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_type:
-                  part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_index: part.index,
-              })
-              throw new RangeError('Content block not found')
-            }
-            if (
-              feature('CONNECTOR_TEXT') &&
-              delta.type === 'connector_text_delta'
-            ) {
-              if (contentBlock.type !== 'connector_text') {
-                logEvent('tengu_streaming_error', {
-                  error_type:
-                    'content_block_type_mismatch_connector_text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  expected_type:
-                    'connector_text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  actual_type:
-                    contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-                throw new Error('Content block is not a connector_text block')
-              }
-              ;(contentBlock as { connector_text: string }).connector_text +=
-                delta.connector_text
-            } else {
-              switch (delta.type) {
-                case 'citations_delta':
-                  // TODO: handle citations
-                  break
-                case 'input_json_delta':
-                  if (
-                    contentBlock.type !== 'tool_use' &&
-                    contentBlock.type !== 'server_tool_use'
-                  ) {
-                    logEvent('tengu_streaming_error', {
-                      error_type:
-                        'content_block_type_mismatch_input_json' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      expected_type:
-                        'tool_use' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      actual_type:
-                        contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
-                    throw new Error('Content block is not a input_json block')
-                  }
-                  if (typeof contentBlock.input !== 'string') {
-                    logEvent('tengu_streaming_error', {
-                      error_type:
-                        'content_block_input_not_string' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      input_type:
-                        typeof contentBlock.input as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
-                    throw new Error('Content block input is not a string')
-                  }
-                  contentBlock.input += delta.partial_json
-                  break
-                case 'text_delta':
-                  if (contentBlock.type !== 'text') {
-                    logEvent('tengu_streaming_error', {
-                      error_type:
-                        'content_block_type_mismatch_text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      expected_type:
-                        'text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      actual_type:
-                        contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
-                    throw new Error('Content block is not a text block')
-                  }
-                  textDeltas.get(part.index)?.push(delta.text!)
-                  break
-                case 'signature_delta':
-                  if (
-                    feature('CONNECTOR_TEXT') &&
-                    contentBlock.type === 'connector_text'
-                  ) {
-                    contentBlock.signature = delta.signature
-                    break
-                  }
-                  if (contentBlock.type !== 'thinking') {
-                    logEvent('tengu_streaming_error', {
-                      error_type:
-                        'content_block_type_mismatch_thinking_signature' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      expected_type:
-                        'thinking' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      actual_type:
-                        contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
-                    throw new Error('Content block is not a thinking block')
-                  }
-                  contentBlock.signature = delta.signature
-                  break
-                case 'thinking_delta':
-                  if (contentBlock.type !== 'thinking') {
-                    logEvent('tengu_streaming_error', {
-                      error_type:
-                        'content_block_type_mismatch_thinking_delta' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      expected_type:
-                        'thinking' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      actual_type:
-                        contentBlock.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
-                    throw new Error('Content block is not a thinking block')
-                  }
-                  ;(contentBlock as { thinking: string }).thinking +=
-                    delta.thinking
-                  break
               }
             }
-            // Capture research from content_block_delta if available (internal only).
-            // Always overwrite with the latest value.
-            if (process.env.USER_TYPE === 'ant' && 'research' in part) {
-              research = (part as { research: unknown }).research
-            }
-            break
+          } catch {
+            // densable optional
           }
-          case 'content_block_stop': {
-            // densable: To=!1, at=null
-            messageDeltaCompleted = false
-            openContentBlockIndex = null
-            const contentBlock = contentBlocks[part.index]
-            if (!contentBlock) {
-              logEvent('tengu_streaming_error', {
-                error_type:
-                  'content_block_not_found_stop' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_type:
-                  part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_index: part.index,
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { materializeNonStreamingServerFallbackContent } =
+              require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+            const fa = materializeNonStreamingServerFallbackContent({
+              content: nonStreamContent,
+              stopReason: result.stop_reason ?? null,
+              armed: options.serverRefusalFallback !== undefined,
+            })
+            nonStreamContent = fa.content
+            nonStreamLastHop = fa.lastHop
+            for (const idx of fa.malformedIndexes) {
+              logEvent('tengu_rotunda_pennant_malformed', {
+                block_index: idx,
+                non_streaming: true,
               })
-              throw new RangeError('Content block not found')
             }
-            if (!partialMessage) {
-              logEvent('tengu_streaming_error', {
-                error_type:
-                  'partial_message_not_found' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_type:
-                  part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            if (fa.lastHop !== undefined) {
+              logEvent('tengu_rotunda_pennant_materialized', {
+                armed: options.serverRefusalFallback !== undefined,
+                block_index: -1,
+                non_streaming: true,
               })
-              throw new Error('Message not found')
             }
-            // Merge accumulated text deltas into the content block (O(n) join instead of O(n^2) +=)
-            const deltas = textDeltas.get(part.index)
-            if (deltas) {
-              ;(contentBlock as { text: string }).text = deltas.join('')
-              textDeltas.delete(part.index)
+            if (fa.droppedCount > 0) {
+              logEvent('tengu_rotunda_pennant_sync_dropped', {
+                dropped_count: fa.droppedCount,
+                had_tool_use: fa.droppedHadToolUse,
+                chain_exhausted: result.stop_reason === 'refusal',
+              })
             }
-            // Prefer the stream-accumulated `usage` over message_start's partial
-            // usage so background-agent progress tracking sees non-zero
-            // input tokens as soon as they are known. message_delta still
-            // mutates this object in place with final output_tokens later.
+          } catch {
+            // densable optional
+          }
+
+          const m: AssistantMessage = {
+            message: {
+              ...result,
+              content: normalizeContentFromAPI(
+                nonStreamContent as typeof result.content,
+                tools,
+                options.agentId,
+              ) as MessageContent,
+            },
+            requestId: streamRequestId ?? undefined,
+            type: 'assistant',
+            uuid: randomUUID(),
+            timestamp: new Date().toISOString(),
+            ...(research !== undefined && {
+              research,
+            }),
+            ...(advisorModel && {
+              advisorModel,
+            }),
+            // densable ...Ie!==void 0&&{effort:Ie}
+            ...(effortLevelForTranscript !== undefined && {
+              effort: effortLevelForTranscript,
+            }),
+          }
+          newMessages.push(m)
+          fallbackMessage = m
+          yield m
+          // densable wa: yield po then yield*wa → server_fallback midStream:!1
+          if (
+            options.serverRefusalFallback !== undefined &&
+            !serverFallbackEmitted
+          ) {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { planNonStreamingServerFallbackEvent } =
+                require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+              const sfEv = planNonStreamingServerFallbackEvent({
+                lastHop: nonStreamLastHop,
+                currentModel: options.model,
+                requestId: streamRequestId,
+                finalStopReason: result.stop_reason ?? null,
+                alreadyEmitted: serverFallbackEmitted,
+              })
+              if (sfEv) {
+                serverFallbackEmitted = true
+                lastServerFallbackHop = nonStreamLastHop
+                yield sfEv as unknown as StreamEvent
+              }
+            } catch {
+              // densable optional
+            }
+          }
+        } finally {
+          clearStreamIdleTimers()
+        }
+      } catch (errorFromRetry) {
+        // densable #26 thinking-only re-stream — bubble to streamAttempt loop.
+        if (errorFromRetry instanceof ThinkingOnlyStreamRetryError) {
+          throw errorFromRetry
+        }
+        // FallbackTriggeredError must propagate to query.ts, which performs the
+        // actual model switch. Swallowing it here would turn the fallback into a
+        // no-op — the user would just see "Model fallback triggered: X -> Y" as
+        // an error message with no actual retry on the fallback model.
+        if (errorFromRetry instanceof FallbackTriggeredError) {
+          throw errorFromRetry
+        }
+
+        // Check if this is a 404 error during stream creation that should trigger
+        // non-streaming fallback. This handles gateways that return 404 for streaming
+        // endpoints but work fine with non-streaming. Before v2.1.8, BetaMessageStream
+        // threw 404s during iteration (caught by inner catch with fallback), but now
+        // with raw streams, 404s are thrown during creation (caught here).
+        const is404StreamCreationError =
+          !didFallBackToNonStreaming &&
+          errorFromRetry instanceof CannotRetryError &&
+          errorFromRetry.originalError instanceof APIError &&
+          errorFromRetry.originalError.status === 404
+
+        if (is404StreamCreationError) {
+          // 404 is thrown at .withResponse() before streamRequestId is assigned,
+          // and CannotRetryError means every retry failed — so grab the failed
+          // request's ID from the error header instead.
+          const failedRequestId =
+            (errorFromRetry.originalError as APIError).requestID ?? 'unknown'
+          logForDebugging(
+            'Streaming endpoint returned 404, falling back to non-streaming mode',
+            { level: 'warn' },
+          )
+          didFallBackToNonStreaming = true
+          if (options.onStreamingFallback) {
+            options.onStreamingFallback()
+          }
+
+          logEvent('tengu_streaming_fallback_to_non_streaming', {
+            model:
+              options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error:
+              '404_stream_creation' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            attemptNumber,
+            maxOutputTokens,
+            thinkingType:
+              thinkingConfig.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...(thinkingConfig.type === 'enabled' && {
+              thinkingBudgetTokens: thinkingConfig.budgetTokens,
+            }),
+            request_id:
+              failedRequestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            fallback_cause:
+              '404_stream_creation' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+
+          try {
+            // Fall back to non-streaming mode
+            const result = yield* executeNonStreamingRequest(
+              { model: options.model, source: options.querySource },
+              {
+                model: options.model,
+                fallbackModel: options.fallbackModel,
+                thinkingConfig,
+                ...(isFastModeEnabled() && { fastMode: isFastMode }),
+                signal,
+              },
+              paramsFromContext,
+              (attempt, _startTime, tokens) => {
+                attemptNumber = attempt
+                maxOutputTokens = tokens
+              },
+              params => captureAPIRequest(params, options.querySource),
+              failedRequestId,
+            )
+
+            // densable fa + wa on 404 non-streaming path (same as idle fallback)
+            let nonStreamContent404: unknown[] = Array.isArray(result.content)
+              ? [...result.content]
+              : []
+            let nonStreamLastHop404:
+              | {
+                  fromModel: string
+                  model: string
+                  reason: string
+                  category: string | null
+                }
+              | undefined
+            // densable G2s on 404 non-stream path
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { planFallbackCreditMint } =
+                require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+              const stopDetails404 = (result as { stop_details?: unknown })
+                .stop_details
+              if (stopDetails404 !== undefined) {
+                const mint = planFallbackCreditMint({
+                  stopDetails: stopDetails404,
+                  alreadyMinted: fallbackCreditMinted,
+                })
+                if (
+                  typeof stopDetails404 === 'object' &&
+                  stopDetails404 !== null &&
+                  'fallback_credit_token' in stopDetails404
+                ) {
+                  delete (stopDetails404 as { fallback_credit_token?: unknown })
+                    .fallback_credit_token
+                }
+                if (mint.creditCode !== undefined) {
+                  mintedFallbackCreditCode = mint.creditCode
+                  if (mint.shouldLogMint) {
+                    fallbackCreditMinted = true
+                    logEvent('tengu_fallback_credit_minted', {
+                      request_id: (streamRequestId ??
+                        failedRequestId) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      model:
+                        options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      fallback_target_model: (options.refusalFallbackModel ??
+                        options.serverRefusalFallback?.model ??
+                        'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      token_length: mint.creditCode.length,
+                      query_source:
+                        options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    })
+                  }
+                }
+              }
+            } catch {
+              // densable optional
+            }
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { materializeNonStreamingServerFallbackContent } =
+                require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+              const fa = materializeNonStreamingServerFallbackContent({
+                content: nonStreamContent404,
+                stopReason: result.stop_reason ?? null,
+                armed: options.serverRefusalFallback !== undefined,
+              })
+              nonStreamContent404 = fa.content
+              nonStreamLastHop404 = fa.lastHop
+              for (const idx of fa.malformedIndexes) {
+                logEvent('tengu_rotunda_pennant_malformed', {
+                  block_index: idx,
+                  non_streaming: true,
+                })
+              }
+              if (fa.lastHop !== undefined) {
+                logEvent('tengu_rotunda_pennant_materialized', {
+                  armed: options.serverRefusalFallback !== undefined,
+                  block_index: -1,
+                  non_streaming: true,
+                })
+              }
+            } catch {
+              // densable optional
+            }
+
             const m: AssistantMessage = {
               message: {
-                ...partialMessage,
-                usage: { ...usage },
+                ...result,
                 content: normalizeContentFromAPI(
-                  [contentBlock] as BetaContentBlock[],
+                  nonStreamContent404 as typeof result.content,
                   tools,
                   options.agentId,
                 ) as MessageContent,
@@ -3023,1409 +4363,201 @@ async function* queryModel(
               }),
             }
             newMessages.push(m)
+            fallbackMessage = m
             yield m
-            break
-          }
-          case 'message_delta': {
-            usage = updateUsage(usage, part.usage)
-            // Capture research from message_delta if available (internal only).
-            // Always overwrite with the latest value. Also write back to
-            // already-yielded messages since message_delta arrives after
-            // content_block_stop.
-            if (
-              process.env.USER_TYPE === 'ant' &&
-              'research' in (part as unknown as Record<string, unknown>)
-            ) {
-              research = (part as unknown as Record<string, unknown>).research
-              for (const msg of newMessages) {
-                msg.research = research
-              }
-            }
-
-            // Write final usage and stop_reason back to ALL yielded messages.
-            // densable: for (let Qo of ve) Qo.message.usage=tt, stop_reason=wt
-            // Messages are created at content_block_stop from partialMessage
-            // (output_tokens: 0, stop_reason: null). message_delta arrives
-            // after with the real cumulative values.
-            //
-            // IMPORTANT: Use direct property mutation, not object replacement.
-            // The transcript write queue holds a reference to message.message
-            // and serializes it lazily (100ms flush interval). Object
-            // replacement ({ ...lastMsg.message, usage }) would disconnect
-            // the queued reference; direct mutation ensures the transcript
-            // captures the final values.
-            stopReason = part.delta.stop_reason
-            // densable: if(Br=us.delta.stop_reason, Br!==null) To=!0
-            if (stopReason != null) {
-              messageDeltaCompleted = true
-            }
-
-            for (const msg of newMessages) {
-              msg.message.usage = usage
-              msg.message.stop_reason = stopReason
-            }
-
-            // densable G2s — mint fallback_credit_token from stop_details once
-            try {
-              const delta = part.delta as {
-                stop_details?: unknown & {
-                  fallback_credit_token?: unknown
-                }
-              }
-              if (delta.stop_details !== undefined) {
-                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const { planFallbackCreditMint } =
-                  require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                const mint = planFallbackCreditMint({
-                  stopDetails: delta.stop_details,
-                  alreadyMinted: fallbackCreditMinted,
-                })
-                // scrub token from live delta (privacy; densable deletes in place)
-                if (
-                  typeof delta.stop_details === 'object' &&
-                  delta.stop_details !== null &&
-                  'fallback_credit_token' in delta.stop_details
-                ) {
-                  delete (
-                    delta.stop_details as { fallback_credit_token?: unknown }
-                  ).fallback_credit_token
-                }
-                if (mint.creditCode !== undefined) {
-                  mintedFallbackCreditCode = mint.creditCode
-                  if (mint.shouldLogMint) {
-                    fallbackCreditMinted = true
-                    logEvent('tengu_fallback_credit_minted', {
-                      request_id: (streamRequestId ??
-                        'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      model:
-                        options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      fallback_target_model: (options.refusalFallbackModel ??
-                        options.serverRefusalFallback?.model ??
-                        'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      token_length: mint.creditCode.length,
-                      query_source:
-                        options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
-                  }
-                }
-              }
-            } catch {
-              // densable optional
-            }
-
-            // densable non-mid end hop: !ui && di (lastHop / deferred)
             if (
               options.serverRefusalFallback !== undefined &&
               !serverFallbackEmitted
             ) {
               try {
                 // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const {
-                  buildNonMidStreamServerFallbackEvent,
-                  planDeferredServerFallbackFlush,
-                } =
+                const { planNonStreamingServerFallbackEvent } =
                   require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                const hop = lastServerFallbackHop ?? deferredServerFallbackHop
-                if (hop !== undefined) {
+                const sfEv = planNonStreamingServerFallbackEvent({
+                  lastHop: nonStreamLastHop404,
+                  currentModel: options.model,
+                  requestId: streamRequestId ?? failedRequestId,
+                  finalStopReason: result.stop_reason ?? null,
+                  alreadyEmitted: serverFallbackEmitted,
+                })
+                if (sfEv) {
                   serverFallbackEmitted = true
-                  deferredServerFallbackHop = undefined
-                  yield buildNonMidStreamServerFallbackEvent({
-                    fromModel: hop.fromModel,
-                    toModel: hop.model,
-                    reason: hop.reason,
-                    apiRefusalCategory: hop.category,
-                    requestId: streamRequestId ?? null,
-                    finalStopReason: stopReason,
-                  }) as unknown as StreamEvent
-                } else {
-                  const deferred = planDeferredServerFallbackFlush({
-                    deferredHop: deferredServerFallbackHop,
-                    alreadyEmitted: serverFallbackEmitted,
-                    requestId: streamRequestId ?? null,
-                  })
-                  if (deferred) {
-                    serverFallbackEmitted = true
-                    deferredServerFallbackHop = undefined
-                    yield deferred as unknown as StreamEvent
-                  }
+                  lastServerFallbackHop = nonStreamLastHop404
+                  yield sfEv as unknown as StreamEvent
                 }
               } catch {
                 // densable optional
               }
             }
 
-            // densable #38 cost credit gate (gr) — pure transition in streamCostCredit.ts
-            {
-              const credit = onMessageDeltaCostCredit(
-                streamCostCredit,
-                stopReason,
-              )
-              streamCostCredit = credit.next
-              if (credit.shouldCredit) {
-                const costUSDForPart = calculateUSDCost(
-                  resolvedModel,
-                  usage as unknown as BetaUsage,
-                )
-                costUSD += addToTotalSessionCost(
-                  costUSDForPart,
-                  usage as unknown as BetaUsage,
-                  options.model,
-                  {
-                    activeMcpServer: options.activeMcpServer,
-                    activeMcpTool: options.activeMcpTool,
-                  },
-                )
-              }
+            // Continue to success logging below
+          } catch (fallbackError) {
+            // Propagate model-fallback signal to query.ts (see comment above).
+            if (fallbackError instanceof FallbackTriggeredError) {
+              throw fallbackError
             }
 
-            const refusalMessage = getErrorMessageIfRefusal(
-              part.delta.stop_reason,
-              options.model,
-            )
-            if (refusalMessage) {
-              // Official FXl + silent-arm densable consumer: when refusal
-              // fallback is on and an armed model is available (refusal
-              // lane or generic fallbackModel), park dialog (or silent
-              // auto-switch) and throw FallbackTriggeredError so query.ts
-              // retries on fallback. Full rewind/latch/session supersede
-              // and stream fallback_request yield remain denser.
-              let refusalHandledByFallback = false
-              try {
-                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const {
-                  isRefusalFallbackEnabled,
-                  runRefusalFallbackDialogFlow,
-                  getProviderRefusalFallbackGuidanceText,
-                  resolveStreamRefusalFallbackTarget,
-                  resolveRefusalSilentAttempt,
-                  normalizeApiRefusalCategory,
-                } =
-                  require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                const stopDetails = (
-                  part.delta as {
-                    stop_details?: {
-                      category?: string | null
-                      explanation?: string | null
-                    }
-                  }
-                ).stop_details
-                const apiRefusalCategory = stopDetails?.category ?? null
-                const armedFallback =
-                  options.refusalFallbackModel ?? options.fallbackModel
-                if (
-                  isRefusalFallbackEnabled() &&
-                  armedFallback &&
-                  armedFallback !== options.model
-                ) {
-                  const isMainThread = options.agentId === undefined
-                  const silentAttempt = resolveRefusalSilentAttempt({
-                    silentArmActive: options.refusalFallbackSilentArmActive,
-                    modelLane: options.refusalFallbackModelLane,
-                  })
-                  // Official g_i when category present; without category keep
-                  // the armed model (partial densable — full stream path
-                  // always runs g_i and may decline unmapped).
-                  let targetModel: string | undefined = armedFallback
-                  if (apiRefusalCategory != null) {
-                    const routed = resolveStreamRefusalFallbackTarget({
-                      originalModel: options.model,
-                      armedFallbackModel: armedFallback,
-                      apiRefusalCategory,
-                    })
-                    void normalizeApiRefusalCategory(apiRefusalCategory)
-                    if (routed.route?.matched === 'none') {
-                      targetModel = undefined
-                    } else {
-                      targetModel = routed.fallbackModel ?? armedFallback
-                    }
-                  }
-                  if (targetModel === undefined) {
-                    // densable: route declined / not armed → refusal_no_fallback
-                    try {
-                      const { buildRefusalNoFallbackEvent } =
-                        // eslint-disable-next-line @typescript-eslint/no-require-imports
-                        require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                      yield buildRefusalNoFallbackEvent(
-                        'route_declined',
-                      ) as unknown as StreamEvent
-                    } catch {
-                      // densable optional
-                    }
-                  } else {
-                    const flow = await runRefusalFallbackDialogFlow({
-                      decision: {
-                        isMainThread,
-                        requestDialog: options.requestDialog,
-                        silentAttempt,
-                        // Setting not fully plumbed; silentAttempt drives OXl silent_ab.
-                        // No-dialog-host still auto-switches via Gi default.
-                        switchModelsOnFlag: false,
-                      },
-                      requestDialog: options.requestDialog,
-                      signal,
-                      payload: {
-                        originalModel: options.model,
-                        fallbackModel: targetModel,
-                        apiRefusalCategory,
-                        guidanceText: getProviderRefusalFallbackGuidanceText(
-                          getAPIProvider() === 'firstParty',
-                        ),
-                      },
-                    })
-                    if (flow.shouldSwitchToFallback) {
-                      refusalHandledByFallback = true
-                      // Official stream fallback_request yield densable (query
-                      // consumer handles dialog telemetry / salvage denser).
-                      try {
-                        const {
-                          buildFallbackRequestEvent,
-                          matchRefusalFallbackRoute,
-                        } =
-                          // eslint-disable-next-line @typescript-eslint/no-require-imports
-                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                        let routeMatched:
-                          | 'category'
-                          | 'catch_all'
-                          | 'none'
-                          | null = null
-                        if (apiRefusalCategory != null) {
-                          const route = matchRefusalFallbackRoute({
-                            originalModelCanonical: options.model,
-                            armedFallbackModel: targetModel,
-                            apiRefusalCategory,
-                          })
-                          routeMatched =
-                            route.matched === 'none'
-                              ? 'none'
-                              : route.matched === 'category'
-                                ? 'category'
-                                : route.matched === 'catch_all'
-                                  ? 'catch_all'
-                                  : null
-                        }
-                        yield buildFallbackRequestEvent({
-                          originalModel: options.model,
-                          fallbackModel: targetModel,
-                          requestId: streamRequestId ?? null,
-                          apiRefusalCategory,
-                          apiRefusalExplanation:
-                            stopDetails?.explanation ?? null,
-                          creditCode: mintedFallbackCreditCode ?? null,
-                          silentArmAtTrigger: silentAttempt,
-                          routeMatched,
-                        }) as unknown as StreamEvent
-                      } catch (e) {
-                        if (e instanceof FallbackTriggeredError) throw e
-                        // densable yield optional
-                      }
-                      // Official Ryn + b$t latch densable (session restore denser)
-                      try {
-                        const {
-                          getMainLoopModelOverride,
-                          markRefusalFallbackOccurred,
-                          setMainLoopModelOverride,
-                          setRefusalFallbackModelLatch,
-                        } =
-                          // eslint-disable-next-line @typescript-eslint/no-require-imports
-                          require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
-                        const { applyRefusalFallbackLatchArm } =
-                          // already loaded densables above; re-require for latch arm
-                          // eslint-disable-next-line @typescript-eslint/no-require-imports
-                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                        applyRefusalFallbackLatchArm({
-                          fallbackModel: targetModel,
-                          previousOverride: getMainLoopModelOverride(),
-                          setLatch: setRefusalFallbackModelLatch,
-                          setMainLoopModelOverride,
-                          markOccurred: markRefusalFallbackOccurred,
-                        })
-                      } catch {
-                        // bootstrap latch optional
-                      }
-                      throw new FallbackTriggeredError(
-                        options.model,
-                        targetModel,
-                      )
-                    }
-                    // densable: dialog declined / cancelled → refusal_no_fallback
-                    if (
-                      !flow.shouldSwitchToFallback &&
-                      flow.choice !== 'retry_fallback'
-                    ) {
-                      try {
-                        const { buildRefusalNoFallbackEvent } =
-                          // eslint-disable-next-line @typescript-eslint/no-require-imports
-                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                        const reason =
-                          flow.suppressReason === 'no_consumer_capability'
-                            ? 'no_consumer_capability'
-                            : flow.choice === 'edit_prompt'
-                              ? 'dialog_declined'
-                              : 'dialog_declined'
-                        yield buildRefusalNoFallbackEvent(
-                          reason,
-                        ) as unknown as StreamEvent
-                      } catch {
-                        // densable optional
-                      }
-                    }
-                  }
-                } else if (
-                  isRefusalFallbackEnabled() &&
-                  (!armedFallback || armedFallback === options.model)
-                ) {
-                  // densable: not_armed / client_chain_exhausted
-                  try {
-                    const { buildRefusalNoFallbackEvent } =
-                      // eslint-disable-next-line @typescript-eslint/no-require-imports
-                      require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-                    yield buildRefusalNoFallbackEvent(
-                      'not_armed',
-                    ) as unknown as StreamEvent
-                  } catch {
-                    // densable optional
-                  }
-                }
-              } catch (e) {
-                if (e instanceof FallbackTriggeredError) throw e
-                // densable optional
-              }
-              if (!refusalHandledByFallback) {
-                yield refusalMessage
-              }
-            }
-
-            if (stopReason === 'max_tokens') {
-              logEvent('tengu_max_tokens_reached', {
-                max_tokens: maxOutputTokens,
-              })
-              yield createAssistantAPIErrorMessage({
-                content: `${API_ERROR_MESSAGE_PREFIX}: Claude's response exceeded the ${
-                  maxOutputTokens
-                } output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.`,
-                apiError: 'max_output_tokens',
-                error: 'max_output_tokens',
-              })
-            }
-
-            if (stopReason === 'model_context_window_exceeded') {
-              logEvent('tengu_context_window_exceeded', {
-                max_tokens: maxOutputTokens,
-                output_tokens: usage.output_tokens,
-              })
-              // Reuse the max_output_tokens recovery path — from the model's
-              // perspective, both mean "response was cut off, continue from
-              // where you left off."
-              yield createAssistantAPIErrorMessage({
-                content: `${API_ERROR_MESSAGE_PREFIX}: The model has reached its context window limit.`,
-                apiError: 'max_output_tokens',
-                error: 'max_output_tokens',
-              })
-            }
-            break
-          }
-          case 'message_stop':
-            // densable: if (gr==="pending") gr="credited"; tr+=Zce(...)
-            {
-              const credit = onMessageStopCostCredit(streamCostCredit)
-              streamCostCredit = credit.next
-              if (credit.shouldCredit) {
-                const costUSDForStop = calculateUSDCost(
-                  resolvedModel,
-                  usage as unknown as BetaUsage,
-                )
-                costUSD += addToTotalSessionCost(
-                  costUSDForStop,
-                  usage as unknown as BetaUsage,
-                  options.model,
-                  {
-                    activeMcpServer: options.activeMcpServer,
-                    activeMcpTool: options.activeMcpTool,
-                  },
-                )
-              }
-            }
-            break
-        }
-
-        yield {
-          type: 'stream_event',
-          event: part,
-          ...(part.type === 'message_start' ? { ttftMs } : undefined),
-        }
-      }
-      // densable Xs() — flush deferred server_fallback hop when stream ends
-      // without midStream emission (no assistant partials at hop time).
-      if (
-        options.serverRefusalFallback !== undefined &&
-        !serverFallbackEmitted &&
-        deferredServerFallbackHop !== undefined
-      ) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { planDeferredServerFallbackFlush } =
-            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-          const deferred = planDeferredServerFallbackFlush({
-            deferredHop: deferredServerFallbackHop,
-            alreadyEmitted: serverFallbackEmitted,
-            requestId: streamRequestId ?? null,
-          })
-          if (deferred) {
-            serverFallbackEmitted = true
-            deferredServerFallbackHop = undefined
-            yield deferred as unknown as StreamEvent
-          }
-        } catch {
-          // densable optional
-        }
-      }
-      // Clear the idle timeout watchdog now that the stream loop has exited
-      clearStreamIdleTimers()
-
-      // If the stream was aborted by our idle timeout watchdog, fall back to
-      // non-streaming retry rather than treating it as a completed stream.
-      if (streamIdleAborted) {
-        // Instrumentation: proves the for-await exited after the watchdog fired
-        // (vs. hung forever). exit_delay_ms measures abort propagation latency:
-        // 0-10ms = abort worked; >>1000ms = something else woke the loop.
-        const exitDelayMs =
-          streamWatchdogFiredAt !== null
-            ? Math.round(performance.now() - streamWatchdogFiredAt)
-            : -1
-        logForDiagnosticsNoPII(
-          'info',
-          'cli_stream_loop_exited_after_watchdog_clean',
-        )
-        logEvent('tengu_stream_loop_exited_after_watchdog', {
-          request_id: (streamRequestId ??
-            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          exit_delay_ms: exitDelayMs,
-          exit_path:
-            'clean' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          model:
-            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        // Prevent double-emit: this throw lands in the catch block below,
-        // whose exit_path='error' probe guards on streamWatchdogFiredAt.
-        streamWatchdogFiredAt = null
-        throw new Error('Stream idle timeout - no chunks received')
-      }
-
-      // Detect when the stream completed without producing any assistant messages.
-      // This covers two proxy failure modes:
-      // 1. No events at all (!partialMessage): proxy returned 200 with non-SSE body
-      // 2. Partial events (partialMessage set but no content blocks completed AND
-      //    no stop_reason received): proxy returned message_start but stream ended
-      //    before content_block_stop and before message_delta with stop_reason
-      // BetaMessageStream had the first check in _endRequest() but the raw Stream
-      // does not - without it the generator silently returns no assistant messages,
-      // causing "Execution error" in -p mode.
-      // Note: We must check stopReason to avoid false positives. For example, with
-      // structured output (--json-schema), the model calls a StructuredOutput tool
-      // on turn 1, then on turn 2 responds with end_turn and no content blocks.
-      // That's a legitimate empty response, not an incomplete stream.
-      if (!partialMessage || (newMessages.length === 0 && !stopReason)) {
-        logForDebugging(
-          !partialMessage
-            ? 'Stream completed without receiving message_start event - triggering non-streaming fallback'
-            : 'Stream completed with message_start but no content blocks completed - triggering non-streaming fallback',
-          { level: 'error' },
-        )
-        logEvent('tengu_stream_no_events', {
-          model:
-            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          request_id: (streamRequestId ??
-            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        throw new Error('Stream ended without receiving any events')
-      }
-
-      // Log summary if any stalls occurred during streaming
-      if (stallCount > 0) {
-        logForDebugging(
-          `Streaming completed with ${stallCount} stall(s), total stall time: ${(totalStallTime / 1000).toFixed(1)}s`,
-          { level: 'warn' },
-        )
-        logEvent('tengu_streaming_stall_summary', {
-          stall_count: stallCount,
-          total_stall_time_ms: totalStallTime,
-          model:
-            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          request_id: (streamRequestId ??
-            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-      }
-
-      // Check if the cache actually broke based on response tokens
-      if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
-        void checkResponseForCacheBreak(
-          options.querySource,
-          usage.cache_read_input_tokens,
-          usage.cache_creation_input_tokens,
-          messages,
-          options.agentId,
-          streamRequestId,
-        )
-      }
-
-      // Process fallback percentage header and quota status if available
-      // streamResponse is set when the stream is created in the withRetry callback above
-      // TypeScript's control flow analysis can't track that streamResponse is set in the callback
-      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      const resp = streamResponse as unknown as Response | undefined
-      if (resp) {
-        extractQuotaStatusFromHeaders(resp.headers)
-        // Non-Anthropic providers that flow through this same client path
-        // (Bedrock) expose their own throttle headers — let their adapter
-        // overwrite the store with its bucket(s). Anthropic's adapter runs
-        // inside extractQuotaStatusFromHeaders.
-        if (getAPIProvider() === 'bedrock') {
-          updateProviderBuckets(
-            'bedrock',
-            bedrockAdapter.parseHeaders(resp.headers),
-          )
-        }
-        // Store headers for gateway detection
-        responseHeaders = resp.headers
-      }
-    } catch (streamingError) {
-      // Clear the idle timeout watchdog on error path too
-      clearStreamIdleTimers()
-
-      // Instrumentation: if the watchdog had already fired and the for-await
-      // threw (rather than exiting cleanly), record that the loop DID exit and
-      // how long after the watchdog. Distinguishes true hangs from error exits.
-      if (streamIdleAborted && streamWatchdogFiredAt !== null) {
-        const exitDelayMs = Math.round(
-          performance.now() - streamWatchdogFiredAt,
-        )
-        logForDiagnosticsNoPII(
-          'info',
-          'cli_stream_loop_exited_after_watchdog_error',
-        )
-        logEvent('tengu_stream_loop_exited_after_watchdog', {
-          request_id: (streamRequestId ??
-            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          exit_delay_ms: exitDelayMs,
-          exit_path:
-            'error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          error_name:
-            streamingError instanceof Error
-              ? (streamingError.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-              : ('unknown' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS),
-          model:
-            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-      }
-
-      if (streamingError instanceof APIUserAbortError) {
-        // Check if the abort signal was triggered by the user (ESC key)
-        // If the signal is aborted, it's a user-initiated abort
-        // If not, it's likely a timeout from the SDK
-        if (signal.aborted) {
-          // This is a real user abort (ESC key was pressed)
-          logForDebugging(
-            `Streaming aborted by user: ${errorMessage(streamingError)}`,
-          )
-          if (isAdvisorInProgress) {
-            logEvent('tengu_advisor_tool_interrupted', {
-              model:
-                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              advisor_model: (advisorModel ??
-                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            })
-          }
-          throw streamingError
-        } else {
-          // The SDK threw APIUserAbortError but our signal wasn't aborted
-          // This means it's a timeout from the SDK's internal timeout
-          logForDebugging(
-            `Streaming timeout (SDK abort): ${streamingError.message}`,
-            { level: 'error' },
-          )
-          // Throw a more specific error for timeout
-          throw new APIConnectionTimeoutError({ message: 'Request timed out' })
-        }
-      }
-
-      // densable 2.1.219 #7 — mid-stream partial finalize:
-      // When assistant content was already yielded and the stream dies via
-      // watchdog / stale-or-network connection / server api_error, keep the
-      // partial text and append an isApiErrorMessage banner instead of
-      // discarding it via non-streaming fallback (which would re-run tools).
-      {
-        const connDetails = extractConnectionErrorDetails(streamingError)
-        const connCode = connDetails?.code
-        const isStaleConn =
-          connCode !== undefined && STREAM_STALE_CONNECTION_CODES.has(connCode)
-        const isNetworkDown =
-          connCode !== undefined && STREAM_NETWORK_DOWN_CODES.has(connCode)
-        const isStaleOrNetwork = isStaleConn || isNetworkDown
-        const isServerApiErrorPartial =
-          streamingError instanceof APIError &&
-          (streamingError as { type?: string }).type === 'api_error' &&
-          newMessages.length > 0
-        const contentBlocks = (
-          msg: (typeof newMessages)[number],
-        ): Array<{ type: string; text?: string }> => {
-          const c = msg.message?.content
-          return Array.isArray(c)
-            ? (c as Array<{ type: string; text?: string }>)
-            : []
-        }
-        const hasYieldedContent = newMessages.some(msg =>
-          contentBlocks(msg).some(
-            block =>
-              block.type !== 'thinking' &&
-              block.type !== 'redacted_thinking' &&
-              !(
-                block.type === 'text' &&
-                (block.text === '' || block.text === NO_CONTENT_MESSAGE)
-              ),
-          ),
-        )
-        const hasAnyYieldedBlocks = newMessages.length > 0
-        if (
-          (hasAnyYieldedBlocks || hasYieldedContent) &&
-          (streamIdleAborted || isStaleOrNetwork || isServerApiErrorPartial)
-        ) {
-          const hasToolUse = newMessages.some(msg =>
-            contentBlocks(msg).some(b => b.type === 'tool_use'),
-          )
-          const hasNonThinkingOutput = newMessages.some(msg =>
-            contentBlocks(msg).some(
-              b =>
-                b.type !== 'thinking' &&
-                b.type !== 'redacted_thinking' &&
-                !(
-                  b.type === 'text' &&
-                  (b.text === '' || b.text === NO_CONTENT_MESSAGE)
-                ),
-            ),
-          )
-          const cause:
-            | 'watchdog'
-            | 'server_error'
-            | 'network_down'
-            | 'stale_connection' = streamIdleAborted
-            ? 'watchdog'
-            : isServerApiErrorPartial
-              ? 'server_error'
-              : isNetworkDown
-                ? 'network_down'
-                : 'stale_connection'
-
-          // densable 2.1.222 #5: La&&To&&at===null → already complete, no truncation
-          // if(La&&To&&at===null){ T(...response already complete...);
-          //   N("tengu_streaming_close_after_complete",...); break e }
-          const closePlan = planStreamCloseAfterComplete({
-            stopReason,
-            messageDeltaCompleted,
-            openContentBlockIndex,
-          })
-          if (closePlan.alreadyComplete) {
+            // Fallback also failed, handle as normal error
             logForDebugging(
-              `Stream ${
-                streamIdleAborted
-                  ? 'stalled'
-                  : `connection closed (${connCode ?? 'unknown'})`
-              } after message_delta (stop_reason=${stopReason}) — response already complete, no truncation`,
-              { level: 'info' },
+              `Non-streaming fallback also failed: ${errorMessage(fallbackError)}`,
+              { level: 'error' },
             )
-            logEvent('tengu_streaming_close_after_complete', {
-              model:
-                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              blocks_yielded: newMessages.length,
-              cause:
-                cause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              error_code: (connCode ??
-                'none') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              request_id: (streamRequestId ??
-                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+
+            let error = fallbackError
+            let errorModel = options.model
+            if (fallbackError instanceof CannotRetryError) {
+              error = fallbackError.originalError
+              errorModel = fallbackError.retryContext.model
+            }
+
+            if (error instanceof APIError) {
+              extractQuotaStatusFromError(error)
+            }
+
+            const requestId =
+              streamRequestId ||
+              (error instanceof APIError ? error.requestID : undefined) ||
+              (error instanceof APIError
+                ? (error.error as { request_id?: string })?.request_id
+                : undefined)
+
+            logAPIError({
+              error,
+              model: errorModel,
+              messageCount: messagesForAPI.length,
+              messageTokens: tokenCountFromLastAPIResponse(messagesForAPI),
+              durationMs: Date.now() - start,
+              durationMsIncludingRetries: Date.now() - startIncludingRetries,
+              attempt: attemptNumber,
+              requestId,
+              clientRequestId,
+              didFallBackToNonStreaming,
+              queryTracking: options.queryTracking,
+              querySource: options.querySource,
+              llmSpan,
+              fastMode: isFastModeRequest,
+              previousRequestId,
             })
-            // densable break e — success exit, no mid-response banner
+
+            if (error instanceof APIUserAbortError) {
+              releaseStreamResources()
+              return
+            }
+
+            yield getAssistantMessageFromError(error, errorModel, {
+              messages,
+              messagesForAPI,
+            })
+            releaseStreamResources()
+            return
+          }
+        } else {
+          // Original error handling for non-404 errors
+          logForDebugging(
+            `Error in API request: ${errorMessage(errorFromRetry)}`,
+            {
+              level: 'error',
+            },
+          )
+
+          let error = errorFromRetry
+          let errorModel = options.model
+          if (errorFromRetry instanceof CannotRetryError) {
+            error = errorFromRetry.originalError
+            errorModel = errorFromRetry.retryContext.model
+          }
+
+          // Extract quota status from error headers if it's a rate limit error
+          if (error instanceof APIError) {
+            extractQuotaStatusFromError(error)
+          }
+
+          // Extract requestId from stream, error header, or error body
+          const requestId =
+            streamRequestId ||
+            (error instanceof APIError ? error.requestID : undefined) ||
+            (error instanceof APIError
+              ? (error.error as { request_id?: string })?.request_id
+              : undefined)
+
+          logAPIError({
+            error,
+            model: errorModel,
+            messageCount: messagesForAPI.length,
+            messageTokens: tokenCountFromLastAPIResponse(messagesForAPI),
+            durationMs: Date.now() - start,
+            durationMsIncludingRetries: Date.now() - startIncludingRetries,
+            attempt: attemptNumber,
+            requestId,
+            clientRequestId,
+            didFallBackToNonStreaming,
+            queryTracking: options.queryTracking,
+            querySource: options.querySource,
+            llmSpan,
+            fastMode: isFastModeRequest,
+            previousRequestId,
+          })
+
+          // Don't yield an assistant error message for user aborts
+          // The interruption message is handled in query.ts
+          if (error instanceof APIUserAbortError) {
+            releaseStreamResources()
             return
           }
 
-          const synthesizedStop = hasToolUse ? 'tool_use' : 'end_turn'
-          // densable: if stop_reason not already set on yielded messages, stamp it
-          for (const msg of newMessages) {
-            if (msg.message && msg.message.stop_reason == null) {
-              msg.message.stop_reason = synthesizedStop
-            }
-          }
-          const hasOutput = hasNonThinkingOutput || hasYieldedContent
-          logForDebugging(
-            streamIdleAborted
-              ? `Stream idle timeout after ${newMessages.length} block(s) yielded — finalizing partial response`
-              : isServerApiErrorPartial
-                ? `Mid-stream server error after ${newMessages.length} block(s) yielded — finalizing partial response`
-                : `Stream connection closed (${connCode ?? 'unknown'}) after ${newMessages.length} block(s) yielded — finalizing partial response`,
-            { level: 'warn' },
-          )
-          logEvent('tengu_streaming_partial_finalized', {
-            model:
-              options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            blocks_yielded: newMessages.length,
-            has_output: hasOutput,
-            synthesized_stop_reason:
-              synthesizedStop as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            cause:
-              cause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            request_id: (streamRequestId ??
-              'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          yield getAssistantMessageFromError(error, errorModel, {
+            messages,
+            messagesForAPI,
           })
-          const incompleteBanner = hasOutput
-            ? streamIdleAborted
-              ? `${API_ERROR_MESSAGE_PREFIX}: Response stalled mid-stream. The response above may be incomplete.`
-              : isServerApiErrorPartial
-                ? `${API_ERROR_MESSAGE_PREFIX}: Server error mid-response. The response above may be incomplete.`
-                : `${API_ERROR_MESSAGE_PREFIX}: Connection closed mid-response. The response above may be incomplete.`
-            : streamIdleAborted
-              ? `${API_ERROR_MESSAGE_PREFIX}: Response stalled while thinking, before producing a response. Try again.`
-              : `${API_ERROR_MESSAGE_PREFIX}: Connection closed while thinking, before producing a response. Try again.`
-          yield createAssistantAPIErrorMessage({
-            content: incompleteBanner,
-            apiError: 'server_error',
-            error: 'server_error',
-          })
-          // densable `break e` — exit streaming successfully with partial kept
-          return
-        }
-      }
-
-      // When the flag is enabled, skip the non-streaming fallback and let the
-      // error propagate to withRetry. The mid-stream fallback causes double tool
-      // execution when streaming tool execution is active: the partial stream
-      // starts a tool, then the non-streaming retry produces the same tool_use
-      // and runs it again. See inc-4258.
-      // Official DISABLE_NONSTREAMING_FALLBACK densable.
-      let nonstreamingFallbackDisabled = isEnvTruthy(
-        process.env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK,
-      )
-      try {
-        const { isNonstreamingFallbackDisabled } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-        nonstreamingFallbackDisabled = isNonstreamingFallbackDisabled()
-      } catch {
-        // residual helpers optional
-      }
-      // densable: also skip non-streaming when watchdog fired under GB flag
-      const watchdogSkipNonstreaming =
-        getFeatureValue_CACHED_MAY_BE_STALE(
-          'tengu_watchdog_skip_nonstreaming_fallback',
-          true,
-        ) && streamIdleAborted
-      const disableFallback =
-        nonstreamingFallbackDisabled ||
-        watchdogSkipNonstreaming ||
-        getFeatureValue_CACHED_MAY_BE_STALE(
-          'tengu_disable_streaming_to_non_streaming_fallback',
-          false,
-        )
-
-      if (disableFallback) {
-        logForDebugging(
-          `Error streaming (non-streaming fallback disabled): ${errorMessage(streamingError)}`,
-          { level: 'error' },
-        )
-        logEvent('tengu_streaming_fallback_to_non_streaming', {
-          model:
-            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          error:
-            streamingError instanceof Error
-              ? (streamingError.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-              : (String(
-                  streamingError,
-                ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS),
-          attemptNumber,
-          maxOutputTokens,
-          thinkingType:
-            thinkingConfig.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          ...(thinkingConfig.type === 'enabled' && {
-            thinkingBudgetTokens: thinkingConfig.budgetTokens,
-          }),
-          fallback_disabled: true,
-          request_id: (streamRequestId ??
-            'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          fallback_cause: (streamIdleAborted
-            ? 'watchdog'
-            : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        throw streamingError
-      }
-
-      logForDebugging(
-        `Error streaming, falling back to non-streaming mode: ${errorMessage(streamingError)}`,
-        { level: 'error' },
-      )
-      didFallBackToNonStreaming = true
-      if (options.onStreamingFallback) {
-        options.onStreamingFallback()
-      }
-
-      logEvent('tengu_streaming_fallback_to_non_streaming', {
-        model:
-          options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        error:
-          streamingError instanceof Error
-            ? (streamingError.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-            : (String(
-                streamingError,
-              ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS),
-        attemptNumber,
-        maxOutputTokens,
-        thinkingType:
-          thinkingConfig.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        ...(thinkingConfig.type === 'enabled' && {
-          thinkingBudgetTokens: thinkingConfig.budgetTokens,
-        }),
-        fallback_disabled: false,
-        request_id: (streamRequestId ??
-          'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        fallback_cause: (streamIdleAborted
-          ? 'watchdog'
-          : newMessages.length > 0
-            ? 'partial_yield'
-            : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-
-      // Fall back to non-streaming mode with retries.
-      // If the streaming failure was itself a 529, count it toward the
-      // consecutive-529 budget so total 529s-before-model-fallback is the
-      // same whether the overload was hit in streaming or non-streaming mode.
-      // This is a speculative fix for https://github.com/anthropics/claude-code/issues/1513
-      // Instrumentation: proves executeNonStreamingRequest was entered (vs. the
-      // fallback event firing but the call itself hanging at dispatch).
-      logForDiagnosticsNoPII('info', 'cli_nonstreaming_fallback_started')
-      logEvent('tengu_nonstreaming_fallback_started', {
-        request_id: (streamRequestId ??
-          'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        model:
-          options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        fallback_cause: (streamIdleAborted
-          ? 'watchdog'
-          : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      const result = yield* executeNonStreamingRequest(
-        { model: options.model, source: options.querySource },
-        {
-          model: options.model,
-          fallbackModel: options.fallbackModel,
-          thinkingConfig,
-          ...(isFastModeEnabled() && { fastMode: isFastMode }),
-          signal,
-          initialConsecutive529Errors: is529Error(streamingError) ? 1 : 0,
-          querySource: options.querySource,
-        },
-        paramsFromContext,
-        (attempt, _startTime, tokens) => {
-          attemptNumber = attempt
-          maxOutputTokens = tokens
-        },
-        params => captureAPIRequest(params, options.querySource),
-        streamRequestId,
-      )
-
-      // densable fa — materialize non-streaming fallback content blocks
-      // then yield assistant, then wa() server_fallback (order matches densable)
-      let nonStreamContent: unknown[] = Array.isArray(result.content)
-        ? [...result.content]
-        : []
-      let nonStreamLastHop:
-        | {
-            fromModel: string
-            model: string
-            reason: string
-            category: string | null
-          }
-        | undefined
-      // densable G2s non-stream: mint from stop_details before fa/wa
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { planFallbackCreditMint } =
-          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-        const stopDetails = (result as { stop_details?: unknown }).stop_details
-        if (stopDetails !== undefined) {
-          const mint = planFallbackCreditMint({
-            stopDetails,
-            alreadyMinted: fallbackCreditMinted,
-          })
-          if (
-            typeof stopDetails === 'object' &&
-            stopDetails !== null &&
-            'fallback_credit_token' in stopDetails
-          ) {
-            delete (stopDetails as { fallback_credit_token?: unknown })
-              .fallback_credit_token
-          }
-          if (mint.creditCode !== undefined) {
-            mintedFallbackCreditCode = mint.creditCode
-            if (mint.shouldLogMint) {
-              fallbackCreditMinted = true
-              logEvent('tengu_fallback_credit_minted', {
-                request_id: (streamRequestId ??
-                  'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                model:
-                  options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                fallback_target_model: (options.refusalFallbackModel ??
-                  options.serverRefusalFallback?.model ??
-                  'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                token_length: mint.creditCode.length,
-                query_source:
-                  options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              })
-            }
-          }
-        }
-      } catch {
-        // densable optional
-      }
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { materializeNonStreamingServerFallbackContent } =
-          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-        const fa = materializeNonStreamingServerFallbackContent({
-          content: nonStreamContent,
-          stopReason: result.stop_reason ?? null,
-          armed: options.serverRefusalFallback !== undefined,
-        })
-        nonStreamContent = fa.content
-        nonStreamLastHop = fa.lastHop
-        for (const idx of fa.malformedIndexes) {
-          logEvent('tengu_rotunda_pennant_malformed', {
-            block_index: idx,
-            non_streaming: true,
-          })
-        }
-        if (fa.lastHop !== undefined) {
-          logEvent('tengu_rotunda_pennant_materialized', {
-            armed: options.serverRefusalFallback !== undefined,
-            block_index: -1,
-            non_streaming: true,
-          })
-        }
-        if (fa.droppedCount > 0) {
-          logEvent('tengu_rotunda_pennant_sync_dropped', {
-            dropped_count: fa.droppedCount,
-            had_tool_use: fa.droppedHadToolUse,
-            chain_exhausted: result.stop_reason === 'refusal',
-          })
-        }
-      } catch {
-        // densable optional
-      }
-
-      const m: AssistantMessage = {
-        message: {
-          ...result,
-          content: normalizeContentFromAPI(
-            nonStreamContent as typeof result.content,
-            tools,
-            options.agentId,
-          ) as MessageContent,
-        },
-        requestId: streamRequestId ?? undefined,
-        type: 'assistant',
-        uuid: randomUUID(),
-        timestamp: new Date().toISOString(),
-        ...(research !== undefined && {
-          research,
-        }),
-        ...(advisorModel && {
-          advisorModel,
-        }),
-        // densable ...Ie!==void 0&&{effort:Ie}
-        ...(effortLevelForTranscript !== undefined && {
-          effort: effortLevelForTranscript,
-        }),
-      }
-      newMessages.push(m)
-      fallbackMessage = m
-      yield m
-      // densable wa: yield po then yield*wa → server_fallback midStream:!1
-      if (
-        options.serverRefusalFallback !== undefined &&
-        !serverFallbackEmitted
-      ) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { planNonStreamingServerFallbackEvent } =
-            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-          const sfEv = planNonStreamingServerFallbackEvent({
-            lastHop: nonStreamLastHop,
-            currentModel: options.model,
-            requestId: streamRequestId,
-            finalStopReason: result.stop_reason ?? null,
-            alreadyEmitted: serverFallbackEmitted,
-          })
-          if (sfEv) {
-            serverFallbackEmitted = true
-            lastServerFallbackHop = nonStreamLastHop
-            yield sfEv as unknown as StreamEvent
-          }
-        } catch {
-          // densable optional
-        }
-      }
-    } finally {
-      clearStreamIdleTimers()
-    }
-  } catch (errorFromRetry) {
-    // FallbackTriggeredError must propagate to query.ts, which performs the
-    // actual model switch. Swallowing it here would turn the fallback into a
-    // no-op — the user would just see "Model fallback triggered: X -> Y" as
-    // an error message with no actual retry on the fallback model.
-    if (errorFromRetry instanceof FallbackTriggeredError) {
-      throw errorFromRetry
-    }
-
-    // Check if this is a 404 error during stream creation that should trigger
-    // non-streaming fallback. This handles gateways that return 404 for streaming
-    // endpoints but work fine with non-streaming. Before v2.1.8, BetaMessageStream
-    // threw 404s during iteration (caught by inner catch with fallback), but now
-    // with raw streams, 404s are thrown during creation (caught here).
-    const is404StreamCreationError =
-      !didFallBackToNonStreaming &&
-      errorFromRetry instanceof CannotRetryError &&
-      errorFromRetry.originalError instanceof APIError &&
-      errorFromRetry.originalError.status === 404
-
-    if (is404StreamCreationError) {
-      // 404 is thrown at .withResponse() before streamRequestId is assigned,
-      // and CannotRetryError means every retry failed — so grab the failed
-      // request's ID from the error header instead.
-      const failedRequestId =
-        (errorFromRetry.originalError as APIError).requestID ?? 'unknown'
-      logForDebugging(
-        'Streaming endpoint returned 404, falling back to non-streaming mode',
-        { level: 'warn' },
-      )
-      didFallBackToNonStreaming = true
-      if (options.onStreamingFallback) {
-        options.onStreamingFallback()
-      }
-
-      logEvent('tengu_streaming_fallback_to_non_streaming', {
-        model:
-          options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        error:
-          '404_stream_creation' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        attemptNumber,
-        maxOutputTokens,
-        thinkingType:
-          thinkingConfig.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        ...(thinkingConfig.type === 'enabled' && {
-          thinkingBudgetTokens: thinkingConfig.budgetTokens,
-        }),
-        request_id:
-          failedRequestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        fallback_cause:
-          '404_stream_creation' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-
-      try {
-        // Fall back to non-streaming mode
-        const result = yield* executeNonStreamingRequest(
-          { model: options.model, source: options.querySource },
-          {
-            model: options.model,
-            fallbackModel: options.fallbackModel,
-            thinkingConfig,
-            ...(isFastModeEnabled() && { fastMode: isFastMode }),
-            signal,
-          },
-          paramsFromContext,
-          (attempt, _startTime, tokens) => {
-            attemptNumber = attempt
-            maxOutputTokens = tokens
-          },
-          params => captureAPIRequest(params, options.querySource),
-          failedRequestId,
-        )
-
-        // densable fa + wa on 404 non-streaming path (same as idle fallback)
-        let nonStreamContent404: unknown[] = Array.isArray(result.content)
-          ? [...result.content]
-          : []
-        let nonStreamLastHop404:
-          | {
-              fromModel: string
-              model: string
-              reason: string
-              category: string | null
-            }
-          | undefined
-        // densable G2s on 404 non-stream path
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { planFallbackCreditMint } =
-            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-          const stopDetails404 = (result as { stop_details?: unknown })
-            .stop_details
-          if (stopDetails404 !== undefined) {
-            const mint = planFallbackCreditMint({
-              stopDetails: stopDetails404,
-              alreadyMinted: fallbackCreditMinted,
-            })
-            if (
-              typeof stopDetails404 === 'object' &&
-              stopDetails404 !== null &&
-              'fallback_credit_token' in stopDetails404
-            ) {
-              delete (stopDetails404 as { fallback_credit_token?: unknown })
-                .fallback_credit_token
-            }
-            if (mint.creditCode !== undefined) {
-              mintedFallbackCreditCode = mint.creditCode
-              if (mint.shouldLogMint) {
-                fallbackCreditMinted = true
-                logEvent('tengu_fallback_credit_minted', {
-                  request_id: (streamRequestId ??
-                    failedRequestId) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  model:
-                    options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  fallback_target_model: (options.refusalFallbackModel ??
-                    options.serverRefusalFallback?.model ??
-                    'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  token_length: mint.creditCode.length,
-                  query_source:
-                    options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-              }
-            }
-          }
-        } catch {
-          // densable optional
-        }
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { materializeNonStreamingServerFallbackContent } =
-            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-          const fa = materializeNonStreamingServerFallbackContent({
-            content: nonStreamContent404,
-            stopReason: result.stop_reason ?? null,
-            armed: options.serverRefusalFallback !== undefined,
-          })
-          nonStreamContent404 = fa.content
-          nonStreamLastHop404 = fa.lastHop
-          for (const idx of fa.malformedIndexes) {
-            logEvent('tengu_rotunda_pennant_malformed', {
-              block_index: idx,
-              non_streaming: true,
-            })
-          }
-          if (fa.lastHop !== undefined) {
-            logEvent('tengu_rotunda_pennant_materialized', {
-              armed: options.serverRefusalFallback !== undefined,
-              block_index: -1,
-              non_streaming: true,
-            })
-          }
-        } catch {
-          // densable optional
-        }
-
-        const m: AssistantMessage = {
-          message: {
-            ...result,
-            content: normalizeContentFromAPI(
-              nonStreamContent404 as typeof result.content,
-              tools,
-              options.agentId,
-            ) as MessageContent,
-          },
-          requestId: streamRequestId ?? undefined,
-          type: 'assistant',
-          uuid: randomUUID(),
-          timestamp: new Date().toISOString(),
-          ...(research !== undefined && { research }),
-          ...(advisorModel && { advisorModel }),
-          // densable ...Ie!==void 0&&{effort:Ie}
-          ...(effortLevelForTranscript !== undefined && {
-            effort: effortLevelForTranscript,
-          }),
-        }
-        newMessages.push(m)
-        fallbackMessage = m
-        yield m
-        if (
-          options.serverRefusalFallback !== undefined &&
-          !serverFallbackEmitted
-        ) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { planNonStreamingServerFallbackEvent } =
-              require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
-            const sfEv = planNonStreamingServerFallbackEvent({
-              lastHop: nonStreamLastHop404,
-              currentModel: options.model,
-              requestId: streamRequestId ?? failedRequestId,
-              finalStopReason: result.stop_reason ?? null,
-              alreadyEmitted: serverFallbackEmitted,
-            })
-            if (sfEv) {
-              serverFallbackEmitted = true
-              lastServerFallbackHop = nonStreamLastHop404
-              yield sfEv as unknown as StreamEvent
-            }
-          } catch {
-            // densable optional
-          }
-        }
-
-        // Continue to success logging below
-      } catch (fallbackError) {
-        // Propagate model-fallback signal to query.ts (see comment above).
-        if (fallbackError instanceof FallbackTriggeredError) {
-          throw fallbackError
-        }
-
-        // Fallback also failed, handle as normal error
-        logForDebugging(
-          `Non-streaming fallback also failed: ${errorMessage(fallbackError)}`,
-          { level: 'error' },
-        )
-
-        let error = fallbackError
-        let errorModel = options.model
-        if (fallbackError instanceof CannotRetryError) {
-          error = fallbackError.originalError
-          errorModel = fallbackError.retryContext.model
-        }
-
-        if (error instanceof APIError) {
-          extractQuotaStatusFromError(error)
-        }
-
-        const requestId =
-          streamRequestId ||
-          (error instanceof APIError ? error.requestID : undefined) ||
-          (error instanceof APIError
-            ? (error.error as { request_id?: string })?.request_id
-            : undefined)
-
-        logAPIError({
-          error,
-          model: errorModel,
-          messageCount: messagesForAPI.length,
-          messageTokens: tokenCountFromLastAPIResponse(messagesForAPI),
-          durationMs: Date.now() - start,
-          durationMsIncludingRetries: Date.now() - startIncludingRetries,
-          attempt: attemptNumber,
-          requestId,
-          clientRequestId,
-          didFallBackToNonStreaming,
-          queryTracking: options.queryTracking,
-          querySource: options.querySource,
-          llmSpan,
-          fastMode: isFastModeRequest,
-          previousRequestId,
-        })
-
-        if (error instanceof APIUserAbortError) {
           releaseStreamResources()
           return
         }
-
-        yield getAssistantMessageFromError(error, errorModel, {
-          messages,
-          messagesForAPI,
-        })
+      } finally {
+        stopSessionActivity('api_call', sessionActivityAgentId)
+        // Must be in the finally block: if the generator is terminated early
+        // via .return() (e.g. consumer breaks out of for-await-of, or query.ts
+        // encounters an abort), code after the try/finally never executes.
+        // Without this, the Response object's native TLS/socket buffers leak
+        // until the generator itself is GC'd (see GH #32920).
         releaseStreamResources()
-        return
+
+        // Non-streaming fallback cost: the streaming path tracks cost in the
+        // message_delta handler before any yield. Fallback pushes to newMessages
+        // then yields, so tracking must be here to survive .return() at the yield.
+        if (fallbackMessage) {
+          const fallbackUsage = fallbackMessage.message
+            .usage as BetaMessageDeltaUsage
+          usage = updateUsage(EMPTY_USAGE, fallbackUsage)
+          stopReason = fallbackMessage.message.stop_reason as BetaStopReason
+          const fallbackCost = calculateUSDCost(
+            resolvedModel,
+            fallbackUsage as unknown as BetaUsage,
+          )
+          costUSD += addToTotalSessionCost(
+            fallbackCost,
+            fallbackUsage as unknown as BetaUsage,
+            options.model,
+            {
+              activeMcpServer: options.activeMcpServer,
+              activeMcpTool: options.activeMcpTool,
+            },
+          )
+        }
       }
-    } else {
-      // Original error handling for non-404 errors
-      logForDebugging(`Error in API request: ${errorMessage(errorFromRetry)}`, {
-        level: 'error',
-      })
-
-      let error = errorFromRetry
-      let errorModel = options.model
-      if (errorFromRetry instanceof CannotRetryError) {
-        error = errorFromRetry.originalError
-        errorModel = errorFromRetry.retryContext.model
+      break
+    } catch (streamAttemptError) {
+      if (streamAttemptError instanceof ThinkingOnlyStreamRetryError) {
+        if (streamAttemptError.backoffMs > 0) {
+          await sleep(streamAttemptError.backoffMs, signal)
+        }
+        if (signal.aborted) {
+          return
+        }
+        continue
       }
-
-      // Extract quota status from error headers if it's a rate limit error
-      if (error instanceof APIError) {
-        extractQuotaStatusFromError(error)
-      }
-
-      // Extract requestId from stream, error header, or error body
-      const requestId =
-        streamRequestId ||
-        (error instanceof APIError ? error.requestID : undefined) ||
-        (error instanceof APIError
-          ? (error.error as { request_id?: string })?.request_id
-          : undefined)
-
-      logAPIError({
-        error,
-        model: errorModel,
-        messageCount: messagesForAPI.length,
-        messageTokens: tokenCountFromLastAPIResponse(messagesForAPI),
-        durationMs: Date.now() - start,
-        durationMsIncludingRetries: Date.now() - startIncludingRetries,
-        attempt: attemptNumber,
-        requestId,
-        clientRequestId,
-        didFallBackToNonStreaming,
-        queryTracking: options.queryTracking,
-        querySource: options.querySource,
-        llmSpan,
-        fastMode: isFastModeRequest,
-        previousRequestId,
-      })
-
-      // Don't yield an assistant error message for user aborts
-      // The interruption message is handled in query.ts
-      if (error instanceof APIUserAbortError) {
-        releaseStreamResources()
-        return
-      }
-
-      yield getAssistantMessageFromError(error, errorModel, {
-        messages,
-        messagesForAPI,
-      })
-      releaseStreamResources()
-      return
+      throw streamAttemptError
     }
-  } finally {
-    stopSessionActivity('api_call', sessionActivityAgentId)
-    // Must be in the finally block: if the generator is terminated early
-    // via .return() (e.g. consumer breaks out of for-await-of, or query.ts
-    // encounters an abort), code after the try/finally never executes.
-    // Without this, the Response object's native TLS/socket buffers leak
-    // until the generator itself is GC'd (see GH #32920).
-    releaseStreamResources()
-
-    // Non-streaming fallback cost: the streaming path tracks cost in the
-    // message_delta handler before any yield. Fallback pushes to newMessages
-    // then yields, so tracking must be here to survive .return() at the yield.
-    if (fallbackMessage) {
-      const fallbackUsage = fallbackMessage.message
-        .usage as BetaMessageDeltaUsage
-      usage = updateUsage(EMPTY_USAGE, fallbackUsage)
-      stopReason = fallbackMessage.message.stop_reason as BetaStopReason
-      const fallbackCost = calculateUSDCost(
-        resolvedModel,
-        fallbackUsage as unknown as BetaUsage,
-      )
-      costUSD += addToTotalSessionCost(
-        fallbackCost,
-        fallbackUsage as unknown as BetaUsage,
-        options.model,
-        {
-          activeMcpServer: options.activeMcpServer,
-          activeMcpTool: options.activeMcpTool,
-        },
-      )
-    }
-  }
+  } // streamAttempt
 
   // Mark all registered tools as sent to API so they become eligible for deletion
   if (feature('CACHED_MICROCOMPACT') && cachedMCEnabled) {

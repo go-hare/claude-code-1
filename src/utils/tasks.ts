@@ -2,10 +2,14 @@ import { AsyncLocalStorage } from 'async_hooks'
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { z } from 'zod/v4'
-import { getIsNonInteractiveSession, getSessionId } from '../bootstrap/state.js'
+import { getSessionId } from '../bootstrap/state.js'
 import { uniq } from './array.js'
 import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir, getTeamsDir, isEnvTruthy } from './envUtils.js'
+import {
+  getClaudeConfigHomeDir,
+  getTeamsDir,
+  isEnvDefinedFalsy,
+} from './envUtils.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 import { lazySchema } from './lazySchema.js'
 import * as lockfile from './lockfile.js'
@@ -284,19 +288,57 @@ async function writeHighWaterMark(
   await writeFile(path, String(value))
 }
 
+/**
+ * densable 2.1.233 `h5` — Task* surface (vs legacy TodoWrite).
+ *
+ * Gold:
+ *   if (q.CLAUDE_CODE_ENABLE_TASKS === false) return false
+ *   return true
+ *
+ * Default is always Task* (true). Only an explicit falsy ENABLE_TASKS
+ * (`0`/`false`/`no`/`off`) forces legacy TodoWrite. Non-interactive sessions
+ * still get Task* unless the env forces them off (densable does not gate on
+ * interactive).
+ */
 export function isTodoV2Enabled(): boolean {
-  // Official ENABLE_TASKS densable force-on (e.g. SDK users who want Task tools over TodoWrite).
-  try {
-    const { isTasksEnvEnabled } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
-    if (isTasksEnvEnabled()) return true
-  } catch {
-    if (isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TASKS)) {
-      return true
-    }
+  // densable: only explicit false disables Task* surface
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ENABLE_TASKS)) {
+    return false
   }
-  return !getIsNonInteractiveSession()
+  // residual isTasksEnvEnabled is force-on only; truthy already covered by default true
+  return true
+}
+
+/**
+ * densable 2.1.233 uX — model/env/GB gate for TodoWrite + Task* tools.
+ * Does not include h5 (TodoV2 surface); use isTodoV2ToolsEnabled for Task*.
+ */
+export function isTodoToolsEnabled(): boolean {
+  try {
+    const { isTodoToolsEnabledForModel } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./todoToolsGate.js') as typeof import('./todoToolsGate.js')
+    return isTodoToolsEnabledForModel()
+  } catch {
+    return true
+  }
+}
+
+/**
+ * densable 2.1.233 Eee — TaskCreate/Get/Update/List isEnabled.
+ * h5 (isTodoV2Enabled) && uX (isTodoToolsEnabledForModel).
+ */
+export function isTodoV2ToolsEnabled(): boolean {
+  if (!isTodoV2Enabled()) return false
+  return isTodoToolsEnabled()
+}
+
+/**
+ * densable 2.1.233 TodoWrite isEnabled: !h5() && uX().
+ */
+export function isTodoWriteToolEnabled(): boolean {
+  if (isTodoV2Enabled()) return false
+  return isTodoToolsEnabled()
 }
 
 /**

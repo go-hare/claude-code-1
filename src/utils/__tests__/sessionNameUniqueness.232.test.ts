@@ -6,6 +6,7 @@ import {
   allocateUniqueSessionName,
   collectOccupiedNameKeys,
   decideSessionNameUniqueness,
+  findNameHolders,
   findNameHoldersLenient,
   formatSessionNameYieldMessage,
   formatSessionRenamePeerNotice,
@@ -35,7 +36,8 @@ function rec(
   startedAt: number,
   extra?: Partial<LiveSessionNameRecord>,
 ): LiveSessionNameRecord {
-  return { pid, name, startedAt, ...extra }
+  // densable YM_ requires process-start identity; default a stable token per pid.
+  return { pid, name, startedAt, procStart: `ps-${pid}`, ...extra }
 }
 
 describe('densable kp normalizeSessionNameKey', () => {
@@ -62,14 +64,14 @@ describe('densable Lid isOlderSessionRecord', () => {
   })
 })
 
-describe('densable YM_ findNameHoldersLenient', () => {
-  test('finds other pids with same normalized name', () => {
+describe('densable YM_ findNameHolders (strict procStart)', () => {
+  test('finds other pids with same name and process-start identity', () => {
     const live = [
       rec(10, 'Auth Fix', 1),
       rec(11, 'auth-fix', 2),
       rec(12, 'other', 3),
     ]
-    const holders = findNameHoldersLenient(
+    const holders = findNameHolders(
       normalizeSessionNameKey('auth fix'),
       live,
       99,
@@ -79,8 +81,31 @@ describe('densable YM_ findNameHoldersLenient', () => {
 
   test('excludes self pid', () => {
     const live = [rec(10, 'solo', 1)]
+    expect(findNameHolders(normalizeSessionNameKey('solo'), live, 10)).toEqual(
+      [],
+    )
+  })
+
+  test('skips rows without process-start identity', () => {
+    const live = [
+      rec(10, 'shared', 1, { procStart: undefined, procStartFt: undefined }),
+      rec(11, 'shared', 2),
+    ]
+    const holders = findNameHolders(normalizeSessionNameKey('shared'), live, 99)
+    expect(holders.map(h => h.pid)).toEqual([11])
+  })
+
+  test('lenient still matches missing process-start', () => {
+    const live = [
+      rec(10, 'shared', 1, { procStart: undefined, procStartFt: undefined }),
+    ]
     expect(
-      findNameHoldersLenient(normalizeSessionNameKey('solo'), live, 10),
+      findNameHoldersLenient(normalizeSessionNameKey('shared'), live, 99).map(
+        h => h.pid,
+      ),
+    ).toEqual([10])
+    expect(
+      findNameHolders(normalizeSessionNameKey('shared'), live, 99),
     ).toEqual([])
   })
 })
@@ -159,6 +184,35 @@ describe('densable ZM_ decideSessionNameUniqueness', () => {
       expect(d.newName).toBe('shared-word-word')
       expect(d.holders[0]?.pid).toBe(1)
     }
+  })
+
+  test('strict default ignores holders without process-start identity', () => {
+    const d = decideSessionNameUniqueness({
+      desiredName: 'shared',
+      self: rec(2, undefined, 50),
+      live: [
+        rec(1, 'shared', 100, { procStart: undefined, procStartFt: undefined }),
+        rec(2, undefined, 50),
+      ],
+      moment: 'rename',
+      slug: () => 'word-word',
+    })
+    expect(d.kind).toBe('keep')
+  })
+
+  test('lenientHolders still yields without process-start identity', () => {
+    const d = decideSessionNameUniqueness({
+      desiredName: 'shared',
+      self: rec(2, undefined, 50),
+      live: [
+        rec(1, 'shared', 100, { procStart: undefined, procStartFt: undefined }),
+        rec(2, undefined, 50),
+      ],
+      moment: 'rename',
+      slug: () => 'word-word',
+      lenientHolders: true,
+    })
+    expect(d.kind).toBe('yield')
   })
 
   test('startup only yields to older holders', () => {
@@ -260,12 +314,7 @@ describe('densable Bid runSessionNameStartupUniqueness', () => {
     let selfName = 'shared'
     const live = (): LiveSessionNameRecord[] => [
       rec(1, 'shared', 10), // older holder
-      {
-        pid: process.pid,
-        name: selfName,
-        startedAt: 100,
-        nameSource: 'user',
-      },
+      rec(process.pid, selfName, 100, { nameSource: 'user' }),
     ]
     const deps: SessionNameUniquenessDeps = {
       whenRegistered: async () => true,
@@ -325,12 +374,7 @@ describe('densable G$o scheduleSessionNameRenameRecheck', () => {
           whenRegistered: async () => true,
           listLive: async () => [
             rec(1, 'mine', 1, { nameSince: 1 }),
-            {
-              pid: process.pid,
-              name: selfName,
-              startedAt: 99,
-              nameSince: 99,
-            },
+            rec(process.pid, selfName, 99, { nameSince: 99 }),
           ],
         },
         onYield: async (newName, previous) => {

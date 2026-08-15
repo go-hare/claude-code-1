@@ -90,14 +90,15 @@ describe('densable 2.1.232 #16 MCP connect timeout helpers', () => {
     const http = resolveMcpProtocolNegotiationPlan('http', env)
     expect(http.mode).toBe('auto')
     if (http.mode === 'auto') {
-      expect(http.probeTimeoutMs).toBe(
+      // densable BVa: probe:{timeoutMs}
+      expect(http.probe.timeoutMs).toBe(
         Math.min(MCP_PROTOCOL_PROBE_HTTP_CAP_MS, Math.floor(30_000 / 3)),
       )
     }
     const stdio = resolveMcpProtocolNegotiationPlan('stdio', env)
     expect(stdio.mode).toBe('auto')
     if (stdio.mode === 'auto') {
-      expect(stdio.probeTimeoutMs).toBe(
+      expect(stdio.probe.timeoutMs).toBe(
         Math.min(MCP_PROTOCOL_PROBE_STDIO_CAP_MS, Math.floor(30_000 / 3)),
       )
     }
@@ -174,6 +175,38 @@ describe('densable 2.1.232 #16 MCP connect timeout helpers', () => {
     expect(d).toEqual({ shouldFallback: true, reason: 'probe_failed' })
   })
 
+  test('v2 SdkError ERA_NEGOTIATION_FAILED on http → probe_failed', () => {
+    const plan = resolveMcpProtocolNegotiationPlan('http', {
+      MCP_PROTOCOL_NEGOTIATION: 'auto',
+    })
+    // @modelcontextprotocol/client SdkErrorCode.EraNegotiationFailed
+    const err = Object.assign(new Error('Version negotiation failed'), {
+      name: 'SdkError',
+      code: 'ERA_NEGOTIATION_FAILED',
+    })
+    const d = classifyMcpAutoProbeFallback(plan, err, {
+      transportType: 'http',
+      canRecreateTransport: true,
+    })
+    expect(d).toEqual({ shouldFallback: true, reason: 'probe_failed' })
+  })
+
+  test('v2 SdkError ERA_NEGOTIATION_FAILED on stdio → closed', () => {
+    const plan = resolveMcpProtocolNegotiationPlan('stdio', {
+      MCP_PROTOCOL_NEGOTIATION: 'auto',
+    })
+    const err = Object.assign(new Error('Version negotiation failed'), {
+      name: 'SdkError',
+      code: 'ERA_NEGOTIATION_FAILED',
+    })
+    expect(
+      classifyMcpAutoProbeFallback(plan, err, {
+        transportType: 'stdio',
+        canRecreateTransport: true,
+      }),
+    ).toEqual({ shouldFallback: true, reason: 'closed' })
+  })
+
   test('auto probe RequestTimeout with transport marker → probe_timeout', () => {
     const plan = resolveMcpProtocolNegotiationPlan('http', {
       MCP_PROTOCOL_NEGOTIATION: 'auto',
@@ -182,6 +215,22 @@ describe('densable 2.1.232 #16 MCP connect timeout helpers', () => {
     const d = classifyMcpAutoProbeFallback(plan, err, {
       transportType: 'http',
       transport: { _anthropicProbeTimedOut: true },
+      canRecreateTransport: true,
+    })
+    expect(d).toEqual({ shouldFallback: true, reason: 'probe_timeout' })
+  })
+
+  test('v2 probe timeout message without SEA stamp → probe_timeout', () => {
+    const plan = resolveMcpProtocolNegotiationPlan('http', {
+      MCP_PROTOCOL_NEGOTIATION: 'auto',
+    })
+    const err = Object.assign(
+      new Error('Version negotiation probe timed out after 5000ms'),
+      { name: 'SdkError', code: 'REQUEST_TIMEOUT' },
+    )
+    const d = classifyMcpAutoProbeFallback(plan, err, {
+      transportType: 'http',
+      // no _anthropicProbeTimedOut — public client@2
       canRecreateTransport: true,
     })
     expect(d).toEqual({ shouldFallback: true, reason: 'probe_timeout' })

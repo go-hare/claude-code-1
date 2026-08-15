@@ -333,7 +333,29 @@ const externalTips: Tip[] = [
     content: async () =>
       'Run /install-github-app to tag @claude right from your Github issues and PRs',
     cooldownSessions: 10,
-    isRelevant: async () => !getGlobalConfig().githubActionSetupCount,
+    // densable 2.1.233 #17 — hide on gitlab/bitbucket origin (GitHub app only).
+    // Use gitRemoteHostname (nested path remotes) — parseGitRemote only handles
+    // two-segment paths and misses gitlab.com/group/sub/project.git.
+    isRelevant: async () => {
+      if (getGlobalConfig().githubActionSetupCount) return false
+      try {
+        // Lazy require avoids circular import with git / worktree
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getRemoteUrl } =
+          require('../../utils/git.js') as typeof import('../../utils/git.js')
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { gitRemoteHostname } =
+          require('../../utils/worktree.js') as typeof import('../../utils/worktree.js')
+        const host =
+          gitRemoteHostname((await getRemoteUrl()) ?? '')?.toLowerCase() ?? ''
+        if (host.includes('gitlab') || host.includes('bitbucket')) {
+          return false
+        }
+        return true
+      } catch {
+        return true
+      }
+    },
   },
   {
     id: 'install-slack-app',

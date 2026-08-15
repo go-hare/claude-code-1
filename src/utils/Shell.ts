@@ -45,6 +45,10 @@ import { createBashShellProvider } from './shell/bashProvider.js'
 import { getCachedPowerShellPath } from './shell/powershellDetection.js'
 import { createPowerShellProvider } from './shell/powershellProvider.js'
 import type { ShellProvider, ShellType } from './shell/shellProvider.js'
+import {
+  attachPidToToolMemoryCgroup,
+  resolveToolMemoryCgroupForSpawn,
+} from './shell/toolMemoryCgroup.js'
 import { subprocessEnv } from './subprocessEnv.js'
 import { posixPathToWindowsPath } from './windowsPaths.js'
 
@@ -195,6 +199,12 @@ export type ExecOptions = {
    * omitted, Shell computes `f ?? p` via resolveIsolationRoot.
    */
   isolationRoot?: string
+  /**
+   * densable 2.1.233 `useToolMemoryCgroup` — when true, place the child into
+   * the tool memory cgroup (Qfp / CLAUDE_CODE_TOOL_MEMORY_LIMIT).
+   * BashTool + PowerShellTool pass true; other callers leave off.
+   */
+  useToolMemoryCgroup?: boolean
 }
 
 /**
@@ -216,6 +226,7 @@ export async function exec(
     onStdout,
     agentWorktree,
     isolationRoot: isolationRootOpt,
+    useToolMemoryCgroup,
   } = options ?? {}
   const commandTimeout = timeout || DEFAULT_TIMEOUT
 
@@ -430,6 +441,13 @@ export async function exec(
   }
 
   try {
+    // densable 2.1.233: yhp.spawn(..., { cgroup: y ? Qfp() : void 0 }).
+    // Bun's child_process.spawn accepts `cgroup` (atomic at process create).
+    // Pure Node has no cgroup option → post-spawn cgroup.procs attach only.
+    const cgroupDir = resolveToolMemoryCgroupForSpawn(useToolMemoryCgroup)
+    const useAtomicCgroup =
+      typeof Bun !== 'undefined' && cgroupDir !== undefined
+
     const childProcess = spawn(spawnBinary, shellArgs, {
       env: {
         ...subprocessEnv(),
@@ -457,7 +475,14 @@ export async function exec(
       detached: provider.detached,
       // Prevent visible console window on Windows (no-op on other platforms)
       windowsHide: true,
+      // densable SEA: cgroup:y?Qfp():void 0 — Bun child_process only
+      ...(useAtomicCgroup ? ({ cgroup: cgroupDir } as { cgroup: string }) : {}),
     })
+
+    // Node fallback only — densable does not post-attach when cgroup: is set.
+    if (useToolMemoryCgroup && !useAtomicCgroup) {
+      attachPidToToolMemoryCgroup(childProcess.pid)
+    }
 
     const shellCommand = wrapSpawn(
       childProcess,

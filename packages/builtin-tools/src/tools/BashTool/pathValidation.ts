@@ -4,7 +4,6 @@ import type { z } from 'zod/v4'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { Redirect, SimpleCommand } from 'src/utils/bash/ast.js'
 import {
-  extractInputRedirections,
   extractOutputRedirections,
   splitCommand_DEPRECATED,
 } from 'src/utils/bash/commands.js'
@@ -21,6 +20,7 @@ import {
   isDangerousRemovalPath,
   validatePath,
 } from 'src/utils/permissions/pathValidation.js'
+import { getPlatform } from 'src/utils/platform.js'
 import type { BashTool } from './BashTool.js'
 import { stripSafeWrappers } from './bashPermissions.js'
 import { sedCommandIsAllowedByAllowlist } from './sedValidation.js'
@@ -976,6 +976,22 @@ function validateSinglePathCommandArgv(
   return pathChecker(args, cwd, toolPermissionContext, compoundCommandHasCd)
 }
 
+/**
+ * densable + Windows: discard targets that do not write to the filesystem.
+ * `/dev/null` (POSIX) always; `NUL`/`nul`/`\\.\NUL` only on Windows — on
+ * Unix/WSL `> nul` creates a real file named `nul` and must still trip
+ * cd-compound-redirect (233 #20 review).
+ */
+export function isDiscardOutputRedirectTarget(target: string): boolean {
+  const t = target.trim()
+  if (t === '/dev/null') return true
+  // Windows null device only (optionally \\.\NUL) — not Linux/macOS/WSL
+  if (getPlatform() === 'windows' && /^(?:\\\\\.\\)?nul$/i.test(t)) {
+    return true
+  }
+  return false
+}
+
 /** @internal exported for unit tests (cd-compound-redirect /dev/null exception) */
 export function validateOutputRedirections(
   redirections: Array<{ target: string; operator: '>' | '>>' }>,
@@ -989,10 +1005,11 @@ export function validateOutputRedirections(
   // The redirection target would be validated relative to the original CWD, but the
   // actual write happens in the changed directory after 'cd' executes.
   // Official 2.1.207: /dev/null-only redirects are safe (discard output) and must not
-  // spuriously prompt — only non-/dev/null targets trigger cd-compound-redirect.
+  // spuriously prompt — only non-discard targets trigger cd-compound-redirect.
+  // densable 2.1.233 #20: also treat Windows NUL as discard (auto-mode regression).
   if (
     compoundCommandHasCd &&
-    redirections.some(r => r.target !== '/dev/null')
+    redirections.some(r => !isDiscardOutputRedirectTarget(r.target))
   ) {
     return {
       behavior: 'ask',
@@ -1006,8 +1023,8 @@ export function validateOutputRedirections(
     }
   }
   for (const { target } of redirections) {
-    // /dev/null is always safe - it discards output
-    if (target === '/dev/null') {
+    // Discard devices are always safe
+    if (isDiscardOutputRedirectTarget(target)) {
       continue
     }
     const { allowed, resolvedPath, decisionReason } = validatePath(
@@ -1208,27 +1225,12 @@ export function checkPathConstraints(
     return redirectionResult
   }
 
-  // densable 2.1.232 #43 auS: permission-check input redirections (`< file`)
-  // as reads — same as argument spellings. Prefer AST redirects when present;
-  // product builds without TREE_SITTER_BASH fall back to extractInputRedirections
-  // so the gate is not dead on default build.
-  {
-    const inputTargets = astRedirects
-      ? astRedirects
-          .filter(r => r.op === '<' && r.target !== '/dev/null')
-          .map(r => ({ target: r.target }))
-      : extractInputRedirections(input.command)
-    if (inputTargets.length > 0) {
-      const inputResult = validateInputRedirections(
-        inputTargets,
-        cwd,
-        toolPermissionContext,
-      )
-      if (inputResult.behavior !== 'passthrough') {
-        return inputResult
-      }
-    }
-  }
+  // densable 2.1.233: REVERTED 2.1.232 Bash input-redirect (`< file`) product
+  // gate. Official notes: "Reverted the 2.1.232 Bash permission changes for
+  // Cygwin-style symlinks on Windows and for input redirections (`< file`);
+  // a narrower version will return in a later release."
+  // Keep validateInputRedirections exported for residual tests / future revive;
+  // do NOT call it from checkPathConstraints until densable ships the narrower gate.
 
   // SECURITY: When AST-derived commands are available, iterate them with
   // pre-parsed argv instead of re-parsing via splitCommand_DEPRECATED + shell-quote.

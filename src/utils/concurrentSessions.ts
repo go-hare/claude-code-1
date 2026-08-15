@@ -11,7 +11,11 @@ import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { errorMessage, isFsInaccessible } from './errors.js'
-import { isProcessRunning } from './genericProcessUtils.js'
+import {
+  buildProcessStartIdentityFields,
+  getProcessLstartString,
+  isProcessRunning,
+} from './genericProcessUtils.js'
 import { getPlatform } from './platform.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import { getAgentId } from './teammate.js'
@@ -113,6 +117,17 @@ export async function registerSession(): Promise<boolean> {
       const raw = process.env.CLAUDE_CODE_BRIDGE_SESSION_ID?.trim()
       envBridgeSessionId = raw && raw.length > 0 ? raw : undefined
     }
+    // densable 2.1.232 #4 YM_: stamp process-start identity so live holders
+    // are only sessions with a real procStart/procStartFt (not PID recycle).
+    let processStartFields: { procStart?: string; procStartFt?: string } = {}
+    try {
+      const identity = await getProcessLstartString(process.pid)
+      processStartFields = buildProcessStartIdentityFields(identity)
+    } catch (e) {
+      logForDebugging(
+        `[concurrentSessions] procStart stamp failed: ${errorMessage(e)}`,
+      )
+    }
     await writeFile(
       pidFile,
       jsonStringify({
@@ -122,6 +137,7 @@ export async function registerSession(): Promise<boolean> {
         startedAt: Date.now(),
         kind,
         entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
+        ...processStartFields,
         ...(envBridgeSessionId ? { bridgeSessionId: envBridgeSessionId } : {}),
         ...(feature('UDS_INBOX')
           ? { messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET }
@@ -264,7 +280,10 @@ export type LiveSessionRecord = {
   name?: string
   startedAt: number
   nameSince?: number
+  /** densable unix / non-FFI win32 process-start identity. */
   procStart?: string
+  /** densable win32 kernel32 FFI FILETIME identity. */
+  procStartFt?: string
   /** densable nameSource: user | collision | derived | auto */
   nameSource?: SessionNameSource
   kind?: SessionKind
@@ -308,6 +327,8 @@ export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
         typeof data.nameSince === 'number' ? data.nameSince : undefined
       const procStart =
         typeof data.procStart === 'string' ? data.procStart : undefined
+      const procStartFt =
+        typeof data.procStartFt === 'string' ? data.procStartFt : undefined
       const nameSourceRaw = data.nameSource
       const nameSource =
         nameSourceRaw === 'user' ||
@@ -336,6 +357,7 @@ export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
         startedAt,
         nameSince,
         procStart,
+        procStartFt,
         nameSource,
         kind,
         messagingSocketPath,

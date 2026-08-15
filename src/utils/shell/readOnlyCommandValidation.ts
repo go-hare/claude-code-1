@@ -1631,6 +1631,13 @@ export function containsVulnerableUncPath(
     return false
   }
 
+  // densable 2.1.233 #11 — NT object / device prefix `\??\` (and `//??/`)
+  // bypasses naive `\\?\` / UNC detectors and can still trigger NTLM to a host.
+  // Examples: `\??\UNC\server\share`, `\??\C:\Windows\...` via object manager.
+  if (/[\\/]\?\?[\\/]/.test(pathOrCommand)) {
+    return true
+  }
+
   // densable path mode: bare leading // or \\ is UNC
   if (forPath && /^[\\/]{2}/.test(pathOrCommand)) {
     return true

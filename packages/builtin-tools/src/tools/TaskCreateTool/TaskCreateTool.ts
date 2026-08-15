@@ -9,7 +9,7 @@ import {
   createTask,
   deleteTask,
   getTaskListId,
-  isTodoV2Enabled,
+  isTodoV2ToolsEnabled,
 } from 'src/utils/tasks.js'
 import { getAgentName, getTeamName } from 'src/utils/teammate.js'
 import { TASK_CREATE_TOOL_NAME } from './constants.js'
@@ -65,8 +65,9 @@ export const TaskCreateTool = buildTool({
     return 'TaskCreate'
   },
   shouldDefer: true,
+  // densable 2.1.233 Eee: h5() && uX()
   isEnabled() {
-    return isTodoV2Enabled()
+    return isTodoV2ToolsEnabled()
   },
   isConcurrencySafe() {
     return true

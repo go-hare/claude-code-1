@@ -223,69 +223,47 @@ describeIfWindows('densable Xun expandCygwinCookieChain (win32)', () => {
   })
 })
 
-describeIfWindows('validatePath Yun/Xun wire-in (win32)', () => {
-  test('cookie path returns safetyCheck with densable s8s message', () => {
-    const project = makeTempDir()
-    const cookie = join(project, 'escape')
-    writeCookie(cookie, 'C:\\Windows\\System32')
-    const result = validatePath(
-      cookie,
-      project,
-      getEmptyToolPermissionContext(),
-      'write',
-    )
-    expect(result.allowed).toBe(false)
-    expect(result.decisionReason?.type).toBe('safetyCheck')
-    if (result.decisionReason?.type === 'safetyCheck') {
-      expect(result.decisionReason.reason).toContain(CYGWIN_SYMLINK_MESSAGE)
-      expect(result.decisionReason.classifierApprovable).toBe(false)
-    }
-  })
+describeIfWindows(
+  'validatePath after densable 2.1.233 Cygwin product revert',
+  () => {
+    test('cookie path is NOT gated with densable s8s Cygwin message', () => {
+      // 233 reverted 232 Yun/Xun product wire-in; residual module still exists
+      // but validatePath must not emit the Cygwin cookie safetyCheck.
+      const project = makeTempDir()
+      const cookie = join(project, 'escape')
+      writeCookie(cookie, 'C:\\Windows\\System32')
+      const result = validatePath(
+        cookie,
+        project,
+        getEmptyToolPermissionContext(),
+        'write',
+      )
+      if (!result.allowed && result.decisionReason?.type === 'safetyCheck') {
+        expect(result.decisionReason.reason).not.toContain(
+          'Cygwin-emulated symlink',
+        )
+      }
+    })
 
-  test('path through cookie mid-segment is denied', () => {
-    const project = makeTempDir()
-    const cookie = join(project, 'portal')
-    writeCookie(cookie, 'C:\\Users')
-    const through = join(cookie, 'Public', 'secret.txt')
-    const result = validatePath(
-      through,
-      project,
-      getEmptyToolPermissionContext(),
-      'write',
-    )
-    expect(result.allowed).toBe(false)
-    expect(result.decisionReason?.type).toBe('safetyCheck')
-    if (result.decisionReason?.type === 'safetyCheck') {
-      expect(result.decisionReason.reason).toContain('Cygwin-emulated symlink')
-      expect(result.decisionReason.classifierApprovable).toBe(false)
-    }
-  })
-
-  test('ordinary file in project is not cookie-denied', () => {
-    const project = makeTempDir()
-    const file = join(project, 'src', 'main.ts')
-    mkdirSync(join(project, 'src'), { recursive: true })
-    writeFileSync(file, 'export {}')
-    const result = validatePath(
-      file,
-      project,
-      {
-        ...getEmptyToolPermissionContext(),
-        mode: 'acceptEdits',
-        additionalWorkingDirectories: new Map(),
-      },
-      'write',
-    )
-    // May still be denied by working-dir / safety for other reasons, but
-    // must NOT be the cygwin cookie safetyCheck.
-    if (
-      result.decisionReason?.type === 'safetyCheck' &&
-      result.decisionReason.reason.includes('Cygwin-emulated')
-    ) {
-      throw new Error('ordinary file incorrectly flagged as cygwin cookie')
-    }
-  })
-})
+    test('path through cookie mid-segment is not Cygwin-cookie-gated', () => {
+      const project = makeTempDir()
+      const cookie = join(project, 'portal')
+      writeCookie(cookie, 'C:\\Users')
+      const through = join(cookie, 'Public', 'secret.txt')
+      const result = validatePath(
+        through,
+        project,
+        getEmptyToolPermissionContext(),
+        'write',
+      )
+      if (!result.allowed && result.decisionReason?.type === 'safetyCheck') {
+        expect(result.decisionReason.reason).not.toContain(
+          'Cygwin-emulated symlink',
+        )
+      }
+    })
+  },
+)
 
 describe('validatePath SAn path traversal gate', () => {
   test("denies path with '..' after a real segment", () => {

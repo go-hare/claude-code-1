@@ -9,11 +9,6 @@
  * sdk/controlTypes.ts directly.
  */
 
-import type {
-  CallToolResult,
-  ToolAnnotations,
-} from '@modelcontextprotocol/sdk/types.js'
-
 // Control protocol types for SDK builders (bridge subpath consumers)
 /** @alpha */
 export type {
@@ -122,4 +117,4 @@ export {
 export type {
   CallToolResult,
   ToolAnnotations,
-} from '@modelcontextprotocol/sdk/types.js'
+} from 'src/services/mcp/types.js'

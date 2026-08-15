@@ -1,5 +1,8 @@
 /**
- * densable 2.1.232 #43 — Bash input redirections (`< file`) permission-checked.
+ * densable 2.1.232 #43 residual — helpers retained after 2.1.233 product revert.
+ * Official 233: "Reverted the 2.1.232 Bash permission changes … for input
+ * redirections (`< file`); a narrower version will return in a later release."
+ * Product checkPathConstraints no longer calls these; tests lock residual API.
  */
 import { describe, expect, test } from 'bun:test'
 import { join } from 'path'
@@ -41,8 +44,11 @@ describe('validateInputRedirections (densable 2.1.232 #43)', () => {
   })
 
   test('path inside cwd is passthrough', () => {
+    // residual API: use a file that exists in this monorepo (README.md may be
+    // absent depending on cwd when bun test runs a single file).
+    const inside = join(process.cwd(), 'package.json')
     const result = validateInputRedirections(
-      [{ target: 'README.md' }],
+      [{ target: inside }],
       process.cwd(),
       makeCtx(),
     )
@@ -92,8 +98,8 @@ describe('validateInputRedirections (densable 2.1.232 #43)', () => {
   })
 })
 
-describe('checkPathConstraints AST input redirects', () => {
-  test('AST `< outside` triggers input-redirection ask', () => {
+describe('checkPathConstraints after densable 2.1.233 input-redirect revert', () => {
+  test('AST `< outside` is NOT product-gated (233 reverted 232 #43)', () => {
     const outside =
       process.platform === 'win32'
         ? 'C:\\Windows\\System32\\drivers\\etc\\hosts'
@@ -107,28 +113,11 @@ describe('checkPathConstraints AST input redirects', () => {
       redirects,
       [],
     )
-    expect(result.behavior).toBe('ask')
-    if (result.behavior === 'ask') {
-      expect(result.message).toContain('Input redirection from')
-    }
+    // Product path no longer runs validateInputRedirections
+    expect(result.behavior).not.toBe('ask')
   })
 
-  test('AST `< /dev/null` stays passthrough when no path cmds', () => {
-    const redirects: Redirect[] = [{ op: '<', target: '/dev/null' }]
-    const result = checkPathConstraints(
-      { command: 'cat < /dev/null' },
-      process.cwd(),
-      makeCtx(),
-      false,
-      redirects,
-      [],
-    )
-    expect(result.behavior).toBe('passthrough')
-  })
-
-  test('without AST, extractInputRedirections still gates simple `< file`', () => {
-    // Product default now enables TREE_SITTER_BASH, but legacy/non-AST path
-    // must still permission-check simple input redirects (review finding).
+  test('without AST, bare `< file` is not product-gated with Input redirection ask', () => {
     const outside =
       process.platform === 'win32'
         ? 'C:\\Windows\\System32\\drivers\\etc\\hosts'
@@ -141,9 +130,9 @@ describe('checkPathConstraints AST input redirects', () => {
       undefined,
       undefined,
     )
-    expect(result.behavior).toBe('ask')
+    expect(result.behavior).toBeDefined()
     if (result.behavior === 'ask') {
-      expect(result.message).toContain('Input redirection from')
+      expect(result.message ?? '').not.toContain('Input redirection from')
     }
   })
 })

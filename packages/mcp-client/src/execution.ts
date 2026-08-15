@@ -1,7 +1,6 @@
 // MCP tool execution — call tools on connected MCP servers
 // Extracted from src/services/mcp/client.ts (callMCPTool)
 
-import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import type { ConnectedMCPServer } from './types.js'
 import type { McpClientDependencies } from './interfaces.js'
 import { McpToolCallError, McpAuthError } from './errors.js'
@@ -71,6 +70,7 @@ export async function callMcpTool(
       deps.logger.debug(`[${serverName}] Tool '${tool}' still running`)
     }, 30_000)
 
+    // densable/v2: callTool(params, options) — no result schema arg
     const result = await Promise.race([
       mcpClient.callTool(
         {
@@ -78,7 +78,6 @@ export async function callMcpTool(
           arguments: args,
           _meta: meta,
         },
-        CallToolResultSchema,
         {
           signal,
           timeout: effectiveTimeout,

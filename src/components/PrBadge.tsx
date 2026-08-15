@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, Text } from '@anthropic/ink';
 import type { PrReviewState } from '../utils/ghPrStatus.js';
+import { codeChangeNumberPrefix, codeChangeProviderFromUrl } from '../utils/worktree.js';
 
 type Props = {
   number: number;
@@ -11,17 +12,21 @@ type Props = {
 
 export function PrBadge({ number, url, reviewState, bold }: Props): React.ReactNode {
   const statusColor = getPrStatusColor(reviewState);
+  // densable 2.1.233 #1 — GitLab MR display uses !N; GitHub/Bitbucket keep #N
+  const sigil = codeChangeNumberPrefix(codeChangeProviderFromUrl(url));
+  const numLabel = `${sigil}${number}`;
+  const kind = sigil === '!' ? 'MR' : 'PR';
   const label = (
     <Text color={statusColor} dimColor={!statusColor && !bold} bold={bold}>
-      #{number}
+      {numLabel}
     </Text>
   );
   return (
     <Text>
-      <Text dimColor={!bold}>PR</Text>{' '}
+      <Text dimColor={!bold}>{kind}</Text>{' '}
       <Link url={url} fallback={label}>
         <Text color={statusColor} dimColor={!statusColor && !bold} underline bold={bold}>
-          #{number}
+          {numLabel}
         </Text>
       </Link>
     </Text>

@@ -809,6 +809,130 @@ export async function validatePluginContents(
 }
 
 /**
+ * densable 2.1.233 #14 — validate a bare skills directory (no plugin.json).
+ * Accepts:
+ * - path ending with `.claude/skills` or `skills`
+ * - path that contains skill subdirs with SKILL.md
+ * Aggregates content validation into a single ValidationResult.
+ */
+async function tryValidateBareSkillsDirectory(
+  absolutePath: string,
+): Promise<ValidationResult | null> {
+  const base = path.basename(absolutePath)
+  // densable 2.1.233 #14: path is skills/ or .../.claude/skills
+  // (base==='skills' already covers parentBase==='.claude')
+  const looksLikeSkillsDir =
+    base === 'skills' ||
+    absolutePath.replace(/\\/g, '/').endsWith('/.claude/skills')
+
+  // Prefer validatePluginContents when this is a plugin root that has skills/
+  // but no manifest — or when the path itself is the skills directory.
+  let scanRoot = absolutePath
+  if (looksLikeSkillsDir) {
+    // validatePluginContents expects plugin root with skills/ child — pass parent
+    // when we're already inside skills/, else scan absolutePath as skills root.
+    scanRoot = path.dirname(absolutePath)
+  }
+
+  // If not clearly a skills path, probe for SKILL.md under skills/ or direct children
+  if (!looksLikeSkillsDir) {
+    const nestedSkills = path.join(absolutePath, 'skills')
+    try {
+      const st = await stat(nestedSkills)
+      if (st.isDirectory()) {
+        scanRoot = absolutePath
+      } else {
+        return null
+      }
+    } catch {
+      // Maybe absolutePath is itself a single skill dir with SKILL.md
+      try {
+        await stat(path.join(absolutePath, 'SKILL.md'))
+        const content = await readFile(path.join(absolutePath, 'SKILL.md'), {
+          encoding: 'utf-8',
+        })
+        return validateComponentFile(
+          path.join(absolutePath, 'SKILL.md'),
+          content,
+          'skill',
+        )
+      } catch {
+        return null
+      }
+    }
+  }
+
+  const contentResults =
+    looksLikeSkillsDir && base === 'skills'
+      ? await validateSkillsDirOnly(absolutePath)
+      : await validatePluginContents(scanRoot)
+
+  // Empty results: still a valid skills surface with no issues (success).
+  // (Previously `looksLikeSkillsDir || contentResults` was always true for
+  // arrays — dead `return null`.)
+  if (contentResults.length === 0) {
+    return {
+      success: true,
+      errors: [],
+      warnings: [],
+      filePath: absolutePath,
+      fileType: 'skill',
+    }
+  }
+
+  const errors = contentResults.flatMap(r =>
+    r.errors.map(e => ({
+      ...e,
+      path: `${path.relative(absolutePath, r.filePath) || r.filePath}: ${e.path}`,
+    })),
+  )
+  const warnings = contentResults.flatMap(r =>
+    r.warnings.map(w => ({
+      ...w,
+      path: `${path.relative(absolutePath, r.filePath) || r.filePath}: ${w.path}`,
+    })),
+  )
+  return {
+    success: errors.length === 0,
+    errors,
+    warnings,
+    filePath: absolutePath,
+    fileType: 'skill',
+  }
+}
+
+/** Scan only a skills directory (not a full plugin root). */
+async function validateSkillsDirOnly(
+  skillsDir: string,
+): Promise<ValidationResult[]> {
+  const results: ValidationResult[] = []
+  const files = await collectMarkdown(skillsDir, true)
+  for (const filePath of files) {
+    let content: string
+    try {
+      content = await readFile(filePath, { encoding: 'utf-8' })
+    } catch (e: unknown) {
+      if (isENOENT(e)) continue
+      results.push({
+        success: false,
+        errors: [
+          { path: 'file', message: `Failed to read: ${errorMessage(e)}` },
+        ],
+        warnings: [],
+        filePath,
+        fileType: 'skill',
+      })
+      continue
+    }
+    const r = validateComponentFile(filePath, content, 'skill')
+    if (r.errors.length > 0 || r.warnings.length > 0) {
+      results.push(r)
+    }
+  }
+  return results
+}
+
+/**
  * Validate a manifest file or directory (auto-detects type)
  */
 export async function validateManifest(
@@ -844,6 +968,13 @@ export async function validateManifest(
     const pluginResult = await validatePluginManifest(pluginPath)
     if (pluginResult.errors[0]?.code !== 'ENOENT') {
       return pluginResult
+    }
+
+    // densable 2.1.233 #14 — bare `.claude/skills` (or a skills/ dir without
+    // plugin.json) still validates skill markdown content.
+    const bareSkills = await tryValidateBareSkillsDirectory(absolutePath)
+    if (bareSkills) {
+      return bareSkills
     }
 
     return {

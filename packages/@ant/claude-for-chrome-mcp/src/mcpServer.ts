@@ -1,10 +1,4 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js'
-
+import { Server, type CallToolResult } from '@modelcontextprotocol/server'
 import { createBridgeClient } from './bridgeClient.js'
 import { BROWSER_TOOLS } from './browserTools.js'
 import { createMcpSocketClient } from './mcpSocketClient.js'
@@ -49,7 +43,7 @@ export function createClaudeForChromeMcpServer(
     },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler('tools/list', async () => {
     if (context.isDisabled?.()) {
       return { tools: [] }
     }
@@ -60,7 +54,7 @@ export function createClaudeForChromeMcpServer(
   })
 
   server.setRequestHandler(
-    CallToolRequestSchema,
+    'tools/call',
     async (request): Promise<CallToolResult> => {
       logger.info(`[${serverName}] Executing tool: ${request.params.name}`)
 

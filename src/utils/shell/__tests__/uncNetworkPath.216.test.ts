@@ -86,6 +86,14 @@ describe('containsVulnerableUncPath densable sI (2.1.216 #20)', () => {
     expect(containsVulnerableUncPath('https://example.com/x')).toBe(false)
     expect(containsVulnerableUncPath('http://example.com/x', true)).toBe(false)
   })
+
+  // densable 2.1.233 #11 — NT device prefix `\??\` NTLM bypass
+  test('NT object device prefix \\??\\ is vulnerable (233)', () => {
+    expect(containsVulnerableUncPath('\\??\\UNC\\evil\\share')).toBe(true)
+    expect(containsVulnerableUncPath('\\??\\C:\\Windows\\System32')).toBe(true)
+    expect(containsVulnerableUncPath('/??/UNC/evil/share', true)).toBe(true)
+    expect(containsVulnerableUncPath('type \\??\\UNC\\x\\y\\z')).toBe(true)
+  })
 })
 
 describe('validatePath densable Rjr UNC (2.1.216 #20)', () => {

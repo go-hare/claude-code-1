@@ -5,7 +5,7 @@
  *
  * Imported by the renderer via the `./sentinelApps` subpath (package.json
  * `exports`), which keeps Next.js from reaching index.ts → mcpServer.ts →
- * @modelcontextprotocol/sdk (devDep, would fail module resolution). Keep
+ * @modelcontextprotocol/server (devDep, would fail module resolution). Keep
  * this file import-free so the subpath stays clean.
  */
 

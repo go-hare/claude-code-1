@@ -1,10 +1,7 @@
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import {
-  ElicitationCompleteNotificationSchema,
-  type ElicitRequestParams,
-  ElicitRequestSchema,
-  type ElicitResult,
-} from '@modelcontextprotocol/sdk/types.js'
+import type { Client } from '@modelcontextprotocol/client'
+import type { ElicitResult } from './types.js'
+
+type ElicitRequestParams = Record<string, unknown>
 import type { AppState } from '../../state/AppState.js'
 import {
   executeElicitationHooks,
@@ -74,7 +71,8 @@ export function registerElicitationHandler(
   // Wrapped in try/catch because setRequestHandler throws if the client wasn't
   // created with elicitation capability declared.
   try {
-    client.setRequestHandler(ElicitRequestSchema, async (request, extra) => {
+    // densable: setRequestHandler("elicitation/create", ...)
+    client.setRequestHandler('elicitation/create', async (request, extra) => {
       logMCPDebug(
         serverName,
         `Received elicitation request: ${jsonStringify(request)}`,
@@ -172,10 +170,13 @@ export function registerElicitationHandler(
 
     // Register handler for elicitation completion notifications (URL mode).
     // Sets `completed: true` on the matching queue event; the dialog reacts to this flag.
+    // densable: setNotificationHandler("notifications/elicitation/complete", ...)
     client.setNotificationHandler(
-      ElicitationCompleteNotificationSchema,
+      'notifications/elicitation/complete',
       notification => {
-        const { elicitationId } = notification.params
+        const params = (notification as { params?: { elicitationId?: string } })
+          .params
+        const elicitationId = params?.elicitationId
         logMCPDebug(
           serverName,
           `Received elicitation completion notification: ${elicitationId}`,

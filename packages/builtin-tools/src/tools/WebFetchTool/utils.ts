@@ -48,14 +48,40 @@ type CacheEntry = {
   persistedSize?: number
 }
 
-// Cache with 15-minute TTL and 50MB size limit
-// LRUCache handles automatic expiration and eviction
-const CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
+// densable 2.1.233: $J_=900000; C9s() = CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS ?? $J_
+// Cache with configurable TTL (default 15 min) and 50MB size limit.
+// LRUCache handles automatic expiration and eviction.
+const DEFAULT_WEBFETCH_CACHE_TTL_MS = 15 * 60 * 1000 // densable $J_
 const MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024 // 50MB
+
+let cachedWebFetchTtlMs: number | undefined
+
+/** densable C9s — resolve WebFetch URL cache TTL once (env or default). */
+export function getWebFetchCacheTtlMs(): number {
+  if (cachedWebFetchTtlMs !== undefined) {
+    return cachedWebFetchTtlMs
+  }
+  const raw = process.env.CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS
+  if (raw !== undefined && raw !== '') {
+    const n = Number(raw)
+    if (Number.isFinite(n) && n > 0) {
+      cachedWebFetchTtlMs = n
+      return n
+    }
+  }
+  cachedWebFetchTtlMs = DEFAULT_WEBFETCH_CACHE_TTL_MS
+  return DEFAULT_WEBFETCH_CACHE_TTL_MS
+}
+
+/** Test helper — clear memoized TTL so env changes apply. */
+export function resetWebFetchCacheTtlMsForTests(): void {
+  cachedWebFetchTtlMs = undefined
+}
 
 const URL_CACHE = new LRUCache<string, CacheEntry>({
   maxSize: MAX_CACHE_SIZE_BYTES,
-  ttl: CACHE_TTL_MS,
+  // densable: ttl:C9s() — evaluated at construction; C9s memoizes env
+  ttl: getWebFetchCacheTtlMs(),
 })
 
 export function clearWebFetchCache(): void {

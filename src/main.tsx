@@ -339,6 +339,7 @@ import {
   setQuestionPreviewFormat,
   setSessionBypassPermissionsMode,
   setSessionSource,
+  setTodoToolsOptIn,
   setUserMsgOptIn,
   switchSession,
 } from './bootstrap/state.js';
@@ -2552,6 +2553,37 @@ async function run(): Promise<CommanderCommand> {
           })
         ) {
           setUserMsgOptIn(true);
+        }
+      }
+
+      // densable Tds(rGp.some(p)) — --tools / --allowedTools listing any Task*
+      // or TodoWrite forces todoToolsOptIn so uX allows them on model floors
+      // that would otherwise disable the tools.
+      {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { TASK_CREATE_TOOL_NAME } =
+          require('@claude-code/builtin-tools/tools/TaskCreateTool/constants.js') as typeof import('@claude-code/builtin-tools/tools/TaskCreateTool/constants.js');
+        const { TASK_GET_TOOL_NAME } =
+          require('@claude-code/builtin-tools/tools/TaskGetTool/constants.js') as typeof import('@claude-code/builtin-tools/tools/TaskGetTool/constants.js');
+        const { TASK_UPDATE_TOOL_NAME } =
+          require('@claude-code/builtin-tools/tools/TaskUpdateTool/constants.js') as typeof import('@claude-code/builtin-tools/tools/TaskUpdateTool/constants.js');
+        const { TASK_LIST_TOOL_NAME } =
+          require('@claude-code/builtin-tools/tools/TaskListTool/constants.js') as typeof import('@claude-code/builtin-tools/tools/TaskListTool/constants.js');
+        const { TODO_WRITE_TOOL_NAME } =
+          require('@claude-code/builtin-tools/tools/TodoWriteTool/constants.js') as typeof import('@claude-code/builtin-tools/tools/TodoWriteTool/constants.js');
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        const rGp = [
+          TASK_CREATE_TOOL_NAME,
+          TASK_GET_TOOL_NAME,
+          TASK_UPDATE_TOOL_NAME,
+          TASK_LIST_TOOL_NAME,
+          TODO_WRITE_TOOL_NAME,
+        ];
+        const fromTools = baseTools.length > 0 ? parseToolListFromCLI(baseTools) : [];
+        const fromAllowed = allowedTools.length > 0 ? parseToolListFromCLI(allowedTools) : [];
+        const names = new Set([...fromTools, ...fromAllowed].map(n => n.toLowerCase()));
+        if (rGp.some(n => names.has(n.toLowerCase()))) {
+          setTodoToolsOptIn(true);
         }
       }
 

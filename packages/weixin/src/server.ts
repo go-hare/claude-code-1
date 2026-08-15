@@ -1,10 +1,6 @@
 import { existsSync } from 'node:fs'
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js'
+import { Server } from '@modelcontextprotocol/server'
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import {
   CDN_BASE_URL,
   DEFAULT_BASE_URL,
@@ -65,7 +61,7 @@ export function createWeixinMcpServer(version: string): Server {
     },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async () => ({
     tools: [
       {
         name: 'reply',
@@ -102,7 +98,7 @@ export function createWeixinMcpServer(version: string): Server {
     ],
   }))
 
-  server.setRequestHandler(CallToolRequestSchema, async request => {
+  server.setRequestHandler('tools/call', async request => {
     const { name, arguments: args } = request.params
     const account = loadAccount()
     if (!account) {

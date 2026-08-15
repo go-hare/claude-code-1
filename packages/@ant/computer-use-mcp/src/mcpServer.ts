@@ -17,12 +17,7 @@
  *   is the same either way.
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js'
+import { Server } from '@modelcontextprotocol/server'
 
 import type { ScreenshotResult } from './executor.js'
 import type { CuCallToolResult } from './toolCalls.js'
@@ -269,20 +264,23 @@ export function createComputerUseMcpServer(
     coordinateMode,
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () =>
+  server.setRequestHandler('tools/list', async () =>
     adapter.isDisabled() ? { tools: [] } : { tools },
   )
 
   if (context) {
     const dispatch = bindSessionContext(adapter, coordinateMode, context)
     server.setRequestHandler(
-      CallToolRequestSchema,
-      async (request): Promise<CallToolResult> => {
+      'tools/call',
+      async (request): Promise<CuCallToolResult> => {
+        const params = (
+          request as { params?: { name?: string; arguments?: unknown } }
+        ).params
         const {
           screenshot: _s,
           telemetry: _t,
           ...result
-        } = await dispatch(request.params.name, request.params.arguments ?? {})
+        } = await dispatch(params?.name ?? '', params?.arguments ?? {})
         return result
       },
     )
@@ -293,10 +291,12 @@ export function createComputerUseMcpServer(
   // server over MCP transport WITHOUT going through a binder (a wiring
   // regression). Clear error instead of silent failure.
   server.setRequestHandler(
-    CallToolRequestSchema,
-    async (request): Promise<CallToolResult> => {
+    'tools/call',
+    async (request): Promise<CuCallToolResult> => {
+      const toolName =
+        (request as { params?: { name?: string } }).params?.name ?? ''
       logger.warn(
-        `[${serverName}] tool call "${request.params.name}" reached the stub handler — no session context bound. Per-session state unavailable.`,
+        `[${serverName}] tool call "${toolName}" reached the stub handler — no session context bound. Per-session state unavailable.`,
       )
       return {
         content: [

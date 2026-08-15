@@ -304,6 +304,40 @@ export function executeEffort(
   });
 }
 
+/**
+ * densable gSi — /effort help text.
+ * SEA shape: model-filtered levels as `- name: desc`, plus optional ultracode + auto.
+ * (Release "numbered list" a11y is residual Ink list roles; help string matches densable.)
+ */
+function buildEffortHelpText(model: string): string {
+  const levels = getSupportedEffortLevels(model);
+  const ultra = isUltracodeOfferable(model);
+  // densable TQv short blurbs (not the longer getEffortLevelDescription catalog)
+  const desc: Record<string, string> = {
+    low: 'Quick, straightforward implementation',
+    medium: 'Balanced approach with standard testing',
+    high: 'Comprehensive implementation with extensive testing',
+    xhigh: 'Extended reasoning with thorough analysis',
+    max: 'Maximum capability with deepest reasoning',
+  };
+  const levelLines = levels.map(n => `- ${n}: ${desc[n] ?? getEffortValueDescription(n)}`).join('\n');
+  const usage = `Usage: /effort [${levels.join('|')}${ultra ? '|ultracode' : ''}|auto]`;
+  return (
+    `${usage}\n\nEffort levels:\n` +
+    levelLines +
+    (ultra ? '\n- ultracode: xhigh + dynamic workflow orchestration (this session only)' : '') +
+    '\n- auto: Use the default effort level for your model'
+  );
+}
+
+function EffortHelpText({ onDone }: { onDone: (result: string) => void }): React.ReactNode {
+  const model = useMainLoopModel();
+  React.useEffect(() => {
+    onDone(buildEffortHelpText(model));
+  }, [model, onDone]);
+  return null;
+}
+
 function ShowCurrentEffort({ onDone }: { onDone: (result: string) => void }): React.ReactNode {
   const effortValue = useAppState(s => s.effortValue);
   const ultracode = useAppState(s => s.ultracode);
@@ -339,10 +373,8 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
   args = args?.trim() || '';
 
   if (COMMON_HELP_ARGS.includes(args)) {
-    onDone(
-      'Usage: /effort [low|medium|high|xhigh|max|ultracode|auto]\n\nEffort levels:\n- low: Quick, straightforward implementation\n- medium: Balanced approach with standard testing\n- high: Comprehensive implementation with extensive testing\n- xhigh: Extended reasoning beyond high, short of max\n- max: Maximum capability with deepest reasoning\n- ultracode: catalog top effort + dynamic workflow orchestration (this session only)\n- auto: Use the default effort level for your model',
-    );
-    return;
+    // densable gSi — model-filtered dash list (SEA help string shape).
+    return <EffortHelpText onDone={onDone} />;
   }
 
   if (!args || args === 'current' || args === 'status') {

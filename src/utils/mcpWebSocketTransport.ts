@@ -1,8 +1,8 @@
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import {
-  type JSONRPCMessage,
-  JSONRPCMessageSchema,
-} from '@modelcontextprotocol/sdk/types.js'
+  parseJSONRPCMessage,
+  type Transport,
+} from '@modelcontextprotocol/client'
+import type { JSONRPCMessage } from 'src/services/mcp/types.js'
 import type WsWebSocket from 'ws'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { toError } from './errors.js'
@@ -79,7 +79,7 @@ export class WebSocketTransport implements Transport {
       const data =
         typeof event.data === 'string' ? event.data : String(event.data)
       const messageObj = jsonParse(data)
-      const message = JSONRPCMessageSchema.parse(messageObj)
+      const message = parseJSONRPCMessage(messageObj) as JSONRPCMessage
       this.onmessage?.(message)
     } catch (error) {
       this.handleError(error)
@@ -98,7 +98,7 @@ export class WebSocketTransport implements Transport {
   private onNodeMessage = (data: Buffer) => {
     try {
       const messageObj = jsonParse(data.toString('utf-8'))
-      const message = JSONRPCMessageSchema.parse(messageObj)
+      const message = parseJSONRPCMessage(messageObj) as JSONRPCMessage
       this.onmessage?.(message)
     } catch (error) {
       this.handleError(error)

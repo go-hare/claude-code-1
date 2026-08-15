@@ -33,7 +33,7 @@ import {
 // External Type Placeholders
 // ============================================================================
 
-// JSONRPCMessage from @modelcontextprotocol/sdk - treat as unknown
+// JSONRPCMessage structural unknown (densable/v2 client)
 export const JSONRPCMessagePlaceholder = lazySchema(() => z.unknown())
 
 // ============================================================================

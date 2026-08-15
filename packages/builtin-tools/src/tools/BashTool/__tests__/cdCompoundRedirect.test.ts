@@ -5,8 +5,10 @@
  */
 import { describe, expect, test } from 'bun:test'
 import type { ToolPermissionContext } from 'src/Tool.js'
+import { getPlatform } from 'src/utils/platform.js'
 import {
   createPathChecker,
+  isDiscardOutputRedirectTarget,
   validateOutputRedirections,
 } from '../pathValidation.js'
 
@@ -30,6 +32,36 @@ describe('validateOutputRedirections cd-compound-redirect (2.1.207)', () => {
       true,
     )
     expect(result.behavior).toBe('passthrough')
+  })
+
+  // densable 2.1.233 #20 — NUL is discard only on Windows; on Unix it is a real file
+  test('cd + redirect to NUL is platform-gated', () => {
+    for (const target of ['NUL', 'nul', '\\\\.\\NUL']) {
+      const result = validateOutputRedirections(
+        [{ target, operator: '>' }],
+        process.cwd(),
+        makeCtx(),
+        true,
+      )
+      if (getPlatform() === 'windows') {
+        expect(result.behavior).toBe('passthrough')
+        expect(isDiscardOutputRedirectTarget(target)).toBe(true)
+      } else {
+        // Unix/WSL: `> nul` creates a real file — still cd-compound-redirect
+        expect(isDiscardOutputRedirectTarget(target)).toBe(false)
+        expect(result.behavior).toBe('ask')
+        if (result.behavior === 'ask') {
+          expect(result.decisionReason).toMatchObject({
+            type: 'other',
+            bashMissKind: 'cd-compound-redirect',
+          })
+        }
+      }
+    }
+  })
+
+  test('/dev/null is always discard on every platform', () => {
+    expect(isDiscardOutputRedirectTarget('/dev/null')).toBe(true)
   })
 
   test('cd + redirect to a real file asks with bashMissKind', () => {

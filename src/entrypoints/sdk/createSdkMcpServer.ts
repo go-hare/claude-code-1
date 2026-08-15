@@ -11,11 +11,8 @@
  * not inventing a densable-absent registry fix here.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type {
-  CallToolResult,
-  ToolAnnotations,
-} from '@modelcontextprotocol/sdk/types.js'
+import { McpServer } from '@modelcontextprotocol/server'
+import type { CallToolResult, ToolAnnotations } from 'src/services/mcp/types.js'
 import { globalRegistry } from 'zod/v4'
 import type {
   AnyZodRawShape,

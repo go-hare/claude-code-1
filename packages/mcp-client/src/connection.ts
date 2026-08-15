@@ -1,10 +1,8 @@
 // MCP connection utilities — protocol-level helpers for establishing and managing connections
 // These are building blocks used by the host's connectToServer implementation.
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
-import type { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { Client, type Transport } from '@modelcontextprotocol/client'
+import type { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import type { McpClientDependencies } from './interfaces.js'
 import type { ConnectedMCPServer, ScopedMcpServerConfig } from './types.js'
 
@@ -55,14 +53,14 @@ export function createMcpClient(options: CreateClientOptions): Client {
     },
     {
       capabilities: {
-        roots: {},
+        roots: { listChanged: true },
         elicitation: {},
       },
     },
   )
 
-  // Register default ListRoots handler
-  client.setRequestHandler(ListRootsRequestSchema, async () => ({
+  // densable: setRequestHandler("roots/list", ...)
+  client.setRequestHandler('roots/list', async () => ({
     roots: [
       {
         uri: options.rootUri ?? `file://${process.cwd()}`,

@@ -105,8 +105,29 @@ describe('substituteArguments', () => {
     )
   })
 
-  test('replaces out-of-range index with empty string', () => {
-    expect(substituteArguments('$5', 'hello world')).toBe('')
+  test('densable: out-of-range $n left as literal (still may append)', () => {
+    // densable iCt: if(s[p]===void 0)return u without c=!0 → append path
+    expect(substituteArguments('$5', 'hello world', false)).toBe('$5')
+  })
+
+  // densable 2.1.233 #10 — values must not re-expand as templates
+  test('does not re-expand $ARGUMENTS inside user args', () => {
+    expect(substituteArguments('X $ARGUMENTS Y', 'a $ARGUMENTS b')).toBe(
+      'X a $ARGUMENTS b Y',
+    )
+  })
+
+  test('does not re-expand $0 inside user args', () => {
+    // quote so the whole value is $0
+    expect(substituteArguments('got $0', '"$1 is not zero"')).toBe(
+      'got $1 is not zero',
+    )
+  })
+
+  test('escaped \\$ARGUMENTS stays literal dollar', () => {
+    expect(substituteArguments('use \\$ARGUMENTS please', 'x', false)).toBe(
+      'use $ARGUMENTS please',
+    )
   })
 
   test('reuses same placeholder multiple times', () => {

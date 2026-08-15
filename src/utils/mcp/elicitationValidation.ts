@@ -1,9 +1,3 @@
-import type {
-  EnumSchema,
-  MultiSelectEnumSchema,
-  PrimitiveSchemaDefinition,
-  StringSchema,
-} from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod/v4'
 import { jsonStringify } from '../slowOperations.js'
 import { plural } from '../stringUtils.js'
@@ -11,6 +5,8 @@ import {
   looksLikeISO8601,
   parseNaturalLanguageDateTime,
 } from './dateTimeParser.js'
+
+import type { ElicitResult } from 'src/services/mcp/types.js'
 
 export type ValidationResult = {
   value?: string | number | boolean

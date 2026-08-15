@@ -31,5 +31,15 @@ function P5p(e) {
 | `YLr` stream-idle arm | `classifyAPIError` startsWith `Stream idle timeout` + `BodyIdleTimeoutError` |
 | `P5p` | existing timeout / APIConnectionTimeoutError arms |
 | byte watchdog providers | `streamWatchdogGates.ts` |
+| thinking-only re-stream (Po=1 / sr=2) | `thinkingOnlyStreamRetry.ts` + `claude.ts` `streamAttempt` |
 
-- Tests: `src/services/api/__tests__/classifyAPIError.streamIdle.232.test.ts`
+### thinking-only re-stream (densable 219+/232 #26)
+
+```js
+// !ke && Br===null && (xo ? Tn < Po : oo < sr)
+// xo watchdog → tengu_streaming_watchdog_retry after_thinking_only
+// else stale → tengu_streaming_stale_connection_retry after_thinking_only
+// Po=1, sr=2; stale backoff 100*oo
+```
+
+- Tests: `classifyAPIError.streamIdle.232.test.ts`, `thinkingOnlyStreamRetry.232.test.ts`

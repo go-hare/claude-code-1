@@ -30,9 +30,9 @@
 | `jid` peer notice | **HAVE** — `notifySessionNameCorrespondents` + `announceYield` from Bid/rename/G$o |
 | `Nid.correspondents` | **HAVE** — `sessionNameState` + note on UDS in/out |
 | densable `QM_` lastYield reuse | **HAVE** — `preferStableYieldName` / `reuseLastYieldName` in mEn |
-| strict `procStart` YM_ | residual（默认 lenient） |
-| `procStart` field | registry optional |
+| strict `procStart` YM_ | **HAVE** — default strict；`registerSession` stamps `procStart`/`procStartFt` |
+| `procStart` field | registry **written** at register |
 
 ## Status
 
-**#4 HAVE**（主路径 1:1）。residual：strict `procStart` YM_ only.
+**#4 HAVE**（主路径 1:1 + strict YM_）。

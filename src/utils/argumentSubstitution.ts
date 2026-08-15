@@ -1,16 +1,26 @@
 /**
  * Utility for substituting $ARGUMENTS placeholders in skill/command prompts.
  *
+ * densable 2.1.233 #10 `iCt` — argument values must NOT re-expand as templates.
+ * Gold uses yPr=￿ / Pxn=￾ sentinels: `$` inside substituted values is
+ * protected, then restored after all placeholder passes.
+ *
  * Supports:
  * - $ARGUMENTS - replaced with the full arguments string
  * - $ARGUMENTS[0], $ARGUMENTS[1], etc. - replaced with individual indexed arguments
  * - $0, $1, etc. - shorthand for $ARGUMENTS[0], $ARGUMENTS[1]
  * - Named arguments (e.g., $foo, $bar) - when argument names are defined in frontmatter
+ * - `\$ARGUMENTS` / `\$0` — escaped placeholders stay literal `$…`
  *
  * Arguments are parsed using shell-quote for proper shell argument handling.
  */
 
 import { tryParseShellCommand } from './bash/shellQuote.js'
+
+/** densable yPr — temporary stand-in for `$` inside substituted values */
+const DOLLAR_SENTINEL = '￿'
+/** densable Pxn — wrapper around substituted values (stripped at end) */
+const VALUE_WRAPPER = '￾'
 
 /**
  * Parse an arguments string into an array of individual arguments.
@@ -82,13 +92,36 @@ export function generateProgressiveArgumentHint(
   return remaining.map(name => `[${name}]`).join(' ')
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * densable iCt — wrap a substituted value so embedded `$` cannot re-match
+ * placeholders in later passes.
+ */
+function protectValue(
+  value: string | undefined,
+  transform?: (s: string) => string,
+): string {
+  let d = (value ?? '')
+    .replaceAll(DOLLAR_SENTINEL, '�')
+    .replaceAll(VALUE_WRAPPER, '�')
+  if (transform) d = transform(d)
+  return VALUE_WRAPPER + d.replaceAll('$', DOLLAR_SENTINEL) + VALUE_WRAPPER
+}
+
 /**
  * Substitute $ARGUMENTS placeholders in content with actual argument values.
+ *
+ * densable 2.1.233 #10: values are protected so `$ARGUMENTS` / `$0` inside user
+ * args are not expanded a second time as templates.
  *
  * @param content - The content containing placeholders
  * @param args - The raw arguments string (may be undefined/null)
  * @param appendIfNoPlaceholder - If true and no placeholders are found, appends "ARGUMENTS: {args}" to content
  * @param argumentNames - Optional array of named arguments (e.g., ["foo", "bar"]) that map to indexed positions
+ * @param valueTransform - Optional densable `o` post-process for values only
  * @returns The content with placeholders substituted
  */
 export function substituteArguments(
@@ -96,6 +129,7 @@ export function substituteArguments(
   args: string | undefined,
   appendIfNoPlaceholder = true,
   argumentNames: string[] = [],
+  valueTransform?: (s: string) => string,
 ): string {
   // undefined/null means no args provided - return content unchanged
   // empty string is a valid input that should replace placeholders with empty
@@ -103,43 +137,71 @@ export function substituteArguments(
     return content
   }
 
+  // densable: scrub any pre-existing sentinels in the template
+  let e = content
+    .replaceAll(DOLLAR_SENTINEL, '�')
+    .replaceAll(VALUE_WRAPPER, '�')
+
+  const wrap = (u: string | undefined) => protectValue(u, valueTransform)
   const parsedArgs = parseArguments(args)
-  const originalContent = content
 
-  // Replace named arguments (e.g., $foo, $bar) with their values
-  // Named arguments map to positions: argumentNames[0] -> parsedArgs[0], etc.
-  for (let i = 0; i < argumentNames.length; i++) {
-    const name = argumentNames[i]
+  // densable: longer named args first
+  const named = argumentNames
+    .map((name, i) => ({ name, i }))
+    .filter(u => Boolean(u.name))
+    .sort((a, b) => b.name!.length - a.name!.length)
+
+  // densable: `\$` before placeholder names → sentinel so they stay literal `$`
+  const nameAlts = named.map(({ name }) => `${escapeRegExp(name!)}(?![\\[\\w])`)
+  const escapeAlt = ['\\d', 'ARGUMENTS', ...nameAlts].join('|')
+  // densable: unescaped `\$` before placeholder tokens → protect as literal `$`
+  // eslint-disable-next-line custom-rules/no-lookbehind-regex -- densable iCt short strings
+  e = e.replace(
+    new RegExp(`(?<!\\\\)\\\\\\$(?=${escapeAlt})`, 'g'),
+    DOLLAR_SENTINEL,
+  )
+
+  let anyHit = false
+
+  for (const { name, i } of named) {
     if (!name) continue
-
-    // Match $name but not $name[...] or $nameXxx (word chars)
-    // Also ensure we match word boundaries to avoid partial matches
-    content = content.replace(
-      new RegExp(`\\$${name}(?![\\[\\w])`, 'g'),
-      parsedArgs[i] ?? '',
+    e = e.replace(
+      new RegExp(`\\$${escapeRegExp(name)}(?![\\[\\w])`, 'g'),
+      () => {
+        anyHit = true
+        return wrap(parsedArgs[i])
+      },
     )
   }
 
-  // Replace indexed arguments ($ARGUMENTS[0], $ARGUMENTS[1], etc.)
-  content = content.replace(/\$ARGUMENTS\[(\d+)\]/g, (_, indexStr: string) => {
+  // densable: missing index → yPr + match without leading $ (restores to $ARGUMENTS[n])
+  e = e.replace(/\$ARGUMENTS\[(\d+)\]/g, (full, indexStr: string) => {
     const index = parseInt(indexStr, 10)
-    return parsedArgs[index] ?? ''
+    if (parsedArgs[index] === undefined) {
+      return DOLLAR_SENTINEL + full.slice(1)
+    }
+    anyHit = true
+    return wrap(parsedArgs[index])
   })
 
-  // Replace shorthand indexed arguments ($0, $1, etc.)
-  content = content.replace(/\$(\d+)(?!\w)/g, (_, indexStr: string) => {
+  e = e.replace(/\$(\d+)(?!\w)/g, (full, indexStr: string) => {
     const index = parseInt(indexStr, 10)
-    return parsedArgs[index] ?? ''
+    if (parsedArgs[index] === undefined) {
+      return full
+    }
+    anyHit = true
+    return wrap(parsedArgs[index])
   })
 
-  // Replace $ARGUMENTS with the full arguments string
-  content = content.replaceAll('$ARGUMENTS', args)
+  e = e.replaceAll('$ARGUMENTS', () => {
+    anyHit = true
+    return wrap(args)
+  })
 
-  // If no placeholders were found and appendIfNoPlaceholder is true, append
-  // But only if args is non-empty (empty string means command invoked with no args)
-  if (content === originalContent && appendIfNoPlaceholder && args) {
-    content = content + `\n\nARGUMENTS: ${args}`
+  if (!anyHit && appendIfNoPlaceholder && args) {
+    e = e + `\n\nARGUMENTS: ${wrap(args)}`
   }
 
-  return content
+  // densable: restore protected `$`, strip value wrappers
+  return e.replaceAll(DOLLAR_SENTINEL, '$').replaceAll(VALUE_WRAPPER, '')
 }

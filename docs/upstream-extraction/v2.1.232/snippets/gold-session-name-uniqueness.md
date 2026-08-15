@@ -23,4 +23,4 @@
 - `runSessionStartupSideEffects` → Bid
 - UDS in/out → `noteSessionNameCorrespondent`
 - Tests: `sessionNameUniqueness.232.test.ts`
-- Residual: strict `procStart` YM_ (see `gold-session-name-bid-gso.md`)
+- Strict YM_: `findNameHolders` requires process-start stamp; registry writes via `registerSession`

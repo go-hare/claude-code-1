@@ -1,9 +1,3 @@
-import {
-  type ListResourcesResult,
-  ListResourcesResultSchema,
-  type ReadResourceResult,
-  ReadResourceResultSchema,
-} from '@modelcontextprotocol/sdk/types.js'
 import type { Command } from '../commands.js'
 import type { MCPServerConnection } from '../services/mcp/types.js'
 import { normalizeNameForMCP } from '../services/mcp/normalization.js'

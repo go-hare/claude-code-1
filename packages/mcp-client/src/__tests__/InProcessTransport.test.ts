@@ -1,6 +1,6 @@
+import type { JSONRPCMessage } from '@modelcontextprotocol/client'
 import { describe, expect, test } from 'bun:test'
 import { createLinkedTransportPair } from '../transport/InProcessTransport.js'
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 
 describe('InProcessTransport', () => {
   test('creates linked pair', () => {

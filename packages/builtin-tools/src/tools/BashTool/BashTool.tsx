@@ -1093,6 +1093,8 @@ async function* runShellCommand({
     shouldAutoBackground,
     // densable VRu — block shell when cwd is outside agent isolation worktree
     agentWorktree,
+    // densable 2.1.233 #3 useToolMemoryCgroup:!0
+    useToolMemoryCgroup: true,
   });
 
   // Start the command execution

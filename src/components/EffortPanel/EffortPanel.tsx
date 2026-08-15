@@ -38,7 +38,8 @@ import {
  */
 const MIN_SEGMENT = 12;
 
-// densable help row (plain + ripple).
+// densable help row (plain + ripple). densable 2.1.233 #15 — keep full hint
+// visible (do not truncate mid-sentence for narrow panels).
 const HELP_TEXT = '←/→ to adjust · Enter to confirm · Esc to cancel';
 
 // 淡入淡出每帧步长：60ms 间隔下 5 帧达到目标 ≈ 300ms 动画时长。
@@ -209,7 +210,14 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
   );
 
   return (
-    <Box ref={rippleRef} flexDirection="column" paddingX={1} width={panelWidth + 2}>
+    <Box
+      ref={rippleRef}
+      flexDirection="column"
+      paddingX={1}
+      width={panelWidth + 2}
+      // densable 2.1.233 #15 residual — screen-reader list of effort levels
+      accessibility={{ role: 'list', label: 'Effort levels' }}
+    >
       <Text bold color="suggestion">
         Effort
       </Text>
@@ -232,8 +240,10 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
             positions={positions}
             sublabel={sublabel}
           />
-          <Box marginTop={1}>
-            <Text color="subtle">{HELP_TEXT}</Text>
+          <Box marginTop={1} width={panelWidth} flexShrink={0}>
+            <Text color="subtle" wrap="wrap">
+              {HELP_TEXT}
+            </Text>
           </Box>
         </>
       )}
@@ -273,8 +283,16 @@ function PlainContent({
         ))}
       </Box>
       <Box flexDirection="row">
-        {positions.map(p => (
-          <Box key={`label-${p}`} width={segment} justifyContent="center">
+        {positions.map((p, i) => (
+          <Box
+            key={`label-${p}`}
+            width={segment}
+            justifyContent="center"
+            accessibility={{
+              role: 'listitem',
+              label: `${i + 1}. ${p}${cursor === p ? ', selected' : ''}`,
+            }}
+          >
             <Text bold={cursor === p} color={cursor === p ? 'suggestion' : 'subtle'}>
               {p}
             </Text>

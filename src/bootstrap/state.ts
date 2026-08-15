@@ -118,6 +118,12 @@ type State = {
   strictToolResultPairing: boolean
   sdkAgentProgressSummariesEnabled: boolean
   userMsgOptIn: boolean
+  /**
+   * densable launchOptions.todoToolsOptIn (#h) — forces Todo/Task tools through
+   * uX even on model floors that disable them. Set by --tools/--allowedTools
+   * including Task* or TodoWrite (densable Tds(rGp.some(...))).
+   */
+  todoToolsOptIn: boolean
   clientType: string
   sessionSource: string | undefined
   questionPreviewFormat: 'markdown' | 'html' | undefined
@@ -439,6 +445,7 @@ function getInitialState(): State {
     strictToolResultPairing: false,
     sdkAgentProgressSummariesEnabled: false,
     userMsgOptIn: false,
+    todoToolsOptIn: false,
     clientType: 'cli',
     sessionSource: undefined,
     questionPreviewFormat: undefined,
@@ -1558,6 +1565,16 @@ export function getUserMsgOptIn(): boolean {
 
 export function setUserMsgOptIn(value: boolean): void {
   STATE.userMsgOptIn = value
+}
+
+/** densable Ads / todoToolsOptIn — host launch option residual */
+export function getTodoToolsOptIn(): boolean {
+  return STATE.todoToolsOptIn
+}
+
+/** densable replaceTodoToolsOptIn / Tds */
+export function setTodoToolsOptIn(value: boolean): void {
+  STATE.todoToolsOptIn = value
 }
 
 export function setSessionSource(source: string): void {
