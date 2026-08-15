@@ -43,9 +43,31 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.228 → 2.1.229** product alignment (228 layout/Windows git/SHR/UDS + **229 full pack 32 rows: HAVE 27 / N/A 5**, including product-default PTL reactive compact). **Published npm version is whatever `package.json` says** (currently **2.7.39**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.40**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.229 alignment (2.7.39)
+#### densable 2.1.231–2.1.233 alignment (2.7.40)
+
+Sources of truth:
+
+- `docs/upstream-extraction/v2.1.231/official-231-checklist.md` (**HAVE 1** + cup/r8o residual)
+- `docs/upstream-extraction/v2.1.232/official-232-checklist.md` (**HAVE 45 / N/A 4 / PARTIAL 0**; 49 official rows)
+- `docs/upstream-extraction/v2.1.233/official-233-checklist.md` (**HAVE 14** + verify-only/pre-exist; **N/A 3**)
+
+Stacked on **2.1.229** (npm **2.7.39**). **2.7.40** closes 231→233 in one ship line (including 232 review residuals: G7 `cse_*`, thinking-only re-stream, ERA probe, remint wiring).
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **231 OAuth** | MCP pre-registered clients (e.g. Slack) redirect: **JFr=`localhost`** (listen still `127.0.0.1`); preferred-port reuse; `preserveClientRegistration`; custom `redirectUri` skips localhost listener | Distinct from 229 “strict AS → 127.0.0.1 redirect” — **redirect host ≠ listen host** on purpose |
+| **232 agent / cross-session** | fork product default ON (runtime gate, not compile `FORK_SUBAGENT`); `@` peer mention; SendMessage bare-name delivery; unique live session names; dialog expiry / inbound policy | full cloud sessions / inProcess team-file not invented |
+| **232 security / marketplace** | GitLab token-family redaction + `glab` path protection; marketplace aliases; GitLab nested-subgroup clone; PS `PSDefaultParameterValues`; nested git trust; UDS socket-dir harden | **#10/#11/#22 gateway, #45 Cowork N/A** |
+| **232 RC / stream** | remint ~30min / Ls+Hde/gzp; G7 teleported + keep `cse_*` across failed reconnect; thinking-only re-stream (Po=1/sr=2); stream idle → `api_timeout`; mTLS hot-reload; region sanitize | live remint e2e harness not default |
+| **232 other** | MCP connect timeout (y0/Obf/ERA/probe); sandbox.ripgrep only user/managed/`--settings`; plugin install refreshes marketplace first; `/code-review` high+ bg; OpenAI/Grok max prompt length → PTL | — |
+| **233 MCP v2** | product path **`@modelcontextprotocol/client@2` + `server@2` single stack** (listen reopen/park, BVa probe, string handlers, `mcpServerKeyHash`); v2 type re-exports; structural auth guards | **no apps gateway invent**; transitive agent-sdk may still pull sdk 1.x |
+| **233 harden / UX** | cgroup `TOOL_MEMORY_LIMIT`; `WEBFETCH_CACHE_TTL_MS`; argument double-expand sentinels; `\??\` UNC; bare skills validate; `/effort` screen-reader list; Todo/Tds opt-in; hide GitHub tip on non-GH remotes; `cd && >` discard targets | — |
+| **233 official reverts** | **Revert 232 Cygwin symlink write gate + Bash `< file` product gate**; `TREE_SITTER_BASH` not in DEFAULT; keep `validateInputRedirections` residual, do not call from product path | wait for densable narrower gate; **do not re-enable by default for checklist** |
+| **Feature defaults** | inherit 229: **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS periphery ON | collapse/snip/ULTRAPLAN still OFF; compile `FORK_SUBAGENT` still optional |
+
+#### densable 2.1.229 alignment (2.7.39, included)
 
 Source of truth: `docs/upstream-extraction/v2.1.229/official-229-checklist.md` (**HAVE 27 / N/A 5 / GAP 0**), `changelog-2.1.229.md`. Stacked on **2.1.228**. **2.7.39** also ships **DEFAULT_BUILD `REACTIVE_COMPACT`** (long-session 413/PTL withhold + try recovery; **not** CONTEXT_COLLAPSE / HISTORY_SNIP) with densable **ex / Jsa / Rhe** gates.
 
@@ -179,10 +201,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.39)
+### Recent updates (2.7.5 → 2.7.40)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.40** | **densable 2.1.231–2.1.233 closeout** (no public 2.1.230): **231** MCP OAuth pre-registered redirect FLv (`localhost` + port reuse + preserveClient); **232** HAVE 45 / N/A 4 — fork default, @mention/SendMessage bare name, unique session names, GitLab tokens/marketplace, PS/nested-git, MCP connect timeout, RC remint/G7 `cse_*`, thinking-only re-stream, OpenAI/Grok PTL, sandbox.ripgrep source limits, etc.; **233** HAVE 14 — MCP **client@2/server@2 product single-stack**, cgroup memory, WebFetch TTL, `\??\` UNC, Todo/Tds, `/effort` a11y; **official revert of 232 Cygwin + Bash `<` product gates** (residuals kept). N/A: gateway / Desktop Notification / Cowork. |
 | **2.7.39** | **densable 2.1.229 (HAVE 27 / N/A 5 / GAP 0)** + product-default **`REACTIVE_COMPACT`**: long-session 413/PTL withhold + try recovery (Ysa/bua #25; messages >32MB unrecoverable #20); try gates densable **ex/Jsa/Rhe**; OAuth `127.0.0.1`, attribution force, SHR launcher hooks/GCM/base-dir, plugin command sources, ListAgents offline/cloud, safeToolInput, UNC path, workflow host concurrency/prefix stagger, IPv6 doctor, commit-push-pr deny, etc. N/A: #3 SSE host, #21 Desktop OTEL, #30–32 VSCode. **No** collapse/snip. |
 | **2.7.38** | **Grok 4.6 effort catalog**: add a `grok-4.6` row via longest-substring model-id match (not a vendor heuristic). Official [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning) (2026-08-12): `grok-4.6` is `low \| medium \| high \| xhigh` (default `high`); `grok-4.5` stays 3-tier (xhigh treated as high). Also `grok-4.20-reasoning` 3-tier and `grok-4.20-multi-agent` with xhigh (agent count). `queryModelGrok` sends Chat Completions `reasoning_effort` on the **mapped** id. No bare `grok-4` / `grok-4.20` rows. |
 | **2.7.37** | **densable 2.1.228 (HAVE 17 + PARTIAL 1 / GAP 0; #12 core-only)** + 223–227 included: Ink layout recover; kTd whole-token re-ESC + incomplete buffer; Windows `uio`; SHR checkout skip + follow-up hold; UDS `key_publish` fail-closed + LAN TCP auth; RC reattach owner / left-arrow; syncedSkills harden core; Write/Edit Jqy/MCt+l8t; Vertex fail-fast + Bedrock GKd; St mid-turn; cross-session from-name; cleanup memory / plugin symlink / marketplace ssn; `/tui` model pin; title ◐/◑; auto-mode drop expensive; DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS periphery ON**; 221 #10 null-proto + createSdkMcpServer. Residuals: `cross-pack-residuals.md` (teleport invent-ban). |

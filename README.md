@@ -43,9 +43,31 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.228 → 2.1.229** 产品对齐（228 layout/Windows git/SHR/UDS 等 + **229 全包 32 条：HAVE 27 / N/A 5**，含 PTL reactive compact 产品默认）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.39**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.40**），与 git tag 可能不同步。
 
-#### densable 2.1.229 对齐说明（2.7.39）
+#### densable 2.1.231–2.1.233 对齐说明（2.7.40）
+
+对照文档：
+
+- `docs/upstream-extraction/v2.1.231/official-231-checklist.md`（**HAVE 1** + cup/r8o residual）
+- `docs/upstream-extraction/v2.1.232/official-232-checklist.md`（**HAVE 45 / N/A 4 / PARTIAL 0**；官方 49 条）
+- `docs/upstream-extraction/v2.1.233/official-233-checklist.md`（**HAVE 14** + verify-only/pre-exist；**N/A 3**）
+
+叠在 **2.1.229**（npm **2.7.39**）之上。**2.7.40** 一次收口 231→233（含 232 review residual：G7 `cse_*`、thinking-only re-stream、ERA 探测、remint 接线）。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **231 OAuth** | MCP 预注册 client（Slack 等）redirect：**JFr=`localhost`**（listen 仍 `127.0.0.1`）；preferred-port 复用；`preserveClientRegistration`；custom `redirectUri` 不启 localhost listener | 与 229「strict AS 用 127.0.0.1 redirect」目标不同——**redirect host ≠ listen host** 故意分离 |
+| **232 Agent / 跨会话** | fork 产品默认 ON（runtime gate，非 compile `FORK_SUBAGENT`）；`@` peer mention；SendMessage 裸名直达；本机 session 名唯一；Dialog expiry / 跨会话 inbound 策略 | 完整 cloud sessions / inProcess team-file 不 invent |
+| **232 安全 / 市场** | GitLab token 家族脱敏 + `glab` 路径保护；marketplace 别名；GitLab nested subgroup clone；PS `PSDefaultParameterValues`；nested git 独立 trust；UDS socket dir 硬化 | **#10/#11/#22 gateway、#45 Cowork N/A** |
+| **232 RC / 流** | remint ~30min / Ls+Hde/gzp；G7 teleported + `cse_*` 失败重连保留；thinking-only re-stream（Po=1/sr=2）；stream idle→`api_timeout`；mTLS 热更；region sanitize | 真网 e2e remint harness 非默认 |
+| **232 其它** | MCP connect timeout（y0/Obf/ERA/probe）；sandbox.ripgrep 仅 user/managed/`--settings`；plugin install 先 refresh；`/code-review` high+ bg；OpenAI/Grok max prompt length→PTL | — |
+| **233 MCP v2** | 产品路径 **`@modelcontextprotocol/client@2` + `server@2` 单栈**（listen reopen/park、BVa probe、string handlers、`mcpServerKeyHash`）；类型 re-export v2；auth 结构守卫 | **不 invent apps gateway**；agent-sdk 传递依赖仍可能带 sdk 1.x |
+| **233 硬化 / UX** | cgroup `TOOL_MEMORY_LIMIT`；`WEBFETCH_CACHE_TTL_MS`；参数二次展开哨兵；`\??\` UNC；bare skills validate；`/effort` 读屏列表；Todo/Tds opt-in；GitHub tip 非 GH 隐藏；`cd && >` discard 目标 | — |
+| **233 官方回滚** | **回滚 232 Cygwin symlink 写门 + Bash `< file` 产品门**；`TREE_SITTER_BASH` 不进 DEFAULT；`validateInputRedirections` residual 保留勿产品调用 | 待 densable narrower 版再接；**勿为 checklist 默认开回** |
+| **Feature 默认** | 继承 229：**REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS 外围 ON | collapse/snip/ULTRAPLAN 仍 OFF；`FORK_SUBAGENT` compile 仍 optional |
+
+#### densable 2.1.229 对齐说明（2.7.39，已并入）
 
 对照文档：`docs/upstream-extraction/v2.1.229/official-229-checklist.md`（**HAVE 27 / N/A 5 / GAP 0**）、`changelog-2.1.229.md`。叠在 **2.1.228** 之上。**2.7.39** 在 229 产品线上补了 **DEFAULT_BUILD `REACTIVE_COMPACT`**（长会话 413/PTL withhold + try 恢复；**不含** CONTEXT_COLLAPSE / HISTORY_SNIP）与 densable **ex / Jsa / Rhe** 门控。
 
@@ -179,10 +201,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.39）
+### 近期更新（2.7.5 → 2.7.40）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.40** | **densable 2.1.231–2.1.233 收口**（无官方 2.1.230）：**231** MCP OAuth 预注册 redirect FLv（`localhost` + port 复用 + preserveClient）；**232** HAVE 45 / N/A 4 — fork 默认、@mention/SendMessage 裸名、session 名唯一、GitLab token/marketplace、PS/nested-git、MCP connect timeout、RC remint/G7 `cse_*`、thinking-only re-stream、OpenAI/Grok PTL、sandbox.ripgrep 源限制等；**233** HAVE 14 — MCP **client@2/server@2 产品单栈**、cgroup 内存、WebFetch TTL、`\??\` UNC、Todo/Tds、`/effort` a11y；**官方回滚 232 Cygwin + Bash `<` 产品门**（residual 保留）。N/A：gateway / Desktop Notification / Cowork。 |
 | **2.7.39** | **densable 2.1.229（HAVE 27 / N/A 5 / GAP 0）** + 产品默认 **`REACTIVE_COMPACT`**：长会话 413/PTL withhold + try 恢复（Ysa/bua #25；messages >32MB unrecoverable #20）；try 门控 densable **ex/Jsa/Rhe**；OAuth `127.0.0.1`、attribution force、SHR launcher hooks/GCM/base-dir、plugin command 源、ListAgents offline/cloud、safeToolInput、UNC path、workflow host 并发/prefix stagger、IPv6 doctor、commit-push-pr deny 等。N/A：#3 SSE host、#21 Desktop OTEL、#30–32 VSCode。**不含** collapse/snip。 |
 | **2.7.38** | **Grok 4.6 推理档 catalog**：按模型 ID 最长匹配加 `grok-4.6` 行（不按厂商启发式）。官方 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)（2026-08-12）：`grok-4.6` 为 `low \| medium \| high \| xhigh`（默认 `high`）；`grok-4.5` 仍三档（xhigh 当 high）。另有 `grok-4.20-reasoning` 三档、`grok-4.20-multi-agent` 含 xhigh（agent count）。`queryModelGrok` 对**映射后** id 发 Chat Completions `reasoning_effort`。不加裸 `grok-4` / `grok-4.20` 行。 |
 | **2.7.37** | **densable 2.1.228（HAVE 17 + PARTIAL 1 / GAP 0；#12 core-only）** + 已并入 223–227：Ink layout recover；kTd whole-token re-ESC + incomplete buffer；Windows `uio`；SHR checkout skip + follow-up hold；UDS `key_publish` fail-closed + LAN TCP auth；RC reattach owner / left-arrow；syncedSkills harden core；Write/Edit Jqy/MCt+l8t；Vertex fail-fast + Bedrock GKd；St mid-turn；cross-session from-name；cleanup memory / plugin symlink / marketplace ssn；`/tui` model pin；title ◐/◑；auto-mode 去 expensive；DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS 外围 ON**；221 #10 null-proto + createSdkMcpServer。跨 pack 残差见 `cross-pack-residuals.md`（teleport invent-ban）。 |
