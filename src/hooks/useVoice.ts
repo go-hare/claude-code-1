@@ -30,7 +30,7 @@ import {
   resetVoiceCircuitBreaker,
 } from '../services/voiceCircuitBreaker.js'
 import { logForDebugging } from '../utils/debug.js'
-import { toError } from '../utils/errors.js'
+import { errorMessage, toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
 import { logError } from '../utils/log.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
@@ -553,7 +553,26 @@ export function useVoice({
       })
       .catch(err => {
         logError(toError(err))
-        if (!isStale()) updateState('idle')
+        if (!isStale()) {
+          // densable-adjacent: connect .catch already surfaces onError; finalize
+          // failures must not silently return to idle (user thinks key-up did nothing).
+          // Mirror success-path cleanup so we don't leave a half-open connection
+          // or stale transcript buffer after a failed finalize.
+          if (connectionRef.current) {
+            connectionRef.current.close()
+            connectionRef.current = null
+          }
+          fullAudioRef.current = []
+          accumulatedRef.current = ''
+          setVoiceState(prev => {
+            if (prev.voiceInterimTranscript === '') return prev
+            return { ...prev, voiceInterimTranscript: '' }
+          })
+          onErrorRef.current?.(
+            `Voice finalize failed: ${errorMessage(toError(err))}`,
+          )
+          updateState('idle')
+        }
       })
   }
 

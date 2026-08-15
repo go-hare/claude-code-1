@@ -306,9 +306,9 @@ export function findCygwinEmulatedSymlink(
       opts?.onCookieRemainder?.([...segments])
       return a
     }
-    const p = c.replace(/[. ]+$/, '')
+    // densable-aligned with isCookieOrLinkPath: Shell Link magic is enough —
+    // do not require a `.lnk` extension (extensionless .lnk headers exist).
     if (
-      /\.lnk$/i.test(p) &&
       d.bytesRead >= SHELL_LINK_HEADER.length &&
       d.buffer.subarray(0, SHELL_LINK_HEADER.length).equals(SHELL_LINK_HEADER)
     ) {

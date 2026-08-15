@@ -172,6 +172,11 @@ export function isRecoverableCloseCode(
  * `$t===4090 && Jr==="epoch_stale" && Ot()`
  * Ot = tengu_bridge_recover_stale_epoch, densable default **false**.
  */
+/**
+ * densable Ls: `$t===4090 && Jr==="epoch_stale" && Ot()`
+ * gzp also maps `epoch_conflict` → 4090 (HTTP 409 supersession). Accept both
+ * so causeTypedCloseCodes path recovers under Ot.
+ */
 export function isEpochStaleRecoverableClose(
   code: number | undefined,
   cause: string | undefined,
@@ -179,7 +184,7 @@ export function isEpochStaleRecoverableClose(
 ): boolean {
   return (
     code === 4090 &&
-    cause === 'epoch_stale' &&
+    (cause === 'epoch_stale' || cause === 'epoch_conflict') &&
     recoverStaleEpochEnabled === true
   )
 }
@@ -233,6 +238,34 @@ export const OAUTH_REAUTH_REQUIRED_DETAIL =
  * nn: Ds("Session teleported to cloud"); Xl: "suppressed_teleported"
  */
 export const SESSION_TELEPORTED_DETAIL = 'Session teleported to cloud'
+
+/**
+ * densable gzp — request-path condition → close code for Ls recovery.
+ * Used when causeTypedCloseCodes is on (env-less v2).
+ */
+export const CLASSIFIED_CLOSE_REASON_CODES: Readonly<Record<string, number>> = {
+  epoch_conflict: 4090,
+  superseded_by_worker: 4090,
+  session_not_active: 4090,
+  epoch_stale: 4090,
+  session_not_found: 4090,
+  token_expired: 4094,
+  auth_exhausted: 4094,
+}
+
+/** densable: code = causeTypedCloseCodes ? gzp[reason] : 4090 */
+export function closeCodeForClassifiedReason(
+  reason: string,
+  opts?: { causeTypedCloseCodes?: boolean },
+): number {
+  if (opts?.causeTypedCloseCodes === false) return 4090
+  return CLASSIFIED_CLOSE_REASON_CODES[reason] ?? 4090
+}
+
+/** densable Co(Jr) — telemetry close_cause string (empty if absent). */
+export function formatCloseCause(cause: string | undefined): string {
+  return cause ?? ''
+}
 
 /**
  * densable Xn / To / Vo — recovery-in-flight ownership token.

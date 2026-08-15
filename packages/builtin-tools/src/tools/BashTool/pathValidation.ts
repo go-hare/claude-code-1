@@ -4,6 +4,7 @@ import type { z } from 'zod/v4'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { Redirect, SimpleCommand } from 'src/utils/bash/ast.js'
 import {
+  extractInputRedirections,
   extractOutputRedirections,
   splitCommand_DEPRECATED,
 } from 'src/utils/bash/commands.js'
@@ -1207,13 +1208,16 @@ export function checkPathConstraints(
     return redirectionResult
   }
 
-  // densable 2.1.232 #43 auS: when AST redirects are available, permission-check
-  // input redirections (`< file`) as reads — same as argument spellings.
-  // Non-AST / shell-quote path does not extract `<` targets (densable A2e).
-  if (astRedirects) {
+  // densable 2.1.232 #43 auS: permission-check input redirections (`< file`)
+  // as reads — same as argument spellings. Prefer AST redirects when present;
+  // product builds without TREE_SITTER_BASH fall back to extractInputRedirections
+  // so the gate is not dead on default build.
+  {
     const inputTargets = astRedirects
-      .filter(r => r.op === '<' && r.target !== '/dev/null')
-      .map(r => ({ target: r.target }))
+      ? astRedirects
+          .filter(r => r.op === '<' && r.target !== '/dev/null')
+          .map(r => ({ target: r.target }))
+      : extractInputRedirections(input.command)
     if (inputTargets.length > 0) {
       const inputResult = validateInputRedirections(
         inputTargets,

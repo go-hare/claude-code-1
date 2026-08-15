@@ -47,6 +47,7 @@ import {
   disposeTransportClose,
   evaluateEpochStaleRecoveryBudget,
   evaluateRecoverableCloseBudgets,
+  formatCloseCause,
   formatOAuthAdoptRetryStatus,
   formatRemintExhaustedMessage,
   formatRemintRetryStatus,
@@ -62,7 +63,10 @@ import {
   SESSION_TELEPORTED_DETAIL,
 } from './remintRecovery.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { isTeleportedSessionId } from '../bootstrap/state.js'
+import {
+  isTeleportedSessionId,
+  setReplBridgeSessionId,
+} from '../bootstrap/state.js'
 import { getTrustedDeviceToken } from './trustedDevice.js'
 import {
   getEnvLessBridgeConfig,
@@ -356,6 +360,10 @@ export async function initEnvLessBridgeCore(
     sessionId = minted
   }
 
+  // densable G7: mint-time write of cse_* so teleport zNn / remint suppress
+  // do not depend on React ready/connected hooks (which race failed reconnect).
+  setReplBridgeSessionId(sessionId)
+
   // densable 2.1.224 #28: if(!G)FLp(rt); ULp({skipSessionId:rt, archive:Zxr})
   // G = outboundOnly — mirror path does not claim placeholder ownership.
   // Register + sweep after session id is final, before /bridge credentials.
@@ -377,7 +385,7 @@ export async function initEnvLessBridgeCore(
   })
 
   // ── 2. Fetch bridge credentials (POST /bridge → worker_jwt, expires_in, api_base_url) ──
-  const credentials = await withRetry(
+  const credentialsResult = await withRetry(
     () =>
       fetchRemoteCredentials(
         sessionId,
@@ -388,7 +396,7 @@ export async function initEnvLessBridgeCore(
     'fetchRemoteCredentials',
     cfg,
   )
-  if (!credentials) {
+  if (!isRemoteCredentials(credentialsResult)) {
     if (isReattaching) {
       // densable: reattach /bridge fail is transient — surface retry prompt,
       // do NOT archive the parent session.
@@ -403,7 +411,12 @@ export async function initEnvLessBridgeCore(
       logBridgeSkip('v2_remote_creds_reattach_transient', undefined, true)
       return null
     }
-    onStateChange?.('failed', 'Remote credentials fetch failed — see debug log')
+    const failDetail = isTerminalBridgeFailure(credentialsResult)
+      ? `Remote credentials rejected (${credentialsResult.reason})`
+      : isNonTerminalBridgeFailure(credentialsResult)
+        ? OAUTH_REAUTH_REQUIRED_DETAIL
+        : 'Remote credentials fetch failed — see debug log'
+    onStateChange?.('failed', failDetail)
     logBridgeSkip('v2_remote_creds_failed', undefined, true)
     void archiveSession(
       sessionId,
@@ -414,6 +427,8 @@ export async function initEnvLessBridgeCore(
     )
     return null
   }
+  // Narrowed: isRemoteCredentials check above
+  const credentials = credentialsResult
   logForDebugging(
     `[remote-bridge] Fetched bridge credentials (expires_in=${credentials.expires_in}s)`,
   )
@@ -601,7 +616,7 @@ export async function initEnvLessBridgeCore(
         }
         const flightGen = recoveryFlight.begin()
         try {
-          const fresh = await withRetry(
+          const result = await withRetry(
             () =>
               fetchRemoteCredentials(
                 sid,
@@ -612,8 +627,10 @@ export async function initEnvLessBridgeCore(
             'fetchRemoteCredentials (proactive)',
             cfg,
           )
-          if (!fresh || tornDown) return
-          const rebuilt = await rebuildTransport(fresh, 'proactive_refresh')
+          if (tornDown) return
+          // densable: only rebuild on real creds; null/Hde/mdt skip (timer will retry)
+          if (!isRemoteCredentials(result)) return
+          const rebuilt = await rebuildTransport(result, 'proactive_refresh')
           if (rebuilt === 'suppressed_teleported') {
             if (!tornDown) {
               onStateChange?.('failed', SESSION_TELEPORTED_DETAIL)
@@ -729,11 +746,11 @@ export async function initEnvLessBridgeCore(
     // Capture generation for this wiring; rebuild bumps generation so this
     // callback becomes stale and cannot fail the session mid-rebuild.
     const myGen = ++transportGeneration
-    transport.setOnClose((code?: number) => {
+    transport.setOnClose((code?: number, cause?: string) => {
       clearTimeout(connectDeadline)
-      // densable Ls — cause is only present on deferred re-dispatch (Ei).
-      // Transport SSE path only surfaces the close code.
-      handleTransportClose(code, undefined, {
+      // densable Ls($t, Jr): SSE may only have code; classified closes pass Jr
+      // (epoch_conflict / token_expired / …) via causeTypedCloseCodes path.
+      handleTransportClose(code, cause, {
         staleTransport: myGen !== transportGeneration,
         reentry: false,
       })
@@ -757,8 +774,10 @@ export async function initEnvLessBridgeCore(
       logEvent('tengu_bridge_repl_ws_closed', {
         code,
         v2: true,
-        close_cause: (cause ??
-          '') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        // densable Co(Jr)
+        close_cause: formatCloseCause(
+          cause,
+        ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         recovery_in_flight: authRecoveryInFlight(),
       })
     }
@@ -1025,8 +1044,8 @@ export async function initEnvLessBridgeCore(
         return
       }
 
-      // densable: first /bridge fetch (RFr/Me)
-      let fresh = await withRetry(
+      // densable: first /bridge fetch (RFr/Me) — typed BridgeCredentialResult
+      let result = await withRetry(
         () =>
           fetchRemoteCredentials(
             sessionId,
@@ -1040,8 +1059,13 @@ export async function initEnvLessBridgeCore(
       if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
 
       // densable adopt-loop: (!tu||Hde(tu)) && needsOAuthRefresh && m && !Va
-      // Local Hde≈null (malformed/rejected collapse to null).
-      if (!fresh && policy.needsOAuthRefresh && onAuth401 && !firstOAuthOk) {
+      // Hde = terminal:false oauth_rejected; null is transient (not Hde alone).
+      if (
+        (!result || isNonTerminalBridgeFailure(result)) &&
+        policy.needsOAuthRefresh &&
+        onAuth401 &&
+        !firstOAuthOk
+      ) {
         let adopted = false
         const maxAdopt = cfg.oauth_retry_max_attempts
         for (let mt = 1; mt <= maxAdopt && !tornDown; mt++) {
@@ -1077,7 +1101,7 @@ export async function initEnvLessBridgeCore(
           if (!nextToken) continue
           adopted = true
           oauthToken = nextToken
-          fresh = await withRetry(
+          result = await withRetry(
             () =>
               fetchRemoteCredentials(
                 sessionId,
@@ -1091,7 +1115,7 @@ export async function initEnvLessBridgeCore(
           break
         }
         if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
-        if (!fresh && !adopted) {
+        if (isNonTerminalBridgeFailure(result) && !adopted) {
           if (!tornDown) {
             onStateChange?.('failed', OAUTH_REAUTH_REQUIRED_DETAIL)
             logForDiagnosticsNoPII(
@@ -1103,6 +1127,66 @@ export async function initEnvLessBridgeCore(
         }
       }
 
+      // densable: Hde after adopt without refresh success → reauth required already handled.
+      // densable: Hde && !needsOAuth && m → late OAuth refresh once.
+      if (
+        isNonTerminalBridgeFailure(result) &&
+        !policy.needsOAuthRefresh &&
+        onAuth401
+      ) {
+        let lateOk = false
+        try {
+          lateOk = (await onAuth401(staleBefore ?? '')) !== false
+        } catch (err) {
+          logForDebugging(
+            `[remote-bridge] ${code} late OAuth refresh threw: ${errorMessage(err)}`,
+            { level: 'error' },
+          )
+        }
+        if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+        if (lateOk) {
+          result = await withRetry(
+            () =>
+              fetchRemoteCredentials(
+                sessionId,
+                baseUrl,
+                getAccessToken() ?? staleBefore ?? '',
+                cfg.http_timeout_ms,
+              ),
+            `fetchRemoteCredentials (${code} late refresh)`,
+            cfg,
+          )
+          if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
+        }
+      }
+
+      // densable: Hde(tu) still soft-rejected → recovery_credentials_rejected
+      if (isNonTerminalBridgeFailure(result)) {
+        logForDiagnosticsNoPII(
+          'error',
+          'bridge_repl_v2_recovery_credentials_rejected',
+        )
+        if (!tornDown) {
+          onStateChange?.('failed', OAUTH_REAUTH_REQUIRED_DETAIL)
+        }
+        return
+      }
+
+      // densable mdt — terminal credential failure
+      if (isTerminalBridgeFailure(result)) {
+        logForDiagnosticsNoPII(
+          'error',
+          'bridge_repl_v2_recovery_credentials_rejected',
+        )
+        if (!tornDown) {
+          onStateChange?.(
+            'failed',
+            `Remote credentials rejected (${result.reason})`,
+          )
+        }
+        return
+      }
+
       // densable: remintCap only when fetchFailure==="retry" && ut()
       // When patience off, a single null fetch fails without multi-attempt remint.
       const remintCap =
@@ -1111,8 +1195,12 @@ export async function initEnvLessBridgeCore(
           : undefined
       const maxAttempts = remintCap?.attempts ?? 1
 
-      // If first fetch already succeeded, skip the while and rebuild below.
-      while (!fresh && remintAttempts < maxAttempts && !tornDown) {
+      // Transient null only — remint loop (rh). Failures already returned.
+      while (
+        !isRemoteCredentials(result) &&
+        remintAttempts < maxAttempts &&
+        !tornDown
+      ) {
         remintAttempts++
         if (remintCap && remintAttempts > 1) {
           const elapsed = Date.now() - startedAt
@@ -1149,7 +1237,7 @@ export async function initEnvLessBridgeCore(
           }
           return
         }
-        fresh = await withRetry(
+        result = await withRetry(
           () =>
             fetchRemoteCredentials(
               sessionId,
@@ -1161,11 +1249,30 @@ export async function initEnvLessBridgeCore(
           cfg,
         )
         if (tornDown || recoveryFlight.state.activeGen !== flightGen) return
-        if (fresh) break
+        // densable remint loop: Hde/mdt abort; null continues
+        if (
+          isTerminalBridgeFailure(result) ||
+          isNonTerminalBridgeFailure(result)
+        ) {
+          logForDiagnosticsNoPII(
+            'error',
+            'bridge_repl_v2_recovery_credentials_rejected',
+          )
+          if (!tornDown) {
+            onStateChange?.(
+              'failed',
+              isTerminalBridgeFailure(result)
+                ? `Remote credentials rejected (${result.reason})`
+                : OAUTH_REAUTH_REQUIRED_DETAIL,
+            )
+          }
+          return
+        }
+        if (isRemoteCredentials(result)) break
         if (!remintCap) break
       }
 
-      if (fresh) {
+      if (isRemoteCredentials(result)) {
         // densable: await Xl(...)==="suppressed_teleported" → Ds teleported
         if (isTeleportedSessionId(sessionId)) {
           logForDiagnosticsNoPII(
@@ -1177,7 +1284,7 @@ export async function initEnvLessBridgeCore(
         }
         initialFlushDone = false
         const rebuilt = await rebuildTransport(
-          fresh,
+          result,
           code === 401 ? 'auth_401_recovery' : 'proactive_refresh',
         )
         if (rebuilt === 'suppressed_teleported') {
@@ -1690,7 +1797,11 @@ export async function initEnvLessBridgeCore(
 
 // ─── Session API (v2 /code/sessions, no env) ─────────────────────────────────
 
-/** Retry an async init call with exponential backoff + jitter. */
+/**
+ * Retry an async init call with exponential backoff + jitter.
+ * densable RFr: only **null** (transient) is retried. Terminal/oauth_rejected
+ * objects and success values return immediately.
+ */
 async function withRetry<T>(
   fn: () => Promise<T | null>,
   label: string,
@@ -1720,12 +1831,20 @@ export {
   createCodeSession,
   unarchiveCodeSession,
   type RemoteCredentials,
+  type BridgeCredentialResult,
+  isRemoteCredentials,
+  isNonTerminalBridgeFailure,
+  isTerminalBridgeFailure,
 } from './codeSessionApi.js'
 import {
   createCodeSession,
   fetchRemoteCredentials as fetchRemoteCredentialsRaw,
-  unarchiveCodeSession,
+  isNonTerminalBridgeFailure,
+  isRemoteCredentials,
+  isTerminalBridgeFailure,
+  type BridgeCredentialResult,
   type RemoteCredentials,
+  unarchiveCodeSession,
 } from './codeSessionApi.js'
 import { getBridgeBaseUrlOverride } from './bridgeConfig.js'
 
@@ -1737,7 +1856,7 @@ export async function fetchRemoteCredentials(
   baseUrl: string,
   accessToken: string,
   timeoutMs: number,
-): Promise<RemoteCredentials | null> {
+): Promise<BridgeCredentialResult> {
   const creds = await fetchRemoteCredentialsRaw(
     sessionId,
     baseUrl,
@@ -1745,7 +1864,7 @@ export async function fetchRemoteCredentials(
     timeoutMs,
     getTrustedDeviceToken(),
   )
-  if (!creds) return null
+  if (!isRemoteCredentials(creds)) return creds
   return getBridgeBaseUrlOverride()
     ? { ...creds, api_base_url: baseUrl }
     : creds

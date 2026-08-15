@@ -104,6 +104,10 @@ export const DEFAULT_BUILD_FEATURES = [
   // present; product pack must match densable. Do NOT enable CONTEXT_COLLAPSE
   // or HISTORY_SNIP here — collapse remains stub-risk / suppress-autocompact.
   'REACTIVE_COMPACT', // 413/PTL withhold + tryReactiveCompact recovery (+ Ysa annotate)
+  // densable always ships tree-sitter bash; without this flag BashTool falls
+  // through to shell-quote legacy path and #43 `cat < file` input-redirect
+  // permission checks never run (validateInputRedirections only sees AST).
+  'TREE_SITTER_BASH', // AST bash parse for path/redirect permission gates
   // 'HISTORY_SNIP', // 已禁用：snip 功能暂时关闭
   // 'CONTEXT_COLLAPSE', // 已禁用：实现是空壳 stub，启用后会抑制 auto compact 导致上下文管理完全失效
   'MONITOR_TOOL', // Monitor 工具，流式监控后台进程输出

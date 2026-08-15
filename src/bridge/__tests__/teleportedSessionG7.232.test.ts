@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   clearTeleportedSessionId,
+  getReplBridgeSessionId,
   isTeleportedSessionId,
   markTeleportedSessionId,
   normalizeTeleportedSessionId,
+  setReplBridgeActive,
+  setReplBridgeSessionId,
   setTeleportedSessionInfo,
 } from '../../bootstrap/state.js'
 import { SESSION_TELEPORTED_DETAIL } from '../remintRecovery.js'
@@ -72,5 +75,26 @@ describe('teleportedSessionIds densable G7/zNn', () => {
 
   test('fail detail gold', () => {
     expect(SESSION_TELEPORTED_DETAIL).toBe('Session teleported to cloud')
+  })
+
+  test('bridge cse_* id is markable for remint G7 match', () => {
+    // remoteBridgeCore checks createCodeSession() cse_* (replBridgeSessionId),
+    // not only local transcript UUID / teleport cloud id.
+    const bridgeCse = 'cse_bridge_remint_id_001'
+    expect(isTeleportedSessionId(bridgeCse)).toBe(false)
+    markTeleportedSessionId(bridgeCse)
+    expect(isTeleportedSessionId(bridgeCse)).toBe(true)
+    expect(isTeleportedSessionId('session_bridge_remint_id_001')).toBe(true)
+    clearTeleportedSessionId(bridgeCse)
+  })
+
+  test('setReplBridgeActive(false) does not clear cse_* (failed reconnect)', () => {
+    setReplBridgeSessionId('cse_keep_on_failed')
+    setReplBridgeActive(true)
+    setReplBridgeActive(false)
+    expect(getReplBridgeSessionId()).toBe('cse_keep_on_failed')
+    // teardown path clears explicitly
+    setReplBridgeSessionId(undefined)
+    expect(getReplBridgeSessionId()).toBeUndefined()
   })
 })

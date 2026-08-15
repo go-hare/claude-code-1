@@ -330,7 +330,11 @@ export class CCRClient {
    * parent bridge re-spawns. In-process callers (replBridge) MUST override
    * this to close gracefully instead; exit would kill the user's REPL.
    */
-  private readonly onEpochMismatch: () => never
+  /**
+   * densable onEpochMismatch(reason) — request-path terminal condition.
+   * reason feeds gzp → close code (epoch_conflict→4090, token_expired→4094…).
+   */
+  private readonly onEpochMismatch: (reason?: string) => never
 
   /**
    * Auth header source. Defaults to the process-wide session-ingress token
@@ -344,7 +348,7 @@ export class CCRClient {
     transport: SSETransport,
     sessionUrl: URL,
     opts?: {
-      onEpochMismatch?: () => never
+      onEpochMismatch?: (reason?: string) => never
       heartbeatIntervalMs?: number
       heartbeatJitterFraction?: number
       /**
@@ -357,7 +361,7 @@ export class CCRClient {
   ) {
     this.onEpochMismatch =
       opts?.onEpochMismatch ??
-      (() => {
+      ((_reason?: string) => {
         // eslint-disable-next-line custom-rules/no-process-exit
         process.exit(1)
       })
@@ -679,7 +683,8 @@ export class CCRClient {
             { level: 'error' },
           )
           logForDiagnosticsNoPII('error', 'cli_worker_token_expired_no_refresh')
-          this.onEpochMismatch()
+          // densable gzp token_expired → 4094
+          this.onEpochMismatch('token_expired')
         }
         // Token looks valid but server says 401 — possible server-side
         // blip (userauth down, KMS hiccup). Count toward threshold.
@@ -690,7 +695,8 @@ export class CCRClient {
             { level: 'error' },
           )
           logForDiagnosticsNoPII('error', 'cli_worker_auth_failures_exhausted')
-          this.onEpochMismatch()
+          // densable gzp auth_exhausted → 4094
+          this.onEpochMismatch('auth_exhausted')
         }
       }
       logForDebugging(`CCRClient: ${label} returned ${response.status}`, {
@@ -809,7 +815,8 @@ export class CCRClient {
       level: 'error',
     })
     logForDiagnosticsNoPII('error', 'cli_worker_epoch_mismatch')
-    this.onEpochMismatch()
+    // densable gzp epoch_conflict → 4090 (Ls epoch_stale branch needs cause)
+    this.onEpochMismatch('epoch_conflict')
   }
 
   /** Start periodic heartbeat. densable: no-op if already closed. */

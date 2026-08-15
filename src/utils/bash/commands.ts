@@ -633,6 +633,68 @@ export function isUnsafeCompoundCommand_DEPRECATED(command: string): boolean {
 }
 
 /**
+ * densable 2.1.232 #43 product fallback — when TREE_SITTER_BASH is off /
+ * parse-unavailable, still surface simple `< file` targets for read checks.
+ * Prefer AST redirects when available (pathValidation uses those first).
+ *
+ * Order mirrors extractOutputRedirections: extractHeredocs first (so `<` in
+ * heredoc bodies is not counted), then match bare / quoted targets. Does not
+ * handle `<<` / `<<<` / `<&` / `<>` as input-file redirects.
+ */
+export function extractInputRedirections(cmd: string): Array<{
+  target: string
+}> {
+  if (!cmd || cmd.length > MAX_COMMAND_LENGTH) return []
+  // Strip heredoc bodies first (same order as extractOutputRedirections) so
+  // a literal `< /etc/passwd` inside a quoted heredoc is not permission-gated.
+  const { processedCommand } = extractHeredocs(cmd)
+  let s = processedCommand
+  // Remove here-strings (<<< word) so they are not treated as `<`
+  s = s.replace(/<<<\s*(?:'[^']*'|"[^"]*"|\S+)/g, ' ')
+  // Drop ordinary double/single quoted spans so `echo "x < /etc/passwd"` is
+  // not treated as an input redirect (fail-closed over-ask → false positive).
+  // Real redirects use unquoted or redirect-side quoted targets like
+  // `cat < "/etc/passwd"` — those quotes wrap only the path after `<`.
+  // For that form we still match via the capture group on the target.
+  // Here we blank string *literals* that are not the redirect target itself
+  // by only blanking quoted spans that do not immediately follow `<`.
+  // Simpler approach: blank all quoted spans, then also match
+  // `< "path"` / `< 'path'` with a second pass on the original post-heredoc text.
+  const unquoted = s
+    .replace(/"(?:\\.|[^"\\])*"/g, ' ')
+    .replace(/'(?:\\.|[^'])*'/g, ' ')
+  const out: Array<{ target: string }> = []
+  const seen = new Set<string>()
+  const push = (raw: string): void => {
+    let t = raw
+    if (
+      (t.startsWith('"') && t.endsWith('"')) ||
+      (t.startsWith("'") && t.endsWith("'"))
+    ) {
+      t = t.slice(1, -1)
+    }
+    if (!t || t === '/dev/null') return
+    if (/[$`*?[{~!]/.test(t)) return
+    if (seen.has(t)) return
+    seen.add(t)
+    out.push({ target: t })
+  }
+  // Pass 1: unquoted command — bare / fd-prefixed / tight-adjacent
+  const bareRe =
+    /(?:^|[\s;|&()]|[A-Za-z0-9_./-])(?:\d*)<\s*(?!<|&|>)([^\s;|&()<>]+)/g
+  for (const m of unquoted.matchAll(bareRe)) {
+    push(m[1] ?? '')
+  }
+  // Pass 2: on post-heredoc text, only `< "path"` / `< 'path'` (quotes wrap path)
+  const quotedTargetRe =
+    /(?:^|[\s;|&()]|[A-Za-z0-9_./-])(?:\d*)<\s*(?!<|&|>)("(?:\\.|[^"\\])*"|'(?:\\.|[^'])*')/g
+  for (const m of s.matchAll(quotedTargetRe)) {
+    push(m[1] ?? '')
+  }
+  return out
+}
+
+/**
  * Extracts output redirections from a command if present.
  * Only handles simple string targets (no variables or command substitutions).
  *

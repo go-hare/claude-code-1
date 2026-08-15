@@ -20,7 +20,7 @@
 | 状态 | 条数 | 说明 |
 | ---- | ---- | ---- |
 | **HAVE** | **44** | 产品主路径 + 测试/gold 已锁；部分条仍有 **标注 residual**（见下 residual 清单），非零差距 densable 全量 |
-| **PARTIAL** | **1** | **#39** remint：`Ls`+`nn`+**G7 teleport 门** 已接；Hde 分型 / SSE cause / bridge 集成测仍 residual |
+| **PARTIAL** | **1** | **#39** remint：`Ls`+`nn`+G7+**Hde/mdt**+**gzp close cause** 已接；bridge 集成测仍 residual |
 | **GAP** | **0** | — |
 | **N/A** | **4** | #10/#11/#22 gateway；#45 Cowork |
 | **UNKNOWN** | **0** | — |
@@ -37,7 +37,7 @@
 | 17 | cloud-worker isolation 面未再扩 |
 | 26 | thinking-only `tengu_streaming_watchdog_retry` 再 stream 环 |
 | 31 | densable `/usage-credits` vs 本地 `/extra-usage` 产品名（非本条范围） |
-| 39 | **见 PARTIAL**：Hde / SSE cause / 集成测（G7 已 HAVE） |
+| 39 | **见 PARTIAL**：bridge 集成测（Hde/gzp/G7 已 HAVE） |
 | 42 | changelog takeover/end/delete 产品语义非独立 slash 金句 |
 | 46 | daemon/Chrome MCP 0700 独立面 |
 | 47 | seccomp violation monitor 运行时探针 |
@@ -100,11 +100,11 @@
 | 36 | `/plugin install` 先 refresh marketplace | **HAVE** | densable `gvm`/`zqr`/`jqr`：scoped `name@mkt` **始终**先 refresh（非 miss-only）；essential-traffic 无 FORCE 例外；仅 github/git/url；seed ineligible。`tryRefreshMarketplaceBeforeScopedInstall` + install success 缓存告警。测试 `scopedInstallRefresh.232.test.ts`；snippet `gold-plugin-install-refresh-zqr.md`。221 miss 路径 `tryRefreshMarketplaceOnCatalogMiss` 仍用于 discovery |
 | 37 | `/code-review` high/xhigh/max 也走 bg agent | **HAVE** | densable `getContext`→`fork`（仅 coordinator `hS` / ReportFindings `zXh` 才 inline）；`Zyi`=`background??true`；effort 不门控 bg。本地 `context:'fork'`+`background:true` + `shouldBackgroundForkedSkill`。`FNb` 仅为 skill analytics set。测试 `codeReviewBg.232.test.ts`；snippet `gold-code-review-bg-levels.md` |
 | 38 | 粘贴/剪贴板图非阻塞读 | **HAVE** | densable `hasClipboardImage`/`readClipboardImage`/`chat:imagePaste`/`tengu_collage_kaleidoscope`：`usePasteHandler` `void getImageFromClipboard()` fire-and-forget + `.finally(finishPaste)`；`PASTE_PENDING_SAFETY_MS=30_000`；native darwin 快路径。测试 `imagePasteNonBlocking.232.test.ts`；snippet `gold-image-paste-nonblocking.md` |
-| 39 | RC 断网 ~30min 重连 | **PARTIAL** | **Ls+nn+G7**：`kd` 无裸 4090；leak/`Ei`/`Vo`；budgets；`Xn/To`；OAuth adopt；patience remintCap；**densable G7/zNn/Dm**：`teleportedSessionIds` cap64 + `isTeleportedSessionId` 门 `nn`/`Xl`；`markTeleportedSessionId` 在 `setTeleportedSessionInfo` + `teleportToRemote` 成功路径。**residual**：`Hde` 分型；SSE 无 Jr cause；无 bridge 集成测。测试 `remintRecovery.232` + `teleportedSessionG7.232`；`gold-remint-ls-onclose.md` |
+| 39 | RC 断网 ~30min 重连 | **PARTIAL** | **Ls+nn+G7+Hde+gzp**：`kd` 无裸 4090；leak/`Ei`/`Vo`；budgets；`Xn/To`；OAuth adopt；patience remintCap；G7 teleportedSessionIds；**Hde/mdt** `/bridge` 返回 `terminal:!0/!1` 分型；**gzp** causeTypedCloseCodes。**G7 接线**：`setReplBridgeSessionId(cse_*)` + teleport 成功时 `markTeleportedSessionId(getReplBridgeSessionId())`（remint 查的是 bridge cse_* 不是 local UUID）。**residual**：无 `remoteBridgeCore` 集成测（defer/leak/stale gen 端到端）。测试 `remintRecovery`/`teleportedSessionG7`/`bridgeCredentialResult.232` |
 | 40 | RC resume 不静默抢同机另一 CC 的 RC | **HAVE** | densable/本地：`non-owner` / suppressed reattach（228 #5）+ pointer/owner 门；`Remote Control is already connected` 拒绝重复 Project 绑定。不静默抢已连接会话 |
 | 41 | agent panel：完成即隐 + `/tasks` footer；overflow 左移 | **HAVE** | densable `kye=30000`=`PANEL_GRACE_MS`；`kT` terminal→`evictAfter`；`isLocalAgentPanelActive` 完成且无 KA 不显示。Footer pill `getPillLabel` + ↓ view CTA；overflow `calculateHorizontalScrollWindow` 左右箭头（选中左移窗口）。`/tasks` 命令进 dialog |
 | 42 | RC 终端说明 takeover/end/delete | **HAVE** | densable 终端 hint 1:1：`space to show/hide QR code` · `w to toggle spawn mode`（`bridgeUI.ts`）；idle/active footer（`buildIdleFooterText`/`buildActiveFooterText`）；失败 `Run /remote-control to retry`（224+）。状态 Reconnecting/Failed/Reconnected。**residual**：changelog「takeover/end/delete」多为产品语义，非独立 slash 金句 |
-| 43 | Bash `< file` 重定向全平台权限检查 | **HAVE** | densable `auS`：AST `op==="<"` 走 `validateInputRedirections`（`validatePath` read；deny rule 文案 + working-dir ask 文案 1:1）；`/dev/null` 跳过；`<<`/`<<<`/`<&` 不检。`checkPathConstraints` 在 output 校验后接 input。测试 `inputRedirect.232.test.ts` |
+| 43 | Bash `< file` 重定向全平台权限检查 | **HAVE** | densable `auS`：AST `op==="<"` → `validateInputRedirections`；**DEFAULT_BUILD_FEATURES 含 `TREE_SITTER_BASH`**（默认构建可走 AST）。无 AST 时 **`extractInputRedirections` fallback** 仍门控简单 `< file`（`/dev/null` 跳过；`<<`/`<<<`/`<&` 不检）。测试 `inputRedirect.232.test.ts` |
 | 44 | resume 已完成 bg agent 文案缩短 | **HAVE** | densable `D5f`/`Y8a`/`hi`/`dle`：`formatResumedAgentMessage` + `resumeAgentBackground.finalText`（`awaitCompletion`→`extractTextContent`）；SendMessage stopped/evicted 走 `awaitCompletion:true` + D5f 短文案（`Resumed agent…Result:` / `Resuming agent…`；id 截 7）。测试 `formatResumedAgentMessage.232.test.ts`；snippet `gold-resume-completed-d5f.md` |
 | 45 | Cowork 不 inline 用户记忆外链 @-import | **N/A** | Cowork 产品面；go-hare 不发 |
 | 46 | cross-session socket dir：拒 symlink/他人目录 | **HAVE** | densable `refusing to bind` / `owned by uid` / `ENOTOWNED`：UDS `ensureSocketParent` + `assertPrivateDirectory`（拒 symlink/非目录/broad `0o077`/wrong uid；mkdir `0o700`）；错误前缀 `[uds-messaging] Failed to set up sockets directory (refusing to bind):`。capability 同门。运行时 `udsMessaging.test.ts` + 源锁 `crossSessionSocketDir.232.test.ts`；snippet `gold-cross-session-socket-dir.md`。daemon `HLp`/`RLp` / Chrome MCP 0700 为独立面 residual |

@@ -304,6 +304,11 @@ type State = {
    */
   replBridgeActive: boolean
   /**
+   * densable env-less bridge session id (`cse_*`). Written when RC connects so
+   * teleport zNn can mark the same id G7 remint checks (not only local UUID).
+   */
+  replBridgeSessionId: string | undefined
+  /**
    * densable stickyBetas (GRe) — session sticky sent/rejected beta headers.
    * mid-conv o3 reject → rejected set (DV) until /clear.
    */
@@ -540,6 +545,7 @@ function getInitialState(): State {
     isRemoteMode: false,
     // densable FC — REPL Remote Control bridge live flag
     replBridgeActive: false,
+    replBridgeSessionId: undefined,
     stickyBetas: { sent: new Set(), rejected: new Set() },
     midConvCachePromotionRejected: false,
     // Direct connect server URL
@@ -2365,6 +2371,18 @@ export function isReplBridgeActive(): boolean {
 export function setReplBridgeActive(active: boolean): void {
   if (STATE.replBridgeActive === active) return
   STATE.replBridgeActive = active
+  // Do NOT clear replBridgeSessionId here — failed→ready reconnect must
+  // keep the cse_* so teleport/G7 still match. Clear only on teardown via
+  // setReplBridgeSessionId(undefined).
+}
+
+/** densable bridge cse_* id for G7 teleport mark + remint suppress. */
+export function getReplBridgeSessionId(): string | undefined {
+  return STATE.replBridgeSessionId
+}
+
+export function setReplBridgeSessionId(sessionId: string | undefined): void {
+  STATE.replBridgeSessionId = sessionId
 }
 
 /** densable p1 stickyBetas */

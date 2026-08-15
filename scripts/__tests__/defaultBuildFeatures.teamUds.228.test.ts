@@ -31,6 +31,11 @@ describe('DEFAULT_BUILD_FEATURES densable product surface ON', () => {
     expect(DEFAULT_BUILD_FEATURES).not.toContain('HISTORY_SNIP')
   })
 
+  test('includes TREE_SITTER_BASH so #43 input-redirect gate is live on default build', async () => {
+    const { DEFAULT_BUILD_FEATURES } = await import('../defines.ts')
+    expect(DEFAULT_BUILD_FEATURES).toContain('TREE_SITTER_BASH')
+  })
+
   test('growthbook local defaults enable tengu_herring_clock for TEAMMEM runtime', async () => {
     const text = await Bun.file('src/services/analytics/growthbook.ts').text()
     expect(text).toContain('tengu_herring_clock: true')

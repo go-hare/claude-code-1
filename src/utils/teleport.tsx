@@ -5,6 +5,7 @@ import React from 'react';
 import {
   getIsNonInteractiveSession,
   getOriginalCwd,
+  getReplBridgeSessionId,
   getSessionId,
   markTeleportedSessionId,
 } from 'src/bootstrap/state.js';
@@ -1954,6 +1955,11 @@ export async function teleportToRemote(options: {
     // Also mark the local session that initiated teleport (densable zNn before
     // WPh uses local id when starting tengu_teleport_to_cloud).
     markTeleportedSessionId(getSessionId());
+    // Critical: remint/rebuild check createCodeSession()'s cse_* id
+    // (replBridgeSessionId), not the local transcript UUID. Without this
+    // G7 never matches after teleport and RC keeps reminting for ~30min.
+    const bridgeCse = getReplBridgeSessionId();
+    if (bridgeCse) markTeleportedSessionId(bridgeCse);
     return {
       id: sessionData.id,
       title: sessionData.title || requestBody.title,

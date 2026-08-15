@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'path'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { Redirect } from 'src/utils/bash/ast.js'
+import { extractInputRedirections } from 'src/utils/bash/commands.js'
 import {
   checkPathConstraints,
   validateInputRedirections,
@@ -125,10 +126,9 @@ describe('checkPathConstraints AST input redirects', () => {
     expect(result.behavior).toBe('passthrough')
   })
 
-  test('without AST, bare string path is not input-checked here', () => {
-    // Non-AST extractOutputRedirections does not capture `<`; only `>`/`>>`.
-    // densable A2e similarly does not push `<` into redirections list for
-    // shell-quote path — only AST path has the input loop.
+  test('without AST, extractInputRedirections still gates simple `< file`', () => {
+    // Product default now enables TREE_SITTER_BASH, but legacy/non-AST path
+    // must still permission-check simple input redirects (review finding).
     const outside =
       process.platform === 'win32'
         ? 'C:\\Windows\\System32\\drivers\\etc\\hosts'
@@ -141,7 +141,40 @@ describe('checkPathConstraints AST input redirects', () => {
       undefined,
       undefined,
     )
-    // Without AST, may or may not catch via other means; must not crash
-    expect(result.behavior).toBeDefined()
+    expect(result.behavior).toBe('ask')
+    if (result.behavior === 'ask') {
+      expect(result.message).toContain('Input redirection from')
+    }
+  })
+})
+
+describe('extractInputRedirections fallback shapes', () => {
+  test('quoted and tight-adjacent forms', () => {
+    expect(extractInputRedirections('cat < "/etc/passwd"')).toEqual([
+      { target: '/etc/passwd' },
+    ])
+    expect(extractInputRedirections("cat < '/etc/passwd'")).toEqual([
+      { target: '/etc/passwd' },
+    ])
+    expect(extractInputRedirections('cat</etc/passwd')).toEqual([
+      { target: '/etc/passwd' },
+    ])
+    expect(extractInputRedirections('cat 0< /etc/passwd')).toEqual([
+      { target: '/etc/passwd' },
+    ])
+  })
+
+  test('heredoc body `<` is not extracted', () => {
+    const cmd = "cat <<'EOF'\n< /etc/passwd\nEOF"
+    expect(extractInputRedirections(cmd)).toEqual([])
+  })
+
+  test('/dev/null skipped', () => {
+    expect(extractInputRedirections('cat < /dev/null')).toEqual([])
+  })
+
+  test('literal `<` inside a string is not an input redirect', () => {
+    expect(extractInputRedirections('echo "x < /etc/passwd"')).toEqual([])
+    expect(extractInputRedirections("echo 'x < /etc/passwd'")).toEqual([])
   })
 })

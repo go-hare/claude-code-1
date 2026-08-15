@@ -6,6 +6,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { updateSessionIngressAuthToken } from '../utils/sessionIngressAuth.js'
 import type { SessionState } from '../utils/sessionState.js'
+import { closeCodeForClassifiedReason } from './remintRecovery.js'
 import { registerWorker } from './workSecret.js'
 
 /**
@@ -27,7 +28,11 @@ export type ReplBridgeTransport = {
   isConnectedStatus(): boolean
   getStateLabel(): string
   setOnData(callback: (data: string) => void): void
-  setOnClose(callback: (closeCode?: number) => void): void
+  /**
+   * densable Ls($t, Jr) — close code + optional classified reason (gzp key).
+   * Jr is set when causeTypedCloseCodes path fires (epoch_conflict, token_expired…).
+   */
+  setOnClose(callback: (closeCode?: number, cause?: string) => void): void
   setOnConnect(callback: () => void): void
   connect(): void
   /**
@@ -198,7 +203,27 @@ export async function createV2ReplTransport(opts: {
     initialSequenceNum,
     getAuthHeaders,
   )
-  let onCloseCb: ((closeCode?: number) => void) | undefined
+  let onCloseCb: ((closeCode?: number, cause?: string) => void) | undefined
+  const fireClassifiedClose = (reason: string): never => {
+    // densable: b = causeTypedCloseCodes ? gzp[y] : 4090; p(b, y)
+    const code = closeCodeForClassifiedReason(reason, {
+      causeTypedCloseCodes: true,
+    })
+    logForDebugging(
+      `[bridge:repl] CCR v2: terminal request-path condition (${reason}) — closing with ${code} for ${code === 4094 ? 'auth recovery' : 'poll-loop recovery'}`,
+    )
+    try {
+      ccr.close()
+      sse.close()
+      onCloseCb?.(code, reason)
+    } catch (closeErr: unknown) {
+      logForDebugging(
+        `[bridge:repl] CCR v2: error during classified-close cleanup: ${errorMessage(closeErr)}`,
+        { level: 'error' },
+      )
+    }
+    throw new Error(`terminal request-path condition: ${reason}`)
+  }
   const ccr = new CCRClient(sse, new URL(sessionUrl), {
     getAuthHeaders,
     heartbeatIntervalMs: opts.heartbeatIntervalMs,
@@ -206,28 +231,10 @@ export async function createV2ReplTransport(opts: {
     // Default is process.exit(1) — correct for spawn-mode children. In-process,
     // that kills the REPL. Close instead: replBridge's onClose wakes the poll
     // loop, which picks up the server's re-dispatch (with fresh epoch).
-    onEpochMismatch: () => {
-      logForDebugging(
-        '[bridge:repl] CCR v2: epoch superseded (409) — closing for poll-loop recovery',
-      )
-      // Close resources in a try block so the throw always executes.
-      // If ccr.close() or sse.close() throw, we still need to unwind
-      // the caller (request()) — otherwise handleEpochMismatch's `never`
-      // return type is violated at runtime and control falls through.
-      try {
-        ccr.close()
-        sse.close()
-        onCloseCb?.(4090)
-      } catch (closeErr: unknown) {
-        logForDebugging(
-          `[bridge:repl] CCR v2: error during epoch-mismatch cleanup: ${errorMessage(closeErr)}`,
-          { level: 'error' },
-        )
-      }
-      // Don't return — the calling request() code continues after the 409
-      // branch, so callers see the logged warning and a false return. We
-      // throw to unwind; the uploaders catch it as a send failure.
-      throw new Error('epoch superseded')
+    // densable: onEpochMismatch:(y)=>{let b=gzp[y]??4090; p(b,y); throw …}
+    onEpochMismatch: (reason?: string) => {
+      const r = reason ?? 'epoch_conflict'
+      return fireClassifiedClose(r)
     },
   })
 
@@ -308,6 +315,7 @@ export async function createV2ReplTransport(opts: {
       // closes (SSETransport:280 passes response.status). Stop CCRClient's
       // heartbeat timer before notifying replBridge. (sse.close() doesn't
       // invoke this, so the epoch-mismatch path above isn't double-firing.)
+      // densable SSE path has code only; classified closes use onCloseCb(code, reason).
       sse.setOnClose(code => {
         ccr.close()
         cb(code ?? 4092)

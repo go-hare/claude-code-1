@@ -1,7 +1,13 @@
 import { feature } from 'bun:bundle';
 import { type FSWatcher, watch } from 'fs';
 import React, { useCallback, useEffect, useRef } from 'react';
-import { getSessionId, onInteraction, setMainLoopModelOverride, setReplBridgeActive } from '../bootstrap/state.js';
+import {
+  getSessionId,
+  onInteraction,
+  setMainLoopModelOverride,
+  setReplBridgeActive,
+  setReplBridgeSessionId,
+} from '../bootstrap/state.js';
 import {
   type BridgePermissionCallbacks,
   type BridgePermissionResponse,
@@ -419,7 +425,11 @@ export function useReplBridge(
             }
             const handle = handleRef.current;
             switch (state) {
-              case 'ready':
+              case 'ready': {
+                // sessionId must be outside setAppState — callback scope would
+                // throw ReferenceError and leave bootstrap cse_* unwritten
+                // after failed→ready reconnect (G7 teleport mark would miss).
+                const sessionId = handle?.bridgeSessionId;
                 setAppState(prev => {
                   const connectUrl =
                     handle && handle.environmentId !== ''
@@ -429,7 +439,6 @@ export function useReplBridge(
                     ? getRemoteSessionUrl(handle.bridgeSessionId, handle.sessionIngressUrl)
                     : prev.replBridgeSessionUrl;
                   const envId = handle?.environmentId;
-                  const sessionId = handle?.bridgeSessionId;
                   if (
                     prev.replBridgeConnected &&
                     !prev.replBridgeSessionActive &&
@@ -454,7 +463,9 @@ export function useReplBridge(
                     replBridgeErrorKind: undefined,
                   };
                 });
+                if (sessionId) setReplBridgeSessionId(sessionId);
                 break;
+              }
               case 'connected': {
                 const wasSessionActive = store.getState().replBridgeSessionActive;
                 setAppState(prev => {
@@ -862,6 +873,9 @@ export function useReplBridge(
                 replBridgeErrorKind: undefined,
               };
             });
+            if (handle.bridgeSessionId) {
+              setReplBridgeSessionId(handle.bridgeSessionId);
+            }
             logForDebugging(`[bridge:repl] Mirror initialized, session=${handle.bridgeSessionId}`);
           } else {
             // Build bridge permission callbacks so the interactive permission
@@ -929,6 +943,9 @@ export function useReplBridge(
                 replBridgeErrorKind: undefined,
               };
             });
+            if (handle.bridgeSessionId) {
+              setReplBridgeSessionId(handle.bridgeSessionId);
+            }
 
             // Show bridge status with URL in the transcript. perpetual (KAIROS
             // assistant mode) falls back to v1 at initReplBridge.ts — skip the
@@ -1033,6 +1050,9 @@ export function useReplBridge(
           setReplBridgeHandle(null);
           // densable eDe(!1) on teardown — stop interactive JT enqueue.
           setReplBridgeActive(false);
+          // Clear cse_* only on teardown (not on failed) so reconnect ready
+          // can re-write without racing a wipe from setReplBridgeActive(false).
+          setReplBridgeSessionId(undefined);
         }
         setAppState(prev => {
           if (!prev.replBridgeConnected && !prev.replBridgeSessionActive && !prev.replBridgeError) {

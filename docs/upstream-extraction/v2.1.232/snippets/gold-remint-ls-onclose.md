@@ -105,7 +105,9 @@ Tests: `src/bridge/__tests__/remintRecovery.232.test.ts`
     - `markTeleportedSessionId` / `isTeleportedSessionId` / `clearTeleportedSessionId`
     - writers: `setTeleportedSessionInfo`, `teleportToRemote` success
     - readers: `recoverFromCloseCode` entry + mid-loop; `rebuildTransport` → `suppressed_teleported`
+- **Hde/mdt + gzp (HAVE this pass)**
+  - `fetchRemoteCredentials` → `BridgeCredentialResult` (`terminal:!0/!1` | creds | null)
+  - `isNonTerminalBridgeFailure` / `isTerminalBridgeFailure` / adopt + late-refresh paths
+  - `CLASSIFIED_CLOSE_REASON_CODES` gzp; CCRClient `onEpochMismatch(reason)`; transport `setOnClose(code, cause)`
 - **Still residual**
-  - densable `Hde` rejected-credential shape collapsed to `null` locally
-  - SSE `setOnClose` has code only (no densable `Jr` cause)
-  - no `remoteBridgeCore` integration tests yet
+  - no `remoteBridgeCore` integration tests yet (defer/leak/stale gen e2e)
