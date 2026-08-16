@@ -76,10 +76,9 @@ function makeRun(
 
 describe('installWorkflowNotifications', () => {
   test('running → completed triggers notification (incl. workflow name)', async () => {
-    const {
-      setIsInteractive,
-      getIsNonInteractiveSession,
-    } = await import('../../bootstrap/state.js')
+    const { setIsInteractive, getIsNonInteractiveSession } = await import(
+      '../../bootstrap/state.js'
+    )
     const { clearTaskTerminatedSdkGate, drainSdkEvents } = await import(
       '../../utils/sdkEventQueue.js'
     )

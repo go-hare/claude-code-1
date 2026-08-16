@@ -21,7 +21,7 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { snapshotModuleExports } from '../../../../tests/mocks/settings.ts'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 const realGrowthbook = await import('../../analytics/growthbook.js')
 const growthbookSnap = snapshotModuleExports(realGrowthbook)

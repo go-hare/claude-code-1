@@ -2,8 +2,26 @@
  * densable 2.1.222 #13 — Spinner effort source for subagent transcript view.
  * SEA: V=But(h??Zi(), m??F) with m/h from per-agent spinner store / task stamps.
  */
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { getEffortSuffix, resolveSpinnerEffortSource } from '../effort.js'
+
+const savedUseOpenAI = process.env.CLAUDE_CODE_USE_OPENAI
+const savedEffortLevel = process.env.CLAUDE_CODE_EFFORT_LEVEL
+
+// process.env is process-global: leaking CLAUDE_CODE_USE_OPENAI flips
+// getAPIProvider() away from firstParty for every suite that runs after this one.
+afterEach(() => {
+  if (savedUseOpenAI === undefined) {
+    delete process.env.CLAUDE_CODE_USE_OPENAI
+  } else {
+    process.env.CLAUDE_CODE_USE_OPENAI = savedUseOpenAI
+  }
+  if (savedEffortLevel === undefined) {
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+  } else {
+    process.env.CLAUDE_CODE_EFFORT_LEVEL = savedEffortLevel
+  }
+})
 
 describe('resolveSpinnerEffortSource (densable 2.1.222 #13)', () => {
   test('leader / no viewingAgentTaskId → session F + Zi', () => {

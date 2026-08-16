@@ -7,6 +7,7 @@
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import * as realBootstrap from 'src/bootstrap/state.js'
+import * as realForkSubagentGate from 'src/utils/forkSubagentGate.js'
 import { growthbookMock } from '../../../../../../tests/mocks/growthbook'
 
 let gbValue: unknown = null
@@ -33,9 +34,14 @@ mock.module('src/utils/settings/settings.js', () => ({
   getInitialSettings: () => ({}),
 }))
 
+const forkGateSnap = { ...realForkSubagentGate }
 mock.module('src/utils/forkSubagentGate.js', () => ({
+  ...forkGateSnap,
   isForkSubagentEnabled: () => false,
 }))
+afterAll(() => {
+  mock.module('src/utils/forkSubagentGate.js', () => forkGateSnap)
+})
 
 const { surfacePickByModel, getNonDeferrableBuiltins } = await import(
   '../prompt.js'

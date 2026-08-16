@@ -31,7 +31,9 @@ mock.module('src/utils/teammateMailbox.js', () => ({
   createShutdownRequestMessage: () => ({}),
 }))
 afterAll(() => {
-  mock.module('src/utils/teammateMailbox.js', () => ({ ...teammateMailboxSnap }))
+  mock.module('src/utils/teammateMailbox.js', () => ({
+    ...teammateMailboxSnap,
+  }))
 })
 
 type TaskSlice = {

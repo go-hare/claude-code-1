@@ -4,7 +4,15 @@
  * Avoid mock.module on bootstrap/state (process-global pollution of addSlowOperation).
  * Use real setLastAPIRequest / getLastAPIRequest / setIsRemoteMode.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import {
   getLastAPIRequest,
   setIsRemoteMode,

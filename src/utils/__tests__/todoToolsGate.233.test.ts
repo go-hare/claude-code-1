@@ -1,7 +1,15 @@
 /**
  * densable 2.1.233 #18 — Todo/Task tools model gate (uX / N_v / lCr / O_v).
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 
 const growthbookMock = {
   getFeatureValue_CACHED_MAY_BE_STALE: mock((_k: string, d: unknown) => d),
@@ -9,22 +17,28 @@ const growthbookMock = {
 mock.module('src/services/analytics/growthbook.ts', () => growthbookMock)
 mock.module('src/services/analytics/growthbook.js', () => growthbookMock)
 
-const modelMock = {
-  firstPartyNameToCanonical: (name: string) => {
-    // minimal: pass through already-canonical ids used in tests
-    if (name.startsWith('claude-')) return name
-    return name
-  },
-  getMainLoopModel: mock(() => 'claude-sonnet-4-5'),
-}
-mock.module('src/utils/model/model.ts', () => modelMock)
-mock.module('src/utils/model/model.js', () => modelMock)
+// The `undefined model` case falls through to getMainLoopModel(), so pin the
+// resolved model via env rather than mocking src/utils/model/model.js —
+// `mock.module` is process-global and would leak into every co-running suite.
+const savedAnthropicModel = process.env.ANTHROPIC_MODEL
 
 import {
   isTodoToolsEnabledForModel,
   modelAllowsTodoToolsByDefault,
   modelMeetsTodoToolsDisabledFloor,
 } from '../todoToolsGate.js'
+
+beforeEach(() => {
+  process.env.ANTHROPIC_MODEL = 'claude-sonnet-4-5'
+})
+
+afterAll(() => {
+  if (savedAnthropicModel === undefined) {
+    delete process.env.ANTHROPIC_MODEL
+  } else {
+    process.env.ANTHROPIC_MODEL = savedAnthropicModel
+  }
+})
 
 afterEach(() => {
   delete process.env.CLAUDE_CODE_ENABLE_TODO_TOOLS

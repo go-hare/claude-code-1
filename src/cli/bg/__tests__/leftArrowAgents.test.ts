@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import * as realInstallPrompt from '../../../daemon/installPrompt.js'
 import * as realBootstrap from '../../../bootstrap/state.js'
 import * as realSessionStorage from '../../../utils/sessionStorage.js'

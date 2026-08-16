@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 const realGrowthbook = await import('../../services/analytics/growthbook.js')

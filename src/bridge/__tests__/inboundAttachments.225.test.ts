@@ -72,7 +72,8 @@ const bridgeConfigMock = () => ({
   getBridgeAccessToken: () => process.env.__TEST_BRIDGE_TOKEN ?? 'test-token',
   getBridgeBaseUrl: () =>
     process.env.CLAUDE_BRIDGE_BASE_URL || 'https://bridge.test',
-  getBridgeBaseUrlOverride: () => process.env.CLAUDE_BRIDGE_BASE_URL || undefined,
+  getBridgeBaseUrlOverride: () =>
+    process.env.CLAUDE_BRIDGE_BASE_URL || undefined,
   getBridgeTokenOverride: () =>
     process.env.CLAUDE_BRIDGE_OAUTH_TOKEN ||
     process.env.__TEST_BRIDGE_TOKEN ||

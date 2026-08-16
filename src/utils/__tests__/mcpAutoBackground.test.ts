@@ -19,7 +19,9 @@ const mqmSnap = snapshotModuleExports(realMessageQueue)
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/debug.js', debugMock)
 // Incomplete MonitorMcp strip drops killMonitorMcp and poisons shellKeepalive co-suites.
-const realMonitorMcp = await import('src/tasks/MonitorMcpTask/MonitorMcpTask.js')
+const realMonitorMcp = await import(
+  'src/tasks/MonitorMcpTask/MonitorMcpTask.js'
+)
 const monitorMcpSnap = snapshotModuleExports(realMonitorMcp)
 mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
   ...monitorMcpSnap,

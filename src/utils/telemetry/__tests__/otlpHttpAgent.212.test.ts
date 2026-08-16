@@ -57,16 +57,17 @@ describe('densable #31 YAo wrapAgentWithContentLength', () => {
       get headersSent() {
         return headersSent
       },
-      write(
-        chunk?: unknown,
-        encoding?: unknown,
-        cb?: unknown,
-      ): boolean {
+      write(chunk?: unknown, encoding?: unknown, cb?: unknown): boolean {
         if (chunk != null && typeof chunk !== 'function') {
           chunks.push(
             Buffer.isBuffer(chunk)
               ? chunk
-              : Buffer.from(String(chunk), typeof encoding === 'string' ? (encoding as BufferEncoding) : 'utf8'),
+              : Buffer.from(
+                  String(chunk),
+                  typeof encoding === 'string'
+                    ? (encoding as BufferEncoding)
+                    : 'utf8',
+                ),
           )
         }
         const done =
@@ -83,7 +84,12 @@ describe('densable #31 YAo wrapAgentWithContentLength', () => {
           chunks.push(
             Buffer.isBuffer(chunk)
               ? chunk
-              : Buffer.from(String(chunk), typeof encoding === 'string' ? (encoding as BufferEncoding) : 'utf8'),
+              : Buffer.from(
+                  String(chunk),
+                  typeof encoding === 'string'
+                    ? (encoding as BufferEncoding)
+                    : 'utf8',
+                ),
           )
         }
         headersSent = true
