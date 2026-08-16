@@ -7,6 +7,12 @@ import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text, useInput } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { ElicitationRequestEvent } from '../../services/mcp/elicitationHandler.js';
+import type {
+  ElicitRequestFormParams,
+  ElicitRequestURLParams,
+  ElicitResult,
+  PrimitiveSchemaDefinition,
+} from '../../services/mcp/types.js';
 import { openBrowser } from '../../utils/browser.js';
 import {
   getEnumLabel,
@@ -32,6 +38,12 @@ type Props = {
 };
 
 const isTextField = (s: PrimitiveSchemaDefinition) => ['string', 'number', 'integer'].includes(s.type);
+
+/** Form property schemas may carry optional `default` (not on every PrimitiveSchema branch). */
+type FormPropertySchema = PrimitiveSchemaDefinition & {
+  default?: string | number | boolean | string[];
+  title?: string;
+};
 
 const RESOLVING_SPINNER_CHARS = '\u280B\u2819\u2839\u2838\u283C\u2834\u2826\u2827\u2807\u280F';
 const advanceSpinnerFrame = (f: number) => (f + 1) % RESOLVING_SPINNER_CHARS.length;
@@ -118,7 +130,8 @@ function ElicitationFormDialog({
   const [formValues, setFormValues] = useState<Record<string, string | number | boolean | string[]>>(() => {
     const initialValues: Record<string, string | number | boolean | string[]> = {};
     if (requestedSchema.properties) {
-      for (const [propName, propSchema] of Object.entries(requestedSchema.properties)) {
+      for (const [propName, rawSchema] of Object.entries(requestedSchema.properties)) {
+        const propSchema = rawSchema as FormPropertySchema;
         if (typeof propSchema === 'object' && propSchema !== null) {
           if (propSchema.default !== undefined) {
             initialValues[propName] = propSchema.default;
@@ -131,8 +144,9 @@ function ElicitationFormDialog({
 
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>(() => {
     const initialErrors: Record<string, string> = {};
-    for (const [propName, propSchema] of Object.entries(requestedSchema.properties)) {
-      if (isTextField(propSchema) && propSchema?.default !== undefined) {
+    for (const [propName, rawSchema] of Object.entries(requestedSchema.properties)) {
+      const propSchema = rawSchema as FormPropertySchema;
+      if (isTextField(propSchema) && propSchema.default !== undefined) {
         const validation = validateElicitationInput(String(propSchema.default), propSchema);
         if (!validation.isValid && validation.error) {
           initialErrors[propName] = validation.error;
@@ -164,7 +178,7 @@ function ElicitationFormDialog({
     const requiredFields = requestedSchema.required ?? [];
     return Object.entries(requestedSchema.properties).map(([name, schema]) => ({
       name,
-      schema,
+      schema: schema as FormPropertySchema,
       isRequired: requiredFields.includes(name),
     }));
   }, [requestedSchema]);

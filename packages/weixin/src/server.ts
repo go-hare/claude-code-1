@@ -61,42 +61,50 @@ export function createWeixinMcpServer(version: string): Server {
     },
   )
 
-  server.setRequestHandler('tools/list', async () => ({
-    tools: [
-      {
-        name: 'reply',
-        description:
-          'Reply to a WeChat message. Pass the chat_id from the channel tag.',
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            chat_id: {
-              type: 'string',
-              description: 'The chat_id from the channel notification',
-            },
-            text: { type: 'string', description: 'The reply text' },
-            files: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Optional absolute file paths to attach',
+  // Cast: nested property `type: 'string'` widens vs v2 JSON Schema literals.
+  server.setRequestHandler(
+    'tools/list',
+    async () =>
+      ({
+        tools: [
+          {
+            name: 'reply',
+            description:
+              'Reply to a WeChat message. Pass the chat_id from the channel tag.',
+            inputSchema: {
+              type: 'object' as const,
+              properties: {
+                chat_id: {
+                  type: 'string',
+                  description: 'The chat_id from the channel notification',
+                },
+                text: { type: 'string', description: 'The reply text' },
+                files: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Optional absolute file paths to attach',
+                },
+              },
+              required: ['chat_id', 'text'],
             },
           },
-          required: ['chat_id', 'text'],
-        },
-      },
-      {
-        name: 'send_typing',
-        description: 'Send a typing indicator to a WeChat user.',
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            chat_id: { type: 'string', description: 'The chat_id (user ID)' },
+          {
+            name: 'send_typing',
+            description: 'Send a typing indicator to a WeChat user.',
+            inputSchema: {
+              type: 'object' as const,
+              properties: {
+                chat_id: {
+                  type: 'string',
+                  description: 'The chat_id (user ID)',
+                },
+              },
+              required: ['chat_id'],
+            },
           },
-          required: ['chat_id'],
-        },
-      },
-    ],
-  }))
+        ],
+      }) as never,
+  )
 
   server.setRequestHandler('tools/call', async request => {
     const { name, arguments: args } = request.params

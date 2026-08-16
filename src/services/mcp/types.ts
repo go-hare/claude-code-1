@@ -1,12 +1,21 @@
 import type {
   CallToolResult,
   Client,
+  ElicitRequestFormParams,
+  ElicitRequestParams,
+  ElicitRequestURLParams,
   ElicitResult,
+  EnumSchema,
   JSONRPCMessage,
+  ListResourcesResult,
+  MultiSelectEnumSchema,
+  PrimitiveSchemaDefinition,
   PromptMessage,
+  ReadResourceResult,
   Resource,
   ResourceLink,
   ServerCapabilities,
+  StringSchema,
   ToolAnnotations,
 } from '@modelcontextprotocol/client'
 import { z } from 'zod/v4'
@@ -18,17 +27,23 @@ import { lazySchema } from '../../utils/lazySchema.js'
  */
 export type {
   CallToolResult,
+  ElicitRequestFormParams,
+  ElicitRequestParams,
+  ElicitRequestURLParams,
   ElicitResult,
+  EnumSchema,
   JSONRPCMessage,
+  ListResourcesResult,
+  MultiSelectEnumSchema,
+  PrimitiveSchemaDefinition,
   PromptMessage,
+  ReadResourceResult,
   Resource,
   ResourceLink,
   ServerCapabilities,
+  StringSchema,
   ToolAnnotations,
 }
-
-/** densable URL elicitation params — structural bag (v2 method handlers). */
-export type ElicitRequestURLParams = Record<string, unknown>
 
 /** Channel / IDE notification schema bag (local zod, not sdk zod-compat). */
 export type AnyObjectSchema = z.ZodType

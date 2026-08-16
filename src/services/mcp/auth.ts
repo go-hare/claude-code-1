@@ -14,6 +14,7 @@ import {
   type OAuthClientInformationFull,
   type OAuthClientMetadata,
   type OAuthClientProvider,
+  type OAuthDiscoveryState,
   type OAuthTokens,
 } from '@modelcontextprotocol/client'
 import axios from 'axios'
@@ -38,9 +39,6 @@ import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { emitMcpNeedsReauth } from './mcpReauthSignal.js'
-
-/** densable retained opaque discovery bag across auth() steps. */
-type OAuthDiscoveryState = Record<string, unknown>
 
 function oauthErrorCodeOf(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined
@@ -2521,7 +2519,10 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
               `Using persisted auth server metadata for refresh`,
             )
             metadata = cached.authorizationServerMetadata
-          } else if (cached?.authorizationServerUrl) {
+          } else if (
+            typeof cached?.authorizationServerUrl === 'string' &&
+            cached.authorizationServerUrl.length > 0
+          ) {
             logMCPDebug(
               this.serverName,
               `Re-discovering metadata from persisted auth server URL: ${cached.authorizationServerUrl}`,

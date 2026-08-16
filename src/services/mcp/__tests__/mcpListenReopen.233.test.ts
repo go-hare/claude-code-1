@@ -174,10 +174,10 @@ describe('tryReopenMcpListen', () => {
       { timeout: 30_000 },
     )
     expect(analyticsMock.logEvent).toHaveBeenCalled()
-    const payload = analyticsMock.logEvent.mock.calls[0]?.[1] as {
-      mcpServerKeyHash?: string
-      outcome?: string
-    }
+    const firstCall = analyticsMock.logEvent.mock.calls[0] as unknown as
+      | [string, { mcpServerKeyHash?: string; outcome?: string }]
+      | undefined
+    const payload = firstCall?.[1]
     expect(payload?.outcome).toBe('reopened')
     expect(payload?.mcpServerKeyHash).toBe(hashMcpServerKey('t'))
   })

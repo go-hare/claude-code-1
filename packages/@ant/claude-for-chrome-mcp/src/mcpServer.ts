@@ -50,7 +50,9 @@ export function createClaudeForChromeMcpServer(
     // Always advertise multi-browser tools. Bridge path uses cloud peers;
     // native socket path uses local socket-pool profiles (no OAuth required).
     // CLI still handles them in toolCalls.ts before any tool_request.
-    return { tools: BROWSER_TOOLS }
+    // Cast: local tool bag is structurally ListToolsResult-compatible; v2
+    // wants literal "object" nested JSON Schema types that our const bag widens.
+    return { tools: BROWSER_TOOLS as never }
   })
 
   server.setRequestHandler(

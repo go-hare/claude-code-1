@@ -110,6 +110,7 @@ import type {
   AsyncHookJSONOutput,
 } from 'src/entrypoints/agentSdkTypes.js'
 import type { StatusLineCommandInput } from '../types/statusLine.js'
+import type { ElicitResult } from 'src/services/mcp/types.js'
 import type { FileSuggestionCommandInput } from '../types/fileSuggestion.js'
 import type { HookResultMessage } from 'src/types/message.js'
 import chalk from 'chalk'

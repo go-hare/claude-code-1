@@ -31,14 +31,12 @@ export const fetchMcpSkillsForClient = memoizeWithLRU(
       }
 
       // List all resources and filter to skill:// URIs
-      const result = (await client.client.request(
-        { method: 'resources/list' },
-        ListResourcesResultSchema,
-      )) as ListResourcesResult
+      // v2 Client exposes typed listResources/readResource (no ResultSchema arg)
+      const result = await client.client.listResources()
 
       if (!result.resources) return []
 
-      const skillResources = result.resources.filter(r =>
+      const skillResources = result.resources.filter((r: { uri: string }) =>
         r.uri.startsWith(SKILL_URI_PREFIX),
       )
 
@@ -57,18 +55,14 @@ export const fetchMcpSkillsForClient = memoizeWithLRU(
       for (const resource of skillResources) {
         try {
           // Read the skill resource content
-          const readResult = (await client.client.request(
-            {
-              method: 'resources/read',
-              params: { uri: resource.uri },
-            },
-            ReadResourceResultSchema,
-          )) as ReadResourceResult
+          const readResult = await client.client.readResource({
+            uri: resource.uri,
+          })
 
           // Extract text content from the resource
           const textContent = readResult.contents
             ?.map(c => ('text' in c ? c.text : undefined))
-            .filter(Boolean)
+            .filter((t): t is string => typeof t === 'string' && t.length > 0)
             .join('\n')
 
           if (!textContent) {

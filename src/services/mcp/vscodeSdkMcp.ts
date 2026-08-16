@@ -19,13 +19,20 @@ function readAutoModeEnabledState(): AutoModeEnabledState | undefined {
   return v === 'enabled' || v === 'disabled' || v === 'opt-in' ? v : undefined
 }
 
+const LOG_EVENT_METHOD = 'log_event'
+
+/** Params-only schema for v2 setNotificationHandler(method, {params}, …). */
+export const LogEventParamsSchema = lazySchema(() =>
+  z.object({
+    eventName: z.string(),
+    eventData: z.object({}).passthrough(),
+  }),
+)
+
 export const LogEventNotificationSchema = lazySchema(() =>
   z.object({
-    method: z.literal('log_event'),
-    params: z.object({
-      eventName: z.string(),
-      eventData: z.object({}).passthrough(),
-    }),
+    method: z.literal(LOG_EVENT_METHOD),
+    params: LogEventParamsSchema(),
   }),
 )
 
@@ -68,10 +75,12 @@ export function setupVscodeSdkMcp(sdkClients: MCPServerConnection[]): void {
     // Store the client reference for later use
     vscodeMcpClient = client
 
+    // densable/v2: setNotificationHandler(method, {params}, handler)
     client.client.setNotificationHandler(
-      LogEventNotificationSchema() as any,
-      async notification => {
-        const { eventName, eventData } = notification.params
+      LOG_EVENT_METHOD,
+      { params: LogEventParamsSchema() },
+      async params => {
+        const { eventName, eventData } = params
         logEvent(
           `tengu_vscode_${eventName}`,
           eventData as { [key: string]: boolean | number | undefined },

@@ -36,6 +36,7 @@ async function fetchChannels(
   }
 
   try {
+    // v2 Client.callTool(params, options?) — schema middle arg removed
     const result = await slackClient.client.callTool(
       {
         name: SLACK_SEARCH_TOOL,
@@ -45,7 +46,6 @@ async function fetchChannels(
           channel_types: 'public_channel,private_channel',
         },
       },
-      undefined,
       { timeout: 5000 },
     )
 

@@ -46,7 +46,8 @@ describe('densable FLv redirect selection helpers', () => {
       !clientId || port === preferredPort || storedRedirect === redirectUri
     expect(preserve).toBe(true)
 
-    const portChanged = 40000
+    // Use runtime numbers so tsc doesn't constant-fold 40000===39152
+    const portChanged = Number('40000')
     const preserveOnPortChange =
       !clientId ||
       portChanged === preferredPort ||

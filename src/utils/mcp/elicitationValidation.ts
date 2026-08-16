@@ -1,3 +1,10 @@
+import type {
+  ElicitResult,
+  EnumSchema,
+  MultiSelectEnumSchema,
+  PrimitiveSchemaDefinition,
+  StringSchema,
+} from 'src/services/mcp/types.js'
 import { z } from 'zod/v4'
 import { jsonStringify } from '../slowOperations.js'
 import { plural } from '../stringUtils.js'
@@ -5,8 +12,6 @@ import {
   looksLikeISO8601,
   parseNaturalLanguageDateTime,
 } from './dateTimeParser.js'
-
-import type { ElicitResult } from 'src/services/mcp/types.js'
 
 export type ValidationResult = {
   value?: string | number | boolean
@@ -259,7 +264,8 @@ export function getFormatHint(
       return undefined
     }
 
-    const { description, example } = STRING_FORMATS[schema.format] || {}
+    const formatKey = schema.format as keyof typeof STRING_FORMATS
+    const { description, example } = STRING_FORMATS[formatKey] || {}
     return `${description}, e.g. ${example}`
   }
 

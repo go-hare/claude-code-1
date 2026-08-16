@@ -111,12 +111,14 @@ import {
   type TurnInterruptionState,
 } from 'src/utils/conversationRecovery.js'
 import type {
+  JSONRPCMessage,
   MCPServerConnection,
   McpSdkServerConfig,
   ScopedMcpServerConfig,
 } from 'src/services/mcp/types.js'
 import {
-  ChannelMessageNotificationSchema,
+  CHANNEL_MESSAGE_METHOD,
+  ChannelMessageParamsSchema,
   gateChannelServer,
   wrapChannelMessage,
   findChannelEntry,
@@ -1758,13 +1760,15 @@ function runHeadlessStreaming(
         // densable: setRequestHandler("elicitation/create", ...)
         connection.client.setRequestHandler(
           'elicitation/create',
-          async (request, extra) => {
+          // v2 BaseContext: signal lives on ctx.mcpReq
+          async (request, ctx) => {
             logMCPDebug(
               serverName,
               `Elicitation request received in print mode: ${jsonStringify(request)}`,
             )
 
             const mode = request.params.mode === 'url' ? 'url' : 'form'
+            const signal = ctx.mcpReq.signal
 
             logEvent('tengu_mcp_elicitation_shown', {
               mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1774,7 +1778,7 @@ function runHeadlessStreaming(
             const hookResponse = await runElicitationHooks(
               serverName,
               request.params,
-              extra.signal,
+              signal,
             )
             if (hookResponse) {
               logMCPDebug(
@@ -1810,7 +1814,7 @@ function runHeadlessStreaming(
               serverName,
               request.params.message,
               requestedSchema,
-              extra.signal,
+              signal,
               mode,
               url,
               elicitationId,
@@ -1819,7 +1823,7 @@ function runHeadlessStreaming(
             const result = await runElicitationResultHooks(
               serverName,
               rawResult,
-              extra.signal,
+              signal,
               mode,
               elicitationId,
             )
@@ -1841,6 +1845,14 @@ function runHeadlessStreaming(
             const elicitationId = (
               notification as { params?: { elicitationId?: string } }
             ).params?.elicitationId
+            // Guard before hooks/enqueue — match elicitationHandler order.
+            if (typeof elicitationId !== 'string') {
+              logMCPDebug(
+                serverName,
+                `Ignoring elicitation completion notification without elicitationId`,
+              )
+              return
+            }
             logMCPDebug(
               serverName,
               `Elicitation completion notification: ${elicitationId}`,
@@ -4225,7 +4237,7 @@ function runHeadlessStreaming(
               sdkClient.client?.transport?.onmessage
             ) {
               sdkClient.client.transport.onmessage(
-                mcpRequest.message as Record<string, unknown>,
+                mcpRequest.message as JSONRPCMessage,
               )
             }
             sendControlResponseSuccess(msg)
@@ -6533,10 +6545,12 @@ function handleChannelEnable(
   // useManageMCPConnections. drainCommandQueue processes it between turns —
   // channel messages queue at priority 'next' and are seen by the model on
   // the turn after they arrive.
+  // densable/v2: setNotificationHandler(method, {params}, handler)
   connection.client.setNotificationHandler(
-    ChannelMessageNotificationSchema() as any,
-    async notification => {
-      const { content, meta } = notification.params
+    CHANNEL_MESSAGE_METHOD,
+    { params: ChannelMessageParamsSchema() },
+    async params => {
+      const { content, meta } = params
       logMCPDebug(
         serverName,
         `notifications/claude/channel: ${content.slice(0, 80)}`,
@@ -6609,10 +6623,12 @@ function reregisterChannelHandlerAfterReconnect(
     connection.name,
     'Channel notifications re-registered after reconnect',
   )
+  // densable/v2: setNotificationHandler(method, {params}, handler)
   connection.client.setNotificationHandler(
-    ChannelMessageNotificationSchema() as any,
-    async notification => {
-      const { content, meta } = notification.params
+    CHANNEL_MESSAGE_METHOD,
+    { params: ChannelMessageParamsSchema() },
+    async params => {
+      const { content, meta } = params
       logMCPDebug(
         connection.name,
         `notifications/claude/channel: ${content.slice(0, 80)}`,

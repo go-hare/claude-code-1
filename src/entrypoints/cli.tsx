@@ -158,7 +158,9 @@ async function main(): Promise<void> {
     const { shutdownDatadog } = await import('../services/analytics/datadog.js');
     const { shutdown1PEventLogging } = await import('../services/analytics/firstPartyEventLogger.js');
     const { logForDebugging } = await import('../utils/debug.js');
-    const { ChannelPermissionRequestNotificationSchema } = await import('../services/mcp/channelNotification.js');
+    const { CHANNEL_PERMISSION_REQUEST_METHOD, ChannelPermissionRequestParamsSchema } = await import(
+      '../services/mcp/channelNotification.js'
+    );
     await handleWeixinCli(
       args.slice(1),
       {
@@ -168,8 +170,11 @@ async function main(): Promise<void> {
         shutdown1PEventLogging,
         logForDebugging,
         registerPermissionHandler(server, handler) {
-          server.setNotificationHandler(ChannelPermissionRequestNotificationSchema(), async notification =>
-            handler(notification.params),
+          // v2 setNotificationHandler: method string + params schema
+          server.setNotificationHandler(
+            CHANNEL_PERMISSION_REQUEST_METHOD,
+            { params: ChannelPermissionRequestParamsSchema() },
+            async params => handler(params),
           );
         },
       },

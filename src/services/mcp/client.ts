@@ -1133,7 +1133,9 @@ export const connectToServer = memoize(
         }
       }
 
-      // densable BNf transport kind for BVa negotiation plan
+      // densable BNf transport kind for BVa negotiation plan.
+      // At this point transport is already built; 'sdk' is handled earlier and
+      // is not in the residual serverRef.type union here.
       const negotiationTransportKind = (() => {
         if (inProcessServer) return 'in-process'
         switch (serverRef.type) {
@@ -1148,13 +1150,11 @@ export const connectToServer = memoize(
             return 'ide'
           case 'claudeai-proxy':
             return 'claudeai-proxy'
-          case 'sdk':
-            return 'sdk-control'
           case 'stdio':
           case undefined:
             return 'stdio'
           default:
-            return serverRef.type ?? 'stdio'
+            return 'stdio'
         }
       })()
 
@@ -3792,14 +3792,24 @@ export async function callMCPToolWithUrlElicitationRetry({
         throw error
       }
 
-      const errorData = error.data
-      const rawElicitations =
-        errorData != null &&
-        typeof errorData === 'object' &&
-        'elicitations' in errorData &&
-        Array.isArray(errorData.elicitations)
-          ? (errorData.elicitations as unknown[])
-          : []
+      // Prefer typed UrlElicitationRequiredError.elicitations; fall back to data bag.
+      const rawElicitations: unknown[] =
+        error instanceof UrlElicitationRequiredError
+          ? error.elicitations
+          : (() => {
+              const errorData =
+                error && typeof error === 'object' && 'data' in error
+                  ? (error as { data?: unknown }).data
+                  : undefined
+              return errorData != null &&
+                typeof errorData === 'object' &&
+                'elicitations' in errorData &&
+                Array.isArray(
+                  (errorData as { elicitations?: unknown }).elicitations,
+                )
+                ? (errorData as { elicitations: unknown[] }).elicitations
+                : []
+            })()
 
       // Validate each element has the required fields for ElicitRequestURLParams
       const elicitations = rawElicitations.filter(

@@ -81,6 +81,7 @@ import {
   getDefaultOpusModel,
 } from './model/model.js'
 import { getSkillToolCommands, getMcpSkillCommands } from '../commands.js'
+import type { ReadResourceResult } from 'src/services/mcp/types.js'
 import type { Command } from '../types/command.js'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { getProjectRoot } from '../bootstrap/state.js'

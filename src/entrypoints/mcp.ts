@@ -1,15 +1,6 @@
 import { Server } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import type { CallToolResult } from 'src/services/mcp/types.js'
-
-type ListToolsResult = { tools: Array<Record<string, unknown>> }
-type Tool = {
-  name: string
-  description?: string
-  inputSchema?: unknown
-  outputSchema?: unknown
-  [key: string]: unknown
-}
 import { getDefaultAppState } from 'src/state/AppStateStore.js'
 import review from '../commands/review.js'
 import type { Command } from '../commands.js'
@@ -30,8 +21,19 @@ import { jsonStringify } from '../utils/slowOperations.js'
 import { getErrorParts } from '../utils/toolErrors.js'
 import { zodToJsonSchema } from '../utils/zodToJsonSchema.js'
 
-type ToolInput = Tool['inputSchema']
-type ToolOutput = Tool['outputSchema']
+/** v2 ListToolsResult requires inputSchema.type === "object" at the root. */
+type McpToolInputSchema = {
+  type: 'object'
+  properties?: Record<string, unknown>
+  required?: string[]
+  [key: string]: unknown
+}
+type McpToolOutputSchema = {
+  type: 'object'
+  properties?: Record<string, unknown>
+  required?: string[]
+  [key: string]: unknown
+}
 
 const MCP_COMMANDS: Command[] = [review]
 
@@ -60,41 +62,46 @@ export async function startMCPServer(
   )
 
   // densable: setRequestHandler("tools/list", ...)
-  server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => {
+  // Cast return: nested JSON Schema property types widen vs v2 literal unions.
+  server.setRequestHandler('tools/list', async () => {
     // TODO: Also re-expose any MCP tools
     const toolPermissionContext = getEmptyToolPermissionContext()
     const tools = getTools(toolPermissionContext)
-    return {
-      tools: await Promise.all(
-        tools.map(async tool => {
-          let outputSchema: ToolOutput | undefined
-          if (tool.outputSchema) {
-            const convertedSchema = zodToJsonSchema(tool.outputSchema)
-            // MCP SDK requires outputSchema to have type: "object" at root level
-            // Skip schemas with anyOf/oneOf at root (from z.union, z.discriminatedUnion, etc.)
-            // See: https://github.com/anthropics/claude-code/issues/8014
-            if (
-              typeof convertedSchema === 'object' &&
-              convertedSchema !== null &&
-              'type' in convertedSchema &&
-              convertedSchema.type === 'object'
-            ) {
-              outputSchema = convertedSchema as ToolOutput
-            }
+    const listed = await Promise.all(
+      tools.map(async tool => {
+        let outputSchema: McpToolOutputSchema | undefined
+        if (tool.outputSchema) {
+          const convertedSchema = zodToJsonSchema(tool.outputSchema)
+          // MCP SDK requires outputSchema to have type: "object" at root level
+          // Skip schemas with anyOf/oneOf at root (from z.union, z.discriminatedUnion, etc.)
+          // See: https://github.com/anthropics/claude-code/issues/8014
+          if (
+            typeof convertedSchema === 'object' &&
+            convertedSchema !== null &&
+            'type' in convertedSchema &&
+            convertedSchema.type === 'object'
+          ) {
+            outputSchema = convertedSchema as McpToolOutputSchema
           }
-          return {
-            ...tool,
-            description: await tool.prompt({
-              getToolPermissionContext: async () => toolPermissionContext,
-              tools,
-              agents: [],
-            }),
-            inputSchema: zodToJsonSchema(tool.inputSchema) as ToolInput,
-            outputSchema,
-          }
-        }),
-      ),
-    }
+        }
+        const inputSchema = zodToJsonSchema(
+          tool.inputSchema,
+        ) as McpToolInputSchema
+        // Force type: "object" for v2 ListToolsResult (zodToJsonSchema may widen)
+        inputSchema.type = 'object'
+        return {
+          name: tool.name,
+          description: await tool.prompt({
+            getToolPermissionContext: async () => toolPermissionContext,
+            tools,
+            agents: [],
+          }),
+          inputSchema,
+          ...(outputSchema ? { outputSchema } : {}),
+        }
+      }),
+    )
+    return { tools: listed } as never
   })
 
   // densable: setRequestHandler("tools/call", ...)

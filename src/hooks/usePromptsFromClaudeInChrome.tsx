@@ -9,25 +9,22 @@ import { callIdeRpc } from '../services/mcp/client.js';
 import type { ConnectedMCPServer, MCPServerConnection } from '../services/mcp/types.js';
 import type { PermissionMode } from '../types/permissions.js';
 import { CLAUDE_IN_CHROME_MCP_SERVER_NAME, isTrackedClaudeInChromeTabId } from '../utils/claudeInChrome/common.js';
-import type { AnyObjectSchema } from 'src/services/mcp/types.js';
 import { lazySchema } from '../utils/lazySchema.js';
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js';
 
-// Schema for the prompt notification from Chrome extension (JSON-RPC 2.0 format)
-const ClaudeInChromePromptNotificationSchema: () => AnyObjectSchema = lazySchema(() =>
+// Chrome extension prompt notification — custom params on notifications/message
+const CLAUDE_IN_CHROME_PROMPT_METHOD = 'notifications/message';
+const ClaudeInChromePromptParamsSchema = lazySchema(() =>
   z.object({
-    method: z.literal('notifications/message'),
-    params: z.object({
-      prompt: z.string(),
-      image: z
-        .object({
-          type: z.literal('base64'),
-          media_type: z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']),
-          data: z.string(),
-        })
-        .optional(),
-      tabId: z.number().optional(),
-    }),
+    prompt: z.string(),
+    image: z
+      .object({
+        type: z.literal('base64'),
+        media_type: z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']),
+        data: z.string(),
+      })
+      .optional(),
+    tabId: z.number().optional(),
   }),
 );
 
@@ -52,42 +49,46 @@ export function usePromptsFromClaudeInChrome(
     }
 
     if (mcpClient) {
-      mcpClient.client.setNotificationHandler(ClaudeInChromePromptNotificationSchema(), notification => {
-        if (mcpClientRef.current !== mcpClient) {
-          return;
-        }
-        const { tabId, prompt, image } = notification.params;
-
-        // Process notifications from tabs we're tracking since notifications are broadcasted
-        if (typeof tabId !== 'number' || !isTrackedClaudeInChromeTabId(tabId)) {
-          return;
-        }
-
-        try {
-          // Build content blocks if there's an image, otherwise just use the prompt string
-          if (image) {
-            const contentBlocks: ContentBlockParam[] = [
-              { type: 'text', text: prompt },
-              {
-                type: 'image',
-                source: {
-                  type: image.type,
-                  media_type: image.media_type,
-                  data: image.data,
-                },
-              },
-            ];
-            enqueuePendingNotification({
-              value: contentBlocks,
-              mode: 'prompt',
-            });
-          } else {
-            enqueuePendingNotification({ value: prompt, mode: 'prompt' });
+      mcpClient.client.setNotificationHandler(
+        CLAUDE_IN_CHROME_PROMPT_METHOD,
+        { params: ClaudeInChromePromptParamsSchema() },
+        params => {
+          if (mcpClientRef.current !== mcpClient) {
+            return;
           }
-        } catch (error) {
-          logError(error as Error);
-        }
-      });
+          const { tabId, prompt, image } = params;
+
+          // Process notifications from tabs we're tracking since notifications are broadcasted
+          if (typeof tabId !== 'number' || !isTrackedClaudeInChromeTabId(tabId)) {
+            return;
+          }
+
+          try {
+            // Build content blocks if there's an image, otherwise just use the prompt string
+            if (image) {
+              const contentBlocks: ContentBlockParam[] = [
+                { type: 'text', text: prompt },
+                {
+                  type: 'image',
+                  source: {
+                    type: image.type,
+                    media_type: image.media_type,
+                    data: image.data,
+                  },
+                },
+              ];
+              enqueuePendingNotification({
+                value: contentBlocks,
+                mode: 'prompt',
+              });
+            } else {
+              enqueuePendingNotification({ value: prompt, mode: 'prompt' });
+            }
+          } catch (error) {
+            logError(error as Error);
+          }
+        },
+      );
     }
   }, [mcpClients]);
 

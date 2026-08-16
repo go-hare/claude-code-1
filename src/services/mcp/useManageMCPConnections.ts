@@ -75,9 +75,10 @@ import {
 } from './mcpReauthSignal.js'
 import { isXaaEnabled } from './xaaIdpLogin.js'
 import {
+  CHANNEL_MESSAGE_METHOD,
   CHANNEL_PERMISSION_METHOD,
-  ChannelMessageNotificationSchema,
-  ChannelPermissionNotificationSchema,
+  ChannelMessageParamsSchema,
+  ChannelPermissionParamsSchema,
   findChannelEntry,
   gateChannelServer,
   wrapChannelMessage,
@@ -571,10 +572,12 @@ export function useManageMCPConnections(
           switch (gate.action) {
             case 'register':
               logMCPDebug(client.name, 'Channel notifications registered')
+              // densable/v2: setNotificationHandler(method, {params}, handler)
               client.client.setNotificationHandler(
-                ChannelMessageNotificationSchema() as any,
-                async notification => {
-                  const { content, meta } = notification.params
+                CHANNEL_MESSAGE_METHOD,
+                { params: ChannelMessageParamsSchema() },
+                async params => {
+                  const { content, meta } = params
                   logMCPDebug(
                     client.name,
                     `notifications/claude/channel: ${content.slice(0, 80)}`,
@@ -607,9 +610,10 @@ export function useManageMCPConnections(
                 client.capabilities?.experimental?.['claude/channel/permission']
               ) {
                 client.client.setNotificationHandler(
-                  ChannelPermissionNotificationSchema() as any,
-                  async notification => {
-                    const { request_id, behavior } = notification.params
+                  CHANNEL_PERMISSION_METHOD,
+                  { params: ChannelPermissionParamsSchema() },
+                  async params => {
+                    const { request_id, behavior } = params
                     const resolved =
                       channelPermCallbacksRef.current?.resolve(
                         request_id,

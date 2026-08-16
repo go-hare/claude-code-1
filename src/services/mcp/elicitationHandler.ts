@@ -1,7 +1,5 @@
 import type { Client } from '@modelcontextprotocol/client'
-import type { ElicitResult } from './types.js'
-
-type ElicitRequestParams = Record<string, unknown>
+import type { ElicitRequestParams, ElicitResult } from './types.js'
 import type { AppState } from '../../state/AppState.js'
 import {
   executeElicitationHooks,
@@ -72,13 +70,16 @@ export function registerElicitationHandler(
   // created with elicitation capability declared.
   try {
     // densable: setRequestHandler("elicitation/create", ...)
-    client.setRequestHandler('elicitation/create', async (request, extra) => {
+    // v2 BaseContext: signal/id live on ctx.mcpReq (not top-level extra).
+    client.setRequestHandler('elicitation/create', async (request, ctx) => {
       logMCPDebug(
         serverName,
         `Received elicitation request: ${jsonStringify(request)}`,
       )
 
       const mode = getElicitationMode(request.params)
+      const signal = ctx.mcpReq.signal
+      const requestId = ctx.mcpReq.id
 
       logEvent('tengu_mcp_elicitation_shown', {
         mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -89,7 +90,7 @@ export function registerElicitationHandler(
         const hookResponse = await runElicitationHooks(
           serverName,
           request.params,
-          extra.signal,
+          signal,
         )
         if (hookResponse) {
           logMCPDebug(
@@ -114,7 +115,7 @@ export function registerElicitationHandler(
             resolve({ action: 'cancel' })
           }
 
-          if (extra.signal.aborted) {
+          if (signal.aborted) {
             onAbort()
             return
           }
@@ -129,12 +130,12 @@ export function registerElicitationHandler(
                 ...prev.elicitation.queue,
                 {
                   serverName,
-                  requestId: extra.requestId,
+                  requestId,
                   params: request.params,
-                  signal: extra.signal,
+                  signal,
                   waitingState,
                   respond: (result: ElicitResult) => {
-                    extra.signal.removeEventListener('abort', onAbort)
+                    signal.removeEventListener('abort', onAbort)
                     logEvent('tengu_mcp_elicitation_response', {
                       mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                       action:
@@ -147,7 +148,7 @@ export function registerElicitationHandler(
             },
           }))
 
-          extra.signal.addEventListener('abort', onAbort, { once: true })
+          signal.addEventListener('abort', onAbort, { once: true })
         })
         const rawResult = await response
         logMCPDebug(
@@ -157,7 +158,7 @@ export function registerElicitationHandler(
         const result = await runElicitationResultHooks(
           serverName,
           rawResult,
-          extra.signal,
+          signal,
           mode,
           elicitationId,
         )
@@ -177,6 +178,13 @@ export function registerElicitationHandler(
         const params = (notification as { params?: { elicitationId?: string } })
           .params
         const elicitationId = params?.elicitationId
+        if (typeof elicitationId !== 'string') {
+          logMCPDebug(
+            serverName,
+            `Ignoring elicitation completion notification without elicitationId`,
+          )
+          return
+        }
         logMCPDebug(
           serverName,
           `Received elicitation completion notification: ${elicitationId}`,
@@ -225,10 +233,14 @@ export async function runElicitationHooks(
         ? (params.elicitationId as string | undefined)
         : undefined
 
+    const message =
+      typeof params.message === 'string'
+        ? params.message
+        : String(params.message ?? '')
     const { elicitationResponse, blockingError } =
       await executeElicitationHooks({
         serverName,
-        message: params.message,
+        message,
         requestedSchema:
           'requestedSchema' in params
             ? (params.requestedSchema as Record<string, unknown>)
