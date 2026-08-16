@@ -31,7 +31,11 @@ const axiosPost = mock(
 const axiosHandle = setupAxiosMock()
 axiosHandle.useStubs = true
 axiosHandle.stubs.post = (...args: unknown[]) =>
-  axiosPost(...(args as [string, unknown?, unknown?]))
+  axiosPost(
+    args[0] as string,
+    args[1],
+    args[2] as { validateStatus?: (s: number) => boolean } | undefined,
+  )
 axiosHandle.stubs.isAxiosError = (e: unknown) =>
   Boolean(e && typeof e === 'object' && 'isAxiosError' in e)
 

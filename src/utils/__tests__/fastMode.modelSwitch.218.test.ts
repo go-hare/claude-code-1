@@ -51,7 +51,7 @@ mock.module(
   'src/utils/settings/settings.js',
   createSettingsMock(settingsSnap, {
     getInitialSettings: () => ({ fastMode: true }),
-    getSettingsForSource: () => undefined,
+    getSettingsForSource: () => null,
     updateSettingsForSource: (() => ({
       error: null,
     })) as unknown as typeof realSettings.updateSettingsForSource,

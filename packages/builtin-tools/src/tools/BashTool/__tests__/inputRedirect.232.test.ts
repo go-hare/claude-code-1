@@ -75,13 +75,11 @@ describe('validateInputRedirections (densable 2.1.232 #43)', () => {
 
   test('deny Read rule yields deny with densable message', () => {
     const secret = join(process.cwd(), 'secret.env')
+    const secretNorm = secret.replace(/\\/g, '/')
     const ctx = makeCtx({
       alwaysDenyRules: {
-        // Permission rules use tool names as keys
-        Read: [
-          `//${secret.replace(/\\/g, '/')}/**`,
-          secret.replace(/\\/g, '/'),
-        ],
+        // ToolPermissionRulesBySource is keyed by PermissionRuleSource
+        session: [`Read(//${secretNorm}/**)`, `Read(${secretNorm})`],
       },
     })
     // Also try matching via absolute path pattern that validatePath uses

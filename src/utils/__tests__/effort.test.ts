@@ -142,7 +142,7 @@ function configMock() {
       // Best-effort keep shared test config in sync for co-suites.
       try {
         ;(
-          configSnap.saveGlobalConfig as (
+          configSnap.saveGlobalConfig as unknown as (
             u: (c: Record<string, unknown>) => Record<string, unknown>,
           ) => void
         )?.(u => ({ ...u, ...next }))

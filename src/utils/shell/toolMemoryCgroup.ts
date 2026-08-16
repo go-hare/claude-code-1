@@ -118,8 +118,10 @@ export function ensureToolMemoryCgroupDir(): string | undefined {
   const parsedLimit = parseToolMemoryLimitBytes(raw)
   if (
     parsedLimit === undefined &&
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_tool_memory_cgroup', false) !==
-      true
+    getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
+      'tengu_tool_memory_cgroup',
+      false,
+    ) !== true
   ) {
     // densable: r===void 0 && !GB → return without setting kZt
     return undefined

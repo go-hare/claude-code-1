@@ -134,9 +134,10 @@ describe('densable 2.1.218 #32 LEh/MEh / hFt', () => {
       sandbox: {
         bwrapPath: '/usr/local/bin/bwrap',
         socatPath: '/usr/bin/socat',
+        // intentional string form for coerce path (schema wants {command,args?})
         ripgrep: '/opt/rg',
       },
-    } as SettingsJson)
+    } as unknown as SettingsJson)
     expect(d.shellSettings['sandbox.bwrapPath']).toBe('/usr/local/bin/bwrap')
     expect(d.shellSettings['sandbox.socatPath']).toBe('/usr/bin/socat')
     expect(d.shellSettings['sandbox.ripgrep']).toBe('/opt/rg')
@@ -172,8 +173,9 @@ describe('densable 2.1.218 #32 LEh/MEh / hFt', () => {
     ).toBe(false)
     expect(
       hasDangerousSandboxBinarySettings({
+        // intentional object form for empty-command coerce path
         sandbox: { bwrapPath: { command: '' } },
-      } as SettingsJson),
+      } as unknown as SettingsJson),
     ).toBe(false)
   })
 })
