@@ -43,9 +43,9 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.41**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.42**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.231–2.1.233 alignment (2.7.40 → 2.7.41)
+#### densable 2.1.231–2.1.233 alignment (2.7.40 → 2.7.42)
 
 Sources of truth:
 
@@ -53,7 +53,7 @@ Sources of truth:
 - `docs/upstream-extraction/v2.1.232/official-232-checklist.md` (**HAVE 45 / N/A 4 / PARTIAL 0**; 49 official rows)
 - `docs/upstream-extraction/v2.1.233/official-233-checklist.md` (**HAVE 14** + verify-only/pre-exist; **N/A 3**)
 
-Stacked on **2.1.229** (npm **2.7.39**). **2.7.40** closes 231→233 in one ship line (including 232 review residuals: G7 `cse_*`, thinking-only re-stream, ERA probe, remint wiring). **2.7.41** finishes residual MCP v2 migration: full method+params `setNotificationHandler` (channel/IDE/VSCode/print), `ctx.mcpReq`, elicitation-complete guard order, plus process-global `mock.module` isolation.
+Stacked on **2.1.229** (npm **2.7.39**). **2.7.40** closes 231→233 in one ship line (including 232 review residuals: G7 `cse_*`, thinking-only re-stream, ERA probe, remint wiring). **2.7.41** finishes residual MCP v2 migration: full method+params `setNotificationHandler` (channel/IDE/VSCode/print), `ctx.mcpReq`, elicitation-complete guard order, plus process-global `mock.module` isolation. **2.7.42** closes tools/list boundary and residual casts: `listToolsResult`, densable `createSdkMcpServer`/`tools/call` path, `k0i` implements, channel origin.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
@@ -201,10 +201,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.41)
+### Recent updates (2.7.5 → 2.7.42)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.42** | **MCP tools/list boundary + residual cast close-out**: `listToolsResult` wire boundary (chrome/weixin `as unknown as ListToolsResult`); densable `cr4` `createSdkMcpServer` registerTool without cast; `entrypoints/mcp.ts` tools/call `coerceInput`→`safeParse`→`validateInput`→`call`; `DensableAjvJsonSchemaValidator implements jsonSchemaValidator`; channel enqueue `origin` without `as any`. |
 | **2.7.41** | **MCP v2 residual close-out**: full densable string `setNotificationHandler` (channel/IDE/VSCode/print enable+reconnect); `ctx.mcpReq` / elicitation-complete guard order; type residuals (deny source keys, binary callTool, GB boolean); hermetic tests vs process-global `mock.module`/env. |
 | **2.7.40** | **densable 2.1.231–2.1.233 closeout** (no public 2.1.230): **231** MCP OAuth pre-registered redirect FLv (`localhost` + port reuse + preserveClient); **232** HAVE 45 / N/A 4 — fork default, @mention/SendMessage bare name, unique session names, GitLab tokens/marketplace, PS/nested-git, MCP connect timeout, RC remint/G7 `cse_*`, thinking-only re-stream, OpenAI/Grok PTL, sandbox.ripgrep source limits, etc.; **233** HAVE 14 — MCP **client@2/server@2 product single-stack**, cgroup memory, WebFetch TTL, `\??\` UNC, Todo/Tds, `/effort` a11y; **official revert of 232 Cygwin + Bash `<` product gates** (residuals kept). N/A: gateway / Desktop Notification / Cowork. |
 | **2.7.39** | **densable 2.1.229 (HAVE 27 / N/A 5 / GAP 0)** + product-default **`REACTIVE_COMPACT`**: long-session 413/PTL withhold + try recovery (Ysa/bua #25; messages >32MB unrecoverable #20); try gates densable **ex/Jsa/Rhe**; OAuth `127.0.0.1`, attribution force, SHR launcher hooks/GCM/base-dir, plugin command sources, ListAgents offline/cloud, safeToolInput, UNC path, workflow host concurrency/prefix stagger, IPv6 doctor, commit-push-pr deny, etc. N/A: #3 SSE host, #21 Desktop OTEL, #30–32 VSCode. **No** collapse/snip. |
