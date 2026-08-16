@@ -7,10 +7,18 @@
  */
 
 import type { McpServer } from '@modelcontextprotocol/server'
+import type { z } from 'zod/v4'
 import type { CallToolResult, ToolAnnotations } from 'src/services/mcp/types.js'
 
-export type AnyZodRawShape = Record<string, unknown>
-export type InferShape<T extends AnyZodRawShape> = { [K in keyof T]: unknown }
+/**
+ * densable/agent-sdk + server@2 `registerTool` raw-shape overload:
+ * plain `{ field: z.string() }` record (auto-wrapped with `z.object()`).
+ * Use classic `z.ZodType` (not core `$ZodType`) so server@2 accepts it.
+ */
+export type AnyZodRawShape = { [key: string]: z.ZodType }
+export type InferShape<T extends AnyZodRawShape> = {
+  [K in keyof T]: z.infer<T[K]>
+}
 
 export type ForkSessionOptions = {
   dir?: string
@@ -52,8 +60,7 @@ export type SDKSessionOptions = {
 
 /** densable/agent-sdk SdkMcpToolDefinition — output of `tool()`. */
 export interface SdkMcpToolDefinition<
-  // biome-ignore lint/suspicious/noExplicitAny: agent-sdk uses any for schema variance
-  T extends AnyZodRawShape = any,
+  T extends AnyZodRawShape = AnyZodRawShape,
 > {
   name: string
   description: string

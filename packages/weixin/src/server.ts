@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { Server } from '@modelcontextprotocol/server'
+import { Server, type ListToolsResult } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import {
   CDN_BASE_URL,
@@ -61,10 +61,11 @@ export function createWeixinMcpServer(version: string): Server {
     },
   )
 
-  // Cast: nested property `type: 'string'` widens vs v2 JSON Schema literals.
+  // densable/v2: tools/list bag is wire-valid; nested JSON Schema literals
+  // widen under TS — boundary via unknown (official-233 #6, no sdk 1.x).
   server.setRequestHandler(
     'tools/list',
-    async () =>
+    async (): Promise<ListToolsResult> =>
       ({
         tools: [
           {
@@ -103,7 +104,7 @@ export function createWeixinMcpServer(version: string): Server {
             },
           },
         ],
-      }) as never,
+      }) as unknown as ListToolsResult,
   )
 
   server.setRequestHandler('tools/call', async request => {

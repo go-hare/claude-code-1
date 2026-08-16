@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
+import { listToolsResult } from 'src/services/mcp/listToolsResult.js'
 import type { CallToolResult } from 'src/services/mcp/types.js'
 import { getDefaultAppState } from 'src/state/AppStateStore.js'
 import review from '../commands/review.js'
@@ -18,7 +19,7 @@ import { getMainLoopModel } from '../utils/model/model.js'
 import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js'
 import { setCwd } from '../utils/Shell.js'
 import { jsonStringify } from '../utils/slowOperations.js'
-import { getErrorParts } from '../utils/toolErrors.js'
+import { formatZodValidationError, getErrorParts } from '../utils/toolErrors.js'
 import { zodToJsonSchema } from '../utils/zodToJsonSchema.js'
 
 /** v2 ListToolsResult requires inputSchema.type === "object" at the root. */
@@ -87,7 +88,7 @@ export async function startMCPServer(
         const inputSchema = zodToJsonSchema(
           tool.inputSchema,
         ) as McpToolInputSchema
-        // Force type: "object" for v2 ListToolsResult (zodToJsonSchema may widen)
+        // densable/v2 wire: root must be object (zodToJsonSchema may widen)
         inputSchema.type = 'object'
         return {
           name: tool.name,
@@ -101,7 +102,8 @@ export async function startMCPServer(
         }
       }),
     )
-    return { tools: listed } as never
+    // Nested property schemas stay structural; boundary via listToolsResult.
+    return listToolsResult(listed)
   })
 
   // densable: setRequestHandler("tools/call", ...)
@@ -149,13 +151,27 @@ export async function startMCPServer(
         updateAttributionState: () => {},
       }
 
-      // TODO: validate input types with zod
+      // densable main loop (toolExecution): coerceInput → safeParse → validateInput → call.
+      // Same path for MCP-exported built-ins — no invent gateway, no args as never.
       try {
         if (!tool.isEnabled()) {
           throw new Error(`Tool ${name} is not enabled`)
         }
+        let parseTarget: unknown = args ?? {}
+        if (tool.coerceInput) {
+          const coerced = tool.coerceInput(parseTarget)
+          if (coerced !== null) {
+            parseTarget = coerced.input
+          }
+        }
+        const parsedInput = tool.inputSchema.safeParse(parseTarget)
+        if (!parsedInput.success) {
+          throw new Error(
+            `Tool ${name} input is invalid: ${formatZodValidationError(name, parsedInput.error)}`,
+          )
+        }
         const validationResult = await tool.validateInput?.(
-          (args as never) ?? {},
+          parsedInput.data,
           toolUseContext,
         )
         if (validationResult && !validationResult.result) {
@@ -164,7 +180,7 @@ export async function startMCPServer(
           )
         }
         const finalResult = await tool.call(
-          (args ?? {}) as never,
+          parsedInput.data,
           toolUseContext,
           hasPermissionsToUseTool,
           createAssistantMessage({

@@ -1,9 +1,15 @@
 /**
  * densable `fVp` / agent-sdk `hl` product twin: in-process SDK MCP server.
  *
- * Gold (claude-agent-sdk sdk.mjs `hl` / SEA `fVp`):
+ * Gold (claude-agent-sdk sdk.mjs `hl` / SEA `fVp` / densable `cr4`):
  *   new McpServer({name, version}) → tools.forEach → registerTool →
  *   return { type: 'sdk', name, instance }
+ *
+ * densable SEA is untyped JS: `registerTool(name, {inputSchema, …}, handler)`
+ * with **no** cast. Our TS twin:
+ *   - per-tool `tool()` keeps full Zod generics
+ *   - heterogeneous `tools[]` uses `any` variance (same as agent-sdk / densable forEach)
+ *   - `registerTool` gets raw Zod shape + handler without `as never`
  *
  * densable 1:1 registry: do **not** null-proto McpServer maps — densable SEA
  * and public MCP SDK keep plain `_registeredTools = {}` + truthy membership.
@@ -13,7 +19,7 @@
 
 import { McpServer } from '@modelcontextprotocol/server'
 import type { CallToolResult, ToolAnnotations } from 'src/services/mcp/types.js'
-import { globalRegistry } from 'zod/v4'
+import { globalRegistry, type z } from 'zod/v4'
 import type {
   AnyZodRawShape,
   InferShape,
@@ -24,8 +30,10 @@ import type {
 export type CreateSdkMcpServerOptions = {
   name: string
   version?: string
-  // agent-sdk: Array<SdkMcpToolDefinition<any>> — per-tool schema generics vary
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  /**
+   * densable `cr4` / agent-sdk: heterogeneous tool list (each schema differs).
+   * SEA is untyped; agent-sdk uses `SdkMcpToolDefinition<any>` for variance.
+   */
   tools?: Array<SdkMcpToolDefinition<any>>
 }
 
@@ -53,19 +61,20 @@ export function tool<Schema extends AnyZodRawShape>(
     name,
     description,
     inputSchema,
-    handler: handler as SdkMcpToolDefinition<Schema>['handler'],
+    handler,
     annotations: extras?.annotations,
     _meta: Object.keys(meta).length > 0 ? meta : undefined,
   }
 }
 
-function isZodType(value: unknown): value is { description?: string } {
+function isZodType(value: unknown): value is z.ZodType {
   return typeof value === 'object' && value !== null && '_zod' in value
 }
 
 /**
- * densable `fVp` / agent-sdk `hl` — create in-process SDK MCP server config.
+ * densable `fVp` / agent-sdk `hl` / densable `cr4` — create in-process SDK MCP server.
  * Registry left as MCP SDK default (plain `{}`) for densable 1:1.
+ * registerTool args match densable: no `as never` on inputSchema/handler.
  */
 export function createSdkMcpServer(
   options: CreateSdkMcpServerOptions,
@@ -89,19 +98,20 @@ export function createSdkMcpServer(
       for (const field of Object.values(def.inputSchema ?? {})) {
         if (!isZodType(field)) continue
         const desc = field.description
-        if (desc && !globalRegistry.has(field as never)) {
-          globalRegistry.add(field as never, { description: desc })
+        if (desc && !globalRegistry.has(field)) {
+          globalRegistry.add(field, { description: desc })
         }
       }
+      // densable cr4: registerTool(name, {description, inputSchema, annotations, _meta}, handler)
       mcp.registerTool(
         def.name,
         {
           description: def.description,
-          inputSchema: def.inputSchema as never,
-          annotations: def.annotations as ToolAnnotations | undefined,
-          _meta: def._meta as Record<string, unknown> | undefined,
+          inputSchema: def.inputSchema,
+          annotations: def.annotations,
+          _meta: def._meta,
         },
-        def.handler as never,
+        def.handler,
       )
     }
   }

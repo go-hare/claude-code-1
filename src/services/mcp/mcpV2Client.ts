@@ -16,6 +16,9 @@ import {
   Client,
   type ClientOptions,
   type Implementation,
+  type JsonSchemaType,
+  type JsonSchemaValidator,
+  type jsonSchemaValidator,
 } from '@modelcontextprotocol/client'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv'
 import { PRODUCT_URL } from '../../constants/product.js'
@@ -64,22 +67,23 @@ export const DENSABLE_JSON_SCHEMA_DRAFT_URIS = new Set([
 /**
  * densable k0i — Ajv validator that strips `$schema` when it is in kpS
  * (after trailing `#` strip) so tool output schemas still validate.
+ * Implements client@2 `jsonSchemaValidator` (no cast at Client construction).
  */
-export class DensableAjvJsonSchemaValidator {
+export class DensableAjvJsonSchemaValidator implements jsonSchemaValidator {
   private readonly inner = new AjvJsonSchemaValidator()
 
-  getValidator(
-    schema: Record<string, unknown>,
-  ): ReturnType<AjvJsonSchemaValidator['getValidator']> {
-    const draft = schema.$schema
+  getValidator<T>(schema: JsonSchemaType): JsonSchemaValidator<T> {
+    const draft = (schema as { $schema?: unknown }).$schema
     if (
       typeof draft === 'string' &&
       DENSABLE_JSON_SCHEMA_DRAFT_URIS.has(draft.replace(/#$/, ''))
     ) {
-      const { $schema: _drop, ...rest } = schema
-      return this.inner.getValidator(rest)
+      const { $schema: _drop, ...rest } = schema as JsonSchemaType & {
+        $schema?: unknown
+      }
+      return this.inner.getValidator<T>(rest as JsonSchemaType)
     }
-    return this.inner.getValidator(schema)
+    return this.inner.getValidator<T>(schema)
   }
 }
 
@@ -135,7 +139,7 @@ export function createDensableMcpClient(
 ): Client {
   return new Client(densableClientInfo(), {
     capabilities: densableClientCapabilities(),
-    jsonSchemaValidator: new DensableAjvJsonSchemaValidator() as never,
+    jsonSchemaValidator: new DensableAjvJsonSchemaValidator(),
     versionNegotiation: toV2VersionNegotiation(plan),
     listChanged: densableListChangedOptions(),
   })

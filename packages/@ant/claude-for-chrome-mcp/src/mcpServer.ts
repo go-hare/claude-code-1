@@ -1,4 +1,8 @@
-import { Server, type CallToolResult } from '@modelcontextprotocol/server'
+import {
+  Server,
+  type CallToolResult,
+  type ListToolsResult,
+} from '@modelcontextprotocol/server'
 import { createBridgeClient } from './bridgeClient.js'
 import { BROWSER_TOOLS } from './browserTools.js'
 import { createMcpSocketClient } from './mcpSocketClient.js'
@@ -50,9 +54,9 @@ export function createClaudeForChromeMcpServer(
     // Always advertise multi-browser tools. Bridge path uses cloud peers;
     // native socket path uses local socket-pool profiles (no OAuth required).
     // CLI still handles them in toolCalls.ts before any tool_request.
-    // Cast: local tool bag is structurally ListToolsResult-compatible; v2
-    // wants literal "object" nested JSON Schema types that our const bag widens.
-    return { tools: BROWSER_TOOLS as never }
+    // densable SEA is untyped; server@2 Infer wants nested JSON Schema literals.
+    // Boundary via unknown — not sdk 1.x, not invent gateway (official-233 #6).
+    return { tools: BROWSER_TOOLS } as unknown as ListToolsResult
   })
 
   server.setRequestHandler(

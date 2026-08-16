@@ -8,6 +8,7 @@ import type {
   EnumSchema,
   JSONRPCMessage,
   ListResourcesResult,
+  ListToolsResult,
   MultiSelectEnumSchema,
   PrimitiveSchemaDefinition,
   PromptMessage,
@@ -16,6 +17,7 @@ import type {
   ResourceLink,
   ServerCapabilities,
   StringSchema,
+  Tool,
   ToolAnnotations,
 } from '@modelcontextprotocol/client'
 import { z } from 'zod/v4'
@@ -34,6 +36,7 @@ export type {
   EnumSchema,
   JSONRPCMessage,
   ListResourcesResult,
+  ListToolsResult,
   MultiSelectEnumSchema,
   PrimitiveSchemaDefinition,
   PromptMessage,
@@ -42,6 +45,7 @@ export type {
   ResourceLink,
   ServerCapabilities,
   StringSchema,
+  Tool,
   ToolAnnotations,
 }
 

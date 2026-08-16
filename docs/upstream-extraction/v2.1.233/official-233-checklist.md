@@ -1,7 +1,7 @@
 # densable 2.1.233 — 官方更新清单 × go-hare 对照
 
 > 来源：GitHub release **v2.1.233**（2026-08-14）+ densable SEA win32-x64。  
-> 更新：2026-08-15 — #6 单栈 client@2+server@2；P2：v2 类型 re-export + auth 结构守卫（HAVE 14）。  
+> 更新：2026-08-16 — #6 residual：全量 string handlers；tools/list 边界 `ListToolsResult`（非散落 `as never`）。  
 > 约定：extract densable first → 1:1；不 invent gateway；不自动 commit/push。
 
 ## 计数（审查口径）
@@ -24,7 +24,7 @@
 | 3 | Linux cgroup `TOOL_MEMORY_LIMIT` | **HAVE** | densable `cgroup:y?Qfp():void 0`：Bun 下 `child_process.spawn({cgroup})` 原子；纯 Node fallback `cgroup.procs` post-attach |
 | 4 | `WEBFETCH_CACHE_TTL_MS` | **HAVE** | densable C9s / `$J_=900000`；构造时注入 LRU ttl |
 | 5 | cloud 等权限时 env 关 → 勿标 lost | **HAVE (verify-only)** | densable `XBa` ≡ `awaitRemoteSessionResult`：`requires_action` throw；对照 SEA，本 pack 无新代码 |
-| 6 | MCP listen 勿死循环重开 | **HAVE** | densable `hNf`/`npS`/`opS`/`rpS`/`LVa`；**单栈** `client@2`+`server@2`（**无 sdk 1.x**）；string handlers + `listTools`/`callTool`；`timeout:k0()` + `mcpServerKeyHash`；BVa `probe:{timeoutMs}`；默认 legacy 同 densable GB |
+| 6 | MCP listen 勿死循环重开 | **HAVE** | densable `hNf`/`npS`/`opS`/`rpS`/`LVa`；**单栈** `client@2`+`server@2`（**无 sdk 1.x**）；**全量** string handlers + params schema；`listTools`/`callTool`；`timeout:k0()` + `mcpServerKeyHash`；BVa `probe:{timeoutMs}`；默认 legacy 同 densable GB；tools/list 静态 bag → `listToolsResult` / `as ListToolsResult`（densable SEA 无 TS，不 invent schema 适配包） |
 | 7 | Desktop/VS Code Notification 权限 | **N/A** | 宿主扩展面 |
 | 8 | Linux sandbox idle 单核 100% | **HAVE** | SRT HTTP CONNECT 死 peer EPIPE 不 destroy → Bun 空转；修自 **SRT ≥0.0.72**；本仓 **`@anthropic-ai/sandbox-runtime@0.0.73`** |
 | 9 | skill 别名 headless Unknown command | **HAVE (pre-exist)** | densable GtS ≈ `stripCollidingPluginAliases`（221+）；本 pack **无 diff** |
@@ -44,7 +44,12 @@
 
 - 不 invent apps gateway（#2/#13）。  
 - residual Cygwin / `validateInputRedirections`：**默认产品路径不得调用**，直到 densable 再上 narrower 版。  
-- #6：单栈 **`client@2`+`server@2`**（已移除 sdk）。densable 形：string handlers、`listTools`/`callTool`、listen reopen/park、`timeout:k0()`、`mcpServerKeyHash`、**k0i/kpS 精确 draft 集合**。协议类型 **re-export v2**（`types.ts`）；ant/mcp-client 用 `server`/`client` 的 `CallToolResult`/`JSONRPCMessage`。auth OAuth body 用 **结构守卫**（非本地 zod Schema 袋）。**禁止**再引入 sdk/适配包。  
+- #6：单栈 **`client@2`+`server@2`**（已移除 sdk）。densable 形：string handlers、`listTools`/`callTool`、listen reopen/park、`timeout:k0()`、`mcpServerKeyHash`、**k0i/kpS 精确 draft 集合**。协议类型 **re-export v2**（`types.ts` 含 `ListToolsResult`/`Tool`）；ant/mcp-client 用 `server`/`client` 的 `CallToolResult`/`JSONRPCMessage`。auth OAuth body 用 **结构守卫**（非本地 zod Schema 袋）。**禁止**再引入 sdk/适配包。  
+- #6 tools/list：**不**为 TS 写 JSON Schema 适配层。densable 走 `registerTool`/无类型 SEA；我们在 wire 边界 `listToolsResult()` / `as ListToolsResult`，根 `inputSchema.type='object'` 强制保留。散落 `as never` 收口到该边界。  
+- #6 SDK/`tools/call`：**对齐 densable `cr4`/`fVp`** — `createSdkMcpServer` 用 Zod raw-shape + `registerTool` 无 cast；`entrypoints/mcp.ts` tools/call 走 densable 主循环 `coerceInput`→`safeParse`→`validateInput`→`call`（与 `toolExecution` 同序），去掉 `args as never`。  
+- #6 TS residual：**k0i** `DensableAjvJsonSchemaValidator implements jsonSchemaValidator`（Client 构造无 `as never`）；channel enqueue `origin: { kind:'channel', server }` 无 `as any`。  
+
+
 - #8：依赖对齐 SRT，非 CLI 内再实现一遍 proxy。  
 - 提交时 **勿 stage** logos、`nul`、`docs/upstream-extraction/v2.1.212/**`。  
 
