@@ -43,9 +43,9 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.40**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.41**），与 git tag 可能不同步。
 
-#### densable 2.1.231–2.1.233 对齐说明（2.7.40）
+#### densable 2.1.231–2.1.233 对齐说明（2.7.40 → 2.7.41）
 
 对照文档：
 
@@ -53,7 +53,7 @@
 - `docs/upstream-extraction/v2.1.232/official-232-checklist.md`（**HAVE 45 / N/A 4 / PARTIAL 0**；官方 49 条）
 - `docs/upstream-extraction/v2.1.233/official-233-checklist.md`（**HAVE 14** + verify-only/pre-exist；**N/A 3**）
 
-叠在 **2.1.229**（npm **2.7.39**）之上。**2.7.40** 一次收口 231→233（含 232 review residual：G7 `cse_*`、thinking-only re-stream、ERA 探测、remint 接线）。
+叠在 **2.1.229**（npm **2.7.39**）之上。**2.7.40** 一次收口 231→233（含 232 review residual：G7 `cse_*`、thinking-only re-stream、ERA 探测、remint 接线）。**2.7.41** 补齐 MCP v2 残留类型迁移：全量 method+params `setNotificationHandler`（channel/IDE/VSCode/print）、`ctx.mcpReq`、elicitation complete 守卫顺序、以及 `mock.module` 进程全局污染隔离。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -201,10 +201,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.40）
+### 近期更新（2.7.5 → 2.7.41）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.41** | **MCP v2 residual 收口**：全量 densable string `setNotificationHandler`（channel/IDE/VSCode/print enable+reconnect）；`ctx.mcpReq` / elicitation complete 守卫顺序；type residual（deny source keys、callTool 二元、GB boolean）；测试隔离 process-global `mock.module`/env。 |
 | **2.7.40** | **densable 2.1.231–2.1.233 收口**（无官方 2.1.230）：**231** MCP OAuth 预注册 redirect FLv（`localhost` + port 复用 + preserveClient）；**232** HAVE 45 / N/A 4 — fork 默认、@mention/SendMessage 裸名、session 名唯一、GitLab token/marketplace、PS/nested-git、MCP connect timeout、RC remint/G7 `cse_*`、thinking-only re-stream、OpenAI/Grok PTL、sandbox.ripgrep 源限制等；**233** HAVE 14 — MCP **client@2/server@2 产品单栈**、cgroup 内存、WebFetch TTL、`\??\` UNC、Todo/Tds、`/effort` a11y；**官方回滚 232 Cygwin + Bash `<` 产品门**（residual 保留）。N/A：gateway / Desktop Notification / Cowork。 |
 | **2.7.39** | **densable 2.1.229（HAVE 27 / N/A 5 / GAP 0）** + 产品默认 **`REACTIVE_COMPACT`**：长会话 413/PTL withhold + try 恢复（Ysa/bua #25；messages >32MB unrecoverable #20）；try 门控 densable **ex/Jsa/Rhe**；OAuth `127.0.0.1`、attribution force、SHR launcher hooks/GCM/base-dir、plugin command 源、ListAgents offline/cloud、safeToolInput、UNC path、workflow host 并发/prefix stagger、IPv6 doctor、commit-push-pr deny 等。N/A：#3 SSE host、#21 Desktop OTEL、#30–32 VSCode。**不含** collapse/snip。 |
 | **2.7.38** | **Grok 4.6 推理档 catalog**：按模型 ID 最长匹配加 `grok-4.6` 行（不按厂商启发式）。官方 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)（2026-08-12）：`grok-4.6` 为 `low \| medium \| high \| xhigh`（默认 `high`）；`grok-4.5` 仍三档（xhigh 当 high）。另有 `grok-4.20-reasoning` 三档、`grok-4.20-multi-agent` 含 xhigh（agent count）。`queryModelGrok` 对**映射后** id 发 Chat Completions `reasoning_effort`。不加裸 `grok-4` / `grok-4.20` 行。 |
