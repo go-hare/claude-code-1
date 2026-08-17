@@ -32,7 +32,10 @@ import {
   createChatGPTResponsesStream,
   type ResponsesReasoningEffort,
 } from './responsesAdapter.js'
-import { normalizeMessagesForAPI } from '../../../utils/messages.js'
+import {
+  createUserMessage,
+  normalizeMessagesForAPI,
+} from '../../../utils/messages.js'
 import { toolToAPISchema } from '../../../utils/api.js'
 import {
   getEmptyToolPermissionContext,
@@ -60,11 +63,6 @@ export {
 }
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import type { Options } from '../claude.js'
-import {
-  createAssistantAPIErrorMessage,
-  createUserMessage,
-} from '../../../utils/messages.js'
-import type { SDKAssistantMessageError } from '../../../entrypoints/agentSdkTypes.js'
 import {
   isSearchExtraToolsEnabled,
   isDeferredToolsDeltaEnabled,
@@ -512,12 +510,10 @@ export async function* queryModelOpenAI(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     logForDebugging(`[OpenAI] Error: ${errorMessage}`, { level: 'error' })
-    yield createAssistantAPIErrorMessage({
-      content: `API Error: ${errorMessage}`,
-      apiError: 'api_error',
-      error: (error instanceof Error
-        ? error
-        : new Error(String(error))) as unknown as SDKAssistantMessageError,
-    })
+    // densable PTL / rate-limit / etc. via shared Cre — so OpenAI max-prompt
+    // length reaches cup/n8o reactive compact (not raw "API Error: …").
+    // Dynamic import keeps isolated adapter tests from loading errors.ts graph.
+    const { getAssistantMessageFromError } = await import('../errors.js')
+    yield getAssistantMessageFromError(error, options.model, { messages })
   }
 }

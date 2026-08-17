@@ -28,7 +28,6 @@ import {
   resolveGrokModel,
 } from '@ant/model-provider'
 import { normalizeMessagesForAPI } from '../../../utils/messages.js'
-import type { SDKAssistantMessageError } from '../../../entrypoints/agentSdkTypes.js'
 import { toolToAPISchema } from '../../../utils/api.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
@@ -40,7 +39,6 @@ import {
   convertToolsToLangfuse,
 } from '../../../services/langfuse/convert.js'
 import type { Options } from '../claude.js'
-import { createAssistantAPIErrorMessage } from '../../../utils/messages.js'
 import { resolveAppliedEffort } from '../../../utils/effort.js'
 import { buildGrokChatCompletionsBody } from './requestBody.js'
 
@@ -287,12 +285,8 @@ export async function* queryModelGrok(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     logForDebugging(`[Grok] Error: ${errorMessage}`, { level: 'error' })
-    yield createAssistantAPIErrorMessage({
-      content: `API Error: ${errorMessage}`,
-      apiError: 'api_error',
-      error: (error instanceof Error
-        ? error
-        : new Error(String(error))) as unknown as SDKAssistantMessageError,
-    })
+    // Shared Cre so OpenAI-style max-prompt length reaches reactive compact.
+    const { getAssistantMessageFromError } = await import('../errors.js')
+    yield getAssistantMessageFromError(error, options.model, { messages })
   }
 }

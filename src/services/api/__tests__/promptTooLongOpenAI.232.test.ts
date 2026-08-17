@@ -70,3 +70,28 @@ describe('getAssistantMessageFromError OpenAI PTL → reactive path', () => {
     expect(gap).toBe(500193 - 500000)
   })
 })
+
+describe('compat adapter catch uses getAssistantMessageFromError (product path)', () => {
+  test('OpenAI/Grok/Gemini index import getAssistantMessageFromError', async () => {
+    // Source lock: catch must not yield raw `API Error: ${msg}` for PTL.
+    const openaiSrc = await Bun.file(
+      new URL('../openai/index.ts', import.meta.url),
+    ).text()
+    const grokSrc = await Bun.file(
+      new URL('../grok/index.ts', import.meta.url),
+    ).text()
+    const geminiSrc = await Bun.file(
+      new URL('../gemini/index.ts', import.meta.url),
+    ).text()
+    for (const [name, src] of [
+      ['openai', openaiSrc],
+      ['grok', grokSrc],
+      ['gemini', geminiSrc],
+    ] as const) {
+      expect(src.includes('getAssistantMessageFromError'), name).toBe(true)
+      expect(src.includes("await import('../errors.js')"), name).toBe(true)
+      // Old catch yielded raw `API Error: ${errorMessage}` — must stay gone.
+      expect(src.includes('API Error: ${' + 'errorMessage}'), name).toBe(false)
+    }
+  })
+})
