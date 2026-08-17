@@ -45,3 +45,18 @@ export function onMessageStopCostCredit(
   }
   return { next: state, shouldCredit: false }
 }
+
+/**
+ * densable thinking-only re-stream (`continue e`) cost gate:
+ *   if (eo !== "credited") { eo = "credited"; dr += sge(...) }
+ * Credits any non-credited state (none or pending) before the stream attempt
+ * retries — unlike message_stop which only drains pending.
+ */
+export function onThinkingOnlyRetryCostCredit(
+  state: StreamCostCreditState,
+): StreamCostCreditTransition {
+  if (state !== 'credited') {
+    return { next: 'credited', shouldCredit: true }
+  }
+  return { next: 'credited', shouldCredit: false }
+}

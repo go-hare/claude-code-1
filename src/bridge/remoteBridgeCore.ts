@@ -64,6 +64,7 @@ import {
 } from './remintRecovery.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
+  getReplBridgeSessionId,
   isTeleportedSessionId,
   setReplBridgeSessionId,
 } from '../bootstrap/state.js'
@@ -384,6 +385,14 @@ export async function initEnvLessBridgeCore(
       ),
   })
 
+  // Clear mint-time cse_* when abandoning this session (not transient reattach).
+  // Keep cse_* on reattach fail so G7 teleport mark still matches for remint.
+  const clearAbandonedBridgeSessionId = (): void => {
+    if (getReplBridgeSessionId() === sessionId) {
+      setReplBridgeSessionId(undefined)
+    }
+  }
+
   // ── 2. Fetch bridge credentials (POST /bridge → worker_jwt, expires_in, api_base_url) ──
   const credentialsResult = await withRetry(
     () =>
@@ -399,7 +408,7 @@ export async function initEnvLessBridgeCore(
   if (!isRemoteCredentials(credentialsResult)) {
     if (isReattaching) {
       // densable: reattach /bridge fail is transient — surface retry prompt,
-      // do NOT archive the parent session.
+      // do NOT archive the parent session. Keep mint-time cse_* for G7.
       logForDebugging(
         `[remote-bridge] Reattach ${sessionId}: /bridge failed after unarchive; surfacing retry prompt`,
       )
@@ -418,6 +427,7 @@ export async function initEnvLessBridgeCore(
         : 'Remote credentials fetch failed — see debug log'
     onStateChange?.('failed', failDetail)
     logBridgeSkip('v2_remote_creds_failed', undefined, true)
+    clearAbandonedBridgeSessionId()
     void archiveSession(
       sessionId,
       baseUrl,
@@ -464,8 +474,9 @@ export async function initEnvLessBridgeCore(
     onStateChange?.('failed', `Transport setup failed: ${errorMessage(err)}`)
     logBridgeSkip('v2_transport_setup_failed', undefined, true)
     // densable: skip archive on failed reattach transport so parent session
-    // remains recoverable.
+    // remains recoverable. Keep mint-time cse_* for G7 on reattach.
     if (!isReattaching) {
+      clearAbandonedBridgeSessionId()
       void archiveSession(
         sessionId,
         baseUrl,
@@ -1521,8 +1532,9 @@ export async function initEnvLessBridgeCore(
       return
     }
 
-    // Full teardown: densable kEo — clear in-process bridge meta.
+    // Full teardown: densable kEo — clear in-process bridge meta + mint-time cse_*.
     clearBridgeSessionMeta()
+    clearAbandonedBridgeSessionId()
 
     let token = getAccessToken()
     let status = await archiveSession(

@@ -7,6 +7,8 @@
  *     // Po=1 (watchdog cap), sr=2 (stale cap)
  *     if (xo) Tn++; log tengu_streaming_watchdog_retry after_thinking_only
  *     else    oo++; log tengu_streaming_stale_connection_retry after_thinking_only
+ *     if (eo !== "credited") { eo = "credited"; dr += sge(...) }
+ *     // synthetic content_block_stop / message_stop if Ht
  *     continue e  // re-stream
  *   }
  *   // else partial finalize + banner

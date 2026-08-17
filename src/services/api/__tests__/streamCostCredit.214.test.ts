@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   onMessageDeltaCostCredit,
   onMessageStopCostCredit,
+  onThinkingOnlyRetryCostCredit,
   type StreamCostCreditState,
 } from '../streamCostCredit.js'
 
@@ -76,6 +77,26 @@ describe('onMessageStopCostCredit densable gr', () => {
       shouldCredit: false,
     })
     expect(onMessageStopCostCredit('credited')).toEqual({
+      next: 'credited',
+      shouldCredit: false,
+    })
+  })
+})
+
+describe('onThinkingOnlyRetryCostCredit densable continue e', () => {
+  test('none and pending credit once before re-stream', () => {
+    expect(onThinkingOnlyRetryCostCredit('none')).toEqual({
+      next: 'credited',
+      shouldCredit: true,
+    })
+    expect(onThinkingOnlyRetryCostCredit('pending')).toEqual({
+      next: 'credited',
+      shouldCredit: true,
+    })
+  })
+
+  test('already credited does not double-count', () => {
+    expect(onThinkingOnlyRetryCostCredit('credited')).toEqual({
       next: 'credited',
       shouldCredit: false,
     })

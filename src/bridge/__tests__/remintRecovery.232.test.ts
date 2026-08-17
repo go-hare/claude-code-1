@@ -73,6 +73,9 @@ describe('remintRecovery densable 232 #39', () => {
     expect(isEpochStaleRecoverableClose(4090, 'epoch_stale', true)).toBe(true)
     expect(isEpochStaleRecoverableClose(4090, undefined, true)).toBe(false)
     expect(isEpochStaleRecoverableClose(4090, 'other', true)).toBe(false)
+    expect(isEpochStaleRecoverableClose(4090, 'epoch_conflict', true)).toBe(
+      false,
+    )
     expect(isEpochStaleRecoverableClose(401, 'epoch_stale', true)).toBe(false)
   })
 

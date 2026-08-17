@@ -176,6 +176,7 @@ import { addToTotalSessionCost } from 'src/cost-tracker.js'
 import {
   onMessageDeltaCostCredit,
   onMessageStopCostCredit,
+  onThinkingOnlyRetryCostCredit,
   type StreamCostCreditState,
 } from 'src/services/api/streamCostCredit.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -3804,6 +3805,28 @@ async function* queryModel(
                         'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                     }),
                   })
+                  // densable: if (eo !== "credited") eo="credited"; dr+=sge(...)
+                  // before continue e — credit aborted thinking-only attempt.
+                  {
+                    const credit =
+                      onThinkingOnlyRetryCostCredit(streamCostCredit)
+                    streamCostCredit = credit.next
+                    if (credit.shouldCredit) {
+                      const costUSDForPart = calculateUSDCost(
+                        resolvedModel,
+                        usage as unknown as BetaUsage,
+                      )
+                      costUSD += addToTotalSessionCost(
+                        costUSDForPart,
+                        usage as unknown as BetaUsage,
+                        options.model,
+                        {
+                          activeMcpServer: options.activeMcpServer,
+                          activeMcpTool: options.activeMcpTool,
+                        },
+                      )
+                    }
+                  }
                   if (openContentBlockIndex !== null) {
                     yield {
                       type: 'stream_event',

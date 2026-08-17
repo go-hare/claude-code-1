@@ -96,14 +96,12 @@ describe('classified close codes densable gzp', () => {
     expect(formatCloseCause('epoch_conflict')).toBe('epoch_conflict')
   })
 
-  test('epoch_conflict also recovers under Ot like epoch_stale', () => {
+  test('epoch_conflict is NOT recoverable (densable Jr==="epoch_stale" only)', () => {
     expect(isEpochStaleRecoverableClose(4090, 'epoch_stale', true)).toBe(true)
     expect(isEpochStaleRecoverableClose(4090, 'epoch_conflict', true)).toBe(
-      true,
-    )
-    expect(isEpochStaleRecoverableClose(4090, 'epoch_conflict', false)).toBe(
       false,
     )
+    expect(isEpochStaleRecoverableClose(4090, 'epoch_stale', false)).toBe(false)
     expect(
       isEpochStaleRecoverableClose(4090, 'superseded_by_worker', true),
     ).toBe(false)

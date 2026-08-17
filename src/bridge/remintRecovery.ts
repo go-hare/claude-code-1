@@ -171,11 +171,10 @@ export function isRecoverableCloseCode(
  * densable Ls epoch_stale branch gate (outside kd):
  * `$t===4090 && Jr==="epoch_stale" && Ot()`
  * Ot = tengu_bridge_recover_stale_epoch, densable default **false**.
- */
-/**
- * densable Ls: `$t===4090 && Jr==="epoch_stale" && Ot()`
- * gzp also maps `epoch_conflict` → 4090 (HTTP 409 supersession). Accept both
- * so causeTypedCloseCodes path recovers under Ot.
+ *
+ * densable requires Jr === "epoch_stale" only. gzp may emit `epoch_conflict`
+ * for HTTP 409 — that is a true supersession and must NOT enter Ba remint
+ * (would thrash against the newer epoch).
  */
 export function isEpochStaleRecoverableClose(
   code: number | undefined,
@@ -184,7 +183,7 @@ export function isEpochStaleRecoverableClose(
 ): boolean {
   return (
     code === 4090 &&
-    (cause === 'epoch_stale' || cause === 'epoch_conflict') &&
+    cause === 'epoch_stale' &&
     recoverStaleEpochEnabled === true
   )
 }
