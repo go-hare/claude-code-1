@@ -34,8 +34,15 @@ export function ChatView({
   const grouped = groupToolCalls(entries);
   const hasMessages = entries.length > 0;
 
-  // 检查是否正在加载（最后一个条目是用户消息）
-  const showThinking = isLoading && entries.length > 0 && entries[entries.length - 1]?.type === 'user_message';
+  // Thinking indicator: awaiting first assistant/tool after user turn,
+  // or re-entered busy session still waiting on a reply.
+  const lastEntry = entries.length > 0 ? entries[entries.length - 1] : null;
+  const showThinking =
+    isLoading &&
+    !!lastEntry &&
+    (lastEntry.type === 'user_message' ||
+      // Mid-turn with no visible assistant text yet (e.g. only system noise)
+      (lastEntry.type === 'assistant_message' && lastEntry.chunks.length === 0));
 
   return (
     <Conversation className="flex-1">

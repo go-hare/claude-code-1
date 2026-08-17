@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiFetchSession, apiSendControl, apiInterrupt } from '../api/client';
 import type { Session, SessionEvent } from '../types';
-import { isClosedSessionStatus, formatTime, cn } from '../lib/utils';
+import { isClosedSessionStatus, isBusySessionStatus, formatTime, cn } from '../lib/utils';
 import { Info } from 'lucide-react';
 import { RCSChatAdapter } from '../lib/rcs-chat-adapter';
 import type { ThreadEntry, PendingPermission } from '../lib/types';
@@ -39,7 +39,10 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
     () =>
       new RCSChatAdapter(sessionId, setEntries, {
         onStatusChange: status => {
+          // Official: session_status is source of truth for turn busy state.
+          // Re-entering a running/requires_action session must restore loading UI.
           setSessionStatus(status);
+          setIsLoading(isBusySessionStatus(status));
         },
         onError: err => {
           console.error('[RCSChatAdapter] error:', err);
@@ -67,12 +70,19 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
 
     async function load() {
       setError('');
+      // Reset turn UI when switching sessions; restore from server status below.
+      setEntries([]);
+      setPendingPermissions([]);
+      setIsLoading(false);
+      setSessionStatus(null);
 
       try {
         const sess = await apiFetchSession(sessionId);
         if (cancelled) return;
         setSession(sess);
         setSessionStatus(sess.status);
+        // Restore busy UI when opening an in-flight session (not only local submit).
+        setIsLoading(isBusySessionStatus(sess.status));
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Failed to load session');
@@ -120,16 +130,20 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
     }
   }, [adapter]);
 
-  // Mark loading done when last assistant message stops streaming
+  // Fallback clear: history ended the turn but session_status lag/miss.
+  // Never clear while official busy statuses say the turn is still open.
   useEffect(() => {
+    if (isBusySessionStatus(sessionStatus)) return;
     if (entries.length === 0) return;
     const last = entries[entries.length - 1];
     if (last?.type === 'assistant_message' || last?.type === 'tool_call') {
-      // If the last entry is no longer a streaming tool, consider loading done
-      if (last.type === 'tool_call' && last.toolCall.status === 'running') return;
+      if (last.type === 'tool_call') {
+        const st = last.toolCall.status;
+        if (st === 'running' || st === 'waiting_for_confirmation') return;
+      }
       setIsLoading(false);
     }
-  }, [entries]);
+  }, [entries, sessionStatus]);
 
   // Permission actions
   const handleApprovePermission = useCallback(

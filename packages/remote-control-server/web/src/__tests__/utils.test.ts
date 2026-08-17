@@ -4,6 +4,7 @@ const {
   formatTime,
   statusClass,
   isClosedSessionStatus,
+  isBusySessionStatus,
   truncate,
   generateMessageUuid,
   extractEventText,
@@ -118,6 +119,35 @@ describe('isClosedSessionStatus', () => {
 
   test('returns false for undefined', () => {
     expect(isClosedSessionStatus(undefined)).toBe(false)
+  })
+})
+
+// =============================================================================
+// isBusySessionStatus() — official SessionState busy set
+// =============================================================================
+
+describe('isBusySessionStatus', () => {
+  test('returns true for running', () => {
+    expect(isBusySessionStatus('running')).toBe(true)
+  })
+
+  test('returns true for requires_action', () => {
+    expect(isBusySessionStatus('requires_action')).toBe(true)
+  })
+
+  test('returns false for idle', () => {
+    expect(isBusySessionStatus('idle')).toBe(false)
+  })
+
+  test('returns false for active (legacy label, not SessionState busy)', () => {
+    expect(isBusySessionStatus('active')).toBe(false)
+  })
+
+  test('returns false for archived/inactive/null', () => {
+    expect(isBusySessionStatus('archived')).toBe(false)
+    expect(isBusySessionStatus('inactive')).toBe(false)
+    expect(isBusySessionStatus(null)).toBe(false)
+    expect(isBusySessionStatus(undefined)).toBe(false)
   })
 })
 

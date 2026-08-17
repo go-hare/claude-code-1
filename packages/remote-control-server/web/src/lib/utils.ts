@@ -37,6 +37,18 @@ export function isClosedSessionStatus(
   return status === 'archived' || status === 'inactive'
 }
 
+/**
+ * densable/official SessionState busy set:
+ * `idle | running | requires_action` (src/utils/sessionState.ts).
+ * Bridge pushes via reportState → PUT /worker → SSE session_status.
+ * Web re-entry must restore loading from this, not only local submit.
+ */
+export function isBusySessionStatus(
+  status: string | null | undefined,
+): boolean {
+  return status === 'running' || status === 'requires_action'
+}
+
 export function truncate(str: string | null | undefined, max: number): string {
   if (!str) return ''
   const s = String(str)
