@@ -43,9 +43,9 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.43**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.44**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.231–2.1.233 alignment (2.7.40 → 2.7.43)
+#### densable 2.1.231–2.1.233 alignment (2.7.40 → 2.7.43; 2.7.44 product patch)
 
 Sources of truth:
 
@@ -53,7 +53,7 @@ Sources of truth:
 - `docs/upstream-extraction/v2.1.232/official-232-checklist.md` (**HAVE 45 / N/A 4 / PARTIAL 0**; 49 official rows)
 - `docs/upstream-extraction/v2.1.233/official-233-checklist.md` (**HAVE 14** + verify-only/pre-exist; **N/A 3**)
 
-Stacked on **2.1.229** (npm **2.7.39**). **2.7.40** closes 231→233 in one ship line (including 232 review residuals: G7 `cse_*`, thinking-only re-stream, ERA probe, remint wiring). **2.7.41** finishes residual MCP v2 migration: full method+params `setNotificationHandler` (channel/IDE/VSCode/print), `ctx.mcpReq`, elicitation-complete guard order, plus process-global `mock.module` isolation. **2.7.42** closes tools/list boundary and residual casts: `listToolsResult`, densable `createSdkMcpServer`/`tools/call` path, `k0i` implements, channel origin. **2.7.43** review close-out: thinking-only cost credit, G7 `cse_*` abandon clear, `epoch_stale`-only Ot; OpenAI/Grok/Gemini catch via `getAssistantMessageFromError` so PTL reaches reactive compact.
+Stacked on **2.1.229** (npm **2.7.39**). **2.7.40** closes 231→233 in one ship line (including 232 review residuals: G7 `cse_*`, thinking-only re-stream, ERA probe, remint wiring). **2.7.41** finishes residual MCP v2 migration: full method+params `setNotificationHandler` (channel/IDE/VSCode/print), `ctx.mcpReq`, elicitation-complete guard order, plus process-global `mock.module` isolation. **2.7.42** closes tools/list boundary and residual casts: `listToolsResult`, densable `createSdkMcpServer`/`tools/call` path, `k0i` implements, channel origin. **2.7.43** review close-out: thinking-only cost credit, G7 `cse_*` abandon clear, `epoch_stale`-only Ot; OpenAI/Grok/Gemini catch via `getAssistantMessageFromError` so PTL reaches reactive compact. **2.7.44** teammate default model: unset/null follows leader / `ANTHROPIC_MODEL` (Opus last-resort only), and forwards Anthropic model env pins.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
@@ -201,10 +201,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.43)
+### Recent updates (2.7.5 → 2.7.44)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.44** | **teammate default model follows leader**: unset/null `teammateDefaultModel` resolves via leader → `mainLoopModel` / `ANTHROPIC_MODEL`, with hardcoded Opus only as last resort; Config/ModelPicker copy aligned; forward `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_*_MODEL` to teammates. |
 | **2.7.43** | **densable 1:1 review close-out + compat PTL**: credit session cost before thinking-only re-stream; clear G7 mint-time `cse_*` on abandon/teardown (keep on reattach); `epoch_stale`-only Ot (`epoch_conflict` does not enter Ba remint); OpenAI/Grok/Gemini catch via `getAssistantMessageFromError` so `maximum prompt length` reaches reactive compact. |
 | **2.7.42** | **MCP tools/list boundary + residual cast close-out**: `listToolsResult` wire boundary (chrome/weixin `as unknown as ListToolsResult`); densable `cr4` `createSdkMcpServer` registerTool without cast; `entrypoints/mcp.ts` tools/call `coerceInput`→`safeParse`→`validateInput`→`call`; `DensableAjvJsonSchemaValidator implements jsonSchemaValidator`; channel enqueue `origin` without `as any`. |
 | **2.7.41** | **MCP v2 residual close-out**: full densable string `setNotificationHandler` (channel/IDE/VSCode/print enable+reconnect); `ctx.mcpReq` / elicitation-complete guard order; type residuals (deny source keys, binary callTool, GB boolean); hermetic tests vs process-global `mock.module`/env. |
