@@ -7,6 +7,10 @@ const ENV_KEYS = [
   'OPENAI_API_KEY',
   'OPENAI_BASE_URL',
   'OPENAI_MODEL',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 ] as const
 
 const ORIGINAL_ENV = Object.fromEntries(
@@ -46,5 +50,19 @@ describe('buildInheritedEnvVars', () => {
     expect(env).toContain('OPENAI_API_KEY=sk-test')
     expect(env).toContain('OPENAI_BASE_URL=http\\://127.0.0.1\\:8317/v1')
     expect(env).toContain('OPENAI_MODEL=gpt-5.4')
+  })
+
+  test('forwards ANTHROPIC_MODEL and default family pins to teammates', () => {
+    process.env.ANTHROPIC_MODEL = 'grok-4.5'
+    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'grok-4.5'
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'grok-4.5'
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'grok-4.5'
+
+    const env = buildInheritedEnvVars()
+
+    expect(env).toContain('ANTHROPIC_MODEL=grok-4.5')
+    expect(env).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL=grok-4.5')
+    expect(env).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL=grok-4.5')
+    expect(env).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL=grok-4.5')
   })
 })

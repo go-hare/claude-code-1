@@ -63,6 +63,12 @@ export type Props = {
   /** Overrides the dim header line below "Select model". */
   headerText?: string;
   /**
+   * Override the Default (null) row description. Used by teammate default
+   * picker so "currently …" reflects the leader/session model rather than
+   * the platform tier default (e.g. Opus 5).
+   */
+  defaultOptionDescription?: string;
+  /**
    * When true, skip writing effortLevel to userSettings on selection.
    * Used by the assistant installer wizard where the model choice is
    * project-scoped (written to the assistant's .claude/settings.json via
@@ -91,6 +97,7 @@ export function ModelPicker({
   isStandaloneCommand,
   showFastModeNotice,
   headerText,
+  defaultOptionDescription,
   skipSettingsWrite,
   deferEffortApply,
 }: Props): React.ReactNode {
@@ -140,9 +147,13 @@ export function ModelPicker({
   // This handles edge cases where the user's current model (e.g., 'haiku' for 3P users)
   // is not in the base options but should still be selectable and shown as selected
   const optionsWithInitial = useMemo(() => {
-    if (initial !== null && !modelOptions.some(opt => opt.value === initial)) {
+    const withDefaultDesc =
+      defaultOptionDescription === undefined
+        ? modelOptions
+        : modelOptions.map(opt => (opt.value === null ? { ...opt, description: defaultOptionDescription } : opt));
+    if (initial !== null && !withDefaultDesc.some(opt => opt.value === initial)) {
       return [
-        ...modelOptions,
+        ...withDefaultDesc,
         {
           value: initial,
           label: modelDisplayString(initial),
@@ -150,8 +161,8 @@ export function ModelPicker({
         },
       ];
     }
-    return modelOptions;
-  }, [modelOptions, initial]);
+    return withDefaultDesc;
+  }, [modelOptions, initial, defaultOptionDescription]);
 
   const selectOptions = useMemo(
     () =>

@@ -45,7 +45,7 @@ import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { ThemePicker } from '../ThemePicker.js';
 import { useAppState, useSetAppState, useAppStateStore } from '../../state/AppState.js';
 import { ModelPicker } from '../ModelPicker.js';
-import { modelDisplayString, isOpus1mMergeEnabled } from '../../utils/model/model.js';
+import { getMainLoopModel, modelDisplayString, isOpus1mMergeEnabled } from '../../utils/model/model.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import { ClaudeMdExternalIncludesDialog } from '../ClaudeMdExternalIncludesDialog.js';
 import { ChannelDowngradeDialog, type ChannelDowngradeChoice } from '../ChannelDowngradeDialog.js';
@@ -1239,7 +1239,12 @@ export function Config({
             {
               id: 'teammateDefaultModel',
               label: 'Default teammate model',
-              value: teammateModelDisplayString(globalConfig.teammateDefaultModel),
+              value: teammateModelDisplayString(
+                globalConfig.teammateDefaultModel,
+                // Prefer session pin; fall through to resolved main-loop model
+                // so ANTHROPIC_MODEL / settings show as "currently …".
+                mainLoopModel ?? getMainLoopModel(),
+              ),
               type: 'managedEnum' as const,
               onChange() {},
             },
@@ -1923,12 +1928,13 @@ export function Config({
             initial={globalConfig.teammateDefaultModel ?? null}
             skipSettingsWrite
             headerText="Default model for newly spawned teammates. The leader can override via the tool call's model parameter."
+            defaultOptionDescription={`Use the default model (currently ${modelDisplayString(mainLoopModel ?? getMainLoopModel())})`}
             onSelect={(model, _effort) => {
               setShowSubmenu(null);
               setTabsHidden(false);
               // First-open-then-Enter from unset: picker highlights "Default"
-              // (initial=null) and confirming would write null, silently
-              // switching Opus-fallback → follow-leader. Treat as no-op.
+              // (initial=null). Unset already follows the leader, so confirming
+              // Default is a no-op (do not persist null just to flip semantics).
               if (globalConfig.teammateDefaultModel === undefined && model === null) {
                 return;
               }
@@ -1942,7 +1948,7 @@ export function Config({
               });
               setChanges(prev => ({
                 ...prev,
-                teammateDefaultModel: teammateModelDisplayString(model),
+                teammateDefaultModel: teammateModelDisplayString(model, mainLoopModel ?? getMainLoopModel()),
               }));
               logEvent('tengu_teammate_default_model_changed', {
                 model: model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -2296,11 +2302,12 @@ export function Config({
   );
 }
 
-function teammateModelDisplayString(value: string | null | undefined): string {
-  if (value === undefined) {
-    return modelDisplayString(getHardcodedTeammateModelFallback());
+function teammateModelDisplayString(value: string | null | undefined, leaderModel?: string | null): string {
+  // unset + explicit Default both follow the leader session model
+  if (value === undefined || value === null) {
+    const resolved = leaderModel ?? getMainLoopModel() ?? getHardcodedTeammateModelFallback();
+    return `Default (currently ${modelDisplayString(resolved)})`;
   }
-  if (value === null) return "Default (leader's model)";
   return modelDisplayString(value);
 }
 

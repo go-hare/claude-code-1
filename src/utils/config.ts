@@ -591,7 +591,9 @@ export type GlobalConfig = {
   // Teammate spawn mode: 'auto' | 'tmux' | 'windows-terminal' | 'in-process'
   teammateMode?: 'auto' | 'tmux' | 'windows-terminal' | 'in-process' // How to spawn teammates (default: 'auto')
   // Model for new teammates when the tool call doesn't pass one.
-  // undefined = hardcoded Opus (backward-compat); null = leader's model; string = model alias/ID.
+  // undefined/null = follow leader, then mainLoopModel / ANTHROPIC_MODEL; string = alias/ID.
+  // Hardcoded Opus is last-resort only when leader + mainLoop cannot be resolved.
+  // (Storage may still distinguish unset vs explicit null; resolution treats them the same.)
   teammateDefaultModel?: string | null
 
   // PR status footer configuration (feature-flagged via GrowthBook)

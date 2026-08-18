@@ -142,6 +142,11 @@ const TEAMMATE_ENV_VARS = [
   'GROK_MODEL_MAP',
   // Custom API endpoint
   'ANTHROPIC_BASE_URL',
+  // Model pin via Anthropic-compatible / settings.env path (not only GROK_MODEL)
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   // Config directory override
   'CLAUDE_CONFIG_DIR',
   // CCR marker — teammates need this for CCR-aware code paths. Auth finds
