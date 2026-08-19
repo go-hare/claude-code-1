@@ -1,10 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { Dialog } from '@anthropic/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { logEvent } from '../../services/analytics/index.js';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
+import {
+  canOfferQuotaAutoResume,
+  cancelQuotaAutoResume,
+  getQuotaAutoResumeState,
+  getWaitThenContinueOption,
+  isQuotaAutoResumeEpisodeActive,
+  offerArmQuotaAutoResume,
+  subscribeQuotaAutoResumeChanged,
+} from '../../services/quotaAutoResume.js';
 import type { ToolUseContext } from '../../Tool.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { getOauthAccountInfo, getRateLimitTier, getSubscriptionType } from '../../utils/auth.js';
@@ -14,7 +23,7 @@ import { extraUsage } from '../extra-usage/index.js';
 import upgrade from '../upgrade/index.js';
 import { call as upgradeCall } from '../upgrade/upgrade.js';
 
-type RateLimitOptionsMenuOptionType = 'upgrade' | 'extra-usage' | 'cancel';
+type RateLimitOptionsMenuOptionType = 'upgrade' | 'extra-usage' | 'cancel' | 'auto-resume' | 'cancel-auto-resume';
 
 type RateLimitOptionsMenuProps = {
   onDone: (
@@ -34,10 +43,20 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
   const subscriptionType = getSubscriptionType();
   const rateLimitTier = getRateLimitTier();
   const hasExtraUsageEnabled = getOauthAccountInfo()?.hasExtraUsageEnabled === true;
+  const isUsageBased = getOauthAccountInfo()?.billingType === 'usage_based';
   const isMax = subscriptionType === 'max';
   const isMax20x = isMax && rateLimitTier === 'default_claude_max_20x';
   const isTeamOrEnterprise = subscriptionType === 'team' || subscriptionType === 'enterprise';
   const buyFirst = getFeatureValue_CACHED_MAY_BE_STALE('tengu_jade_anvil_4', false);
+  const quotaPhase = useSyncExternalStore(
+    subscribeQuotaAutoResumeChanged,
+    () => getQuotaAutoResumeState().phase,
+    () => getQuotaAutoResumeState().phase,
+  );
+  // densable v3h = p$t(phase) — episode still owns wait
+  const episodeActive = isQuotaAutoResumeEpisodeActive(getQuotaAutoResumeState());
+  const resetAlreadyPassed = claudeAiLimits.resetsAt !== undefined && claudeAiLimits.resetsAt * 1000 <= Date.now();
+  const waitOption = getWaitThenContinueOption(claudeAiLimits.resetsAt, resetAlreadyPassed);
 
   const options = useMemo<OptionWithDescription<RateLimitOptionsMenuOptionType>[]>(() => {
     const actionOptions: OptionWithDescription<RateLimitOptionsMenuOptionType>[] = [];
@@ -83,29 +102,96 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
     }
 
     const cancelOption: OptionWithDescription<RateLimitOptionsMenuOptionType> = {
-      label: 'Stop and wait for limit to reset',
+      label: isUsageBased ? 'Stop' : 'Stop and wait for limit to reset',
       value: 'cancel',
     };
 
+    // densable: v3h ? Don't continue… : d$t ? Wait here… : undefined
+    const autoResumeOption: OptionWithDescription<RateLimitOptionsMenuOptionType> | undefined = episodeActive
+      ? {
+          label: "Don't continue automatically",
+          value: 'cancel-auto-resume',
+        }
+      : canOfferQuotaAutoResume(claudeAiLimits)
+        ? {
+            label: waitOption.label,
+            value: 'auto-resume',
+          }
+        : undefined;
+
     if (buyFirst) {
-      return [...actionOptions, cancelOption];
+      return autoResumeOption ? [...actionOptions, cancelOption, autoResumeOption] : [...actionOptions, cancelOption];
     }
-    return [cancelOption, ...actionOptions];
+    return autoResumeOption ? [cancelOption, autoResumeOption, ...actionOptions] : [cancelOption, ...actionOptions];
   }, [
     buyFirst,
     isMax20x,
     isTeamOrEnterprise,
     hasExtraUsageEnabled,
-    claudeAiLimits.overageStatus,
-    claudeAiLimits.overageDisabledReason,
+    isUsageBased,
+    episodeActive,
+    waitOption.label,
+    claudeAiLimits,
+    quotaPhase,
   ]);
 
   function handleCancel(): void {
+    // densable RZi: if already armed/stale, cancel auto-resume instead of silent skip
+    if (episodeActive || quotaPhase === 'stale') {
+      logEvent('tengu_rate_limit_options_menu_cancel', {});
+      cancelQuotaAutoResume('dialog');
+      onDone(
+        'Automatic continue cancelled. Your session will wait for you instead; /rate-limit-options can arm it again.',
+      );
+      return;
+    }
     logEvent('tengu_rate_limit_options_menu_cancel', {});
+    (
+      context as ToolUseContext & {
+        prefillRateLimitAutoQueueContinue?: () => void;
+      }
+    ).prefillRateLimitAutoQueueContinue?.();
     onDone(undefined, { display: 'skip' });
   }
 
+  function handleSelectAutoResume(): void {
+    logEvent('tengu_rate_limit_options_menu_select_auto_resume', {});
+    // densable xZi: Vqn && VXa(M4f); else prefill + skip
+    if (
+      claudeAiLimits.status !== 'rejected' ||
+      claudeAiLimits.resetsAt === undefined ||
+      !offerArmQuotaAutoResume(claudeAiLimits, Date.now(), 'dialog')
+    ) {
+      (
+        context as ToolUseContext & {
+          prefillRateLimitAutoQueueContinue?: () => void;
+        }
+      ).prefillRateLimitAutoQueueContinue?.();
+      onDone(undefined, { display: 'skip' });
+      return;
+    }
+    onDone(
+      `Claude Code will continue automatically ${waitOption.confirmationPhrase}. Keep this session open; it may still pause for permission prompts. Press esc to cancel the wait.`,
+    );
+  }
+
+  function handleCancelAutoResume(): void {
+    logEvent('tengu_rate_limit_options_menu_cancel_auto_resume', {});
+    cancelQuotaAutoResume('dialog');
+    onDone(
+      'Automatic continue cancelled. Your session will wait for you instead; /rate-limit-options can arm it again.',
+    );
+  }
+
   function handleSelect(value: RateLimitOptionsMenuOptionType): void {
+    // densable A3h: upgrade/team/extra-usage cancel pending auto-queue
+    if (value === 'upgrade' || value === 'extra-usage') {
+      (
+        context as ToolUseContext & {
+          cancelRateLimitAutoQueueContinue?: () => void;
+        }
+      ).cancelRateLimitAutoQueueContinue?.();
+    }
     if (value === 'upgrade') {
       logEvent('tengu_rate_limit_options_menu_select_upgrade', {});
       void upgradeCall(onDone, context).then(jsx => {
@@ -120,6 +206,10 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
           setSubCommandJSX(jsx);
         }
       });
+    } else if (value === 'auto-resume') {
+      handleSelectAutoResume();
+    } else if (value === 'cancel-auto-resume') {
+      handleCancelAutoResume();
     } else if (value === 'cancel') {
       handleCancel();
     }

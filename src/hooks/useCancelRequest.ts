@@ -4,7 +4,7 @@
  * Must be rendered inside KeybindingSetup to have access to the keybinding context.
  * This component renders nothing - it just registers the cancel keybinding handler.
  */
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/metadata.js'
 import {
@@ -30,8 +30,7 @@ import type { PromptInputMode, VimMode } from '../types/textInputTypes.js'
 import {
   clearCommandQueue,
   enqueuePendingNotification,
-  hasEditableCommandsInQueue,
-  isQueuedCommandEditable,
+  isPoppableEditableCommand,
 } from '../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 
@@ -85,6 +84,28 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   const { addNotification, removeNotification } = useNotifications()
   const lastKillAgentsPressRef = useRef<number>(0)
   const viewSelectionMode = useAppState(s => s.viewSelectionMode)
+  // densable Fxe().phase — keep Esc active while quota auto-resume waits
+  const isQuotaAutoResumeEscTarget = useSyncExternalStore(
+    onStoreChange => {
+      try {
+        const { subscribeQuotaAutoResumeChanged } =
+          require('../services/quotaAutoResume.js') as typeof import('../services/quotaAutoResume.js')
+        return subscribeQuotaAutoResumeChanged(onStoreChange)
+      } catch {
+        return () => {}
+      }
+    },
+    () => {
+      try {
+        const { isQuotaAutoResumeWaiting } =
+          require('../services/quotaAutoResume.js') as typeof import('../services/quotaAutoResume.js')
+        return isQuotaAutoResumeWaiting()
+      } catch {
+        return false
+      }
+    },
+    () => false,
+  )
 
   const handleCancel = useCallback(() => {
     const cancelProps = {
@@ -104,6 +125,38 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       // loopDynamic may be unavailable in partial test mocks
     }
 
+    // densable $l / #20: Esc while selecting a queued message clears selection
+    // only — must NOT Gis auto-continue and must NOT interrupt the turn.
+    if (store.getState().queueEditIndex !== null) {
+      setAppState(prev =>
+        prev.queueEditIndex === null ? prev : { ...prev, queueEditIndex: null },
+      )
+      return
+    }
+
+    // densable Gis(w, gesture) — cancel quota auto-resume wait on Esc (Pwc/We).
+    // When only waiting on usage-limit auto-continue, Esc cancels that wait and
+    // returns without aborting a turn (ke=true early return).
+    let cancelledQuotaWait = false
+    try {
+      const { isQuotaAutoResumeWaiting, cancelQuotaAutoResumeWithNotice } =
+        require('../services/quotaAutoResume.js') as typeof import('../services/quotaAutoResume.js')
+      if (isQuotaAutoResumeWaiting()) {
+        const notice = cancelQuotaAutoResumeWithNotice('escape')
+        if (notice) {
+          addNotification({
+            key: 'quota-auto-resume-cancelled',
+            text: notice,
+            priority: 'immediate',
+            timeoutMs: 8000,
+          })
+          cancelledQuotaWait = true
+        }
+      }
+    } catch {
+      // quotaAutoResume may be unavailable in partial test mocks
+    }
+
     // Priority 1: If there's an active task running, cancel it first
     // This takes precedence over queue management so users can always interrupt Claude
     if (abortSignal !== undefined && !abortSignal.aborted) {
@@ -113,14 +166,21 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       return
     }
 
-    // Priority 2: Pop editable queue when Claude is idle (densable Opu/x4).
-    // task-notification / meta / non-human origins do not count — Esc must
-    // fall through to PromptInput double-press → rewind picker (#12).
-    if (hasEditableCommandsInQueue()) {
+    // Priority 2: Pop NMt-poppable queue when Claude is idle (densable Opu/NMt).
+    // Bash entries only count when input is empty — otherwise Esc must not steal
+    // the draft / interrupt via queue pop (#19/#20).
+    if (
+      queuedCommands.some(cmd => isPoppableEditableCommand(cmd, !inputValue))
+    ) {
       if (popCommandFromQueue) {
         popCommandFromQueue()
         return
       }
+    }
+
+    // densable: if(ke)return — Esc only cancelled the wait; do not tengu_cancel.
+    if (cancelledQuotaWait) {
+      return
     }
 
     // Fallback: nothing to cancel or pop (shouldn't reach here if isActive is correct)
@@ -133,6 +193,11 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     setToolUseConfirmQueue,
     onCancel,
     streamMode,
+    addNotification,
+    queuedCommands,
+    inputValue,
+    store,
+    setAppState,
   ])
 
   // Determine if this handler should be active
@@ -141,10 +206,12 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // Local JSX commands (like /model, /btw) handle their own input
   const isOverlayActive = useIsOverlayActive()
   const canCancelRunningTask = abortSignal !== undefined && !abortSignal.aborted
-  // densable xja: q = y.some(x4) — only editable (human) queue entries activate
-  // cancel. Full queue length would keep Esc bound while only bg
-  // task-notifications sit in the queue (long-running sessions / #12).
-  const hasEditableQueuedCommands = queuedCommands.some(isQueuedCommandEditable)
+  // densable 2.1.234: q = S.some(NMt(re, p)) — NMt excludes bash unless input empty.
+  // Using plain isQueuedCommandEditable would pop/steal Esc for bang entries while
+  // the user still has draft text (#19/#20).
+  const hasEditableQueuedCommands = queuedCommands.some(cmd =>
+    isPoppableEditableCommand(cmd, !inputValue),
+  )
   // When in bash/background mode with empty input, escape should exit the mode
   // rather than cancel the request. Let PromptInput handle mode exit.
   // This only applies to Escape, not Ctrl+C which should always cancel.
@@ -166,7 +233,9 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // input, and to useBackgroundTaskNavigation when viewing a teammate
   const isEscapeActive =
     isContextActive &&
-    (canCancelRunningTask || hasEditableQueuedCommands) &&
+    (canCancelRunningTask ||
+      hasEditableQueuedCommands ||
+      isQuotaAutoResumeEscTarget) &&
     !isInSpecialModeWithEmptyInput &&
     !isViewingTeammate
 
@@ -176,7 +245,10 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // handler and double-press-to-exit from ever seeing the keypress.
   const isCtrlCActive =
     isContextActive &&
-    (canCancelRunningTask || hasEditableQueuedCommands || isViewingTeammate)
+    (canCancelRunningTask ||
+      hasEditableQueuedCommands ||
+      isViewingTeammate ||
+      isQuotaAutoResumeEscTarget)
 
   useKeybinding('chat:cancel', handleCancel, {
     context: 'Chat',
@@ -263,6 +335,28 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
         source:
           'kill_agents' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
+      // densable: if(Klr()) Gis(w,"kill_agents_chord")
+      // Klr ≡ WXa — only pending continuation in queue, not armed/stale wait.
+      try {
+        const {
+          isQuotaAutoResumeArmedOrPending,
+          cancelQuotaAutoResumeWithNotice,
+        } =
+          require('../services/quotaAutoResume.js') as typeof import('../services/quotaAutoResume.js')
+        if (isQuotaAutoResumeArmedOrPending()) {
+          const notice = cancelQuotaAutoResumeWithNotice('kill_agents_chord')
+          if (notice) {
+            addNotification({
+              key: 'quota-auto-resume-cancelled',
+              text: notice,
+              priority: 'immediate',
+              timeoutMs: 8000,
+            })
+          }
+        }
+      } catch {
+        // ignore
+      }
       clearCommandQueue()
       killAllAgentsAndNotify()
       return

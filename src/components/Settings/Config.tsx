@@ -78,12 +78,16 @@ import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
 import { isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
+import {
+  isAutoContinueAtUsageLimitToggleable,
+  isAutoContinueAtUsageLimitEffective,
+  setAutoContinueAtUsageLimitSetting,
+} from '../../services/quotaAutoResume.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import {
   getCliTeammateModeOverride,
   clearCliTeammateModeOverride,
 } from '../../utils/swarm/backends/teammateModeSnapshot.js';
-import { getHardcodedTeammateModelFallback } from '../../utils/swarm/teammateModel.js';
 import { useSearchInput } from '../../hooks/useSearchInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import {
@@ -174,7 +178,6 @@ type Setting =
 type SubMenu =
   | 'Theme'
   | 'Model'
-  | 'TeammateModel'
   | 'ExternalIncludes'
   | 'OutputStyle'
   | 'ChannelDowngrade'
@@ -392,6 +395,31 @@ export function Config({
         });
       },
     },
+    // densable 2.1.234: ...S?[{id:"autoContinueAtUsageLimit",...}] gated by vgt/tengu_maple_sundial
+    ...(isAutoContinueAtUsageLimitToggleable()
+      ? [
+          {
+            id: 'autoContinueAtUsageLimit',
+            label: 'Continue automatically at usage limit',
+            value: settingsData?.autoContinueAtUsageLimit ?? true,
+            type: 'boolean' as const,
+            onChange(autoContinueAtUsageLimit: boolean) {
+              setSettingsData(prev => ({
+                ...prev,
+                autoContinueAtUsageLimit,
+              }));
+              const result = setAutoContinueAtUsageLimitSetting(autoContinueAtUsageLimit);
+              if (result.error) {
+                const restored = isAutoContinueAtUsageLimitEffective();
+                setSettingsData(prev => ({
+                  ...prev,
+                  autoContinueAtUsageLimit: restored,
+                }));
+              }
+            },
+          } satisfies Setting,
+        ]
+      : []),
     {
       id: 'spinnerTipsEnabled',
       label: 'Show tips',
@@ -1236,18 +1264,8 @@ export function Config({
                 });
               },
             },
-            {
-              id: 'teammateDefaultModel',
-              label: 'Default teammate model',
-              value: teammateModelDisplayString(
-                globalConfig.teammateDefaultModel,
-                // Prefer session pin; fall through to resolved main-loop model
-                // so ANTHROPIC_MODEL / settings show as "currently …".
-                mainLoopModel ?? getMainLoopModel(),
-              ),
-              type: 'managedEnum' as const,
-              onChange() {},
-            },
+            // densable 2.1.234 #47: removed "Default teammate model" — teammates
+            // follow the leader unless the spawn names a model.
           ];
         })()
       : []),
@@ -1496,6 +1514,14 @@ export function Config({
     if (globalConfig.autoCompactEnabled !== initialConfig.current.autoCompactEnabled) {
       formattedChanges.push(`${globalConfig.autoCompactEnabled ? 'Enabled' : 'Disabled'} auto-compact`);
     }
+    if (
+      (settingsData?.autoContinueAtUsageLimit ?? true) !==
+      (initialSettingsData.current?.autoContinueAtUsageLimit ?? true)
+    ) {
+      formattedChanges.push(
+        `${(settingsData?.autoContinueAtUsageLimit ?? true) ? 'Enabled' : 'Disabled'} continue automatically at usage limit`,
+      );
+    }
     if (globalConfig.respectGitignore !== initialConfig.current.respectGitignore) {
       formattedChanges.push(
         `${globalConfig.respectGitignore ? 'Enabled' : 'Disabled'} respect .gitignore in file picker`,
@@ -1686,7 +1712,6 @@ export function Config({
     if (
       setting.id === 'theme' ||
       setting.id === 'model' ||
-      setting.id === 'teammateDefaultModel' ||
       setting.id === 'showExternalIncludesDialog' ||
       setting.id === 'outputStyle' ||
       setting.id === 'language'
@@ -1700,10 +1725,6 @@ export function Config({
           return;
         case 'model':
           setShowSubmenu('Model');
-          setTabsHidden(true);
-          return;
-        case 'teammateDefaultModel':
-          setShowSubmenu('TeammateModel');
           setTabsHidden(true);
           return;
         case 'showExternalIncludesDialog':
@@ -1909,55 +1930,6 @@ export function Config({
                 ? isFastMode && isFastModeSupportedByModel(mainLoopModel) && isFastModeAvailable()
                 : false
             }
-          />
-          <Text dimColor>
-            <Byline>
-              <KeyboardShortcutHint shortcut="Enter" action="confirm" />
-              <ConfigurableShortcutHint
-                action="confirm:no"
-                context="Confirmation"
-                fallback="Esc"
-                description="cancel"
-              />
-            </Byline>
-          </Text>
-        </>
-      ) : showSubmenu === 'TeammateModel' ? (
-        <>
-          <ModelPicker
-            initial={globalConfig.teammateDefaultModel ?? null}
-            skipSettingsWrite
-            headerText="Default model for newly spawned teammates. The leader can override via the tool call's model parameter."
-            defaultOptionDescription={`Use the default model (currently ${modelDisplayString(mainLoopModel ?? getMainLoopModel())})`}
-            onSelect={(model, _effort) => {
-              setShowSubmenu(null);
-              setTabsHidden(false);
-              // First-open-then-Enter from unset: picker highlights "Default"
-              // (initial=null). Unset already follows the leader, so confirming
-              // Default is a no-op (do not persist null just to flip semantics).
-              if (globalConfig.teammateDefaultModel === undefined && model === null) {
-                return;
-              }
-              isDirty.current = true;
-              saveGlobalConfig(current =>
-                current.teammateDefaultModel === model ? current : { ...current, teammateDefaultModel: model },
-              );
-              setGlobalConfig({
-                ...getGlobalConfig(),
-                teammateDefaultModel: model,
-              });
-              setChanges(prev => ({
-                ...prev,
-                teammateDefaultModel: teammateModelDisplayString(model, mainLoopModel ?? getMainLoopModel()),
-              }));
-              logEvent('tengu_teammate_default_model_changed', {
-                model: model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              });
-            }}
-            onCancel={() => {
-              setShowSubmenu(null);
-              setTabsHidden(false);
-            }}
           />
           <Text dimColor>
             <Byline>
@@ -2300,15 +2272,6 @@ export function Config({
       )}
     </Box>
   );
-}
-
-function teammateModelDisplayString(value: string | null | undefined, leaderModel?: string | null): string {
-  // unset + explicit Default both follow the leader session model
-  if (value === undefined || value === null) {
-    const resolved = leaderModel ?? getMainLoopModel() ?? getHardcodedTeammateModelFallback();
-    return `Default (currently ${modelDisplayString(resolved)})`;
-  }
-  return modelDisplayString(value);
 }
 
 const THEME_LABELS: Record<string, string> = {

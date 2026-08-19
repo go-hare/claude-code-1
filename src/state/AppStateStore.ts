@@ -117,6 +117,12 @@ export type AppState = DeepImmutable<{
    */
   briefTranscript: boolean
   viewSelectionMode: 'none' | 'selecting-agent' | 'viewing-agent'
+  /**
+   * densable 2.1.234 `queueEditIndex` — index into editable queued commands
+   * when ↑/↓ selects a still-queued entry for edit. Esc clears this without
+   * interrupting the turn (#20).
+   */
+  queueEditIndex: number | null
   // Which footer pill is focused (arrow-key navigation below the prompt).
   // Lives in AppState so pill components rendered outside PromptInput
   // (CompanionSprite in REPL.tsx) can read their own focused state.
@@ -285,6 +291,10 @@ export type AppState = DeepImmutable<{
     setAt: number
     iterations: number
     tokensAtStart: number
+    /** densable 2.1.234 iYp — deferral clock while bg work blocks Stop eval. */
+    deferredSince?: number
+    checkinCount?: number
+    lastDeferralPassAt?: number
   }
   tungstenActiveSession?: {
     sessionName: string
@@ -574,6 +584,7 @@ export function getDefaultAppState(): AppState {
       return isFocusViewActive(s.viewMode, s.briefTranscript)
     })(),
     viewSelectionMode: 'none',
+    queueEditIndex: null,
     footerSelection: null,
     kairosEnabled: false,
     remoteSessionUrl: undefined,

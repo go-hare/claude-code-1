@@ -971,6 +971,14 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe('Whether to show tips in the spinner'),
+      // densable 2.1.234 autoContinueAtUsageLimit (userSettings). Absent key ⇒
+      // effective true via autoContinueKeyPresence==="absent" (SEA BXa/Wqn).
+      autoContinueAtUsageLimit: z
+        .boolean()
+        .optional()
+        .describe(
+          'Continue the current task automatically when the claude.ai usage limit resets',
+        ),
       // Official settings.tui ("default" | "fullscreen") — explicit TUI renderer.
       // Consumed by isFullscreenEnvEnabled(); "default" forces classic layout,
       // "fullscreen" forces alt-screen / no-flicker. Absent → env / auto default.
@@ -1065,6 +1073,18 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Advisor model for the server-side advisor tool.'),
+      // densable 2.1.234 /autocompact — token window before auto-summarizing.
+      // Actual threshold is min(this, model max context). Env
+      // CLAUDE_CODE_AUTO_COMPACT_WINDOW takes precedence when set.
+      autoCompactWindow: z
+        .number()
+        .int()
+        .min(100_000)
+        .max(1_000_000)
+        .optional()
+        .describe(
+          'Auto-compact window in tokens (100000–1000000). Omit for model-tuned auto. Overridden by CLAUDE_CODE_AUTO_COMPACT_WINDOW.',
+        ),
       fastMode: z
         .boolean()
         .optional()

@@ -1,11 +1,19 @@
-import type { UUID } from 'crypto'
+import { randomUUID, type UUID } from 'crypto'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/metadata.js'
+import {
+  claimQuotaAutoResumeTurn,
+  filterPendingQuotaContinuationIfRevoked,
+  onQuotaAutoResumeHumanSubmit,
+  releaseQuotaAutoResumeTurnClaim,
+  type QuotaTurnClaim,
+} from 'src/services/quotaAutoResume.js'
 import { type Command, getCommandName, isCommandEnabled } from '../commands.js'
 import { selectableUserMessagesFilter } from '../components/MessageSelector.js'
 import type { SpinnerMode } from '../components/Spinner/types.js'
 import type { QuerySource } from '../constants/querySource.js'
 import {
+  addToHistory,
   expandPastedTextRefs,
   formatUnavailablePastedRefsMessage,
   parseReferences,
@@ -32,7 +40,7 @@ import { fileHistoryEnabled, fileHistoryMakeSnapshot } from './fileHistory.js'
 import { gracefulShutdownSync } from './gracefulShutdown.js'
 import { toError } from './errors.js'
 import { logError } from './log.js'
-import { enqueue } from './messageQueueManager.js'
+import { enqueue, isQueuedCommandEditable } from './messageQueueManager.js'
 import { resolveSkillModelOverride } from './model/model.js'
 import {
   claimConsumableQueuedAutonomyCommands,
@@ -43,6 +51,7 @@ import { processUserInput } from './processUserInput/processUserInput.js'
 import type { QueryGuard } from './QueryGuard.js'
 import { queryCheckpoint, startQueryProfile } from './queryProfiler.js'
 import { applyTurnStartOriginFraming } from './messages.js'
+import { isCommandImmediate } from './immediateCommand.js'
 import { runWithWorkload } from './workloadContext.js'
 
 function exit(): void {
@@ -139,6 +148,16 @@ export type HandlePromptSubmitParams = BaseExecutionParams & {
   skipSlashCommands?: boolean
   /** Preserves that the input originated from Remote Control when queued. */
   bridgeOrigin?: boolean
+  /**
+   * densable 2.1.234 — history entry built at submit; flushed on drain (JDr).
+   * Mid-turn queue stamps this on QueuedCommand instead of addToHistory now.
+   */
+  historyEntry?: QueuedCommand['historyEntry']
+  /**
+   * densable onSubmitProceed — mid-turn enqueue calls this before queueing so
+   * bang (`!`) mode resets to prompt (#20 stickiness).
+   */
+  onSubmitProceed?: () => void
 }
 
 export async function handlePromptSubmit(
@@ -166,6 +185,8 @@ export async function handlePromptSubmit(
     uuid,
     skipSlashCommands,
     bridgeOrigin,
+    historyEntry,
+    onSubmitProceed,
   } = params
 
   const { setCursorOffset, clearBuffer, resetHistory } = helpers
@@ -288,9 +309,10 @@ export async function handlePromptSubmit(
     const commandArgs =
       spaceIndex === -1 ? '' : trimmedInput.slice(spaceIndex + 1).trim()
 
+    // densable ARt(cmd, args) — resolve boolean | (args)=>boolean
     const immediateCommand = commands.find(
       cmd =>
-        cmd.immediate &&
+        isCommandImmediate(cmd, commandArgs) &&
         isCommandEnabled(cmd) &&
         (cmd.name === commandName ||
           cmd.aliases?.includes(commandName) ||
@@ -383,6 +405,14 @@ export async function handlePromptSubmit(
       params.abortController?.abort('interrupt')
     }
 
+    // densable: e.onSubmitProceed?.() before oI — reset bang mode mid-turn (#20)
+    onSubmitProceed?.()
+    // densable Yqn(O) — se = I==="prompt" && Ydg; Ydg residual, prompt-mode is the gate
+    const queuedUuid = uuid ?? randomUUID()
+    if (mode === 'prompt') {
+      onQuotaAutoResumeHumanSubmit(queuedUuid)
+    }
+
     // Enqueue with string value + raw pastedContents. Images will be resized
     // at execution time when processUserInput runs (not baked in here).
     enqueue({
@@ -394,7 +424,8 @@ export async function handlePromptSubmit(
       bridgeOrigin,
       // densable prompt enqueue stamps human origin so Wzn keyword gate can fire.
       origin: { kind: 'human' },
-      uuid,
+      uuid: queuedUuid,
+      historyEntry,
     })
 
     onInputChange('')
@@ -411,6 +442,7 @@ export async function handlePromptSubmit(
   // Construct a QueuedCommand from the direct user input so both paths
   // go through the same executeUserInput loop. This ensures images get
   // resized via processUserInput regardless of how the command arrives.
+  const cmdUuid = uuid ?? randomUUID()
   const cmd: QueuedCommand = {
     value: finalInput,
     preExpansionValue: input,
@@ -420,7 +452,13 @@ export async function handlePromptSubmit(
     bridgeOrigin,
     // densable prompt path: origin.kind === "human" (Wzn for ultracode keyword).
     origin: { kind: 'human' },
-    uuid,
+    uuid: cmdUuid,
+    historyEntry,
+  }
+
+  // densable Yqn(O,{dispatching:!0}) — idle-path prompt submit
+  if (mode === 'prompt') {
+    onQuotaAutoResumeHumanSubmit(cmdUuid, { dispatching: true })
   }
 
   await executeUserInput({
@@ -481,6 +519,14 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     return getToolUseContext(messages, [], abortController, mainLoopModel)
   }
 
+  // densable w = (g??[]).flatMap(uuid) — captured before z4f so G4f sees
+  // the original drain set (including a Jqn-stripped continuation).
+  const rawQueued = queuedCommands ?? []
+  const turnUuids = rawQueued.flatMap(cmd =>
+    cmd.uuid === undefined ? [] : [cmd.uuid],
+  )
+  let turnClaim: QuotaTurnClaim | null = null
+
   // Wrap in try-finally so the guard is released even if processUserInput
   // throws or onQuery is skipped. onQuery's finally calls queryGuard.end(),
   // which transitions running→idle; cancelReservation() below is a no-op in
@@ -508,7 +554,8 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     // Iterate all commands uniformly. First command gets attachments +
     // ideSelection + pastedContents, rest skip attachments to avoid
     // duplicating turn-level context (IDE selection, todos, diffs).
-    let commands = queuedCommands ?? []
+    // densable J=z4f(g??[]) — strip pending continuation only if Jqn.
+    let commands = filterPendingQuotaContinuationIfRevoked(rawQueued)
     const queuedAutonomyClaim =
       await claimConsumableQueuedAutonomyCommands(commands)
     commands = queuedAutonomyClaim.attachmentCommands
@@ -519,6 +566,16 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
       // autonomy command was skipped as non-consumable.
       setAbortController(null)
       return
+    }
+
+    // densable JDr: flush historyEntry on drain — not at mid-turn enqueue (#20)
+    for (const command of commands) {
+      if (!command.historyEntry) continue
+      try {
+        addToHistory(command.historyEntry)
+      } catch (err) {
+        logError(toError(err))
+      }
     }
 
     // Compute the workload tag for this turn. queueProcessor can batch a
@@ -673,6 +730,25 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               }
             }
           }
+          // densable W4f — claim takeover vs continuation before onQuery.
+          // Gold: z=Math.max(0,J.findIndex(Uft)); se=J[z]
+          const firstUftIndex = Math.max(
+            0,
+            commands.findIndex(isQueuedCommandEditable),
+          )
+          const claimCmd = commands[firstUftIndex]
+          const claimMode = claimCmd?.mode ?? 'prompt'
+          const humanCommands = commands.filter(isQueuedCommandEditable)
+          turnClaim = claimQuotaAutoResumeTurn({
+            turnUuids,
+            isHumanTakeover:
+              shouldQuery &&
+              (claimMode === 'prompt' || claimMode === 'bash') &&
+              claimCmd !== undefined &&
+              isQueuedCommandEditable(claimCmd),
+            humanCommandUuids: humanCommands.map(cmd => cmd.uuid),
+            willQuery: shouldQuery,
+          })
           await onQuery(
             newMessages,
             abortController,
@@ -761,6 +837,8 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
       throw turnError
     }
   } finally {
+    // densable G4f(S,w) — release W4f claim after the turn (or on throw).
+    releaseQuotaAutoResumeTurnClaim(turnClaim, turnUuids)
     // Safety net: release the guard reservation if processUserInput threw
     // or onQuery was skipped. No-op if onQuery already ran (guard is idle
     // via end(), or running — cancelReservation only acts on dispatching).

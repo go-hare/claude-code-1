@@ -18,7 +18,6 @@ import type {
 } from '../types/textInputTypes.js'
 import type { PastedContent } from './config.js'
 import { extractTextContent, isHumanLikeOrigin } from './messages.js'
-import { objectGroupBy } from './objectGroupBy.js'
 import { recordQueueOperation } from './sessionStorage.js'
 import { createSignal } from './signal.js'
 
@@ -483,14 +482,34 @@ export type PopAllEditableResult = {
   text: string
   cursorOffset: number
   images: PastedContent[]
+  /** densable ve: bash iff every popped editable cmd is bash; else prompt */
+  mode: 'bash' | 'prompt'
 }
 
 /**
- * Pop all editable commands and combine them with current input for editing.
- * Notification modes (task-notification) are left in the queue
- * to be auto-processed later.
- * Returns object with combined text, cursor offset, and images to restore.
- * Returns undefined if no editable commands in queue.
+ * densable NMt(e,t): editable && (inputEmpty || mode!=="bash").
+ * Bang-shell queue entries only pop when the prompt is empty — otherwise ↑
+ * would splice `!` text into a prompt draft and send it as plain text (#19).
+ */
+export function isPoppableEditableCommand(
+  cmd: QueuedCommand,
+  inputEmpty: boolean,
+): boolean {
+  return isQueuedCommandEditable(cmd) && (inputEmpty || cmd.mode !== 'bash')
+}
+
+/** densable txa(e): queue has an NMt-poppable entry given inputEmpty. */
+export function hasPoppableEditableCommandsInQueue(
+  inputEmpty: boolean,
+): boolean {
+  return commandQueue.some(cmd => isPoppableEditableCommand(cmd, inputEmpty))
+}
+
+/**
+ * Pop editable commands and combine them with current input for editing.
+ * densable `ve` 1:1 (2.1.234): NMt filter; mode bash only when every selected
+ * cmd is bash; when restoring as prompt, leave bash entries in the queue.
+ * Notification modes stay queued for auto-processing.
  */
 export function popAllEditable(
   currentInput: string,
@@ -500,11 +519,21 @@ export function popAllEditable(
     return undefined
   }
 
-  const { editable = [], nonEditable = [] } = objectGroupBy(
-    [...commandQueue],
-    cmd => (isQueuedCommandEditable(cmd) ? 'editable' : 'nonEditable'),
+  const inputEmpty = currentInput === ''
+  const candidates = commandQueue.filter(cmd =>
+    isPoppableEditableCommand(cmd, inputEmpty),
   )
+  if (candidates.length === 0) {
+    return undefined
+  }
 
+  // densable: Je=je.every(mode==="bash")?"bash":"prompt"
+  const mode: 'bash' | 'prompt' = candidates.every(cmd => cmd.mode === 'bash')
+    ? 'bash'
+    : 'prompt'
+  // densable: Ft=Je==="bash"?je:je.filter(mode!=="bash")
+  const editable =
+    mode === 'bash' ? candidates : candidates.filter(cmd => cmd.mode !== 'bash')
   if (editable.length === 0) {
     return undefined
   }
@@ -542,12 +571,110 @@ export function popAllEditable(
     )
   }
 
-  // Replace queue contents with only the non-editable commands
+  // densable: keep commands not in Ft (incl. bash left behind on prompt restore)
+  const popped = new Set(editable)
+  const remaining = commandQueue.filter(cmd => !popped.has(cmd))
   commandQueue.length = 0
-  commandQueue.push(...nonEditable)
+  commandQueue.push(...remaining)
   notifySubscribers()
 
-  return { text: newInput, cursorOffset, images }
+  return { text: newInput, cursorOffset, images, mode }
+}
+
+export type PopEditableAtResult = PopAllEditableResult
+
+/**
+ * densable `Ne` / `popEditableAt` 1:1 (2.1.234 #20).
+ * Index is into `n.filter(lJ)` (editable), then NMt-gated.
+ * Paste-id remap (`ke`) is not ported — same extract path as `popAllEditable`.
+ */
+export function popEditableAt(
+  index: number,
+  currentInput: string,
+  currentCursorOffset: number,
+): PopEditableAtResult | undefined {
+  const cmd = commandQueue.filter(isQueuedCommandEditable)[index]
+  if (!cmd) {
+    return undefined
+  }
+  if (!isPoppableEditableCommand(cmd, currentInput === '')) {
+    return undefined
+  }
+
+  const text = extractTextFromValue(cmd.value)
+  const newInput = [text, currentInput].filter(Boolean).join('\n')
+  const cursorOffset = text.length + 1 + currentCursorOffset
+
+  const images: PastedContent[] = []
+  if (cmd.pastedContents) {
+    for (const content of Object.values(cmd.pastedContents)) {
+      if (content.type === 'image') {
+        images.push(content)
+      }
+    }
+  }
+  images.push(...extractImagesFromValue(cmd.value, Date.now()))
+
+  logOperation('popOne', typeof cmd.value === 'string' ? cmd.value : undefined)
+
+  const gr = commandQueue.indexOf(cmd)
+  if (gr !== -1) {
+    commandQueue.splice(gr, 1)
+    notifySubscribers()
+  }
+
+  return {
+    text: newInput,
+    cursorOffset,
+    images,
+    mode: cmd.mode === 'bash' ? 'bash' : 'prompt',
+  }
+}
+
+/**
+ * densable LI `lte()` branch — ↑ walks still-queued editables, then history.
+ */
+export function queueEditIndexAfterHistoryUp(
+  current: number | null,
+  editableCount: number,
+): { queueEditIndex: number | null; historyUp: boolean } {
+  if (current === null && editableCount > 0) {
+    return { queueEditIndex: editableCount - 1, historyUp: false }
+  }
+  if (current !== null) {
+    if (current > 0) {
+      return { queueEditIndex: current - 1, historyUp: false }
+    }
+    return { queueEditIndex: null, historyUp: true }
+  }
+  return { queueEditIndex: null, historyUp: true }
+}
+
+/**
+ * densable na `lte()` branch — ↓ walks still-queued editables, then footer/history.
+ */
+export function queueEditIndexAfterHistoryDown(
+  current: number | null,
+  editableCount: number,
+): { queueEditIndex: number | null; consumed: boolean } {
+  if (current === null) {
+    return { queueEditIndex: null, consumed: false }
+  }
+  if (current < editableCount - 1) {
+    return { queueEditIndex: current + 1, consumed: true }
+  }
+  return { queueEditIndex: null, consumed: true }
+}
+
+/** densable clamp effect: `if(yo===0)mr(null); else if(Er>yo-1)mr(yo-1)`. */
+export function clampQueueEditIndex(
+  current: number | null,
+  editableCount: number,
+): number | null {
+  if (current === null) return null
+  if (editableCount === 0) return null
+  if (current > editableCount - 1) return editableCount - 1
+  return current
 }
 
 /**

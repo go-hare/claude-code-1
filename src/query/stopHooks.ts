@@ -57,38 +57,6 @@ import {
   createCacheSafeParams,
   saveCacheSafeParams,
 } from '../utils/forkedAgent.js'
-import type { TaskState } from '../tasks/types.js'
-
-const BLOCKING_TASK_TYPES = new Set([
-  'local_agent',
-  'remote_agent',
-  'in_process_teammate',
-  'local_workflow',
-])
-
-function isTerminalStatus(status: string): boolean {
-  return status === 'completed' || status === 'failed' || status === 'killed'
-}
-
-function hasActiveBackgroundWork(tasks: Record<string, TaskState>): boolean {
-  for (const task of Object.values(tasks)) {
-    if (
-      BLOCKING_TASK_TYPES.has(task.type) &&
-      !isTerminalStatus(task.status) &&
-      !(
-        task.type === 'in_process_teammate' &&
-        'isIdle' in task &&
-        (task as Record<string, unknown>).isIdle
-      )
-    ) {
-      return true
-    }
-    if (task.type === 'local_bash' && !isTerminalStatus(task.status)) {
-      return true
-    }
-  }
-  return false
-}
 
 type StopHookResult = {
   blockingErrors: Message[]
@@ -295,17 +263,23 @@ export async function* handleStopHooks(
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
 
-    // Defer goal evaluation while background work is still running.
-    // Matches upstream behavior: if an active goal exists but agents/bash tasks
-    // are still in-flight, remove the goal's Stop hook for this turn so it
-    // doesn't fire prematurely. The hook remains registered for the next turn.
-    if (appState.activeGoal) {
+    // densable 2.1.234: defer goal Stop while DMv bg work runs; iYp check-in
+    // after CLAUDE_CODE_GOAL_CHECKIN_MINUTES (default 30). Do not bump
+    // iterations on defer (local invent) — use deferredSince / checkinCount.
+    if (appState.activeGoal && !toolUseContext.agentId) {
       const tasks = appState.tasks ?? {}
-      if (hasActiveBackgroundWork(tasks)) {
+      const {
+        listGoalDeferringTasks,
+        planGoalCheckin,
+        clearGoalDeferralFields,
+      } = await import('../services/goal/goalCheckin.js')
+      const deferring = listGoalDeferringTasks(tasks)
+      // densable: X=DMv(...); if(X.length>0) iYp else clear deferral.
+      // Do not OR invent hasActiveBackgroundWork — empty DMv must not defer.
+      if (deferring.length > 0) {
         logForDebugging(
           '[goal] evaluation deferred \u2014 background work still running',
         )
-        // Remove the goal hook temporarily — it will be re-evaluated next turn
         const { getSessionHooks, removeSessionHook } = await import(
           '../utils/hooks/sessionHooks.js'
         )
@@ -327,22 +301,58 @@ export async function* handleStopHooks(
                   'Stop',
                   hook,
                 )
-                // Re-register on next turn by incrementing iterations
-                toolUseContext.setAppState(prev => {
-                  if (!prev.activeGoal) return prev
-                  return {
-                    ...prev,
-                    activeGoal: {
-                      ...prev.activeGoal,
-                      iterations: prev.activeGoal.iterations + 1,
-                    },
-                  }
-                })
                 break
               }
             }
           }
         }
+        try {
+          const plan = planGoalCheckin(
+            appState.activeGoal,
+            deferring,
+            Date.now(),
+            {
+              onInjected: info => {
+                const shells = info.deferring.filter(
+                  t => t.type === 'local_bash' || t.type === 'local_shell',
+                ).length
+                logEvent('tengu_goal_checkin_injected', {
+                  deferredMs: info.deferredMs,
+                  activeShells: shells,
+                  activeAgents: info.deferring.length - shells,
+                  checkinCount: info.checkinCount,
+                })
+                logForDebugging(
+                  `[goal] check-in injected (turn_end) after ${Math.round(info.deferredMs / 1000)}s deferred`,
+                )
+              },
+            },
+          )
+          if (plan.nextGoal !== appState.activeGoal) {
+            toolUseContext.setAppState(prev => {
+              if (!prev.activeGoal) return prev
+              return { ...prev, activeGoal: plan.nextGoal }
+            })
+          }
+          if (plan.checkinText) {
+            const checkinMsg = createUserMessage({
+              content: plan.checkinText,
+              isMeta: true,
+            })
+            blockingErrors.push(checkinMsg)
+            yield checkinMsg
+          }
+        } catch (err) {
+          logForDebugging(`[goal] check-in plan failed: ${errorMessage(err)}`, {
+            level: 'error',
+          })
+        }
+      } else if (appState.activeGoal.deferredSince !== undefined) {
+        const cleared = clearGoalDeferralFields(appState.activeGoal)
+        toolUseContext.setAppState(prev => {
+          if (!prev.activeGoal) return prev
+          return { ...prev, activeGoal: cleared }
+        })
       }
     }
 

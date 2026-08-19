@@ -329,6 +329,14 @@ export type QueuedCommand = {
   /** Raw pasted contents including images. Images are resized at execution time. */
   pastedContents?: Record<number, PastedContent>
   /**
+   * densable 2.1.234 `historyEntry` — built at submit, written on drain (JDr).
+   * Mid-turn queue must not addToHistory until the command actually runs (#20).
+   */
+  historyEntry?: {
+    display: string
+    pastedContents: Record<number, PastedContent>
+  }
+  /**
    * The input string before [Pasted text #N] placeholders were expanded.
    * Used for ultraplan keyword detection so pasted content containing the
    * keyword does not trigger a CCR session. Falls back to `value` when
