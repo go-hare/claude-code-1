@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code",
-  "version": "2.7.44",
+  "version": "2.7.45",
   "description": "Source restoration / engineering rebuild of Anthropic Claude Code CLI — multi-provider models, self-hosted Remote Control, ACP, daemon sessions, MCP, plugins, and terminal automation",
   "type": "module",
   "author": "DeQiang",
@@ -44,14 +44,14 @@
     "cli-wrapper.cjs"
   ],
   "optionalDependencies": {
-    "@go-hare/claude-code-darwin-arm64": ">=2.7.44",
-    "@go-hare/claude-code-darwin-x64": ">=2.7.44",
-    "@go-hare/claude-code-linux-x64": ">=2.7.44",
-    "@go-hare/claude-code-linux-arm64": ">=2.7.44",
-    "@go-hare/claude-code-linux-x64-musl": ">=2.7.44",
-    "@go-hare/claude-code-linux-arm64-musl": ">=2.7.44",
-    "@go-hare/claude-code-win32-x64": ">=2.7.44",
-    "@go-hare/claude-code-win32-arm64": ">=2.7.44",
+    "@go-hare/claude-code-darwin-arm64": ">=2.7.45",
+    "@go-hare/claude-code-darwin-x64": ">=2.7.45",
+    "@go-hare/claude-code-linux-x64": ">=2.7.45",
+    "@go-hare/claude-code-linux-arm64": ">=2.7.45",
+    "@go-hare/claude-code-linux-x64-musl": ">=2.7.45",
+    "@go-hare/claude-code-linux-arm64-musl": ">=2.7.45",
+    "@go-hare/claude-code-win32-x64": ">=2.7.45",
+    "@go-hare/claude-code-win32-arm64": ">=2.7.45",
     "doubaoime-asr": "^0.1.0"
   },
   "scripts": {

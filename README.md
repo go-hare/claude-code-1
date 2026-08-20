@@ -43,7 +43,25 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.44**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 18 / N/A 1**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.45**），与 git tag 可能不同步。
+
+#### densable 2.1.234–2.1.235 对齐说明（2.7.45）
+
+对照文档：
+
+- `docs/upstream-extraction/v2.1.235/official-235-checklist.md`（**HAVE 18 / PARTIAL 0 / GAP 0 / N/A 1**；官方 19 条）
+- `docs/upstream-extraction/v2.1.235/changelog-2.1.235.md`、`progress.md`
+- 邻版：`docs/upstream-extraction/v2.1.235/changelog-2.1.234-neighbor.md`（quota auto-resume 等 tip 已有）
+
+叠在 **2.1.233**（npm **2.7.40–2.7.44**）之上。**2.7.45** 一次收口 **2.1.235** CLI 产品面（#1–#18）+ tip 已有 **2.1.234** quota auto-resume，并补 adversarial 残留：**C1** Edit/Write `contentWithheld`、**I1** cloud-session RC 门；另含 CLI IDE bridge `uSm` 与 quota rearm `HEv=2`（非 checklist 主行）。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **输入 / 渲染** | #1 `settings.spellcheck` underline-as-you-type；#3 md-list OIl=32 + hanging；#4 multiline highlight 偏移；#8 slash `oX` 解 `&amp;|&lt;|&gt;`；#15 vim `savedCursorOffset`；#16 dialog `getFocusedValue` 同 tick | spawn env / cleanup residual 见 checklist |
+| **权限 / Agent** | #5 Shift+Tab `confirm:cycleMode`（comment 开→折叠字段）；#6 omit `subagent_type` + GP 不可用明确错误；#7 notebook `contentWithheld`；#12 `suppressAlwaysAllowRule` + grant 覆盖一致；**C1** Edit/Write B7S withhold（`GFt`/`sRe`，one-time-only） | UNC network withhold 仍 Windows-only（同 #7 residual） |
+| **工具 / 上下文** | #2 LSP `hasEverConnected` latch；#9 update footer `failureHint`；#10 `showExpandedTodos` 持久化；#11 cloud bg delta poll；#13 embedded rg **15.0.x 新于** SEA 14.1.1（patho fail-fast + `-m/-A/-C`）；#14 autocompact-off hint；#17 SendMessage `message_too_large` | **禁止** rg 15→14 / JS fake fail-fast；sidecar≠SEA argv0 仅笔记 |
+| **RC / IDE** | #18 `claude rc`↔interactive enterprise-gateway 同门；**I1** `CLAUDE_CODE_REMOTE`/`mX` cloud-session 拒绝串；**uSm** CLI IDE bridge 14 gates + survey/nudge 路由 | **#19 VSCode host focus N/A**（invent-ban）；不 invent gateway / Desktop·cloud handoff |
+| **234 邻版 / rearm** | tip **2.1.234** quota auto-resume；rearm `REARM_CAP=2` + xxi same-family | 不 invent storageV5 / overage_included 客户端 |
 
 #### densable 2.1.231–2.1.233 对齐说明（2.7.40 → 2.7.43；2.7.44 产品补丁）
 
@@ -201,10 +219,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.44）
+### 近期更新（2.7.5 → 2.7.45）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.45** | **densable 2.1.235（HAVE 18 / N/A 1）** + tip **2.1.234** quota auto-resume：spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP 门 / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX 门**；CLI IDE bridge `uSm`；quota rearm `HEv=2`。**#19 VSCode host focus N/A**。 |
 | **2.7.44** | **teammate 默认模型跟随 leader**：`teammateDefaultModel` unset/null 经 leader → `mainLoopModel` / `ANTHROPIC_MODEL` 解析，硬编码 Opus 仅最后兜底；Config/ModelPicker 文案对齐；向 teammate 转发 `ANTHROPIC_MODEL` 与 `ANTHROPIC_DEFAULT_*_MODEL`。 |
 | **2.7.43** | **densable 1:1 审查收口 + 兼容层 PTL**：thinking-only re-stream 前 credit session cost；G7 mint-time `cse_*` 放弃/teardown 清理（reattach 暂态保留）；`epoch_stale`-only Ot（`epoch_conflict` 不进 Ba remint）；OpenAI/Grok/Gemini catch 经 `getAssistantMessageFromError`，`maximum prompt length` 可进 reactive compact。 |
 | **2.7.42** | **MCP tools/list 边界 + residual cast 收口**：`listToolsResult` 统一 wire 边界（chrome/weixin `as unknown as ListToolsResult`）；`createSdkMcpServer` densable `cr4` registerTool 无 cast；`entrypoints/mcp.ts` tools/call 对齐 `coerceInput`→`safeParse`→`validateInput`→`call`；`DensableAjvJsonSchemaValidator implements jsonSchemaValidator`；channel enqueue `origin` 无 `as any`。 |

@@ -43,7 +43,25 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.44**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 18 / N/A 1**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.45**; trust `package.json` / npm) and may not match git tags.
+
+#### densable 2.1.234–2.1.235 alignment (2.7.45)
+
+Sources of truth:
+
+- `docs/upstream-extraction/v2.1.235/official-235-checklist.md` (**HAVE 18 / PARTIAL 0 / GAP 0 / N/A 1**; 19 official rows)
+- `docs/upstream-extraction/v2.1.235/changelog-2.1.235.md`, `progress.md`
+- Neighbor: `docs/upstream-extraction/v2.1.235/changelog-2.1.234-neighbor.md` (quota auto-resume already on tip)
+
+Stacked on **2.1.233** (npm **2.7.40–2.7.44**). **2.7.45** ships **2.1.235** CLI product surface (#1–#18) plus tip **2.1.234** quota auto-resume, and closes adversarial residuals: **C1** Edit/Write `contentWithheld`, **I1** cloud-session RC gate; also CLI IDE bridge `uSm` and quota rearm `HEv=2` (extras, not checklist primary rows).
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **input / render** | #1 `settings.spellcheck` underline-as-you-type; #3 md-list OIl=32 + hanging; #4 multiline highlight shift; #8 slash `oX` for `&amp;|&lt;|&gt;`; #15 vim `savedCursorOffset`; #16 dialog `getFocusedValue` same-tick | spawn env / cleanup residuals per checklist |
+| **permissions / Agent** | #5 Shift+Tab `confirm:cycleMode` (comment open → collapse field); #6 omit `subagent_type` + GP-unavailable clear error; #7 notebook `contentWithheld`; #12 `suppressAlwaysAllowRule` + grant coverage match; **C1** Edit/Write B7S withhold (`GFt`/`sRe`, one-time-only) | UNC network withhold still Windows-only (same #7 residual) |
+| **tools / context** | #2 LSP `hasEverConnected` latch; #9 update footer `failureHint`; #10 `showExpandedTodos` persist; #11 cloud bg delta poll; #13 embedded rg **15.0.x newer than** SEA 14.1.1 (patho fail-fast + `-m/-A/-C`); #14 autocompact-off hint; #17 SendMessage `message_too_large` | **no** rg 15→14 / JS fake fail-fast; sidecar≠SEA argv0 notes only |
+| **RC / IDE** | #18 `claude rc`↔interactive enterprise-gateway same gate; **I1** `CLAUDE_CODE_REMOTE`/`mX` cloud-session denial; **uSm** CLI IDE bridge 14 gates + survey/nudge routing | **#19 VSCode host focus N/A** (invent-ban); no gateway / Desktop·cloud handoff invent |
+| **234 neighbor / rearm** | tip **2.1.234** quota auto-resume; rearm `REARM_CAP=2` + xxi same-family | no storageV5 / overage_included client invent |
 
 #### densable 2.1.231–2.1.233 alignment (2.7.40 → 2.7.43; 2.7.44 product patch)
 
@@ -201,10 +219,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.44)
+### Recent updates (2.7.5 → 2.7.45)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.45** | **densable 2.1.235 (HAVE 18 / N/A 1)** + tip **2.1.234** quota auto-resume: spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP gate / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX gate**; CLI IDE bridge `uSm`; quota rearm `HEv=2`. **#19 VSCode host focus N/A**. |
 | **2.7.44** | **teammate default model follows leader**: unset/null `teammateDefaultModel` resolves via leader → `mainLoopModel` / `ANTHROPIC_MODEL`, with hardcoded Opus only as last resort; Config/ModelPicker copy aligned; forward `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_*_MODEL` to teammates. |
 | **2.7.43** | **densable 1:1 review close-out + compat PTL**: credit session cost before thinking-only re-stream; clear G7 mint-time `cse_*` on abandon/teardown (keep on reattach); `epoch_stale`-only Ot (`epoch_conflict` does not enter Ba remint); OpenAI/Grok/Gemini catch via `getAssistantMessageFromError` so `maximum prompt length` reaches reactive compact. |
 | **2.7.42** | **MCP tools/list boundary + residual cast close-out**: `listToolsResult` wire boundary (chrome/weixin `as unknown as ListToolsResult`); densable `cr4` `createSdkMcpServer` registerTool without cast; `entrypoints/mcp.ts` tools/call `coerceInput`→`safeParse`→`validateInput`→`call`; `DensableAjvJsonSchemaValidator implements jsonSchemaValidator`; channel enqueue `origin` without `as any`. |
