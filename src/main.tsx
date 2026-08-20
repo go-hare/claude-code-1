@@ -152,7 +152,9 @@ import {
 import { initializeAnalyticsGates } from 'src/services/analytics/sink.js';
 import {
   getOriginalCwd,
+  getResolvedOrgDefault,
   setAdditionalDirectoriesForClaudeMd,
+  setInitialEnvDefaultModel,
   setIsRemoteMode,
   setMainLoopModelOverride,
   setMainThreadAgentType,
@@ -2871,7 +2873,8 @@ async function run(): Promise<CommanderCommand> {
       //  - explicit model via --model or ANTHROPIC_MODEL (both feed alias resolution)
       //  - no env override (which short-circuits _CACHED_MAY_BE_STALE before disk)
       //  - flag absent from disk (== null also catches pre-#22279 poisoned null)
-      const explicitModel = options.model || process.env.ANTHROPIC_MODEL;
+      // densable ji: --model || ANTHROPIC_MODEL || ANTHROPIC_DEFAULT_MODEL
+      const explicitModel = options.model || process.env.ANTHROPIC_MODEL || process.env.ANTHROPIC_DEFAULT_MODEL;
       if (
         process.env.USER_TYPE === 'ant' &&
         explicitModel &&
@@ -2999,6 +3002,29 @@ async function run(): Promise<CommanderCommand> {
 
       // Compute resolved model for hooks (use user-specified model at launch)
       setInitialMainLoopModel(getUserSpecifiedModelSetting() || null);
+      // densable VVt(odt()) then Txs + model_env_default feature telemetry.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { resolveOrgDefaultSetting, resolveAnthropicDefaultModelEnv } =
+        require('./utils/model/orgDefaultModel.js') as typeof import('./utils/model/orgDefaultModel.js');
+      resolveOrgDefaultSetting();
+      setInitialEnvDefaultModel(process.env.ANTHROPIC_DEFAULT_MODEL ?? null);
+      if (process.env.ANTHROPIC_DEFAULT_MODEL !== undefined) {
+        if (resolveAnthropicDefaultModelEnv() === null) {
+          logEvent('tengu_feature_sad', {
+            feature_name: 'model_env_default' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error_code: 'inert' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        } else if (getResolvedOrgDefault()) {
+          logEvent('tengu_feature_sad', {
+            feature_name: 'model_env_default' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error_code: 'outranked_by_org_default' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        } else {
+          logEvent('tengu_feature_ok', {
+            feature_name: 'model_env_default' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        }
+      }
       const initialMainLoopModel = getInitialMainLoopModel();
       const resolvedInitialModel = parseUserSpecifiedModel(initialMainLoopModel ?? getDefaultMainLoopModel());
 
@@ -3144,6 +3170,16 @@ async function run(): Promise<CommanderCommand> {
         // Install asciicast recorder before Ink mounts (ant-only, opt-in via CLAUDE_CODE_TERMINAL_RECORDING=1)
         if (process.env.USER_TYPE === 'ant') {
           installAsciicastRecorder();
+        }
+
+        // densable iIh — fullscreen boot canary reconcile before Ink mount.
+        try {
+          const { reconcileFullscreenBootAtLaunch, armFullscreenBootCanary } = await import('./utils/fullscreen.js');
+          reconcileFullscreenBootAtLaunch();
+          // densable aIh — await arm before createRoot (SEA: await aIh then Ink).
+          await armFullscreenBootCanary();
+        } catch {
+          // canary optional at early boot
         }
 
         const { createRoot } = await import('@anthropic/ink');
@@ -3812,10 +3848,12 @@ async function run(): Promise<CommanderCommand> {
         return;
       }
 
-      // Log model config at startup
+      // Log model config at startup (densable adds default_env_var)
       logEvent('tengu_startup_manual_model_config', {
         cli_flag: options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         env_var: process.env.ANTHROPIC_MODEL as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        default_env_var: process.env
+          .ANTHROPIC_DEFAULT_MODEL as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         settings_file: (getInitialSettings() || {}).model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         subscriptionType: getSubscriptionType() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         agent: agentSetting as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

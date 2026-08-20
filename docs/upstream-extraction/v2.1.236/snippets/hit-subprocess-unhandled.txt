@@ -1,0 +1,26 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: subprocess-unhandled
+checklist: Unhandled rejection when subprocess fails to start e.g. powershell WSL (RECHECK)
+found: true
+topSymbols: ['powershell.exe', 'unhandledRejection', 'failed to spawn']
+oneLineNote: RECHECK: powershell.exe/WSL spawn + failed-to-spawn/unhandledRejection present; exact changelog phrase absent
+search_patterns: ['powershell.exe', 'failed to spawn', 'unhandledRejection', 'WSL']
+
+=== pattern counts ===
+'powershell.exe': 30
+'failed to spawn': 32
+'unhandledRejection': 12
+'WSL': 96
+
+=== powershell.exe WSL ===
+--- offset 283205447 ---
+se"linux":{let r=o2n();if(typeof r.tool!=="string")r.probe().then(()=>{if(typeof r.tool==="string")gTp(e)});else if(r.tool==="wl-copy")euS(e);else if(r.tool==="xclip")Vn("xclip",["-selection","clipboard"],t),Vn("xclip",["-selection","primary"],t);else if(r.tool==="xsel")Vn("xsel",["--clipboard","--input"],t),Vn("xsel",["--primary","--input"],t);else if(r.tool==="addon"){try{r.recordAddonWrite(Goi()?.setLinuxClipboardText(e)!==!1)}catch{r.recordAddonWrite(!1)}r.probe()}return}case"wsl":{Vn("powershell.exe",["-NoProfile","-NonInteractive","-Command",aTp],t);return}case"windows":{Vn("powershell",["-NoProfile","-NonInteractive","-Command",aTp],t);return}}}async function euS(e){let t=o2n(),r=t.beginWaylandCopy(),n={input:e,useCwd:!1,timeout:2000,stdout:"ignore",stderr:"ignore"};if(await Vn("wl-copy",[],n),!t.isLatestWaylandCopy(r))return;await Vn("wl-copy",["--primary"],n)}async function s2n(e="clipboard"){if(r2n())return"";let t={useCwd:!1,timeout:20
+
+=== failed to spawn ===
+--- offset 62611113 ---
+uninhabited type `!`Stream already endedfunctioninputContent-Length mismatchRequestBunRequest<r>method<d>:<r> ""<r>url<d>:<r> <r>params<d>:<r> <r>headers<d>:<r> <green>expected<r>hashingverificationserver boundqueryCnamequeryAqueryAaaaqueryNsqueryMxqueryNaptrlatestpublicrestricted,"access":null???authUrldoneUrl-...|...............retry-after .....tokenmissing `token` field in reponse jsonnpm-noticex-local-cachefailed to parse response jsonfailed to send OTP requestThreadSpawnfailed to spawn thread for opening auth url.This operation requires a one-time password..Enter OTP: failed to read OTP inputdefault,ipaddresslogin is not allowed from your IP addressotpunable to authenticate, need: {}one-time passfailed to publish package (dev) (peer) (optional)OOM writing version *CurrentUpdateLatestWorkspacePackage .[34m*.[0mBun.file() is not supported here yet (it needs an async version)topicDATA padded but emptystream flow-control window exceededconnectio
+
+=== unhandledRejection ===
+--- offset 59360015 ---
+"e", kConsoleCat, "time::" + key, 0);.    return originalTimeEnd.@call(this, label);.  };.}.function installRejectionInstrumentation() {.  let unhandled = 0, handledAfter = 0;.  function emitRejectionsCounter() {.    if (!isCategoryGroupEnabled(kRejectionsCat)).      return;.    events.push({.      pid: process.pid,.      tid,.      ts: now(),.      ph: "C",.      cat: kRejectionsCat,.      name: "rejections",.      args: { unhandled, handledAfter }.    });.  }.  process.on("unhandledRejection", function() {.    unhandled++, emitRejectionsCounter();.  }), process.on("rejectionHandled", function() {.    handledAfter++, emitRejectionsCounter();.  });.}.function installThreadpoolInstrumentation() {.  let zlibExports = @getInternalField(@internalModuleRegistry, 190) || @createInternalModuleById(190), zlibAsyncMethods = [.    "deflate",.    "gzip",.    "deflateRaw",.    "unzip",.    "inflate",.    "gunzip",.    "inflateRaw",.    "brotliCompress",.

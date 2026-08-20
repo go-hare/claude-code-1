@@ -35,6 +35,8 @@ import {
   getUserForGrowthBook,
   resetUserCache,
 } from '../../utils/user.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
+import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
 import {
   is1PEventLoggingEnabled,
   logGrowthBookExperimentTo1P,
@@ -519,14 +521,65 @@ function getLocalGateDefault(feature: string): unknown | undefined {
 }
 
 /**
- * Check if GrowthBook operations should be enabled
+ * densable $nb — non-firstParty provider blocks live GrowthBook unless the
+ * host owns provider routing (CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST).
+ * Dynamic require avoids growthbook → providers → settings cycles.
  */
-function isGrowthBookEnabled(): boolean {
-  // 适配器模式：有自定义服务器配置时直接启用
-  if (process.env.CLAUDE_GB_ADAPTER_URL && process.env.CLAUDE_GB_ADAPTER_KEY) {
-    return true
+function isNonFirstPartyUnlessHostManaged(): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)) {
+    return false
   }
-  // GrowthBook depends on 1P event logging.
+  try {
+    const { getAPIProvider } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/model/providers.js') as typeof import('../../utils/model/providers.js')
+    return getAPIProvider() !== 'firstParty'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable Mg() !== null — gateway auth session present.
+ */
+function hasGatewayAuthSession(): boolean {
+  try {
+    const { getGatewayAuth } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
+    return getGatewayAuth() != null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable KJ — any reason to suppress 1P GrowthBook evaluation.
+ * `$nb() || Mg()!=null || _0e()`
+ */
+function isGrowthBookBlockedByProviderOrPrivacy(): boolean {
+  return (
+    isNonFirstPartyUnlessHostManaged() ||
+    hasGatewayAuthSession() ||
+    isTelemetryDisabled()
+  )
+}
+
+/**
+ * densable KIt / __e — GrowthBook live evaluation gate.
+ * `!DISABLE_GROWTHBOOK && !KJ()` (plus tip NODE_ENV=test via 1P logger).
+ * Adapter URL must NOT bypass 3P / telemetry-off / DISABLE_GROWTHBOOK.
+ */
+export function isGrowthBookEnabled(): boolean {
+  if (isEnvTruthy(process.env.DISABLE_GROWTHBOOK)) {
+    return false
+  }
+  // densable __e = !KJ
+  if (isGrowthBookBlockedByProviderOrPrivacy()) {
+    return false
+  }
+  // Tip: NODE_ENV=test and remaining analytics opt-outs (1P logger).
+  // 3P/telemetry already covered above; this keeps test isolation.
   return is1PEventLoggingEnabled()
 }
 

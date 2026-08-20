@@ -1,0 +1,43 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236
+sha256: 6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848
+key: cloud-env-empty
+id: 13
+checklist: Unclear error when cloud environments list empty/malformed
+gold: MIS malformed mapper + iSe fetchEnvironments + DIS schema + LIS outcome + Qht createDefault
+
+================================================================================
+BLOCK 0 | env id helpers (uAe/Dae/vZe/O1e/X4r) before MIS
+offset 284494305 (0x10f509e1)
+================================================================================
+function uAe(e){return e?.kind==="self_hosted_pool"}function Dae(e){return e.kind==="self_hosted_pool"?e.pool_id:e.environment_id}function vZe(e){return e!==void 0&&e.startsWith("ccpool_")}function O1e(){let e,t=$w();for(let r=t.length-1;r>=0;r--){let n=t[r],o=pn(n)?.remote?.defaultEnvironmentId;if(o===void 0)continue;if(vZe(o)&&!OIS.includes(n)){e??={id:o,source:n};continue}return{id:o,source:n,ignoredUntrustedPool:e?.id===o?void 0:e}}return{id:void 0,source:void 0,ignoredUntrustedPool:e}}function X4r(e){return e.startsWith("ccpool_")?{self_hosted_runner_pool_id:e}:{environment_id:e}}
+
+================================================================================
+BLOCK A | MIS + iSe + LIS + Qht
+offset 284494897 (0x10f50c31)
+================================================================================
+function MIS(e){if(typeof e==="string"&&e.trim().length===0)return new bt("The cloud environments service returned an empty response (HTTP 200 with no body). This is usually temporary \u2014 try again in a moment.","fetchEnvironments: HTTP 200 with an empty body");if(typeof e==="string")return new bt("The cloud environments service returned a response in an unexpected format (HTTP 200 with a non-JSON body). This is usually temporary \u2014 try again in a moment.","fetchEnvironments: HTTP 200 with a non-JSON body");return new bt("The cloud environments service returned a response in an unexpected format (HTTP 200 without a usable environments list). This is usually temporary \u2014 try again in a moment.","fetchEnvironments: HTTP 200 JSON body without a valid environments array")}async function iSe(e,t){return Yd("teleport_environments_list",async()=>{if(Zn()!=="firstParty")throw Error("Remote environments are only available on the first-party Anthropic API provider.");let n=e??ma()?.accessToken;if(!n)throw Error("Claude Code web sessions require authentication with a Claude.ai account. API key authentication is not sufficient. Please run /login to authenticate, or check your authentication status with /status.");let o=await lse();if(!o)throw Error("Unable to get organization UUID");let i=`${Xa().BASE_API_URL}/v1/environment_providers`;try{let s=await tq(()=>ni.get(i,{headers:{...s4(ma()?.accessToken??n),"x-organization-uuid":o},timeout:15000}));if(s.status!==200)throw Error(`Failed to fetch environments: ${s.status} ${s.statusText}`);let a=DIS().safeParse(s.data);if(!a.success)throw MIS(s.data);let l=a.data.environments,c=l.length>0;if(ar().hasRemoteEnvironment!==c)await sn((u)=>u.hasRemoteEnvironment===c?u:{...u,hasRemoteEnvironment:c},t);return l}catch(s){let a=yn(s);if(WC(s))T(`fetchEnvironments failed: ${a.message}`,{level:"error"});else Ee(a);throw a}},LIS)}function LIS(e){return e instanceof bt?"malformed_response":"error"}async function Qht(e="Default",t,r){return Yd("teleport_default_environment_create",async()=>{if(Zn()!=="firstParty")throw Error("Remote environments are only available on the first-party Anthropic API provider.");let n=r??ma()?.accessToken;if(!n)throw Error("No access token available");let o=await lse();if(!o)throw Error("Unable to get organization UUID");let i=`${Xa().BASE_API_URL}/v1/environment_providers/cloud/create`;return(await ni.post(i,{name:e,kind:"anthropic_cloud",description:"Default - trusted network access",config:{environment_type:"anthropic",cwd:"/home/user",init_script:null,environment:{},languages:[{name:"python",version:"3.11"},{name:"node",version:"20"}],network_config:{allowed_hosts:[],allow_default_hosts:!0}}},{headers:{...s4(n),"anthropic-beta":"ccr-byoc-2025-07-29","x-organization-uuid":o},timeout:15000,signal:t})).data})}
+
+================================================================================
+BLOCK B | DIS zod schema
+offset 284498797 (0x10f51b6d)
+================================================================================
+DIS=Se(()=>ye({environments:ft(AF((e)=>typeof e==="object"&&e!==null&&!Array.isArray(e)))}))});
+
+================================================================================
+BLOCK C | empty-list UX tags (near env_lookup_failed)
+env_lookup_failed offset 162703664
+================================================================================
+env_lookup_failed
+Couldn't look up cloud environments
+no_environment
+No cloud environment available. Create one from the web UI (or run /web-setup), then try again.
+
+NOTES:
+- Core GAP: HTTP 200 empty/non-JSON/non-list bodies must throw MIS() clear errors instead of generic Failed to fetch environments.
+- iSe: Yd("teleport_environments_list", fn, LIS); DIS().safeParse(s.data); !success -> throw MIS(s.data).
+- LIS(e): e instanceof bt ? "malformed_response" : "error".
+- DIS schema is LOOSE: {environments: array of non-null plain objects}. Do NOT invent full EnvironmentResource zod.
+- Empty environments[] that parses successfully is NOT this GAP (hasRemoteEnvironment=false path).
+- Qht createDefault description string differs from tip ("Default - trusted network access").
+- Avoid inventing Yd/bt wrappers if tip already has equivalent retry/error helpers; map messages 1:1.

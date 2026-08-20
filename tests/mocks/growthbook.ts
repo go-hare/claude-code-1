@@ -16,6 +16,8 @@ export function growthbookMock() {
     // Real API is sync (deprecated wrapper over CACHED_MAY_BE_STALE).
     // Returning a Promise poisons co-running suites that call it without await.
     getFeatureValue_CACHED_WITH_REFRESH: (_n: string, d: unknown) => d,
+    // densable KIt — default false in mocks so KD→qTa paths are testable.
+    isGrowthBookEnabled: () => false,
     hasGrowthBookEnvOverride: () => false,
     getAllGrowthBookFeatures: () => ({}),
     getGrowthBookConfigOverrides: () => ({}),

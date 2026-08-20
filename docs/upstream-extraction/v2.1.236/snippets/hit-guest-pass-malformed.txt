@@ -1,0 +1,27 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: guest-pass-malformed
+checklist: Spinner tips never appear when guest-pass reward in ~/.claude.json malformed
+found: true
+topSymbols: ['Efr', 'wgm', 'VsT.safeParse', 'referrer_reward', 'guest-passes', 'spinner tip failed']
+oneLineNote: guest-passes tip uses Efr()->wgm(safeParse referrer_reward); malformed reward => null. No literal ~/.claude.json malformed string
+search_patterns: ['guest-pass', 'referrer_reward', 'spinner tip failed', 'wgm(', 'Efr()']
+
+=== pattern counts ===
+'guest-pass': 10
+'referrer_reward': 5
+'spinner tip failed': 2
+'wgm(': 3
+'Efr()': 4
+
+=== BEST wgm safeParse referrer_reward ===
+--- offset 291296244 ---
+lityCache?.[e];if(!r)return{eligible:!1,needsRefresh:!0,hasCache:!1};let{eligible:n,timestamp:o}=r,i=bgm(o,Date.now());return{eligible:n,needsRefresh:i,hasCache:!0}}function VBt(e){return am(e.amount_minor_units,e.currency,"fit")}function wgm(e){let t=VsT().safeParse(e);return t.success?t.data:null}function YsT(e){let t=KsT().safeParse(e);return t.success?t.data:void 0}function Efr(){let e=Cc()?.organizationUuid;if(!e)return null;let r=ar().passesEligibilityCache?.[e];return wgm(r?.referrer_reward)}function Z2i(){let e=Cc()?.organizationUuid;if(!e)return null;let r=ar().passesEligibilityCache?.[e]?.remaining_passes;return typeof r==="number"?r:null}async function _gm(){let e=zsT();if(e.inFlight)return T("Passes: Reusing in-flight eligibility fetch"),e.inFlight;let t=Cc()?.organizationUuid;if(!t)return null;return e.inFlight=(async()=>{try{let r=await GsT(),n={...r,timestamp:Date.now()};return await sn((o)=>({...o,passesEligibilityCache:{...o.pass
+
+=== guest-passes tip Efr ===
+--- offset 296980610 ---
+,tier:"announcement",type:"info",promo:!1,priority:eit.org,isActive:()=>C9h(),render:()=>Fp.jsx(Xoc,{})},bzw={id:"startup-announcement",tier:"announcement",type:"info",promo:!1,priority:eit.launch,isActive:()=>P6t(!1)!==void 0&&!(YAe()?.isTopPriorityAnnouncement===!0&&Lns()),showAccentBar:()=>P6t(!1)?.accentBar!==!1,render:()=>Fp.jsx(Tic,{})},Szw={id:"fotw-nudge",tier:"announcement",type:"info",promo:!1,priority:eit.campaign,isActive:()=>Lns(),render:()=>Fp.jsx(lic,{})},vzw={id:"guest-passes",tier:"announcement",type:"info",promo:!0,maxImpressions:3,priority:eit.promo,isActive:(e)=>P9h(e.storageV5)&&!e2t()&&!p9r(),render:()=>Fp.jsx(Qoc,{})},Tzw={id:"fullscreen-downsell",tier:"announcement",type:"info",promo:!1,priority:eit.hint,claimsFirstShow:()=>(ar().fullscreenDownsellSeenCount??0)===0,isActive:()=>V.CLAUDE_CODE_TUI_JUST_SWITCHED===void 0&&K9h(),render:()=>Fp.jsx(dic,{})},wzw={id:"subscription-switch",tier:"announcement",type:"info",promo:!0,m
+
+=== spinner tip failed ===
+--- offset 173527040 ---
+....(...................................................................................................................................................p...............h...............................................................................................d.........................................................................................................i.............0...............@...............`...............................Yr..............................spinner tip failed........................................................................P,..0...0...0........S...;............................................................................................ .......................(.......@...........3S..q?......q?......3S...S.......D..P.......................................................x.......................................................................................................................................

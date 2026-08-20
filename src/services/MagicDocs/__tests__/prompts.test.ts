@@ -283,6 +283,34 @@ const realFsAdapter = {
       typeof options === 'string' ? options : (options?.encoding ?? undefined)
     return nodeFs.readFile(p, encoding)
   },
+  // densable notebook preview (`readFileBytes(path, MG+1)`) — without this,
+  // afterAll flips useMockForMagicDocs=false but leaves a incomplete adapter
+  // that poisons notebookPermissionPreview.235 (could-not-read).
+  readFileBytes: async (p: string, maxBytes?: number) => {
+    if (maxBytes === undefined) {
+      return nodeFs.readFile(p)
+    }
+    const handle = await nodeFs.open(p, 'r')
+    try {
+      const { size } = await handle.stat()
+      const readSize = Math.min(size, maxBytes)
+      const buffer = Buffer.allocUnsafe(readSize)
+      let offset = 0
+      while (offset < readSize) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          offset,
+          readSize - offset,
+          offset,
+        )
+        if (bytesRead === 0) break
+        offset += bytesRead
+      }
+      return offset < readSize ? buffer.subarray(0, offset) : buffer
+    } finally {
+      await handle.close()
+    }
+  },
   writeFile: (p: string, data: string | Uint8Array) =>
     nodeFs.writeFile(p, data),
   rename: (oldPath: string, newPath: string) => nodeFs.rename(oldPath, newPath),

@@ -1,6 +1,11 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import * as realConfig from 'src/utils/config.js'
 
-// Process-global mock.module — only mock config surface used by tipHistory.
+// Process-global mock.module — spread real config + restore in afterAll so
+// sibling suites (effort pin / orgConsent / tui) keep a full export surface.
+const configSnap = snapshotModuleExports(realConfig)
+
 const configState: {
   numStartups: number
   tipsHistory: Record<string, number>
@@ -11,19 +16,33 @@ const configState: {
   tipLifetimeShownCounts: {},
 }
 
-mock.module('src/utils/config.ts', () => ({
-  getGlobalConfig: () => ({ ...configState }),
-  saveGlobalConfig: (
-    updater: (c: typeof configState) => typeof configState,
-  ) => {
-    const next = updater({ ...configState })
-    configState.numStartups = next.numStartups
-    configState.tipsHistory = { ...(next.tipsHistory ?? {}) }
-    configState.tipLifetimeShownCounts = {
-      ...(next.tipLifetimeShownCounts ?? {}),
-    }
-  },
-}))
+function configMock() {
+  return {
+    ...configSnap,
+    getGlobalConfig: () => ({
+      ...(configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig)(),
+      ...configState,
+    }),
+    saveGlobalConfig: (
+      updater: (c: typeof configState) => typeof configState,
+    ) => {
+      const next = updater({ ...configState })
+      configState.numStartups = next.numStartups
+      configState.tipsHistory = { ...(next.tipsHistory ?? {}) }
+      configState.tipLifetimeShownCounts = {
+        ...(next.tipLifetimeShownCounts ?? {}),
+      }
+    },
+  }
+}
+
+mock.module('src/utils/config.ts', configMock)
+mock.module('src/utils/config.js', configMock)
+
+afterAll(() => {
+  mock.module('src/utils/config.ts', () => ({ ...configSnap }))
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+})
 
 import {
   getSessionsSinceLastShown,

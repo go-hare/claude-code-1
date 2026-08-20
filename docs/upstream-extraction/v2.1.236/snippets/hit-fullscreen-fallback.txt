@@ -1,0 +1,34 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: fullscreen-fallback
+patterns: ["fullscreen renderer","classic renderer","failed start"]
+counts: {'fullscreen renderer': 16, 'classic renderer': 11, 'failed start': 2}
+
+### fullscreen_boot_canary_and_fallback_msgs offset=296179242
+(o)=>{let i=o.fullscreenBootPending?.[String(e)];if(i===void 0||i.died!==void 0)return o;return n=!0,{...o,fullscreenBootPending:{...o.fullscreenBootPending,[String(e)]:{...i,died:"render_error"}}}}),T("fullscreen boot canary: failure recorded"),n}var nIh,Qbw=2,eSw=1e4,tSw=600000,rSw=2592000000,oSw=`Claude Code's fullscreen renderer didn't finish starting last time on this machine, so this launch is using the classic renderer. It will try fullscreen again next launch; /tui default keeps the classic renderer.
+`,iSw=`Claude Code's fullscreen renderer has repeatedly failed to start on this machine, so it has been turned off here. Run /tui fullscreen to try it again (this also resets after an update).
+`,rIh,hQ,h_r,
+
+### sticky_auto_disable_log offset=151661324
+............	.......fullscreen disabled: turned off on this machine after repeated failed starts (recorded sticky auto-disable, honoured at REPL mount) . /tui fullscreen or CLAUDE_CODE_NO_FLICKER=1 to override...........	...D...report the i
+
+### sticky_auto_disable_js offset=296177247
+f(!HM()||V.CLAUDE_CODE_EXIT_AFTER_FIRST_RENDER)return!1;if(!t.crashAutoOff&&NDn()&&rIh.has(xse(t)))t.crashAutoOff=!0,T("fullscreen disabled: turned off on this machine after repeated failed starts (recorded sticky auto-disable, honoured at REPL mount) \xB7 /tui fullscreen or CLAUDE_CODE_NO_FLICKER=1 to override");if(!Ps(t))return!1;if(!rIh.has(xse(t)))return!1;let r=process.pid
+
+### unrecoverable_error_during_fullscreen_start offset=302632899
+teSync(2,`
+${jNe(e)}
+`)}catch{}}async function A0r(e,t,r,n){e.render(t),Pvs(r,n);try{await e.waitUntilExit()}catch(o){let i=yn(o),a=await $Ji().catch(()=>!1)?" It happened while the fullscreen renderer was starting, so the next launch will use the classic renderer (CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 forces that any time).":"";if(B8c(`Claude Code exited after an unrecoverable interface error (${i.message}).${a}`),
+
+### focus_view_requires_fullscreen offset=291382953
+mes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.`,{display:"system"}),null}return e("Focus view needs the fullscreen renderer. Run /tui fullscreen to switch (this restarts and resumes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.",{display:"system"}),null}let n=!t.getAppState().briefTranscr
+
+### screen_reader_classic_lock offset=297923764
+s started directly with \`claude\`.`,{display:"system"}),null}if(GF())return e("Screen-reader mode always uses the classic renderer, so the tui setting has no effect while it is active.",{display:"system"}),null;let u=i==="fullscreen",d=u===Ps();if(d&&zo().tui
+
+### fullscreen_tip_and_dialog offset=302238042
+EMOTE&&!V.isSSH()},{id:"no-flicker",providerAgnostic:!0,content:async()=>"Try the new fullscreen renderer \u2014 flicker-free output, mouse support, auto-copy on select \xB7 /tui fullscreen",cooldownSessions:10,advertisedCommand:"tui",isRelevant:async()=>!Ps()&&zo().tui===void 0&
+
+### fullscreen_confirm_dialog_title offset=302302907
+3]!==h0r||E0o[14]!==m9c)hr0=Eue.jsx(Vr,{title:"Try the new fullscreen renderer?",onCancel:h0r,children:m9c}),E0o[13]=h0r,E0o[14]=m9c,E0o[15]=hr0;else hr0=E0o[15];return hr0}var zhn,Eue,Rey;var xey=w((
+

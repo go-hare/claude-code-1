@@ -58,10 +58,15 @@ const {
   getDefaultModelAttributionBadge,
   getOrgModelDefaultCache,
   getResolvedOrgDefaultModel,
+  resolveAnthropicDefaultModelEnv,
   shouldOrgDefaultOverrideUserSelection,
 } = await import('../orgDefaultModel.js')
+const { setInitialEnvDefaultModel } = await import(
+  '../../../bootstrap/state.js'
+)
 
 const originalProvider = process.env.CLAUDE_CODE_USE_BEDROCK
+const originalDefaultModel = process.env.ANTHROPIC_DEFAULT_MODEL
 
 describe('orgDefaultModel', () => {
   beforeEach(() => {
@@ -69,6 +74,8 @@ describe('orgDefaultModel', () => {
     delete process.env.CLAUDE_CODE_USE_BEDROCK
     delete process.env.CLAUDE_CODE_USE_VERTEX
     delete process.env.CLAUDE_CODE_USE_FOUNDRY
+    delete process.env.ANTHROPIC_DEFAULT_MODEL
+    setInitialEnvDefaultModel(undefined)
     mockCache = null
     mockOrgUuid = undefined
   })
@@ -77,17 +84,26 @@ describe('orgDefaultModel', () => {
     if (originalProvider !== undefined) {
       process.env.CLAUDE_CODE_USE_BEDROCK = originalProvider
     }
+    if (originalDefaultModel === undefined) {
+      delete process.env.ANTHROPIC_DEFAULT_MODEL
+    } else {
+      process.env.ANTHROPIC_DEFAULT_MODEL = originalDefaultModel
+    }
+    setInitialEnvDefaultModel(undefined)
     mockCache = null
     mockOrgUuid = undefined
   })
 
-  test('getDefaultModelAttributionBadge maps org / enforced / tier', () => {
+  test('getDefaultModelAttributionBadge maps org / enforced / env / tier', () => {
     expect(getDefaultModelAttributionBadge('org')).toBe(' · Org default')
     expect(getDefaultModelAttributionBadge('enforced')).toBe(
       ' · Set by your organization',
     )
     expect(getDefaultModelAttributionBadge('entitlement')).toBe(
       ' · Set by your organization',
+    )
+    expect(getDefaultModelAttributionBadge('env')).toBe(
+      ' · Set by ANTHROPIC_DEFAULT_MODEL',
     )
     expect(getDefaultModelAttributionBadge('tier')).toBe('')
   })
@@ -140,5 +156,29 @@ describe('orgDefaultModel', () => {
     mockOrgUuid = 'org-1'
     process.env.CLAUDE_CODE_USE_BEDROCK = '1'
     expect(getResolvedOrgDefaultModel()).toBeNull()
+  })
+
+  test('resolveAnthropicDefaultModelEnv returns live env value', () => {
+    process.env.ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-6'
+    expect(resolveAnthropicDefaultModelEnv()).toBe('claude-sonnet-4-6')
+  })
+
+  test('resolveAnthropicDefaultModelEnv treats default/inherit/plan aliases as inert', () => {
+    process.env.ANTHROPIC_DEFAULT_MODEL = 'default'
+    expect(resolveAnthropicDefaultModelEnv()).toBeNull()
+    process.env.ANTHROPIC_DEFAULT_MODEL = 'inherit'
+    expect(resolveAnthropicDefaultModelEnv()).toBeNull()
+    process.env.ANTHROPIC_DEFAULT_MODEL = 'opusplan'
+    expect(resolveAnthropicDefaultModelEnv()).toBeNull()
+    process.env.ANTHROPIC_DEFAULT_MODEL = 'haiku'
+    expect(resolveAnthropicDefaultModelEnv()).toBeNull()
+  })
+
+  test('resolveAnthropicDefaultModelEnv prefers latched startup value', () => {
+    process.env.ANTHROPIC_DEFAULT_MODEL = 'claude-live'
+    setInitialEnvDefaultModel('claude-latched')
+    expect(resolveAnthropicDefaultModelEnv()).toBe('claude-latched')
+    setInitialEnvDefaultModel(null)
+    expect(resolveAnthropicDefaultModelEnv()).toBeNull()
   })
 })

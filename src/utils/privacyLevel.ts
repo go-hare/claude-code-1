@@ -1,3 +1,5 @@
+import { isEnvTruthy } from './envUtils.js'
+
 /**
  * Privacy level controls how much nonessential network traffic and telemetry
  * Claude Code generates.
@@ -10,9 +12,10 @@
  * - essential-traffic:  ALL nonessential network traffic disabled
  *                       (telemetry + auto-updates, grove, release notes, model capabilities, etc.).
  *
- * The resolved level is the most restrictive signal from:
+ * The resolved level is the most restrictive signal from (densable Gdu order):
  *   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC  →  essential-traffic
  *   DISABLE_TELEMETRY                         →  no-telemetry
+ *   DO_NOT_TRACK (truthy)                     →  no-telemetry
  */
 
 type PrivacyLevel = 'default' | 'no-telemetry' | 'essential-traffic'
@@ -22,6 +25,10 @@ export function getPrivacyLevel(): PrivacyLevel {
     return 'essential-traffic'
   }
   if (process.env.DISABLE_TELEMETRY) {
+    return 'no-telemetry'
+  }
+  // densable Gdu / Hn(DO_NOT_TRACK)
+  if (isEnvTruthy(process.env.DO_NOT_TRACK)) {
     return 'no-telemetry'
   }
   return 'default'
@@ -50,6 +57,23 @@ export function isTelemetryDisabled(): boolean {
 export function getEssentialTrafficOnlyReason(): string | null {
   if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
     return 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'
+  }
+  return null
+}
+
+/**
+ * densable IOo — env var responsible for any non-default privacy level, or null.
+ * Covers essential-traffic and no-telemetry (DISABLE_TELEMETRY / DO_NOT_TRACK).
+ */
+export function getPrivacyDisableReason(): string | null {
+  if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
+    return 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'
+  }
+  if (process.env.DISABLE_TELEMETRY) {
+    return 'DISABLE_TELEMETRY'
+  }
+  if (isEnvTruthy(process.env.DO_NOT_TRACK)) {
+    return 'DO_NOT_TRACK'
   }
   return null
 }

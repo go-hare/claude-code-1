@@ -1,0 +1,92 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: footer-right-margin
+id: 32
+search_patterns: ["Right-aligned footer","goal indicator","consistent right margin"]
+
+=== pattern counts ===
+b'Right-aligned footer': 0
+b'goal indicator': 2
+b'consistent right margin': 0
+b'right-aligned': 3
+b'StatusFooter': 24
+b'active_goal': 37
+b'marginRight': 28
+b'rightPad': 5
+
+=== exact 'Right-aligned footer' ===
+total=0
+(none)
+
+
+=== exact 'goal indicator' ===
+total=2
+--- offset 269776785 (0x10147791) ---
+.......0...............................active_goal.....................Emitted when the user's /goal Stop hook reports met (clears) or not-yet-met (bumps iterations + last_reason). Any surface with a goal indicator re-renders from this. value is null when the goal is cleared. From internal QueryEvent 'active_goal'................................&.............................`............m.@...B.....m......!<..B
+
+--- offset 302811091 (0x120c87d3) ---
+eason:N().optional()}).nullable(),uuid:Ku(),session_id:N()}).describe("Emitted when the user's /goal Stop hook reports met (clears) or not-yet-met (bumps iterations + last_reason). Any surface with a goal indicator re-renders from this. value is null when the goal is cleared. From internal QueryEvent 'active_goal'.")),jVc=Se(()=>ye({type:kt("autocompact_state"),value:ye({enabled:zt().describe("Whether auto-comp
+
+
+=== exact 'consistent right margin' ===
+total=0
+(none)
+
+
+=== related: right-aligned (not footer; artifact/table docs) ===
+--- offset 299080775 (0x11d39c47) ---
+rowser tab and the artifact itself) and the visible \`<h1>\` in the header. Fill both. |.| \`COLUMNS\` | JSON array of column definitions: \`{key, label, type}\`. \`type\` is \`"text"\` or \`"num"\` (right-aligned, numeric sort). |.| \`ROWS\` | JSON array of row objects, each keyed by the column keys. Embed the full dataset \u2014 the renderer handles scrolling (size ceiling under Data rules). |.| \`FOOTER_NOT
+
+--- offset 299082527 (0x11d3a31f) ---
+ML comment-like state inside script data with similarly corrupting effects..- Numbers display with up to 6 decimal places. Pre-round values to the precision worth showing \u2014 mixed precision makes right-aligned columns ragged..- Embed the full dataset up to a few thousand rows. Beyond that, subset or aggregate to what the user will actually browse, and say what was cut in \`FOOTER_NOTE\`...## Restyle on top
+
+--- offset 299090700 (0x11d3c30c) ---
+.     JSON array of column definitions. Order here = display order..       key   \u2014 property name on each row object.       label \u2014 header text.       type  \u2014 "text" (default) or "num" (right-aligned, numeric sort) -->.<script type="application/json" id="dt-columns">.[.  { "key": "name",  "label": "Name",  "type": "text" },.  { "key": "value", "label": "Value", "type": "num" }.].</script>..<!-- S
+
+=== related: StatusFooter sample contexts ===
+--- offset 129398002 (0x7b674f2) ---
+ftArrowOpensAgents............................defaultToAgentsView.............................optionsHint.....................defaultView.....................prStatusFooterEnabled...........................claudeInChromeDefaultEnabled....................pickToCommit....................labelBoldSuffix.................searchText......................onChangeMainModelConfig.......
+
+--- offset 208391026 (0xc6bcb72) ---
+..............leftArrowOpensAgents............................defaultToAgentsView.............................permissionExplainerEnabled......................prStatusFooterEnabled...........................remoteControlAtStartup..........................autoUploadSessions.......................... ...autoAddRemoteControlDaemonWorker................remoteDialogSeen..............
+
+--- offset 280475634 (0x10b7b7f2) ---
+ionNeverPlugins","lspRecommendationIgnoredCount","copyFullResponse","copyOnSelect","leftArrowOpensAgents","defaultToAgentsView","permissionExplainerEnabled","prStatusFooterEnabled","remoteControlAtStartup","autoUploadSessions","autoAddRemoteControlDaemonWorker","remoteDialogSeen","workflowSizeGuideline"];AMd=["allowedTools","hasTrustDialogAccepted","hasCompletedProjectOnboardin
+
+--- offset 286382595 (0x1111da03) ---
+ion removeFooter() {.    if (footer) {.      footer.parentNode.removeChild(footer);.      footer = null;.      document.body.style.paddingBottom = '';.      setStatusFooterHidden(false);.    }.  }.  /* Post-save waiting state: the page is now STALE (the workshop session.     republishes it and the shell reboots the view to the new version),.     so further picks would only race
+
+--- offset 286383744 (0x1111de80) ---
+    waitingBar = null;.  }.  function enterWaiting(text, since) {.    waitingActive = true;.    disarmAll();.    removeFooter();.    removeWaitingBar();.    setStatusFooterHidden(true);.    var w = document.createElement('div');.    w.className = 'ws-footer';.    var sp = document.createElement('span');.    sp.className = 'ws-spin';.    w.appendChild(sp);.    var s = document.c
+
+--- offset 286390286 (0x1111f80e) ---
+ile the.       page waits) \u2014 then its padding and status-footer handling win. */.    if (!footer) {.      document.body.style.paddingBottom = '';.      setStatusFooterHidden(false);.    }.  }.  function confirmLabel(n) {.    if (n === 1) {.      var only;.      for (var id in picks) {.        if (Object.prototype.hasOwnProperty.call(picks, id)) only = picks[id];.      }.  
+
+--- offset 286391471 (0x1111fcaf) ---
+REPLACES the static status footer while row.         picks are pending \u2014 the kickoff CTA cannot be clicked mid-batch.         by construction. */.      setStatusFooterHidden(true);.    }.    while (footer.firstChild) footer.removeChild(footer.firstChild);.    var btn = document.createElement('button');.    btn.type = 'button';.    btn.className = 'confirm-btn';.    btn.tex
+
+--- offset 286430039 (0x11129357) ---
+'row', item: item, row: row, token: token, undo: item.innerHTML };.    runConfirm(batch, 1, function (text) {.      note(item, text);.    });.  }.  function setStatusFooterHidden(hidden) {.    var sf = document.querySelector('.ws-status-footer');.    if (!sf) return;.    var cls = (sf.getAttribute('class') || '').replace(' ws-hidden', '');.    sf.setAttribute('class', hidden ? 
+
+--- offset 290123177 (0x114aeda9) ---
+xternalEditorContext:j})),H("tengu_external_editor_context_changed",{enabled:j})}},{id:"prStatus",label:CVr("Show PR status footer","Show PR status"),value:t.prStatusFooterEnabled??!0,type:"boolean",onChange(j){W((z)=>{if(z.prStatusFooterEnabled===j)return z;return{...z,prStatusFooterEnabled:j}}),P((z)=>({...z,prStatusFooterEnabled:j})),H("tengu_pr_status_footer_setting_changed
+
+--- offset 290123243 (0x114aedeb) ---
+",{enabled:j})}},{id:"prStatus",label:CVr("Show PR status footer","Show PR status"),value:t.prStatusFooterEnabled??!0,type:"boolean",onChange(j){W((z)=>{if(z.prStatusFooterEnabled===j)return z;return{...z,prStatusFooterEnabled:j}}),P((z)=>({...z,prStatusFooterEnabled:j})),H("tengu_pr_status_footer_setting_changed",{enabled:j})}},{id:"model",label:"Model",value:c===null?"Default
+
+--- offset 290123290 (0x114aee1a) ---
+ PR status footer","Show PR status"),value:t.prStatusFooterEnabled??!0,type:"boolean",onChange(j){W((z)=>{if(z.prStatusFooterEnabled===j)return z;return{...z,prStatusFooterEnabled:j}}),P((z)=>({...z,prStatusFooterEnabled:j})),H("tengu_pr_status_footer_setting_changed",{enabled:j})}},{id:"model",label:"Model",value:c===null?"Default (recommended)":c,type:"managedEnum",options:r4
+
+--- offset 290123331 (0x114aee43) ---
+e:t.prStatusFooterEnabled??!0,type:"boolean",onChange(j){W((z)=>{if(z.prStatusFooterEnabled===j)return z;return{...z,prStatusFooterEnabled:j}}),P((z)=>({...z,prStatusFooterEnabled:j})),H("tengu_pr_status_footer_setting_changed",{enabled:j})}},{id:"model",label:"Model",value:c===null?"Default (recommended)":c,type:"managedEnum",options:r4v(),optionsHint:"For a specific model ID,
+
+=== related: active_goal event describe (contains goal indicator) ===
+--- offset 302810771 (0x120c8693) ---
+t to expand a side panel. Enum is a superset of AppState.expandedView for back-compat; do not narrow.")),UVc=Se(()=>ye({type:kt("active_goal"),value:ye({condition:N(),iterations:Qe().int(),set_at:Qe().int(),tokens_at_start:Qe().int(),last_reason:N().optional()}).nullable(),uuid:Ku(),session_id:N()}).describe("Emitted when the user's /goal Stop hook reports met (clears) or not-yet-met (bumps iterations + last_reason). Any surface with a 
+
+=== notes ===
+Requested latin1 phrases "Right-aligned footer" and "consistent right margin" are ABSENT from SEA 2.1.236.
+"goal indicator" appears only inside active_goal QueryEvent/schema describe text (re-render surfaces when /goal Stop hook updates).
+"right-aligned" hits are artifact/datatable column docs (type "num"), not REPL footer margin.
+StatusFooter symbol exists (keybinding/context/UI), but no accompanying comment about consistent right margin was found near it.
+Invent-ban: no product behavior inferred beyond these string hits.

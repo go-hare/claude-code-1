@@ -1,0 +1,26 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: sigterm-print
+checklist: SIGTERM print/SDK no interrupted-turn/synthetic denials; exit 143
+found: true
+topSymbols: ['interrupted-turn', 'print.ts', 'CLAUDE_CODE_RESUME_INTERRUPTED_TURN']
+oneLineNote: print.ts interrupted-turn rescue/defer path present; exit 143 literal weak/absent near SIGTERM
+search_patterns: ['interrupted-turn', 'SIGTERM', '143', 'print.ts']
+
+=== pattern counts ===
+'interrupted-turn': 2
+'SIGTERM': 276
+'143': 146
+'print.ts': 57
+
+=== BEST print interrupted-turn ===
+--- offset 177193920 ---
+SIGTERM.....................Q...Cannot destructure property 'setOnPeerMessageStatus' from null or undefined value...............................rn......................(.......................................0%......I........%..............................npe.............................messages........................file_state_cache................QRe.............................none............................prompt..........................print.......................M...[print.ts] Deferring interrupted-turn rescue for parked permission toolUseID=...............1...[print.ts] Auto-resuming interrupted turn (kind: ...............................)...............................disabled0u..............(........................................#..............@#..............."......I.......................started.....................E...Cannot destructure property 'deadlineMs' from null or undefined value...........................ro..............
+
+=== CLAUDE_CODE_RESUME_INTERRUPTED_TURN ===
+--- offset 81238064 ---
+CLAUDE_CODE_REMOTE_RAW_EVENTS_FILE......I4................0."...CLAUDE_CODE_REMOTE_SEND_KEEPALIVES.......L......................CLAUDE_CODE_REMOTE_SESSION_ID.............0.!...CLAUDE_CODE_REMOTE_SESSION_ORIGIN.........0..............Y.. ...CLAUDE_CODE_REMOTE_SETTINGS_PATH........I.0.#...CLAUDE_CODE_REMOTE_SETTINGS_POLL_MS......F...............@......CLAUDE_CODE_REPL..........0.....CLAUDE_CODE_REPO_CHECKOUTS0.....................CLAUDE_CODE_RESUME_FROM_SESSION.........I...#...CLAUDE_CODE_RESUME_INTERRUPTED_TURN.......0...............0.....CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS..................CLAUDE_CODE_RESUME_PROMPT.0...............0.....CLAUDE_CODE_RESUME_SOURCE_ALIVE.............$...CLAUDE_CODE_RESUME_THRESHOLD_MINUTES.....1..............I.0."...CLAUDE_CODE_RESUME_TOKEN_THRESHOLD........................../...CLAUDE_CODE_RETIRE_UNANSWERED_PARKED_PERMISSION...........0.....CLAUDE_CODE_SAFE_MODE....T................0.....CLAUDE_CODE_SAND
+
+=== 143 near print/sigterm ===
+--- offset 280551973 ---
+})}background(){return!1}kill(){return Promise.resolve()}cleanup(){}}function Toa(){return new O1d}function I1d(e){for(let t of[-e,e])try{return process.kill(t,0),!1}catch(r){if(St(r)!=="ESRCH")return!1}return!0}function Ydt(e){let t=new Ete(h4("local_bash"),null);return{status:"completed",result:Promise.resolve({code:1,stdout:"",stderr:e,interrupted:!1,preSpawnError:e}),taskOutput:t,background(){return!1},kill(){return Promise.resolve()},cleanup(){}}}var p8o,P1d,d8o=137,x1d=143,p0b=1500,f0b=100,_oa,YPn,m0b=5000;var XPn=w(()=>{AO();xh();at();As();yYe();Ai();kO();gZt();p8o=require("fs/promises"),P1d=require("path"),_oa=new Set;YPn=new Set});function _y(e){return e.map((t)=>{let r=String(t);if(r==="")return"''";if(/^[A-Za-z0-9_./:=@+,-]+$/.test(r))return r;return"'"+r.replaceAll("'",`'"'"'`)+"'"}).join(" ")}function m8o(e,t){let r=e.lastIndexOf(" -");if(r>0){let n=e.substring(0,r),o=e.substring(r+1);return`${_y([n])} ${o} ${_y([t])}`}else return`${

@@ -1,0 +1,116 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236
+sha256: 6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848
+key: ANTHROPIC_DEFAULT_MODEL
+gold: full function windows for GAP #1
+
+================================================================================
+BLOCK A | dhd / phd / UW / aRn / idt / Vzo / zxt / qxt
+offset 0x10accf8d (window_start 0x10accf8d)
+================================================================================
+function dhd(){return!1}function phd(e){if(dhd())return null;let t=Kzo(e,null)??e,r=Vzo(t)??t;return A7e(r,{ignoreModelOverrides:!0})===null?r:null}function UW(){return idt().setting}function aRn(e){switch(e){case"org":return" \xB7 Org default";case"enforced":case"entitlement":return" \xB7 Set by your organization";case"env":return" \xB7 Set by ANTHROPIC_DEFAULT_MODEL";case"tier":return""}}function idt(){let e=ibn(),t;if(e===void 0){if(t=odt(),t!==null)VVt(t)}else if(e===null)t=null;else t=phd(e);if(t!==null)return{setting:t,attribution:"org"};let r=zxt();if(r!==null)return{setting:r,attribution:"env"};let{setting:n,envFamily:o,concreteBaseline:i}=fhd(),s=Kzo(n,o,i),a=s??n,l=Vzo(a);if(s!==null)return{setting:l??s,attribution:"enforced"};if(l!==null)return{setting:l,attribution:"entitlement"};return{setting:a,attribution:"tier"}}function Vzo(e){let t=oX();if(t.size===0||!nX(e,t))return null;let r=[{family:"opus",model:Uk()},{family:"sonnet",model:VI()},{family:"haiku",model:rdt()}],n=Do(hs(e)),o=r.findIndex((s)=>n.includes(s.family)),i=o!==-1?o:KI(hs(e))?0:1;for(let{family:s,model:a}of r.slice(i)){if(Hu(a))return a;let l=JAn(s);if(l!==null)return l}return null}function zxt(){let e=vxs(),t=e===void 0?V.ANTHROPIC_DEFAULT_MODEL:e;if(t==null)return null;let r=t.trim().toLowerCase();if(r==="default"||r==="inherit")return null;if(Z0e(al(r)))return null;if(zYs(r))return null;if(dhd())return null;if(lRn().state!=="inactive"||Ia()?.enforceAvailableModels===!0)return null;if(!Hu(t))return null;if(A7e(t,{ignoreModelOverrides:!0})!==null)return null;return t}function qxt(){return FF()==null&&idt().attribution==="env"}function fhd(){if(ls()){if(P7e()||Wxt()||adt())return{setting:t4()?cte(Uk()):Uk(),envFamily:"opus"}}else if(Vy())return{setting:t4()?cte(Uk()):Uk(),envFamily:"opus"};let e=Zn();if(e==="mantle")return{setting:Zb()[JJt],envFamily:null,concreteBaseline:String(a7e()[JJt])};if(e==="bedrock"||e==="vertex"){let t=ahd(),r=lRn().state!=="inactive"||Ia()?.enforceAvailableModels===!0;if(t.sonnet&&!t.opus&&!r)return{setting:VI(),envFamily:"sonnet"};return{setting:Uk(),envFamily:"opus"}}return{setting:VI(),envFamily:"sonnet"}}function Kzo(e,t,r){let n=Ia()||{},o=n.availableM
+
+================================================================================
+BLOCK B | Z0e + zYs
+offset 0x10acc4a5
+================================================================================
+function Z0e(e){return e==="opusplan"||e==="haiku"}function WDr(e){if(e==="opusplan"||e==="opusplan[1m]")return"opus";if(e==="haiku")return"sonnet";return null}function zYs(e){return!1}function n4(e){let t=e.trim().toLowerCase(),r=al(t).trim();if(!nK(r)||!Vy())return null;let n=oX();if(!(Ia()||{}).availableModels&&n.size===0)return null;let o=JAn(r);if(o===null||!(oq(o)??Hu(o))||nX(o,n))return null;if(r===t)return o;return(r==="opus"?Xie():r==="sonnet"?t_e():!0)&&X0e(o)?`${o}[1m]`:o}function PD(e){let{permissionMode:t,mainLoopModel:r,exceeds200kTokens:n=!1}=e,o=FF();if((o==="opusplan"||o==="opusplan[1m]")&&t==="plan"&&!n){let s=o==="opusplan[1m]"||t4(),a=s?cte(Uk()):Uk();if(!((oq(a)??Hu(a))&
+
+================================================================================
+BLOCK B | Hu
+offset 0x10ac9e57
+================================================================================
+function Hu(e,t){if(t?.allowlist===void 0){try{if(TYt().length>0&&!sCn())return!1}catch{return!1}if(!t?.skipEntitlementDenyOverlay&&nX(e,oX()))return!1}let r=Ia()||{},n=t?.allowlist??r.availableModels;if(!n)return!0;if(n.length===0)return!1;let o=n.map((l)=>al(l.trim().toLowerCase())),i=al(e.trim().toLowerCase());if(o.includes(i)&&!nK(i)){if(t?.envFreeAliasResolution||!BH(i)||Fzo(i,t))return!0}let s;if(t?.overridesMap!==void 0)s=rhd(e,t.overridesMap);else if(t?.ignoreModelOverrides)s=e;else{let l;try{l=pn("policySettings")}catch{return!1}s=l?.availableModels!==void 0?rhd(e,l.modelOverrides??yRt()??{}):YOr(e)}let a=al(s.trim().toLowerCase());if(o.includes(a)){if(!nK(a)||!thd(a,o)){if(t?.envFr
+
+================================================================================
+BLOCK B | A7e
+offset 0x10acbeaf
+================================================================================
+function A7e(e,t){if(Zn()!=="firstParty"||!om())return null;let r=BH(e.toLowerCase().trim())?hs(e):e,n=t?.ignoreModelOverrides?(l)=>r4(al(l.toLowerCase()).trim()):Dib,o=n(e),i=n(r),s=x7e().find((l)=>l.disabled===!0&&typeof l.value==="string"&&(n(l.value)===o||n(l.value)===i));if(s)return{reason:"disabled",description:s.description};let a=t?.ignoreModelOverrides?r4(r):Do(r);if(!XJt()&&a==="claude-fable-5")return{reason:"absent",displayName:Qie(r)??"That model"};if(!Wzo()&&jDr(a))return{reason:"absent",displayName:Qie(r)??"That model"};return null}function Dib(e){return Do(al(e.toLowerCase()).trim())}function Mib(e){return e.toLowerCase().includes("fable")}function $Ys(e){return}function Lib(e
+
+================================================================================
+BLOCK C | ibn / VVt / vxs / Txs (org + env session latches)
+offset 0x10862aac
+================================================================================
+function ibn(){return Sr.modelSelection.resolvedOrgDefault()}function VVt(e){Sr.modelSelection.replaceResolvedOrgDefault(e)}function vxs(){return Sr.modelSelection.initialEnvDefaultModel()}function Txs(e){Sr.modelSelection.replaceInitialEnvDefaultModel(e)}function NR(){return LM()?.sdkBetas??Sr.surfaceCapabilities.sdkBetas()}function wxs(e){Sr.surfaceCapabilities.replaceSdkBetas(e)}function Pkr(){return Sr.host.accountCreditLatches.longContext1mC
+
+================================================================================
+BLOCK D | FF() — ANTHROPIC_MODEL (persist / session override) path
+offset 0x10acb648
+================================================================================
+d 0}function _De(e){return jzo(e,"opus")}function MYs(e){return jzo(e,"sonnet")}function FF(){let e,t=SE();if(t!==void 0)e=t;else{let r=die(),n=process.env.ANTHROPIC_MODEL;e=r!==void 0?r:n||Ia()?.model||void 0}return qzo(e)}function qzo(e){if(e&&!Hu(e))return n4(e)??void 0;return e}function Ui(){let e=FF();if(e!==void 0&&e!==null)return hs(e);return g0()}function lhd(){let e=n0e().best;if(e!==void 0&&Object.hasOwn(Bzo,e)&&Bzo[e]?.available())return e;return"opus"}function chd(){let e=Bzo[lhd()];if(e!==void 0){let t=e.default
+
+================================================================================
+BLOCK E | startup model_env_default telemetry
+offset 0x1208628e
+================================================================================
+gs:Ia()||{},agentFrontmatter:e.agentModel!==void 0?{model:e.agentModel}:void 0},e.storageV5);if(qC(t),Gxo(r),VVt(odt()),Txs(V.ANTHROPIC_DEFAULT_MODEL??null),V.ANTHROPIC_DEFAULT_MODEL!==void 0)if(zxt()===null)ve("model_env_default","inert");else if(ibn())ve("model_env_default","outranked_by_org_default");else be("model_env_default");if(qAe("--model",["-m"],r,void 0,e.storageV5),i!==void 0)ve("startup_resolve_model","requested_model_restricted",{model:bu(i)??Re("nonconforming")});else be("startup_resolve_model");return{effectiveModel:t,initialMainLoopModel:r,resolve
+
+================================================================================
+BLOCK F | startup fallback chain
+offset 0x1208fec2
+================================================================================
+n,a),c4o();let Fo=t.name?cC(t.name)||void 0:void 0;if(Fo)wrt(Fo),Lmr(Fo);let ji=t.model||process.env.ANTHROPIC_MODEL||V.ANTHROPIC_DEFAULT_MODEL,Go=t.model,Rs=re?Yt():Rr;if(__e()&&Object.keys(ar().cachedGrowthBookFeatures??{}).length===0){Lu("before_growthbook_init");let hr=performance.now();await Ul(IK(),1500,"gb-before-tools").
+
+================================================================================
+BLOCK G | tengu_startup_manual_model_config
+offset 0x1225de11
+================================================================================
+Setup:Me,wasTrustedBeforeSetup:We}=e;H("tengu_startup_manual_model_config",{cli_flag:t.model,env_var:process.env.ANTHROPIC_MODEL,default_env_var:bu(V.ANTHROPIC_DEFAULT_MODEL),settings_file:(zo()||{}).model,settings_source:_o(Zee("model")),subscriptionType:_o(mc()),agent:s});let qe=Qmd(U??re),Ue=[];if(D)Ue.push({key:"pe
+
+================================================================================
+BLOCK H | QEn model env list + vv_ SAFE allowlist (spreads ...QEn)
+offset 0x109908af
+================================================================================
+,"CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH","CLAUDE_CODE_SKIP_MANTLE_AUTH"],QEn=["ANTHROPIC_MODEL","ANTHROPIC_DEFAULT_MODEL","ANTHROPIC_DEFAULT_FABLE_MODEL","ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_FABLE_MODEL_NAME","ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_HAIKU_MODEL","ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME","ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_OPUS_MODEL","ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_OPUS_MODEL_NAME","ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_SONNET_MODEL","ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_SONNET_MODEL_NAME","ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_SMALL_FAST_MODEL","ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION","CLAUDE_CODE_SUBAGENT_MODEL","CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT","CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT"],e0n=["ANTHROPIC_CUSTOM_MODEL_OPTION","ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION","ANTHROPIC_CUSTOM_MODEL_OPTION_NAME","ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"],v4s=["AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","AWS_SESSION_TOKEN"],T4s=[...v4s,"AWS_PROFILE","AWS_CONFIG_FILE","AWS_SHARED_CREDENTIALS_FILE","GOOGLE_APPLICATION_CREDENTIALS","GOOGLE_CLOUD_PROJECT"];vv_=new Set(["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",...POe,...OOe,...DOe,...S4s,"CLAUDE_CODE_HOST_AUTH_ENV_VAR","CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH","CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS","CLAUDE_CODE_HOST_CREDS_FILE",...T4s,"GCLOUD_PROJECT","GOOGLE_CLOUD_QUOTA_PROJECT","GCE_METADATA_HOST","GCE_METADATA_IP","METADATA_SERVER_DETECTION","AWS_CONTAINER_CREDENTIALS_FULL_URI","AWS_CONTAINER_CREDENTIALS_RELATIVE_URI","AWS_CONTAINER_AUTHORIZATION_TOKEN","AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE","AWS_EC2_METADATA_SE
+
+================================================================================
+BLOCK I | kv_ allowlist (also includes ANTHROPIC_DEFAULT_MODEL + ANTHROPIC_MODEL)
+offset 0x10991386
+================================================================================
+kv_=new Set(["ANTHROPIC_BEDROCK_REGION_PREFIX","ANTHROPIC_BEDROCK_SERVICE_TIER","ANTHROPIC_CUSTOM_HEADERS","ANTHROPIC_CUSTOM_MODEL_OPTION","ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION","ANTHROPIC_CUSTOM_MODEL_OPTION_NAME","ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_FABLE_MODEL","ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_FABLE_MODEL_NAME","ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_MODEL","ANTHROPIC_DEFAULT_HAIKU_MODEL","ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME","ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_OPUS_MODEL","ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_OPUS_MODEL_NAME","ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_SONNET_MODEL","ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_SONNET_MODEL_NAME","ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_FOUNDRY_API_KEY","ANTHROPIC_MODEL","ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION","ANTHROPIC_SMALL_FAST_MODEL","AWS_DEFAULT_REGION","AWS_PROFILE","AWS_REGION","BASH_DEFAULT_TIMEOUT_MS","BASH_MAX_OUTPUT_LENGTH","BASH_MAX_TIMEOUT_MS","CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR","CLAUDE_CODE_API_KEY_HELPER_TTL_MS","CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS","CLAUDE_CODE_DISABLE_TERMINAL_TITLE","CLAUDE_CODE_ENABLE_AUTO_MODE","CL
+
+================================================================================
+BLOCK J | Kif — ANTHROPIC_MODEL blocks writing userSettings.model
+offset 0x1104a044
+================================================================================
+function Kif(e,t){if(SE()!==void 0)return!1;if(V.ANTHROPIC_MODEL)return!1;let r=Zee("model");if(r===null){let n=zxt();if(n===null||!qxt()||!KI(hs(n)))return!1}else{if(r!=="userSettings")return!1;let n=pn("userSettings")?.model;if(n===void 0||!KI(hs(n)))return!1}return oa("userSettings",{model:e},void 0,t),!0}async function Ayi(){let e=kz();if(e)return u5r(e.isEnabled?null:"overage_not_provisioned"),e.isEnabled?"enabled":"disabled";let t=null;try{
+
+================================================================================
+BLOCK K | fRn — ANTHROPIC_MODEL suppresses settings-source suffix
+offset 0x10ad0589
+================================================================================
+function fRn(){if(SE()!==void 0)return"";if(V.ANTHROPIC_MODEL)return"";switch(Zee("model")){case"projectSettings":return` (from ${Dde("projectSettings")})`;case"policySettings":return" (from managed settings)";default:return""}}function Qie(e){let t=Do(e),r=o0(t);if(!r)return null;let n=e.endsWith("[1m]")&&r.context?.supports_1m_suffix?" (1M contex
+
+================================================================================
+BLOCK L | BYOC env scrub clears both MODEL and DEFAULT_MODEL
+offset 0x1229ce6b
+================================================================================
+er:ccr_inference user:file_upload",CLAUDE_CONFIG_DIR:l,CLAUDE_STAGE_FILE_ROOT:c,ANTHROPIC_MODEL:void 0,ANTHROPIC_DEFAULT_MODEL:void 0,CLAUDE_CODE_ENVIRONMENT_KIND:"byoc",CLAUDE_CODE_BYOC_ENABLE_DATADOG:process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG,DISABLE_TELEMETRY:process.env.DISABLE_TELEMETRY,DO_NOT
+
+================================================================================
+SEMANTICS NOTES (derived)
+================================================================================
+1. ANTHROPIC_DEFAULT_MODEL:
+   - Latched at startup via Txs(V.ANTHROPIC_DEFAULT_MODEL??null) into
+     Sr.modelSelection.initialEnvDefaultModel (vxs/Txs).
+   - Consumed by zxt() as session-start default attribution "env".
+   - Does NOT appear in FF() override chain; UI labels it specifically
+     via aRn("env") => " · Set by ANTHROPIC_DEFAULT_MODEL".
+   - Telemetry model_env_default: inert | outranked_by_org_default | fire(be).
+
+2. ANTHROPIC_MODEL:
+   - Live process.env / V.ANTHROPIC_MODEL used as stronger override in FF()
+     (after SE()/die settings), startup fallback before DEFAULT_MODEL,
+     and tengu env_var field.
+   - Blocks Kif from persisting model into userSettings; suppresses fRn
+     settings-source suffix; treated as persistent/session override, not
+     the softer "env default" attribution path.
+
+3. idt() attribution order:
+   org (ibn/odt/phd) -> env (zxt) -> enforced (Kzo) -> entitlement (Vzo) -> tier (fhd baseline)
+
+4. zxt() null guards (in order):
+   missing value; trim lower in {default,inherit}; Z0e(al(r)) opusplan|haiku;
+   zYs(r) (stub false in this build); dhd() (stub false); allowlist active or
+   enforceAvailableModels; !Hu(t); A7e(t,{ignoreModelOverrides:true})!==null.

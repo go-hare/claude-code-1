@@ -95,12 +95,7 @@ export function FileWritePermissionRequest(props: PermissionRequestProps): React
             <Text dimColor>{withhold.message}</Text>
           </Box>
         ) : (
-          <FileWriteToolDiff
-            file_path={file_path}
-            content={content}
-            fileExists={fileExists}
-            oldContent={oldContent}
-          />
+          <FileWriteToolDiff file_path={file_path} content={content} fileExists={fileExists} oldContent={oldContent} />
         )
       }
       path={file_path}

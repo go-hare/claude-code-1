@@ -1,0 +1,66 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236
+sha256: 6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848
+key: sendmessage-burst
+id: 30
+gold: outbound UDS send pacing (sentInBurst / reserve-before-send / refund-on-connect-fail)
+symbols: T5d, wDn, jKo, zKo, x5d, hQt, JHr, OLb, Cla, fQt, vla, PLb, jLb, P5d, CDn, Ola, Dla, O5d, zLb, R5d
+defaults: vla={bucketCapacity:30,refillPerSecond:0.5,dedupWindowMs:30000,maxSelfHops:10,maxChainLength:28,maxTrackedSenders:256}; PLb=50; Cla={...vla,maxQueuedPeerMessages:PLb}; DLb=300000
+gates: P5d — env CLAUDE_CODE_HARBOR_KITE_PACING_OFF OR GB tengu_harbor_kite_pacing_off => off; else jLb().reserve(namespaceKey)
+GB limits: tengu_harbor_kite_limits via JHr()/OLb zod catch-defaults
+
+================================================================================
+BLOCK | HELPERS_wDn_jKo_zKo
+offset 281139969
+================================================================================
+function wDn(e,t,r,n,o){let i=Math.max(0,r-t)/1000;return Math.min(n,e+i*o)}function jKo(e){return e>=1}function zKo(e,t,r,n,o=()=>!0){let i=e.get(t);if(i!==void 0)return e.delete(t),e.set(t,i),i;while(e.size>=Math.max(1,r)){let a;for(let[l,c]of e)if(o(c)){a=l;break}if(a??=e.keys().next().value,a===void 0)break;e.delete(a)}let s=n();return e.set(t,s),s}
+
+================================================================================
+BLOCK | DEFAULTS_vla_ingress_guard_shared
+offset ~281141049 area (wla)
+================================================================================
+vla={bucketCapacity:30,refillPerSecond:0.5,dedupWindowMs:30000,maxSelfHops:10,maxChainLength:28,maxTrackedSenders:256}
+
+================================================================================
+BLOCK | LIMITS_JHr_OLb_Cla
+offset 281142799
+================================================================================
+function JHr(){let e=w_e("tengu_harbor_kite_limits",Cla,DLb),t=OLb().safeParse(e);if(!t.success)return T("[peer-guard] tengu_harbor_kite_limits is not an object; using defaults",{level:"warn"}),Cla;return t.data}var S5d=60000,RLb=256,xLb=20,ILb,PLb=50,Cla,fQt,OLb,DLb=300000;var XHr=w(()=>{...;ILb={"rate-limited":"sender exceeded the peer message rate limit",duplicate:"identical to the previous message from this sender","hop-loop":"message has already passed through this session (a peer messaging loop)","hop-runaway":"peer relay chain is too long (runaway forwarding)","queue-full":"this session has too many undelivered peer messages queued"};Cla={...vla,maxQueuedPeerMessages:PLb},fQt=Cla,OLb=Se(()=>ye({bucketCapacity:Qe().min(5).max(500).catch(fQt.bucketCapacity),refillPerSecond:Qe().min(0.05).max(50).catch(fQt.refillPerSecond),dedupWindowMs:Qe().int().min(0).max(600000).catch(fQt.dedupWindowMs),maxSelfHops:Qe().int().min(3).max(LMr).catch(fQt.maxSelfHops),maxChainLength:Qe().int().min(8).max(LMr-1).catch(fQt.maxChainLength),maxTrackedSenders:Qe().int().min(16).max(1e5).catch(fQt.maxTrackedSenders),maxQueuedPeerMessages:Qe().int().min(10).max(5000).catch(fQt.maxQueuedPeerMessages)}))});
+
+================================================================================
+BLOCK | PACER_T5d_sentInBurst
+offset 281144058
+================================================================================
+function T5d(e,t=Date.now){let r=new Map;function n(a,l){let{bucketCapacity:c,refillPerSecond:u,maxTrackedSenders:d}=e(),p=!1,f=zKo(r,a,d,()=>(p=!0,{tokens:c,updatedAt:l,sentInBurst:0,burstStartedAt:l}),(m)=>wDn(m.tokens,m.updatedAt,l,c,u)>=c);if(!p){f.tokens=wDn(f.tokens,f.updatedAt,l,c,u),f.updatedAt=l;let m=c/Math.max(u,0.000000001)*1000;if(f.tokens>=c||l-f.burstStartedAt>m)f.sentInBurst=0,f.burstStartedAt=l}return f}function o(a){let l=n(a,t());if(!jKo(l.tokens))return{ok:!1,sentInBurst:l.sentInBurst};l.tokens-=1,l.sentInBurst+=1;let c=l,u=!1;return{ok:!0,refund:()=>{if(u)return;u=!0,c.tokens=Math.min(e().bucketCapacity,c.tokens+1),c.sentInBurst=Math.max(0,c.sentInBurst-1)}}}function i(a){let l=n(a,t());l.tokens=Math.min(e().bucketCapacity,l.tokens+1),l.sentInBurst=Math.max(0,l.sentInBurst-1)}function s(a){let l=n(a,t());l.tokens=Math.max(0,l.tokens-1),l.sentInBurst+=1}return{reserve:o,credit:i,debit:s}}
+
+================================================================================
+BLOCK | ERROR_x5d
+offset 281145447
+================================================================================
+function x5d(e){return new bt(`Too many messages to this session just now: ${e} were sent recently and more would be dropped by its rate limit, so this one was not sent. Batch what remains into one message, or wait a little before sending more.`,"cross-session sends to one target outpaced its inbox rate limit",R5d)}function hQt(e){return e instanceof bt&&e.errorClass===R5d}
+
+================================================================================
+BLOCK | WIRE_jLb_P5d_CDn_refuse_before_send
+offset 281147994..281148715
+================================================================================
+function jLb(){return Qh().outbound.pacer??=T5d(JHr)}function P5d(){if(V.CLAUDE_CODE_HARBOR_KITE_PACING_OFF)return!1;return!nt("tengu_harbor_kite_pacing_off",!1)}function Ola(e){O5d(e,(t,r)=>t.credit(r))}function Dla(e){O5d(e,(t,r)=>t.debit(r))}function O5d(e,t){let r=Qh().outbound.pacer;if(!r)return;let{scheme:n,target:o}=vB(e);if(n!=="uds")return;t(r,dX(o)??o)}
+// inside CDn send path:
+m=(l!==void 0||qt()!=="windows")&&P5d()?jLb().reserve(dX(e)??e):zLb;if(!m.ok)throw T(`[uds-client] paced: not sending to ${sP(e)} — ${m.sentInBurst} sent this burst; its inbox rate limit would drop more`),x5d(m.sentInBurst);... try{await N5d(...)}catch(h){if(QHr(h)){if(m.refund(),s)L5d(u.msg_id)}throw h}
+
+================================================================================
+BLOCK | STRINGS
+================================================================================
+"[uds-client] paced: not sending to "
+" sent this burst; its inbox rate limit would drop more"
+"Too many messages to this session just now: "
+" were sent recently and more would be dropped by its rate limit, so this one was not sent. Batch what remains into one message, or wait a little before sending more."
+"cross-session sends to one target outpaced its inbox rate limit"
+"tengu_harbor_kite_limits"
+"tengu_harbor_kite_pacing_off"
+"CLAUDE_CODE_HARBOR_KITE_PACING_OFF"
+
+TIP GAP NOTES
+- tip has recv-side inbox full drop in udsMessaging (MAX_UDS_INBOX_*), and send-side line-cap refuse (UdsMessageTooLargeError), but NO outbound token-bucket / sentInBurst reserve-before-send.
+- Implement in udsClient send path (CDn≈sendToUdsSocket / cross-session user frame sender), not invent SendMessageTool-local counters.
+- Do NOT conflate with ingress admit reasons ILb rate-limited/queue-full (recv peer-guard); #30 is outbound pacer refuse so message is never falsely marked sent.
+- Windows + no own inbox: SEA skips pacer (zLb noop ok) unless own socket present OR non-windows.

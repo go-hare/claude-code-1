@@ -23,6 +23,9 @@ import { getAgentId } from './teammate.js'
 export type SessionKind = 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
 export type SessionStatus = 'busy' | 'idle' | 'waiting'
 
+/** densable session-registry capability voucher for idle notices (tqo). */
+export const SESSION_FEATURE_NOTIFY_IDLE = 'notify_idle'
+
 function getSessionsDir(): string {
   return join(getClaudeConfigHomeDir(), 'sessions')
 }
@@ -140,7 +143,11 @@ export async function registerSession(): Promise<boolean> {
         ...processStartFields,
         ...(envBridgeSessionId ? { bridgeSessionId: envBridgeSessionId } : {}),
         ...(feature('UDS_INBOX')
-          ? { messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET }
+          ? {
+              messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET,
+              // densable tqo voucher — peers read this to accept notify_when_idle.
+              features: [SESSION_FEATURE_NOTIFY_IDLE],
+            }
           : {}),
         ...(feature('BG_SESSIONS')
           ? {
@@ -270,6 +277,20 @@ export async function updateSessionActivity(patch: {
 }
 
 /**
+ * densable kla / messaging-socket stamp — refresh PID registry socket path +
+ * `features: ["notify_idle"]` voucher after the inbox binds (or clears).
+ */
+export async function updateSessionMessagingSocket(
+  messagingSocketPath: string | undefined,
+): Promise<void> {
+  if (!feature('UDS_INBOX')) return
+  await updatePidFile({
+    messagingSocketPath,
+    features: messagingSocketPath ? [SESSION_FEATURE_NOTIFY_IDLE] : undefined,
+  })
+}
+
+/**
  * densable 2.1.232 #4 `u2e` / `listLive` — live session records from the PID
  * registry (`~/.claude/sessions/<pid>.json`), including names for uniqueness.
  * Stale PID files are swept (same rules as {@link countConcurrentSessions}).
@@ -288,6 +309,11 @@ export type LiveSessionRecord = {
   nameSource?: SessionNameSource
   kind?: SessionKind
   messagingSocketPath?: string
+  /**
+   * densable session-registry `features` voucher list.
+   * Idle subscribe treats a present record that lacks `notify_idle` as peer-unsupported.
+   */
+  features?: string[]
 }
 
 export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
@@ -350,6 +376,9 @@ export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
         typeof data.messagingSocketPath === 'string'
           ? data.messagingSocketPath
           : undefined
+      const features = Array.isArray(data.features)
+        ? data.features.filter((f): f is string => typeof f === 'string')
+        : undefined
       live.push({
         pid,
         sessionId,
@@ -361,6 +390,7 @@ export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
         nameSource,
         kind,
         messagingSocketPath,
+        features,
       })
     } catch (e) {
       logForDebugging(

@@ -1,0 +1,173 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236
+sha256: 6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848
+key: auto-mode-bedrock-defaults
+id: 22
+checklist: Auto mode on Bedrock/Vertex/Foundry + telemetry-off: classifier same defaults incl severity-scored
+gold: Gdu/_0e/IOo privacy → KJ/__e → KIt GrowthBook gate → KD() falls back to frozen qTa (severityByModel) when KIt false; Hcr severityEligible:!0 → Y8f/J8f/xol severity-scored stage1; R8f beta firstParty-only; provider docs say 3P auto supported
+
+================================================================================
+BLOCK 0 | Privacy / telemetry-off (Gdu / _0e / IOo)
+offset 277662404 (0x108cbf44)
+================================================================================
+function Gdu(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"essential-traffic";if(process.env.DISABLE_TELEMETRY)return"no-telemetry";if(Hn(process.env.DO_NOT_TRACK))return"no-telemetry";return"default"}
+function _a(){return Gdu()==="essential-traffic"}
+function _0e(){return Gdu()!=="default"}
+function _Rr(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";return null}
+function IOo(){if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)return"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";if(process.env.DISABLE_TELEMETRY)return"DISABLE_TELEMETRY";if(Hn(process.env.DO_NOT_TRACK))return"DO_NOT_TRACK";return null}
+
+ORDER:
+1. CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC → "essential-traffic"
+2. else DISABLE_TELEMETRY → "no-telemetry"
+3. else DO_NOT_TRACK (Hn truthy) → "no-telemetry"
+4. else "default"
+_0e() true iff privacy ≠ default (covers both telemetry-off modes).
+
+================================================================================
+BLOCK A | 1P logging + GrowthBook enablement (KJ / __e / KIt / Gvb)
+offsets 279653707, 280017079, 280405838
+================================================================================
+function $nb(){if(V.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)return!1;return!kd()}
+function KJ(){return $nb()||Mg()!==null||_0e()}
+function __e(){return!KJ()}
+function KIt(){return!V.DISABLE_GROWTHBOOK&&__e()}
+function Gvb(){return V.CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF&&!V.DISABLE_GROWTHBOOK&&_0e()&&kd()}
+
+CONTROL-FLOW:
+- kd() === (Zn()==="firstParty")  [provider helper elsewhere]
+- $nb(): non-firstParty ⇒ true (unless PROVIDER_MANAGED_BY_HOST) ⇒ KJ true ⇒ __e false ⇒ KIt false
+- _0e() telemetry-off ⇒ KJ true ⇒ __e false ⇒ KIt false (even on firstParty)
+- KIt false disables live GrowthBook feature evaluation
+- Gvb: optional disk-cache-while-telemetry-off ONLY when firstParty + _0e + CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF
+
+SYMBOLS: Gdu, _0e, IOo, $nb, KJ, __e, KIt, Gvb, kd, Zn
+
+================================================================================
+BLOCK B | tengu_auto_mode_config resolver KD → qTa baked defaults
+offset 282923523 (0x10dce543)
+================================================================================
+function KD(){let e=nt("tengu_auto_mode_config",Eri)??Eri;if(e!==Eri)return e;return KIt()?Eri:qTa}
+qTa=Object.freeze({
+  twoStageClassifier:!0,
+  sameTurnSiblingContext:!0,
+  jsonlTranscript:!0,
+  editRemovalVisibility:!0,
+  editRemovalCap:3000,
+  outcomeVisibility:!1,
+  repoVisibility:!0,
+  gitStatusType:!0,
+  gitStatusUploads:!1,
+  severityByModel:Object.freeze({
+    "claude-sonnet-5[1m]":Object.freeze({t1:25,t2:35}),
+    "claude-opus-4-8[1m]":Object.freeze({t1:45,t2:35}),
+    "claude-sonnet-5":Object.freeze({t1:25,t2:35}),
+    "claude-opus-4-8":Object.freeze({t1:45,t2:35})
+  })
+})
+Eri=Object.freeze({})
+
+ORDER / MEANING:
+1. Read GrowthBook key tengu_auto_mode_config with empty Eri default
+2. If remote/cached value !== Eri → use that value (live GB config)
+3. Else if KIt() → return Eri {} (GB on but no remote config ⇒ empty)
+4. Else (!KIt) → return qTa baked defaults INCLUDING severityByModel
+
+CRITICAL FOR #22:
+- Bedrock/Vertex/Foundry: KIt false via $nb (!kd) ⇒ KD returns qTa (severity-scored defaults) without needing live GB
+- telemetry-off firstParty: KIt false via _0e ⇒ same qTa path
+- Thus classifier defaults (two-stage + severityByModel) are provider-parity with Claude API when GB cannot run
+
+================================================================================
+BLOCK C | Severity eligibility + threshold resolve (Hcr / Y8f / J8f / xol)
+offsets 289872745, 289861019, 292533808, 289883853
+================================================================================
+// permission auto path always opts in:
+severityEligible:!0
+// inside Hcr:
+c=i.severityEligible?Y8f(Lol()):null
+
+function Y8f(e){return J8f(e).value}
+function POi(e,t){return typeof e==="number"&&Number.isFinite(e)&&e>=0&&e<=100?e:t}
+function J8f(e){
+  let t=null;
+  if(t?.member){ /* GB member bundle.severity — densable leaves t=null in this build */ }
+  let r=KD(),n=s2v(r?.severityByModel,e);
+  if(n)return{value:{t1:POi(n.t1,E8f),t2:POi(n.t2,C8f)},src:"gb"};
+  return{value:null,src:"default"}
+}
+function s2v(e,t){
+  if(!e)return;
+  let r=K8r(e,t);
+  if(r||e!==qTa.severityByModel)return r;
+  for(let n of GDr(t)){let o=K8r(e,n);if(o)return o}
+  return
+}
+E8f=15,C8f=20
+
+function xol(e){
+  if(e.stop_reason!=="stop_sequence"&&e.stop_reason!=="end_turn")return null;
+  return c2v(xd(e.content))
+}
+// c2v: single <severity>N</severity> → Number; else null
+
+STAGE1 (d2v) when severity thresholds `u` present:
+- stop_sequences: ["</severity>"] (else "</block>")
+- parse via xol; compare v>u.t1 for fast block
+- suffixes via a2v(...,u): severity mode uses r2v ("Respond with <severity>N</severity> ONLY...")
+
+LITERALS:
+- "<severity>", "</severity>", "Blocked by fast classifier", "Allowed by fast classifier"
+- Output format o2v: "Output <severity>N</severity> where N is an integer 0-100 and 50 is exactly the allow/block boundary..."
+
+================================================================================
+BLOCK D | Classifier model defaults (Lol / Fdr / NYs) — provider-agnostic
+offsets 289876756, 279756008
+================================================================================
+function Lol(){return Fdr().value}
+function Fdr(){
+  let e=Ui(),t=KD(),
+      r=X8f(t?.modelByMainModel,{vet:(n)=>Hol(n,"modelByMainModel")})??Hol(t?.model,"model");
+  if(r)return{value:r,src:"gb"};
+  if(Ndr().externalSonnet5Probe!=="demoted"){let n=NYs(e);if(n)return{value:n,src:"default",externalDefault:!0}}
+  return{value:zol(e),src:"default"}
+}
+function NYs(e){
+  let t=ese(e);
+  if(t==="claude-sonnet-4-6"||t==="claude-sonnet-4-5"||t.startsWith("claude-haiku-"))return;
+  let r=V.ANTHROPIC_DEFAULT_SONNET_MODEL,
+      o=r!==void 0&&r===V.CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT?void 0:r;
+  ...
+  return uhd(UH(o),e)
+}
+
+twoStageClassifier default when KD empty-ish:
+function oVf(){let t=KD()?.twoStageClassifier;if(t==="fast"||t==="thinking")return{value:t,src:"gb"};return{value:"both",src:t!==void 0?"gb":"default"}}
+NOTE: qTa.twoStageClassifier:!0 is truthy boolean; oVf only special-cases "fast"|"thinking" strings → else "both".
+
+CONSTANTS near classifier timeouts/retries:
+K9n=60000,Y9n=120000,k0f=60000,A0f=4,R0f=0
+
+================================================================================
+BLOCK E | Provider-specific beta (NOT defaults) + product copy
+offsets 289870769, 279720297, 299968988
+================================================================================
+aYs=zR("auto_mode_classifier","auto-mode-classifier-2026-07-16")
+function R8f(e){if(e!=="firstParty")return[];if(!gB()||!om())return[];return[aYs]}
+function x8f(e){let t=$dr();return f2v(t,qv(e)),t}
+
+MEANING:
+- extraBetas auto-mode-classifier ONLY on firstParty + experimental betas allowed + first-party base URL
+- Bedrock/Vertex/Foundry: R8f → [] (no classifier beta header) BUT still use same KD/qTa defaults + severity path
+- Docs/copy: "The provider is NOT a skip reason: auto mode is provider-supported on every provider, 3P (Bedrock/Vertex/Foundry) included."
+
+================================================================================
+NOTES (implementable contract; invent-ban)
+================================================================================
+1. #22 is NOT a separate Bedrock classifier fork — parity is KD()'s !KIt → qTa fallback.
+2. Telemetry-off and 3P both force KIt false (via _0e and $nb respectively) → same qTa severityByModel.
+3. severityEligible:!0 on the auto permission path; thresholds from Y8f(Lol()) using KD().severityByModel.
+4. Clamp fallbacks E8f=15 / C8f=20 only when severity entry exists but t1/t2 invalid; missing map entry ⇒ value:null (non-severity XML path).
+5. Do NOT invent provider-specific severity maps; SEA map keys are claude-sonnet-5 / claude-opus-4-8 (+[1m]).
+6. Do NOT invent "severity-scored" string — SEA uses severityByModel + <severity> tags.
+7. tip GAP was missing this KD/KIt/qTa linkage; gold now supplies it.
+8. ExtraUsage / race / 0% strings in SEA are unrelated to this classifier-defaults GAP.

@@ -126,7 +126,27 @@ export async function launchRepl(
 
   const { startDeferredPrefetches } = await import('./main.js');
   startDeferredPrefetches();
-  await root.waitUntilExit();
+  try {
+    await root.waitUntilExit();
+  } catch (err) {
+    // densable A0r/$Ji — unrecoverable render while canary armed → died:render_error
+    let canaryNote = '';
+    try {
+      const { markFullscreenBootRenderError } = await import('./utils/fullscreen.js');
+      if (await markFullscreenBootRenderError().catch(() => false)) {
+        canaryNote =
+          ' It happened while the fullscreen renderer was starting, so the next launch will use the classic renderer (CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 forces that any time).';
+      }
+    } catch {
+      // optional
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console -- surface fatal UI error after Ink crash
+    console.error(`Claude Code exited after an unrecoverable interface error (${message}).${canaryNote}`);
+    const { gracefulShutdown } = await import('./utils/gracefulShutdown.js');
+    await gracefulShutdown(1);
+    return { type: 'exit' };
+  }
 
   if (switchToAgents) {
     return {

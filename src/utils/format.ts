@@ -243,6 +243,7 @@ export function formatResetTime(
   timestampInSeconds: number | undefined,
   showTimezone: boolean = false,
   showTime: boolean = true,
+  alwaysShowDate: boolean = false,
 ): string | undefined {
   if (!timestampInSeconds) return undefined
 
@@ -253,8 +254,8 @@ export function formatResetTime(
   // Calculate hours until reset
   const hoursUntilReset = (date.getTime() - now.getTime()) / (1000 * 60 * 60)
 
-  // If reset is more than 24 hours away, show the date as well
-  if (hoursUntilReset > 24) {
+  // If reset is more than 24 hours away (or alwaysShowDate), show the date as well
+  if (alwaysShowDate || hoursUntilReset > 24) {
     // Show date and time for resets more than a day away
     const dateOptions: Intl.DateTimeFormatOptions = {
       month: 'short',
@@ -296,9 +297,10 @@ export function formatResetText(
   resetsAt: string,
   showTimezone: boolean = false,
   showTime: boolean = true,
+  alwaysShowDate: boolean = false,
 ): string {
   const dt = new Date(resetsAt)
-  return `${formatResetTime(Math.floor(dt.getTime() / 1000), showTimezone, showTime)}`
+  return `${formatResetTime(Math.floor(dt.getTime() / 1000), showTimezone, showTime, alwaysShowDate)}`
 }
 
 // Back-compat: truncate helpers moved to ./truncate.ts (needs ink/stringWidth)

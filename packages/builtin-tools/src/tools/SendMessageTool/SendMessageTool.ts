@@ -138,15 +138,38 @@ const StructuredMessage = lazySchema(() =>
   ]),
 )
 
+// densable e$f / $2f: hoist feature() to module scope — Bun forbids feature()
+// inside lazySchema arrows, const assignment bodies, or && chains.
+const SEND_MESSAGE_TO_DESC = feature('UDS_INBOX')
+  ? feature('LAN_PIPES')
+    ? 'Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer, or "tcp:<host>:<port>" for a LAN peer (use ListAgents to discover)'
+    : 'Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer (use ListAgents to discover)'
+  : 'Recipient: teammate name, or "*" for broadcast to all teammates'
+
+const SEND_MESSAGE_MESSAGE_FIELD = feature('UDS_INBOX')
+  ? z
+      .union([
+        z.string().describe('Plain text message content'),
+        StructuredMessage(),
+      ])
+      .optional()
+      .default('')
+  : z.union([
+      z.string().describe('Plain text message content'),
+      StructuredMessage(),
+    ])
+
+const SEND_MESSAGE_NOTIFY_WHEN_IDLE_FIELD = feature('UDS_INBOX')
+  ? {
+      notify_when_idle: semanticBoolean(z.boolean().optional()).describe(
+        'Ask a session ON THIS MACHINE to send you ONE notice when it next goes idle (finishes its turn with nothing queued) or exits — opt-in, one-shot, no polling. With a message: deliver it now AND subscribe. Without a message (omit it): a pure subscription that costs the other session nothing.',
+      ),
+    }
+  : {}
+
 const inputSchema = lazySchema(() =>
   z.object({
-    to: z
-      .string()
-      .describe(
-        feature('UDS_INBOX')
-          ? `Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer${feature('LAN_PIPES') ? ', or "tcp:<host>:<port>" for a LAN peer' : ''} (use ListAgents to discover)`
-          : 'Recipient: teammate name, or "*" for broadcast to all teammates',
-      ),
+    to: z.string().describe(SEND_MESSAGE_TO_DESC),
     // densable SRp: summary.max(Cpr) + soft-truncate describe (Cpr=200).
     summary: z
       .string()
@@ -155,10 +178,8 @@ const inputSchema = lazySchema(() =>
       .describe(
         `A 5-10 word summary shown as a one-line preview in the UI (required when message is a string). Longer summaries are truncated to ${SEND_MESSAGE_SUMMARY_MAX_CHARS} characters rather than rejected, and only the first line is shown.`,
       ),
-    message: z.union([
-      z.string().describe('Plain text message content'),
-      StructuredMessage(),
-    ]),
+    message: SEND_MESSAGE_MESSAGE_FIELD,
+    ...SEND_MESSAGE_NOTIFY_WHEN_IDLE_FIELD,
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -233,6 +254,104 @@ function hasInlineUdsToken(to: string): boolean {
   // Empty-token markers are still inline-token attempts. Observable input
   // redaction preserves "#token=" so cloned inputs remain rejected.
   return addr.scheme === 'uds' && addr.target.includes(UDS_INLINE_TOKEN_MARKER)
+}
+
+/** densable S$t — notify_when_idle truthy on input. */
+function wantsNotifyWhenIdle(input: unknown): boolean {
+  // Input is a feature()-gated schema union under tsc; read the field safely.
+  if (typeof input !== 'object' || input === null) return false
+  return (input as { notify_when_idle?: unknown }).notify_when_idle === true
+}
+
+/** densable VRi — main conversation only (not subagent / teammate). */
+function isNotifyWhenIdlePrincipalRefused(context: ToolUseContext): boolean {
+  if (context.agentId !== undefined) return true
+  if (getAgentContext()?.agentType === 'teammate') return true
+  if (isTeammate()) return true
+  return false
+}
+
+function plainMessageText(message: Input['message']): string {
+  return typeof message === 'string' ? message : ''
+}
+
+/**
+ * densable subscribe after optional UDS text delivery.
+ * Restricts to on-this-machine UDS targets (U2f).
+ */
+async function maybeSubscribePeerIdle(opts: {
+  to: string
+  socketPath: string
+  displayLabel?: string
+  fromMode?: 'bypass' | 'prompting'
+  context: ToolUseContext
+}): Promise<{
+  ok: boolean
+  modelLine: string
+  displayLine: string
+  errorClass?: string
+  degradedClass?: string
+}> {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const idle =
+    require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+
+  if (isNotifyWhenIdlePrincipalRefused(opts.context)) {
+    return {
+      ok: false,
+      modelLine: idle.NOTIFY_WHEN_IDLE_MAIN_ONLY,
+      displayLine: idle.NO_IDLE_SUB_MAIN_ONLY,
+      errorClass: 'permission_denied',
+    }
+  }
+
+  let peerRecord: { pid?: number; features?: string[] } | null = null
+  try {
+    const { listLiveSessionRecords } =
+      require('src/utils/concurrentSessions.js') as typeof import('src/utils/concurrentSessions.js')
+    const live = await listLiveSessionRecords()
+    const hit = live.find(r => r.messagingSocketPath === opts.socketPath)
+    if (hit) {
+      peerRecord = {
+        pid: hit.pid,
+        ...(hit.features !== undefined ? { features: hit.features } : {}),
+      }
+    }
+  } catch {
+    peerRecord = null
+  }
+
+  const result = await idle.subscribeToPeerIdle(opts.socketPath, {
+    fromMode: opts.fromMode,
+    label: opts.displayLabel ?? opts.to,
+    peerRecord,
+    peerRegistryReadable: peerRecord != null,
+  })
+  const modelLine = result.ok
+    ? idle.idleSubscribedLine(
+        opts.displayLabel ?? opts.to,
+        result.peerKnownCapable,
+      )
+    : idle.idleSubscribeFailedLine(result)
+  const displayLine = idle.idleSubscribeDisplayLine(
+    opts.displayLabel ?? opts.to,
+    result,
+  )
+  if (result.ok) {
+    return { ok: true, modelLine, displayLine }
+  }
+  const cls = idle.idleSubscribeErrorClass(result.reason)
+  const degraded =
+    result.reason === 'send-uncertain' ||
+    result.reason === 'requester-refuses-inbound' ||
+    result.reason === 'cap'
+  return {
+    ok: false,
+    modelLine,
+    displayLine,
+    ...(degraded ? { degradedClass: cls } : { errorClass: cls }),
+  }
 }
 
 /** Peer body envelope tag. */
@@ -1224,6 +1343,35 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           errorCode: 9,
         }
       }
+
+      // densable: pure notify_when_idle subscribe may omit message (default "").
+      // bridge/tcp hard-refuse only for pure notify; message+notify may deliver
+      // text and refuse subscribe later (mailbox/uds shape).
+      if (feature('UDS_INBOX') && wantsNotifyWhenIdle(input)) {
+        const plain = plainMessageText(input.message)
+        const pureNotify = plain.trim().length === 0
+        if (pureNotify && (addr.scheme === 'bridge' || addr.scheme === 'tcp')) {
+          return {
+            result: false,
+            message:
+              'notify_when_idle is only supported for Claude sessions on this machine in this release (not teammates, subagents, Remote Control or cloud sessions).',
+            errorCode: 9,
+          }
+        }
+        if (pureNotify) {
+          // Pure subscribe — summary not required.
+          return { result: true }
+        }
+        if (typeof input.message !== 'string') {
+          return {
+            result: false,
+            message:
+              'structured messages cannot be sent with notify_when_idle — only plain text (or omit message)',
+            errorCode: 9,
+          }
+        }
+      }
+
       if (feature('UDS_INBOX') && parseAddress(input.to).scheme === 'bridge') {
         // Structured-message rejection first — it's the permanent constraint.
         // Showing "not connected" first would make the user reconnect only to
@@ -1265,7 +1413,17 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         return { result: true }
       }
       if (typeof input.message === 'string') {
-        if (!input.summary || input.summary.trim().length === 0) {
+        if (input.message.trim().length === 0 && !wantsNotifyWhenIdle(input)) {
+          return {
+            result: false,
+            message: 'message must not be empty',
+            errorCode: 9,
+          }
+        }
+        if (
+          input.message.trim().length > 0 &&
+          (!input.summary || input.summary.trim().length === 0)
+        ) {
           return {
             result: false,
             message: 'summary is required when message is a string',
@@ -1351,7 +1509,15 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
       }
 
-      if (typeof input.message === 'string') {
+      let notifyIdle = false
+      if (feature('UDS_INBOX')) {
+        notifyIdle = wantsNotifyWhenIdle(input)
+      }
+      const plainText = typeof input.message === 'string' ? input.message : null
+      const pureIdleSubscribe =
+        notifyIdle && (plainText === null || plainText.trim().length === 0)
+
+      if (typeof input.message === 'string' || pureIdleSubscribe) {
         const addr = parseAddress(input.to)
         if (addr.scheme === 'uds' && hasInlineUdsToken(input.to)) {
           return {
@@ -1364,7 +1530,147 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
       }
 
-      if (feature('UDS_INBOX') && typeof input.message === 'string') {
+      // densable U2f / VRi — notify_when_idle gates before other delivery.
+      if (notifyIdle) {
+        const addr = parseAddress(input.to)
+        // Pure notify on bridge/tcp: hard refuse (no subscribe invent).
+        // Message+notify: fall through so text can deliver; append refuse note.
+        if (
+          pureIdleSubscribe &&
+          (addr.scheme === 'bridge' || addr.scheme === 'tcp')
+        ) {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const idle =
+            require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          return {
+            data: {
+              success: false,
+              message: idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY,
+              errorClass: 'not_reachable',
+            },
+          }
+        }
+        if (isNotifyWhenIdlePrincipalRefused(context) && pureIdleSubscribe) {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const idle =
+            require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          return {
+            data: {
+              success: false,
+              message: idle.NOTIFY_WHEN_IDLE_MAIN_ONLY,
+              errorClass: 'permission_denied',
+            },
+          }
+        }
+        // Pure subscribe on explicit uds: — no text send.
+        if (pureIdleSubscribe && addr.scheme === 'uds') {
+          const sub = await maybeSubscribePeerIdle({
+            to: input.to,
+            socketPath: addr.target,
+            displayLabel: recipientForDisplay(input.to),
+            context,
+          })
+          return {
+            data: {
+              success: sub.ok,
+              message: sub.modelLine,
+              ...(sub.errorClass ? { errorClass: sub.errorClass } : {}),
+              ...(sub.degradedClass
+                ? { degradedClass: sub.degradedClass }
+                : {}),
+            },
+          }
+        }
+        // C1 — bare-name pure notify: resolve+subscribe only (no empty send).
+        if (
+          pureIdleSubscribe &&
+          addr.scheme === 'other' &&
+          input.to !== '*' &&
+          input.to !== MAIN_RECIPIENT
+        ) {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const udsClient =
+            require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
+          const bridgePeers =
+            require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
+          const idle =
+            require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          const [udsPeers, bridgeList, allLive] = await Promise.all([
+            udsClient.listPeers(),
+            bridgePeers.listBridgePeers(),
+            udsClient.listAllLiveSessions(),
+          ])
+          const candidates = buildPeerCandidates({
+            udsPeers,
+            bridgePeers: bridgeList,
+          })
+          const pins = context.getAppState().sendMessagePins ?? {}
+          const resolved = resolvePeerByName({
+            to: input.to,
+            pins,
+            candidates,
+            localClaimed: localClaimedRemoteBodies(allLive),
+          })
+          if (resolved.kind === 'refused') {
+            return { data: { success: false, message: resolved.message } }
+          }
+          if (resolved.kind === 'ambiguous') {
+            return {
+              data: {
+                success: false,
+                message: formatAmbiguousMessage(input.to, resolved.candidates, {
+                  pinnedIdentityClaimedLocally:
+                    resolved.pinnedIdentityClaimedLocally,
+                }),
+              },
+            }
+          }
+          if (resolved.kind === 'ok') {
+            const cand = resolved.candidate
+            if (cand.kind === 'bridge-session') {
+              return {
+                data: {
+                  success: false,
+                  message: idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY,
+                  errorClass: 'not_reachable',
+                },
+              }
+            }
+            const sub = await maybeSubscribePeerIdle({
+              to: cand.name,
+              socketPath: cand.id,
+              displayLabel: cand.name,
+              context,
+            })
+            return {
+              data: {
+                success: sub.ok,
+                message: sub.modelLine,
+                ...(sub.errorClass ? { errorClass: sub.errorClass } : {}),
+                ...(sub.degradedClass
+                  ? { degradedClass: sub.degradedClass }
+                  : {}),
+              },
+            }
+          }
+          return {
+            data: {
+              success: false,
+              message: idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY,
+              errorClass: 'not_reachable',
+            },
+          }
+        }
+      }
+
+      if (
+        feature('UDS_INBOX') &&
+        typeof input.message === 'string' &&
+        input.message.trim().length > 0
+      ) {
         const addr = parseAddress(input.to)
         // Explicit uds:/bridge:/tcp: schemes only here.
         // densable gIn bare-name / name [ref] peer resolve runs AFTER local_agent.
@@ -1394,12 +1700,27 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           // (displayName). Explicit bridge:/uds: scheme paths do NOT pin —
           // address-string keys would pollute sendMessagePins and never match
           // ListAgents names (SEA: only two NKp call sites, both p.displayName).
+          if (!result.ok) {
+            return {
+              data: {
+                success: false,
+                message: `Failed to send to ${input.to}: ${result.error ?? 'unknown'}`,
+              },
+            }
+          }
+          let message = `”${preview}” → ${input.to}`
+          // I7 — message+notify on bridge: deliver text, refuse subscribe.
+          if (notifyIdle) {
+            /* eslint-disable @typescript-eslint/no-require-imports */
+            const idle =
+              require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+            /* eslint-enable @typescript-eslint/no-require-imports */
+            message = `${message}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY}`
+          }
           return {
             data: {
-              success: result.ok,
-              message: result.ok
-                ? `”${preview}” → ${input.to}`
-                : `Failed to send to ${input.to}: ${result.error ?? 'unknown'}`,
+              success: true,
+              message,
             },
           }
         }
@@ -1426,6 +1747,38 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             })
             const preview = input.summary || truncate(input.message, 50)
             // densable: no NKp on explicit uds: scheme (see bridge branch above).
+            // Idle subscribe only after message delivery succeeds.
+            if (notifyIdle) {
+              if (isNotifyWhenIdlePrincipalRefused(context)) {
+                /* eslint-disable @typescript-eslint/no-require-imports */
+                const idle =
+                  require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+                /* eslint-enable @typescript-eslint/no-require-imports */
+                return {
+                  data: {
+                    success: true,
+                    message: `”${preview}” → ${recipient}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_MAIN_ONLY}`,
+                  },
+                }
+              }
+              const sub = await maybeSubscribePeerIdle({
+                to: input.to,
+                socketPath: addr.target,
+                displayLabel: recipient,
+                fromMode,
+                context,
+              })
+              return {
+                data: {
+                  success: true,
+                  message: `”${preview}” → ${recipient}\n${sub.modelLine}`,
+                  ...(sub.errorClass ? { errorClass: sub.errorClass } : {}),
+                  ...(sub.degradedClass
+                    ? { degradedClass: sub.degradedClass }
+                    : {}),
+                },
+              }
+            }
             return {
               data: {
                 success: true,
@@ -1434,10 +1787,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
           } catch (e) {
             // densable yZt → too_large / message_too_large (tFd text already in message)
+            /* eslint-disable @typescript-eslint/no-require-imports */
+            const idle =
+              require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+            /* eslint-enable @typescript-eslint/no-require-imports */
             return {
               data: {
                 success: false,
-                message: `Failed to send to ${recipient}: ${errorMessage(e)}`,
+                message: `Failed to send to ${recipient}: ${errorMessage(e)}${
+                  notifyIdle
+                    ? `\nNothing was subscribed either (when a message rides along, the idle subscription is only made after that message is delivered).${idle.NOTIFY_WHEN_IDLE_NOT_DELIVERED_RETRY}`
+                    : ''
+                }`,
                 ...(isUdsMessageTooLargeError(e)
                   ? { errorClass: 'message_too_large' }
                   : {}),
@@ -1498,10 +1859,19 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             client.send({ type: 'chat', data: input.message })
             client.disconnect()
             const preview = input.summary || truncate(input.message, 50)
+            let message = `”${preview}” → ${input.to} (TCP ${ep.host}:${ep.port})`
+            // I7 — message+notify on tcp: deliver text, refuse subscribe.
+            if (notifyIdle) {
+              /* eslint-disable @typescript-eslint/no-require-imports */
+              const idle =
+                require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+              /* eslint-enable @typescript-eslint/no-require-imports */
+              message = `${message}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY}`
+            }
             return {
               data: {
                 success: true,
-                message: `”${preview}” → ${input.to} (TCP ${ep.host}:${ep.port})`,
+                message,
               },
             }
           } catch (e) {
@@ -1588,9 +1958,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       // densable 2.1.225 gIn/rKp — after in-process agents, resolve bare name /
       // name [ref] against local UDS + RC peers with pin guard.
+      // densable 2.1.236 C1: require non-empty text (pure idle handled earlier).
       if (
         feature('UDS_INBOX') &&
         typeof input.message === 'string' &&
+        input.message.trim().length > 0 &&
         input.to !== '*' &&
         input.to !== MAIN_RECIPIENT &&
         parseAddress(input.to).scheme === 'other'
@@ -1666,10 +2038,19 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               resolved.sameNamedSiblings && resolved.sameNamedSiblings > 0
                 ? `\nNote: ${resolved.sameNamedSiblings} other agent${resolved.sameNamedSiblings === 1 ? ' is' : 's are'} also named '${cand.name}'. This went to the one this conversation confirmed; to switch, re-send with that agent's 'name [ref]' (ListAgents lists them).`
                 : ''
+            let message = `“${preview}” → ${cand.name} (a Claude session on another machine, over Remote Control)${siblingNote}`
+            // I7 — bare→bridge message+notify: deliver, refuse subscribe.
+            if (notifyIdle) {
+              /* eslint-disable @typescript-eslint/no-require-imports */
+              const idle =
+                require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+              /* eslint-enable @typescript-eslint/no-require-imports */
+              message = `${message}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY}`
+            }
             return {
               data: {
                 success: true,
-                message: `“${preview}” → ${cand.name} (a Claude session on another machine, over Remote Control)${siblingNote}`,
+                message,
               },
             }
           }
@@ -1698,6 +2079,37 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               resolved.sameNamedSiblings && resolved.sameNamedSiblings > 0
                 ? `\nNote: ${resolved.sameNamedSiblings} other live session${resolved.sameNamedSiblings === 1 ? ' is' : 's are'} also named '${cand.name}'. This went to the one this conversation confirmed; to switch, re-send with that session's 'name [ref]' (ListAgents lists them).`
                 : ''
+            if (notifyIdle) {
+              if (isNotifyWhenIdlePrincipalRefused(context)) {
+                /* eslint-disable @typescript-eslint/no-require-imports */
+                const idle =
+                  require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+                /* eslint-enable @typescript-eslint/no-require-imports */
+                return {
+                  data: {
+                    success: true,
+                    message: `“${preview}” → ${cand.name} (another Claude session on this machine)${siblingNote}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_MAIN_ONLY}`,
+                  },
+                }
+              }
+              const sub = await maybeSubscribePeerIdle({
+                to: cand.name,
+                socketPath: cand.id,
+                displayLabel: cand.name,
+                fromMode,
+                context,
+              })
+              return {
+                data: {
+                  success: true,
+                  message: `“${preview}” → ${cand.name} (another Claude session on this machine)${siblingNote}\n${sub.modelLine}`,
+                  ...(sub.errorClass ? { errorClass: sub.errorClass } : {}),
+                  ...(sub.degradedClass
+                    ? { degradedClass: sub.degradedClass }
+                    : {}),
+                },
+              }
+            }
             return {
               data: {
                 success: true,
@@ -1718,6 +2130,67 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           }
         }
         // not-found among peers → mailbox fallthrough
+      }
+
+      // densable U2f — notify_when_idle never rides teammate mailbox / broadcast.
+      if (notifyIdle) {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const idle =
+          require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        if (pureIdleSubscribe) {
+          return {
+            data: {
+              success: false,
+              message: idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY,
+              errorClass: 'not_reachable',
+            },
+          }
+        }
+        // Message+notify to a non-UDS target: deliver message via mailbox below,
+        // but refuse the idle subscription with an explicit note.
+        if (typeof input.message === 'string') {
+          if (input.to === '*') {
+            const delivered = await handleBroadcast(
+              input.message,
+              input.summary,
+              context,
+            )
+            const base =
+              typeof delivered.data.message === 'string'
+                ? delivered.data.message
+                : 'Broadcast sent.'
+            return {
+              data: {
+                ...delivered.data,
+                message: `${base}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY}`,
+              },
+            }
+          }
+          const delivered = await handleMessage(
+            input.to,
+            input.message,
+            input.summary,
+            context,
+          )
+          const base =
+            typeof delivered.data.message === 'string'
+              ? delivered.data.message
+              : `Message sent to ${input.to}.`
+          return {
+            data: {
+              ...delivered.data,
+              message: `${base}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY}`,
+            },
+          }
+        }
+        return {
+          data: {
+            success: false,
+            message: idle.NOTIFY_WHEN_IDLE_THIS_MACHINE_ONLY,
+            errorClass: 'not_reachable',
+          },
+        }
       }
 
       if (typeof input.message === 'string') {

@@ -56,12 +56,20 @@ export type ModelOption = {
 }
 
 export function getDefaultOptionForUser(fastMode = false): ModelOption {
-  // Official org-default badge on the Default row (Elh/Urc).
+  // densable idt/aRn: org → env (ANTHROPIC_DEFAULT_MODEL) → tier badge.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { resolveOrgDefaultSetting, getDefaultModelAttributionBadge } =
-    require('./orgDefaultModel.js') as typeof import('./orgDefaultModel.js')
+  const {
+    resolveOrgDefaultSetting,
+    resolveAnthropicDefaultModelEnv,
+    getDefaultModelAttributionBadge,
+  } = require('./orgDefaultModel.js') as typeof import('./orgDefaultModel.js')
   const orgDefault = resolveOrgDefaultSetting()
-  const orgBadge = orgDefault ? getDefaultModelAttributionBadge('org') : ''
+  const envDefault = !orgDefault ? resolveAnthropicDefaultModelEnv() : null
+  const attributionBadge = orgDefault
+    ? getDefaultModelAttributionBadge('org')
+    : envDefault
+      ? getDefaultModelAttributionBadge('env')
+      : ''
 
   if (process.env.USER_TYPE === 'ant') {
     const currentModel = renderDefaultModelSetting(
@@ -70,20 +78,27 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
     return {
       value: null,
       label: 'Default (recommended)',
-      description: `Use the default model for Ants (currently ${currentModel})${orgBadge}`,
+      description: `Use the default model for Ants (currently ${currentModel})${attributionBadge}`,
       descriptionForModel: `Default model (currently ${currentModel})`,
     }
   }
 
   // Subscribers
   if (isClaudeAISubscriber()) {
-    // When org default is set, show the resolved model name + Org default badge
-    // instead of the generic tier marketing string (official N1n org arm).
+    // When org/env default is set, show the resolved model name + badge
+    // instead of the generic tier marketing string (official N1n org/env arm).
     if (orgDefault) {
       return {
         value: null,
         label: 'Default (recommended)',
-        description: `${renderDefaultModelSetting(orgDefault)}${orgBadge}`,
+        description: `${renderDefaultModelSetting(orgDefault)}${attributionBadge}`,
+      }
+    }
+    if (envDefault) {
+      return {
+        value: null,
+        label: 'Default (recommended)',
+        description: `${renderDefaultModelSetting(envDefault)}${attributionBadge}`,
       }
     }
     return {
@@ -98,7 +113,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   return {
     value: null,
     label: 'Default (recommended)',
-    description: `Use the default model (currently ${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}${orgBadge}`,
+    description: `Use the default model (currently ${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}${attributionBadge}`,
   }
 }
 

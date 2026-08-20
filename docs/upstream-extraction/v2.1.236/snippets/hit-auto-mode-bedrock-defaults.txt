@@ -1,0 +1,24 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: auto-mode-bedrock-defaults
+checklist: Auto mode Bedrock/Vertex/Foundry classifier defaults
+found: true
+topSymbols: ['Bedrock', 'Vertex', 'Foundry', 'classifier', 'severity']
+oneLineNote: Provider + classifier/severity present; telemetry-off parity mostly indirect
+search_patterns: ['Bedrock', 'Vertex', 'Foundry', 'classifier', 'severity', 'telemetry']
+
+=== pattern counts ===
+'Bedrock': 833
+'Vertex': 559
+'Foundry': 137
+'classifier': 730
+'severity': 321
+'telemetry': 1377
+
+=== classifier sample ===
+--- offset 75077242 ---
+%.F...Fable is experiencing high load, please use /model to switch to Sonnet...%%..............&%.>...Server is temporarily limiting requests (not your usage limit)..........Ij......Request timed out.......I................&%.....Your organization has disabled Claude subscription access for Claude Code . Use an Anthropic API key instead, or ask your admin to enable access.........g..6...cannot be used as an advisor when the request model is...(%..............)%.....auto-mode-classifier-error.txt...........U......auto-mode-dump..................linesFor................I#......recordClassifiedCall.....)%..............A......isRecordedClassifiedCallI*%.............I.......wire.....*%..............*%.....seedDir..!...............+%.....seedNamedRemoteUrl......."......................hasDir...+%..............+%.....dirState.,%.............I,%.....namedRemoteUrl...........,%.....Subagent has finished and is handing back control to the main agent. Revie
+
+=== severity sample ===
+--- offset 59935961 ---
+tion,.  BaseSQLAdapter,.  createPooledConnectionHandle,.  SSLMode.};.return $})...(function (){"use strict";// build/release/tmp_modules/internal/sql/errors.ts.var $;..class SQLError extends Error {.  constructor(message) {.    super(message);.    this.name = "SQLError";.  }.}..class PostgresError extends SQLError {.  code;.  constructor(message, options) {.    super(message);.    this.name = "PostgresError";.    let {.      code,.      errno,.      detail,.      hint,.      severity,.      position,.      internalPosition,.      internalQuery,.      where,.      schema,.      table,.      column,.      dataType,.      constraint,.      file,.      line,.      routine.    } = options;.    if (this.code = code, errno !== @undefined).      this.errno = errno;.    if (detail !== @undefined).      this.detail = detail;.    if (hint !== @undefined).      this.hint = hint;.    if (severity !== @undefined).      this.severity = severity;.    if (positio

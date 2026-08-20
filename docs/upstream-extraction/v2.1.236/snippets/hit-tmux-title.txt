@@ -1,0 +1,76 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (confirmed via --version)
+key: tmux-title
+search_patterns: ["tmux","960ms","title is now written only when"]
+
+EXACT PATTERN COUNTS:
+  tmux: 530
+  960ms: 0
+  title is now written only when: 0
+
+RELATED PATTERN COUNTS (not inventing behavior; latin1 presence only):
+  terminalTitleFromRename: 3
+  CLAUDE_CODE_DISABLE_TERMINAL_TITLE: 11
+  setPaneTitle: 6
+  pane_title: 2
+  terminal title: 2
+  terminal tab title: 2
+  tengu_device_bind_title_latched: 2
+  rename_session: 17
+  process.title="claude": 1
+
+NOTE: Distinctive gold strings "960ms" and "title is now written only when" are ABSENT in this SEA.
+Below are best nearby printable contexts for tmux + terminal/pane title machinery that IS present.
+
+=== NO HIT for 'title is now written only when' ===
+
+=== NO HIT for '960ms' ===
+
+=== hit 1 needle='terminalTitleFromRename:zt()' offset=0x109acd49 (278580553) ===
+ installed). Read from user, flag and managed settings only (the whole block from the highest-precedence of those applies); ignored in project .claude/settings.json and .claude/settings.local.json.`),terminalTitleFromRename:zt().optional().describe("Whether /rename updates the terminal tab title (defaults to true). Set to false to keep auto-generated topic titles."),alwaysThinkingEnabled:zt().optional().describe("When false, thinking is disabled. When absent or true, thinking is enab
+
+=== hit 2 needle='Whether /rename updates the terminal tab title' offset=0x521df10 (86105872) ===
+ from user, flag and managed settings only (the whole block from the highest-precedence of those applies); ignored in project .claude/settings.json and .claude/settings.local.json.                t   Whether /rename updates the terminal tab title (defaults to true). Set to false to keep auto-generated topic titles.                        n   When false, thinking is disabled. When absent or true, thinking is enabled automatically for supported models.                  low                             hi
+
+=== hit 3 needle='Whether /rename updates the terminal tab title' offset=0x109acd7b (278580603) ===
+ings only (the whole block from the highest-precedence of those applies); ignored in project .claude/settings.json and .claude/settings.local.json.`),terminalTitleFromRename:zt().optional().describe("Whether /rename updates the terminal tab title (defaults to true). Set to false to keep auto-generated topic titles."),alwaysThinkingEnabled:zt().optional().describe("When false, thinking is disabled. When absent or true, thinking is enabled automatically for supported models."),effortLevel:Hr(["low","med
+
+=== hit 4 needle='!V.CLAUDE_CODE_DISABLE_TERMINAL_TITLE)process.title="claude"' offset=0x1212d5a0 (303224224) ===
+ait Promise.all([nPr(),vJs()]),Lu("preAction_after_mdm"),n=await pGc({showInvalidConfigDialog:e.showInvalidConfigDialog}),fr()&&n!==void 0)oUe({storageV5:n});if(Lu("preAction_after_init"),await Hqp(),!V.CLAUDE_CODE_DISABLE_TERMINAL_TITLE)process.title="claude";let{initSinks:u}=await Promise.resolve().then(() => (ihr(),OXr));u(),Lu("preAction_after_sinks");let d=a.getOptionValue("pluginDir");if(Array.isArray(d)&&d.length>0&&d.every((y)=>typeof y==="string"))kbn(d),fL("preAction: --plugin-dir inline plugins");let p=a
+
+=== hit 5 needle='async setPaneTitle' offset=0x1121c5ab (287425963) ===
+et-option","-p","-t",e,"window-style",`bg=default,fg=${n}`]),await o(["set-option","-p","-t",e,"pane-border-style",`fg=${n}`]),await o(["set-option","-p","-t",e,"pane-active-border-style",`fg=${n}`])}async setPaneTitle(e,t,r,n=!1){let o=J0f(r),i=n?ZSe:ZAe;await i(["select-pane","-t",e,"-T",t]),await i(["set-option","-p","-t",e,"pane-border-format",`#[fg=${o},bold] #{pane_title} #[default]`])}async enablePaneBorderStatus(e,t=!1){let r=e||await this.getCurrentWindowTarget();i
+
+=== hit 6 needle='async setPaneTitle' offset=0x1121e37a (287433594) ===
+it uWn(["session","send",...n,"\x15"]);let o=await uWn(["session","run",...n,t]);if(o.code!==0)throw new IZ(`Failed to send command to iTerm2 pane ${e}: ${o.stderr}`)}async setPaneBorderColor(e,t,r){}async setPaneTitle(e,t,r,n){}async enablePaneBorderStatus(e,t){}async killPane(e,t){let r=await uWn(["session","close","-f","-s",e]),n=this.teammateSessionIds.indexOf(e);if(n!==-1)this.teammateSessionIds.splice(n,1);if(this.teammateSessionIds.length===0)this.firstPaneUsed=!1;re
+
+=== hit 7 needle='pane-border-format' offset=0xdeae120 (233496864) ===
+                        select-pane                     -t                              -T                                              set-option                      -p                              pane-border-format                              #[fg=                           ,bold] #{pane_title} #[default]                                                                      @       @p<  @   @  @   @`M @p  _0      @ e @  \    @p 2    @p                 _   o           ) 
+
+=== hit 8 needle='pane-border-format' offset=0x1121c62d (287426093) ===
+it o(["set-option","-p","-t",e,"pane-active-border-style",`fg=${n}`])}async setPaneTitle(e,t,r,n=!1){let o=J0f(r),i=n?ZSe:ZAe;await i(["select-pane","-t",e,"-T",t]),await i(["set-option","-p","-t",e,"pane-border-format",`#[fg=${o},bold] #{pane_title} #[default]`])}async enablePaneBorderStatus(e,t=!1){let r=e||await this.getCurrentWindowTarget();if(!r)return;await(t?ZSe:ZAe)(["set-option","-w","-t",r,"pane-border-status","top"])}async killPane(e,t=!1){return(await(t?ZSe:ZAe)
+
+=== hit 9 needle='tengu_device_bind_title_latched' offset=0x6776d80 (108490112) ===
+                (                                        wr              wr     i        wr               x              wr     )        xr                                                             tengu_device_bind_title_latched             7   [deviceBind] rename_session after bound create failed:                                                               @    @  @         ; F <  dT     @   C   r0a @P/ C   @PL @   G  F    @@h     @                  }                           p. 
+
+=== hit 10 needle='tengu_device_bind_title_latched' offset=0x10f90fad (284757933) ===
+control_request",request_id:`rename-session-${yHt.randomUUID()}`,request:{subtype:"rename_session",title:e}}}async function T5p(e,t){let r=await bXs(e,O5p(t)).catch((n)=>({ok:!1,reason:ce(n)}));if(H("tengu_device_bind_title_latched",{success:r.ok}),!r.ok)T(`[deviceBind] rename_session after bound create failed: ${r.reason}`)}function uHS(e){if(typeof e==="string")return e;if(!e)return"";return e.filter((t)=>t.type==="text"&&typeof t.text==="string").map((t)=>t.text).join(" ")}function w
+
+=== hit 11 needle='.option("--tmux","Create a tmux session for the worktree' offset=0x121317d5 (303241173) ===
+ROUP:"darwin"}.VERSION} (Claude Code)${Kge()}`,"-v, --version","Output the version number"),t.option("-w, --worktree [name]","Create a new git worktree for this session (optionally specify a name)"),t.option("--tmux","Create a tmux session for the worktree (requires --worktree). Uses iTerm2 native panes when available; use --tmux=classic for traditional tmux."),t.addOption(new np("--advisor <model>","Enable the server-side advisor tool with the specified model (alias or full ID).").hideHelp()),t.addOption(new n
+
+=== hit 12 needle='Error: --tmux requires --worktree' offset=0xa6e8690 (175015568) ===
+ null or undefined value                            G   Cannot destructure property 'outputFormat' from null or undefined value                         verbose                                     !   Error: --tmux requires --worktree                               windows                     )   Error: --tmux is not supported on Windows                                       Error: tmux is not installed.               N   Error: --agent-id, --agent-name, and --team-name must all be provided
+
+=== hit 13 needle='Error: --tmux requires --worktree' offset=0x1208c3d4 (302564308) ===
+pact,zo().autoCompactWindow),z=KWr()?t.worktree:void 0,Q=typeof z==="string"?z:void 0,re=z!==void 0,Z;if(Q){let hr=q3i(Q);if(hr!==null)Z=hr,Q=void 0}let ie=KWr()&&t.tmux===!0;if(ie){if(!re)return va("Error: --tmux requires --worktree");if(qt()==="windows")return va("Error: --tmux is not supported on Windows");if(!await kTl())return va(`Error: tmux is not installed. ${ATl()}`)}let se=$s0(t);if(se.parentSessionId)xvs().setCliParentSessionId?.(se.parentSessionId);$Is(se.agentId);let ue;if(fd
+
+=== hit 14 needle='--teammate-mode <mode>' offset=0xaa43720 (178534176) ===
+                    '   Require plan mode before implementation                         --parent-session-id <id>                    +   Parent session ID for analytics correlation                     --teammate-mode <mode>                      A   How to spawn teammates: "tmux", "iterm2", "in-process", or "auto"                               auto                            tmux                            iterm2                          in-process                      @         
+
+=== hit 15 needle='--teammate-mode <mode>' offset=0x1213204b (303243339) ===
+plan-mode-required","Require plan mode before implementation").hideHelp()),t.addOption(new np("--parent-session-id <id>","Parent session ID for analytics correlation").hideHelp()),t.addOption(new np("--teammate-mode <mode>",'How to spawn teammates: "tmux", "iterm2", "in-process", or "auto"').choices(["auto","tmux","iterm2","in-process"]).hideHelp()),t.addOption(new np("--agent-type <type>","Custom agent type for this teammate").hideHelp()),t.addOption(new np("--sdk-url <url>","
+
+=== hit 16 needle='select-pane","-t",e,"-T"' offset=0x1121c5ed (287426029) ===
+ o(["set-option","-p","-t",e,"pane-border-style",`fg=${n}`]),await o(["set-option","-p","-t",e,"pane-active-border-style",`fg=${n}`])}async setPaneTitle(e,t,r,n=!1){let o=J0f(r),i=n?ZSe:ZAe;await i(["select-pane","-t",e,"-T",t]),await i(["set-option","-p","-t",e,"pane-border-format",`#[fg=${o},bold] #{pane_title} #[default]`])}async enablePaneBorderStatus(e,t=!1){let r=e||await this.getCurrentWindowTarget();if(!r)return;await(t?ZSe:ZAe)(["set-option","-w","-t",r,"pane-border-stat
+

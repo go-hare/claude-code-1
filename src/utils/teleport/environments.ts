@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { z } from 'zod'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
 import { getClaudeAIOAuthTokens } from '../auth.js'
@@ -23,6 +24,53 @@ export type EnvironmentListResponse = {
   has_more: boolean
   first_id: string | null
   last_id: string | null
+}
+
+/**
+ * densable DIS — loose list envelope only:
+ * `{ environments: array of non-null plain objects }`.
+ * Do not invent a full EnvironmentResource schema here.
+ */
+const environmentsListSchema = z.object({
+  environments: z.array(z.object({}).passthrough()),
+})
+
+const MALFORMED_DETAIL_PREFIX = 'fetchEnvironments:'
+
+/**
+ * densable MIS — map empty / non-JSON / unusable HTTP 200 bodies to clear errors.
+ * User-facing message is Error.message; detail is attached for diagnostics.
+ */
+export function mapMalformedEnvironmentsResponse(data: unknown): Error {
+  let message: string
+  let detail: string
+  if (typeof data === 'string' && data.trim().length === 0) {
+    message =
+      'The cloud environments service returned an empty response (HTTP 200 with no body). This is usually temporary — try again in a moment.'
+    detail = 'fetchEnvironments: HTTP 200 with an empty body'
+  } else if (typeof data === 'string') {
+    message =
+      'The cloud environments service returned a response in an unexpected format (HTTP 200 with a non-JSON body). This is usually temporary — try again in a moment.'
+    detail = 'fetchEnvironments: HTTP 200 with a non-JSON body'
+  } else {
+    message =
+      'The cloud environments service returned a response in an unexpected format (HTTP 200 without a usable environments list). This is usually temporary — try again in a moment.'
+    detail =
+      'fetchEnvironments: HTTP 200 JSON body without a valid environments array'
+  }
+  const err = new Error(message) as Error & { detail: string }
+  err.detail = detail
+  return err
+}
+
+function isMalformedEnvironmentsError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'detail' in error &&
+    typeof (error as { detail: unknown }).detail === 'string' &&
+    (error as { detail: string }).detail.startsWith(MALFORMED_DETAIL_PREFIX)
+  )
 }
 
 /**
@@ -51,7 +99,7 @@ export async function fetchEnvironments(): Promise<EnvironmentResource[]> {
       'x-organization-uuid': orgUUID,
     }
 
-    const response = await axios.get<EnvironmentListResponse>(url, {
+    const response = await axios.get(url, {
       headers,
       timeout: 15000,
     })
@@ -62,8 +110,14 @@ export async function fetchEnvironments(): Promise<EnvironmentResource[]> {
       )
     }
 
+    const parsed = environmentsListSchema.safeParse(response.data)
+    if (!parsed.success) {
+      throw mapMalformedEnvironmentsResponse(response.data)
+    }
+
     // densable Nye: sync hasRemoteEnvironment = environments.length > 0
-    const hasAny = response.data.environments.length > 0
+    const environments = parsed.data.environments as EnvironmentResource[]
+    const hasAny = environments.length > 0
     if (getGlobalConfig().hasRemoteEnvironment !== hasAny) {
       saveGlobalConfig(s =>
         s.hasRemoteEnvironment === hasAny
@@ -72,10 +126,14 @@ export async function fetchEnvironments(): Promise<EnvironmentResource[]> {
       )
     }
 
-    return response.data.environments
+    return environments
   } catch (error) {
     const err = toError(error)
     logError(err)
+    // densable MIS: preserve clear malformed messages (do not wrap)
+    if (isMalformedEnvironmentsError(error)) {
+      throw err
+    }
     throw new Error(`Failed to fetch environments: ${err.message}`)
   }
 }
@@ -102,7 +160,8 @@ export async function createDefaultCloudEnvironment(
     {
       name,
       kind: 'anthropic_cloud',
-      description: '',
+      // densable Qht (#13): SEA uses trusted-network copy (tip previously '')
+      description: 'Default - trusted network access',
       config: {
         environment_type: 'anthropic',
         cwd: '/home/user',

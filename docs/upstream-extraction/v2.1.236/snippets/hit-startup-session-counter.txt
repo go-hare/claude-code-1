@@ -1,0 +1,21 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: startup-session-counter
+checklist: Startup session counter written in background
+found: true
+topSymbols: ['numStartups', 'setImmediate', 'sn', 'B20', 'Ovs']
+oneLineNote: Startup increments numStartups then setImmediate background write (B20/Ovs); sessionCounter is separate OTEL metric
+search_patterns: ['numStartups', 'sessionCounter', 'setImmediate']
+
+=== pattern counts ===
+'numStartups': 28
+'sessionCounter': 4
+'setImmediate': 146
+
+=== BEST numStartups+1 setImmediate ===
+--- offset 304475730 ---
+effortValue:B1r(t.effort),ultracode:P8o(t.effort),cacheMissAckedAtOutputTokens:-1,autoCompactWindow:l,activeOverlays:new Set,fastMode:zAn(re),...ffe()&&o&&{advisorModel:o},teamContext:yt,teammateColors:oe?.teammateColors??{assignments:new Map,index:0},storedImagePaths:new Map,imageDescriptions:new Map,classifierApprovals:{approvals:new Map,checking:new Set},webBrowser:fn(Dil).getDefaultWebBrowserState()};if(A&&F===null)fmt(String(A),ge);let Lt=_e?[...L,_e]:L;sn((Ht)=>({...Ht,numStartups:(Ht.numStartups??0)+1}),ge),setImmediate((Ht)=>{B20(ar()),Ovs(Ht)},e.storageV5);let or=null,gr=!1,ir=or&&!gr?or.then((Ht)=>Ht.createSessionTurnUploader(se)).catch(()=>null):null,_r=or&&gr?or.then((Ht)=>Ht.createSessionTurnUploaderV2(se)).catch(()=>null):null,br={debug:m,commands:[...u,...I],initialTools:Lt,mcpClients:P,autoConnectIdeFlag:E,mainThreadAgentDefinition:r,disableSlashCommands:h,dynamicMcpConfig:g,strictMcpConfig:fe,systemPrompt:we,appendSystemPrompt:a,
+
+=== sessionCounter OTEL ===
+--- offset 277199621 ---
+is.#i=t("claude_code.cost.usage",{description:"Cost of the Claude Code session",unit:n("USD")}),this.#s=t("claude_code.token.usage",{description:"Number of tokens used",unit:n("tokens")}),this.#l=t("claude_code.code_edit_tool.decision",{description:"Count of code editing tool permission decisions (accept/reject) for Edit, Write, and NotebookEdit tools"}),this.#a=t("claude_code.active_time.total",{description:"Total active time in seconds",unit:n("s")})}meter(){return this.#e}sessionCounter(){return this.#t}locCounter(){return this.#r}prCounter(){return this.#n}commitCounter(){return this.#o}costCounter(){return this.#i}tokenCounter(){return this.#s}codeEditToolDecisionCounter(){return this.#l}activeTimeCounter(){return this.#a}statsStore(){return this.#u}replaceStatsStore(e){this.#u=e}loggerProvider(){return this.#c}replaceLoggerProvider(e){this.#c=e}eventLogger(){return this.#p}eventLoggerOwner(){return this.#m}attachEventLogger(e,t){if(this.#p=

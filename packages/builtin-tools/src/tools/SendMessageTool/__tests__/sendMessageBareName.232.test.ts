@@ -33,10 +33,11 @@ describe('densable 2.1.232 #3 SendMessage bare name', () => {
   test('tool call path: in-process local before peer bare-name resolve', () => {
     // densable: bare name always wins → use the in-process one
     // Compare call sites inside call(), not the import / function def order.
+    // densable 2.1.236 C1 may resolve peers earlier for pure notify_when_idle;
+    // text-path order is still local_agent before gIn peer resolve.
     const localCall = toolSrc.indexOf('await tryDeliverToLocalAgent(')
-    const peerCall = toolSrc.indexOf('resolvePeerByName({')
     expect(localCall).toBeGreaterThan(0)
-    expect(peerCall).toBeGreaterThan(0)
-    expect(localCall).toBeLessThan(peerCall)
+    const peerCall = toolSrc.indexOf('resolvePeerByName({', localCall)
+    expect(peerCall).toBeGreaterThan(localCall)
   })
 })

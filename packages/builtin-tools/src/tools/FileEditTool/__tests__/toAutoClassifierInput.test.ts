@@ -7,7 +7,10 @@ afterEach(() => {
 })
 
 describe('FileEditTool.toAutoClassifierInput editRemoval', () => {
-  test('default: path + new_string only', () => {
+  test('when editRemoval off (env): path + new_string only', () => {
+    // densable 2.1.236 qTa may bake editRemovalVisibility=true when !KIt;
+    // env falsy must still force the legacy string projection.
+    process.env.CLAUDE_CODE_AUTO_MODE_EDIT_REMOVAL = '0'
     const out = FileEditTool.toAutoClassifierInput!({
       file_path: '/a.ts',
       old_string: 'old',

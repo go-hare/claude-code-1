@@ -1,12 +1,18 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { extraUsage as extraUsageCommand } from 'src/commands/extra-usage/index.js';
-import { formatCost } from 'src/cost-tracker.js';
+import { usageCredits as usageCreditsCommand } from 'src/commands/extra-usage/index.js';
 import { getSubscriptionType } from 'src/utils/auth.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
-import { type ExtraUsage, fetchUtilization, type RateLimit, type Utilization } from '../../services/api/usage.js';
+import {
+  type ExtraUsage,
+  fetchUtilization,
+  formatUsageCreditsAmount,
+  type RateLimit,
+  resolveExtraUsageUtilization,
+  type Utilization,
+} from '../../services/api/usage.js';
 import { formatResetText } from '../../utils/format.js';
 import { logError } from '../../utils/log.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
@@ -19,10 +25,19 @@ type LimitBarProps = {
   limit: RateLimit;
   maxWidth: number;
   showTimeInReset?: boolean;
+  /** densable iXl alwaysShowDateInReset — force date in reset subtext. */
+  alwaysShowDateInReset?: boolean;
   extraSubtext?: string;
 };
 
-function LimitBar({ title, limit, maxWidth, showTimeInReset = true, extraSubtext }: LimitBarProps): React.ReactNode {
+function LimitBar({
+  title,
+  limit,
+  maxWidth,
+  showTimeInReset = true,
+  alwaysShowDateInReset = false,
+  extraSubtext,
+}: LimitBarProps): React.ReactNode {
   const { utilization, resets_at } = limit;
   if (utilization === null) {
     return null;
@@ -33,7 +48,7 @@ function LimitBar({ title, limit, maxWidth, showTimeInReset = true, extraSubtext
 
   let subtext: string | undefined;
   if (resets_at) {
-    subtext = `Resets ${formatResetText(resets_at, true, showTimeInReset)}`;
+    subtext = `Resets ${formatResetText(resets_at, true, showTimeInReset, alwaysShowDateInReset)}`;
   }
 
   if (extraSubtext) {
@@ -198,56 +213,78 @@ type ExtraUsageSectionProps = {
   maxWidth: number;
 };
 
-const EXTRA_USAGE_SECTION_TITLE = 'Extra usage';
+/** SEA iXl R5t — renamed from "Extra usage". */
+const USAGE_CREDITS_SECTION_TITLE = 'Usage credits';
 
 function ExtraUsageSection({ extraUsage, maxWidth }: ExtraUsageSectionProps): React.ReactNode {
   const subscriptionType = getSubscriptionType();
   const isProOrMax = subscriptionType === 'pro' || subscriptionType === 'max';
-  if (!isProOrMax) {
-    // Only show to Pro and Max, consistent with claude.ai non-admin usage settings
-    return false;
+  const isTeamOrEnterprise = subscriptionType === 'team' || subscriptionType === 'enterprise';
+  // densable iXl gate: Pro/Max OR Team/Enterprise (not Pro/Max-only)
+  if (!isProOrMax && !isTeamOrEnterprise) {
+    return null;
   }
 
   if (!extraUsage.is_enabled) {
-    if (extraUsageCommand.isEnabled()) {
+    // Off-state CTA is Pro/Max-only (+ /usage-credits command enabled)
+    if (isProOrMax && usageCreditsCommand.isEnabled()) {
       return (
         <Box flexDirection="column">
-          <Text bold>{EXTRA_USAGE_SECTION_TITLE}</Text>
-          <Text dimColor>Extra usage not enabled · /extra-usage to enable</Text>
+          <Text bold>{USAGE_CREDITS_SECTION_TITLE}</Text>
+          <Text dimColor>Usage credits are off · /usage-credits to turn them on</Text>
         </Box>
       );
     }
-
+    // team|enterprise + disabled → hide row
     return null;
   }
 
   if (extraUsage.monthly_limit === null) {
+    if (isProOrMax) {
+      return (
+        <Box flexDirection="column">
+          <Text bold>{USAGE_CREDITS_SECTION_TITLE}</Text>
+          <Text dimColor>Unlimited</Text>
+        </Box>
+      );
+    }
+    // Team/Enterprise unlimited: spend-only subtitle (no ProgressBar)
+    if (typeof extraUsage.used_credits !== 'number') {
+      return null;
+    }
+    const spent = formatUsageCreditsAmount(extraUsage.used_credits, extraUsage.currency ?? 'USD');
     return (
       <Box flexDirection="column">
-        <Text bold>{EXTRA_USAGE_SECTION_TITLE}</Text>
-        <Text dimColor>Unlimited</Text>
+        <Text bold>{USAGE_CREDITS_SECTION_TITLE}</Text>
+        <Text dimColor>{`${spent} spent`}</Text>
       </Box>
     );
   }
 
-  if (typeof extraUsage.used_credits !== 'number' || typeof extraUsage.utilization !== 'number') {
+  if (typeof extraUsage.used_credits !== 'number') {
     return null;
   }
 
-  const formattedUsedCredits = formatCost(extraUsage.used_credits / 100, 2);
-  const formattedMonthlyLimit = formatCost(extraUsage.monthly_limit / 100, 2);
+  const utilization = resolveExtraUsageUtilization({
+    utilization: extraUsage.utilization,
+    monthly_limit: extraUsage.monthly_limit,
+    used_credits: extraUsage.used_credits,
+  });
+  const currency = extraUsage.currency ?? 'USD';
+  const formattedUsedCredits = formatUsageCreditsAmount(extraUsage.used_credits, currency);
+  const formattedMonthlyLimit = formatUsageCreditsAmount(extraUsage.monthly_limit, currency);
   const now = new Date();
   const oneMonthReset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
   return (
     <LimitBar
-      title={EXTRA_USAGE_SECTION_TITLE}
+      title={USAGE_CREDITS_SECTION_TITLE}
       limit={{
-        utilization: extraUsage.utilization,
-        // Not applicable for enterprises, but for now we don't render this for them
+        utilization,
         resets_at: oneMonthReset.toISOString(),
       }}
       showTimeInReset={false}
+      alwaysShowDateInReset
       extraSubtext={`${formattedUsedCredits} / ${formattedMonthlyLimit} spent`}
       maxWidth={maxWidth}
     />

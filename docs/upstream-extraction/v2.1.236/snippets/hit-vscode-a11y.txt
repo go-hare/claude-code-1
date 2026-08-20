@@ -1,0 +1,91 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: vscode-a11y
+checklist: #33 vscode-a11y — [VSCode] transcript screen reader live announcements + heading nav
+found: false
+topSymbols: ['--ax-screen-reader', 'axScreenReader', 'screenReaderMode', 'liveRegion', 'aria-live']
+oneLineNote: Exact checklist phrases 'live announcements' and 'per-turn heading' absent; VSCode strings are terminal/IDE host, not transcript a11y. Related CLI/HTML a11y exists separately.
+search_patterns: ['screen reader', 'live announcements', 'per-turn heading', 'VSCode']
+
+=== pattern counts ===
+'screen reader': 3
+'live announcements': 0
+'per-turn heading': 0
+'VSCode': 39
+
+=== related counts (not checklist patterns) ===
+'screen-reader': 16
+'screenReader': 19
+'aria-live': 10
+'live region': 2
+'liveRegion': 6
+'axScreenReader': 3
+'--ax-screen-reader': 6
+'CLAUDE_AX_SCREEN_READER': 12
+'a11y': 2
+
+=== 'screen reader' hits total=3 shown=3 ===
+--- offset 289060272 ---
+bWriteSourcePin",uKn="UNKNOWN",QIv,ePv="**Language**: Pass `lang` on every publish \u2014 the BCP-47 tag of the page's text content (`\"ja\"`, `\"pt-BR\"`). It becomes the page's `<html lang>`, which screen readers, hyphenation, and search rely on. Match the content's language, not the conversation's; for mixed-language pages use the dominant one.\n\n",tPv=128,u3f=128,oPv="Publishing reads file co
+
+--- offset 289066542 ---
+ne(u6r,{message:'must be a BCP-47 language tag like "ja" or "pt-BR"'}).optional().describe(`BCP-47 language tag of the page's text content ("ja", "pt-BR") \u2014 becomes the page's <html lang>, which screen readers and search rely on. Match the content's language, not the conversation's; for mixed content use the dominant language. Pass on every publish.`)},...lyt()&&{files:Fs([ft(fi({path:N().min
+
+--- offset 300376465 ---
+dEventListener('click', e => { rehearse = e.shiftKey; enter() }).    }.    // Every present-mode navigation announces \u2014 arrows, Home/End, and.    // digit jumps alike; a silent landing strands a screen reader..    const announceSlide = s => {.      if (!document.body.classList.contains('present')) return.      const list = slides().      const title = s.querySelector('h1, h2').      liveSay('
+
+=== 'live announcements' hits total=0 shown=0 ===
+(none)
+
+=== 'per-turn heading' hits total=0 shown=0 ===
+(none)
+
+=== 'VSCode' hits total=39 shown=12 ===
+--- offset 81449863 ---
+..........-......AppRoot..f................7.....enableITerm2ClipboardAccess...............7. ...getNativeCSIuTerminalDisplayName.........z......hasUsedBackslashReturn..I.7.....................installVSCodeGpuAccelerationOff...........7.....isShiftEnterKeyBindingInstalled.........I.7.....markBackslashReturnUsed...7...............7.....readVSCodeScrollSensitivity.....................setupTerminal..
+
+--- offset 81450004 ---
+....hasUsedBackslashReturn..I.7.....................installVSCodeGpuAccelerationOff...........7.....isShiftEnterKeyBindingInstalled.........I.7.....markBackslashReturnUsed...7...............7.....readVSCodeScrollSensitivity.....................setupTerminal.............7.....shouldOfferTerminalSetup.................w......supportsShiftEnter......I}..............I.......vscodeUserDirectories.....7.
+
+--- offset 101196217 ---
+X..................5...k.........................@.....................h....................... .E......................qT.....................0.P.....................X.*.....................supportedVSCodeTerminal.............;........Ac.Jr......gAc......Ac..Bc......H..P.......................X!V.....................@!V.....x...............................................(i.......................
+
+--- offset 136008529 ---
+.......P...............p...............p...............................................................unreadable error value..........................................string......................7...[VSCode] Failed to send experiment_gates notification: ..........................................................@.?.I....0].@.<..q,.@ ......@.M.@....@P............................!...;...=...a...c...i
+
+--- offset 144213376 ---
+rminal..................vscode..........................cursor..........................windsurf........................alacritty.......................zed.............................................VSCode..........................................Cursor..........................................Devin Desktop...........................................................................................
+
+--- offset 144239216 ---
+.........5i...............p.....................$.............................._..i.i.i.i.i.............P...............`...............p...............................x...............................VSCode..........................Cursor..........................Devin Desktop....................................................................@...I.......................... ..."...................
+
+--- offset 144258224 ---
+................................................................................(.........................................E.....I........................yE.............................................VSCode..................8.......@.......9........................................................@ ..@ ..@.d2.......;...................................,...H...X.......................................
+
+--- offset 161932816 ---
+.....j...i...............................j...i..........p...............p...............................................................................................................................VSCode..........................VS Code.....................6... wheel sensitivity unset . /terminal-setup sets it to .......................... wheel sensitivity ......................... ... . /term
+
+--- offset 204706846 ---
+ple.Terminal..............................com.mitchellh.ghostty...........................net.kovidgoyal.kitty............................dev.warp.Warp-Stable............................com.microsoft.VSCode............................native..........................darwin..........................request_access..................screenshot......................zoom............................left_c
+
+--- offset 232576158 ---
+..........................co.zeit.hyper...................com.mitchellh.ghostty...........................org.tabby.......................com.termius-dmg.mac.............................com.microsoft.VSCode............................com.microsoft.VSCodeInsiders....................com.vscodium....................com.todesktop.230313mzl4w4u92...................com.exafunction.windsurf..............
+
+--- offset 232576206 ---
+..........com.mitchellh.ghostty...........................org.tabby.......................com.termius-dmg.mac.............................com.microsoft.VSCode............................com.microsoft.VSCodeInsiders....................com.vscodium....................com.todesktop.230313mzl4w4u92...................com.exafunction.windsurf........................dev.zed.Zed.....................dev.ze
+
+--- offset 232579038 ---
+..........................co.zeit.hyper...................com.mitchellh.ghostty...........................org.tabby.......................com.termius-dmg.mac.............................com.microsoft.VSCode............................com.microsoft.VSCodeInsiders....................com.vscodium....................com.todesktop.230313mzl4w4u92...................com.exafunction.windsurf..............
+
+=== related best context (CLI --ax-screen-reader; not VSCode transcript a11y) ===
+--- '--ax-screen-reader' ---
+offset 178532992: a \\.\pipe\ name on Windows (defaults to an auto-generated path)........................--brief.....................;...Enable SendUserMessage tool for agent-to-user communication.....................--ax-screen-reader..........................V...Render screen-reader friendly output (flat text, no decorative borders or animations)...........................--channels <servers...>.................
+offset 194395185: ......i................................................Render screen-reader friendly output (flat text, no decorative borders or animations). Overridden by the CLAUDE_AX_SCREEN_READER env var and the --ax-screen-reader CLI flag......................................................p-......!<.B.4..#<.......L....................................P.........................@..............................
+
+--- 'axScreenReader' ---
+offset 194395424: ..........................................p-......!<.B.4..#<.......L....................................P.........................@.....................................................................axScreenReader...............u..........lu.......u...w.......D..P.......................................................x................................................MH.............................
+offset 278538068: :()=>({defaultView:Hr(["chat","transcript"]).optional().describe("Default transcript view: chat (SendUserMessage checkpoints only) or transcript (full)")})},screenReader:{buildGate:()=>!0,shape:()=>({axScreenReader:zt().optional().describe("Render screen-reader friendly output (flat text, no decorative borders or animations). Overridden by the CLAUDE_AX_SCREEN_READER env var and the --ax-screen-re
+
+--- 'liveRegion' ---
+offset 300374432: dChild(hud).    const endCue = document.createElement('div').    endCue.className = 'end-cue'.    endCue.textContent = 'End of deck \u2014 Esc to exit'.    document.body.appendChild(endCue).    const liveRegion = document.createElement('span').    liveRegion.className = 'visually-hidden'.    liveRegion.setAttribute('aria-live', 'polite').    document.body.appendChild(liveRegion).    const peekBand
+offset 300374480: ement('div').    endCue.className = 'end-cue'.    endCue.textContent = 'End of deck \u2014 Esc to exit'.    document.body.appendChild(endCue).    const liveRegion = document.createElement('span').    liveRegion.className = 'visually-hidden'.    liveRegion.setAttribute('aria-live', 'polite').    document.body.appendChild(liveRegion).    const peekBand = document.createElement('div').    peekBand.cl

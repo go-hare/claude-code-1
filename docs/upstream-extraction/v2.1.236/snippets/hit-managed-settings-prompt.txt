@@ -1,0 +1,175 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: managed-settings-prompt
+id: 11
+patterns: ["managed-settings","approval prompt","first keypress"]
+
+=== pattern counts ===
+b'managed-settings': 101
+b'approval prompt': 6
+b'first keypress': 0
+b'managed-settings dialog': 2
+b'not yet approved in the managed-settings dialog': 2
+b'remote_consent_missing': 2
+b'Settings errors are currently blocking the approval prompt': 1
+b'You will be prompted for approval next time you start Claude Code': 2
+b'keypress': 71
+
+=== exact 'managed-settings' hits total=101 (showing 25) ===
+--- offset 73904913 ---
+.......recordAccess.............Qw.....priorAccess.....................injection.......................citedStatus.....................injectionForKey..........y......statusForKey.............~......<managed-settings>.......................Qw.....<auto-memory-index>.........c...........I.../...# Pinned memories (apply to every conversation).................Codebase and user instructions are shown below. Be sure t
+
+--- offset 86101586 ---
+ay OIDC device flow...................Cloud gateway URL to pre-fill and auto-connect to during login, alongside forceLoginMethod: "gateway". Honored only from admin-controlled managed settings (MDM / managed-settings.json / policy helper); ignored in user, project, and remote-delivered settings...............................first-wins......................merge........................... ...............0.........
+
+--- offset 86101954 ---
+...................... ...............0...............................first-wins......................merge...........................Controls whether the SDK parent tier (Options.managedSettings / --managed-settings) layers under this admin tier. "first-wins" .............?...(.d.e.f.a.u.l.t.).:. .p.a.r.e.n.t. .i.s. .d.r.o.p.p.e.d. ..  .a.d.m.i.n. .t.i.e.r.s. .a.r.e. .t.h.e. .o.n.l.y. .p.o.l.i.c.y. .............
+
+--- offset 86117888 ---
+orepo/CLAUDE.md", "**/code/CLAUDE.md", "**/some-dir/.claude/rules/**"...............%...Custom message to append to the plugin trust warning shown before installation. Only read from policy settings (managed-settings.json / MDM). Useful for enterprise administrators to add organization-specific context (e.g., "All plugins from our internal marketplace are vetted and approved.")............................custom:.
+
+--- offset 86390768 ---
+................................(...............................................................:...............................................................i.......................................managed-settings.json......................................................................4.......S..............................................)..............................................#+.....................
+
+--- offset 86394832 ---
+........................@...............@...............P...............`...............................................................................................................................managed-settings.json.......................................C...Cannot destructure property 'settings' from null or undefined value.............................s...............................i.......................
+
+--- offset 86395056 ---
+....................................C...Cannot destructure property 'settings' from null or undefined value.............................s...............................i...............................managed-settings.d..............................................f...............................p...........................+...Iterator result interface is not an object......................................ENOENT..
+
+--- offset 86395328 ---
+........................p...........................+...Iterator result interface is not an object......................................ENOENT..........................ENOTDIR..................... ...managed-settings.d read failed: ................error.......................U...Cannot destructure property 'wslInheritsWindowsSettings' from null or undefined value...........1...............................c.......
+
+--- offset 86567792 ---
+........................`^..............@...............`^......I........v.............. .......)........v...............D......I.......P^..............................................................managed-settings.json...........................................managed-settings.d..........................................................................+...Iterator result interface is not an object..............
+
+--- offset 86567856 ---
+I........v.............. .......)........v...............D......I.......P^..............................................................managed-settings.json...........................................managed-settings.d..........................................................................+...Iterator result interface is not an object..........................................................@...................
+
+--- offset 86574544 ---
+....?...........i........................q...............*...............................C...............C......................).......P*......I........C......I.......................................managed-settings.json...........................................................managed-settings.d...............................................json.......................................................+...Iterator
+
+--- offset 86574624 ---
+.........C...............C......................).......P*......I........C......I.......................................managed-settings.json...........................................................managed-settings.d...............................................json.......................................................+...Iterator result interface is not an object..........................................+...
+
+--- offset 86582400 ---
+................................i....... ...............P%..............@R......................)....... ................$......................I.......0%..............................................managed-settings.json...........................................................managed-settings.d...............................................json.......................................................+...Iterator
+
+--- offset 86582480 ---
+................)....... ................$......................I.......0%..............................................managed-settings.json...........................................................managed-settings.d...............................................json.......................................................+...Iterator result interface is not an object..........................................-...
+
+--- offset 86619832 ---
+id..............................default_payload_invalid.........................managed settings................: ..............................remote....................../...not yet approved in the managed-settings dialog.................remote_consent_missing......................)...remote settings not verified this session...................5...remote policyHelpers names no entry for this platform...........
+
+--- offset 86730000 ---
+........................................................0...............P...............P...............................................................wsl.............................................managed-settings.json.......................................C...Cannot destructure property 'settings' from null or undefined value.............................r...........................U...Cannot destructure prope
+
+--- offset 86730432 ---
+WindowsSettings' from null or undefined value...........1...............................o.......................................(.......................................................................managed-settings.d..........................................+...Iterator result interface is not an object..........................................................3..............................$.......l.......\....
+
+--- offset 89751083 ---
+dential.cannot satisfy the org pin...Remove the credential and run: claude auth login..If this is a third-party desktop session: forceLoginOrgUUID targets first-party OAuth and should be removed from managed-settings.json........................(.......................................@...............................could not be read...............................other...........................malformed..........
+
+--- offset 95585488 ---
+....+...Iterator result interface is not an object......................................domain:.........................................................................wsl.............................managed-settings.json...........................managed-settings.d...............................claude.........................settings.json...................settings.local.json.............................skills..
+
+--- offset 95585536 ---
+ct......................................domain:.........................................................................wsl.............................managed-settings.json...........................managed-settings.d...............................claude.........................settings.json...................settings.local.json.............................skills..........................hooks...................
+
+--- offset 102742402 ---
+......................................................................................................................................policySettings..............................(...managed settings (managed-settings.json)........................................flagSettings....................the --settings flag.........................!...an --add-dir directory's settings................................... .....
+
+--- offset 130066640 ---
+i........<)..............=).....).......0./..............=).....................................(.......................................`%......I...................................................9...managed-settings security dialog requester wait timed out................................................................................@.;..a.......`>.@ ...@.C.......Eh.....<K.....`T.....@.$.K.L.@.4...K.@.,.....@..
+
+--- offset 136847760 ---
+................H.A..............................................................i......0...............0...............@...............................................wsl.............................managed-settings.json..............................................................$......AT...<.QvT..p=.......\.....@@T.E.....4.......4.......;.@..................Q...k........................P%.....................
+
+--- offset 141411392 ---
+.........!|.....................I.......P/..............`/..............................P!|.....)........l......I.......................................................wsl.............................managed-settings.json...........................utf-8...........................object..........................boolean.....................j...managed-settings.json: strictPluginOnlyCustomization has an invalid valu
+
+--- offset 141411536 ---
+........................wsl.............................managed-settings.json...........................utf-8...........................object..........................boolean.....................j...managed-settings.json: strictPluginOnlyCustomization has an invalid value (expected true or an array, got ......................)...........................Z...The field is silently ignored (schema .catch rescues it)
+
+
+=== exact 'approval prompt' hits total=6 (showing 6) ===
+--- offset 236606137 ---
+...........G...Cannot destructure property 'messageQueue' from null or undefined value.........................l...........................a...Goal proposals need an interactive session to render the approval prompt; none is available here............................|...A goal proposal is already awaiting the user's decision. Keep working; if it is approved you will receive a kickoff message.....................
+
+--- offset 288355506 ---
+als; the user can set one themselves with /goal.");let s=i==="alwaysAsk"||t!==!1,{messageQueue:a,requestDialog:l}=r;if(l===void 0)throw Error("Goal proposals need an interactive session to render the approval prompt; none is available here.");if(r.getAppState().pendingGoalProposal)throw Error("A goal proposal is already awaiting the user's decision. Keep working; if it is approved you will receive a kickoff mess
+
+--- offset 293963461 ---
+ other settings and will not prompt.","remain rejected by other settings and will not prompt.")}),i&&i.pendingCount>0&&(i.gatingErrors>0?aH.jsx(b,{children:"Settings errors are currently blocking the approval prompt \u2014 run `claude doctor` to list them, fix them, then restart Claude Code to be prompted."}):aH.jsx(b,{children:"You will be prompted for approval next time you start Claude Code."}))]})})),await e
+
+--- offset 299383014 ---
+`.stories-map.json`, `.render-check.json`, `.sync-diff.json`) and `_screenshots/`. `_vendor/` DOES upload \u2014 the preview cards load React from it.\n\n`finalize_plan` shows the user an interactive approval prompt. **If it's denied, stop** \u2014 don't retry with different `localDir`/`writes` values; denial means the session can't approve, not that the arguments were wrong. The bundle is already validated at \
+
+--- offset 304075561 ---
+ \u201CAlways allow\u201D approval options for MCP tools. Disable to keep tool approvals per-call or session-scoped only.",id:"GXMHY2UvCF"})),long:(0,yCt.longDescription)("When enabled (the default), approval prompts for tools without a `toolPolicy` entry offer a persistent grant \u2014 **Always allow**, or **Allow for all tasks** for tools that can modify data \u2014 the Tool permissions picker in Connector set
+
+--- offset 304075926 ---
+u2014 the Tool permissions picker in Connector settings lets users pre-approve tools, and those grants persist across sessions with no expiry.\n\nWhen disabled, the persistent options are hidden from approval prompts and from the Connector settings picker, previously stored persistent grants stop being honored, and scheduled-task runs no longer record or replay cross-run tool approvals. Session-scoped approvals 
+
+
+=== exact 'first keypress' hits total=0 (showing 0) ===
+(none)
+
+=== related 'managed-settings dialog' hits total=2 ===
+--- offset 86619832 ---
+....structural_invalid..............................default_payload_invalid.........................managed settings................: ..............................remote....................../...not yet approved in the managed-settings dialog.................remote_consent_missing......................)...remote settings not verified this session...................5...remote policyHelpers names no entry for this platform...........................debug......
+
+--- offset 278677917 ---
+return null;izs();let o=e?.policyHelpers,i=t==="remote"&&azs(e),s=i?void 0:e?.policyHelper;if(!o&&!s)return p_.initializeAttempted=!1,null;if(i){if(!R3s()){if(p_.initializeAttempted=!1,FNo())tzs("not yet approved in the managed-settings dialog",nzs(e)),ve("settings_policy_helpers_per_os","remote_consent_missing");else tzs("remote settings not verified this session",nzs(e));return null}p_.defaultFallback=null}else if(t==="remote"&&o)return T("remote policyHelp
+
+
+=== related 'not yet approved in the managed-settings dialog' hits total=2 ===
+--- offset 86619808 ---
+cyHelpers...................structural_invalid..............................default_payload_invalid.........................managed settings................: ..............................remote....................../...not yet approved in the managed-settings dialog.................remote_consent_missing......................)...remote settings not verified this session...................5...remote policyHelpers names no entry for this platform...........................debug......
+
+--- offset 278677893 ---
+f(!p_.claimInitialize())return null;izs();let o=e?.policyHelpers,i=t==="remote"&&azs(e),s=i?void 0:e?.policyHelper;if(!o&&!s)return p_.initializeAttempted=!1,null;if(i){if(!R3s()){if(p_.initializeAttempted=!1,FNo())tzs("not yet approved in the managed-settings dialog",nzs(e)),ve("settings_policy_helpers_per_os","remote_consent_missing");else tzs("remote settings not verified this session",nzs(e));return null}p_.defaultFallback=null}else if(t==="remote"&&o)return T("remote policyHelp
+
+
+=== related 'remote_consent_missing' hits total=2 ===
+--- offset 86619872 ---
+............default_payload_invalid.........................managed settings................: ..............................remote....................../...not yet approved in the managed-settings dialog.................remote_consent_missing......................)...remote settings not verified this session...................5...remote policyHelpers names no entry for this platform...........................debug.......................6...policyHelper ignor
+
+--- offset 278677987 ---
+id 0:e?.policyHelper;if(!o&&!s)return p_.initializeAttempted=!1,null;if(i){if(!R3s()){if(p_.initializeAttempted=!1,FNo())tzs("not yet approved in the managed-settings dialog",nzs(e)),ve("settings_policy_helpers_per_os","remote_consent_missing");else tzs("remote settings not verified this session",nzs(e));return null}p_.defaultFallback=null}else if(t==="remote"&&o)return T("remote policyHelpers names no entry for this platform",{level:"debug"}),p_.initializeA
+
+
+=== related 'Settings errors are currently blocking the approval prompt' hits total=1 ===
+--- offset 293963418 ---
+jsx(b,{children:rKm(i.stillRejectedServers,"remains rejected by other settings and will not prompt.","remain rejected by other settings and will not prompt.")}),i&&i.pendingCount>0&&(i.gatingErrors>0?aH.jsx(b,{children:"Settings errors are currently blocking the approval prompt \u2014 run `claude doctor` to list them, fix them, then restart Claude Code to be prompted."}):aH.jsx(b,{children:"You will be prompted for approval next time you start Claude Code."}))]})})),await e.waitUntilExit()}fun
+
+
+=== related 'You will be prompted for approval next time you start Claude Code' hits total=2 ===
+--- offset 145695856 ---
+l. .p.r.o.m.p.t. ..  .r.u.n. .`.c.l.a.u.d.e. .d.o.c.t.o.r.`. .t.o. .l.i.s.t. .t.h.e.m.,. .f.i.x. .t.h.e.m.,. .t.h.e.n. .r.e.s.t.a.r.t. .C.l.a.u.d.e. .C.o.d.e. .t.o. .b.e. .p.r.o.m.p.t.e.d.............................B...You will be prompted for approval next time you start Claude Code...........................................................................................................................................Q..............................,M..............................L.....@`=.@ ..V...
+
+--- offset 293963592 ---
+ount>0&&(i.gatingErrors>0?aH.jsx(b,{children:"Settings errors are currently blocking the approval prompt \u2014 run `claude doctor` to list them, fix them, then restart Claude Code to be prompted."}):aH.jsx(b,{children:"You will be prompted for approval next time you start Claude Code."}))]})})),await e.waitUntilExit()}function rKm(e,t,r){return e.length===1?`1 server (${e[0]}) ${t}`:`${e.length} servers (${e.join(", ")}) ${r}`}var nKm,oKm,gno,aH,uKm,cKm="\u23F8 Pending approval (run `claude` to appr
+
+
+=== keypress hits with managed|settings|approval|prompt in +/-220 printable window ===
+--- offset 73833387 ---
+.TaskOutput......................Poll....................I.......(no pending events).............................ConnectGitHub...................ProposeGoal.....................Propose a session goal condition, with one-keypress user approval; once set, Claude keeps working until a separate evaluator confirms it is met..........P......propose_skills..............X...S.h.o.w. .t.h.e. .u.s.e.r. .a. .r.e.v.i.e.w. .c.a.r.d. .o.f. .p.r.o.p.o.s.e.d. 
+
+--- offset 280684602 ---
+sign(u,{cancel:f});i.addEventListener("abort",h),s.add(()=>i.removeEventListener("abort",h))}s.add(COe((h,g)=>{p(new mia(`User force closed the prompt with ${h} ${g}`))}));let m=()=>c.checkCursorPos();return l.input.on("keypress",m),s.add(()=>l.input.removeListener("keypress",m)),ANd(l,(h)=>{let g=LFd.AsyncResource.bind(()=>DZt.clearAll());return l.on("close",g),s.add(()=>l.removeListener("close",g)),h(()=>{try{let y=e(r,(v)=>{setImmediate(()=>
+
+--- offset 280684649 ---
+),s.add(()=>i.removeEventListener("abort",h))}s.add(COe((h,g)=>{p(new mia(`User force closed the prompt with ${h} ${g}`))}));let m=()=>c.checkCursorPos();return l.input.on("keypress",m),s.add(()=>l.input.removeListener("keypress",m)),ANd(l,(h)=>{let g=LFd.AsyncResource.bind(()=>DZt.clearAll());return l.on("close",g),s.add(()=>l.removeListener("close",g)),h(()=>{try{let y=e(r,(v)=>{setImmediate(()=>d(v))}),[_,S]=typeof y==="string"?[y]:y;c.rende
+
+--- offset 282842292 ---
+treated as new approval or consent...`});var nfe="TaskOutput";var amt="Poll",Vmp="(no pending events)";var wNn=()=>{};var z$r="ConnectGitHub";var eri="ProposeGoal",ENn=500,Kmp="Propose a session goal condition, with one-keypress user approval; once set, Claude keeps working until a separate evaluator confirms it is met",Ymp;var Qva=w(()=>{Ymp=`Propose a completion condition for this session's work \u2014 a goal that keeps you working until a se
+
+--- offset 282842711 ---
+ keeps you working until a separate evaluator confirms it is met. Non-blocking: the proposal renders alongside your work, so keep working while it is handled...ask_user true (the default) asks the user first, with a one-keypress approval dialog. If they decline you will not be notified \u2014 do not ask about the decision and do not re-propose the same or a reworded condition. Set ask_user false \u2014 which sets the goal directly, with no dial
+
+--- offset 288353520 ---
+).describe("Whether the user was asked for approval (true) or the goal was set directly (false)")}));UTv=Ji({name:eri,maxResultSizeChars:1000,searchHint:"propose a session goal condition for the user to approve with one keypress",get inputSchema(){return FTv()},get outputSchema(){return $Tv()},shouldDefer:!0,isEnabled(){if(Rn()||ec())return!1;if(gs())return!1;if(!sAi())return!1;let e=CYt();if(e==="disabled")return!1;return BTv(e),!0},isConcurre
+
+(kept 6 of 71 keypress hits)
+

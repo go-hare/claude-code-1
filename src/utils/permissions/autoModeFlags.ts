@@ -1,9 +1,15 @@
 /**
  * Official 2.1.207 auto-mode feature flags (env → GrowthBook → default).
  * Pure resolvers so classifier / transcript / fleet paths can share one source.
+ *
+ * densable 2.1.236 #22: KD() → frozen qTa when GrowthBook/KIt is false
+ * (3P / telemetry-off / DISABLE_GROWTHBOOK), including severityByModel.
  */
 
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import {
+  getFeatureValue_CACHED_MAY_BE_STALE,
+  isGrowthBookEnabled,
+} from '../../services/analytics/growthbook.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
 
 /** Official mwg — default edit-removal context cap (chars). */
@@ -12,6 +18,10 @@ export const AUTO_MODE_EDIT_REMOVAL_CAP_DEFAULT = 3000
 /** Official vDg — default git status truncation limit (chars). */
 export const AUTO_MODE_GIT_STATUS_LIMIT_DEFAULT = 2000
 
+/** densable E8f / C8f — clamp fallbacks when severity entry exists but t1/t2 invalid. */
+export const AUTO_MODE_SEVERITY_T1_FALLBACK = 15
+export const AUTO_MODE_SEVERITY_T2_FALLBACK = 20
+
 export type FlagSource = 'env' | 'gb' | 'default'
 
 export type ResolvedFlag<T> = {
@@ -19,8 +29,17 @@ export type ResolvedFlag<T> = {
   src: FlagSource
 }
 
+export type AutoModeSeverityThresholds = {
+  t1: number
+  t2: number
+}
+
 /** GrowthBook tengu_auto_mode_config subset for these knobs. */
 export type AutoModeFlagConfig = {
+  model?: string
+  modelByMainModel?: Record<string, string>
+  fallbackModelByModel?: Record<string, string>
+  twoStageClassifier?: boolean | 'fast' | 'thinking'
   priorAssistantContext?: boolean
   sameTurnSiblingContext?: boolean
   editRemovalVisibility?: boolean
@@ -32,20 +51,122 @@ export type AutoModeFlagConfig = {
   classifyEditsModels?: string[]
   repoVisibility?: boolean
   forceExternalPermissions?: boolean
+  jsonlTranscript?: boolean
+  /** densable qTa.severityByModel — SEA keys only when baked. */
+  severityByModel?: Record<string, { t1?: number; t2?: number }>
+}
+
+/** densable Eri — empty remote/default sentinel (reference equality in KD). */
+export const EMPTY_AUTO_MODE_CONFIG: Readonly<AutoModeFlagConfig> =
+  Object.freeze({})
+
+/**
+ * densable qTa — baked classifier defaults when !KIt (invent-ban: SEA fields/keys only).
+ */
+export const BAKED_AUTO_MODE_CONFIG: Readonly<AutoModeFlagConfig> =
+  Object.freeze({
+    twoStageClassifier: true,
+    sameTurnSiblingContext: true,
+    jsonlTranscript: true,
+    editRemovalVisibility: true,
+    editRemovalCap: 3000,
+    outcomeVisibility: false,
+    repoVisibility: true,
+    gitStatusType: true,
+    gitStatusUploads: false,
+    severityByModel: Object.freeze({
+      'claude-sonnet-5[1m]': Object.freeze({ t1: 25, t2: 35 }),
+      'claude-opus-4-8[1m]': Object.freeze({ t1: 45, t2: 35 }),
+      'claude-sonnet-5': Object.freeze({ t1: 25, t2: 35 }),
+      'claude-opus-4-8': Object.freeze({ t1: 45, t2: 35 }),
+    }),
+  })
+
+/**
+ * densable KD — tengu_auto_mode_config with !KIt → qTa fallback.
+ * 1. Read GB key with empty Eri default
+ * 2. If remote !== Eri → use remote
+ * 3. Else if KIt → Eri {}
+ * 4. Else → qTa (incl. severityByModel)
+ */
+export function resolveTenguAutoModeConfig(): AutoModeFlagConfig {
+  const remote = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_auto_mode_config',
+    EMPTY_AUTO_MODE_CONFIG as AutoModeFlagConfig,
+  )
+  const config =
+    remote && typeof remote === 'object'
+      ? (remote as AutoModeFlagConfig)
+      : (EMPTY_AUTO_MODE_CONFIG as AutoModeFlagConfig)
+  if (config !== EMPTY_AUTO_MODE_CONFIG) {
+    return config
+  }
+  // Incomplete process-global growthbook mocks may omit isGrowthBookEnabled.
+  const kitOn =
+    typeof isGrowthBookEnabled === 'function' ? isGrowthBookEnabled() : false
+  return kitOn
+    ? (EMPTY_AUTO_MODE_CONFIG as AutoModeFlagConfig)
+    : (BAKED_AUTO_MODE_CONFIG as AutoModeFlagConfig)
 }
 
 function readGbConfig(): AutoModeFlagConfig {
   // GrowthBook may be mocked to return null in other suites (process-global
   // mock.module). Treat non-object as empty config so resolvers never throw on
   // `gb.editRemovalVisibility` etc.
-  const raw = getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_auto_mode_config',
-    {} as AutoModeFlagConfig,
-  )
+  const raw = resolveTenguAutoModeConfig()
   if (raw && typeof raw === 'object') {
-    return raw as AutoModeFlagConfig
+    return raw
   }
   return {}
+}
+
+function clampSeverityThreshold(value: unknown, fallback: number): number {
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 100
+    ? value
+    : fallback
+}
+
+function severityEntryAt(
+  map: Record<string, { t1?: number; t2?: number }> | undefined,
+  key: string,
+): { t1?: number; t2?: number } | undefined {
+  if (map == null || typeof map !== 'object') return undefined
+  if (!Object.hasOwn(map, key)) return undefined
+  return map[key]
+}
+
+/**
+ * densable s2v / J8f — resolve severity thresholds for a classifier model.
+ * Exact key first; when map is the baked qTa.severityByModel, also try GDr aliases.
+ */
+export function resolveSeverityThresholds(
+  classifierModel: string,
+  config: AutoModeFlagConfig = resolveTenguAutoModeConfig(),
+): ResolvedFlag<AutoModeSeverityThresholds | null> {
+  const map = config.severityByModel
+  if (!map) {
+    return { value: null, src: 'default' }
+  }
+  let entry = severityEntryAt(map, classifierModel)
+  if (!entry && map === BAKED_AUTO_MODE_CONFIG.severityByModel) {
+    for (const alias of getAutoModeModelLookupKeys(classifierModel)) {
+      entry = severityEntryAt(map, alias)
+      if (entry) break
+    }
+  }
+  if (!entry) {
+    return { value: null, src: 'default' }
+  }
+  return {
+    value: {
+      t1: clampSeverityThreshold(entry.t1, AUTO_MODE_SEVERITY_T1_FALLBACK),
+      t2: clampSeverityThreshold(entry.t2, AUTO_MODE_SEVERITY_T2_FALLBACK),
+    },
+    src: 'gb',
+  }
 }
 
 /**

@@ -1,0 +1,29 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: fullscreen-resize-message
+checklist: Fullscreen: newly sent message missing until next update after resize
+found: true
+topSymbols: ['handleResize', 'replayPending', 'tickPump', 'nativeHistory', 'VirtualMessageList']
+oneLineNote: No literal 'newly sent message'; handleResize sets replayPending and tickPump replays nativeHistory
+search_patterns: ['newly sent', 'message missing', 'VirtualMessageList', 'handleResize', 'replayPending', 'tickPump', 'nativeHistory']
+
+=== pattern counts ===
+'newly sent': 1
+'message missing': 1
+'VirtualMessageList': 5
+'handleResize': 8
+'replayPending': 8
+'tickPump': 4
+'nativeHistory': 20
+
+=== BEST replayPending handleResize ===
+--- offset 296992570 ---
+));for(let e=this.contentHeight;e<this.rows;e++)this.clearLine(e);this.commitImmediate()}suspend(){this.suspended=!0,this._suspendedCols=this.cols,this._suspendedRows=this.rows,this.buf+=UCe,this.commitImmediate()}resume(e,t){this.suspended=!1;let r=e!==this._suspendedCols||t!==this._suspendedRows;if(this.cols=e,this.rows=t,this.contentHeight=Math.max(2,t-Ran),this.buf+=uae,this.buf+=kMe(1,this.contentHeight),this.buf+=rL,r)this.buf+=b4+xNr+rL,this.resetTransientState(),this.replayPending=!0,this.pumpCursor=this.nativeHistory.length>0?0:-1,this.lastFrame="";this.commitImmediate()}restore(){if(this.restored)return;this.restored=!0,this.buf+=Hmo;for(let e=this.contentHeight;e<this.rows;e++)this.clearLine(e);this.buf+=UCe,this.buf+=Z_e(this.contentHeight+1,1),this.buf+=ire,this.commitImmediate()}syncViewport(e,t){if(this.suspended)return;if(this.pumpCursor>=0)return;if(!this.syncOpen&&gfe())this.buf+=G2n,this.syncOpen=!0;if(this.restoreUnderContentO
+
+=== BEST tickPump ===
+--- offset 296995852 ---
+s)return"noop";if(this.suspended)return this.cols=e,this.rows=t,"noop";let r=e!==this.cols,n=this.rows;this.cols=e,this.rows=t;let o=Math.max(2,t-Ran);if(this.contentHeight=o,r||t<n)return this.buf+=UCe+b4+xNr+rL,this.buf+=kMe(1,Math.max(2,o)),this.resetTransientState(),this.replayPending=!0,this.pumpCursor=this.nativeHistory.length>0?0:-1,this.lastFrame="",this.commitImmediate(),"replay";return this.buf+=kMe(1,Math.max(2,o)),this.lastFrame="",this.commitImmediate(),"adjust"}tickPump(){if(this.pumpCursor<0)return!1;let e=this.nativeHistory;this.buf+=kMe(1,2);let t=Math.min(this.pumpCursor+l5w,e.length);for(;this.pumpCursor<t;this.pumpCursor++)this.buf+=Z_e(1,1)+e[this.pumpCursor]+Hmo+zic,this.buf+=Z_e(2,1)+`.`;if(this.buf+=kMe(1,Math.max(2,this.contentHeight)),this.lastFrame="",this.commitImmediate(),this.pumpCursor>=e.length)this.pumpCursor=-1;return this.pumpCursor>=0}consumeBackfillNeeded(){if(!this._backfillNeeded)return!1;return this._backfi
+
+=== VirtualMessageList ===
+--- offset 157434592 ---
+....................................................................................................................................................H..i.....................................&...........&...........j.....................................................i................................................................................................................................................................................................................:...VirtualMessageList: itemKeys/messages length desync (keys=...................... messages=...................... range=[........................,...............................)).................................................................$........H....@.\.@.L.@.L.C...@.d.C........p..@ ....3...;.....................................S......................(.......................................P....Z......x./.........`./......./.s./......H..P...............................

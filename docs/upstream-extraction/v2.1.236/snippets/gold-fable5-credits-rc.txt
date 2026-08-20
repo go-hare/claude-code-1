@@ -1,0 +1,59 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236
+sha256: 6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848
+key: fable5-credits-rc
+id: 14
+checklist: Fable 5 first-time usage-credits prompt auto-selecting fallback after 60s under Remote Control
+gold: query_setup park-timeout must NOT auto-fallback; Ar→dialog_unanswered|dialog_queued_at_park→model_error
+
+================================================================================
+BLOCK | FABLE_QUERY_SETUP_PARK (core 236 fix)
+offset 287168200 (0x111dd6c8)
+================================================================================
+if(Rr&&Z.requestDialog){let Ln=Z.abortController.signal,On=iXe(),xo=!rkt()&&vIt(),Bn=new AbortController,Io=()=>Bn.abort();Ln.addEventListener("abort",Io,{once:!0});let Fo=!1,ji=Date.now(),Go=xo&&!gs()?Wlt(()=>{if(Date.now()-ji>1000)Fo=!0}):()=>{},Rs=(jc)=>jc.uuid??jc,hi=new Set(Z.messageQueue.getCommandQueueSnapshot().filter(J1t).map(Rs)),Fn=()=>{if(tkt(),!Fo&&Z.messageQueue.getCommandQueueSnapshot().some((jc)=>J1t(jc)&&!hi.has(Rs(jc))))vr=!0,Bn.abort()},Yo=xo?Z.messageQueue.subscribe(Fn):()=>{},Ns=xo&&On>0?setTimeout((jc)=>{if(tkt(),!Fo)jc.abort()},On,Bn):void 0;try{Pt=await Z.requestDialog(Zgt,{overagesEnabled:enr()},{signal:Bn.signal})}finally{clearTimeout(Ns),Go(),Yo(),Ln.removeEventListener("abort",Io)}Ar=Pt==="cancelled"&&Bn.signal.aborted&&!Ln.aborted}let Qn=Pt==="consent"&&await Yif(Z.storageV5);if(!Qn&&Z.abortController.signal.aborted){if(!t4e(Z.abortController.signal.reason))yield cle({toolUse:!1,interruptedMessageId:p9n(Z),interruptedByShutdown:wte(Z.abortController.signal),now:m.now,uuidFn:m.uuid});return QQe(Z,l),{reason:"aborted_streaming"}}if(Ar){pe("model_fable_consent",vr?"dialog_queued_at_park":"dialog_unanswered");let Ln=qd({content:SLe()?"Fable 5 now uses usage credits · the prompt to confirm went unanswered — nothing was sent · answer it where this session is running, or /model to change":"Fable 5 limit reached · continuing on Fable 5 uses usage credits, and the prompt to confirm went unanswered — nothing was sent · answer it where this session is running, or /model to change",now:m.now,uuid:m.uuid});return yield Ln,Y5e(Z,l,Ln),{reason:"model_error",error:Error("Fable consent dialog was not answered")}}if(Rr&&rkt())if(Qn)be("model_fable_consent");else if(Pt==="consent")ve("model_fable_consent","overage_enable_deferred");else if(Pt==="switch_default")pe("model_fable_consent","declined");else ve("model_fable_consent","dismissed");if(!Qn){if(!Rr&&F)ve("model_fable_consent","no_dialog_fallback");let Ln=I7e();if(Ln===null){let Bn=uje();if(F)pe("model_fable_consent",Bn?"no_model_fallback_env":"no_allowed_fallback");... return yield Io,...{reason:"model_error",error:...}} ... yield{type:"query_model_change",toModel:Ln} ... yield{type:"system",subtype:"model_consent_fallback",...}
+
+================================================================================
+BLOCK | TELEMETRY_STRINGS_model_fable_consent
+offset 116357440 (0x6ef7940)
+================================================================================
+model_fable_consent
+dialog_queued_at_park
+dialog_unanswered
+Fable 5 now uses usage credits · the prompt to confirm went unanswered — nothing was sent · answer it where this session is running, or /model to change
+Fable 5 limit reached · continuing on Fable 5 uses usage credits, and the prompt to confirm went unanswered — nothing was sent · answer it where this session is running, or /model to change
+model_error
+Fable consent dialog was not answered
+overage_enable_deferred
+switch_default
+declined
+dismissed
+no_dialog_fallback
+no_model_fallback_env
+no_allowed_fallback
+model_consent_fallback
+
+================================================================================
+BLOCK | DIALOG_SPEC_Zgt
+offset 285516816 (0x1104a410)
+================================================================================
+Zgt=wg({kind:"fable_overage_consent_prompt",payload:Se(()=>ye({overagesEnabled:zt(),balanceCents:Qe().nullable().optional(),currency:N().nullable().optional()})),result:Se(()=>Hr(["consent","switch_default","cancelled"])),default:"cancelled"})
+
+================================================================================
+BLOCK | SESSION_FALLBACK_STATE
+offset 277169497 (0x10854559)
+================================================================================
+class qAs{#e=!1;fableConsentSessionFallback(){return this.#e}replaceFableConsentSessionFallback(e){this.#e=e}reset(){this.#e=!1}}
+
+================================================================================
+BLOCK | iXe parkTimeout helper
+offset 282957884 (function iXe)
+================================================================================
+function iXe(...) /* env/default park timeout used as On=iXe(); tip maps to resolveFableBridgeDialogTimeoutMsOrDefault → 60_000 */
+
+NOTES / IMPLEMENT CONTRACT:
+1. RC park timeout (Bn.abort after iXe ms, parent Ln NOT aborted) sets Ar=true when Pt==="cancelled".
+2. Ar MUST abort query with model_error + dialog_unanswered|dialog_queued_at_park. Do NOT set fallbackModel / do NOT query_model_change.
+3. Explicit user switch_default (and tip-mapped declined/dismissed only when NOT Ar) may switch via I7e()/model_consent_fallback.
+4. tip bug: timeout→cancelled→reason dialog_declined + fallbackModel; query.ts switches on dialog_declined. Align to SEA Ar branch.
+5. invent-ban: SEA has NO string "bridge_dialog_timeout" (tip-local). Do not reuse refusal_fallback dialog_declined (offset 116363408) for fable consent.
+6. Weak gold: literal "60s"/"auto-select" not SEA product strings; timeout is iXe()/env (tip DEFAULT 60_000 OK).

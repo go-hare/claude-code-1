@@ -268,6 +268,18 @@ export function truncateCodeUnitsSafe(
   return sliced
 }
 
+/**
+ * densable 2.1.236 `edu(e,t)` — word-boundary truncate with ellipsis.
+ * Used by awaySummary/recap hard cap (`Hbm=400`).
+ */
+export function truncateAtWordBoundary(text: string, max: number): string {
+  if (text.length <= max) return text
+  const head = truncateCodeUnitsSafe(text, max - 1)
+  const boundary = head.search(/\s\S*$/)
+  const wordCut = boundary === -1 ? '' : head.slice(0, boundary).trimEnd()
+  return `${wordCut.length > max / 2 ? wordCut : head.trimEnd()}…`
+}
+
 /** densable Etp — max UTF-16 code units for IDE selection content. */
 export const IDE_SELECTION_CONTENT_MAX_CODE_UNITS = 2000
 

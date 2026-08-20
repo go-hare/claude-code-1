@@ -8,7 +8,18 @@ import {
   test,
 } from 'bun:test'
 import type { UUID } from 'crypto'
+import * as realAuth from '../../utils/auth.js'
+import * as realBootstrap from '../../bootstrap/state.js'
+import * as realFormat from '../../utils/format.js'
+import * as realSettings from '../../utils/settings/settings.js'
+import * as realAnalytics from '../analytics/index.js'
+import * as realGrowthbook from '../analytics/growthbook.js'
+import * as realClaudeAiLimits from '../claudeAiLimits.js'
 import type { QueuedCommand } from '../../types/textInputTypes.js'
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
 
 const getSettingsForSourceMock = mock(
   (_source?: string) =>
@@ -38,53 +49,87 @@ let currentLimits: {
   isUsingOverage: false,
 }
 
-const realSettings = await import('../../utils/settings/settings.js')
-mock.module('../../utils/settings/settings.js', () => ({
-  ...realSettings,
-  getSettingsForSource: getSettingsForSourceMock,
-  updateSettingsForSource: updateSettingsForSourceMock,
-}))
+// Snapshot BEFORE mock.module — live ESM namespaces rebind into the mock, so
+// afterAll `...realX` would reinstall the mock (TRACEPARENT / tui pollution).
+const settingsSnap = snapshotModuleExports(realSettings)
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+const authSnap = snapshotModuleExports(realAuth)
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
+const analyticsSnap = snapshotModuleExports(realAnalytics)
+const formatSnap = snapshotModuleExports(realFormat)
+const claudeAiLimitsSnap = snapshotModuleExports(realClaudeAiLimits)
 
-const realGrowthbook = await import('../analytics/growthbook.js')
-mock.module('../analytics/growthbook.js', () => ({
-  ...realGrowthbook,
-  getFeatureValue_CACHED_MAY_BE_STALE: getFeatureValueMock,
-}))
+function settingsMock() {
+  return {
+    ...settingsSnap,
+    getSettingsForSource: getSettingsForSourceMock,
+    updateSettingsForSource: updateSettingsForSourceMock,
+  }
+}
+function growthbookMockFactory() {
+  return {
+    ...growthbookSnap,
+    getFeatureValue_CACHED_MAY_BE_STALE: getFeatureValueMock,
+  }
+}
+function authMock() {
+  return {
+    ...authSnap,
+    isClaudeAISubscriber: isClaudeAISubscriberMock,
+    getOauthAccountInfo: getOauthAccountInfoMock,
+  }
+}
+function bootstrapMock() {
+  return {
+    ...bootstrapSnap,
+    getMainThreadAgentId: () => undefined,
+    getIsNonInteractiveSession: getIsNonInteractiveSessionMock,
+  }
+}
+function analyticsMock() {
+  return {
+    ...analyticsSnap,
+    logEvent: logEventMock,
+  }
+}
+function formatMock() {
+  return {
+    ...formatSnap,
+    formatResetTime: formatResetTimeMock,
+  }
+}
+function claudeAiLimitsMock() {
+  return {
+    ...claudeAiLimitsSnap,
+    statusListeners,
+    get currentLimits() {
+      return currentLimits
+    },
+  }
+}
 
-const realAuth = await import('../../utils/auth.js')
-mock.module('../../utils/auth.js', () => ({
-  ...realAuth,
-  isClaudeAISubscriber: isClaudeAISubscriberMock,
-  getOauthAccountInfo: getOauthAccountInfoMock,
-}))
+mock.module('../../utils/settings/settings.js', settingsMock)
+mock.module('src/utils/settings/settings.js', settingsMock)
+mock.module('src/utils/settings/settings.ts', settingsMock)
 
-const realBootstrap = await import('../../bootstrap/state.js')
-mock.module('../../bootstrap/state.js', () => ({
-  ...realBootstrap,
-  getMainThreadAgentId: () => undefined,
-  getIsNonInteractiveSession: getIsNonInteractiveSessionMock,
-}))
+mock.module('../analytics/growthbook.js', growthbookMockFactory)
+mock.module('src/services/analytics/growthbook.js', growthbookMockFactory)
 
-const realAnalytics = await import('../analytics/index.js')
-mock.module('../analytics/index.js', () => ({
-  ...realAnalytics,
-  logEvent: logEventMock,
-}))
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/utils/auth.js', authMock)
+mock.module('src/utils/auth.ts', authMock)
 
-const realFormat = await import('../../utils/format.js')
-mock.module('../../utils/format.js', () => ({
-  ...realFormat,
-  formatResetTime: formatResetTimeMock,
-}))
+mock.module('../../bootstrap/state.js', bootstrapMock)
+mock.module('src/bootstrap/state.js', bootstrapMock)
 
-const realClaudeAiLimits = await import('../claudeAiLimits.js')
-mock.module('../claudeAiLimits.js', () => ({
-  ...realClaudeAiLimits,
-  statusListeners,
-  get currentLimits() {
-    return currentLimits
-  },
-}))
+mock.module('../analytics/index.js', analyticsMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
+
+mock.module('../../utils/format.js', formatMock)
+mock.module('src/utils/format.js', formatMock)
+
+mock.module('../claudeAiLimits.js', claudeAiLimitsMock)
+mock.module('src/services/claudeAiLimits.js', claudeAiLimitsMock)
 
 const {
   armQuotaAutoResume,
@@ -122,13 +167,28 @@ const { getCommandQueue, resetCommandQueue } = await import(
 )
 
 afterAll(() => {
-  mock.module('../../bootstrap/state.js', () => ({ ...realBootstrap }))
-  mock.module('../../utils/settings/settings.js', () => ({ ...realSettings }))
-  mock.module('../analytics/growthbook.js', () => ({ ...realGrowthbook }))
-  mock.module('../../utils/auth.js', () => ({ ...realAuth }))
-  mock.module('../analytics/index.js', () => ({ ...realAnalytics }))
-  mock.module('../../utils/format.js', () => ({ ...realFormat }))
-  mock.module('../claudeAiLimits.js', () => ({ ...realClaudeAiLimits }))
+  mock.module('../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    '../../utils/settings/settings.js',
+    'src/utils/settings/settings.js',
+    'src/utils/settings/settings.ts',
+  ])
+  mock.module('../analytics/growthbook.js', () => ({ ...growthbookSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+  mock.module('../../utils/auth.js', () => ({ ...authSnap }))
+  mock.module('src/utils/auth.js', () => ({ ...authSnap }))
+  mock.module('src/utils/auth.ts', () => ({ ...authSnap }))
+  mock.module('../analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('../../utils/format.js', () => ({ ...formatSnap }))
+  mock.module('src/utils/format.js', () => ({ ...formatSnap }))
+  mock.module('../claudeAiLimits.js', () => ({ ...claudeAiLimitsSnap }))
+  mock.module('src/services/claudeAiLimits.js', () => ({
+    ...claudeAiLimitsSnap,
+  }))
 })
 
 describe('quotaAutoResume densable 2.1.234', () => {

@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { z } from 'zod/v4'
 import { getOauthConfig } from '../../constants/oauth.js'
 import {
   getOauthAccountInfo,
@@ -7,6 +8,7 @@ import {
 } from '../../utils/auth.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { lazySchema } from '../../utils/lazySchema.js'
 import { logError } from '../../utils/log.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
 import { getOAuthHeaders, prepareApiRequest } from '../../utils/teleport/api.js'
@@ -16,6 +18,22 @@ import type {
   ReferralRedemptionsResponse,
   ReferrerRewardInfo,
 } from '../oauth/types.js'
+
+/**
+ * densable 2.1.236 `VsT` — malformed ~/.claude.json referrer_reward must
+ * safeParse→null so spinner tips keep working (guest-pass-malformed).
+ */
+const referrerRewardSchema = lazySchema(() =>
+  z.object({
+    amount_minor_units: z.number(),
+    currency: z.string().regex(/^[A-Za-z]{3}$/),
+  }),
+)
+
+function parseReferrerReward(value: unknown): ReferrerRewardInfo | null {
+  const parsed = referrerRewardSchema().safeParse(value)
+  return parsed.success ? (parsed.data as ReferrerRewardInfo) : null
+}
 
 // Cache expiration time: 24 hours (eligibility changes only on subscription/experiment changes)
 const CACHE_EXPIRATION_MS = 24 * 60 * 60 * 1000
@@ -152,7 +170,8 @@ export function getCachedReferrerReward(): ReferrerRewardInfo | null {
   if (!orgId) return null
   const config = getGlobalConfig()
   const cachedEntry = config.passesEligibilityCache?.[orgId]
-  return cachedEntry?.referrer_reward ?? null
+  // densable Efr→wgm(VsT.safeParse): malformed reward → null (tip stays up).
+  return parseReferrerReward(cachedEntry?.referrer_reward)
 }
 
 /**

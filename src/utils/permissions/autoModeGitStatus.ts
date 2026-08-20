@@ -67,6 +67,8 @@ export async function fetchAutoModeGitStatus(
     if (!wantType && !wantUploads) return null
 
     const cwd = getCwd()
+    // densable 2.1.236: always force --untracked-files=all|normal so
+    // status.showUntrackedFiles=no cannot hide untracked from auto-mode.
     const args = [
       '-c',
       'core.hooksPath=/dev/null',
@@ -79,7 +81,7 @@ export async function fetchAutoModeGitStatus(
       '--no-optional-locks',
       'status',
       '--porcelain',
-      ...(wantUploads ? ['--untracked-files=all'] : []),
+      wantUploads ? '--untracked-files=all' : '--untracked-files=normal',
     ]
     const result = await execFileNoThrowWithCwd('git', args, {
       cwd,

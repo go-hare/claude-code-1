@@ -171,6 +171,15 @@ async function enableTui(): Promise<LocalCommandResult> {
   mkdirSync(getClaudeConfigHomeDir(), { recursive: true })
   writeFileSync(markerPath, new Date().toISOString(), 'utf8')
   const settingsResult = persistTuiSettings('fullscreen')
+  // densable FJi — /tui fullscreen clears sticky auto-disable + strikes.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { clearFullscreenStickyAutoDisable } =
+      require('../../utils/fullscreen.js') as typeof import('../../utils/fullscreen.js')
+    clearFullscreenStickyAutoDisable()
+  } catch {
+    // optional
+  }
   // Densable residual: mark intended renderer for next process (official injects on relaunch).
   Object.assign(process.env, buildTuiJustSwitchedEnv('fullscreen'))
   await applyTuiRelaunchAfterSwitch('fullscreen')
@@ -268,6 +277,30 @@ export async function callTui(args: string): Promise<LocalCommandResult> {
     } catch {
       effective = 'unknown'
     }
+    // densable /tui status suffixes for crash_auto_off / sticky / pending.
+    let canarySuffix = ''
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getCrashAutoOff, isFullscreenStickyAutoDisabled } =
+        require('../../utils/fullscreen.js') as typeof import('../../utils/fullscreen.js')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getGlobalConfig } =
+        require('../../utils/config.js') as typeof import('../../utils/config.js')
+      // densable BLOCK E: sticky-only → repeatedly-failed; crashAutoOff OR
+      // pending → didn't-finish (do not OR sticky with crashAutoOff).
+      if (isFullscreenStickyAutoDisabled()) {
+        canarySuffix =
+          '(fullscreen was turned off on this machine after it repeatedly failed to start; /tui fullscreen retries)'
+      } else if (
+        getCrashAutoOff() ||
+        Object.keys(getGlobalConfig().fullscreenBootPending ?? {}).length > 0
+      ) {
+        canarySuffix =
+          "(a fullscreen launch on this machine didn't finish starting last time; /tui fullscreen retries)"
+      }
+    } catch {
+      // optional
+    }
     return {
       type: 'text',
       value: [
@@ -278,19 +311,22 @@ export async function callTui(args: string): Promise<LocalCommandResult> {
         `  Marker mode:  ${enabled ? 'enabled' : 'disabled'}`,
         `  Effective:    ${effective}`,
         `  Env var:      ${envLine}`,
+        canarySuffix ? `  Canary:       ${canarySuffix}` : '',
         '',
         'Note: changes take effect on the next session start.',
-      ].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
     }
   }
 
-  // ── on ───────────────────────────────────────────────────────────────
-  if (sub === 'on') {
+  // ── on / fullscreen ──────────────────────────────────────────────────
+  if (sub === 'on' || sub === 'fullscreen') {
     return await enableTui()
   }
 
-  // ── off ──────────────────────────────────────────────────────────────
-  if (sub === 'off') {
+  // ── off / default ────────────────────────────────────────────────────
+  if (sub === 'off' || sub === 'default') {
     return await disableTui()
   }
 

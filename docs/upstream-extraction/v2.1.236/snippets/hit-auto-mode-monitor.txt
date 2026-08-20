@@ -1,0 +1,27 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: auto-mode-monitor
+checklist: Auto mode Monitor allow rules set aside
+found: true
+topSymbols: ['Monitor', 'alwaysAllowRules', 'MonitorTool', 'classifier']
+oneLineNote: Monitor/alwaysAllowRules/MonitorTool present; exact set-aside phrasing sparse
+search_patterns: ['Monitor', 'alwaysAllowRules', 'set aside', 'auto mode', 'MonitorTool']
+
+=== pattern counts ===
+'Monitor': 227
+'alwaysAllowRules': 63
+'set aside': 6
+'auto mode': 197
+'MonitorTool': 4
+
+=== alwaysAllowRules ===
+--- offset 85982752 ---
+.@.L.G...@.L.G...@@M.@.......@.=.Q.....K.@.=.G.....+.@.].. z.@`_.P.....K.@.=.G.....+.@.].. z.@P_.O.....K.@.=.G.....+.@.].. z........{.......................&...c........................................................!.......................x......................X........................i-.............................................................................................P.......................X.......................@.......................H.......................alwaysAllowRules................alwaysDenyRules.................alwaysAskRules...............................z..8.......8........z...z.......D..P.......................................................................................................H...............................................................................(...................................................................h...h...h...x...x...x...............................................................
+
+=== MonitorTool ===
+--- offset 81391472 ---
+..........5.....registerAdoptedWorkflowTask...............5.....registerWorkflowTask.....b................5.....retryWorkflowAgent........5..............^......skipWorkflowAgent.........5.............IY......updateWorkflowProgressBatch...............5.....WorkflowInputError.......3......................WorkflowTool..............5.....workflowPermissionDialog..5...............5.....recordWorkflowUsageConsent5.............I.5.....workflowNeedsUsageConsentPrompt...........5.....MonitorTool.............I.......applyCcrTimeoutCap......I.......................wsEgressDenyReason......................I.......TEAMMATE_SYSTEM_PROMPT_ADDENDUM...........5.....runInProcessTeammate......5.....................startInProcessTeammate....5.............I.5.....deriveTeammatePermissionMode..............5.....spawnInProcessTeammate..I................Q......finalizeTeamMember........5.....................generateUniqueTeammateName5...............5. ...registerOutOfPro
+
+=== set aside ===
+--- offset 103545574 ---
+..................................i........................}......................)...................................................*...A publish that stood named a set-aside at ..................N...; it is not an aside name beside the published version, so it is left in place..................debug.......................................+...Iterator result interface is not an object..................................C...A publish that stood left the replaced plugin version set aside at .........................T...; it could not be proven distinct from the published version, so it is left in place........................................N...Could not remove a replaced plugin version set aside by a publish that stood: ......................V....................................@.4.....@.<..P........4.....@.4.....@P<......P;.. &.@ ......@`T.@.......@.........l.......4.....@.4.O....0=.....@.4.O.....i5......L...l....#.......S....@...L...B.4.@PT.L...B

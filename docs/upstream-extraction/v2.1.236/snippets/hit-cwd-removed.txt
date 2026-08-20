@@ -1,0 +1,91 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: cwd-removed
+search_patterns: ["directory a session had switched","ENOENT","background housekeeping","local MCP logs"]
+
+EXACT PATTERN RESULTS:
+- "directory a session had switched": 0 hits
+- "local MCP logs": 0 hits (exact phrase)
+- "background housekeeping": 2 hits
+- "ENOENT": many hits (runtime/fs + app cleanup paths)
+
+RELATED PRODUCT/CODE HITS (cwd gone / housekeeping / mcp-logs):
+
+================================================================================
+background housekeeping failed (code)
+offset=298606419 pattern=b'background housekeeping failed'
+.last-cleanup"),new Date().toISOString()).catch((i)=>Xm(i)?T(`.last-cleanup write failed: ${i.code} ${i.message}`,{level:"error"}):Ee(i))}if(HM()&&lz()>Date.now()-60000){setTimeout(o,Tgs).unref();return}await bXr()}function o(){return n().catch((i)=>yin(i)?T(`background housekeeping failed: ${i.message}`,{level:"error"}):Ee(i))}setTimeout(o,DMg).unref()}var wgs,nNc,OMg=86400000,Tgs=600000,DMg=5000,MMg=3600000;var Kfn=w(()=>{ot();cWa();qqn();cKl();Ye();rNc();po();at();$r();nl();FNe();oyo();Fl();wgs=require("fs/promises"),nNc=require("path")});fu
+
+================================================================================
+oNc/backgroundHousekeeping + .last-cleanup + sNh/bXr
+offset=298605247 pattern=b'async function LMg(e){'
+e-code-url-handler",tNc="Claude Code URL Handler",kMg="claude-code-url-handler.desktop",wNE="Claude Code URL Handler.app",lTo,ZHc,QHc,AMg,EMg=86400000;var rNc=w(()=>{Qt();Ye();po();nl();at();yc();Sle();wo();Fj();cZe();Sgs();Ywe=require("fs"),CMg=O(require("os")),wst=O(require("path")),lTo=wst.join(CMg.homedir(),"Applications",wNE),ZHc=wst.join(lTo,"Contents","MacOS","claude");QHc=`HKEY_CURRENT_USER\\Software\\Classes\\${Kwe}`,AMg=`${QHc}\\shell\\open\\command`});var cTo={};vt(cTo,{DELAY_VERY_SLOW_OPERATIONS_THAT_HAPPEN_EVERY_SESSION:()=>Tgs,STALE_CLEANUP_CATCHUP_DELAY_MS:()=>DMg,TRANSCRIPT_HEARTBEAT_INTERVAL_MS:()=>MMg,isLastCleanupSentinelFresh:()=>LMg,startBackgroundHousekeeping:()=>oNc});async function LMg(e){if(fr()&&e!==void 0){let t=await e.statMeta(An.state("last-cleanup"));return t.ok&&Date.now()-t.value.mtimeMs<OMg}try{let t=await wgs.stat(nNc.join(kn(),".last-cleanup"));return Date.now()-t.mtimeMs<OMg}catch{return!1}}async function oNc(e,t){if(!e.backgroundHousekeeping.claim())return;if(nWa(e),Ubf(e),ong(t),HM())PMg(t),i3i(),setInterval(i3i,MMg).unref();let r="sentinel-unchecked";async function n(){if(HM()&&lz()>Date.now()-60000){setTimeout(o,Tgs).unref();return}if(r!=="done"){if(r==="sentinel-unchecked"){if(r="sweep-due",await LMg(t)){setTimeout(o,Tgs).unref();return}}if(r="done",await sNh(t),fr()&&t!==void 0){await iNh(kn(),e.backgroundHousekeeping),await oNh(t);let i=await t.write(An.st
+
+================================================================================
+cleanup mcp-logs scan failed
+offset=296426557 pattern=b'cleanup mcp-logs scan failed'
+o=await tNh(r,t,!1);try{let i;try{i=await e.readdir(n)}catch{return o}let s=i.filter((a)=>a.isDirectory()&&a.name.startsWith("mcp-logs-")).map((a)=>up.join(n,a.name));for(let a of s)o=$Te(o,await tNh(a,t,!0)),await D9(a,e)}catch(i){if(sr(i));else if(yin(i))T(`cleanup mcp-logs scan failed: ${i.code}`,{level:"error"});else Ee(i)}return o}async function _ce(e,t,r,n,o=t){let i;try{i=await r.stat(e)}catch(s){if(sr(s))return!1;throw s}if(!(i.mtime<t))return n.filesRetainedFresh++,!1;try{await r.unlink(e)}catch(s){if(sr(s))return!1;if(i.mtime<o)n.fi
+
+================================================================================
+QAw mcp-logs- sweep
+offset=296426404 pattern=b'a.name.startsWith("mcp-logs-")'
+nup readdir ${e} failed: ${o.code}`,{level:"error"});else Ee(o)}return n}async function QAw(){let e=kr(),t=z8();if(t===null)return Yne();let r=Vkt.errors(),n=Vkt.baseLogs(),o=await tNh(r,t,!1);try{let i;try{i=await e.readdir(n)}catch{return o}let s=i.filter((a)=>a.isDirectory()&&a.name.startsWith("mcp-logs-")).map((a)=>up.join(n,a.name));for(let a of s)o=$Te(o,await tNh(a,t,!0)),await D9(a,e)}catch(i){if(sr(i));else if(yin(i))T(`cleanup mcp-logs scan failed: ${i.code}`,{level:"error"});else Ee(i)}return o}async function _ce(e,t,r,n,o=t){let i;try{i=await r.stat(e)}catch(s){if(sr(s))r
+
+================================================================================
+Vkt.mcpLogs path builder
+offset=277661843 pattern=b'mcpLogs:(e)=>ROo.join(Y1s(),`mcp-logs-${Bdu(e)}`)'
+urn Cn()}}function Y1s(){return ROo.join(J3y.cache,Bdu(lTn()))}var ROo,J3y,$du=200,Vkt;var xOo=w(()=>{Ndu();ot();as();ROo=require("path"),J3y=K1s("claude-cli");Vkt={baseLogs:()=>Y1s(),errors:()=>ROo.join(Y1s(),"errors"),mcpLogs:(e)=>ROo.join(Y1s(),`mcp-logs-${Bdu(e)}`)}});function cTn(e){return e.replace(zdu,"").trim()||e}function yRr(e){return e.replace(zdu,"").trim()}function qdu(e){let t=e,r=t.indexOf(Udu);while(r>=0){let n=t.indexOf(jdu,r);if(n<0)break;t=t.slice(0,r)+t.slice(n+jdu
+
+================================================================================
+Working directory no longer exists
+offset=105439186 pattern=b'no longer exists. Please restart Claude from an existing directory'
+t that worktree isolation was lost................................................	...+...Iterator result interface is not an object..............................	.......Working directory ".....................	...E..." no longer exists. Please restart Claude from an existing directory....................................	...$...[worktree] blocked shell exec: cwd "....................	...B..." is gone and recovery targets the shared checkout; agentWorktree=......................	......worktree_gone...
+
+================================================================================
+Shell CWD deleted / recovered
+offset=105440146 pattern=b'was deleted; shell cwd recovered to'
+d... .R.e.p.o.r.t. .t.h.i.s. .i.n.s.t.e.a.d. .o.f. .r.e.t.r.y.i.n.g...............	.......Shell CWD ".............	...#..." no longer exists, recovering to ".....................	.......".......................	...'..." was deleted; shell cwd recovered to ".................	...D...". Re-issue your command (it will run from the recovered directory).....................	.......g.......................	...>...[worktree] blocked shell exec outside isolation worktree: cwd=...
+
+================================================================================
+ExitWorktree session cwd recovered
+offset=121395762 pattern=b'no longer exists; session cwd recovered to'
+, never touched)..................................................	...............	...+...Iterator result interface is not an object..............	..."...ExitWorktree: original directory "......................	......." no longer exists; session cwd recovered to "..........	.......".......................	...3...ExitWorktree: not moving the permission anchor to ".........................k...". ..  .i.t. .s.t.r.i.c.t.l.y. .c.o.n.t.a.i.n.s. .t.h.e. .s.e.s.s.i.o.n.'.s. .l.i.v.e. .
+
+================================================================================
+sr(o) ENOENT skip in QAw/tNh path
+offset=296426092 pattern=b'if(sr(o));else if(yin(o))T(`cleanup readdir'
+r(e);for(let i of o)try{if(ZAw(i.name)<t)if(await kr().unlink(up.join(e,i.name)),r)n.messages++;else n.errors++}catch(s){T(`Failed to clean up file ${i.name} in ${e}: ${s}`,{level:"error"})}}catch(o){if(sr(o));else if(yin(o))T(`cleanup readdir ${e} failed: ${o.code}`,{level:"error"});else Ee(o)}return n}async function QAw(){let e=kr(),t=z8();if(t===null)return Yne();let r=Vkt.errors(),n=Vkt.baseLogs(),o=await tNh(r,t,!1);try{let i;try{i=aw
+
+================================================================================
+tengu_cleanup_throttle_marker / last-cleanup sentinel
+offset=153619504 pattern=b'tengu_cleanup_throttle_marker'
+i........................j......	...............).......................0$......I.......
+.......................	.......last-cleanup............................	.......NotFound................	.......tengu_cleanup_throttle_marker...........	.......not_regular_rerun.......................	......telemetryCode...........................	.../....last-cleanup: sentinel is not a regular file (.................). ..  ..............
+
+================================================================================
+BEST ~200-char SNIPPETS
+--- background housekeeping failed @ 298606419 ---
+(`.last-cleanup write failed: ${i.code} ${i.message}`,{level:"error"}):Ee(i))}if(HM()&&lz()>Date.now()-60000){setTimeout(o,Tgs).unref();return}await bXr()}function o(){return n().catch((i)=>yin(i)?T(`background housekeeping failed: ${i.message}`,{level:"error"}):Ee(i))}setTimeout(o,DMg).unref()}var wgs,nNc,OMg=86400000,Tgs=600000,DMg=5000,MMg=3600000;var Kfn=w(()=>{ot();cWa();qqn();cKl();Ye();rNc();po();at();$r();nl();FNe();oy
+
+--- cleanup mcp-logs scan failed @ 296426557 ---
+{return o}let s=i.filter((a)=>a.isDirectory()&&a.name.startsWith("mcp-logs-")).map((a)=>up.join(n,a.name));for(let a of s)o=$Te(o,await tNh(a,t,!0)),await D9(a,e)}catch(i){if(sr(i));else if(yin(i))T(`cleanup mcp-logs scan failed: ${i.code}`,{level:"error"});else Ee(i)}return o}async function _ce(e,t,r,n,o=t){let i;try{i=await r.stat(e)}catch(s){if(sr(s))return!1;throw s}if(!(i.mtime<t))return n.filesRetainedFresh++,!1;try{aw
+
+--- a.name.startsWith("mcp-logs-") @ 296426404 ---
+unction QAw(){let e=kr(),t=z8();if(t===null)return Yne();let r=Vkt.errors(),n=Vkt.baseLogs(),o=await tNh(r,t,!1);try{let i;try{i=await e.readdir(n)}catch{return o}let s=i.filter((a)=>a.isDirectory()&&a.name.startsWith("mcp-logs-")).map((a)=>up.join(n,a.name));for(let a of s)o=$Te(o,await tNh(a,t,!0)),await D9(a,e)}catch(i){if(sr(i));else if(yin(i))T(`cleanup mcp-logs scan failed: ${i.code}`,{level:"error"});else Ee(i)}return o
+
+--- no longer exists. Please restart Claude from an existing directory @ 105439186 ---
+ation was lost................................................	...+...Iterator result interface is not an object..............................	.......Working directory ".....................	...E..." no longer exists. Please restart Claude from an existing directory....................................	...$...[worktree] blocked shell exec: cwd "....................	...B..." is gone and recovery targets the shared checkout; agentWorktree=......................	...
+
+--- was deleted; shell cwd recovered to @ 105440146 ---
+t.h.i.s. .i.n.s.t.e.a.d. .o.f. .r.e.t.r.y.i.n.g...............	.......Shell CWD ".............	...#..." no longer exists, recovering to ".....................	.......".......................	...'..." was deleted; shell cwd recovered to ".................	...D...". Re-issue your command (it will run from the recovered directory).....................	.......g.......................	...>...[worktree] blocked shell exec outside isolati
+
+--- no longer exists; session cwd recovered to @ 121395762 ---
+..............................................	...............	...+...Iterator result interface is not an object..............	..."...ExitWorktree: original directory "......................	......." no longer exists; session cwd recovered to "..........	.......".......................	...3...ExitWorktree: not moving the permission anchor to ".........................k...". ..  .i.t. .s.t.r.i.c.t.l.y. .c.o.n.t.a.i.n.s. .t.h.e. .s.e.s.s.i.
+
+--- .last-cleanup write failed @ 298606221 ---
+hDiscipline:"inPlace"});if(!i.ok)T(`.last-cleanup write failed: ${i.error.code}`,{level:"error"})}else await wgs.writeFile(nNc.join(kn(),".last-cleanup"),new Date().toISOString()).catch((i)=>Xm(i)?T(`.last-cleanup write failed: ${i.code} ${i.message}`,{level:"error"}):Ee(i))}if(HM()&&lz()>Date.now()-60000){setTimeout(o,Tgs).unref();return}await bXr()}function o(){return n().catch((i)=>yin(i)?T(`background housekeeping fail
+
+--- tengu_retention_sweep @ 153658848 ---
+........ .......	........@...............................M......I........M......	........................?......).......................
+.......................................................	.......tengu_retention_sweep...................................	.......skipped.................	.......start...................................................	.......
+...........................................................

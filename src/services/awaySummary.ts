@@ -6,11 +6,15 @@ import { getResolvedLanguage } from '../utils/language.js'
 import { getLastCacheSafeParams, runForkedAgent } from '../utils/forkedAgent.js'
 import { createAutoMemCanUseTool } from './extractMemories/extractMemories.js'
 import { getAutoMemPath } from '../memdir/paths.js'
+import { truncateAtWordBoundary } from '../utils/stringUtils.js'
 import { getSessionMemoryContent } from './SessionMemory/sessionMemoryUtils.js'
 
 // Recap only needs recent context — truncate to avoid "prompt too long" on
 // large sessions. 30 messages ≈ ~15 exchanges, plenty for "where we left off."
 const RECENT_MESSAGE_WINDOW = 30
+
+/** densable 2.1.236 `Hbm=400` — hard cap after generation (word-boundary). */
+export const AWAY_SUMMARY_RECAP_MAX_CHARS = 400
 
 const PROMPT_EN =
   'The user stepped away and is coming back. Write exactly 1-3 short sentences. Start by stating the high-level task — what they are building or debugging, not implementation details. Next: the concrete next step. Skip status reports and commit recaps.'
@@ -97,7 +101,20 @@ export async function generateAwaySummary(
       : typeof content === 'string'
         ? content
         : null
-    return text?.trim() || null
+    const trimmed = text?.trim() || null
+    if (!trimmed) return null
+    // densable edu(s,Hbm): hard-cap runaway recap on word boundary.
+    if (trimmed.length > AWAY_SUMMARY_RECAP_MAX_CHARS) {
+      const capped = truncateAtWordBoundary(
+        trimmed,
+        AWAY_SUMMARY_RECAP_MAX_CHARS,
+      )
+      logForDebugging(
+        `[awaySummary] recap capped from ${trimmed.length} to ${capped.length} chars`,
+      )
+      return capped
+    }
+    return trimmed
   } catch (err) {
     if (err instanceof APIUserAbortError || signal.aborted) {
       return null

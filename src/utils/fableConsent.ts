@@ -3,11 +3,22 @@
  * Full credit-purchase / 3DS path remains denser in ExtraUsageDialog.
  */
 
+import {
+  getMainThreadAgentId,
+  isReplBridgeActive,
+  isSdkDialogHostActive,
+} from '../bootstrap/state.js'
+import type { QueuedCommand } from '../types/textInputTypes.js'
 import { getGlobalConfig, saveGlobalConfig } from './config.js'
+import {
+  getCommandQueueSnapshot,
+  subscribeToCommandQueue,
+} from './messageQueueManager.js'
 import {
   FABLE_OVERAGE_CONSENT_DIALOG_KIND,
   fableOverageConsentDialogSpec,
 } from './printRequestDialog.js'
+import { getAgentId } from './teammate.js'
 
 /** Official model family match for Claude Fable 5. */
 export function isFableModel(model: string | null | undefined): boolean {
@@ -274,16 +285,72 @@ export type ShowFableOverageConsentDialogInput = {
    * uses a dedicated AbortController). Local path passes tool abort signal.
    */
   parkTimeoutMs?: number
+  /**
+   * Test/DI override for densable xo gate (`shouldWatchFableParkCommandQueue`).
+   * When omitted, uses live sdkDialogHost / bridge / bg / teammate detection.
+   */
+  watchCommandQueue?: boolean
+}
+
+export type FableOverageConsentDialogChoice =
+  | 'consent'
+  | 'switch_default'
+  | 'cancelled'
+  | 'unanswered'
+  | 'queued_at_park'
+
+/**
+ * densable J1t — main-thread prompt queue entries only.
+ * SEA: `function J1t(e){return ix(e)&&e.mode==="prompt"}` with `ix=agentId===Di()`.
+ */
+export function isFableParkQueuePrompt(cmd: QueuedCommand): boolean {
+  return cmd.agentId === getMainThreadAgentId() && cmd.mode === 'prompt'
+}
+
+/**
+ * densable xo = !rkt() && vIt():
+ * - rkt = sdkDialogHostActive
+ * - vIt = replBridgeActive || sessionKind==='bg' || teammateAgentId set
+ *
+ * densable Ns = xo && On>0 — park timeout + queue subscribe only when xo.
+ * Fo/Wlt interaction suppress remains residual (no tip userPresence.interactionFired).
+ */
+export function shouldWatchFableParkCommandQueue(input?: {
+  env?: NodeJS.ProcessEnv
+  sdkDialogHostActive?: boolean
+  replBridgeActive?: boolean
+  teammateAgentId?: string | undefined
+}): boolean {
+  const env = input?.env ?? process.env
+  const sdkHost = input?.sdkDialogHostActive ?? isSdkDialogHostActive()
+  if (sdkHost) return false
+  const bridge = input?.replBridgeActive ?? isReplBridgeActive()
+  const bg = env.CLAUDE_CODE_SESSION_KIND === 'bg'
+  const teammateId =
+    input?.teammateAgentId !== undefined ? input.teammateAgentId : getAgentId()
+  return bridge || bg || teammateId !== undefined
+}
+
+function fableParkQueueCommandKey(cmd: QueuedCommand): string | QueuedCommand {
+  // densable Rs = jc.uuid ?? jc
+  return cmd.uuid ?? cmd
 }
 
 /**
  * Official requestDialog(X6e, {overagesEnabled}) densable.
  * Full ORu persist-after-consent + abort-reason handling remains denser at
  * query call sites; this covers the dialog show + result parse.
+ *
+ * Park-timeout densable (SEA Ar): when parkTimeoutMs aborts the local
+ * AbortController but the parent signal is still live, a cancelled/default
+ * result is treated as unanswered — not soft cancel / auto-fallback.
+ *
+ * densable 2.1.236 #14: when xo watch sees a new J1t prompt during park,
+ * return queued_at_park (same abort/no-fallback contract as unanswered).
  */
 export async function showFableOverageConsentDialog(
   input: ShowFableOverageConsentDialogInput,
-): Promise<'consent' | 'switch_default' | 'cancelled'> {
+): Promise<FableOverageConsentDialogChoice> {
   const payload = buildFableOverageConsentPayload({
     overagesEnabled: input.overagesEnabled,
     balanceCents: input.balanceCents,
@@ -307,17 +374,56 @@ export async function showFableOverageConsentDialog(
     return 'cancelled'
   }
 
-  if (input.parkTimeoutMs !== undefined && input.parkTimeoutMs > 0) {
+  // densable Ns = xo && On>0 — only arm park timeout when xo/watch is on.
+  const watchQueue =
+    input.watchCommandQueue ?? shouldWatchFableParkCommandQueue()
+  if (
+    watchQueue &&
+    input.parkTimeoutMs !== undefined &&
+    input.parkTimeoutMs > 0
+  ) {
     const localAbort = new AbortController()
     const onParentAbort = () => localAbort.abort()
     input.signal?.addEventListener('abort', onParentAbort, { once: true })
     const timeout = setTimeout(() => localAbort.abort(), input.parkTimeoutMs)
+    let queuedAtPark = false
+    let unsubscribe: (() => void) | undefined
+    {
+      const seen = new Set(
+        getCommandQueueSnapshot()
+          .filter(isFableParkQueuePrompt)
+          .map(fableParkQueueCommandKey),
+      )
+      unsubscribe = subscribeToCommandQueue(() => {
+        if (queuedAtPark || localAbort.signal.aborted) return
+        const hasNew = getCommandQueueSnapshot().some(
+          cmd =>
+            isFableParkQueuePrompt(cmd) &&
+            !seen.has(fableParkQueueCommandKey(cmd)),
+        )
+        if (hasNew) {
+          queuedAtPark = true
+          localAbort.abort()
+        }
+      })
+    }
     try {
-      return parse(
+      const parsed = parse(
         await input.requestDialog(spec, payload, { signal: localAbort.signal }),
       )
+      // SEA Ar: Pt==="cancelled" && Bn.aborted && !Ln.aborted
+      if (
+        parsed === 'cancelled' &&
+        localAbort.signal.aborted &&
+        !input.signal?.aborted
+      ) {
+        // SEA pe(..., vr ? dialog_queued_at_park : dialog_unanswered)
+        return queuedAtPark ? 'queued_at_park' : 'unanswered'
+      }
+      return parsed
     } finally {
       clearTimeout(timeout)
+      unsubscribe?.()
       input.signal?.removeEventListener('abort', onParentAbort)
     }
   }
@@ -327,13 +433,22 @@ export async function showFableOverageConsentDialog(
   )
 }
 
+/** Official unanswered copy when first-time credits park-timeout fires (SEA SLe path). */
+export const FABLE_CONSENT_UNANSWERED_COPY =
+  'Fable 5 now uses usage credits · the prompt to confirm went unanswered — nothing was sent · answer it where this session is running, or /model to change'
+
+export const FABLE_CONSENT_UNANSWERED_ERROR =
+  'Fable consent dialog was not answered'
+
 export type FableOverageConsentFlowReason =
   | 'already_consented'
   | 'not_fable'
   | 'no_dialog_fallback'
   | 'overage_enable_deferred'
-  | 'bridge_dialog_timeout'
+  | 'dialog_unanswered'
+  | 'dialog_queued_at_park'
   | 'dialog_declined'
+  | 'parent_aborted'
   | 'no_allowed_fallback'
   | 'model_consent_fallback'
   | 'credits_not_required'
@@ -392,6 +507,8 @@ export async function runFableOverageConsentFlow(input: {
   isFallbackAllowed?: boolean
   /** Session-level consent latch callback when no org/account key. */
   onSessionConsent?: () => void
+  /** Test/DI override for park queue watch (densable xo). */
+  watchCommandQueue?: boolean
 }): Promise<FableOverageConsentFlowResult> {
   if (!isFableModel(input.model)) {
     return {
@@ -449,7 +566,7 @@ export async function runFableOverageConsentFlow(input: {
     }
   }
 
-  let choice: 'consent' | 'switch_default' | 'cancelled'
+  let choice: FableOverageConsentDialogChoice
   try {
     choice = await showFableOverageConsentDialog({
       requestDialog: input.requestDialog,
@@ -458,16 +575,43 @@ export async function runFableOverageConsentFlow(input: {
       currency: input.currency,
       signal: input.signal,
       parkTimeoutMs: input.parkTimeoutMs,
+      watchCommandQueue: input.watchCommandQueue,
     })
   } catch {
-    // Official bridge_dialog_timeout / abort → treat as cancelled
-    choice = 'cancelled'
+    // SEA Ar / park unanswered: requestDialog throw under park timeout must
+    // abort with dialog_unanswered — never invent tip-local bridge_dialog_timeout
+    // and never auto-fallback.
     return {
       choice: 'cancelled',
-      reason: 'bridge_dialog_timeout',
+      reason: 'dialog_unanswered',
       dialogShown: true,
       shouldAbort: true,
-      errorMessage: 'Fable 5 requires usage credits. /model to switch models.',
+      errorMessage: FABLE_CONSENT_UNANSWERED_COPY,
+    }
+  }
+
+  // SEA Ar: park timeout / queue-during-park → abort query, no fallbackModel.
+  if (choice === 'unanswered' || choice === 'queued_at_park') {
+    return {
+      choice: 'cancelled',
+      reason:
+        choice === 'queued_at_park'
+          ? 'dialog_queued_at_park'
+          : 'dialog_unanswered',
+      dialogShown: true,
+      shouldAbort: true,
+      errorMessage: FABLE_CONSENT_UNANSWERED_COPY,
+    }
+  }
+
+  // densable I3 / SEA: parent abort during park → aborted_streaming (before Ar
+  // / soft declined). Never dialog_declined + fallbackModel.
+  if (choice === 'cancelled' && input.signal?.aborted) {
+    return {
+      choice: 'cancelled',
+      reason: 'parent_aborted',
+      dialogShown: true,
+      shouldAbort: true,
     }
   }
 
@@ -531,7 +675,7 @@ export async function runFableOverageConsentFlow(input: {
     }
   }
 
-  // cancelled / dismissed
+  // Soft cancelled / dismissed (NOT park unanswered) — SEA may still switch.
   const fallbackOk =
     input.isFallbackAllowed !== false && Boolean(input.fallbackModel)
   if (fallbackOk) {

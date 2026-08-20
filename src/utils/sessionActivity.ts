@@ -34,6 +34,11 @@ let idleTimer: ReturnType<typeof setTimeout> | null = null
 let cleanupRegistered = false
 /** Official FYi / BYi — mainLoopRefcount change listener. */
 let onMainLoopRefcountChanged: ((n: number) => void) | null = null
+/**
+ * densable 2.1.236 — fire when mainLoopRefcount transitions to 0 (turn idle).
+ * Used by notify_when_idle inbound subscriptions (peer_idle_notice).
+ */
+let onMainLoopBecameIdle: (() => void) | null = null
 /** Official GRu / UYi — dropNestedBlockedChain listener (agent cancel). */
 let onDropNestedBlockedChain: ((agentId: string) => void) | null = null
 
@@ -100,6 +105,11 @@ export function setMainLoopRefcountListener(
   cb: ((n: number) => void) | null,
 ): void {
   onMainLoopRefcountChanged = cb
+}
+
+/** densable notify_when_idle — register main-loop idle (refcount → 0) listener. */
+export function setMainLoopBecameIdleListener(cb: (() => void) | null): void {
+  onMainLoopBecameIdle = cb
 }
 
 /** Official UYi — register dropNestedBlockedChain listener. */
@@ -202,6 +212,9 @@ export function stopSessionActivity(
     if (mainLoopRefcount > 0) {
       mainLoopRefcount--
       onMainLoopRefcountChanged?.(mainLoopRefcount)
+      if (mainLoopRefcount === 0) {
+        onMainLoopBecameIdle?.()
+      }
     } else {
       logForDiagnosticsNoPII('warn', 'session_activity_main_loop_underflow', {
         reason,
@@ -232,5 +245,6 @@ export function resetSessionActivityForTests(): void {
   clearIdleTimer()
   cleanupRegistered = false
   onMainLoopRefcountChanged = null
+  onMainLoopBecameIdle = null
   onDropNestedBlockedChain = null
 }

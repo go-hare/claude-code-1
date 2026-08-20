@@ -129,7 +129,28 @@ export function showSetupDialog<T = void>(
 export async function renderAndRun(root: Root, element: React.ReactNode): Promise<void> {
   root.render(element);
   startDeferredPrefetches();
-  await root.waitUntilExit();
+  try {
+    await root.waitUntilExit();
+  } catch (err) {
+    // densable A0r/$Ji — unrecoverable render while canary armed → died:render_error
+    let canaryNote = '';
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { markFullscreenBootRenderError } =
+        require('./utils/fullscreen.js') as typeof import('./utils/fullscreen.js');
+      if (await markFullscreenBootRenderError().catch(() => false)) {
+        canaryNote =
+          ' It happened while the fullscreen renderer was starting, so the next launch will use the classic renderer (CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 forces that any time).';
+      }
+    } catch {
+      // optional
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console -- Ink may have swallowed console; surface fatal UI error
+    console.error(`Claude Code exited after an unrecoverable interface error (${message}).${canaryNote}`);
+    await gracefulShutdown(1);
+    return;
+  }
   await gracefulShutdown(0);
 }
 

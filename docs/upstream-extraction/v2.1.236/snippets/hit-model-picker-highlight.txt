@@ -1,0 +1,22 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: model-picker-highlight
+checklist: /model highlight only newest model name
+found: false
+topSymbols: ['ModelPicker']
+oneLineNote: 'newest model' hits are migration docs, not ModelPicker highlight; no highlightNewest/isNewestModel symbols
+search_patterns: ['newest model', 'ModelPicker', 'highlightNewest', 'isNewestModel']
+
+=== pattern counts ===
+'newest model': 2
+'ModelPicker': 11
+'highlightNewest': 0
+'isNewestModel': 0
+
+=== ModelPicker ===
+--- offset 153900912 ---
+................medium..........................high............................0...............@...............P...............................low.............................medium..........................high....2.......3.......4.......5.......6.......7.......8.......9.......:.......;.......<.......=.......>.......?.......@.......A.......B.......C.......D.......E.......F.......G.......H.......I...............................wot.....J.......K.......L.......................ModelPicker.....M...............................remember........................Select model....................egM.............................Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model..............N.......O.......P...............................Currently using ............9... for this session only. Selecting a model will undo this........Q.......R.......S...............................
+
+=== newest model (docs) ===
+--- offset 301626861 ---
+a file, directory, or file list, that is the scope. Otherwise the scope is the whole working directory's prompt surface \u2014 everything Step 1's inventory finds..2. **Target model.** Cruft is relative to a model: a workaround that is load-bearing on one generation is dead weight on the next. Resolve the target in this order: the model the request names; else the destination of an in-progress migration the repository documents (vendor notes, migration docs, TODOs); else the newest model the repository's own code or docs point at; else the current flagship generation of the provider the code calls. If the audit is part of a migration, read \`shared/model-migration.md\` \u2192 the per-target section alongside this file, since every migration section's checklist is also a removal checklist...## Step 1: Inventory the prompt surface..Find everything that reaches the model as text, not just the file named "prompt":..- **System prompts** and the code t

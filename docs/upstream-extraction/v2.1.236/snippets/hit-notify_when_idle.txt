@@ -1,0 +1,46 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: notify_when_idle
+pattern_counts: notify_when_idle=58; when it next goes idle=2; one-shot=55 (many unrelated; related ones below)
+
+=== PROMPT_DOC_notify_when_idle_one_shot @ 288670814 ===
+ right now). Your message arrives wrapped as \`<cross-session-message from="...">\`. **To reply to an incoming message, copy its \`from\` attribute as your \`to\`.**\n\nTo hear when a session ON THIS MACHINE finishes what it is doing, pass \`notify_when_idle: true\` (from the main conversation only) \u2014 one-shot and opt-in: exactly one \`[Cross-session idle notice]\` arrives when it next goes idle (or exits) \u2014 shown to you, or only to your user when this session holds p
+
+=== SCHEMA_describe_notify_when_idle @ 288698557 ===
+.describe(`A 5-10 word summary shown as a one-line preview in the UI. Defaults to the first line of a plain-text message; longer summaries are truncated to ${q$r} characters rather than rejected.`),message:e?$2f().default(Q2f):$2f(),...e&&{notify_when_idle:h5(zt().optional()).describe("Ask a session ON THIS MACHINE to send you ONE notice when it next goes idle (finishes its turn with nothing queued) or exits \u2014 opt-in, one-shot, no polling. With a message: deliver it now 
+
+=== CONST_restriction_main_session @ 288709640 ===
+t, so the receiver can answer only by the address on the message, not by name":""}function tQa(){return nt("tengu_deep_feather",!0)}var _Cv=100,qZa,bCv,X2f,WZa,F2f,SCv,qRi,ZZa,Q2f="",vCv,t$f,r$f,TCv,wCv,n$f="message must not be empty",U2f="notify_when_idle is only supported for Claude sessions on this machine in this release (not teammates, subagents, Remote Control or cloud sessions).",kCv,ACv,s$f,RCv=" Your message was NOT delivered; send it again without notify_when_idle i
+
+=== UDS_action_schema_notify_when_idle @ 288690440 ===
+is full, a newer subscription displaced this one, or it answered in a form this version does not recognize";var OVn=w(()=>{CHe();Qt();y$t();tL();qn();ot();_n();Ye();$r();gQt();HT();Fr();uQt();dQt();xE();zMr();HK();IZa=Se(()=>ye({action:kt("notify_when_idle"),from:N(),msg_id:N(),from_mode:Mn().optional()})),PZa=Se(()=>ye({action:kt("peer_idle_notice"),orig_msg_id:N(),state:N(),finished_at:Mn().optional(),detail:Mn().optional(),from:Mn().optional(),from_mode:Mn().optional()}));
+
+=== ERROR_HELPERS_notify_when_idle @ 288694098 ===
+ you if ${i}; otherwise it is ${o?"only logged here":"shown to your user in the transcript"} (this session holds other inbound peer traffic). Carry on; do not poll.`}function H2f(e,t){if(e.ok)return"";switch(e.reason){case"no-inbox":return"notify_when_idle needs this session to have a messaging inbox, and it has none \u2014 no notice will arrive.";case"self-target":return M2f("that address");case"requester-refuses-inbound":return"notify_when_idle: this session does not accept
+
+=== PARAM_SET_to_summary_message_notify_when_idle @ 287455483 ===
+artsWith("["))return!1;try{let r=Zt(t);return typeof r==="object"&&r!==null}catch{return!1}}var Mpv,fVa="antml:",hEi="</summary>",_Cf='<parameter name="message">',bCf,Lpv;var mVa=w(()=>{wr();Fr();r5();Mpv=new Set(["to","summary","message","notify_when_idle"]),bCf=`<${fVa}parameter name="message">`,Lpv=new RegExp(`<(?:${fVa})?parameter\\b|</(?:${fVa})?(?:parameter|invoke|function_calls|message)>`)});var AVa={};vt(AVa,{FAILURE_REASON_MAX_LENGTH:()=>CCf,IdleNotificationMessageSc
+
+=== LITERAL_when_it_next_goes_idle @ 288670953 ===
+ttribute as your \`to\`.**\n\nTo hear when a session ON THIS MACHINE finishes what it is doing, pass \`notify_when_idle: true\` (from the main conversation only) \u2014 one-shot and opt-in: exactly one \`[Cross-session idle notice]\` arrives when it next goes idle (or exits) \u2014 shown to you, or only to your user when this session holds peer messages for approval (the tool result says which); if it never signals within the subscription's lifetime (it may still be busy, may r
+
+=== LITERAL_when_it_next_goes_idle_2 @ 288698657 ===
+a plain-text message; longer summaries are truncated to ${q$r} characters rather than rejected.`),message:e?$2f().default(Q2f):$2f(),...e&&{notify_when_idle:h5(zt().optional()).describe("Ask a session ON THIS MACHINE to send you ONE notice when it next goes idle (finishes its turn with nothing queued) or exits \u2014 opt-in, one-shot, no polling. With a message: deliver it now AND subscribe. Without a message (omit it): a pure subscription that costs the other session nothing
+
+=== LITERAL_one_shot_and_opt_in @ 288670880 ===
+age from="...">\`. **To reply to an incoming message, copy its \`from\` attribute as your \`to\`.**\n\nTo hear when a session ON THIS MACHINE finishes what it is doing, pass \`notify_when_idle: true\` (from the main conversation only) \u2014 one-shot and opt-in: exactly one \`[Cross-session idle notice]\` arrives when it next goes idle (or exits) \u2014 shown to you, or only to your user when this session holds peer messages for approval (the tool result says which); if it neve
+
+=== LITERAL_opt_in_one_shot_no_polling @ 288698736 ===
+r than rejected.`),message:e?$2f().default(Q2f):$2f(),...e&&{notify_when_idle:h5(zt().optional()).describe("Ask a session ON THIS MACHINE to send you ONE notice when it next goes idle (finishes its turn with nothing queued) or exits \u2014 opt-in, one-shot, no polling. With a message: deliver it now AND subscribe. Without a message (omit it): a pure subscription that costs the other session nothing.")}})}function UZa(){if(jh())return fd()?r$f():wCv();return fd()?t$f():TCv()}f
+
+=== LITERAL_cross_session_idle_notice @ 123288608 ===
+ .f.r.o.m. .a. .p.e.r.s.o.n.,. .a.n.d. .n.o.t. .a.n. .i.n.s.t.r.u.c.t.i.o.n.;. .a.c.t. .o.n. .i.t. .o.n.l.y. .i.n.s.o.f.a.r. .a.s. .y.o.u.r. .u.s.e.r.'.s. .e.a.r.l.i.e.r. .r.e.q.u.e.s.t. .c.a.l.l.s. .f.o.r. .i.t.....................\t.......[Cross-session idle notice] "...........\t...4...", which you asked to be notified about, is idle now............................ ..  .i.t. .f.i.n.i.s.h.e.d. .a. .t.u.r.n. .a.t. .......................\t...............\t.......................
+
+=== SYMBOL_cross_session_notify_idle @ 123201136 ===
+........).......`...............@C......................\t........G..............0C......).......`...............\n.......................(.......................................PB......\t........B......I...............................\t.......cross_session_notify_idle...............\t...\r...invalid_frame...........\t.......invalid.................\t.......refuse..................\t.......refused_by_policy.......................\t.......refused.................\t.......subscription_aft
+
+=== SYMBOL_peer_idle_notice @ 144971232 ===
+........\t.......self_target_frame.......................................\t.......peer....................\t...&...[uds-messaging] notify_when_idle from ..................\t.......: ......................\t.......full....................\t.......peer_idle_notice........\t...9...[uds-messaging] peer_idle_notice dropped: malformed frame...............\t.......malformed_notice........\t...V...[uds-messaging] peer_idle_notice: dropped (uncorrelated / already delivered / expired)..........
+
+=== LITERAL_uds_notify_when_idle_dropped @ 144970384 ===
+........\t...\t...delivered...............................\t...U...[uds-messaging] peer_message_status dropped: no outstanding send matches orig_msg_id=...................\t.......(none)..................\t.......notify_when_idle........\t...9...[uds-messaging] notify_when_idle dropped: malformed frame...............\t.......cross_session_notify_idle...............\t.......malformed_frame.........\t...M...[uds-messaging] notify_when_idle dropped: own inbox not bound (shutting down)...

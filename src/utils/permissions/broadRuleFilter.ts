@@ -353,6 +353,15 @@ function isAgentBroadRule(toolName: string): boolean {
 }
 
 /**
+ * densable 2.1.236 `lpv` / `HE="Monitor"` — any Monitor allow rule is broad
+ * in auto mode so Monitor is reviewed like Bash (set aside from alwaysAllow).
+ */
+const MONITOR_TOOL_NAME = 'Monitor'
+function isMonitorBroadRule(toolName: string): boolean {
+  return normalizeLegacyToolName(toolName) === MONITOR_TOOL_NAME
+}
+
+/**
  * Official `NRH` — cached broad-rule detector entry point.
  *
  * Cache key matches official: `${toolName}\x00${ruleContent ?? ''}`.
@@ -376,10 +385,12 @@ export function isBroadRule(
   const key = `${toolName}\x00${ruleContent ?? ''}`
   const cached = broadRuleCache.get(key)
   if (cached !== undefined) return cached
+  // Official nWn: Q9n(Bash) || tWn(PowerShell) || k8a(Agent) || lpv(Monitor)
   const result =
     isBashBroadRule(toolName, ruleContent) ||
     isPowerShellBroadRule(toolName, ruleContent) ||
-    isAgentBroadRule(toolName)
+    isAgentBroadRule(toolName) ||
+    isMonitorBroadRule(toolName)
   broadRuleCache.set(key, result)
   return result
 }

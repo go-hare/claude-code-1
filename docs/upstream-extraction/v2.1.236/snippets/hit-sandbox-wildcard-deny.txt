@@ -1,0 +1,39 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: sandbox-wildcard-deny
+patterns searched: ["**/.env","wildcard read-deny","read deny","allowed read regions"]
+notes: exact "wildcard read-deny" and "allowed read regions" = 0 hits; related hits below
+
+=== **/.env* pattern array (JS source) @ 289958700 len=900 ===
+DDR|SOPS_[A-Z_]*|op read|aws secretsmanager|gcloud secrets)/g,10),Promise.all([QOi(["**/*terraform*","**/*.tf","**/*k8s*","**/*kubernetes*","**/helm[-._]*","**/*[-._]helm[-._]*","**/iam[-._]*","**/*[-._]iam[-._]*","**/prod[-._]*","**/*[-._]prod[-._]*","**/egress[-._]*","**/*[-._]egress[-._]*","**/*rbac*","**/*secret*","**/*credential*","**/*pii*","**/.env*","**/*.cedar","**/*allowlist*","**/network-polic*","**/*classification*","**/*retention*","**/*_encrypted*"],e,60),QOi(["**/helm/**","**/iam/**","**/prod/**","**/k8s/**","**/kubernetes/**","**/rbac/**"],e,1000,4,aKf).then((c)=>{let u=new Map;for(let d of c){let p=d.match(aKf)?.[2];if(p===void 0)continue;let f=u.get(p)??[];if(f.length<2)f.push(d),u.set(p,f)}return[...u.values()].flat()})]).then(([c,u])=>{let d=new Set(c);return[...c,...u.filter((p)=>!d.has(p))].slice(0,72)})]),l=[];try{let c=await cVr(e,"package.json",256000),u=c!=null?
+
+=== **/.env* string table cluster A @ 128575150 len=500 ===
+..........	.......**/egress[-._]*.........	.......**/*[-._]egress[-._]*...................	...	...**/*rbac*...............	.......**/*secret*.............	.......**/*credential*.........	.......**/*pii*................	.......**/.env*................	...
+...**/*.cedar..............	.......**/*allowlist*..........	.......**/network-polic*.......................	.......**/*classification*.....................	.......**/*retention*..........	.......**/*_encrypted*.................p.................
+
+=== **/.env* string table cluster B @ 128576366 len=500 ===
+..........	.......**/egress[-._]*.........	.......**/*[-._]egress[-._]*...................	...	...**/*rbac*...............	.......**/*secret*.............	.......**/*credential*.........	.......**/*pii*................	.......**/.env*................	...
+...**/*.cedar..............	.......**/*allowlist*..........	.......**/network-polic*.......................	.......**/*classification*.....................	.......**/*retention*..........	.......**/*_encrypted*.<.......................	...
+...**
+
+=== denyRead / read-deny sandbox linux @ 281679900 len=1100 ===
+s",t);let u=[];for(let d of r)if(l(d)){if(c(d)){Bo(`[Sandbox Linux] Skipping write-path restore that would bury a read-deny mount: ${d}`);continue}e.push("--bind",d,d),u.push(d),s?.push(d),Bo(`[Sandbox Linux] Re-bound write path wiped by denyRead tmpfs: ${d}`)}for(let d of n)if(l(d)){if(!Ky.existsSync(d)){Bo(`[Sandbox Linux] Skipping non-existent read allow path: ${d}`);continue}try{let p=Ky.realpathSync(d),f=d.replace(/\/+$/,"");if(p!==f&&dLn(d,p)){Bo(`[Sandbox Linux] Skipping allowRead restore for symlink pointing outside expected location: ${d} -> ${p}`);continue}}catch{Bo(`[Sandbox Linux] Skipping allowRead restore that could not be resolved: ${d}`);continue}if(u.some((p)=>o(p).some((f)=>o(d).some((m)=>m===f||m.startsWith(f+"/")))))continue;if(c(d)){Bo(`[Sandbox Linux] Skipping allowRead restore that would bury a read-deny mount: ${d}`);continue}e.push("--ro-bind",d,d),Bo(`[Sandbox Linux] Re-allowed read access within denied region: ${d}`)}}async function Njb(e,t,r,n,o={command:"rg"},i=mfa,s=!1,a){let l=[],c=[],u=[],d=new Map,p=new Map,f=new Map,m=(L)=>{let M=f.get(L);if(M===void
+
+=== Skipping non-existent read deny path @ 281687400 len=700 ===
+for(let L of k){if(!Ky.existsSync(L)){Bo(`[Sandbox Linux] Skipping non-existent read deny path: ${L}`);continue}if(Ky.statSync(L).isDirectory()){E.push(L);let D=m(L);S.push(D[D.length-1]);let B=[];LKd(l,L,c,y,m,S,B),v.push({forms:D,restores:B})}else{if(y.includes(L)){Bo(`[Sandbox Linux] Skipping read deny for re-allowed path: ${L}`);continue}let D=rXo(L);l.push("--ro-bind","/dev/null",D),_.set(D,"/dev/null"),_.set(L,"/dev/null");let B=m(L);S.push(B[B.length-1])}}for(let{realPath:L,fakePath:M}of r??[]){let D=rXo(L);l.push("--ro-bind",M,D),_.set(D,M),_.set(L,M)}let A=(L,M)=>m(L).some((D)=>M===D||M.startsWith(D==="/"?"/":D+"/")),R=(L)=>{let M=!1;for(let D of v){if(D.forms.some((B)=>L===B||L.sta
+
+=== claudeInChrome read deny rule @ 282965650 len=450 ===
+th pattern rejected");if(nk(l,t,"read","deny"))throw new bt(`read denied: ${l}`,"claudeInChrome/fileUpload: path matches a read deny rule");if(nk(l,t,"read","ask"))throw new bt(`read requires approval: ${l}`,"claudeInChrome/fileUpload: path matches a read ask rule")}for(let l of await xyp(t)){let c=await afe.lstat(l.path).catch(()=>null);if(c===null||c.isSymbolicLink()||!c.isDirectory())continue;let u=await afe.open(l.path,gBr.constants.O_RDONLY|
+
+=== Skipped by the read-deny gate @ 128499180 len=350 ===
+............	...!...
+_Skipped by the read-deny gate: ............................... .n.o.t. .r.e.a.d. ..  .a. .p.e.r.m.i.s.s.i.o.n.s...d.e.n.y. .r.u.l.e. .c.o.v.e.r.s. .t.h.e. .p.a.t.h.,. .i.t. .i.s. .a.n. .u.n.t.r.u.s.t.e.d. .n.e.t.w.o.r.k. .p.a.t.h.,. .o.r. .i.t. .r.e.s.o.l.v.e.d. .o.u.t.s.i.d.e. .t.h.e. .p.r.o.j.e.c.t.s. .d.i.r.e.c.t.o.r.y..._.
+
+=== filesystem deny paths message @ 284230350 len=420 ===
+(n,u0S);return u+=` The Bash sandbox profile adds ${n.length} filesystem deny paths to every command`,u+=d>0?`, ${d} of them for registered git worktrees, which grow this list without bound. From another terminal, remove worktrees you no longer need (git worktree remove <path>; git worktree prune for already-deleted checkouts), then restart Claude Code so the profile is rebuilt without them \u2014 or relax the Bash s
+
+=== allowed read paths @ 289045880 len=420 ===
+it resolves, through a symbolic link, outside this session\u2019s allowed read paths)":d?" (outside this session\u2019s allowed read paths)":f?" (a path spelling that can name a different file than it appears to)":"",h=s&&!d?" (a hard link: the same file may also live elsewhere on this machine)":"",g=l?.decisionReason?.type==="rule"?l.decisionReason:c?.decisionReason?.type==="rule"?c.decisionReason:o?{type:"rule",rul
+
+=== denyRead property names @ 86439750 len=260 ===
+..	......deniedDomains...........	.......denyRead................	...	...denyWrite....................... ...............0.......................	.......denyRead................	...	...denyWrite.......1.......................	...	...streaming...............	.

@@ -224,14 +224,14 @@ describe('isFullscreenEnvEnabled', () => {
     expect(isFullscreenEnvEnabled()).toBe(true)
   })
 
-  test('t3e reason: default_on when no env/settings/GB', () => {
+  test('t3e reason: ant_default when no env/settings/GB', () => {
     delete process.env.CLAUDE_CODE_NO_FLICKER
     delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
     delete process.env.CLAUDE_CODE_SESSION_KIND
     delete process.env.TMUX
     settingsTui = undefined
-    // P8t path (renderer) defaults on; t3e falls through GB catch → default_on
-    expect(getFullscreenGateReason()).toMatch(/default_on|gb_off/)
+    // P8t path (renderer) defaults on; densable xse → ant_default (tip default-on)
+    expect(getFullscreenGateReason()).toMatch(/ant_default|default_on/)
   })
 
   test('t3e reason: env_off when NO_FLICKER=0', () => {

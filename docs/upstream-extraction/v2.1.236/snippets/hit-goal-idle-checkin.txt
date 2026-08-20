@@ -1,0 +1,31 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: goal-idle-checkin
+checklist: /goal idle+parked behind bg work auto check-in
+found: true
+topSymbols: ['Goal check-in', 'CLAUDE_CODE_GOAL_CHECKIN_MINUTES', 'K9a', '/goal', 'parked']
+oneLineNote: Goal check-in deferred while background work runs; CLAUDE_CODE_GOAL_CHECKIN_MINUTES gate
+search_patterns: ['/goal', 'Goal check-in', 'CLAUDE_CODE_GOAL_CHECKIN_MINUTES', 'parked', 'idle']
+
+=== pattern counts ===
+'/goal': 39
+'Goal check-in': 7
+'CLAUDE_CODE_GOAL_CHECKIN_MINUTES': 3
+'parked': 148
+'idle': 1476
+
+=== BEST Goal check-in deferred ===
+--- offset 114679360 ---
+...................................................................................Q../!..............................j.........i..........a..........!.......................................................j.........i.......................................................................................................................0...............................................@...............p...............................................`...........................0...Goal check-in: background work no longer running................Goal check-in: .............3.... is still active. Its evaluation was deferred for ............................. min while background work ran, and that work is no longer running (it finished or was stopped without reporting back). Continue toward the goal............................,...Goal check-in: background work still running................8.... is still active, and evaluation has been deferred for ........
+
+=== CLAUDE_CODE_GOAL_CHECKIN_MINUTES ===
+--- offset 81235568 ---
+CLAUDE_CODE_EXIT_AFTER_STOP_DELAY.......I.0...............0.....CLAUDE_CODE_FORCE_BRIDGE..0.............I.0.!...CLAUDE_CODE_FORCE_EVALUATE_MEMORY.........................0.#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL.....I.0...............0.....CLAUDE_CODE_FORCE_FULL_LOGO.....................CLAUDE_CODE_FORCE_MEMORY_SURVEY...........0.....CLAUDE_CODE_FORCE_TIP_IDI.0.....................CLAUDE_CODE_GIT_BASH_PATH.................0. ...CLAUDE_CODE_GLOB_TIMEOUT_SECONDS..........0. ...CLAUDE_CODE_GOAL_CHECKIN_MINUTES........Is......CLAUDE_CODE_HIDE_SETTINGS_HINT..............-...CLAUDE_CODE_HOLD_UNANSWERED_PARKED_PERMISSION...........I.0.....CLAUDE_CODE_HOST_PLATFORMM...............5......CLAUDE_CODE_IDE_HOST_OVERRIDE...........I.0."...CLAUDE_CODE_IDLE_THRESHOLD_MINUTES.......................... ...CLAUDE_CODE_IDLE_TOKEN_THRESHOLD........I.0.....CLAUDE_CODE_IS_COWORK....x................0.....CLAUDE_CODE_LOOP_KEEPALIVE0...............0.....CLAUDE_CODE_LOOP
+
+=== K9a minutes*60000 ===
+--- offset 286984390 ---
+et("query_api_request_sent");if(i!==void 0)o.push(""),o.push(`  ${"Total pre-API overhead".padEnd(22)} ${SUe(i).padStart(10)}ms`);return o.join(`.`)}function Mvi(){if(!Fqn)return;let e;try{e=$sv()}catch(t){Ee(t);return}T(e)}var Fqn,Nsv;var Wlr=w(()=>{ot();Ye();mr();$r();_Do();Fr();Fqn=V.CLAUDE_CODE_PROFILE_QUERY;Nsv=new en(()=>new J_f)});function qsv(e){return e.mode==="task-notification"&&ix(e)&&e.passive!==!0}function K9a(){if(!nt("tengu_saffron_wren",!0))return 0;return(V.CLAUDE_CODE_GOAL_CHECKIN_MINUTES??Usv)*60000}function Q_f(e,t,r){let n=Math.max(1,Math.round(t/60000)),o=Ba(Z_f(e));if(r.length===0)return{summary:"Goal check-in: background work no longer running",body:`Goal check-in: \xAB${o}\xBB is still active. Its evaluation was deferred for ${n} min while background work ran, and that work is no longer running (it finished or was stopped without reporting back). Continue toward the goal.`};let i=r.map((s)=>{let a=s.type==="local_bash"&&
+
+=== /goal command UI ===
+--- offset 157968624 ---
+s7M.............&...........................C...Cannot destructure property 'messages' from null or undefined value.........................................+...Iterator result interface is not an object......................................................................................running ........................ ...............................turn............................ tokens......................................................... . ............................./goal clear to stop early.......................escape..........................dismiss.........................Goal............................................Last check......................................................column..........................................ait............................................. Goal active....................................T7h.............................................Goal achieved...................success..................... ...

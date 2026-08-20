@@ -335,6 +335,8 @@ export function buildSessionChildEnv(
     CLAUDE_CONFIG_DIR: opts.configDir,
     CLAUDE_STAGE_FILE_ROOT: opts.stageFileRoot,
     ANTHROPIC_MODEL: undefined,
+    // densable 2.1.236 BYOC scrub clears both pin and session-start default
+    ANTHROPIC_DEFAULT_MODEL: undefined,
     CLAUDE_CODE_ENVIRONMENT_KIND: 'byoc',
     CLAUDE_CODE_BYOC_ENABLE_DATADOG:
       process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG,

@@ -1,0 +1,195 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: usage-credits-row
+checklist: /usage usage-credits spend row for Team/Enterprise; capped 0% before spend
+search_patterns: ['/usage', 'usage-credits', 'Team and Enterprise', '0%']
+
+=== pattern counts ===
+'/usage': 106
+'usage-credits': 69
+'Team and Enterprise': 0
+'0%': 3972
+
+=== Team/Enterprise string variants ===
+'Team and Enterprise': 0
+'team and enterprise': 0
+'Team & Enterprise': 0
+'Team/Enterprise': 1
+'team/enterprise': 0
+'isTeamOrEnterprise': 8
+'Team or Enterprise': 2
+'team or enterprise': 0
+
+=== usage-credits near team/enterprise/spend total_selected=16 shown=10 ===
+--- score=5 ratio=0.99 offset=285495189 ---
+overageDisabledReason)&&(e.rateLimitType==="seven_day_overage_included"||!(KI(t)&&mmt()&&!wbe()))){let p=u();if(p!==null)return p}if(!r&&e.overageDisabledReason&&c5r.has(e.overageDisabledReason)){let p=e.overageDisabledReason==="org_spend_cap_reached",f=mc();if(f==="team"||f==="enterprise")return dQe(p?hif:"org's monthly spend limit",n?" \xB7 run /usage-credits to raise it, or visit claude.ai/admin-settings/usage":" \xB7 run /usage-credits to ask your admin for a higher limit",t);let h=n?"monthly spend limit":p?hif:"org's monthly spend limit",g=n?` \xB7 raise it at ${l5r}`:` \xB7 ask your admin to raise it at ${l5r}`;return dQe(h,g,t)}if(e.overageStatus==="rejected"){let p="";if(i&&e.overage
+
+--- score=5 ratio=0.99 offset=285495269 ---
+&&mmt()&&!wbe()))){let p=u();if(p!==null)return p}if(!r&&e.overageDisabledReason&&c5r.has(e.overageDisabledReason)){let p=e.overageDisabledReason==="org_spend_cap_reached",f=mc();if(f==="team"||f==="enterprise")return dQe(p?hif:"org's monthly spend limit",n?" \xB7 run /usage-credits to raise it, or visit claude.ai/admin-settings/usage":" \xB7 run /usage-credits to ask your admin for a higher limit",t);let h=n?"monthly spend limit":p?hif:"org's monthly spend limit",g=n?` \xB7 raise it at ${l5r}`:` \xB7 ask your admin to raise it at ${l5r}`;return dQe(h,g,t)}if(e.overageStatus==="rejected"){let p="";if(i&&e.overageResetsAt)if(i<e.overageResetsAt)p=` \xB7 resets ${s}`;else p=` \xB7 resets ${a}`
+
+--- score=4 ratio=1.00 offset=285498289 ---
+${a} \xB7 ${i}`:a}if(e.rateLimitType==="overage")t=Zse()?"usage limit":"usage credit limit";if(o){let a=`Approaching ${t} \xB7 resets ${o}`;return i?`${a} \xB7 ${i}`:a}let s=`Approaching ${t}`;return i?`${s} \xB7 ${i}`:s}function N8S(e){let t=mc(),r=Cc()?.hasExtraUsageEnabled===!0,n=fP();if(t==="team"||t==="enterprise"){if(!r&&WIt())return n?"Run /usage-credits to turn on extra usage for your org":"Run /usage-credits to ask your admin for more";if(r&&e==="overage")return n?"Run /usage-credits to raise the cap":"Run /usage-credits to ask your admin for more";return null}if(e==="five_hour"&&(t==="pro"||t==="max")&&bLe())return"/upgrade to keep using Claude Code";return null}function yif(e){if(
+
+--- score=4 ratio=1.00 offset=285498346 ---
+"usage limit":"usage credit limit";if(o){let a=`Approaching ${t} \xB7 resets ${o}`;return i?`${a} \xB7 ${i}`:a}let s=`Approaching ${t}`;return i?`${s} \xB7 ${i}`:s}function N8S(e){let t=mc(),r=Cc()?.hasExtraUsageEnabled===!0,n=fP();if(t==="team"||t==="enterprise"){if(!r&&WIt())return n?"Run /usage-credits to turn on extra usage for your org":"Run /usage-credits to ask your admin for more";if(r&&e==="overage")return n?"Run /usage-credits to raise the cap":"Run /usage-credits to ask your admin for more";return null}if(e==="five_hour"&&(t==="pro"||t==="max")&&bLe())return"/upgrade to keep using Claude Code";return null}function yif(e){if(!F8S(e))return null;let t=SLe()?$ri()?.subline:void 0;if(
+
+--- score=4 ratio=1.00 offset=285498423 ---
+${o}`;return i?`${a} \xB7 ${i}`:a}let s=`Approaching ${t}`;return i?`${s} \xB7 ${i}`:s}function N8S(e){let t=mc(),r=Cc()?.hasExtraUsageEnabled===!0,n=fP();if(t==="team"||t==="enterprise"){if(!r&&WIt())return n?"Run /usage-credits to turn on extra usage for your org":"Run /usage-credits to ask your admin for more";if(r&&e==="overage")return n?"Run /usage-credits to raise the cap":"Run /usage-credits to ask your admin for more";return null}if(e==="five_hour"&&(t==="pro"||t==="max")&&bLe())return"/upgrade to keep using Claude Code";return null}function yif(e){if(!F8S(e))return null;let t=SLe()?$ri()?.subline:void 0;if(t)return t;if(!WIt()||V.DISABLE_EXTRA_USAGE_COMMAND)return"Switch models to k
+
+--- score=4 ratio=0.99 offset=285498461 ---
+s=`Approaching ${t}`;return i?`${s} \xB7 ${i}`:s}function N8S(e){let t=mc(),r=Cc()?.hasExtraUsageEnabled===!0,n=fP();if(t==="team"||t==="enterprise"){if(!r&&WIt())return n?"Run /usage-credits to turn on extra usage for your org":"Run /usage-credits to ask your admin for more";if(r&&e==="overage")return n?"Run /usage-credits to raise the cap":"Run /usage-credits to ask your admin for more";return null}if(e==="five_hour"&&(t==="pro"||t==="max")&&bLe())return"/upgrade to keep using Claude Code";return null}function yif(e){if(!F8S(e))return null;let t=SLe()?$ri()?.subline:void 0;if(t)return t;if(!WIt()||V.DISABLE_EXTRA_USAGE_COMMAND)return"Switch models to keep working.";if(!fP())return"Switch m
+
+--- score=4 ratio=0.99 offset=295847624 ---
+,sKi=O(Te(),1),N2l=O(Oe(),1);nKi={kind:"event",color:"text"}});function Wbh({shouldShowUpsell:e,isMax20x:t,isExtraUsageCommandEnabled:r,shouldAutoOpenRateLimitOptionsMenu:n,isTeamOrEnterprise:o,hasBillingAccess:i,serverHidesUpgrade:s,serverHidesOverage:a,spendLimitNudgePath:l}){if(!e)return null;if(n)return"Opening your options\u2026";if(l)return"/usage-credits to adjust your monthly spend limit.";let c=r&&!a;if(t){if(c)return"/usage-credits to finish what you\u2019re working on.";return"/login to switch to an API usage-billed account."}if(o){if(!c)return"Your admin can enable extra usage at claude.ai/admin-settings/usage.";if(i)return"/usage-credits to finish what you\u2019re working on.";r
+
+--- score=4 ratio=0.99 offset=295847706 ---
+dShowUpsell:e,isMax20x:t,isExtraUsageCommandEnabled:r,shouldAutoOpenRateLimitOptionsMenu:n,isTeamOrEnterprise:o,hasBillingAccess:i,serverHidesUpgrade:s,serverHidesOverage:a,spendLimitNudgePath:l}){if(!e)return null;if(n)return"Opening your options\u2026";if(l)return"/usage-credits to adjust your monthly spend limit.";let c=r&&!a;if(t){if(c)return"/usage-credits to finish what you\u2019re working on.";return"/login to switch to an API usage-billed account."}if(o){if(!c)return"Your admin can enable extra usage at claude.ai/admin-settings/usage.";if(i)return"/usage-credits to finish what you\u2019re working on.";return"/usage-credits to request more usage from your admin."}if(s){if(c)return"/us
+
+--- score=3 ratio=1.00 offset=279731793 ---
+d":return"Fast mode disabled \xB7 usage credits turned off for your account";case"seat_tier_level_disabled":case"seat_tier_zero_credit_limit":case"member_zero_credit_limit":return"Fast mode disabled \xB7 usage credits not available for your plan";case"overage_not_provisioned":case"no_limits_configured":return"Fast mode requires usage credits \xB7 /usage-credits to turn them on";default:return"Fast mode disabled \xB7 usage credits not available"}}function qAn(e){return e==="org_level_disabled_until"||e==="org_spend_cap_reached"||e==="out_of_credits"}function Dzo(){sv.rearmCreditsExhaustedNotice()}function Nmd(e,t){let r=hib(e);if(T(`Fast mode overage rejection: ${e??"unknown"} \u2014 ${r}`),H
+
+--- score=3 ratio=1.00 offset=295847145 ---
+a_auto_resume_fired"},w9e)},L2l[13]=_bh,L2l[14]=fTe,L2l[15]=w9e,L2l[16]=Bcw;else Bcw=L2l[16];wf(Bcw,Ktn.phase==="armed"?vbh:null)}var E9e,sKi,N2l,vbh=30000,Tbh="quota-auto-resume",wbh="quota-auto-resume-credits",rKi="quota-auto-resume-cap",oKi="quota-auto-resume-cancelled",iKi="Automatic continue cancelled \xB7 /rate-limit-options to re-arm",aKi="/usage-credits to continue now",nKi;var Fso=w(()=>{UT();dae();Dt();QVi();_gr();_U();A2l();Za();byr();As();ri();R2l();E9e=O(It(),1),sKi=O(Te(),1),N2l=O(Oe(),1);nKi={kind:"event",color:"text"}});function Wbh({shouldShowUpsell:e,isMax20x:t,isExtraUsageCommandEnabled:r,shouldAutoOpenRateLimitOptionsMenu:n,isTeamOrEnterprise:o,hasBillingAccess:i,serverHi
+
+=== /usage near credits/team/spend selected=43 shown=8 ===
+--- score=4 ratio=0.99 offset=295847623 ---
+nKi={kind:"event",color:"text"}});function Wbh({shouldShowUpsell:e,isMax20x:t,isExtraUsageCommandEnabled:r,shouldAutoOpenRateLimitOptionsMenu:n,isTeamOrEnterprise:o,hasBillingAccess:i,serverHidesUpgrade:s,serverHidesOverage:a,spendLimitNudgePath:l}){if(!e)return null;if(n)return"Opening your options\u2026";if(l)return"/usage-credits to adjust your monthly spend limit.";let c=r&&!a;if(t){if(c)return"/usage-credits to finish what you\u2019re working on.";return"/login to switch to an API usage-billed account."}if(o){if(!c)return"Your admin can enable extra usage at claude.ai/admin-settings/usage.";if(i)return"/usage-credits to finish 
+
+--- score=4 ratio=0.99 offset=285495188 ---
+teLimitType==="seven_day_overage_included"||!(KI(t)&&mmt()&&!wbe()))){let p=u();if(p!==null)return p}if(!r&&e.overageDisabledReason&&c5r.has(e.overageDisabledReason)){let p=e.overageDisabledReason==="org_spend_cap_reached",f=mc();if(f==="team"||f==="enterprise")return dQe(p?hif:"org's monthly spend limit",n?" \xB7 run /usage-credits to raise it, or visit claude.ai/admin-settings/usage":" \xB7 run /usage-credits to ask your admin for a higher limit",t);let h=n?"monthly spend limit":p?hif:"org's monthly spend limit",g=n?` \xB7 raise it at ${l5r}`:` \xB7 ask your admin to raise it at ${l5r}`;return dQe(h,g,t)}if(e.overageStatus==="reje
+
+--- score=4 ratio=0.99 offset=295847705 ---
+traUsageCommandEnabled:r,shouldAutoOpenRateLimitOptionsMenu:n,isTeamOrEnterprise:o,hasBillingAccess:i,serverHidesUpgrade:s,serverHidesOverage:a,spendLimitNudgePath:l}){if(!e)return null;if(n)return"Opening your options\u2026";if(l)return"/usage-credits to adjust your monthly spend limit.";let c=r&&!a;if(t){if(c)return"/usage-credits to finish what you\u2019re working on.";return"/login to switch to an API usage-billed account."}if(o){if(!c)return"Your admin can enable extra usage at claude.ai/admin-settings/usage.";if(i)return"/usage-credits to finish what you\u2019re working on.";return"/usage-credits to request more usage from you
+
+--- score=4 ratio=0.99 offset=285495249 ---
+wbe()))){let p=u();if(p!==null)return p}if(!r&&e.overageDisabledReason&&c5r.has(e.overageDisabledReason)){let p=e.overageDisabledReason==="org_spend_cap_reached",f=mc();if(f==="team"||f==="enterprise")return dQe(p?hif:"org's monthly spend limit",n?" \xB7 run /usage-credits to raise it, or visit claude.ai/admin-settings/usage":" \xB7 run /usage-credits to ask your admin for a higher limit",t);let h=n?"monthly spend limit":p?hif:"org's monthly spend limit",g=n?` \xB7 raise it at ${l5r}`:` \xB7 ask your admin to raise it at ${l5r}`;return dQe(h,g,t)}if(e.overageStatus==="rejected"){let p="";if(i&&e.overageResetsAt)if(i<e.overageResetsA
+
+--- score=4 ratio=0.99 offset=285495268 ---
+if(p!==null)return p}if(!r&&e.overageDisabledReason&&c5r.has(e.overageDisabledReason)){let p=e.overageDisabledReason==="org_spend_cap_reached",f=mc();if(f==="team"||f==="enterprise")return dQe(p?hif:"org's monthly spend limit",n?" \xB7 run /usage-credits to raise it, or visit claude.ai/admin-settings/usage":" \xB7 run /usage-credits to ask your admin for a higher limit",t);let h=n?"monthly spend limit":p?hif:"org's monthly spend limit",g=n?` \xB7 raise it at ${l5r}`:` \xB7 ask your admin to raise it at ${l5r}`;return dQe(h,g,t)}if(e.overageStatus==="rejected"){let p="";if(i&&e.overageResetsAt)if(i<e.overageResetsAt)p=` \xB7 resets $
+
+--- score=3 ratio=1.00 offset=285498288 ---
+mitType==="overage")t=Zse()?"usage limit":"usage credit limit";if(o){let a=`Approaching ${t} \xB7 resets ${o}`;return i?`${a} \xB7 ${i}`:a}let s=`Approaching ${t}`;return i?`${s} \xB7 ${i}`:s}function N8S(e){let t=mc(),r=Cc()?.hasExtraUsageEnabled===!0,n=fP();if(t==="team"||t==="enterprise"){if(!r&&WIt())return n?"Run /usage-credits to turn on extra usage for your org":"Run /usage-credits to ask your admin for more";if(r&&e==="overage")return n?"Run /usage-credits to raise the cap":"Run /usage-credits to ask your admin for more";return null}if(e==="five_hour"&&(t==="pro"||t==="max")&&bLe())return"/upgrade to keep using Claude Code";
+
+--- score=3 ratio=1.00 offset=285498345 ---
+imit";if(o){let a=`Approaching ${t} \xB7 resets ${o}`;return i?`${a} \xB7 ${i}`:a}let s=`Approaching ${t}`;return i?`${s} \xB7 ${i}`:s}function N8S(e){let t=mc(),r=Cc()?.hasExtraUsageEnabled===!0,n=fP();if(t==="team"||t==="enterprise"){if(!r&&WIt())return n?"Run /usage-credits to turn on extra usage for your org":"Run /usage-credits to ask your admin for more";if(r&&e==="overage")return n?"Run /usage-credits to raise the cap":"Run /usage-credits to ask your admin for more";return null}if(e==="five_hour"&&(t==="pro"||t==="max")&&bLe())return"/upgrade to keep using Claude Code";return null}function yif(e){if(!F8S(e))return null;let t=
+
+--- score=3 ratio=1.00 offset=285498422 ---
+}`:a}let s=`Approaching ${t}`;return i?`${s} \xB7 ${i}`:s}function N8S(e){let t=mc(),r=Cc()?.hasExtraUsageEnabled===!0,n=fP();if(t==="team"||t==="enterprise"){if(!r&&WIt())return n?"Run /usage-credits to turn on extra usage for your org":"Run /usage-credits to ask your admin for more";if(r&&e==="overage")return n?"Run /usage-credits to raise the cap":"Run /usage-credits to ask your admin for more";return null}if(e==="five_hour"&&(t==="pro"||t==="max")&&bLe())return"/upgrade to keep using Claude Code";return null}function yif(e){if(!F8S(e))return null;let t=SLe()?$ri()?.subline:void 0;if(t)return t;if(!WIt()||V.DISABLE_EXTRA_USAGE_CO
+
+=== 0% near usage/credits/spend selected=2 shown=2 ===
+--- ratio=1.00 offset=61791430 ---
+rtjointhislistgoodneedwayswestjobsmindalsologorichuseslastteamarmyfoodkingwilleastwardbestfirePageknowaway.pngmovethanloadgiveselfnotemuchfeedmanyrockicononcelookhidediedHomerulehostajaxinfoclublawslesshalfsomesuchzone100%onescareTimeracebluefourweekfacehopegavehardlostwhenparkkeptpassshiproomHTMLplanTypedonesavekeepflaglinksoldfivetookratetownjumpthusdarkcardfilefearstaykillthatfallautoever.comtalkshopvotedeepmoderestturnbornbandfellro
+
+--- ratio=0.95 offset=61798714 ---
+ta-rural</a> spendbakershops= "";php">ction13px;brianhellosize=o=%2F joinmaybe<img img">, fjsimg" ")[0]MTopBType"newlyDanskczechtrailknows</h5>faq">zh-cn10);.-1");type=bluestrulydavis.js';>..<!steel you h2>..form jesus100% menu......walesrisksumentddingb-likteachgif" vegasdanskeestishqipsuomisobredesdeentretodospuedea..osest..tienehastaotrospartedondenuevohacerformamismomejormundoaqu..d..ass..loayudafechatodastantomenosdatosotrassitiomu
+
+=== extra phrase counts ===
+'capped at 0%': 0
+'capped 0%': 0
+'0% before': 0
+'before you spend': 0
+'before spend': 0
+'spend row': 0
+'usage credits': 208
+'monthly spend limit': 25
+'org_spend_cap_reached': 19
+
+=== 'monthly spend limit' hits total=25 shown=8 ===
+--- offset 110794614 ---
+et................seven_day_overage_included......................................org_spend_cap_reached...........................team............................enterprise......................org's monthly spend limit...................J... . run /usage-credits to raise it, or visit claude.ai/admin-settings/usage..................:... . run /usage-credits to ask your admin for a higher limit......................m
+
+--- offset 110794832 ---
+t...................J... . run /usage-credits to raise it, or visit claude.ai/admin-settings/usage..................:... . run /usage-credits to ask your admin for a higher limit......................monthly spend limit............................. . raise it at .............!... . ask your admin to raise it at ...............................rejected........................out_of_credits..............0...Your org is
+
+--- offset 127392832 ---
+s at ...................,...........................................4...You're out of usage credits. Switch to another model............................ to continue................<...You've hit your monthly spend limit. Switch to another model.................... Switch to another model....................a...You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models...........
+
+--- offset 127393168 ---
+its. Run /usage-credits to keep using Fable 5 or /model to switch models............................5...You're out of usage credits. /model to switch models............................You've hit your monthly spend limit. Run /usage-credits to manage your limit and keep using Fable 5 or switch models to continue this chat..................=...You've hit your monthly spend limit. /model to switch models...............
+
+--- offset 127393328 ---
+........................You've hit your monthly spend limit. Run /usage-credits to manage your limit and keep using Fable 5 or switch models to continue this chat..................=...You've hit your monthly spend limit. /model to switch models................=... Run /usage-credits to continue or switch models with /model.................... /model to switch models...................................................
+
+--- offset 149903022 ---
+..........e...............................n...............................O.p.e.n.i.n.g. .y.o.u.r. .o.p.t.i.o.n.s.& ......................l...........................2.../usage-credits to adjust your monthly spend limit...............................r...............................a...............................t...........................0.../.u.s.a.g.e.-.c.r.e.d.i.t.s. .t.o. .f.i.n.i.s.h. .w.h.a.t. .y.o.u.. r.e. 
+
+--- offset 149912672 ---
+........lKi.............................cKi..... .......!.......".......#.......$.......%.......&...............'.......(.......).......*.......+.......,.......-...................$...You've hit your monthly spend limit.............................dOD.............................warning.........................error.........../.......0.......1...............................Press .......................... to continu
+
+--- offset 157801865 ---
+Vh.............................rwt.............................................................Set limit.......................Set to unlimited................Cancel..........................Set your monthly spend limit to.................Set monthly spend limit.........................suggestion..................................F...You can set a maximum amount you can spend on usage credits per month...............
+
+=== 'org_spend_cap_reached' hits total=19 shown=8 ===
+--- offset 87435568 ---
+........`...............................................................................................no_limits_configured............................overage_not_provisioned.........................org_spend_cap_reached...........................out_of_credits..................org_level_disabled..............................org_service_level_disabled......................seat_tier_level_disabled.....................
+
+--- offset 87437616 ---
+.............................................................G......G......i............0...............P...............p...............................org_level_disabled_until........................org_spend_cap_reached...........................out_of_credits...................................................@...@.>.@.=................................).'.....#.....'.$...5.'.X.'......H..P........................[...
+
+--- offset 108790288 ---
+....................................................................................N...Cannot destructure property 'includeOverageInUse' from null or undefined value..........1.......................org_spend_cap_reached...........................org_level_disabled_until........................t...................m...........................,....@p..@pM.G...@.d.I.....3.@.^.I.......@...N.....3.@.^.N....`..@./.L.....3.
+
+--- offset 110794496 ---
+........five_hour.......................seven_day.......................seven_day_opus..................seven_day_sonnet................seven_day_overage_included......................................org_spend_cap_reached...........................team............................enterprise......................org's monthly spend limit...................J... . run /usage-credits to raise it, or visit claude.ai/admin-s
+
+--- offset 179820768 ---
+ied-overage-surpassed-threshold.....................*...anthropic-ratelimit-unified-overage-period..................3...anthropic-ratelimit-unified-overage-disabled-reason.............................org_spend_cap_reached...........................retry-after.................0...anthropic-ratelimit-unified-representative-claim................overage.....................*...anthropic-ratelimit-unified-overage-status...
+
+--- offset 229584368 ---
+........................`...............p...............................................................................................................org_level_disabled_until........................org_spend_cap_reached........................... ...............@...............................org_level_disabled_until........................org_spend_cap_reached...........................session limit................
+
+--- offset 229584512 ---
+........org_level_disabled_until........................org_spend_cap_reached........................... ...............@...............................org_level_disabled_until........................org_spend_cap_reached...........................session limit...................weekly limit....................Opus limit......................Sonnet limit....................Fable 5 limit...................usage credit 
+
+--- offset 279731336 ---
+B7 usage credits exhausted";case"org_level_disabled":case"org_service_level_disabled":return"Fast mode disabled \xB7 usage credits turned off by your organization";case"org_level_disabled_until":case"org_spend_cap_reached":return"Fast mode disabled \xB7 usage credit limit reached";case"member_level_disabled":return"Fast mode disabled \xB7 usage credits turned off for your account";case"seat_tier_level_disabled":case"s
+
+=== 'isTeamOrEnterprise' hits total=8 shown=8 ===
+--- offset 149904480 ---
+........................shouldShowUpsell................isMax20x........................isExtraUsageCommandEnabled.................."...shouldAutoOpenRateLimitOptionsMenu..............................isTeamOrEnterprise..............................hasBillingAccess................serverHidesUpgrade..............................serverHidesOverage..............................spendLimitNudgePath.............@....Y....
+
+--- offset 295847447 ---
+();ri();R2l();E9e=O(It(),1),sKi=O(Te(),1),N2l=O(Oe(),1);nKi={kind:"event",color:"text"}});function Wbh({shouldShowUpsell:e,isMax20x:t,isExtraUsageCommandEnabled:r,shouldAutoOpenRateLimitOptionsMenu:n,isTeamOrEnterprise:o,hasBillingAccess:i,serverHidesUpgrade:s,serverHidesOverage:a,spendLimitNudgePath:l}){if(!e)return null;if(n)return"Opening your options\u2026";if(l)return"/usage-credits to adjust your monthly spen
+
+--- offset 295851549 ---
+;const vyr=fOD||!Dbh;let Xtn;if(u3[39]!==Obh||u3[40]!==Ytn||u3[41]!==Jtn||u3[42]!==vyr)Xtn=Wbh({shouldShowUpsell:Qcw,isMax20x:Xcw,isExtraUsageCommandEnabled:Mbh,shouldAutoOpenRateLimitOptionsMenu:Jtn,isTeamOrEnterprise:Pbh,hasBillingAccess:auw,serverHidesUpgrade:vyr,serverHidesOverage:Obh,spendLimitNudgePath:Ytn}),u3[39]=Obh,u3[40]=Ytn,u3[41]=Jtn,u3[42]=vyr,u3[43]=Xtn;else Xtn=u3[43];let U2l=Xtn;if(!U2l){B2l=null;b
+
+--- offset 298232984 ---
+]!==Cwr||LEt[27]!==Ukg||LEt[28]!==Wkg||LEt[29]!==MEt||LEt[30]!==YOc)rDc=em.jsx(x,{flexDirection:"column",alignItems:"flex-end",flexShrink:1,overflowX:"hidden",children:em.jsx(hDc,{isInOverageMode:Wkg,isTeamOrEnterprise:VxE,apiKeyStatus:Upn,verbose:YOc,tokenUsage:MEt,isAutoUpdating:KOc,isShowingCompactMessage:Cwr,onChangeIsUpdating:Ukg})}),LEt[24]=Upn,LEt[25]=KOc,LEt[26]=Cwr,LEt[27]=Ukg,LEt[28]=Wkg,LEt[29]=MEt,LEt[3
+
+--- offset 298233962 ---
+ex-end",flexShrink:0,overflowX:"hidden",children:[rDc,nDc,oDc]})}),LEt[37]=rDc,LEt[38]=nDc,LEt[39]=oDc,LEt[40]=QxE;else QxE=LEt[40];return QxE}function hDc(sp1){let Fwe=gDc.c(42),{isInOverageMode:Vkg,isTeamOrEnterprise:Kkg,apiKeyStatus:Awr,verbose:fvo,tokenUsage:HEt,isAutoUpdating:Ykg,isShowingCompactMessage:ap1,onChangeIsUpdating:Jkg}=sp1,[iDc,Xkg]=$we.useState(null),tIE;if(Fwe[0]===ae)tIE=!Ca()&&mc()==="pro",Fwe[
+
+--- offset 302265549 ---
+riority:"low",timeoutMs:1e4}),T(`Showing plugin autoupdate notification for: ${u.join(", ")} (${c?"reloaded":"reload required"})`)}return i}}}});function kZg(){let e=mc();return{hasBillingAccess:fP(),isTeamOrEnterprise:e==="team"||e==="enterprise"}}var AZg,RZg,xZg;var IZg=w(()=>{Bt();j4();Sar();Qo();Qse();Cke();Pi();AZg={id:"fable-usage-credits",deps:(e)=>[e.addNotification],setup(){let e=!1;return({addNotification
+
+--- offset 302266203 ---
+ing",key:"fable-usage-credits",text:"Fable 5 is now using usage credits instead of your plan limits",color:"error",priority:"immediate"})})}};RZg={id:"limit-reached",deps:(e)=>{let{hasBillingAccess:t,isTeamOrEnterprise:r}=kZg();return[e.claudeAiLimits.isUsingOverage,e.claudeAiLimits,e.mainLoopModel,e.addNotification,t,r]},setup(){let e=!1;return({addNotification:t,claudeAiLimits:r,mainLoopModel:n})=>{let{hasBilling
+
+--- offset 302266430 ---
+;return[e.claudeAiLimits.isUsingOverage,e.claudeAiLimits,e.mainLoopModel,e.addNotification,t,r]},setup(){let e=!1;return({addNotification:t,claudeAiLimits:r,mainLoopModel:n})=>{let{hasBillingAccess:o,isTeamOrEnterprise:i}=kZg();if(r.isUsingOverage&&!e&&(!i||o))t({key:"limit-reached",text:$ja(r,n),priority:"immediate"}),e=!0;else if(!r.isUsingOverage&&e)e=!1}}},xZg={id:"rate-limit-warning",deps:(e)=>[e.claudeAiLimit
+
+=== 'Run /usage-credits' hits total=18 shown=8 ===
+--- offset 110804912 ---
+........................................................................................................................................team............................enterprise..................6...Run /usage-credits to turn on extra usage for your org......................-...Run /usage-credits to ask your admin for more...................overage.....................#...Run /usage-credits to raise the cap.......
+
+--- offset 110804992 ---
+........................................................team............................enterprise..................6...Run /usage-credits to turn on extra usage for your org......................-...Run /usage-credits to ask your admin for more...................overage.....................#...Run /usage-credits to raise the cap.............................................five_hour.......................pro.......
+
+--- offset 110805088 ---
+se..................6...Run /usage-credits to turn on extra usage for your org......................-...Run /usage-credits to ask your admin for more...................overage.....................#...Run /usage-credits to raise the cap.............................................five_hour.......................pro.............................max.........................".../upgrade to keep using Claude Code........
+
+--- offset 127392973 ---
+........... to continue................<...You've hit your monthly spend limit. Switch to another model.................... Switch to another model....................a...You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models............................5...You're out of usage credits. /model to switch models............................You've hit your monthly spend limit. Ru
+
+--- offset 127393189 ---
+ts to keep using Fable 5 or /model to switch models............................5...You're out of usage credits. /model to switch models............................You've hit your monthly spend limit. Run /usage-credits to manage your limit and keep using Fable 5 or switch models to continue this chat..................=...You've hit your monthly spend limit. /model to switch models................=... Run /usage-cre
+
+--- offset 127393393 ---
+/usage-credits to manage your limit and keep using Fable 5 or switch models to continue this chat..................=...You've hit your monthly spend limit. /model to switch models................=... Run /usage-credits to continue or switch models with /model.................... /model to switch models............................................................$............................@.$M......\.............@`
+
+--- offset 160785264 ---
+ble_consent.............................o...............................consent.........................reenable_failed.................dismiss.....................@...Couldn't turn on usage credits. Run /usage-credits to try again..................................................@....@..@ .......`,.....@.-.K....0=.....@..N....@......................d...............................................8II...............
+
+--- offset 264681459 ---
+......................q......I........p..............................tengu_review_overage_blocked...................... . ..! ......................................./admin-settings/............6....  Run /usage-credits to request this from your admin...........................needs-confirm...............!...tengu_review_overage_dialog_shown...............................pr..............................a............

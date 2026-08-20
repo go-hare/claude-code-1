@@ -1,8 +1,11 @@
 import { useEffect } from 'react'
+import { noteFullscreenBootFirstFrame } from '../utils/fullscreen.js'
 import { isExitAfterFirstRenderEnabled } from '../utils/residualFinalEnvGates.js'
 
 export function useAfterFirstRender(): void {
   useEffect(() => {
+    // densable lIh — first frame while boot canary armed.
+    noteFullscreenBootFirstFrame()
     // Official EXIT_AFTER_FIRST_RENDER densable — ant-only startup bench exit.
     if (process.env.USER_TYPE === 'ant' && isExitAfterFirstRenderEnabled()) {
       process.stderr.write(

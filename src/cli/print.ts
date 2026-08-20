@@ -3716,6 +3716,26 @@ function runHeadlessStreaming(
       }
     })
 
+    // densable 2.1.236 — deliver correlated [Cross-session idle notice] prompts.
+    try {
+      const { setIdleNoticeHandler, idleNoticeModelText } =
+        require('../utils/udsIdleNotify.js') as typeof import('../utils/udsIdleNotify.js')
+      setIdleNoticeHandler(notice => {
+        if (!notice.modelVisible) return
+        enqueue({
+          mode: 'prompt',
+          value: idleNoticeModelText(notice),
+          uuid: randomUUID(),
+          origin: { kind: 'peer', from: 'peer_idle_notice' },
+          skipSlashCommands: true,
+          isMeta: true,
+        })
+        if (!inputClosed) void run()
+      })
+    } catch {
+      // optional
+    }
+
     if (enqueueUdsInboxMessages()) {
       void run()
     }

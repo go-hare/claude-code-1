@@ -1,0 +1,22 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: status-showUntrackedFiles
+checklist: Auto mode git status not fooled by showUntrackedFiles=no
+found: true
+topSymbols: ['--untracked-files=all', '--untracked-files=normal']
+oneLineNote: literal showUntrackedFiles ABSENT; auto-mode path forces --untracked-files=all vs normal
+search_patterns: ['showUntrackedFiles', '--untracked-files=all', '--untracked-files=normal', 'untracked']
+
+=== pattern counts ===
+'showUntrackedFiles': 0
+'--untracked-files=all': 2
+'--untracked-files=normal': 2
+'untracked': 109
+
+=== BEST force untracked-files=all ===
+--- offset 289713106 ---
+e===Ri;if(!i&&e!==Qs)return null;if(t===null||typeof t!=="object"||!("command"in t)||typeof t.command!=="string")return null;let s=i?XOt(t.command):VMt(t.command),a=n&&s!==null&&LNv.has(s),l=o&&NNv(t.command);if(!a&&!l)return null;let c=Yt();if(Qc(c)===null)return null;let{stdout:u,code:d}=await Ao(Ho(),["-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false","-c","safe.bareRepository=explicit","-c","protocol.file.allow=never","--no-optional-locks","status","--porcelain",l?"--untracked-files=all":"--untracked-files=normal"],{cwd:c,timeout:2000,maxBuffer:1e6,abortSignal:r,preserveOutputOnError:!1});if(d!==0)return null;if(l){if(u.trim()==="")return a?{clean:!0}:null;let h=u.split(`.`).filter((y)=>y.length>0),g=[...h.filter((y)=>y.startsWith("??")),...h.filter((y)=>!y.startsWith("??"))].join(`.`);return{porcelain:$Nv(g,MNv())}}let{staged:p,modified:f,untracked:m}=FNv(u);if(p===0&&f===0&&m===0)return{clean:!0};return{staged:p,modified:f,untracke
+
+=== token table ===
+--- offset 127419040 ---
+................................................object..........................command.........................string..........................-c..............................core.hooksPath=/dev/null........................core.fsmonitor=false............................safe.bareRepository=explicit....................protocol.file.allow=never.......................--no-optional-locks.............................status..........................--porcelain.....................--untracked-files=all...........................--untracked-files=normal................@B..................................................A...Cannot destructure property 'stdout' from null or undefined value...............................d...............................................u...........................................................A...Cannot destructure property 'staged' from null or undefined value...............................p...............................

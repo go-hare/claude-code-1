@@ -1,0 +1,125 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: title-chip-align
+checklist: Session title chip aligned with footer right edge
+found: false
+topSymbols: ['SessionTitle', 'getCurrentSessionTitle', 'updateSessionTitle', 'footer']
+oneLineNote: literal 'session title chip'/'title chip'/titleChip absent; 'right edge' hits are CSS/docs/computer-use/chart copy, not footer title-chip alignment
+search_patterns: ['session title chip', 'footer', 'right edge']
+
+=== pattern counts ===
+'session title chip': 0
+'title chip': 0
+'titleChip': 0
+'TitleChip': 0
+'SessionTitleChip': 0
+'footer': 561
+'right edge': 5
+'rightEdge': 0
+'right-edge': 1
+'SessionTitle': 71
+'session title': 13
+'getCurrentSessionTitle': 3
+'getCurrentSessionDisplayTitle': 2
+'updateSessionTitle': 13
+'cacheSessionTitle': 2
+'applyHookSessionTitle': 2
+
+=== session title chip ===
+(no hits)
+
+=== title chip ===
+(no hits)
+
+=== right edge ===
+--- offset 286361039 ---
+rgin-bottom: var(--gap-xs);.    box-shadow: var(--shadow-sm);.    /* Right padding mirrors the marker column (card padding + marker.       width + flex gap) so option rows sit equidistant from the card's.       left and right edges. */.    padding: var(--gap-sm) calc(var(--gap-md) + 14px + var(--gap-sm)) var(--gap-sm) var(--gap-md);.    border: 1px solid var(--border-strong);.    border-radius: var(--radius);.    background: var(--fill-control);.
+
+--- offset 286478451 ---
+rgin-bottom: var(--gap-xs);.    box-shadow: var(--shadow-sm);.    /* Right padding mirrors the marker column (card padding + marker.       width + flex gap) so option rows sit equidistant from the card's.       left and right edges. */.    padding: var(--gap-sm) calc(var(--gap-md) + 14px + var(--gap-sm)) var(--gap-sm) var(--gap-md);.    border: 1px solid var(--border-strong);.    border-radius: var(--radius);.    background: var(--fill-control);.
+
+--- offset 286889008 ---
+irectly from the most recent screenshot image, measured from the top edge. The server handles all scaling."},normalized_0_100:{x:"Horizontal position as a percentage of screen width, 0.0\u2013100.0 (0 = left edge, 100 = right edge).",y:"Vertical position as a percentage of screen height, 0.0\u2013100.0 (0 = top edge, 100 = bottom edge)."}},Vgf={type:"object",properties:{action:{type:"string",enum:["key","type","mouse_move","left_click","left_clic
+
+--- offset 298995365 ---
+rgin-bottom: var(--gap-xs);.    box-shadow: var(--shadow-sm);.    /* Right padding mirrors the marker column (card padding + marker.       width + flex gap) so option rows sit equidistant from the card's.       left and right edges. */.    padding: var(--gap-sm) calc(var(--gap-md) + 14px + var(--gap-sm)) var(--gap-sm) var(--gap-md);.    border: 1px solid var(--border-strong);.    border-radius: var(--radius);.    background: var(--fill-control);.
+
+--- offset 299268821 ---
+ segment, a map tile) is the one exception: pick.  white or ink by the fill's luminance so it always clears contrast..- **When end-labels collide, don't stack them.** Direct end-labels work when series.  separate at the right edge. When lines converge, nudging labels apart vertically.  detaches them from their lines and reads as noise \u2014 instead use **leader lines**.  (a thin connector from label to line-end), facet into **small multiples**, 
+
+=== footer (first UI-ish sample only; count=561) ===
+--- offset 61802922 ---
+pacitysexualbureau.jpg" 10,000obtaintitlesamount, Inc.comedymenu" lyricstoday.indeedcounty_logo.FamilylookedMarketlse ifPlayerturkey);var forestgivingerrorsDomain}else{insertBlog</footerlogin.fasteragents<body 10px 0pragmafridayjuniordollarplacedcoversplugin5,000 page">boston.test(avatartested_countforumsschemaindex,filledsharesreaderalert(appearSubmitline">body">
+
+--- offset 61815167 ---
+sicalagainstserving})();..paymenttroubleconceptcompareparentsplayersregionsmonitor ''The winningexploreadaptedGalleryproduceabilityenhancecareers). The collectSearch ancientexistedfooter handlerprintedconsoleEasternexportswindowsChannelillegalneutralsuggest_headersigning.html">settledwesterncausing-webkitclaimedJusticechaptervictimsThomas mozillapromisepartiesedit
+
+--- offset 61821510 ---
+ial </p>...it intoranked rate oful>..  attemptpair ofmake itKontaktAntoniohaving ratings activestreamstrapped").css(hostilelead tolittle groups,Picture-->.... rows=" objectinverse<footerCustomV><\/scrsolvingChamberslaverywoundedwhereas!= 'undfor allpartly -right:Arabianbacked centuryunit ofmobile-Europe,is homerisk ofdesiredClintoncost ofage of become none ofp&quo
+
+=== session title ===
+--- offset 178307615 ---
+.............Error: --resume "..............................." matches ..................:... sessions. Pass one of these session IDs to disambiguate:.......................Error: --resume requires a valid session ID or session title when used with --print. Usage: claude -p --resume <session-id|title>................................ Provided value "..........................5..." is not a UUID and does not match any session title....................
+
+--- offset 178307815 ---
+valid session ID or session title when used with --print. Usage: claude -p --resume <session-id|title>................................ Provided value "..........................5..." is not a UUID and does not match any session title....................................(....................................... e?.....I.......Pe?.........................................+...Iterator result interface is not an object......................resume_hydrate_m
+
+--- offset 239278776 ---
+it on your behalf. Only notification/title OSCs (0, 1, 2, 9, 99, 777) and BEL are permitted; anything else is dropped...............................PreToolUse......................UserPromptSubmit................Set the session title.......................I...When decision is "block", omit the original prompt from the block message.......................UserPromptExpansion.............................SessionStart................-...Absolute paths to
+
+--- offset 269745079 ---
+.....................conversation_reset..............................Emitted by /clear, plan-mode exit, and fresh-session flows. The surface should mount a fresh transcript under new_conversation_id and reset any cached session title. From internal QueryEvent 'conversation_reset'...............................................................`............n.......l.....@.l.B..S,.....lUh.....<.......L......................................9.............
+
+--- offset 269800153 ---
+ummary, or first prompt........................7...Last modified time in integer milliseconds since epoch......................;...File size in bytes. Only populated for local JSONL storage..................#...User-set session title via /rename..........................,...First meaningful user prompt in the session.................%...Git branch at the end of the session........................"...Working directory for the session.................
+
+--- offset 269827351 ---
+htly later in the prompt, so steering on the working directory and memory location is marginally less authoritative. Has no effect when a custom (non-preset) system prompt is in use................................Custom session title. When provided, the session uses this title and skips automatic title generation. Has no effect on the persisted title when resuming an existing session...................When provided, only skills whose names match an 
+
+--- offset 289556048 ---
+ermissionDecisionReason:N().optional(),updatedInput:uo(N(),Mn()).optional(),additionalContext:N().optional()}),ye({hookEventName:kt("UserPromptSubmit"),additionalContext:N().optional(),sessionTitle:N().describe("Set the session title").optional(),suppressOriginalPrompt:zt().describe('When decision is "block", omit the original prompt from the block message').optional()}),ye({hookEventName:kt("UserPromptExpansion"),additionalContext:N().optional()}),
+
+--- offset 289556420 ---
+),ye({hookEventName:kt("UserPromptExpansion"),additionalContext:N().optional()}),ye({hookEventName:kt("SessionStart"),additionalContext:N().optional(),initialUserMessage:N().optional(),sessionTitle:N().describe("Set the session title").optional(),watchPaths:ft(N()).describe("Absolute paths to watch for FileChanged hooks").optional(),reloadSkills:zt().describe("Re-scan skill and command directories after SessionStart hooks complete, so skills install
+
+=== SessionTitle ===
+--- offset 81290390 ---
+.......7..!...sendControlRequestToRemoteSession.........................2.....sendEventToRemoteSession..2...............2.....trustedDeviceHeaders......2.............I.2.....updateSessionTitle.......R................2.....atStartup.2.............I.2.&...ARTIFACT_DB_READ_MAX_RESULT_SIZE_CHARS....................2.#...ARTIFACT_LOGIN_HOST_MANAGED_MESSAGE.......2...........
+
+--- offset 81378396 ---
+eSession..........5.....getBridgeSessionOrStatus./.............../......updateBridgeSessionColorTag...............5.....updateBridgeSessionNameTag...............U......updateBridgeSessionTitle................I.5.....RendezvousServer..........5.....clearCommandParkBlocked...................5.....clearStartupDialogBlocked.5.............I.5.....disarmStartupWedgeWatchdog5.
+
+--- offset 81430361 ---
+....<7.....buildConversationChain..................I.......buildForkAdoptionMeta....=7.............I=7.....cacheAgentName..........I.......cacheAiTitle.............I......cacheHookSessionTitle...........................cacheSessionTitle........ ......................checkResumeConsistency...>7..............>7.#...claimPrecautionHoldForObservedCause......?7.............I
+
+--- offset 81430405 ---
+.......I.......buildForkAdoptionMeta....=7.............I=7.....cacheAgentName..........I.......cacheAiTitle.............I......cacheHookSessionTitle...........................cacheSessionTitle........ ......................checkResumeConsistency...>7..............>7.#...claimPrecautionHoldForObservedCause......?7.............I?7.....cleanMessagesForLogging..............
+
+--- offset 81432554 ---
+tionLatch.................getCurrentSessionOffBoxPeerName..........L7.....getCurrentSessionPeerNameM7.....................getCurrentSessionPeerNameFor............I.......getCurrentSessionTitle......................"...getDerivedTranscriptPathForSession......Iw...............N7.(...getFirstMeaningfulUserMessageTextContent................IN7.....getLastSessionLog........N
+
+--- offset 81438649 ---
+ingI.7..............1......setTranscriptLocalGcEnabled..............)......snapshotSessionMetadata...7.............I>.. ...subscribeSessionAgentNameChanged.........Y......subscribeSessionTitleChanged............IH..!...takeResumedArtifactCommentMonitor.........7...............7.....titleCacheStillOn.........................7.....touchSessionTranscript....7..............
+
+=== getCurrentSessionTitle ===
+--- offset 81432544 ---
+........getCurrentSessionIsolationLatch.................getCurrentSessionOffBoxPeerName..........L7.....getCurrentSessionPeerNameM7.....................getCurrentSessionPeerNameFor............I.......getCurrentSessionTitle......................"...getDerivedTranscriptPathForSession......Iw...............N7.(...getFirstMeaningfulUserMessageTextContent................IN7.....getLastSessionLog........N7..............M7...
+
+--- offset 292726373 ---
+splayTitle:()=>Omr,getCurrentSessionFile:()=>Dvl,getCurrentSessionIsolationLatch:()=>yeo,getCurrentSessionOffBoxPeerName:()=>JRi,getCurrentSessionPeerName:()=>YRi,getCurrentSessionPeerNameFor:()=>MVn,getCurrentSessionTitle:()=>gC,getDerivedTranscriptPathForSession:()=>HJr,getFirstMeaningfulUserMessageTextContent:()=>meo,getLastSessionLog:()=>Zet,getLogByIndex:()=>iIT,getMaterializedSessionFile:()=>bw,getNodeEnv:()=>cHm
+
+--- offset 296889311 ---
+Uw=d2e[0];let[WWe,ONM]=rwe.useState(fUw),[Ice,DNM]=rwe.useState(0),[Lrc,GWe]=rwe.useState(),mUw;if(d2e[1]===ae)mUw=tS(),d2e[1]=mUw;else mUw=d2e[1];let mT=mUw,L5h=ga(kUw),hUw;if(d2e[2]!==L5h)hUw=Hfo().getCurrentSessionTitle(L5h),d2e[2]=L5h,d2e[3]=hUw;else hUw=d2e[3];let Mfo=hUw,gUw,yUw;if(d2e[4]!==Mfo||d2e[5]!==Got)gUw=()=>{let F5h=async function F5h(){if(mT?.enteredExisting){await Oet(),await p2e(mT,Got),GWe(`Returned 
+
+=== updateSessionTitle log strings ===
+--- offset 88303952 ---
+....................................................F...Cannot destructure property 'accessToken' from null or undefined value........................../v1/code/sessions/..........................0...[updateSessionTitle] Updating title for session ................: "............................."...............................r...........................................<...[updateSessionTitle] Successfully updated ti
+
+--- offset 88304128 ---
+....................0...[updateSessionTitle] Updating title for session ................: "............................."...............................r...........................................<...[updateSessionTitle] Successfully updated title for session ................................(...[updateSessionTitle] Failed with status ........................: ..............................[updateSessionTitle] Error: 
+
+--- offset 88304224 ---
+........................"...............................r...........................................<...[updateSessionTitle] Successfully updated title for session ................................(...[updateSessionTitle] Failed with status ........................: ..............................[updateSessionTitle] Error: ............................................................................3.............!<.@0f
+
+--- offset 88304320 ---
+....<...[updateSessionTitle] Successfully updated title for session ................................(...[updateSessionTitle] Failed with status ........................: ..............................[updateSessionTitle] Error: ............................................................................3.............!<.@0f.@@..@P..@p.@....@@.O......,.....@`4.@.<..@..@ ....3.............@...G...@`UA....@..D....@..P...

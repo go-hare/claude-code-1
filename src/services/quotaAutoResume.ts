@@ -558,10 +558,7 @@ export function onQuotaRejectedForAutoResume(
   if (episode.state.phase === 'armed') {
     // Still waiting: if a *later* resetsAt arrives and window is eligible, rearm
     // with null (does not consume consecutiveRearms — densable $Za(..., null, …)).
-    if (
-      resetsAt * 1000 > episode.state.fireAtMs &&
-      eligible
-    ) {
+    if (resetsAt * 1000 > episode.state.fireAtMs && eligible) {
       rearmQuotaAutoResume(resetsAt, null, episode.episodeArmOrigin)
     }
     return

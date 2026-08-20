@@ -7,40 +7,58 @@
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import * as realBootstrap from 'src/bootstrap/state.js'
+import * as realGrowthbook from 'src/services/analytics/growthbook.js'
 import * as realForkSubagentGate from 'src/utils/forkSubagentGate.js'
-import { growthbookMock } from '../../../../../../tests/mocks/growthbook'
+import * as realSettings from 'src/utils/settings/settings.js'
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../../../tests/mocks/settings.js'
 
 let gbValue: unknown = null
 let overrideModel: string | undefined
 let initialModel: string | null = null
 
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
-  ...growthbookMock(),
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: (_k: string, d: unknown) =>
     gbValue === undefined ? d : gbValue,
 }))
 
-const bootstrapSnap = { ...realBootstrap }
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 mock.module('src/bootstrap/state.js', () => ({
   ...bootstrapSnap,
   getMainLoopModelOverride: () => overrideModel,
   getInitialMainLoopModel: () => initialModel,
 }))
-afterAll(() => {
-  mock.module('src/bootstrap/state.js', () => bootstrapSnap)
-})
 
+const settingsSnap = snapshotModuleExports(realSettings)
 mock.module('src/utils/settings/settings.js', () => ({
+  ...settingsSnap,
+  getInitialSettings: () => ({}),
+}))
+mock.module('src/utils/settings/settings.ts', () => ({
+  ...settingsSnap,
   getInitialSettings: () => ({}),
 }))
 
-const forkGateSnap = { ...realForkSubagentGate }
+const forkGateSnap = snapshotModuleExports(realForkSubagentGate)
 mock.module('src/utils/forkSubagentGate.js', () => ({
   ...forkGateSnap,
   isForkSubagentEnabled: () => false,
 }))
+
 afterAll(() => {
-  mock.module('src/utils/forkSubagentGate.js', () => forkGateSnap)
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/forkSubagentGate.js', () => ({ ...forkGateSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+    'src/utils/settings/settings.ts',
+  ])
 })
 
 const { surfacePickByModel, getNonDeferrableBuiltins } = await import(

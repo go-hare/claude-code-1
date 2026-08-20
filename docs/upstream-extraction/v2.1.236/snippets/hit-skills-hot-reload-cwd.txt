@@ -1,0 +1,26 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: skills-hot-reload-cwd
+checklist: Skills hot-reload error after session cwd deleted
+found: true
+topSymbols: ['reloadSkills', 'hook_session_start_reload_skills']
+oneLineNote: reloadSkills/hook present; no clear skills+cwd-deleted/ENOENT pairing in latin1 (hot-reload mostly keybindings/Bun)
+search_patterns: ['reloadSkills', 'hot-reload', 'hotReload', 'ENOENT']
+
+=== pattern counts ===
+'reloadSkills': 12
+'hot-reload': 8
+'hotReload': 1
+'ENOENT': 633
+
+=== reloadSkills ===
+--- offset 113186864 ---
+..........................).....................@.).....................(h).....................p~......................x_0.......................1.......................1.....................P21......................11......................21.....................(21.......................1.....................H.1......................I2......................I2.....................additionalContexts..............................initialUserMessage..............................reloadSkills................................v...7.......7.......v............D..P.......................................................................................................H...................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...........................................
+
+=== hook_session_start_reload_skills ===
+--- offset 113183968 ---
+................r...............................n...............................i...............................s...............................attachment......................hook_blocking_error.............................SessionStart....................SessionStart:...............................................+...Iterator result interface is not an object..................................4...SessionStart hooks cancelled (control stream closed)........................ ...hook_session_start_reload_skills................startup.........................resume..........................fork............................hook_additional_context.........................................................................................................".....`...........................pT......pT.....@.\..0..........@.........<.........@...@...E...@p\.H.....D.@ ......@.T.I.....L.@`U.I.....L.@.T.I.....L.@.U.I.....Lm....@.|.I.....L.@.U.I.....L.@.T.I.....Ll...
+
+=== hot-reload ===
+--- offset 62993438 ---
+isformatted DNS replyCould not contact DNS serversTimeout while contacting DNS serversEnd of fileError reading fileChannel is being destroyedMisformatted stringIllegal flags specifiedGiven hostname is not numericIllegal hints flags specifiedLibrary initialization not yet performedELOADIPHLPAPI TODO WHAT DOES THIS MEANEADDRGETNETWORKPARAMSDNS query cancelledService not availableNo DNS servers were configuredscan finished twiceMaximum number of pending settings acknowledgementsfailed to watch files for hot-reloadingfailed to watch {} for hot-reloadingstring, Buffer, or URLMultiple {} matching the same route pattern is ambiguouswithFileTypeslookupInvalidFamilyInvalidSocketTypeInvalidProtocolInvalidBackendrecordone of: A, AAAA, ANY, CAA, CNAME, MX, NS, PTR, SOA, SRV, TXTresolvereverseip.................................................................................................................`y......`y......`y...............................ig...

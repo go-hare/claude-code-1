@@ -1,0 +1,22 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: cloud-env-empty
+checklist: Unclear error when cloud environments list empty/malformed
+found: true
+topSymbols: ['MIS', 'iSe', 'fetchEnvironments', 'teleport_environments_list']
+oneLineNote: fetchEnvironments/MIS empty/non-JSON/no usable environments list errors present
+search_patterns: ['usable environments list', 'cloud environments service', 'fetchEnvironments', 'No cloud environment available']
+
+=== pattern counts ===
+'usable environments list': 1
+'cloud environments service': 3
+'fetchEnvironments': 10
+'No cloud environment available': 2
+
+=== BEST usable environments list ===
+--- offset 284495527 ---
+ body). This is usually temporary \u2014 try again in a moment.","fetchEnvironments: HTTP 200 with an empty body");if(typeof e==="string")return new bt("The cloud environments service returned a response in an unexpected format (HTTP 200 with a non-JSON body). This is usually temporary \u2014 try again in a moment.","fetchEnvironments: HTTP 200 with a non-JSON body");return new bt("The cloud environments service returned a response in an unexpected format (HTTP 200 without a usable environments list). This is usually temporary \u2014 try again in a moment.","fetchEnvironments: HTTP 200 JSON body without a valid environments array")}async function iSe(e,t){return Yd("teleport_environments_list",async()=>{if(Zn()!=="firstParty")throw Error("Remote environments are only available on the first-party Anthropic API provider.");let n=e??ma()?.accessToken;if(!n)throw Error("Claude Code web sessions require authentication with a Claude.ai account. API key
+
+=== No cloud environment available ===
+--- offset 162703840 ---
+............}... .h.a.s. .c.o.m.m.i.t.s. .t.h.a.t. .h.a.v.e.n.. t. .b.e.e.n. .p.u.s.h.e.d... .T.h.e. .c.l.o.u.d. .s.e.s.s.i.o.n. .c.l.o.n.e.s. .f.r.o.m. .t.h.e. .r.e.m.o.t.e.,. .s.o. .i.t. .w.o.n.. t. .h.a.v.e. .t.h.e.m... .P.u.s.h.,. .t.h.e.n. .t.r.y. .a.g.a.i.n.........................................env_lookup_failed...........................&...C.o.u.l.d.n.. t. .l.o.o.k. .u.p. .c.l.o.u.d. .e.n.v.i.r.o.n.m.e.n.t.s. ..  .....................no_environment.............._...No cloud environment available. Create one from the web UI (or run /web-setup), then try again..............h... .Y.o.u.r. .d.e.f.a.u.l.t. .t.a.r.g.e.t. .i.s. .a. .s.e.l.f.-.h.o.s.t.e.d. .e.n.v.i.r.o.n.m.e.n.t. ..  .c.o.n.t.i.n.u.i.n.g. .i.n. .t.h.e. .c.l.o.u.d. .n.e.e.d.s. .a. .m.a.n.a.g.e.d. .e.n.v.i.r.o.n.m.e.n.t...................................tengu_teleport_to_cloud.........................start...........................................maybe_committed.................

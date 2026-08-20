@@ -1,9 +1,28 @@
 /**
  * densable 2.1.235 — vscodeSdkMcp experiment_gates + log_event routing.
+ *
+ * Process-global mock.module — spread real config/settings snapshots and
+ * restore in afterAll (thin unrestored mocks poisoned tui/autoMode suites).
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
+import * as realAnalytics from 'src/services/analytics/index.js'
+import * as realGrowthbook from 'src/services/analytics/growthbook.js'
+import * as realConfig from 'src/utils/config.js'
+import * as realSettings from 'src/utils/settings/settings.js'
 
 mock.module('bun:bundle', () => ({
   feature: () => false,
@@ -12,10 +31,16 @@ mock.module('bun:bundle', () => ({
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
+const configSnap = snapshotModuleExports(realConfig)
+const settingsSnap = snapshotModuleExports(realSettings)
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+const analyticsSnap = snapshotModuleExports(realAnalytics)
+
 const logEventMock = mock(
   (_name: string, _data?: Record<string, unknown>) => {},
 )
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: logEventMock,
 }))
 
@@ -26,45 +51,53 @@ let feedbackLastShown: number | undefined
 let clientDataCache: Record<string, unknown> | null = null
 let modelAllowed = true
 
-mock.module('src/utils/config.js', () => ({
-  getGlobalConfig: () => ({
-    cachedGrowthBookFeatures: cachedGb,
-    cachedStatsigGates: cachedSg,
-    hasSeenAutoDefaultNudge,
-    clientDataCache,
-    feedbackSurveyState:
-      feedbackLastShown !== undefined
-        ? { lastShownTime: feedbackLastShown }
-        : undefined,
-  }),
-  saveGlobalConfig: (
-    updater: (c: Record<string, unknown>) => Record<string, unknown>,
-  ) => {
-    const next = updater({
+function configMock() {
+  return {
+    ...configSnap,
+    getGlobalConfig: () => ({
+      ...(configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig)(),
+      cachedGrowthBookFeatures: cachedGb,
+      cachedStatsigGates: cachedSg,
       hasSeenAutoDefaultNudge,
       clientDataCache,
       feedbackSurveyState:
         feedbackLastShown !== undefined
           ? { lastShownTime: feedbackLastShown }
           : undefined,
-    })
-    if (typeof next.hasSeenAutoDefaultNudge === 'boolean') {
-      hasSeenAutoDefaultNudge = next.hasSeenAutoDefaultNudge
-    }
-    if ('clientDataCache' in next) {
-      clientDataCache =
-        (next.clientDataCache as Record<string, unknown> | null) ?? null
-    }
-    const fs = next.feedbackSurveyState as
-      | { lastShownTime?: number }
-      | undefined
-    if (fs?.lastShownTime !== undefined) {
-      feedbackLastShown = fs.lastShownTime
-    }
-  },
-}))
+    }),
+    saveGlobalConfig: (
+      updater: (c: Record<string, unknown>) => Record<string, unknown>,
+    ) => {
+      const next = updater({
+        hasSeenAutoDefaultNudge,
+        clientDataCache,
+        feedbackSurveyState:
+          feedbackLastShown !== undefined
+            ? { lastShownTime: feedbackLastShown }
+            : undefined,
+      })
+      if (typeof next.hasSeenAutoDefaultNudge === 'boolean') {
+        hasSeenAutoDefaultNudge = next.hasSeenAutoDefaultNudge
+      }
+      if ('clientDataCache' in next) {
+        clientDataCache =
+          (next.clientDataCache as Record<string, unknown> | null) ?? null
+      }
+      const fs = next.feedbackSurveyState as
+        | { lastShownTime?: number }
+        | undefined
+      if (fs?.lastShownTime !== undefined) {
+        feedbackLastShown = fs.lastShownTime
+      }
+    },
+  }
+}
+
+mock.module('src/utils/config.js', configMock)
+mock.module('src/utils/config.ts', configMock)
 
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE: (gate: string) =>
     Boolean(cachedGb[gate] ?? cachedSg[gate] ?? false),
   getFeatureValue_CACHED_MAY_BE_STALE: (key: string, fallback: unknown) => {
@@ -73,9 +106,15 @@ mock.module('src/services/analytics/growthbook.js', () => ({
   },
 }))
 
-mock.module('src/utils/settings/settings.js', () => ({
-  updateSettingsForSource: mock(() => {}),
-}))
+function settingsMock() {
+  return {
+    ...settingsSnap,
+    updateSettingsForSource: mock(() => {}),
+  }
+}
+
+mock.module('src/utils/settings/settings.js', settingsMock)
+mock.module('src/utils/settings/settings.ts', settingsMock)
 
 mock.module('src/utils/model/modelAllowlist.js', () => ({
   isModelAllowed: (_model: string) => modelAllowed,
@@ -92,6 +131,19 @@ mock.module('src/services/policyLimits/index.js', () => ({
 mock.module('src/utils/residualFinalEnvGates.js', () => ({
   isFeedbackSurveyEnvDisabled: () => false,
 }))
+
+afterAll(() => {
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/config.ts', () => ({ ...configSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+    'src/utils/settings/settings.ts',
+  ])
+})
 
 const {
   setupVscodeSdkMcp,

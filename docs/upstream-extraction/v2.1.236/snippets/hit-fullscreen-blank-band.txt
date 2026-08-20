@@ -1,0 +1,33 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: fullscreen-blank-band
+patterns: ["blank band","multi-line prompt","panes not repainting"]
+counts: {'blank band': 0, 'multi-line prompt': 2, 'panes not repainting': 0}
+variant_counts: {'blankBand': 0, 'blank_band': 0, 'Blank band': 0, 'multiline prompt': 0, 'multi line prompt': 0, 'not repainting': 0, 'repainting': 1, 'multi-line prompts': 2}
+
+=== exact 'blank band' hits total=0 ===
+(none)
+
+=== exact 'panes not repainting' hits total=0 ===
+(none)
+
+=== exact 'multi-line prompt' hits total=2 ===
+(note: both are /terminal-setup Shift+Enter help copy; substring of "multi-line prompts")
+
+--- offset 144231905 ---
+each your local clipboard, on that machine open:..................."...Terminal setup cannot be run from ..........................U......This command configures a convenient Shift+Enter shortcut for multi-line prompts.........................B...Note: You can already use backslash (\\) + return to add newlines.................................To set up the shortcut (optional):.1. Exit tmux/screen temporarily.2. Ru
+
+--- offset 293750757 ---
+achine. For /copy to reach your local clipboard, on that machine open:${Id}${rr.dim(b9m)}`:"",l=`Terminal setup cannot be run from ${o}...This command configures a convenient Shift+Enter shortcut for multi-line prompts..${rr.dim("Note: You can already use backslash (\\\\) + return to add newlines.")}..To set up the shortcut (optional):.1. Exit tmux/screen temporarily.2. Run /terminal-setup directly in one of these
+
+=== related 'repainting' hit total=1 (not panes / not blank-band) ===
+--- offset 315131889 ---
+ke — that one.  // is selection-stateful (cleared and reapplied on every updateHandles.  // pass), so hover-set copies of it would flicker away..  // One updateRings per call — clearing and repainting each recomputing the.  // projection would double the per-mousemove layout reads (the projection.  // reads a rect + computed style per ringed element)..  function paintHover(tid, name){.    clearHov
+
+=== notes ===
+- SEA --version confirmed: 2.1.236 (Claude Code)
+- No latin1 occurrence of "blank band" / blankBand / blank_band / Blank band.
+- No latin1 occurrence of "panes not repainting" / "not repainting".
+- "multi-line prompt" appears only as part of terminal-setup user-facing text about Shift+Enter for multi-line prompts (unrelated to fullscreen blank-band gold).
+- Lone "repainting" is a web/hover paintHover comment, not TUI pane repaint.
+- Do not invent fullscreen blank-band product behavior from these misses.

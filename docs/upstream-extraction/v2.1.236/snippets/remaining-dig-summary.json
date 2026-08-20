@@ -1,0 +1,293 @@
+[
+  {
+    "id": 7,
+    "key": "sendmessage-malformed-tag",
+    "found": true,
+    "topSymbols": [
+      "SendMessageTool",
+      "coerceInput",
+      "yEi",
+      "isSlippedSummarySplitEnabled",
+      "split_slipped_summary_"
+    ],
+    "oneLineNote": "RECHECK: slipped-summary coerceInput/yEi path confirmed; exact malformed closing tag phrase absent"
+  },
+  {
+    "id": 8,
+    "key": "subprocess-unhandled",
+    "found": true,
+    "topSymbols": [
+      "powershell.exe",
+      "unhandledRejection",
+      "failed to spawn"
+    ],
+    "oneLineNote": "RECHECK: powershell/WSL + failed-to-spawn/unhandledRejection present; exact phrase absent"
+  },
+  {
+    "id": 9,
+    "key": "fullscreen-resize-message",
+    "found": true,
+    "topSymbols": [
+      "handleResize",
+      "replayPending",
+      "tickPump",
+      "nativeHistory",
+      "VirtualMessageList"
+    ],
+    "oneLineNote": "No literal newly-sent-message; fullscreen handleResize->replayPending/tickPump/nativeHistory present"
+  },
+  {
+    "id": 10,
+    "key": "fullscreen-blank-band",
+    "found": false,
+    "topSymbols": [],
+    "oneLineNote": "SKIP; existing hit-fullscreen-blank-band.txt found:false kept"
+  },
+  {
+    "id": 11,
+    "key": "managed-settings-prompt",
+    "found": true,
+    "topSymbols": [
+      "managed-settings"
+    ],
+    "oneLineNote": "SKIP; already dug managed-settings"
+  },
+  {
+    "id": 12,
+    "key": "tmux-title",
+    "found": false,
+    "topSymbols": [],
+    "oneLineNote": "SKIP; existing found:false kept"
+  },
+  {
+    "id": 13,
+    "key": "cloud-env-empty",
+    "found": true,
+    "topSymbols": [
+      "MIS",
+      "iSe",
+      "fetchEnvironments",
+      "teleport_environments_list"
+    ],
+    "oneLineNote": "fetchEnvironments/MIS empty/non-JSON/no usable environments list errors; exact phrase cloud environments list absent"
+  },
+  {
+    "id": 14,
+    "key": "fable5-credits-rc",
+    "found": true,
+    "topSymbols": [
+      "fable_overage_consent_prompt",
+      "fableConsentSessionFallback",
+      "replaceFableConsentSessionFallback",
+      "fableCreditsRequired"
+    ],
+    "oneLineNote": "Fable overage consent + sessionFallback present; no literal 60s/auto-select-under-RC string"
+  },
+  {
+    "id": 15,
+    "key": "guest-pass-malformed",
+    "found": true,
+    "topSymbols": [
+      "Efr",
+      "wgm",
+      "VsT.safeParse",
+      "referrer_reward",
+      "guest-passes"
+    ],
+    "oneLineNote": "guest-passes tip via Efr/wgm(safeParse referrer_reward); malformed reward nulls out; no literal ~/.claude.json string"
+  },
+  {
+    "id": 16,
+    "key": "skills-hot-reload-cwd",
+    "found": true,
+    "topSymbols": [
+      "reloadSkills",
+      "hook_session_start_reload_skills"
+    ],
+    "oneLineNote": "reloadSkills present; cwd-deleted/ENOENT pairing for skills hot-reload not clearly found"
+  },
+  {
+    "id": 17,
+    "key": "self-hosted-runner",
+    "found": true,
+    "topSymbols": [
+      "startup-timeout-min",
+      "post-session",
+      "SELF_HOSTED_RUNNER_STARTUP_TIMEOUT_MS",
+      "retire-at"
+    ],
+    "oneLineNote": "self-hosted runner startup-timeout/retire/release-idle + post-session hook timeout/SIGTERM strings present"
+  },
+  {
+    "id": 18,
+    "key": "clawd-eyes",
+    "found": false,
+    "topSymbols": [
+      "clawd",
+      "clawd_body"
+    ],
+    "oneLineNote": "clawd theme tokens only; eyes/feet/iTerm uneven-font strings not found"
+  },
+  {
+    "id": 19,
+    "key": "recap-cap",
+    "found": true,
+    "topSymbols": [
+      "Hbm=400",
+      "edu",
+      "awaySummary",
+      "name:\"recap\""
+    ],
+    "oneLineNote": "FOUND: Hbm=400 + edu() word-boundary truncate + awaySummary recap capped; /recap literal absent but name:\"recap\" exists"
+  },
+  {
+    "id": 20,
+    "key": "startup-session-counter",
+    "found": true,
+    "topSymbols": [
+      "numStartups",
+      "setImmediate",
+      "B20",
+      "Ovs"
+    ],
+    "oneLineNote": "FOUND: numStartups:(n)+1 then setImmediate background write; sessionCounter is OTEL metric name"
+  },
+  {
+    "id": 21,
+    "key": "auto-mode-monitor",
+    "found": true,
+    "topSymbols": [
+      "Monitor",
+      "alwaysAllowRules",
+      "MonitorTool"
+    ],
+    "oneLineNote": "Monitor + alwaysAllowRules/MonitorTool present; literal set-aside phrasing weak"
+  },
+  {
+    "id": 22,
+    "key": "auto-mode-bedrock-defaults",
+    "found": true,
+    "topSymbols": [
+      "Bedrock",
+      "Vertex",
+      "Foundry",
+      "classifier",
+      "severity"
+    ],
+    "oneLineNote": "providers+classifier/severity present; telemetry-off default-parity string indirect"
+  },
+  {
+    "id": 23,
+    "key": "status-showUntrackedFiles",
+    "found": true,
+    "topSymbols": [
+      "--untracked-files=all",
+      "--untracked-files=normal"
+    ],
+    "oneLineNote": "FOUND: forces --untracked-files=all vs normal; literal showUntrackedFiles absent"
+  },
+  {
+    "id": 24,
+    "key": "model-picker-highlight",
+    "found": false,
+    "topSymbols": [
+      "ModelPicker"
+    ],
+    "oneLineNote": "'newest model' only in docs; ModelPicker present but highlight-only-newest not confirmed"
+  },
+  {
+    "id": 25,
+    "key": "goal-idle-checkin",
+    "found": true,
+    "topSymbols": [
+      "Goal check-in",
+      "CLAUDE_CODE_GOAL_CHECKIN_MINUTES",
+      "K9a",
+      "/goal"
+    ],
+    "oneLineNote": "FOUND: Goal check-in deferred behind bg work + CLAUDE_CODE_GOAL_CHECKIN_MINUTES"
+  },
+  {
+    "id": 26,
+    "key": "usage-credits-row",
+    "found": true,
+    "topSymbols": [
+      "usage-credits",
+      "/usage"
+    ],
+    "oneLineNote": "usage-credits present; Team/Enterprise spend-row + 0% cap UI not uniquely pinned"
+  },
+  {
+    "id": 27,
+    "key": "sigterm-print",
+    "found": true,
+    "topSymbols": [
+      "interrupted-turn",
+      "print.ts",
+      "CLAUDE_CODE_RESUME_INTERRUPTED_TURN"
+    ],
+    "oneLineNote": "FOUND print.ts interrupted-turn defer/resume; exit 143 not clearly colocated as literal"
+  },
+  {
+    "id": 28,
+    "key": "slash-typo-enter",
+    "found": true,
+    "topSymbols": [
+      "Did you mean",
+      "fuzzy",
+      "slash"
+    ],
+    "oneLineNote": "Did you mean/fuzzy/slash present; exact enter-typo-vs-closest behavior not fully string-proven"
+  },
+  {
+    "id": 29,
+    "key": "rc-offline-seconds",
+    "found": false,
+    "topSymbols": [
+      "offline",
+      "Remote Control"
+    ],
+    "oneLineNote": "no markSessionOffline/within-seconds-offline-on-exit string; only generic offline/RC"
+  },
+  {
+    "id": 30,
+    "key": "sendmessage-burst",
+    "found": true,
+    "topSymbols": [
+      "paced: not sending",
+      "sentInBurst",
+      "inbox rate limit",
+      "reserve",
+      "refund"
+    ],
+    "oneLineNote": "FOUND: uds-client refuses send when burst would exceed inbox rate limit (no false sent)"
+  },
+  {
+    "id": 31,
+    "key": "title-chip-align",
+    "found": false,
+    "topSymbols": [
+      "SessionTitle"
+    ],
+    "oneLineNote": "title chip/titleChip absent; SessionTitle only \u2014 alignment not string-proven"
+  },
+  {
+    "id": 32,
+    "key": "footer-right-margin",
+    "found": false,
+    "topSymbols": [
+      "footer"
+    ],
+    "oneLineNote": "right margin/truncated-notices literals absent; not string-proven"
+  },
+  {
+    "id": 33,
+    "key": "vscode-a11y",
+    "found": false,
+    "topSymbols": [
+      "screen reader",
+      "live region"
+    ],
+    "oneLineNote": "CLI a11y strings only; VSCode host transcript a11y N/A invent-ban"
+  }
+]

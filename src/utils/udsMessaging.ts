@@ -42,10 +42,14 @@ export type UdsMessageType =
   | 'error'
   | 'ping'
   | 'pong'
+  /** densable 2.1.236 — control plane (notify_when_idle / peer_idle_notice). */
+  | 'control'
 
 export type UdsMessage = {
   /** Discriminator */
   type: UdsMessageType
+  /** densable control action (type=control only) */
+  action?: string
   /** Payload text / JSON content */
   data?: string
   /** Sender socket path (so the receiver can reply) */
@@ -54,6 +58,15 @@ export type UdsMessage = {
   ts?: string
   /** Optional metadata */
   meta?: Record<string, unknown>
+  /** densable control fields (notify_when_idle / peer_idle_notice) */
+  msg_id?: string
+  orig_msg_id?: string
+  state?: string
+  finished_at?: string
+  detail?: string
+  from_mode?: string
+  status?: string
+  reason?: string
 }
 
 export type UdsInboxEntry = {
@@ -582,6 +595,30 @@ export async function startUdsMessaging(
               return
             }
 
+            // densable 2.1.236 GAP #2 — control frames (notify_when_idle /
+            // peer_idle_notice) are handled out-of-band; never enter the text inbox.
+            if (msg.type === 'control') {
+              const sanitizedControl = stripAuthToken(msg)
+              try {
+                const { handleInboundControlFrame } =
+                  require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
+                void handleInboundControlFrame(
+                  sanitizedControl,
+                  socketPath ?? undefined,
+                )
+              } catch (err) {
+                logForDebugging(
+                  `[udsMessaging] control handler failed: ${errorMessage(err)}`,
+                )
+              }
+              writeSocketMessage(socket, {
+                type: 'response',
+                data: 'ok',
+                ts: new Date().toISOString(),
+              })
+              return
+            }
+
             // Enqueue into inbox
             const sanitizedMessage = stripAuthToken(msg)
             const entry: UdsInboxEntry = {
@@ -766,6 +803,37 @@ export async function startUdsMessaging(
     // Tradeoff (SEA-aligned): child processes inherit this env; token is also
     // on-disk in the capability file. Do not invent a non-env soft-auth path.
     process.env.CLAUDE_CODE_MESSAGING_TOKEN = token
+    // densable kla — stamp messagingSocketPath + features:["notify_idle"] voucher.
+    try {
+      const { updateSessionMessagingSocket } =
+        require('./concurrentSessions.js') as typeof import('./concurrentSessions.js')
+      void updateSessionMessagingSocket(path)
+    } catch {
+      // session registry optional (tests / early boot)
+    }
+    // densable $Ri — register peer_idle_notice sender when inbox starts.
+    try {
+      const {
+        setPeerIdleNoticeSender,
+        buildPeerIdleNoticeSender,
+        flushIdleSubscribers,
+      } = require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
+      setPeerIdleNoticeSender(buildPeerIdleNoticeSender(path))
+      // Arm idle fire when main-loop refcount returns to 0 (turn finished).
+      try {
+        const { setMainLoopBecameIdleListener } =
+          require('./sessionActivity.js') as typeof import('./sessionActivity.js')
+        setMainLoopBecameIdleListener(() => {
+          void flushIdleSubscribers({ state: 'idle' })
+        })
+      } catch {
+        // sessionActivity optional at early boot
+      }
+    } catch (err) {
+      logForDebugging(
+        `[udsMessaging] idle-notify sender wire failed: ${errorMessage(err)}`,
+      )
+    }
     logForDebugging(
       `[udsMessaging] Listening: ${path}${opts?.isExplicit ? ' (explicit)' : ''}`,
     )
@@ -807,6 +875,30 @@ export async function startUdsMessaging(
 export async function stopUdsMessaging(): Promise<void> {
   defaultSocketPath = null
   if (!server) return
+
+  // densable: on exit, fire one peer_idle_notice (state=exited) per inbound sub.
+  try {
+    const { flushIdleSubscribers, setPeerIdleNoticeSender } =
+      require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
+    await flushIdleSubscribers({ state: 'exited' })
+    setPeerIdleNoticeSender(null)
+  } catch {
+    // best-effort
+  }
+  try {
+    const { setMainLoopBecameIdleListener } =
+      require('./sessionActivity.js') as typeof import('./sessionActivity.js')
+    setMainLoopBecameIdleListener(null)
+  } catch {
+    // optional
+  }
+  try {
+    const { updateSessionMessagingSocket } =
+      require('./concurrentSessions.js') as typeof import('./concurrentSessions.js')
+    void updateSessionMessagingSocket(undefined)
+  } catch {
+    // optional
+  }
 
   // Close all connected clients
   for (const socket of clients) {

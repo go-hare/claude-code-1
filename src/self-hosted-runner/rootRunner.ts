@@ -48,6 +48,7 @@ import {
   UNKNOWN_CLIENT_PLATFORM,
   type RunnerHealthState,
 } from './healthMetrics.js'
+import { getPostSessionHookInFlightCount } from './postSessionInFlight.js'
 import { snapshotHostConfig, type HostConfigSnapshot } from './hostConfig.js'
 import {
   createSelfHostedRunnerApi,
@@ -114,6 +115,8 @@ export const DEFAULT_POST_SESSION_HOOK_TIMEOUT_MS = 60_000
 export const SHUTDOWN_BUDGET_PAD_MS = 15_000
 /** densable `_Gr` — push-outcome-on-release extra budget */
 export const PUSH_OUTCOME_BUDGET_MS = 30_000
+/** densable `Ttu` — in-flight release settle addendum / shutdown wait (20s) */
+export const RELEASE_IN_FLIGHT_SHUTDOWN_PAD_MS = 20_000
 /** densable `Jjv` client label default for token refresh */
 export const RUNNER_TOKEN_LABEL = 'runner'
 /** densable `rzv` — retire release retry when declined */
@@ -1047,8 +1050,18 @@ export async function runPollSkeleton(
   const failureInFlight = new Set<string>()
   const releasedAwaitingDeassign = new Set<string>()
   const releaseFalseCounts = new Map<string, number>()
+  /** densable `z` — ordered idle-release promises still settling after post-session */
+  const orderedReleaseInFlight = new Map<string, Promise<unknown>>()
   const retireSkipLogged = new Set<string>()
   const platformBySession = new Map<string, string>()
+  /** densable `Q` — active slots + in-flight releases that already left `active` */
+  const occupiedSlotCount = (): number => {
+    let n = active.size
+    for (const sid of orderedReleaseInFlight.keys()) {
+      if (!active.has(sid)) n++
+    }
+    return n
+  }
   let consecutive404 = 0
   let lastPollAt = Date.now()
   let sessionsHandled = 0
@@ -1105,20 +1118,22 @@ export async function runPollSkeleton(
 
   try {
     while (!signal.aborted) {
-      if (retiring && active.size === 0) {
+      if (retiring && occupiedSlotCount() === 0) {
         opts.onStatus(
           '[runner:exit] retire time passed and no active sessions — exiting before the host kills this runner.',
         )
         return 'drained'
       }
-      if (drainGraceMs === 0 && sawAnyAssignment && active.size === 0) {
+      if (drainGraceMs === 0 && sawAnyAssignment && occupiedSlotCount() === 0) {
         opts.onStatus(
           '[runner:exit] account workload drained — exiting (grace=0, no re-poll). Orchestrator will restart.',
         )
         return 'drained'
       }
 
-      const available = retiring ? 0 : Math.max(0, opts.capacity - active.size)
+      const available = retiring
+        ? 0
+        : Math.max(0, opts.capacity - occupiedSlotCount())
       const wakeSrc = wakeQueue.consume()
       if (wakeSrc === 'SSE') {
         await sleepMs(Math.floor(Math.random() * SSE_WAKE_JITTER_MS), signal)
@@ -1162,7 +1177,7 @@ export async function runPollSkeleton(
         consecutive404 = 0
         if (health) {
           health.lastPollAt = lastPollAt
-          health.activeSessions = active.size
+          health.activeSessions = occupiedSlotCount()
         }
       } catch (err) {
         if (signal.aborted) break
@@ -1211,7 +1226,7 @@ export async function runPollSkeleton(
       }
 
       const fresh = assignmentIds.filter(id => !stuckSessions.has(id))
-      if (fresh.length === 0 && active.size === 0) {
+      if (fresh.length === 0 && occupiedSlotCount() === 0) {
         idleSince ??= Date.now()
         const idleFor = Date.now() - idleSince
         if (sawAnyAssignment) {
@@ -1293,7 +1308,7 @@ export async function runPollSkeleton(
         }
         if (releasedAwaitingDeassign.has(sessionId)) {
           opts.onDebug(
-            `[runner:main] Ignoring released session ${sessionId} — awaiting server deassign`,
+            `[runner:main] Ignoring released session ${sessionId} — awaiting server deassign (or its in-flight release to settle)`,
           )
           continue
         }
@@ -1309,7 +1324,7 @@ export async function runPollSkeleton(
 
         sessionsHandled++
         opts.onStatus(
-          `Picked up session ${sessionId} (${active.size + 1}/${opts.capacity} active)`,
+          `Picked up session ${sessionId} (${occupiedSlotCount() + 1}/${opts.capacity} active)`,
         )
         const childAc = new AbortController()
         const metricsSid = sessionId.replace(/^cse_/, 'session_')
@@ -1505,6 +1520,44 @@ export async function runPollSkeleton(
             if (initObserved) retireAttempt++
             opts.onStatus(`[runner:session] ${sessionId} ${why} — releasing`)
             releasedAwaitingDeassign.add(sessionId)
+            // densable 2.1.236: non-awaiting-action awaits session task/post-session
+            // before releaseSession so settle log says "released after post-session hook".
+            // awaiting-action keeps immediate release + abort (parked prompt path).
+            if (kind !== 'awaiting-action') {
+              // densable Je — capture before abort; used for mid-work telemetry gate
+              const liveBgTasks = active.get(sessionId)?.liveBgTasks ?? 0
+              const ordered = (active.get(sessionId)?.task ?? Promise.resolve())
+                .then(() =>
+                  api.releaseSession(opts.tokenState.runnerToken, sessionId),
+                )
+                .then(({ released }) => {
+                  orderedReleaseInFlight.delete(sessionId)
+                  releasedAwaitingDeassign.delete(sessionId)
+                  releaseFalseCounts.delete(sessionId)
+                  if (released) {
+                    opts.onStatus(
+                      `[runner:session] ${sessionId} released after post-session hook — parked server-side`,
+                    )
+                    if (turnInFlight || deferredHold || liveBgTasks > 0) {
+                      /* densable Oe released_true_mid_work */
+                    }
+                    return
+                  }
+                  opts.onStatus(
+                    `[runner:session] ${sessionId} released=false after post-session hook (pending user event) — respawns on the next poll, or is requeued by this runner's exit if it is draining (grace=0) or retiring`,
+                  )
+                })
+                .catch(err => {
+                  orderedReleaseInFlight.delete(sessionId)
+                  releasedAwaitingDeassign.delete(sessionId)
+                  opts.onStatus(
+                    `[runner:session] ${sessionId} ordered release failed after the post-session hook: ${errMsg(err)} — keeping session; respawns on the next poll, or is requeued by this runner's exit if it is draining (grace=0) or retiring`,
+                  )
+                })
+              orderedReleaseInFlight.set(sessionId, ordered)
+              childAc.abort('idle-release')
+              return
+            }
             void api
               .releaseSession(opts.tokenState.runnerToken, sessionId)
               .then(({ released }) => {
@@ -1793,16 +1846,19 @@ export async function runPollSkeleton(
             clearIdleTimer()
             clearDeferredRemind()
             clearRetireBg()
-            releasedAwaitingDeassign.delete(sessionId)
-            releaseFalseCounts.delete(sessionId)
+            // densable: ordered release path owns U/z cleanup after post-session settle
+            if (!orderedReleaseInFlight.has(sessionId)) {
+              releasedAwaitingDeassign.delete(sessionId)
+              releaseFalseCounts.delete(sessionId)
+            }
             if (health) {
               health.sessionIdle.delete(metricsSid)
               health.sessionClientPlatform.delete(metricsSid)
               clearChildMetricsForSession(health, metricsSid)
             }
-            const wasAtCap = active.size >= opts.capacity
+            const wasAtCap = occupiedSlotCount() >= opts.capacity
             active.delete(sessionId)
-            if (health) health.activeSessions = active.size
+            if (health) health.activeSessions = occupiedSlotCount()
             drainNotify?.()
             if (sseEnabled && wasAtCap) wakeQueue.wake('LOCAL')
           })
@@ -1814,10 +1870,11 @@ export async function runPollSkeleton(
           turnInFlight: false,
           releaseForRetire,
         })
-        if (health) health.activeSessions = active.size
+        if (health) health.activeSessions = occupiedSlotCount()
       }
 
-      if (exitOnAssignment && active.size > 0) return 'assignment-blocked'
+      if (exitOnAssignment && occupiedSlotCount() > 0)
+        return 'assignment-blocked'
 
       successfulPolls++
       if (successfulPolls % HEALTH_LOG_EVERY_POLLS === 0) {
@@ -1831,13 +1888,13 @@ export async function runPollSkeleton(
         const locked =
           health?.lockedAccountEmail ?? (sawAnyAssignment ? 'yes' : 'no')
         opts.onStatus(
-          `[runner:health] polling ok · ${active.size}/${opts.capacity} slots · last_poll=${ago}ms ago · locked_account=${locked} · runner_token expires in ${ttl} · ${sessionsHandled} sessions handled`,
+          `[runner:health] polling ok · ${occupiedSlotCount()}/${opts.capacity} slots · last_poll=${ago}ms ago · locked_account=${locked} · runner_token expires in ${ttl} · ${sessionsHandled} sessions handled`,
         )
       }
 
       const interval = opts.pollIntervalOverrideMs ?? derivePollInterval(lease)
       if (sseEnabled) {
-        wakeQueue.atCapacity = active.size >= opts.capacity
+        wakeQueue.atCapacity = occupiedSlotCount() >= opts.capacity
         await wakeQueue.wait(interval, signal)
       } else {
         await sleepMs(interval, signal)
@@ -1926,6 +1983,22 @@ export async function runPollSkeleton(
           )
           await opts.flushLogSink?.()
           process.exit(1)
+        }
+      }
+      if (orderedReleaseInFlight.size > 0) {
+        opts.onStatus(
+          `[runner] shutdown: waiting for ${orderedReleaseInFlight.size} in-flight session release(s) to settle before deregistering`,
+        )
+        try {
+          await withTimeoutMs(
+            Promise.allSettled([...orderedReleaseInFlight.values()]),
+            RELEASE_IN_FLIGHT_SHUTDOWN_PAD_MS,
+            '[runner:exit] release settle',
+          )
+        } catch {
+          opts.onStatus(
+            `[runner] shutdown: ${orderedReleaseInFlight.size} session release(s) did not settle within ${RELEASE_IN_FLIGHT_SHUTDOWN_PAD_MS / 1000}s — deregistering anyway (those sessions are requeued rather than parked)`,
+          )
         }
       }
     } finally {
@@ -2078,7 +2151,7 @@ export async function selfHostedRunnerMain(
     readDrainWaitMs(),
     args.pushOutcomeOnRelease ? PUSH_OUTCOME_BUDGET_MS : 0,
   )
-  const budgetMsg = `[runner] This runner needs up to ${budgetSec}s to stop the Claude process and run the post-session hook on shutdown, and force-exits after ${budgetSec}s. Configure your process supervisor's stop timeout to at least ${budgetSec}s (e.g. terminationGracePeriodSeconds on Kubernetes, stop_grace_period on Docker Compose, TimeoutStopSec on systemd, or your platform's equivalent).`
+  const budgetMsg = `[runner] This runner needs up to ${budgetSec}s to stop the Claude process and run the post-session hook on shutdown, and force-exits after ${budgetSec}s (a session release already in flight when shutdown begins can add up to ${RELEASE_IN_FLIGHT_SHUTDOWN_PAD_MS / 1000}s, normally well under 1s, before the runner deregisters). Configure your process supervisor's stop timeout to at least ${budgetSec}s (e.g. terminationGracePeriodSeconds on Kubernetes, stop_grace_period on Docker Compose, TimeoutStopSec on systemd, or your platform's equivalent).`
   onStatus(budgetMsg)
 
   // densable azv: if no --exec-path, try hooks-dir/command before resolveExec
@@ -2276,13 +2349,26 @@ export async function selfHostedRunnerMain(
   let forced = false
   const onSignal = (sig: string): void => {
     if (forced) {
-      onStatus('Forced shutdown')
+      const still = getPostSessionHookInFlightCount()
+      if (still > 0) {
+        onStatus(
+          `[runner] Forced shutdown with ${still} post-session hook(s) still running — they continue in their own process group, but their output is no longer captured and the runner's timeout budget no longer applies.`,
+        )
+      } else {
+        onStatus('Forced shutdown')
+      }
       void flushLog().finally(() => process.exit(1))
       return
     }
     forced = true
     onStatus(`Received shutdown signal, draining active sessions... (${sig})`)
     onStatus(budgetMsg)
+    const running = getPostSessionHookInFlightCount()
+    if (running > 0) {
+      onStatus(
+        `[runner] ${running} post-session hook(s) still running — waiting for them within the budget above. A second SIGTERM force-exits the runner immediately; make sure your supervisor's stop timeout covers the full budget so hooks are not cut short.`,
+      )
+    }
     ac.abort()
   }
   const onTerm = (): void => onSignal('SIGTERM')

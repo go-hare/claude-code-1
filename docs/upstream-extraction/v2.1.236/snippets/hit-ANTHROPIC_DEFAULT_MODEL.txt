@@ -1,0 +1,49 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236
+key: ANTHROPIC_DEFAULT_MODEL
+patterns_searched: ["ANTHROPIC_DEFAULT_MODEL", "default model", "new sessions start"]
+notes: Exact phrase "new sessions start" NOT found. "default model" appears in unrelated settings/docs strings. Best hits are env-key usages + attribution UI + model resolution.
+
+================================================================================
+BEST 1 | offset 0x10acd0e8 | attribution label switch
+context (~200 chars nearby):
+function UW(){return idt().setting}function aRn(e){switch(e){case"org":return" \xB7 Org default";case"enforced":case"entitlement":return" \xB7 Set by your organization";case"env":return" \xB7 Set by ANTHROPIC_DEFAULT_MODEL";case"tier":return""}}function idt(){let e=ibn(),t;if(e===void 0){if(t=odt(),t!==null)VVt(t)}else if(e===null)t=null;else t=phd(e);if(t!==null)return{setting:t,attribution:"org"};let r=zxt();if(r!==null)return{setting:r,attribution:"env"};
+
+================================================================================
+BEST 2 | offset 0x5392b13 | string table attribution labels
+context:
+. Org default.......... . Set by your organization............. . Set by ANTHROPIC_DEFAULT_MODEL.......................
+
+================================================================================
+BEST 3 | offset 0x10acd451 | zxt() reads V.ANTHROPIC_DEFAULT_MODEL
+context:
+function zxt(){let e=vxs(),t=e===void 0?V.ANTHROPIC_DEFAULT_MODEL:e;if(t==null)return null;let r=t.trim().toLowerCase();if(r==="default"||r==="inherit")return null;if(Z0e(al(r)))return null;if(zYs(r))return null;if(dhd())return null;if(lRn().state!=="inactive"||Ia()?.enforceAvailableModels===!0)return null;if(!Hu(t))return null;if(A7e(t,{ignoreMode
+
+================================================================================
+BEST 4 | offset 0x12086294 | startup telemetry around env default
+context:
+Txs(V.ANTHROPIC_DEFAULT_MODEL??null),V.ANTHROPIC_DEFAULT_MODEL!==void 0)if(zxt()===null)ve("model_env_default","inert");else if(ibn())ve("model_env_default","outranked_by_org_default");else be("model_env_default");if(qAe("--model",["-m"],r,void 0,e.storageV5)
+
+================================================================================
+BEST 5 | offset 0x1208feea | model fallback chain includes env
+context:
+let ji=t.model||process.env.ANTHROPIC_MODEL||V.ANTHROPIC_DEFAULT_MODEL,Go=t.model,Rs=re?Yt():Rr;
+
+================================================================================
+BEST 6 | offset 0x1225de7f | tengu_startup_manual_model_config fields
+context:
+H("tengu_startup_manual_model_config",{cli_flag:t.model,env_var:process.env.ANTHROPIC_MODEL,default_env_var:bu(V.ANTHROPIC_DEFAULT_MODEL),settings_file:(zo()||{}).model,settings_source:_o(Zee("model")),subscriptionType:_o(mc()),agent:s});
+
+================================================================================
+BEST 7 | offset 0x109908c7 | env allowlist QEn includes ANTHROPIC_DEFAULT_MODEL
+context:
+QEn=["ANTHROPIC_MODEL","ANTHROPIC_DEFAULT_MODEL","ANTHROPIC_DEFAULT_FABLE_MODEL","ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION","ANTHROPIC_DEFAULT_FABLE_MODEL_NAME","ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES","ANTHROPIC_DEFAULT_HAIKU_MODEL",...
+
+================================================================================
+RELATED | "default model" (not env key) examples
+- enforceAvailableModels: "if the default model for the user tier is not in availableModels, Default resolves to the first allowed availableModels entry"
+- agent view: "--model <model>" / "Default model for sessions dispatched from agent view"
+- command schema: "Default model for this command"
+
+RELATED | "new sessions start" / "New sessions start"
+- NO exact matches in SEA latin1 strings.

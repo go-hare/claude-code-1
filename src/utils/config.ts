@@ -481,6 +481,35 @@ export type GlobalConfig = {
   // Official fullscreen TUI upsell (Npf / Ufn=3)
   fullscreenUpsellSeenCount?: number // times the fullscreen renderer upsell was shown
 
+  /**
+   * densable 2.1.236 GAP #5 fullscreen boot canary — pending PID → boot stamp.
+   * Cleared on healthy settle; `died:"render_error"` marks unrecoverable start.
+   */
+  fullscreenBootPending?: Record<
+    string,
+    {
+      startedAt: number
+      version: string
+      host: string
+      platform: string
+      died?: 'render_error'
+    }
+  >
+  /** densable fullscreenBootStrikes — same-version crash strikes before sticky. */
+  fullscreenBootStrikes?: {
+    count: number
+    version: string
+  }
+  /**
+   * densable fullscreenAutoDisabled — sticky auto-disable for VERSION.
+   * Cleared by `/tui fullscreen` (FJi) or version bump.
+   */
+  fullscreenAutoDisabled?: {
+    version: string
+    at: number
+    strikes: number
+  }
+
   // Idle-return dialog tracking
   idleReturnDismissed?: boolean // "Don't ask again" picked
 

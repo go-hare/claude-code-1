@@ -463,6 +463,8 @@ export type YoloClassifierResult = {
    * prompt/completion in post-analysis.
    */
   stage1MsgId?: string
+  /** densable stage1Severity — parsed <severity>N</severity> from stage 1 when scored. */
+  stage1Severity?: number
   /** Token usage from stage 2 (thinking) when stage 2 was run */
   stage2Usage?: ClassifierUsage
   /** Duration of stage 2 in ms when stage 2 was run */
@@ -471,6 +473,8 @@ export type YoloClassifierResult = {
   stage2RequestId?: string
   /** API message id (msg_xxx) for stage 2 (set whenever stage 2 ran) */
   stage2MsgId?: string
+  /** densable stage2Severity — parsed <severity>N</severity> from stage 2 when scored. */
+  stage2Severity?: number
 }
 
 // ============================================================================

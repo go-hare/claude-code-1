@@ -1,22 +1,50 @@
 /**
  * densable 2.1.221 #13 — individual spend limit vs org monthly spend limit.
+ *
+ * Spread real auth/billing snapshots + afterAll restore — thin unrestored
+ * auth mocks are process-global and poison co-running suites.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 import type { ClaudeAILimits } from '../claudeAiLimits.js'
+import * as realAuth from 'src/utils/auth.js'
+import * as realBilling from 'src/utils/billing.js'
+
+const authSnap = snapshotModuleExports(realAuth)
+const billingSnap = snapshotModuleExports(realBilling)
 
 const getSubscriptionTypeMock = mock(() => 'team' as string | null)
 const hasClaudeAiBillingAccessMock = mock(() => false)
 
-mock.module('src/utils/auth.js', () => ({
-  getOauthAccountInfo: () => undefined,
-  getSubscriptionType: getSubscriptionTypeMock,
-  isOverageProvisioningAllowed: () => true,
-}))
-mock.module('src/utils/billing.js', () => ({
-  hasClaudeAiBillingAccess: hasClaudeAiBillingAccessMock,
-}))
+function authMock() {
+  return {
+    ...authSnap,
+    getOauthAccountInfo: () => undefined,
+    getSubscriptionType: getSubscriptionTypeMock,
+    isOverageProvisioningAllowed: () => true,
+  }
+}
+
+function billingMock() {
+  return {
+    ...billingSnap,
+    hasClaudeAiBillingAccess: hasClaudeAiBillingAccessMock,
+  }
+}
+
+mock.module('src/utils/auth.js', authMock)
+mock.module('src/utils/auth.ts', authMock)
+mock.module('src/utils/billing.js', billingMock)
+mock.module('src/utils/billing.ts', billingMock)
 
 const { getRateLimitErrorMessage } = await import('../rateLimitMessages.js')
+
+afterAll(() => {
+  mock.module('src/utils/auth.js', () => ({ ...authSnap }))
+  mock.module('src/utils/auth.ts', () => ({ ...authSnap }))
+  mock.module('src/utils/billing.js', () => ({ ...billingSnap }))
+  mock.module('src/utils/billing.ts', () => ({ ...billingSnap }))
+})
 
 afterEach(() => {
   getSubscriptionTypeMock.mockReset()

@@ -1594,6 +1594,7 @@ export async function handleSession(
           sessionAccessToken: sessionToken,
           cwd: sessionDir,
           timeoutMs,
+          clientPlatform: opts.clientPlatform,
           onStatus,
           onDebug,
         }).catch(err => {

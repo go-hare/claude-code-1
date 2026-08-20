@@ -11,6 +11,7 @@
  */
 
 import { APIUserAbortError } from '@anthropic-ai/sdk'
+import { AWAY_SUMMARY_RECAP_MAX_CHARS } from '../../services/awaySummary.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
   getLastCacheSafeParams,
@@ -20,9 +21,12 @@ import {
   createUserMessage,
   getAssistantMessageText,
 } from '../../utils/messages.js'
+import { truncateAtWordBoundary } from '../../utils/stringUtils.js'
 
 // Matches the official G$9 constant in v2.1.123:
 // "lead with goal + current task, then one next action, ≤40 words, no markdown"
+// densable 2.1.236 also hard-caps at Hbm=400 via edu() after generation.
+
 const RECAP_PROMPT_EN =
   'The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.'
 
@@ -110,7 +114,16 @@ export async function generateRecap(signal: AbortSignal): Promise<RecapResult> {
       return { kind: 'failed' }
     }
 
-    return { kind: 'ok', text: text.trim() }
+    let out = text.trim()
+    // densable edu(s,Hbm): same hard cap as awaySummary for /recap.
+    if (out.length > AWAY_SUMMARY_RECAP_MAX_CHARS) {
+      const capped = truncateAtWordBoundary(out, AWAY_SUMMARY_RECAP_MAX_CHARS)
+      logForDebugging(
+        `[awaySummary] recap capped from ${out.length} to ${capped.length} chars`,
+      )
+      out = capped
+    }
+    return { kind: 'ok', text: out }
   } catch (err) {
     if (
       err instanceof APIUserAbortError ||

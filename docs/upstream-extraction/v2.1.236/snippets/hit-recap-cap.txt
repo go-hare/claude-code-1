@@ -1,0 +1,31 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: recap-cap
+checklist: Recap runaway cap 400 chars word boundary
+found: true
+topSymbols: ['Hbm=400', 'edu', 'awaySummary', 'name:"recap"']
+oneLineNote: awaySummary caps via edu(s,Hbm) with Hbm=400; edu truncates on word boundary; slash command name recap present (/recap literal absent)
+search_patterns: ['recap', 'Hbm=400', 'Recap in under', 'recap capped', '/recap']
+
+=== pattern counts ===
+'recap': 86
+'Hbm=400': 1
+'Recap in under': 2
+'recap capped': 2
+'/recap': 0
+
+=== BEST Hbm=400 + FlT ===
+--- offset 291388297 ---
+${o}`),{kind:"failed"}}}function Nbm(e,t){return IO(e.flatMap((r)=>r.type==="assistant"&&(t||!r.isApiErrorMessage)?r.message.content:[]).filter((r)=>r.type==="text").map((r)=>("text"in r)?r.text:"").join("")).trim()}var FlT="The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.",Hbm=400;var Dfr=w(()=>{ot();kqr();Hte();Pu();Ye();mr();po();ZG();ri();wo();Fr();Qt();gn()});function K7r(e){e((t)=>t.prResolvedThisSession?t:{...t,prResolvedThisSession:!0})}function QBt(e){e((t)=>t.ultrareviewOverageConfirmed?t:{...t,ultrareviewOverageConfirmed:!0})}function Mfr(e,t){return{ownPublishes:r6r(e,t),workshopTelemetry:r4f(e,t),whiteboardTelemetry:u4f(e,t),prReviewTargets:V4f(e,t)}}function x$i(){let e={};return Mfr(()=>e,(t)=>{e=t(e)})}var Y7r=w(()=>{VNt();lIi();
+
+=== BEST edu word-boundary truncate ===
+--- offset 277561362 ---
+round(e/1024);return this.content+`.... [output truncated - ${t}KB removed]`}clear(){this.content="",this.isTruncated=!1,this.totalBytesReceived=0}get length(){return this.content.length}get truncated(){return this.isTruncated}get totalBytes(){return this.totalBytesReceived}}function Gvn(e,t){let r=e.split(`.`);if(r.length<=t)return e;return r.slice(0,t).join(`.`)+"\u2026"}function pz(e,t){if(e.length<=t)return e;let r=To(e,t);return`${r}\u2026 [+${e.length-r.length} chars]`}function edu(e,t){if(e.length<=t)return e;let r=To(e,t-1),n=r.search(/\s\S*$/),o=n===-1?"":r.slice(0,n).trimEnd();return`${o.length>t/2?o:r.trimEnd()}\u2026`}function pm(e){return e.replace(pct,"").replace(/\s+/g," ").trim()}function v1s(e){return e.replace(XBy,"").replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu,"")}function m0e(e){let t=v1s(zp(e));return t.length>200?`${To(t,200)}\u2026`:t}function Vvn(e,t){if(e.length*3<=t)return e;let r=new TextEncoder().encode(e);if(r.length<=t)re
+
+=== awaySummary recap capped ===
+--- offset 131789488 ---
+................................[awaySummary] fallback params rebuild failed: ..................failed......................0...[awaySummary] no CacheSafeParams saved, skipping................no-turn.........................abort...........................away_summary................................C...Cannot destructure property 'messages' from null or undefined value.............................o...............................api-error................................... ...[awaySummary] recap capped from ................ to ............................ chars..........................ok..........................!...[awaySummary] generation failed: ...................................................H....................................@.<.@0..@`..H...@...B..@....@0..v.PK....@...H...@P..@...t.._............@.;.@`E.Q............@.......0..@ ..@.U=...=.......Be...@...H...@p..E.4..QT.@P?...n.@0....c..0}.@ ....K.@.<.G.....,..@..@.%...4.@ ...@......@.<
+
+=== slash command name recap ===
+--- offset 291394307 ---
+-error":return pe("recap_command","api_error",{fallback_params:r}),{type:"text",value:o.text};case"no-turn":return{type:"text",value:"Nothing to recap yet \u2014 send a message first."};case"aborted":return{type:"text",value:"Recap cancelled."};case"failed":return pe("recap_command",n?"fallback_rebuild_failed":"failed",{fallback_params:r}),{type:"text",value:"Couldn't generate a recap. Run with --debug for details."}}},UlT,jlT;var Bbm=w(()=>{Qt();Dfr();ri();UlT={type:"local",name:"recap",description:"Generate a one-line session recap now",supportsNonInteractive:!0,thinClientDispatch:"post-text",load:()=>Promise.resolve({call:BlT})},jlT=UlT});var Ubm={};vt(Ubm,{call:()=>zlT});var zlT=async(e,t)=>{let r=e.trim();if(r===""){let o=t.options.activeGoal;if(!o)return{type:"text",value:"No goal set. Usage: `/goal <condition>`"};let i=o.iterations===0?"not yet evaluated":`${o.iterations} ${wt(o.iterations,"turn")}`,s=o.lastReason?`.Last check: ${zp(o.last

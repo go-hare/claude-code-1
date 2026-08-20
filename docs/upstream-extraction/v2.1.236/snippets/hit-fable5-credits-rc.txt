@@ -1,0 +1,27 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: fable5-credits-rc
+checklist: Fable 5 first-time usage-credits prompt auto-selecting fallback after 60s under Remote Control
+found: true
+topSymbols: ['fable_overage_consent_prompt', 'fableConsentSessionFallback', 'replaceFableConsentSessionFallback', 'fableCreditsRequired']
+oneLineNote: Consent/sessionFallback symbols present; literal 60s auto-select under RC not found as SEA string
+search_patterns: ['fable_overage_consent_prompt', 'fableConsentSessionFallback', 'usage-credits', '60000', 'auto-select']
+
+=== pattern counts ===
+'fable_overage_consent_prompt': 5
+'fableConsentSessionFallback': 4
+'usage-credits': 69
+'60000': 383
+'auto-select': 4
+
+=== fable_overage_consent_prompt ===
+--- offset 229623200 ---
+........................................b......................................................................................................................................................................................................................................................................!.........................a................................a.....................................i...............0...............P...............`...............................fable_overage_consent_prompt....................cancelled...........................!.............................p.......P,......`,......`,......P,......`,......P,......P,......`,......P,......P,......`d..0.....k.......u......l.....l.........;....................................................................XQ......................@A.......................S.......................{.......................................................................k......................
+
+=== fableConsentSessionFallback ===
+--- offset 73668800 ---
+.........S......recordLinesChanged......I...............Ik......markUnknownModelCost.....k...............l......zeroDurationsAndCostForTests.............l......restartClock.............m......anchorLogicalStart.......m...............m......restore.........................registerSaver...........In......runSaverI...............(...............................8.......0...............P.......K................................................o......P........................p......fableConsentSessionFallback..............p.."...replaceFableConsentSessionFallback.......3..............(...............................X.......0...............P.......K.......`...............p.......................................................Ir...................... ...............0........................r......holder...]..............I.......mainThreadAgentType......_......................replaceMainThreadAgentType...............s......mainThreadAgentHooks.....t......
+
+=== continue Fable 5 on usage credits ===
+--- offset 265183304 ---
+.........................................................................................................................................................................!.....................................................i........................................................................ ...............P...............................................................................................choose: retry on fallback model or edit prompt..............:...choose: continue Fable 5 on usage credits or switch models......................MCP input: open link........................#...acknowledge: $5 session cost notice.........................+...choose: resume from summary or full session.................2...choose: make auto mode the default permission mode..............................dismiss: IDE welcome......................................................................................`,......`,......P,......`,......`d.@ ...0.....

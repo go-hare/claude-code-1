@@ -5,13 +5,20 @@
  * override_user_selection). When present and the session is first-party, the
  * /model Default row shows " · Org default" and that model is used when the
  * user has not pinned one (or when override_user_selection forces it).
+ *
+ * densable 2.1.236 adds `ANTHROPIC_DEFAULT_MODEL` (`zxt` / attribution `"env"`)
+ * between org default and tier default — unlike `ANTHROPIC_MODEL`, it does not
+ * pin/persist; `/model` still overrides.
  */
 
 import {
+  getInitialEnvDefaultModel,
   getResolvedOrgDefault,
   setResolvedOrgDefault,
 } from '../../bootstrap/state.js'
 import { getGlobalConfig } from '../config.js'
+import { getSettings_DEPRECATED } from '../settings/settings.js'
+import { isModelAllowed } from './modelAllowlist.js'
 import { getAPIProvider } from './providers.js'
 
 export type OrgModelDefaultCache = {
@@ -27,6 +34,7 @@ export type ModelDefaultAttribution =
   | 'org'
   | 'enforced'
   | 'entitlement'
+  | 'env'
   | 'tier'
 
 export type ResolvedDefaultModel = {
@@ -100,9 +108,10 @@ export function resolveOrgDefaultSetting(): string | null {
 }
 
 /**
- * Attribution badge for the Default row in /model (official Elh/Urc/N1n).
+ * Attribution badge for the Default row in /model (official Elh/Urc/N1n + 236 aRn).
  * - org → " · Org default"
  * - enforced/entitlement → " · Set by your organization"
+ * - env → " · Set by ANTHROPIC_DEFAULT_MODEL"
  * - tier → no badge
  */
 export function getDefaultModelAttributionBadge(
@@ -114,7 +123,36 @@ export function getDefaultModelAttributionBadge(
   if (attribution === 'enforced' || attribution === 'entitlement') {
     return ' · Set by your organization'
   }
+  if (attribution === 'env') {
+    return ' · Set by ANTHROPIC_DEFAULT_MODEL'
+  }
   return ''
+}
+
+/**
+ * densable 2.1.236 `zxt()` — resolve ANTHROPIC_DEFAULT_MODEL for Default row /
+ * new-session start. Portable guards only (no invent of SEA A7e catalog /
+ * allowlist-cascade `lRn`).
+ *
+ * Returns null when unset / inert (`default`/`inherit` / plan aliases /
+ * enforceAvailableModels / not allowlisted).
+ */
+export function resolveAnthropicDefaultModelEnv(): string | null {
+  const latched = getInitialEnvDefaultModel()
+  const raw =
+    latched === undefined ? process.env.ANTHROPIC_DEFAULT_MODEL : latched
+  if (raw == null) return null
+  const trimmed = String(raw).trim()
+  if (trimmed.length === 0) return null
+  const lower = trimmed.toLowerCase()
+  if (lower === 'default' || lower === 'inherit') return null
+  // densable Z0e — plan-mode aliases are not valid DEFAULT_MODEL values.
+  if (lower === 'opusplan' || lower === 'haiku') return null
+  const settings = getSettings_DEPRECATED() || {}
+  // densable: lRn active OR enforceAvailableModels → inert for env default.
+  if (settings.enforceAvailableModels === true) return null
+  if (!isModelAllowed(trimmed)) return null
+  return trimmed
 }
 
 /**

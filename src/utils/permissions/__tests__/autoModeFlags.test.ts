@@ -2,6 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import {
   AUTO_MODE_EDIT_REMOVAL_CAP_DEFAULT,
   AUTO_MODE_GIT_STATUS_LIMIT_DEFAULT,
+  AUTO_MODE_SEVERITY_T1_FALLBACK,
+  AUTO_MODE_SEVERITY_T2_FALLBACK,
+  BAKED_AUTO_MODE_CONFIG,
+  EMPTY_AUTO_MODE_CONFIG,
   countGitStatusPorcelain,
   getAutoModeModelLookupKeys,
   isAutoModeClassifyEditTool,
@@ -31,6 +35,33 @@ describe('parseOptionalEnvBool', () => {
     expect(parseOptionalEnvBool('true')).toBe(true)
     expect(parseOptionalEnvBool('0')).toBe(false)
     expect(parseOptionalEnvBool('false')).toBe(false)
+  })
+})
+
+describe('densable 2.1.236 qTa / Eri frozen defaults', () => {
+  test('EMPTY_AUTO_MODE_CONFIG is frozen empty Eri', () => {
+    expect(EMPTY_AUTO_MODE_CONFIG).toEqual({})
+    expect(Object.isFrozen(EMPTY_AUTO_MODE_CONFIG)).toBe(true)
+  })
+
+  test('BAKED_AUTO_MODE_CONFIG matches SEA qTa incl severityByModel', () => {
+    expect(BAKED_AUTO_MODE_CONFIG.twoStageClassifier).toBe(true)
+    expect(BAKED_AUTO_MODE_CONFIG.sameTurnSiblingContext).toBe(true)
+    expect(BAKED_AUTO_MODE_CONFIG.jsonlTranscript).toBe(true)
+    expect(BAKED_AUTO_MODE_CONFIG.editRemovalVisibility).toBe(true)
+    expect(BAKED_AUTO_MODE_CONFIG.editRemovalCap).toBe(3000)
+    expect(BAKED_AUTO_MODE_CONFIG.outcomeVisibility).toBe(false)
+    expect(BAKED_AUTO_MODE_CONFIG.repoVisibility).toBe(true)
+    expect(BAKED_AUTO_MODE_CONFIG.gitStatusType).toBe(true)
+    expect(BAKED_AUTO_MODE_CONFIG.gitStatusUploads).toBe(false)
+    expect(BAKED_AUTO_MODE_CONFIG.severityByModel).toEqual({
+      'claude-sonnet-5[1m]': { t1: 25, t2: 35 },
+      'claude-opus-4-8[1m]': { t1: 45, t2: 35 },
+      'claude-sonnet-5': { t1: 25, t2: 35 },
+      'claude-opus-4-8': { t1: 45, t2: 35 },
+    })
+    expect(AUTO_MODE_SEVERITY_T1_FALLBACK).toBe(15)
+    expect(AUTO_MODE_SEVERITY_T2_FALLBACK).toBe(20)
   })
 })
 

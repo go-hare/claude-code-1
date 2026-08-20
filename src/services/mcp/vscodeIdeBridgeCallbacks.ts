@@ -102,9 +102,10 @@ function readStartupAnnouncementsBNh(): StartupAnnouncement[] {
       text: o.text,
       title: typeof o.title === 'string' ? o.title : undefined,
       footer: typeof o.footer === 'string' ? o.footer : undefined,
-      priority: typeof o.priority === 'number' && Number.isFinite(o.priority)
-        ? o.priority
-        : 0,
+      priority:
+        typeof o.priority === 'number' && Number.isFinite(o.priority)
+          ? o.priority
+          : 0,
       requiresModel:
         typeof o.requiresModel === 'string' ? o.requiresModel : undefined,
     })

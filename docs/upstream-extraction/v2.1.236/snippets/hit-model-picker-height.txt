@@ -1,0 +1,45 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: model-picker-height
+patterns: ["ModelPicker","taller than the terminal","as many models as fit"]
+counts: {'ModelPicker': 11, 'taller than the terminal': 0, 'as many models as fit': 0}
+
+NOTE: Exact latin1 phrases "taller than the terminal" and "as many models as fit" are ABSENT from SEA 2.1.236.
+Related height behavior IS present as minified ModelPicker visibleOptionCount math (rows-based), not those comment/user strings.
+
+### pattern_miss_taller_than_the_terminal
+count=0
+
+### pattern_miss_as_many_models_as_fit
+count=0
+
+### ModelPicker_string_table offset=153900912
+.......ModelPicker.....M.......................	.......remember................	.......Select model............	.......egM.....................	.......Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model..............N.......O.......P.......................	.......Currently using ........	...9... for this session only. Selecting a model will undo this........
+
+### ModelPicker_keybinding_context offset=282758703
+},{context:"ModelPicker",bindings:{left:"modelPicker:decreaseEffort",right:"modelPicker:increaseEffort",s:"modelPicker:thisSessionOnly"}},{context:"Select",bindings:{up:"select:previous",down:"select:next",j:"select:next",k
+
+### ModelPicker_context_help offset=282763891
+DiffPanel:"When the diff sidebar panel is open",ModelPicker:"When the model picker is open",Select:"When a select/list component is focused",Plugin:"When the plugin dialog is open",Scroll:"When a scrollable view is focused (fullscreen layout)"},mva=["app:inte
+
+### ModelPicker_height_formula offset=296472200
+function Cot(QhM){let Cv=R7l.c(145),{initial:Sot,sessionModel:AQi,onSelect:Gxw,onSetDefault:u5t,onCancel:gFh,isStandaloneCommand:e7l,showFastModeNotice:_do,headerText:egM,options:yFh,skipSettingsWrite:Vxw}=QhM,{storageV5:_Fh}=bn(),Kxw=qi(),{rows:tgM}=kg(hn()),bFh=mt(NIw),Yxw;if(Cv[0]!==bFh||Cv[1]!==yFh)Yxw=yFh??hwa(bFh??!1),Cv[0]=bFh,Cv[1]=yFh,Cv[2]=Yxw;else Yxw=Cv[2];let vot=Yxw,Jxw;if(Cv[3]!==Sot||Cv[4]!==vot)Jxw=Sot===null?iTt:gwa(vot,Sot)??Sot,Cv[3]=Sot,Cv[4]=vot,Cv[5]=Jxw;else Jxw=Cv[5];let Tot=Jxw,[t7l,rgM]=g$.useState(Tot),[RQi]=Pa(),SFh=aS();hl()?!0:!1;let Xxw;if(Cv[6]===ae)Xxw={canEnter:!1,onEnter:FIw},Cv[6]=Xxw;else Xxw=Cv[6];let{isSearchMode:$xe,isSearchModeRef:wot,query:KFe,cursorOffset:vFh,handleKeyDown:TFh,handlePaste:wFh}=XKl(Xxw),ngM=$xe||KFe!==""?4:0,Zxw;if(Cv[7]!==_do)Zxw=Iu()&&(_do||xz()&&!cje()),Cv[7]=_do,Cv[8]=Zxw;else Zxw=Cv[8];let r7l=Zxw,ogM=r7l?3:0,igM=AQi?2:0,sgM=Math.max(2,Math.min(10,Math.floor((tgM-LFh-ngM-ogM-igM)/2))),[oTt,agM]=g$.useState(!1)
+
+### ModelPicker_visibleOptionCount_wireup offset=296476200
+let xFh=IQi,n7l=Math.min(sgM,UTe.length),o7l=Math.max(0,UTe.length-n7l) ... od.jsx(Tn,{defaultValue:Tot,defaultFocusValue:xFh,options:UTe,onChange:g7l,onFocus:PFh,onCancel:y7l,visibleOptionCount:n7l,isDisabled:$xe}) ... KFe!==""&&UTe.length===0&&od.jsx(lc,{children:`No models match "${KFe}"`})
+
+### ModelPicker_module_const_LFh offset=296483360
+var g$,od,R7l,iTt="__NO_PREFERENCE__",LFh=14;var MQi=w(()=>{Am();w0a();tTe();Bt();Qt();oC();yu();Dt();PNl();ql();bP();uFh();ox();gl();ns();Tg();nDe();Pi();dFh();nXe();wo();Za();By();kxe();TR();gx();nc();ha();xnt();JD();QKl();g$=O(It(),1),od=O(Te(),1),R7l=O(Oe(),1)});
+
+### Select_default_visibleOptionCount offset=293819262
+function B6i({visibleOptionCount:e=5,options:t,onFocus:r,focusValue:n}){let[o]=h9.useState(()=>({state:jWm({visibleOptionCount:e,options:t,initialFocusValue:n})}))
+
+HEIGHT_LOGIC_SUMMARY (from SEA only, no invention beyond observed code):
+- Cot(...) is the ModelPicker UI function (props include sessionModel/onSelect/onCancel/headerText/options).
+- Terminal rows: `{rows:tgM}=kg(hn())`.
+- Chrome reserve const: `LFh=14`.
+- Search chrome: `ngM=$xe||KFe!==""?4:0`.
+- Fast-mode notice chrome: `ogM=r7l?3:0`.
+- Session-only banner chrome: `igM=AQi?2:0`.
+- Visible model slots: `sgM=Math.max(2,Math.min(10,Math.floor((tgM-LFh-ngM-ogM-igM)/2)))`.
+- Passed to Select as `visibleOptionCount:n7l` where `n7l=Math.min(sgM,UTe.length)`; overflow count `o7l=Math.max(0,UTe.length-n7l)`.

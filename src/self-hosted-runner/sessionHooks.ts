@@ -8,8 +8,16 @@ import { constants as fsConstants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { basename, join } from 'node:path'
+import { getPostSessionHookInFlight } from './postSessionInFlight.js'
 import { redactLogText, withTimeoutMs } from './rootRunner.js'
 import { remoteSessionUuidFromId } from './sessionChild.js'
+
+export {
+  getPostSessionHookInFlight,
+  getPostSessionHookInFlightCount,
+  PostSessionHookInFlight,
+  resetPostSessionHookInFlightForTests,
+} from './postSessionInFlight.js'
 
 /** densable checkout `.git` / path stat timeout (`BUi` / `J2h`) */
 const HOOK_STAT_TIMEOUT_MS = 5_000
@@ -568,18 +576,47 @@ export type PostSessionHookOpts = {
   timeoutMs: number
   onStatus: (msg: string) => void
   onDebug: (msg: string) => void
+  /**
+   * densable `clientPlatform` → `yCr` → `CLAUDE_RUNNER_CLIENT_PLATFORM`.
+   * Omitted / rejected values leave the env unset.
+   */
+  clientPlatform?: string
   /** inject for tests */
   spawnFn?: typeof spawn
 }
 
+/** densable `Jeu` — charset gate for env-exportable client_platform */
+export const CLIENT_PLATFORM_ENV_RE = /^[A-Za-z0-9_.-]{1,64}$/
+
 /**
- * densable `M2h` — post-session hook (best-effort; never throws to caller).
+ * densable `yCr` — exportable client platform for hook env.
+ * Returns undefined for empty / "unknown" / charset rejects / leading "-" / "."/"..".
+ */
+export function formatClientPlatformForEnv(
+  platform?: string,
+): string | undefined {
+  if (
+    !platform ||
+    platform === 'unknown' ||
+    !CLIENT_PLATFORM_ENV_RE.test(platform) ||
+    platform.startsWith('-') ||
+    /^\.{1,2}$/.test(platform)
+  ) {
+    return undefined
+  }
+  return platform
+}
+
+/**
+ * densable `M2h` / `jxy` — post-session hook (best-effort; never throws to caller).
  * detached process group; SIGTERM then SIGKILL; ignore failures.
+ * Increments host inFlight on spawn and decrements on settle (`Bxy`/`Uxy`).
  */
 export async function runPostSessionHook(
   opts: PostSessionHookOpts,
 ): Promise<void> {
   const spawnFn = opts.spawnFn ?? spawn
+  const clientPlatformEnv = formatClientPlatformForEnv(opts.clientPlatform)
   const env: NodeJS.ProcessEnv = {
     ...buildHookBaseEnv(),
     CLAUDE_RUNNER_SESSION_ID: opts.sessionId.replace(/^cse_/, 'session_'),
@@ -588,6 +625,9 @@ export async function runPostSessionHook(
     CLAUDE_RUNNER_DEBUG_LOG_PATH: opts.debugLogPath,
     CLAUDE_RUNNER_WORKSPACE_PATHS: opts.workspacePaths.join(':'),
     CLAUDE_RUNNER_API_BASE_URL: opts.apiBaseUrl,
+    ...(clientPlatformEnv !== undefined
+      ? { CLAUDE_RUNNER_CLIENT_PLATFORM: clientPlatformEnv }
+      : {}),
     CLAUDE_CODE_SESSION_ACCESS_TOKEN: opts.sessionAccessToken,
   }
   opts.onStatus(
@@ -605,12 +645,15 @@ export async function runPostSessionHook(
     windowsHide: true,
     detached: true,
   })
+  const inFlight = getPostSessionHookInFlight()
+  inFlight.increment()
   let finished = false
   let timedOut = false
   const timers: Array<ReturnType<typeof setTimeout>> = []
   const finish = (): void => {
     if (finished) return
     finished = true
+    inFlight.decrement()
     for (const t of timers) clearTimeout(t)
     settle()
   }

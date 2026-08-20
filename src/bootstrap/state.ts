@@ -74,6 +74,11 @@ type State = {
    */
   resolvedOrgDefault: string | null | undefined
   /**
+   * densable 2.1.236 `Txs`/`vxs` — latched ANTHROPIC_DEFAULT_MODEL at startup
+   * resolve. `undefined` = not latched (read live env); `null`/string = latched.
+   */
+  initialEnvDefaultModel: string | null | undefined
+  /**
    * Fable overage consent latch for key-less sessions (API-key users).
    * Shared by query() and /model so a /model accept is honored on first
    * request. Cleared on logout / account switch.
@@ -434,6 +439,7 @@ function getInitialState(): State {
     mainLoopModelOverride: undefined,
     initialMainLoopModel: null,
     resolvedOrgDefault: undefined,
+    initialEnvDefaultModel: undefined,
     fableSessionFallbackConsented: false,
     refusalFallbackOccurred: false,
     refusalFallbackModelLatch: undefined,
@@ -1120,6 +1126,18 @@ export function getResolvedOrgDefault(): string | null | undefined {
 /** Official wgt — set session-resolved org default model. */
 export function setResolvedOrgDefault(model: string | null | undefined): void {
   STATE.resolvedOrgDefault = model
+}
+
+/** densable `vxs` — latched ANTHROPIC_DEFAULT_MODEL (undefined = read live env). */
+export function getInitialEnvDefaultModel(): string | null | undefined {
+  return STATE.initialEnvDefaultModel
+}
+
+/** densable `Txs` — latch ANTHROPIC_DEFAULT_MODEL at startup resolve. */
+export function setInitialEnvDefaultModel(
+  model: string | null | undefined,
+): void {
+  STATE.initialEnvDefaultModel = model
 }
 
 /** Session latch for Fable consent when no org/account consent key exists. */

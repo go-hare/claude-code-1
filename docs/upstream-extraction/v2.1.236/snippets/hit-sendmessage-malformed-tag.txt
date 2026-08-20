@@ -1,0 +1,26 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: sendmessage-malformed-tag
+checklist: SendMessage malformed closing tag left text in summary (RECHECK)
+found: true
+topSymbols: ['SendMessageTool', 'coerceInput', 'yEi', 'isSlippedSummarySplitEnabled', 'split_slipped_summary_']
+oneLineNote: RECHECK: coerceInput->yEi slipped-summary split/unrepaired; exact malformed closing tag phrase absent
+search_patterns: ['split_slipped_summary_', 'coerceInput', 'isSlippedSummarySplitEnabled', 'closing tag']
+
+=== pattern counts ===
+'split_slipped_summary_': 4
+'coerceInput': 12
+'isSlippedSummarySplitEnabled': 2
+'closing tag': 11
+
+=== coerceInput yEi ===
+--- offset 288712801 ---
+ing was sent."}};xCv=`.The message was delivered, but no idle subscription was made: ${VRi}`;zZa={data:{success:!1,message:"That agent cannot receive messages (it is a background observer, or its status could not be verified)."}};KRi=class KRi extends Error{constructor(e){super(e);this.name="SendMessagePreconditionError"}};XZa=Ji({name:_m,searchHint:"send messages to agent teammates",maxResultSizeChars:1e5,userFacingName(){return"SendMessage"},get inputSchema(){return UZa()},coerceInput:(e)=>yEi(e,{applySplit:tQa()}),shouldDefer:!0,isReadOnly(e){return typeof e.message==="string"},backfillObservableInput(e){if("type"in e)return;if(typeof e.to!=="string")return;if(gEi(e)!==void 0)return;let t=e.message??"";if(typeof t==="string")e.type="message",e.recipient=e.to,e.content=jl(t,50);else if(typeof e.message==="object"&&e.message!==null){let r=e.message;if(e.type=r.type,e.recipient=e.to,r.request_id!==void 0)e.request_id=r.request_id;if(r.approve!==v
+
+=== split_slipped_summary_ ===
+--- offset 118178448 ---
+ ...............0...............0...............@...............P...........................................................................................................E...Cannot destructure property 'applySplit' from null or undefined value.......................................B...Cannot destructure property 'message' from null or undefined value..............................t...............................r...............................n...............................split_slipped_summary_..........................string..........................derive_summary..................................& ..............................truncate_summary............+...Iterator result interface is not an object......................_unrepaired_...................._detect_only....2.......1...........................................\...........................A........@ ......@.f.....@ ......@p<.L...@p}.G...@0......@.$.@@4.H...@.3.@.4.H...@.3.@.4.E...@.N
+
+=== isSlippedSummarySplitEnabled ===
+--- offset 81398224 ---
+.........*6.....idleSubscribeFailedLine..0..............IO......idleSubscribedLine.......................6......idleSubscriptionLines....................+6.....subscribeToPeerIdle......+6..............x......InFlightTeammateResumes.................I,6.....SendMessagePreconditionError............Ih......SendMessageTool.................blankCallCausedByHandler.-6..............-6.....idleNotAttemptedNote......6.............I.6.....idleSubscriptionSkippedNotes..............6.....isSlippedSummarySplitEnabled............I/6.....udsBlankMessageGate......!......................emitPeerFileReceiveTelemetry............I,......injectPeerFilePrefix.....06.............I06.....materializeLocalPeerFiles...............I.......peerFileCountCapNote.....16..............06.....peerFileFailureNote.............................peerTransferSpoolDir.....16..............26.....peerUploadsDir...........26.....readPeerFileBounded......36.............I36.....sanitizePeerFile

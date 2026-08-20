@@ -1024,7 +1024,11 @@ async function* queryLoop(
     // Full ExtraUsageDialog 3DS purchase remains denser.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { isFableModel, runFableOverageConsentFlow } =
+      const {
+        isFableModel,
+        runFableOverageConsentFlow,
+        shouldWatchFableParkCommandQueue,
+      } =
         require('./utils/fableConsent.js') as typeof import('./utils/fableConsent.js')
       if (isFableModel(currentModel)) {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1049,6 +1053,8 @@ async function* queryLoop(
           setFableSessionFallbackConsented,
         } =
           require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+        // densable Ns=xo&&On>0 — park timeout only when xo watch is on.
+        const xo = shouldWatchFableParkCommandQueue()
         const flow = await runFableOverageConsentFlow({
           model: currentModel,
           requestDialog: toolUseContext.requestDialog ?? null,
@@ -1059,11 +1065,18 @@ async function* queryLoop(
             setFableSessionFallbackConsented(true)
           },
           signal: toolUseContext.abortController.signal,
-          parkTimeoutMs: resolveFableBridgeDialogTimeoutMsOrDefault(),
+          parkTimeoutMs: xo
+            ? resolveFableBridgeDialogTimeoutMsOrDefault()
+            : undefined,
           fallbackModel: fallbackAllowed ? fallbackModel : null,
           isFallbackAllowed: fallbackAllowed,
           overagesEnabled: true,
         })
+        // densable I3: parent abort during park → aborted_streaming (before
+        // Ar / dialog_declined fallback / billing model_error).
+        if (flow.reason === 'parent_aborted') {
+          return { reason: 'aborted_streaming' }
+        }
         if (flow.shouldAbort) {
           yield createAssistantAPIErrorMessage({
             content:

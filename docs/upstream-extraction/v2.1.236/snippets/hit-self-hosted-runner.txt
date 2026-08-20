@@ -1,0 +1,559 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (claude --version)
+bullet: #17 key=self-hosted-runner
+
+=== pattern counts ===
+b'self-hosted runner': 30
+b'self-hosted-runner': 68
+b'selfHostedRunner': 24
+b'SelfHostedRunner': 12
+b'post-session hook': 25
+b'postSessionHook': 6
+b'post_session_hook': 0
+b'retire': 273
+b'retireSession': 0
+b'retire runner': 0
+b'runner retire': 0
+
+=== exact 'self-hosted runner' hits total=30 ===
+--- offset 79715130 ---
+aude_code_self_hosted_runner..........I ......incrementp,..............q,.....decrement?..............Iq,...../v1/code/scm-connectors/{provider}/{id}/tunnel..........I=...............q,.....Start the self-hosted runner setup wizard. Greet me and begin Phase 1 (create an environment in the Admin UI). Walk me through one step at a time........f..............Is,.....Start the self-hosted runner doctor wizard. Greet me
+
+--- offset 79715306 ---
+.......q,.....Start the self-hosted runner setup wizard. Greet me and begin Phase 1 (create an environment in the Admin UI). Walk me through one step at a time........f..............Is,.....Start the self-hosted runner doctor wizard. Greet me, then ask me to describe the symptom or pick from the 8 diagnostic categories. Work through it one step at a time...................(..p...#!/bin/sh.test "$1" = get || exit 0.
+
+--- offset 182333399 ---
+.................................--help..........................-h..........................T...Usage: claude self-hosted-runner setup [args...]..Interactive wizard: walks you from zero to a working self-hosted runner.environment for Claude Code on the web. Creates an environment, spawns a local.runner, verifies it appears in the Admin UI, and writes a CHEAT-SHEET.md...Any extra args are passed to the underlying C
+
+--- offset 182373779 ---
+.....................................................--help..........................-h..............................Usage: claude self-hosted-runner doctor [args...]..Interactive wizard: diagnoses a self-hosted runner deployment. Walks the.diagnostic decision tree (auth chain, network, lifecycle, session.execution, queue, version, observability), gathers evidence.from /healthz, runner logs, and the admin API, fixe
+
+--- offset 183385787 ---
+..............................runner.........................) for cross-session isolation. Operator-provisioned git config must live in system config (/etc/gitconfig) or via --configure-git; see the self-hosted runners guide........................................................................Q...Cannot destructure property 'configureGitForSigning' from null or undefined value....................................
+
+--- offset 236198336 ---
+.......a.........e...............e...............e...............a.........a........................i...@...............................x...............p...........................6...list registered self-hosted runners for an environment............................................................................p.......P,......P,......`,......`,......`d..0.J..........;Q......|..0........;C......|..0...........`...
+
+--- offset 236229452 ---
+.....a.........e...............e...............e...............a.........a........................i.........@...............p...............h...............`...........................0...probe local self-hosted runner /healthz endpoint.................................... .............................p.......P,......P,......P,......P,......`,......`,......`d..0.[..........;b......|..0.t..........;{......|..0.....n.
+
+--- offset 236246021 ---
+..a.........a.........e...............e...............e...............a.........a........................i.........@...............................x...............p...........................7...read self-hosted runner Prometheus gauges from /metrics............................................. .............................p.......P,......P,......P,......P,......`,......`,......`d..0.[..........;b......|..0........
+
+--- offset 236263024 ---
+..........e...............e...............e...............a.........a........................i..........@...............................x...............p...........................>...requeue a stuck self-hosted runner session onto another runner....................................................................p.......P,......P,......P,......`,......`,......`d..0.:..........;A......|..0.B..........;I......|..0...
+
+--- offset 236283358 ---
+..........................................................................................child_process...................fs/promises.....................path........................7...start a local self-hosted runner process for try-it-out.............................................+.............................p.......P,......P,......P,......`,......`,......`d...........;...}...........;...}...........;..@}..0.
+
+--- offset 236294337 ---
+.......................passthrough.................3...Spawning a local runner requires classifier review..............................................ask.........................E...Start a detached self-hosted runner with the environment secret file ........................... (base dir .................|...)? The runner will execute that environment's queued sessions on this machine and will keep running after t
+
+--- offset 236310373 ---
+....e...............a.........a........................i...........P...............`...............................................................................fs/promises.................6...tail self-hosted runner log file with secret redaction..........@...................................!.............................p.......P,......P,......P,......`,......`,......`d...........;...}..0............;.......|..0
+
+--- offset 247543147 ---
+ a git repository, but the current working directory (`..................S...`) is not one...If the repository is in a subdirectory, `cd` into it first and then re-run /security-review...If this is a self-hosted runner session created without a `git_repository` source, either add one at session creation so the runner clones it and sets the working directory, or `cd` into the cloned repo before running the review...
+
+--- offset 288279745 ---
+ner_spawn_local",JYa="self_hosted_runner_read_health",XYa="self_hosted_runner_read_metrics",ZYa="self_hosted_runner_tail_log",QYa="self_hosted_runner_requeue_session",eJa,$ki,Bki,Uki,jki,zki="Spawn a self-hosted runner as a detached background process on THIS machine using this binary's `self-hosted-runner` subcommand. Always passes `--base-dir` (the runner's default of /workspace is unwritable on operator laptops)
+
+--- offset 288288489 ---
+;aRe();rvv=Se(()=>fi({pool_id:N().describe("Tagged environment id (ccpool_\u2026).")})),nvv=Se(()=>ye({runners:ft(uo(N(),Mn())),equivalent:ye({ui:N()})})),xMf=Ji({name:GYa,searchHint:"list registered self-hosted runners for an environment",maxResultSizeChars:1e5,shouldDefer:!0,get inputSchema(){return rvv()},get outputSchema(){return nvv()},isReadOnly(){return!0},isConcurrencySafe(){return!0},async description(){re
+
+--- offset 288290470 ---
+ault ${m_t}. 0 means disabled.`)})),avv=Se(()=>ye({health:uo(N(),Mn()).optional(),disabled:zt().optional(),unreachable:zt().optional(),error:N().optional()})),DMf=Ji({name:JYa,searchHint:"probe local self-hosted runner /healthz endpoint",maxResultSizeChars:1e5,shouldDefer:!0,get inputSchema(){return svv()},get outputSchema(){return avv()},isReadOnly(){return!0},isConcurrencySafe(){return!0},async description(){retu
+
+--- offset 288291928 ---
+isabled.`)})),cvv=Se(()=>ye({gauges:uo(N(),Fs([Qe(),N()])).optional(),raw:N().optional(),disabled:zt().optional(),unreachable:zt().optional(),error:N().optional()}));HMf=Ji({name:XYa,searchHint:"read self-hosted runner Prometheus gauges from /metrics",maxResultSizeChars:1e5,shouldDefer:!0,get inputSchema(){return lvv()},get outputSchema(){return cvv()},isReadOnly(){return!0},isConcurrencySafe(){return!0},async desc
+
+--- offset 288293087 ---
+s Conflict. For a stuck session whose runner is gone, any value is accepted.")})),pvv=Se(()=>ye({excluded_count:Qe().optional(),equivalent:ye({ui:N()})})),FMf=Ji({name:QYa,searchHint:"requeue a stuck self-hosted runner session onto another runner",maxResultSizeChars:1e5,shouldDefer:!0,get inputSchema(){return dvv()},get outputSchema(){return pvv()},isReadOnly(){return!1},ignoresWholeToolAllowRule(){return!0},suppre
+
+--- offset 288295445 ---
+isables /healthz.`),log_path:N().optional().describe(`Default: ${UMf}`)})),hvv=Se(()=>ye({pid:Qe(),pid_file:N(),log_path:N(),health_port:Qe(),command:N()}));jMf=Ji({name:YYa,searchHint:"start a local self-hosted runner process for try-it-out",maxResultSizeChars:1e5,shouldDefer:!0,get inputSchema(){return mvv()},get outputSchema(){return hvv()},isReadOnly(){return!1},ignoresWholeToolAllowRule(){return!0},suppressesA
+
+--- offset 288295987 ---
+?Kki}`},async checkPermissions(e,t){if(mn(t).mode==="auto")return{behavior:"passthrough",message:"Spawning a local runner requires classifier review."};return{behavior:"ask",message:`Start a detached self-hosted runner with the environment secret file ${e.secret_file_path} (base dir ${e.base_dir??Kki})? The runner will execute that environment's queued sessions on this machine and will keep running after this sessi
+
+--- offset 288297651 ---
+tes:Qe().int().positive().optional().describe(`How many trailing bytes to read. Default ${WMf}.`)})),_vv=Se(()=>ye({lines:N(),bytes_read:Qe(),error:N().optional()})),GMf=Ji({name:ZYa,searchHint:"tail self-hosted runner log file with secret redaction",maxResultSizeChars:200000,shouldDefer:!0,get inputSchema(){return yvv()},get outputSchema(){return _vv()},isReadOnly(){return!0},isConcurrencySafe(){return!0},async de
+
+--- offset 291244378 ---
+ to run inside a git repository, but the current working directory (\`${r}\`) is not one...If the repository is in a subdirectory, \`cd\` into it first and then re-run /security-review...If this is a self-hosted runner session created without a \`git_repository\` source, either add one at session creation so the runner clones it and sets the working directory, or \`cd\` into the cloned repo before running the revie
+
+--- offset 304642596 ---
+et([400,401,403,404,426]),i_n=[0.1,0.25,0.5,1,2.5,5,10,20,30,60];s_n=[0.5,1,2.5,5,10,20,40,80,160,320,640,1280,2560,5120]});function RIy(e){return`You are guiding an operator from zero to a working **self-hosted runner** for Claude Code on the web. The operator must leave able to do this themselves \u2014 you have typed tools that make *you* efficient, but every API tool you call returns an \`equivalent.ui\` path. 
+
+--- offset 304646463 ---
+ring the transition, and its "Self-hosted cloud environments" row is the earlier environment-profile flow \u2014 not the feature you just set up. The Cloud environments page is the canonical home for self-hosted runner configuration..- **Activity tab \u2192 Runners view**: the runner you just started, with its lease + assigned-session count. **Force-kill** (in the runner row's overflow menu) is here for stuck runne
+
+--- offset 304648923 ---
+etupMain:()=>LB0});async function LB0(e){if(e.includes("--help")||e.includes("-h")){console.log(`Usage: claude self-hosted-runner setup [args...]..Interactive wizard: walks you from zero to a working self-hosted runner.environment for Claude Code on the web. Creates an environment, spawns a local.runner, verifies it appears in the Admin UI, and writes a CHEAT-SHEET.md...Any extra args are passed to the underlying C
+
+--- offset 304650335 ---
+setup, re-run `claude self-hosted-runner setup` \u2014 resuming the session with `claude --resume`/`-c` will not re-enable the setup tools."),Xy(a.status!==null?a.status:1)}var xIy,DB0,MB0="Start the self-hosted runner setup wizard. Greet me and begin Phase 1 (create an environment in the Admin UI). Walk me through one step at a time.";var PIy=w(()=>{DP();Qt();EK();Yje();lSt();aRe();In();Ye();mr();HNe();wr();xIy=re
+
+--- offset 304650971 ---
+d_runner_read_health","self_hosted_runner_read_metrics","self_hosted_runner_spawn_local","self_hosted_runner_tail_log"].join(",")});function OIy(e){let t=new URL(e).host;return`You are diagnosing a **self-hosted runner** deployment for Claude Code on the web. Work through the diagnostic categories below, gather evidence with the typed \`self_hosted_runner_*\` read tools (admin-API state, \`/healthz\`, \`/metrics\`,
+
+--- offset 304667454 ---
+,{selfHostedRunnerDoctorMain:()=>FB0});async function FB0(e){if(e.includes("--help")||e.includes("-h")){console.log(`Usage: claude self-hosted-runner doctor [args...]..Interactive wizard: diagnoses a self-hosted runner deployment. Walks the.diagnostic decision tree (auth chain, network, lifecycle, session.execution, queue, version, observability), gathers evidence.from /healthz, runner logs, and the admin API, fixe
+
+--- offset 304668999 ---
+sis, re-run `claude self-hosted-runner doctor` \u2014 resuming the session with `claude --resume`/`-c` will not re-enable the doctor tools."),Xy(a.status!==null?a.status:1)}var DIy,HB0,NB0="Start the self-hosted runner doctor wizard. Greet me, then ask me to describe the symptom or pick from the 8 diagnostic categories. Work through it one step at a time.";var LIy=w(()=>{DP();Qt();EK();Yje();lSt();aRe();In();Ye();m
+
+--- offset 304810107 ---
+${Z}, ${Bge.join(se,"git")}, ${Bge.join(t.baseDir,".runner")}) for cross-session isolation. Operator-provisioned git config must live in system config (/etc/gitconfig) or via --configure-git; see the self-hosted runners guide.`),await Bue.rm(Z,{recursive:!0,force:!0}),await Bue.rm(Bge.join(d_n.homedir(),".gitconfig"),{recursive:!0,force:!0}),await Bue.rm(Bge.join(se,"git"),{recursive:!0,force:!0}),await Bue.rm(Bge.
+
+
+=== exact 'post-session hook' hits total=25 ===
+--- offset 182071934 ---
+..........`.......I.......p...............................2...............................................................session_........................:...........................8...[runner:hook] post-session hook starting (session exit: ........................, budget .......................ms, via ........................)...............................ignore..........................pipe...................
+
+--- offset 182761675 ---
+.............................checkout....................i...[runner:warn] --push-outcome-on-release does not push repos checked out via the checkout lifecycle hook (.......................); use the post-session hook to snapshot those..................[runner:session] Preparing ..................... git ...........................repository......................repositories.................... (..................
+
+--- offset 183231900 ---
+............upstream with customer-managed credentials (the governed mount is read-only); if this failed with an auth error, provide a git credential for the push target on the runner host or use the post-session hook...................................u................................................................@...@`$.@...@..M....@..T....@.<.@p..@...@.....L.@ ..@ ..H...@.4.F.... 3..V=.BW4.@P............\.....
+
+--- offset 183318694 ---
+..................--sigkill-timeout-sec was renamed to --session-stop-grace-sec. It controls how long to wait for the Claude process to exit cleanly after a session ends, before force-killing it. The post-session hook runs after this.....................K...--post-session-hook-timeout-sec must be a positive number of seconds, got: .....................--drain-wait-bg-tasks-sec.......................[runner:warn] -
+
+--- offset 183363167 ---
+].  --session-stop-grace-sec <n>.                              How long to wait for the Claude process to exit cleanly after a.                              session ends, before force-killing it. The post-session hook runs.                              after this. Default: ...................................&.....                              [env: SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS, in ms].  --post-session-
+
+--- offset 183376520 ---
+he push-outcome window, the full.                              --post-session-hook-timeout-sec, the 60s background-work grace, one poll).                              so sessions park cleanly and the post-session hook isn't truncated by.                              the kill. Default: never. [env: SELF_HOSTED_RUNNER_RETIRE_AT, in seconds]..Per-session watchdogs:.  --release-idle-session-min <n>  Release a session 
+
+--- offset 183379973 ---
+NNER_SIGKILL_TIMEOUT_MS was renamed to SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS. It controls how long to wait for the Claude process to exit cleanly after a session ends, before force-killing it. The post-session hook runs after this..........................................RUNNER_RELEASE_IDLE_SESSION_MIN.............+...SELF_HOSTED_RUNNER_RELEASE_IDLE_SESSION_MIN.................#...SELF_HOSTED_RUNNER_SESSION_IDL
+
+--- offset 183381305 ---
+.........../...SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS.............................!...[runner] This runner needs up to ...........................^...s to stop the Claude process and run the post-session hook on shutdown, and force-exits after ..............J...s (a session release already in flight when shutdown begins can add up to ..................x...s, normally well under 1s, before the runner dereg
+
+--- offset 183468919 ---
+.............2...ms (session-stop-grace + post-session-hook-timeout.............................. + push-on-release window....................... + .........................i...s); force-exiting. The post-session hook had its full budget; post-hook cleanup may have been cut short. ....................... session(s) still active........................................[runner] shutdown: waiting for .............<...
+
+--- offset 183512386 ---
+...................................... ...............................................c...............................[runner:session] ...........................5... ordered release failed after the post-session hook: .......................{... ..  .k.e.e.p.i.n.g. .s.e.s.s.i.o.n.;. .r.e.s.p.a.w.n.s. .o.n. .t.h.e. .n.e.x.t. .p.o.l.l.,. .o.r. .i.s. .r.e.q.u.e.u.e.d. .b.y. .t.h.i.s. .r.u.n.n.e.r.'.s. .e.x.i.t. .i.f
+
+--- offset 304599583 ---
+e.workspacePaths.join(":"),CLAUDE_RUNNER_API_BASE_URL:e.apiBaseUrl,CLAUDE_RUNNER_CLIENT_PLATFORM:yCr(e.clientPlatform),CLAUDE_CODE_SESSION_ACCESS_TOKEN:e.sessionAccessToken};e.onStatus(`[runner:hook] post-session hook starting (session exit: ${e.exitReason}, budget ${e.timeoutMs}ms, via ${e.hookPath})`);let r=Date.now(),n=()=>{},o=new Promise((g)=>{n=g}),i=Zeu.spawn(e.hookPath,[],{cwd:e.cwd,env:t,stdio:["ignore","
+
+--- offset 304706992 ---
+ce-all",xn,Xn])}}let Je=Fe,jt=[],pt=[],pr=await XAo(Lt,"checkout");if(pr&&D)d(`[runner:warn] --push-outcome-on-release does not push repos checked out via the checkout lifecycle hook (${pr}); use the post-session hook to snapshot those`);if(At.length>0){u(`[runner:session] Preparing ${At.length} git ${At.length===1?"repository":"repositories"} (${te?"worktree":"canonical-direct"} mode)`);let xn=[],Xn=[],Pn=[],Zr,N
+
+--- offset 304767356 ---
+he plain "+"upstream with customer-managed credentials (the governed mount is read-only); if this failed with an auth error, provide a git credential for the push target on the runner host or use the post-session hook":""));u()}),d.on("error",(m)=>{o(`[runner:session] push-on-release '${t}' spawn failed: ${m} (best-effort)`),u()})})}async function JU0(e,t,r,n,o,i=bBe.spawn,s=cVt){let a=(c,u)=>new Promise((d)=>{let
+
+--- offset 304785690 ---
+sec":throw Error("--sigkill-timeout-sec was renamed to --session-stop-grace-sec. It controls how long to wait for the Claude process to exit cleanly after a session ends, before force-killing it. The post-session hook runs after this.");case"--post-session-hook-timeout-sec":{let a=e[++o],l=Number(a);if(!a||!Number.isFinite(l)||l<=0)throw Error(`--post-session-hook-timeout-sec must be a positive number of seconds, 
+
+--- offset 304791739 ---
+].  --session-stop-grace-sec <n>.                              How long to wait for the Claude process to exit cleanly after a.                              session ends, before force-killing it. The post-session hook runs.                              after this. Default: ${aRo/1000}..                              [env: SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS, in ms].  --post-session-hook-timeout-sec <n>.       
+
+--- offset 304795701 ---
+ are not, that collaborator write.                              surface widens on resume. Repos checked out via the checkout.                              lifecycle hook are NOT pushed \u2014 use the post-session hook to.                              snapshot those. Adds 30s.                              (total, shared across all pushes) to the advertised.                              shutdown budget..            
+
+--- offset 304799885 ---
+he push-outcome window, the full.                              --post-session-hook-timeout-sec, the 60s background-work grace, one poll).                              so sessions park cleanly and the post-session hook isn't truncated by.                              the kill. Default: never. [env: SELF_HOSTED_RUNNER_RETIRE_AT, in seconds]..Per-session watchdogs:.  --release-idle-session-min <n>  Release a session 
+
+--- offset 304803001 ---
+NNER_SIGKILL_TIMEOUT_MS was renamed to SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS. It controls how long to wait for the Claude process to exit cleanly after a session ends, before force-killing it. The post-session hook runs after this."),await a(),process.exit(1);for(let j of["RUNNER_RELEASE_IDLE_SESSION_MIN","SELF_HOSTED_RUNNER_RELEASE_IDLE_SESSION_MIN","SELF_HOSTED_RUNNER_SESSION_IDLE_MIN","SELF_HOSTED_RUNNER_SES
+
+--- offset 304803753 ---
+ON_STOP_GRACE_MS")||aRo,uJ("SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS")||u_n,Ctu(),t.pushOutcomeOnRelease?c_n:0),d=`[runner] This runner needs up to ${u}s to stop the Claude process and run the post-session hook on shutdown, and force-exits after ${u}s (a session release already in flight when shutdown begins can add up to ${Ttu/1000}s, normally well under 1s, before the runner deregisters). Configure your p
+
+--- offset 304806880 ---
+tal] RegisterRunner failed: ${z}`);await a(),process.exit(1)}c(`Registered: runner_id=${v}`);let C=new AbortController,k=!1,A={},R=(j)=>{if(k){let Z=etu();if(Z>0)c(`[runner] Forced shutdown with ${Z} post-session hook(s) still running \u2014 they continue in their own process group, but their output is no longer captured and the runner's timeout budget no longer applies.`);else c("Forced shutdown");a().finally(()=
+
+--- offset 304807473 ---
+onIdle.values()],(Z)=>Z!==null)} of them idle`;c(`Received shutdown signal, draining active sessions... (${j}; uptime ${aa(process.uptime()*1000)}; ${Q})`),c(d);let re=etu();if(re>0)c(`[runner] ${re} post-session hook(s) still running \u2014 waiting for them within the budget above. A second SIGTERM force-exits the runner immediately; make sure your supervisor's stop timeout covers the full budget so hooks are not
+
+--- offset 304822694 ---
+0,pt=(d.get(Me)?.task??Promise.resolve()).then(()=>r.releaseSession(o.runnerToken,Me)).then(({released:pr})=>{if(z.delete(Me),U.delete(Me),j.delete(Me),pr){if(c(`[runner:session] ${Me} released after post-session hook \u2014 parked server-side`),gt||ut||Je>0)ve("self_hosted_release_session","released_true_mid_work");else be("self_hosted_release_session");return}c(`[runner:session] ${Me} released=false after post-s
+
+--- offset 304822905 ---
+n hook \u2014 parked server-side`),gt||ut||Je>0)ve("self_hosted_release_session","released_true_mid_work");else be("self_hosted_release_session");return}c(`[runner:session] ${Me} released=false after post-session hook (pending user event) \u2014 respawns on the next poll, or is requeued by this runner's exit if it is draining (grace=0) or retiring`),ve("self_hosted_release_session","released_false")}).catch((pr)=>
+
+--- offset 304823257 ---
+ve("self_hosted_release_session","released_false")}).catch((pr)=>{z.delete(Me),U.delete(Me);let jr=pr instanceof Error?pr.message:String(pr);c(`[runner:session] ${Me} ordered release failed after the post-session hook: ${jr} \u2014 keeping session; respawns on the next poll, or is requeued by this runner's exit if it is draining (grace=0) or retiring`),pe("self_hosted_release_session","rpc_failed")});z.set(Me,pt),
+
+--- offset 304832360 ---
+_budget_exceeded"),c(`[runner] shutdown exceeded ${_e}ms (session-stop-grace + post-session-hook-timeout`+(i.pushOutcomeOnRelease?" + push-on-release window":"")+` + ${Eks/1000}s); force-exiting. The post-session hook had its full budget; post-hook cleanup may have been cut short. ${d.size} session(s) still active.`),await e.flushLogSink?.(),process.exit(1)}}if(z.size>0)c(`[runner] shutdown: waiting for ${z.size} 
+
+
+=== exact 'retire' hits total=273 ===
+--- offset 61816357 ---
+cherhighly biologylife ofor evenrise of&raquo;plusonehunting(thoughDouglasjoiningcirclesFor theAncientVietnamvehiclesuch ascrystalvalue =Windowsenjoyeda smallassumed<a id="foreign All rihow theDisplayretiredhoweverhidden;battlesseekingcabinetwas notlook atconductget theJanuaryhappensturninga:hoverOnline French lackingtypicalextractenemieseven ifgeneratdecidedare not/searchbeliefs-image:locatedstatic.log
+
+--- offset 61847764 ---
+are calledengaged in"script");but it waselectroniconsubmit=".<!-- End electricalofficiallysuggestiontop of theunlike theAustralianOriginallyreferences.</head>..recognisedinitializelimited toAlexandriaretirementAdventuresfour years..&lt;!-- increasingdecorationh3 class="origins ofobligationregulationclassified(function(advantagesbeing the historians<base hrefrepeatedlywilling tocomparabledesignatednomina
+
+--- offset 66331714 ---
+tialized!..  %-10s: %5zu.%03zu s..elapsed.  %-10s: user: %zu.%03zu s, system: %zu.%03zu s, faults: %zu, peak rss: ., peak commit: .%s %zu..touched.abandoned.reclaima.reclaimf.reabandon.waits.extended.retire.searches.arenas.reserved.committed.purged.rollback.mmaps.commits.resets.purges.guarded.theaps.heaps.heap waits.threads.  %-10s: %5i..numa nodes.subproc.holes: %zu bytes / %zu blocks discarded now, %z
+
+--- offset 66335545 ---
+loc_huge.malloc_requested.mmap_calls.commit_calls.reset_calls.purge_calls.arena_count.malloc_normal_count.malloc_huge_count.malloc_guarded_count.arena_rollback_count.arena_purges.pages_extended.pages_retire.page_searches.page_searches_count.segments.segments_abandoned.segments_cache._segments_reserved.pages_reclaim_on_alloc.pages_reclaim_on_free.pages_reabandon_full.pages_unabandon_busy_wait.heaps_delet
+
+--- offset 66381772 ---
+ SCID.cannot track new SCID.Abort connection: cannot track new SCID.generating NEW_CONNECTION_ID frame failed: %d.Abort connection: generating NEW_CONNECTION_ID frame failed: %d.too many (%d) CIDs to retire.Abort connection: too many (%d) CIDs to retire.generating RETIRE_CONNECTION_ID frame failed: %d.Abort connection: generating RETIRE_CONNECTION_ID frame failed: %d.generating STREAMS_BLOCKED frame fai
+
+--- offset 66381819 ---
+annot track new SCID.generating NEW_CONNECTION_ID frame failed: %d.Abort connection: generating NEW_CONNECTION_ID frame failed: %d.too many (%d) CIDs to retire.Abort connection: too many (%d) CIDs to retire.generating RETIRE_CONNECTION_ID frame failed: %d.Abort connection: generating RETIRE_CONNECTION_ID frame failed: %d.generating STREAMS_BLOCKED frame failed: %d.Abort connection: generating STREAMS_BL
+
+--- offset 66383989 ---
+ay, last stream: %llu.could not write GOAWAY frame.could not create new stream: %s.Abort connection: could not create new stream: %s.User aborted connection.%s: cannot find own DCID.ietf_full_conn_ci_retire_cid.Abort connection: %s: cannot find own DCID.No DCID available: cannot switch.switched DCID to %.*s.stateless reset reported.header set must be specified when pushing.cannot start header for push s
+
+--- offset 66394306 ---
+ the Sequence Number=%llu.Received NEW_CONNECTION_ID frame, but current DCID is zero-length.Abort connection: Received NEW_CONNECTION_ID frame, but current DCID is zero-length.%s: cannot allocate dce.retire_seqno.received STOP_SENDING on receive-only stream %llu.Abort connection: received STOP_SENDING on receive-only stream %llu.stream %llu is in %s state: receipt of STOP_SENDING frame is a violation.Ab
+
+--- offset 66395202 ---
+ any challenge sent on this path.Abort connection: received path response %s that does not correspond to any challenge sent on this path.path validated: switching from path #%hhu to path #%hhu.cannot retire %.*s, as it is used on more than onepath .cannot decode CRYPTO frame.Abort connection: cannot decode CRYPTO frame.cannot create crypto stream for level %u.Abort connection: cannot create crypto strea
+
+--- offset 66395430 ---
+n more than onepath .cannot decode CRYPTO frame.Abort connection: cannot decode CRYPTO frame.cannot create crypto stream for level %u.Abort connection: cannot create crypto stream for level %u.cannot retire zero-length CID.Abort connection: cannot retire zero-length CID.cannot retire CID seqno=%llu as it has not been allocated yet.Abort connection: cannot retire CID seqno=%llu as it has not been allocat
+
+--- offset 66395478 ---
+Abort connection: cannot decode CRYPTO frame.cannot create crypto stream for level %u.Abort connection: cannot create crypto stream for level %u.cannot retire zero-length CID.Abort connection: cannot retire zero-length CID.cannot retire CID seqno=%llu as it has not been allocated yet.Abort connection: cannot retire CID seqno=%llu as it has not been allocated yet.cannot retire CID seqno=%llu, for it is u
+
+--- offset 66395508 ---
+e CRYPTO frame.cannot create crypto stream for level %u.Abort connection: cannot create crypto stream for level %u.cannot retire zero-length CID.Abort connection: cannot retire zero-length CID.cannot retire CID seqno=%llu as it has not been allocated yet.Abort connection: cannot retire CID seqno=%llu as it has not been allocated yet.cannot retire CID seqno=%llu, for it is used as DCID in the packet.Abor
+
+--- offset 66395588 ---
+ create crypto stream for level %u.cannot retire zero-length CID.Abort connection: cannot retire zero-length CID.cannot retire CID seqno=%llu as it has not been allocated yet.Abort connection: cannot retire CID seqno=%llu as it has not been allocated yet.cannot retire CID seqno=%llu, for it is used as DCID in the packet.Abort connection: cannot retire CID seqno=%llu, for it is used as DCID in the packet
+
+--- offset 66395650 ---
+ID.Abort connection: cannot retire zero-length CID.cannot retire CID seqno=%llu as it has not been allocated yet.Abort connection: cannot retire CID seqno=%llu as it has not been allocated yet.cannot retire CID seqno=%llu, for it is used as DCID in the packet.Abort connection: cannot retire CID seqno=%llu, for it is used as DCID in the packet.current SCID was retired; no new SCID candidate.received an e
+
+--- offset 66395735 ---
+ has not been allocated yet.Abort connection: cannot retire CID seqno=%llu as it has not been allocated yet.cannot retire CID seqno=%llu, for it is used as DCID in the packet.Abort connection: cannot retire CID seqno=%llu, for it is used as DCID in the packet.current SCID was retired; no new SCID candidate.received an empty NEW_TOKEN frame.Abort connection: received an empty NEW_TOKEN frame.received une
+
+--- offset 66395812 ---
+ it has not been allocated yet.cannot retire CID seqno=%llu, for it is used as DCID in the packet.Abort connection: cannot retire CID seqno=%llu, for it is used as DCID in the packet.current SCID was retired; no new SCID candidate.received an empty NEW_TOKEN frame.Abort connection: received an empty NEW_TOKEN frame.received unexpected NEW_TOKEN frame.Abort connection: received unexpected NEW_TOKEN frame
+
+--- offset 75145488 ---
+..&.....transitionTo.............!......shutdownWorker............&.....noteDowngradeRefused......&.............I.&.....respawnIfIdleStale........................&.....isParkedIdleFork................retireIfSettled...........&.....sigtermWorker...................onPtyAuthRequired........................P......rekeyForAuthMismatch......................&.....fireAuthRekey............*......spawn.....&...
+
+--- offset 81368944 ---
+.:5.....getSelfBridgeCompatId...."..............I:5.....getSelfBridgeTitle.......:5.....................reportBridgePermissionMode5.............I;5.....reseedBridgePermissionMode5..............<5.....retireBridgeHandle......................I<5.....setReplBridgeHandle......................<5.....setSdkHostedBridgeHandle................I=5.....setSelfBridgeTitle.......=5..............!......loadHljsBundle
+
+--- offset 87517824 ---
+........h...............`...............p...............................................................................................none............................remap...........................retirement..........................................D.................................0..@ ........;...<.....@`<.E....Q4.."<...4..p<.@ .......`T.@ ......E1<..R4.@@L..P.......pT.@ ........T.......T.......4.@
+
+--- offset 87518880 ---
+.........................................................)......................H.......................................................................................................................retirementDates.................remappedTo......................retirementDate..................isPast..........................isDeprecated....................modelName...................i.'.........Q.'...
+
+--- offset 87518944 ---
+................H.......................................................................................................................retirementDates.................remappedTo......................retirementDate..................isPast..........................isDeprecated....................modelName...................i.'.........Q.'.....u.'...'......H..P.......................X.....................
+
+--- offset 87520816 ---
+................................................................(.......................................0...............p...............0...............................remap...........................retirement.................................................H.j........................................................................H.........................H..i.................................G..i.....
+
+--- offset 87522944 ---
+........................................................................................................ now runs as .................../model to change................ ...............................retired.........................retires........................./model to switch.................................................................@.$..`-.@ ......@.<.M...@ ^.E....Q4.@`n.J...@.e.E....Q4M....@
+
+--- offset 87522976 ---
+........................................................................ now runs as .................../model to change................ ...............................retired.........................retires........................./model to switch.................................................................@.$..`-.@ ......@.<.M...@ ^.E....Q4.@`n.J...@.e.E....Q4M....@...J...@.d.E....Q4.@...E....Q4..
+
+--- offset 87526740 ---
+.................... is automatically remapped to .................. (..........................L...). Set CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP=1 to keep the requested model.....................was retired on..................will be retired on.............................. ...........................&.... Consider switching to a newer model............................................... .............
+
+--- offset 87526776 ---
+y remapped to .................. (..........................L...). Set CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP=1 to keep the requested model.....................was retired on..................will be retired on.............................. ...........................&.... Consider switching to a newer model............................................... ............................@.$..`-.@ ......@.<.M
+
+--- offset 97729824 ---
+..................................y.....................P...............................................handoffGeneration...............................inFlightSubscribes..............................retiredInFlightArms.............................pendingInFlightWiring...........................supervisors.....................pendingRegistrations............................rewatchTiming.................
+
+--- offset 97730784 ---
+........................inFlightGenerations.............................ownSeqs.........................pendingOwnEdits.................watches.........................stopCounts......................retiredWatches..................arming..........................notLiveDoc......................journalUnavailable..............................journalNegotiations.............................liveDocWatch..
+
+--- offset 97751766 ---
+..`...............................................................................................................claude-code-github-action.......................mcp.........................)...tengu_retire_chat_relay_artifact_backstop........................................................................@.$.W.... 6.....@PT.@.>...<......pT......pT...........<............8...?...s.......................
+
+--- offset 99525792 ---
+....................................................................................................+...Iterator result interface is not an object......................armed...........................retired............................."............................@@=.J.....4.."3...L.......s...L...l....#........@ ...`......@.$.S....`3.@@G.F...@ U.P...@ 5.J.....4...4.@.4....r............@...J.....4......
+
+--- offset 108265275 ---
+.{...............................{... P..............<........................................................j........i..... ........+......`.......................I...=...[deviceRegistry] could not retire the unreadable device key: .............(......................................@p.C........@ .....I....@.t.................................... .......................h1....................s.....k....
+
+--- offset 108287739 ---
+.{...............{...............{...................<........................................................j........i..... ........a......`........U;.................:...[deviceRegistry] could not retire the revoked device key: B......................................................@p.@........@ .....F....@.p........{... .#.....................`u............................................s.0...@...0
+
+--- offset 111525184 ---
+........................................................................@]:.....................8.......................`................................................Y..............................retiredHandles...............M...........M../....M...N.......H..P.......................x.......................`.......x.................................................8...................................
+
+--- offset 124428867 ---
+..................... ...............P...............P...............................................watch.......................K...(your watch request was later stopped; idle auto-armed watches are retired).................%...(idle auto-armed watches are retired)...........................it was armed ...............#... and has seen no activity for over ............................................. 
+
+--- offset 124428925 ---
+...........................................watch.......................K...(your watch request was later stopped; idle auto-armed watches are retired).................%...(idle auto-armed watches are retired)...........................it was armed ...............#... and has seen no activity for over ............................................. ..................................................<.@ ..I.
+
+--- offset 124433701 ---
+...................0.......................(.y.....................0.y.............................................uptimeMs........................resumeNeverOpened...............................idle_retired....................reuseRefused....................maxConsecutiveFailures..........................nextRewatchAt...P...wC...........K......z...d................H..P..................................
+
+--- offset 141311398 ---
+....................................s.............................................Restored ....................... by copy after rename failed: .................................................. from retired-dir copy ......................... after rename (.................) and copy (....................) both failed...................Failed to restore ..............................: ..................
+
+--- offset 141311680 ---
+py (....................) both failed...................Failed to restore ..............................: ..............................gone............................original_dir....................retired_dir.....................update_apply_restore_failed.....2.......1................... ... after install failure: rename: ................; copy: ........................; preserved copy: ............
+
+--- offset 141330192 ---
+................................................................................................................'.................................j..........i..........................................retired-dir cleanup failed: .....................................................@`..@...d.Q....................................`E..........................#,..........7.......#,..,,.......D..P.............
+
+--- offset 143081305 ---
+.......H...............................................................&...........................................i...........0...............`...............X...........................!...tengu_bg_retire_grace_bridged_min.......................`..................................................................;.................................... O...................U.......P..\...*....P..+....P...P.
+
+
+=== related 'self-hosted-runner' hits total=68 ===
+--- offset 121447360 ---
+.....................................................................".....i................p...............................................................................................................................self-hosted-runner..............................--environment-secret-file.......................--capacity......................--base-dir......................--api-url.......................--health-port...................--log-file....
+
+--- offset 181892290 ---
+...........................................@@Fh...........................................`S]......................a........................_.............................................................................x-self-hosted-runner-version........................................8........H..P.......................................................x.......................................................................................................
+
+--- offset 182040372 ---
+wns directly (no shell, no .cmd/.ps1/.exe resolution). Run the runner on a Linux or macOS host to use hooks, or drop --hooks-dir / SELF_HOSTED_RUNNER_HOOKS_DIR to use the built-in checkout and command behavior. See docs/self-hosted-runners-guide.md . Lifecycle hooks..............................orchestrator mode is not supported on Windows: it is driven by the spawn-runner lifecycle hook, and lifecycle hooks currently require a Linux or macOS host becaus
+
+--- offset 182040796 ---
+quire a Linux or macOS host because they are POSIX executables spawned directly (no shell, no .cmd/.ps1/.exe resolution). Run the orchestrator on a Linux or macOS host; the runners it provisions are unaffected. See docs/self-hosted-runners-guide.md . Lifecycle hooks.......................................................@0......@.5.@.U.....@...I.....<.@A......@...I.....<........................!...+...G...c.......................p|........................
+
+--- offset 182288674 ---
+...........................................................................................................j......................................i.......0...............`...............X...........................%... [self-hosted-runner] [runner:fatal] .....................................................................................!5......"<...4...n.@ .....LL...@.tT......,......SL....................................................................
+
+--- offset 182295198 ---
+..............P.......I...............I........................................+..............p...............................................--help..........................-h..........................j...Usage: claude self-hosted-runner orchestrator [options]..Polls the spawn-hints queue (server returns immediately) and runs ${hooks-dir}/spawn-runner once per.hint. The hook must submit work asynchronously (kubectl create job, EC2.RunInstances, ...) and
+
+--- offset 182300749 ---
+... . .-.-.h.e.l.p.,. .-.h. . . . . . . . . . . . . . . . . . .S.h.o.w. .t.h.i.s. .h.e.l.p. .m.e.s.s.a.g.e.....................orchestrator mode...............................error: .....................?....Run 'claude self-hosted-runner orchestrator --help' for usage..................................debug...........................................[runner:fatal] .............................)...[runner:hook] spawn-runner hook found at ..................
+
+--- offset 182309106 ---
+.................................................................................j........i...............@...............P...............p...............x...............................n............................... [self-hosted-runner] ..........................o........................................................................@.4.B...@.m.@ ..C.....q................................`U........................}.....................................
+
+--- offset 182333310 ---
+......................I...............................(........................................~..............................................--help..........................-h..........................T...Usage: claude self-hosted-runner setup [args...]..Interactive wizard: walks you from zero to a working self-hosted runner.environment for Claude Code on the web. Creates an environment, spawns a local.runner, verifies it appears in the Admin UI, and wr
+
+--- offset 182333889 ---
+...........................-...............................--append-system-prompt..........................--tools.........................--permission-mode...............................default.....................$...[self-hosted-runner:setup] spawning:............................inherit.........................cli_self_hosted_setup...........................spawn_failed................................2...[self-hosted-runner:setup] failed to spawn chil
+
+--- offset 182334081 ---
+lt.....................$...[self-hosted-runner:setup] spawning:............................inherit.........................cli_self_hosted_setup...........................spawn_failed................................2...[self-hosted-runner:setup] failed to spawn child: ..............................................child_signal....................child_nonzero...............................4...[self-hosted-runner:setup] child exited with status ...........
+
+--- offset 182334257 ---
+_failed................................2...[self-hosted-runner:setup] failed to spawn child: ..............................................child_signal....................child_nonzero...............................4...[self-hosted-runner:setup] child exited with status ............................(null).........................., signal .......................................................[.s.e.l.f.-.h.o.s.t.e.d.-.r.u.n.n.e.r.:.s.e.t.u.p.]. .T.o. .c.o
+
+--- offset 182373710 ---
+...............}......I...............................(.......................................................................................--help..........................-h..............................Usage: claude self-hosted-runner doctor [args...]..Interactive wizard: diagnoses a self-hosted runner deployment. Walks the.diagnostic decision tree (auth chain, network, lifecycle, session.execution, queue, version, observability), gathers evidence.fr
+
+--- offset 182374385 ---
+...........................-...............................--append-system-prompt..........................--tools.........................--permission-mode...............................default.....................%...[self-hosted-runner:doctor] spawning:...........................inherit.....................3...[self-hosted-runner:doctor] failed to spawn child: .............................cli_self_hosted_doctor..........................spawn_failed...
+
+--- offset 182374481 ---
+...........--tools.........................--permission-mode...............................default.....................%...[self-hosted-runner:doctor] spawning:...........................inherit.....................3...[self-hosted-runner:doctor] failed to spawn child: .............................cli_self_hosted_doctor..........................spawn_failed................................5...[self-hosted-runner:doctor] child exited with status ..........
+
+--- offset 182374657 ---
+...........inherit.....................3...[self-hosted-runner:doctor] failed to spawn child: .............................cli_self_hosted_doctor..........................spawn_failed................................5...[self-hosted-runner:doctor] child exited with status ...........................(null).........................., signal .......................................child_signal....................child_nonzero..................................
+
+--- offset 182390046 ---
+......................*...........................................j...i....... ...............`...........................@...#!/bin/sh.BIN="$CLAUDE_RUNNER_CLAUDE_BIN".[ -n "$BIN" ] || BIN='............0...'.exec "$BIN" self-hosted-runner code-sign "$@"........................................................$.@ .....................................P1r.................7........0..........m0.......0...1.......H..P.........................}.................
+
+--- offset 182768016 ---
+s.p.a.w.n...................control_request.................runner-session-gone-............................end_session.....................session_not_found...............................................................self-hosted-runner-session..............(........................................2..............p3......I.......(...........................)...[runner:session] early /remote result is .......................ms old (> ..................-.
+
+--- offset 182911946 ---
+.................._...............................--add-dir...................+...Iterator result interface is not an object......................................S...........................c...[runner:session] Stripped self-hosted-runner operator tool names from the server-supplied tools arg.............................................[runner:warn] server-supplied tools arg contained ONLY self-hosted-runner operator tool names; dropping --tools and usin
+
+--- offset 182912119 ---
+.................c...[runner:session] Stripped self-hosted-runner operator tool names from the server-supplied tools arg.............................................[runner:warn] server-supplied tools arg contained ONLY self-hosted-runner operator tool names; dropping --tools and using the default pool......................................[runner:session] Added ........................./............................... claude_code_args....................
+
+--- offset 183330709 ---
+me account ........................L...p.e.r. .r.u.n.n.e.r.,. .r.e.g.i.s.t.e.r. .a. .f.i.x.e.d.-.f.l.e.e.t. .r.u.n.n.e.r. .w.i.t.h. .t.h.e. .e.n.v.i.r.o.n.m.e.n.t. .s.e.c.r.e.t. ..  .s.e.e. .....................2...docs/self-hosted-runners-guide.md . "Get started"................................................................@........p5.@ ........m.@.......@.L........................%...'...............................p.Y.............................O$.
+
+--- offset 183361598 ---
+-.....I.......@...............`I......I.......@...............`I..............pI...............I..............................................--help..........................-h..........................m...Usage: claude self-hosted-runner [options]..Connection:.  --api-url <url>             API base URL (default: ...............I...).  --environment-secret-file <path>.                              Path to environment secret file (or set SELF_HOSTED_RUNNE
+
+--- offset 183379533 ---
+.-.h. . . . . . . . . . . . . . . . . . .S.h.o.w. .t.h.i.s. .h.e.l.p. .m.e.s.s.a.g.e...........................--hooks-dir.....................................................error: .....................2....Run 'claude self-hosted-runner --help' for usage...............................................debug...........................a...............................open............................error...........................[runner:fatal] SELF_HOSTED_
+
+--- offset 183383856 ---
+: ..........................................Registered: runner_id=..........................................SIGTERM.........................SIGINT..........................runner_token.jwt................................self-hosted-runner..............................[runner:fatal] --use-anthropic-git-proxy requires --capacity 1 (the proxy URL is per-session and linked worktrees share origin). Omit --use-anthropic-git-proxy or set --capacity 1...........
+
+--- offset 183409426 ---
+...........j............................................................i.P...............P...............`...............................................................................o............................... [self-hosted-runner] ..........................s................................................................@.%.B.....m.@ ........t.....@`4.....@P,.@ ..C..........................................................H.e.....................
+
+
+=== related 'selfHostedRunner' hits total=24 ===
+--- offset 81476752 ---
+......8.....parseOrchestratorArgs...I.8...............8.#...renderOrchestratorPrometheusMetrics.......8.....................resolveOrchestratorPoolSecret...........I.8.....runOrchestratorLoop......b................8. ...selfHostedRunnerOrchestratorMain..........8.....startOrchestratorHealthzServer...........q......selfHostedRunnerSetupMainT..............I.8.....selfHostedRunnerDoctorMain................8.....GIT_PROXY_CRED_HELPER_CONTENT.............8.
+
+--- offset 81476848 ---
+......8.....................resolveOrchestratorPoolSecret...........I.8.....runOrchestratorLoop......b................8. ...selfHostedRunnerOrchestratorMain..........8.....startOrchestratorHealthzServer...........q......selfHostedRunnerSetupMainT..............I.8.....selfHostedRunnerDoctorMain................8.....GIT_PROXY_CRED_HELPER_CONTENT.............8.....MIN_GIT_VERSION_FOR_SSH_SIGN..............8.....coauthorHookStubs.........8.................
+
+--- offset 81476896 ---
+oolSecret...........I.8.....runOrchestratorLoop......b................8. ...selfHostedRunnerOrchestratorMain..........8.....startOrchestratorHealthzServer...........q......selfHostedRunnerSetupMainT..............I.8.....selfHostedRunnerDoctorMain................8.....GIT_PROXY_CRED_HELPER_CONTENT.............8.....MIN_GIT_VERSION_FOR_SSH_SIGN..............8.....coauthorHookStubs.........8.....................codeSignArtifacts........)..............I.8.
+
+--- offset 81477520 ---
+th....8.............I.8.....gitSupportsSshSign......II................8.....installCoauthorHooks......8.............I.8.....parseGitVersion..........a......parseSshSignArgs..........8.....readGitVersion..........I.8.....selfHostedRunnerCodeSignMain....................signCommitBuffer........I.......checkTokenTime..................decodeSegment...........I.......parseDecodeTokenArgs......8...............8.....readStdin................0......resolveToken
+
+--- offset 81477776 ---
+............signCommitBuffer........I.......checkTokenTime..................decodeSegment...........I.......parseDecodeTokenArgs......8...............8.....readStdin................0......resolveToken............I.8.....selfHostedRunnerDecodeTokenMain.................splitJwt..................8.....verifyAgainstJwks.......I.8...............8.....TRUST_WORKSPACE_DEFAULT...8...............8.....assertExplicitBaseDir....h..............I.......derivePollIn
+
+--- offset 81478240 ---
+....I.8.............I.......readDrainWaitMs.................readRetireAtEnvMs........"...............]......resolveExec...............8.....resolvePoolSecret...............................runPollLoop.............I.8.....selfHostedRunnerMain......8...............8.....sessionBoundCapacityWarning...............8.....NON_REPL_SUBCOMMANDS......8...............8.....isMcpServeInvocation.....................q......isPluginEvalInvocation..................I.8.
+
+--- offset 183644269 ---
+...............claude agents...................self-hosted-runner..............................cli_self_hosted_runner_path.....................orchestrator....\...........................[...Cannot destructure property 'selfHostedRunnerOrchestratorMain' from null or undefined value.....]...............................setup...^...................T...Cannot destructure property 'selfHostedRunnerSetupMain' from null or undefined value............_........
+
+--- offset 183644429 ---
+...........................[...Cannot destructure property 'selfHostedRunnerOrchestratorMain' from null or undefined value.....]...............................setup...^...................T...Cannot destructure property 'selfHostedRunnerSetupMain' from null or undefined value............_...............................doctor..`...................U...Cannot destructure property 'selfHostedRunnerDoctorMain' from null or undefined value...........a........
+
+--- offset 183644589 ---
+etup...^...................T...Cannot destructure property 'selfHostedRunnerSetupMain' from null or undefined value............_...............................doctor..`...................U...Cannot destructure property 'selfHostedRunnerDoctorMain' from null or undefined value...........a...............................code-sign.......b...........................W...Cannot destructure property 'selfHostedRunnerCodeSignMain' from null or undefined value..
+
+--- offset 183644765 ---
+...........U...Cannot destructure property 'selfHostedRunnerDoctorMain' from null or undefined value...........a...............................code-sign.......b...........................W...Cannot destructure property 'selfHostedRunnerCodeSignMain' from null or undefined value.........c...............................decode-token....d...........................Z...Cannot destructure property 'selfHostedRunnerDecodeTokenMain' from null or undefined valu
+
+--- offset 183644941 ---
+...........W...Cannot destructure property 'selfHostedRunnerCodeSignMain' from null or undefined value.........c...............................decode-token....d...........................Z...Cannot destructure property 'selfHostedRunnerDecodeTokenMain' from null or undefined value......e.......f...................O...Cannot destructure property 'selfHostedRunnerMain' from null or undefined value.g...............................--tmux...................
+
+--- offset 183645069 ---
+...............decode-token....d...........................Z...Cannot destructure property 'selfHostedRunnerDecodeTokenMain' from null or undefined value......e.......f...................O...Cannot destructure property 'selfHostedRunnerMain' from null or undefined value.g...............................--tmux..........................--tmux=classic..................-w..............................--worktree......................cli_tmux_worktree_fast_pa
+
+--- offset 304615819 ---
+laims:()=>SIy,extractPoolIdFromSecret:()=>_Iy,normalizeSpawnHintAttempt:()=>bIy,parseOrchestratorArgs:()=>gIy,renderOrchestratorPrometheusMetrics:()=>TIy,resolveOrchestratorPoolSecret:()=>CIy,runOrchestratorLoop:()=>EIy,selfHostedRunnerOrchestratorMain:()=>OB0,startOrchestratorHealthzServer:()=>wIy});function mIy(){return{buckets:i_n.map(()=>0),count:0,sum:0}}function RB0(e,t){e.sum+=t,e.count+=1;for(let r=0;r<i_n.length;r++)if(t<=i_n[r])e.buckets[r]++
+
+--- offset 304648706 ---
+Production deployment is **taught, not tooled** \u2014 there is no \`deploy_to_k8s\` tool. If asked, explain the k8s/compose pattern and Write a sample manifest; the operator owns their orchestrator.`}var IIy={};vt(IIy,{selfHostedRunnerSetupMain:()=>LB0});async function LB0(e){if(e.includes("--help")||e.includes("-h")){console.log(`Usage: claude self-hosted-runner setup [args...]..Interactive wizard: walks you from zero to a working self-hosted runner.
+
+--- offset 304667256 ---
+tarball \u2014 no secrets should be present), then share it with Anthropic via your shared Slack Connect channel or account team...**Never auto-upload customer logs.** The operator reviews and sends.`}var MIy={};vt(MIy,{selfHostedRunnerDoctorMain:()=>FB0});async function FB0(e){if(e.includes("--help")||e.includes("-h")){console.log(`Usage: claude self-hosted-runner doctor [args...]..Interactive wizard: diagnoses a self-hosted runner deployment. Walks t
+
+--- offset 304670035 ---
+tGovernedEntries:()=>ntu,configureGitProxyCredential:()=>qB0,gitProxyCredHelperPath:()=>UIy,gitSupportsSshSign:()=>FIy,installCoauthorHooks:()=>jIy,parseGitVersion:()=>NIy,parseSshSignArgs:()=>VIy,readGitVersion:()=>jB0,selfHostedRunnerCodeSignMain:()=>VB0,signCommitBuffer:()=>KIy});function NIy(e){let t=/git version (\d+)\.(\d+)/.exec(e);if(!t)return null;return[Number(t[1]),Number(t[2])]}function FIy(e){let t=NIy(e);if(t===null)return null;let[r,n]=t
+
+--- offset 304678101 ---
+itor-watchman","pre-auto-gc","post-rewrite","sendemail-validate","post-index-change"]});var rPy={};vt(rPy,{checkTokenTime:()=>ZIy,decodeSegment:()=>otu,parseDecodeTokenArgs:()=>JIy,readStdin:()=>ePy,resolveToken:()=>tPy,selfHostedRunnerDecodeTokenMain:()=>XB0,splitJwt:()=>XIy,verifyAgainstJwks:()=>QIy});function JIy(e){let t={header:!1,verify:!0,checkExpiry:!0,help:!1};for(let r=0;r<e.length;r++){let n=e[r];switch(n){case"--help":case"-h":t.help=!0;bre
+
+--- offset 304780274 ---
+ST_WORKSPACE_DEFAULT:()=>Etu,assertExplicitBaseDir:()=>cOy,derivePollInterval:()=>mOy,parseArgs:()=>aOy,readDrainWaitMs:()=>Ctu,readRetireAtEnvMs:()=>rOy,resolveExec:()=>dOy,resolvePoolSecret:()=>uOy,runPollLoop:()=>fOy,selfHostedRunnerMain:()=>Tj0,sessionBoundCapacityWarning:()=>lOy});function Ctu(){let e=process.env.SELF_HOSTED_RUNNER_DRAIN_WAIT_MS;return e!==void 0&&e!==""?uJ("SELF_HOSTED_RUNNER_DRAIN_WAIT_MS"):uJ("SELF_HOSTED_RUNNER_DRAIN_WAIT_BG_T
+
+--- offset 304848544 ---
+.resolve().then(() => (x_(),cNr));await de(0,"other",{suppressResumeHint:!0});return}if(s)return R("claude agents")}}if(t[0]==="self-hosted-runner"){r("cli_self_hosted_runner_path");let h=t[1];if(h==="orchestrator"){let{selfHostedRunnerOrchestratorMain:y}=await Promise.resolve().then(() => (AIy(),kIy));await y(t.slice(2));return}if(h==="setup"){let{selfHostedRunnerSetupMain:y}=await Promise.resolve().then(() => (PIy(),IIy));await y(t.slice(2));return}i
+
+--- offset 304848675 ---
+f-hosted-runner"){r("cli_self_hosted_runner_path");let h=t[1];if(h==="orchestrator"){let{selfHostedRunnerOrchestratorMain:y}=await Promise.resolve().then(() => (AIy(),kIy));await y(t.slice(2));return}if(h==="setup"){let{selfHostedRunnerSetupMain:y}=await Promise.resolve().then(() => (PIy(),IIy));await y(t.slice(2));return}if(h==="doctor"){let{selfHostedRunnerDoctorMain:y}=await Promise.resolve().then(() => (LIy(),MIy));await y(t.slice(2));return}if(h==
+
+--- offset 304848800 ---
+await Promise.resolve().then(() => (AIy(),kIy));await y(t.slice(2));return}if(h==="setup"){let{selfHostedRunnerSetupMain:y}=await Promise.resolve().then(() => (PIy(),IIy));await y(t.slice(2));return}if(h==="doctor"){let{selfHostedRunnerDoctorMain:y}=await Promise.resolve().then(() => (LIy(),MIy));await y(t.slice(2));return}if(h==="code-sign"){let{selfHostedRunnerCodeSignMain:y}=await Promise.resolve().then(() => (lVt(),SCr));await y(t.slice(2));return}
+
+--- offset 304848929 ---
+ Promise.resolve().then(() => (PIy(),IIy));await y(t.slice(2));return}if(h==="doctor"){let{selfHostedRunnerDoctorMain:y}=await Promise.resolve().then(() => (LIy(),MIy));await y(t.slice(2));return}if(h==="code-sign"){let{selfHostedRunnerCodeSignMain:y}=await Promise.resolve().then(() => (lVt(),SCr));await y(t.slice(2));return}if(h==="decode-token"){let{selfHostedRunnerDecodeTokenMain:y}=await Promise.resolve().then(() => (nPy(),rPy));await y(t.slice(2))
+
+--- offset 304849063 ---
+.resolve().then(() => (LIy(),MIy));await y(t.slice(2));return}if(h==="code-sign"){let{selfHostedRunnerCodeSignMain:y}=await Promise.resolve().then(() => (lVt(),SCr));await y(t.slice(2));return}if(h==="decode-token"){let{selfHostedRunnerDecodeTokenMain:y}=await Promise.resolve().then(() => (nPy(),rPy));await y(t.slice(2));return}let{selfHostedRunnerMain:g}=await Promise.resolve().then(() => (gOy(),hOy));await g(t.slice(1));return}if((t.includes("--tmux"
+
+--- offset 304849177 ---
+:y}=await Promise.resolve().then(() => (lVt(),SCr));await y(t.slice(2));return}if(h==="decode-token"){let{selfHostedRunnerDecodeTokenMain:y}=await Promise.resolve().then(() => (nPy(),rPy));await y(t.slice(2));return}let{selfHostedRunnerMain:g}=await Promise.resolve().then(() => (gOy(),hOy));await g(t.slice(1));return}if((t.includes("--tmux")||t.includes("--tmux=classic"))&&(t.includes("-w")||t.includes("--worktree")||t.some((h)=>h.startsWith("--worktre
+
+
+=== related 'SelfHostedRunner' hits total=12 ===
+--- offset 81466661 ---
+Proxy..................installIntoSystemTrust..........................init.....n8.............In8.....initializeTelemetryAfterTrust............$......sanitizeServerClaudeCodeArgs.............o8.)...serverToolsValueNamesSelfHostedRunnerToolo8..............f......stripSelfHostedRunnerToolNames...........o8."...toolsSpecNamesSelfHostedRunnerTool......Ip8.............. ......eventLoopStallDetectors..p8.....................sampleCpuAndPageFaults...q8......
+
+--- offset 81466709 ---
+.......................init.....n8.............In8.....initializeTelemetryAfterTrust............$......sanitizeServerClaudeCodeArgs.............o8.)...serverToolsValueNamesSelfHostedRunnerToolo8..............f......stripSelfHostedRunnerToolNames...........o8."...toolsSpecNamesSelfHostedRunnerTool......Ip8.............. ......eventLoopStallDetectors..p8.....................sampleCpuAndPageFaults...q8.....................sampleRssi......................s
+
+--- offset 81466766 ---
+itializeTelemetryAfterTrust............$......sanitizeServerClaudeCodeArgs.............o8.)...serverToolsValueNamesSelfHostedRunnerToolo8..............f......stripSelfHostedRunnerToolNames...........o8."...toolsSpecNamesSelfHostedRunnerTool......Ip8.............. ......eventLoopStallDetectors..p8.....................sampleCpuAndPageFaults...q8.....................sampleRssi......................startEventLoopStallDetector.................!..._resetInhe
+
+--- offset 174616603 ---
+..u......i........u...............................u......)........u..............................................1...............................bg..........................]...Cannot destructure property 'toolsSpecNamesSelfHostedRunnerTool' from null or undefined value...................s...........................................C...Cannot destructure property 'warnings' from null or undefined value.............................auto...................
+
+--- offset 238897840 ---
+or..........................SandboxPolicyRefusalError.......................SandboxUnavailableForShellError.................ScheduleWakeupInputError........................SelectedRangeTooLargeError......................SelfHostedRunnerApiError........................SendMessagePreconditionError....................StagingDirTamperedError.........................StreamableHTTPError.............................StopTaskError...................SwarmPaneErr
+
+--- offset 238900752 ---
+or..........................SandboxPolicyRefusalError.......................SandboxUnavailableForShellError.................ScheduleWakeupInputError........................SelectedRangeTooLargeError......................SelfHostedRunnerApiError........................SendMessagePreconditionError....................StagingDirTamperedError.........................StreamableHTTPError.............................StopTaskError...................SwarmPaneErr
+
+--- offset 288286170 ---
+in` to refresh your session, or verify ANTHROPIC_BASE_URL matches your login environment",g8n,m_t=8080;var aRe=w(()=>{wS();mp();mr();Qo();mm();wr();g8n=class g8n extends Error{status;constructor(e,t){super(t);this.name="SelfHostedRunnerApiError",this.status=e}}});var ZSv,QSv,CMf;var kMf=w(()=>{qn();Ts();_n();KHe();aRe();ZSv=Se(()=>fi({pool_id:N().describe("Tagged environment id (ccpool_\u2026).")})),QSv=Se(()=>ye({pool:uo(N(),Mn()),equivalent:ye({ui:N(
+
+--- offset 289359064 ---
+onditionError","SandboxBridgeUnavailableError","SandboxCommandTooLongError","SandboxInitFailedError","SandboxPolicyRefusalError","SandboxUnavailableForShellError","ScheduleWakeupInputError","SelectedRangeTooLargeError","SelfHostedRunnerApiError","SendMessagePreconditionError","StagingDirTamperedError","StreamableHTTPError","StopTaskError","SwarmPaneError","SymlinkWriteRefusedError","TooManyRedirectsError","WebFetchTransportError","WorkflowInputError","
+
+--- offset 302524995 ---
+;UM();Hg();mr();Cct();po();at();x_();$r();ule();eq();Db();pw();Ai();gy();EZe();wo();npt();PE();VF();D1r();y8o();Rie();pGc=gd(Hi0,()=>"init")});var Qny={};vt(Qny,{sanitizeServerClaudeCodeArgs:()=>hGc,serverToolsValueNamesSelfHostedRunnerTool:()=>Evs,stripSelfHostedRunnerToolNames:()=>Zny,toolsSpecNamesSelfHostedRunnerTool:()=>Bi0});function mGc(e){return e.startsWith($i0)}function Bi0(e){return Ux([...e]).some(mGc)}function Zny(e){return Ux([e]).filter(
+
+--- offset 302525029 ---
+();$r();ule();eq();Db();pw();Ai();gy();EZe();wo();npt();PE();VF();D1r();y8o();Rie();pGc=gd(Hi0,()=>"init")});var Qny={};vt(Qny,{sanitizeServerClaudeCodeArgs:()=>hGc,serverToolsValueNamesSelfHostedRunnerTool:()=>Evs,stripSelfHostedRunnerToolNames:()=>Zny,toolsSpecNamesSelfHostedRunnerTool:()=>Bi0});function mGc(e){return e.startsWith($i0)}function Bi0(e){return Ux([...e]).some(mGc)}function Zny(e){return Ux([e]).filter((t)=>!mGc(t)).join(",")}function E
+
+--- offset 302525077 ---
+);npt();PE();VF();D1r();y8o();Rie();pGc=gd(Hi0,()=>"init")});var Qny={};vt(Qny,{sanitizeServerClaudeCodeArgs:()=>hGc,serverToolsValueNamesSelfHostedRunnerTool:()=>Evs,stripSelfHostedRunnerToolNames:()=>Zny,toolsSpecNamesSelfHostedRunnerTool:()=>Bi0});function mGc(e){return e.startsWith($i0)}function Bi0(e){return Ux([...e]).some(mGc)}function Zny(e){return Ux([e]).filter((t)=>!mGc(t)).join(",")}function Evs(e){if(e===void 0)return!1;let t=typeof e==="s
+
+--- offset 302526050 ---
+n}}async function toy(e){if(process.env.CLAUDE_BG_MEMORY_TOGGLED_OFF==="1"&&process.env.CLAUDE_CODE_SESSION_KIND==="bg")ZVt(!0);if(e.baseTools&&!V.CLAUDE_CODE_REMOTE&&V.CLAUDE_CODE_SESSION_KIND!=="bg"){let{toolsSpecNamesSelfHostedRunnerTool:s}=(gGc(),fn(Qny));if(s(e.baseTools))pMf()}let t=await D8a({allowedToolsCli:e.allowedTools,disallowedToolsCli:e.disallowedTools,baseToolsCli:e.baseTools,permissionMode:e.permissionMode,allowDangerouslySkipPermission
+
+
+=== related 'postSessionHook' hits total=6 ===
+--- offset 182798880 ---
+eFileRoot...................governedGit.....................governedGitConfigPath...........................mcpConfigPath...................launcherSettingsPath............................onChildInit.....................postSessionHookTimeoutMs........................onTokenAck......................onChildStdinReady...............................setupFailureKind................p.......x.......@...............p.......8$......0)..............pB.......N.
+
+--- offset 304720967 ---
+nActivity:p,onBgTaskLedger:f,onBgFollowupPending:m,onChildLifecycle:g?(vi)=>{if(vi==="spawned")g(vi);else Wr=vi}:void 0,onChildInit:()=>{ie=!0,_?.({kind:"end",durationSec:(Date.now()-Z)/1000})},onSessionStartHookError:S,postSessionHookTimeoutMs:t.postSessionHookTimeoutMs??u_n,pushOutcomeOnRelease:D??!1,signal:r,onTokenAck:(vi)=>{let vo=nr.get(vi);if(vo)nr.delete(vi),d(`[runner:session] ${vo.label} update ${vi} acked by child (${Date.now()-vo.sentAtMs}
+
+--- offset 304720994 ---
+f,onBgFollowupPending:m,onChildLifecycle:g?(vi)=>{if(vi==="spawned")g(vi);else Wr=vi}:void 0,onChildInit:()=>{ie=!0,_?.({kind:"end",durationSec:(Date.now()-Z)/1000})},onSessionStartHookError:S,postSessionHookTimeoutMs:t.postSessionHookTimeoutMs??u_n,pushOutcomeOnRelease:D??!1,signal:r,onTokenAck:(vi)=>{let vo=nr.get(vi);if(vo)nr.delete(vi),d(`[runner:session] ${vo.label} update ${vi} acked by child (${Date.now()-vo.sentAtMs}ms)`)},onChildStdinReady:(v
+
+--- offset 304724640 ---
+wn: ${e}: ${_r} \u2014 cannot post failure to UI: config not yet fetched`);else u(`[runner:session] FATAL pre-spawn: ${e}: ${_r} \u2014 cannot post failure to UI: no session_token obtained`);oe="failed"}finally{let ir=t.postSessionHookTimeoutMs??u_n;if(D&&yt&&oe!=="completed"&&r.reason!=="deassign"&&!ut&&or.length>0){d(`[runner:session] ${e} ${oe}: --push-outcome-on-release pushing ${or.length} outcome branch(es) to the source remote`);let _r=Date.now
+
+--- offset 304732917 ---
+ssionId:o,maxLifetimeMs:uJ("SELF_HOSTED_RUNNER_MAX_LIFETIME_MS"),maxLifetimeGraceMs:uJ("SELF_HOSTED_RUNNER_MAX_LIFETIME_GRACE_MS")||wU0,sigkillGraceMs:Math.min(Math.max(uJ("SELF_HOSTED_RUNNER_SIGKILL_GRACE_MS")||30000,e.postSessionHookTimeoutMs+(e.pushOutcomeOnRelease?c_n:0)+Eks),2147483647),sigkillTimeoutMs:uJ("SELF_HOSTED_RUNNER_SESSION_STOP_GRACE_MS")||mtu.SIGKILL_TIMEOUT_DEFAULT_MS,onDebug:S,onStatus:v}),ie=()=>Z.terminate();if(A.addEventListener(
+
+--- offset 304828285 ---
+,standbyIdleMs:Xe,getHealthzClaimVisibleMs:()=>u?.claimVisibility?.get(qe)?.visibleMs,onSessionTokenIssued:($e)=>{if(u&&u.lockedAccountEmail===null){let lt=fks($e);if(lt!==null)u.lockedAccountEmail=lt}},canonicalLocks:E,postSessionHookTimeoutMs:f,pushOutcomeOnRelease:i.pushOutcomeOnRelease,trustWorkspace:i.trustWorkspace,confineRepoSettings:i.confineRepoSettings,onBgTaskLedger:($e)=>{let lt=d.get(Me);if(lt)lt.liveBgTasks=$e;h?.()},onBgFollowupPending:
+
+
+=== related 'retireSession' hits total=0 ===
+(none)
+
+=== related 'retire runner' hits total=0 ===
+(none)
+
+=== filtered 'retire' contexts containing runner|session|hook ===
+--- offset 183310578 ---
+..............--exit-if-unused-min............................--release-idle-session-min......................--drain-grace-sec...............................--use-anthropic-git-proxy.......................--log-file......................--retire-at.....................--base-dir......................--drain-wait-sec................--session-stop-grace-sec..............................................................G........!........................................................
+
+--- offset 183375222 ---
+s. .q.u.e.u.e. .f.o.r. .t.h.a.t. .m.a.n.y. .s.e.c.o.n.d.s. .b.e.f.o.r.e. .e.x.i.t.i.n.g..... . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .M.a.x.:. .....................3.... [env: SELF_HOSTED_RUNNER_DRAIN_GRACE_MS, in ms].  --retire-at <epoch-seconds> Retire the runner at the given wall-clock time (absolute Unix timestamp, in.                              seconds): release every active session through the ReleaseSession path that.                              --releas
+
+--- offset 183462008 ---
+H.R._.S.S.E._.H.I.N.T.S. .e.n.a.b.l.e.d. ..  .o.p.e.n.i.n.g. .s.t.r.e.a.m...............................i...............................n...............................o...............................c...........................$...[runner:retire] retire time set for ............................ (in .......................;...). ..  .s.e.s.s.i.o.n.s. .w.i.l.l. .b.e. .r.e.l.e.a.s.e.d. .a.n.d. .t.h.e. .r.u.n.n.e.r. .w.i.l.l. .e.x.i.t. .t.h.e.n...........................[runner:retire
+
+--- offset 183462016 ---
+S.E._.H.I.N.T.S. .e.n.a.b.l.e.d. ..  .o.p.e.n.i.n.g. .s.t.r.e.a.m...............................i...............................n...............................o...............................c...........................$...[runner:retire] retire time set for ............................ (in .......................;...). ..  .s.e.s.s.i.o.n.s. .w.i.l.l. .b.e. .r.e.l.e.a.s.e.d. .a.n.d. .t.h.e. .r.u.n.n.e.r. .w.i.l.l. .e.x.i.t. .t.h.e.n...........................[runner:retire] retire
+
+--- offset 183462248 ---
+retire] retire time set for ............................ (in .......................;...). ..  .s.e.s.s.i.o.n.s. .w.i.l.l. .b.e. .r.e.l.e.a.s.e.d. .a.n.d. .t.h.e. .r.u.n.n.e.r. .w.i.l.l. .e.x.i.t. .t.h.e.n...........................[runner:retire] retire time ................3... .i.s. .a.l.r.e.a.d.y. .i.n. .t.h.e. .p.a.s.t. ..  .r.e.f.u.s.i.n.g. .w.o.r.k. .a.n.d. .e.x.i.t.i.n.g.......................................d...[.r.u.n.n.e.r.:.e.x.i.t.]. .r.e.t.i.r.e. .t.i.m.e. .p.a.s.s.e.
+
+--- offset 183462256 ---
+retire time set for ............................ (in .......................;...). ..  .s.e.s.s.i.o.n.s. .w.i.l.l. .b.e. .r.e.l.e.a.s.e.d. .a.n.d. .t.h.e. .r.u.n.n.e.r. .w.i.l.l. .e.x.i.t. .t.h.e.n...........................[runner:retire] retire time ................3... .i.s. .a.l.r.e.a.d.y. .i.n. .t.h.e. .p.a.s.t. ..  .r.e.f.u.s.i.n.g. .w.o.r.k. .a.n.d. .e.x.i.t.i.n.g.......................................d...[.r.u.n.n.e.r.:.e.x.i.t.]. .r.e.t.i.r.e. .t.i.m.e. .p.a.s.s.e.d. .a.n.
+
+--- offset 183466456 ---
+....................(...[runner:main] Ignoring released session ....................@... ..  .a.w.a.i.t.i.n.g. .s.e.r.v.e.r. .d.e.a.s.s.i.g.n. .(.o.r. .i.t.s. .i.n.-.f.l.i.g.h.t. .r.e.l.e.a.s.e. .t.o. .s.e.t.t.l.e.).............%...[runner:retire] not starting session .......................E... ..  .r.e.t.i.r.e. .t.i.m.e. .h.a.s. .p.a.s.s.e.d.;. .i.t. .w.i.l.l. .b.e. .r.e.q.u.e.u.e.d. .w.h.e.n. .t.h.i.s. .r.u.n.n.e.r. .e.x.i.t.s.......................Picked up session ............
+
+--- offset 183486508 ---
+....................................................................P...............................................................................................................fe..............................................self_hosted_retire..............................c...........................0...[.r.u.n.n.e.r.:.r.e.t.i.r.e.]. .r.e.t.i.r.e. .t.i.m.e. .r.e.a.c.h.e.d. ..  .r.e.l.e.a.s.i.n.g. .............G... active session(s), refusing new work; exiting once the slots are 
+
+--- offset 183529041 ---
+...............................or..............................Lt..............................ut..............................xr..............................c...............................[runner:session] ............................... retire time passed ........................9...m.i.d.-.t.u.r.n. ..  .r.e.l.e.a.s.i.n.g. .a.s. .s.o.o.n. .a.s. .t.h.e. .c.u.r.r.e.n.t. .t.u.r.n. .f.i.n.i.s.h.e.s...........................P...b.e.f.o.r.e. .t.h.e. .c.h.i.l.d. .r.e.p.o.r.t.e.d. .a.n
+
+--- offset 237432877 ---
+...............................................j...ObserverReport is only available to an observer agent; the main session does not have an observed pairing...................................h...Your observer pairing is not armed (stopped, retired, or never installed). The report was not delivered.....................M...Cannot destructure property 'reportTargetTaskId' from null or undefined value...................o...............................running.........................com
+
+--- offset 255362224 ---
+w.o.r.k.e.r. .s.o.c.k.e.t. .d.i.r.e.c.t.o.r.y. .i.s. .n.o.t. .o.w.n.e.d. .b.y. .t.h.i.s. .u.s.e.r. ..  .........................................resume..........................................................retiring........................retired.........................source session ................. not found......................Bun.Terminal unavailable (running under Node?)..................tengu_bg_pty_unavailable........................prompt..........................--resu
+
+(kept 11 of first 80 retire hits; total retire=273)
+

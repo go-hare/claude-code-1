@@ -310,8 +310,38 @@ export function usePeerInboundUdsDrain(
     })
     enqueueUdsInboxMessages()
 
+    // densable 2.1.236 — deliver correlated [Cross-session idle notice] prompts.
+    try {
+      const { setIdleNoticeHandler, idleNoticeModelText } =
+        require('../utils/udsIdleNotify.js') as typeof import('../utils/udsIdleNotify.js')
+      setIdleNoticeHandler(notice => {
+        const text = idleNoticeModelText(notice)
+        if (!notice.modelVisible) {
+          // densable hold: shown to user / logged, not delivered to the model.
+          return
+        }
+        enqueue({
+          mode: 'prompt',
+          value: text,
+          uuid: randomUUID(),
+          origin: { kind: 'peer', from: 'peer_idle_notice' },
+          skipSlashCommands: true,
+          isMeta: true,
+        })
+      })
+    } catch {
+      // optional when UDS idle notify module unavailable
+    }
+
     return () => {
       setOnEnqueue(null)
+      try {
+        const { setIdleNoticeHandler } =
+          require('../utils/udsIdleNotify.js') as typeof import('../utils/udsIdleNotify.js')
+        setIdleNoticeHandler(null)
+      } catch {
+        // ignore
+      }
       unsubMode()
       unsubPolicy()
       clearPeerInboundModeGetter()

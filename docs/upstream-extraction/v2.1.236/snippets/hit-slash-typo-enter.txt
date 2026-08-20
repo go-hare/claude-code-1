@@ -1,0 +1,32 @@
+SEA: /tmp/official-236/plat/package/claude
+VERSION: 2.1.236 (Claude Code)
+KEY: slash-typo-enter (#28)
+
+EXACT PATTERN HITS:
+- 'slash-command typo': 0
+- 'closest fuzzy match': 0
+- 'unavailable in this session': 7 (policy/connector/memory/capability copy; NOT slash-typo UX)
+
+=== BEST: slash unknown + edit-distance suggestion (Did you mean) @287348123 ===
+resultText:we}}let ge=ZFt(_,o.options.commands.filter((_e)=>!_e.isHidden&&!Qre(_e)&&PO(_e)&&!(_e.loadedFrom==="syncedSkills"&&q6())).map((_e)=>({name:Tf(_e),aliases:_e.aliases})),{maxEditDistance:2});H("tengu_input_slash_invalid",{input_length:_.length,is_mcp_template_unmatched:C,had_suggestion:Boolean(ge),suggestion_distance:ge?QFt(_,ge):void 0}),pe("cmd_dispatch","cmd_unknown");let fe=ge?`Unknown command: /${_}. Did you mean /${ge}?`:`Unknown command: /${_}`;if(o.options.isNonInteractiveSession)return{messages:[...n,wL(`/${_}${S?` ${HHe(k4e(S))}`:""}`),wL(`<local-command-stdout>${fe}</local-command-stdout>`)],shouldQuery:!1,resultText:fe};return{messages:[...n,ws(fe,"warning"),...S?[ws(`Ar
+
+=== BEST: ZFt/QFt maxEditDistance helpers @287325577 ===
+a.distance).slice(0,r).map((s)=>s.name)}function ZFt(e,t,{maxEditDistance:r=1}={}){let n=t.flatMap((s)=>[s.name,...s.aliases??[]]),o,i=r+1;for(let s of n){if(Math.abs(s.length-e.length)>r)continue;let a=QFt(e,s);if(a<i)i=a,o=s}return o}function QFt(e,t){if(e===t)return 0;let r=e.length,n=t.length,o=Array.from({length:r+1},(i,s)=>Array.from({length:n+1},(a,l)=>s===0?l:l===0?s:0));for(let i=1;i<=r;i++)for(let s=1;s<=n;s++){let a=e[i-1]===t[s-1]?0:1;if(o[i][s]=Math.min(o[i-1][s]+1,o[i][s-1]+1,o[i-1][s-1]+a),i>1&&s>1&&e[i-1]===t[s-2]&&e[i-2]===t[s-1])o[i][s]
+
+=== STRING TABLE: Unknown command / Did you mean / @117491392 ===
+................	.......</local-command-stdout>.................................	.......cmd_unknown.............	.......Unknown command: /......................	........ Did you mean /........	.......?.......................	.......Args from unknown skill: ...............	.......builtin.................	.......custom..................	....... ***....................	.......user_prompt.............
+
+=== tengu_input_slash_missing parse fail @287345933 ===
+ouldQuery:!0}}let y=mme(e);if(!y){if(H("tengu_input_slash_missing",{}),o.options.isNonInteractiveSession)return g();pe("cmd_dispatch","cmd_parse_failed");let de="Commands are in the form `/command [args]`";return{messages:[r6e(),...n,Sn({content:VSe({inputString:de,precedingInputBlocks:t})})],shouldQuery:!1,resultText:de}}let{commandName:_,args:S}=y,{isMcp:v
+
+=== unavailable-in-session (sample, non-slash) @288066692 ===
+jyv(e){return e==="web"?"Connectors are unavailable in this session under your organization's web search / connector isolation policy. Start a new session to use connectors.":"Web search, web fetch, and browser tools are unavailable in this session under your organization's web search / connector isolation policy. Do not attempt to reach any external URL via another tool (curl, bash, the browser, 
+
+=== Enter accepts autocomplete suggestion (PromptInput BAg) @298332822 ===
+ext:`Use ${h} to toggle thinking`,priority:"immediate",timeoutMs:3000});return}if(g.length===0)return;let Pe=j?.pendingChord!=null;if(Ft.ctrl&&Ft.key==="n"&&!Pe){Ft.preventDefault(),ir();return}if(Ft.ctrl&&Ft.key==="p"&&!Pe){Ft.preventDefault(),gr();return}if(Ft.name==="return"&&!Ft.shift&&!Ft.meta){if(k==="directory"&&fe.current==="bash-path"){let $e=uU(),lt=i+($e.length-o.length);if($e[lt-1]==="\\"||DAl())return}Ft.preventDefault(),ut()}},selectSuggestion:Vt,setHoveredSuggestion:_r,hoveredSuggestionId:_??null}}var ib,sPE,HAg,aPE,lPE,cPE,NDc,FDc,uPE,yvo,_vo,pPE=5000,Oms=null;var UAg=w(()=>{L9n();UT();Qt();Bt();tg();AL();Dt();ure();gl();ZB();Wp();tL();zrl();GSe();_cr();zR
+
+NOTES:
+- Exact probes "slash-command typo" and "closest fuzzy match" absent in SEA latin1.
+- Product slash typo path uses edit distance (ZFt/QFt, maxEditDistance:2), telemetry tengu_input_slash_invalid + had_suggestion/suggestion_distance, user-facing "Unknown command: /X. Did you mean /Y?".
+- Enter (return) in autocomplete context calls ut()/selectSuggestion; bindings include autocomplete:accept.
+- "unavailable in this session" hits are org policy / memory / capability strings, not slash typo.

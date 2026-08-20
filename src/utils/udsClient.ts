@@ -12,7 +12,7 @@ import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { logForDebugging } from './debug.js'
-import { errorMessage, isFsInaccessible } from './errors.js'
+import { errorMessage, getErrnoCode, isFsInaccessible } from './errors.js'
 import { isProcessRunning } from './genericProcessUtils.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { SessionKind } from './concurrentSessions.js'
@@ -22,6 +22,14 @@ import {
   UdsMessageTooLargeError,
   type UdsMessage,
 } from './udsMessaging.js'
+import {
+  canonicalOutboundPaceKey,
+  createUdsOutboundPacedError,
+  getOutboundPacer,
+  NOOP_OUTBOUND_RESERVE,
+  shouldPaceOutboundSend,
+  type ReserveResult,
+} from './udsOutboundPacer.js'
 import { attachUdsResponseReader, getChunkBytes } from './udsResponseReader.js'
 
 // ---------------------------------------------------------------------------
@@ -72,6 +80,22 @@ export class UdsUnvouchedPipeError extends Error {
     this.socketPath = socketPath
     this.kind = kind
   }
+}
+
+/**
+ * densable QHr / qKo — connect-fail that should refund a reserved outbound token.
+ * SEA: ENOENT | ECONNREFUSED | (bt && errorClass===E5d).
+ * Post-write timeout wrapped as UdsPeerConnectionError must NOT refund.
+ */
+export function isUdsConnectFailError(error: unknown): boolean {
+  const code = getErrnoCode(error)
+  if (code === 'ENOENT' || code === 'ECONNREFUSED') return true
+  // Walk cause chain for errno (UdsPeerConnectionError wraps connect causes).
+  if (error instanceof Error && error.cause !== undefined) {
+    const causeCode = getErrnoCode(error.cause)
+    if (causeCode === 'ENOENT' || causeCode === 'ECONNREFUSED') return true
+  }
+  return false
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +358,23 @@ export async function sendToUdsSocket(
     throw new UdsMessageTooLargeError(wire.length, MAX_UDS_LINE_CHARS)
   }
 
+  // densable CDn / P5d / jLb / T5d — reserve BEFORE send so paced messages are
+  // never falsely marked sent. Windows + no own inbox → noop (zLb).
+  // densable dX(e)??e — namespace-canonical pace key (not raw socketPath).
+  const paceKey =
+    canonicalOutboundPaceKey(target.socketPath) ?? target.socketPath
+  const reservation: ReserveResult = shouldPaceOutboundSend({
+    ownSocketPath: ownSocket,
+  })
+    ? getOutboundPacer().reserve(paceKey)
+    : NOOP_OUTBOUND_RESERVE
+  if (!reservation.ok) {
+    logForDebugging(
+      `[uds-client] paced: not sending to ${targetSocketPath} — ${reservation.sentInBurst} sent this burst; its inbox rate limit would drop more`,
+    )
+    throw createUdsOutboundPacedError(reservation.sentInBurst)
+  }
+
   // densable $id — track outbound peer as rename-notice correspondent.
   try {
     const { noteSessionNameCorrespondent } = await import(
@@ -355,41 +396,49 @@ export async function sendToUdsSocket(
     // optional uniqueness tracking
   }
 
-  return new Promise<void>((resolve, reject) => {
-    let settled = false
-    let conn: ReturnType<typeof createConnection>
-    const finish = (error?: Error): void => {
-      if (settled) return
-      settled = true
-      if (error) {
-        conn.destroy(error)
-        reject(error)
-      } else {
-        conn.end()
-        resolve()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false
+      let conn: ReturnType<typeof createConnection>
+      const finish = (error?: Error): void => {
+        if (settled) return
+        settled = true
+        if (error) {
+          conn.destroy(error)
+          reject(error)
+        } else {
+          conn.end()
+          resolve()
+        }
       }
-    }
 
-    conn = createConnection(target.socketPath, () => {
-      conn.write(wire, err => {
-        if (err) finish(err)
+      conn = createConnection(target.socketPath, () => {
+        conn.write(wire, err => {
+          if (err) finish(err)
+        })
+      })
+      attachUdsResponseReader(conn, {
+        maxFrameBytes: MAX_UDS_FRAME_BYTES,
+        onSettled: finish,
+        formatSocketError: err =>
+          new UdsPeerConnectionError(target.socketPath, err),
+      })
+      conn.setTimeout(timeoutMs, () => {
+        finish(
+          new UdsPeerConnectionError(
+            target.socketPath,
+            new Error('Connection timed out'),
+          ),
+        )
       })
     })
-    attachUdsResponseReader(conn, {
-      maxFrameBytes: MAX_UDS_FRAME_BYTES,
-      onSettled: finish,
-      formatSocketError: err =>
-        new UdsPeerConnectionError(target.socketPath, err),
-    })
-    conn.setTimeout(timeoutMs, () => {
-      finish(
-        new UdsPeerConnectionError(
-          target.socketPath,
-          new Error('Connection timed out'),
-        ),
-      )
-    })
-  })
+  } catch (err) {
+    // densable QHr — connect-fail refunds the reserved token.
+    if (isUdsConnectFailError(err)) {
+      reservation.refund()
+    }
+    throw err
+  }
 }
 
 /**

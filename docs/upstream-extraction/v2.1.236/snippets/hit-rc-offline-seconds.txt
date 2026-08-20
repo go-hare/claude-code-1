@@ -1,0 +1,92 @@
+SEA: /tmp/official-236/plat/package/claude
+version: 2.1.236 (Claude Code)
+key: rc-offline-seconds
+id: 29
+checklist: Remote Control marks session offline within seconds on CLI/terminal exit
+search_patterns: ['marks a session offline', 'within seconds', 'terminal closes']
+found: true
+note: Exact 'marks a session offline' and 'terminal closes' absent. 'within seconds' present (3) only in viewer/shell reboot comment. RC offline evidence is bridge shutdown/deregisterEnvironment + Environment offline / machine was offline strings.
+
+=== exact pattern counts ===
+'marks a session offline': 0
+'within seconds': 3
+'terminal closes': 0
+
+=== exact 'marks a session offline' hits total=0 shown=0 ===
+(none)
+
+=== exact 'within seconds' hits total=3 shown=3 ===
+--- offset 286384235 ---
+t = text;.    w.appendChild(s);.    document.body.appendChild(w);.    document.body.style.paddingBottom = '72px';.    waitingBar = w;.    showPainter(true);.    /* The shell normally reboots the view within seconds; if the session.       died first, don't leave a viewer staring at a spinner forever..       textContent-only escalation, same note element. A restored wait.       counts from the original confirm (marker.since), so the notes do.       not reset across the reboot. 
+
+--- offset 286510443 ---
+t = text;.    w.appendChild(s);.    document.body.appendChild(w);.    document.body.style.paddingBottom = '72px';.    waitingBar = w;.    showPainter(true);.    /* The shell normally reboots the view within seconds; if the session.       died first, don't leave a viewer staring at a spinner forever..       textContent-only escalation, same note element. A restored wait.       counts from the original confirm (marker.since), so the notes do.       not reset across the reboot. 
+
+--- offset 298941159 ---
+t = text;.    w.appendChild(s);.    document.body.appendChild(w);.    document.body.style.paddingBottom = '72px';.    waitingBar = w;.    showPainter(true);.    /* The shell normally reboots the view within seconds; if the session.       died first, don't leave a viewer staring at a spinner forever..       textContent-only escalation, same note element. A restored wait.       counts from the original confirm (marker.since), so the notes do.       not reset across the reboot. 
+
+=== exact 'terminal closes' hits total=0 shown=0 ===
+(none)
+
+=== related SEA contexts (latin1; invent-ban) ===
+--- needle 'Environment deregistered, bridge offline' total=2 shown=2 ---
+--- offset 142034978 ---
+ resume (env ............................., spawnMode ....................)...............................[bridge:shutdown] Archiving .................... session(s).....!......."...................:...[bridge:shutdown] Environment deregistered, bridge offline......................Environment deregistered...................."...Failed to deregister environment: ..............#...........................M...Cannot destructure property 'clearBridgePointer' from null or undefine
+
+--- offset 293368940 ---
+ion(s)`),await Promise.allSettled([...ue].map((oe)=>n.archiveSession(X.get(oe)??jF(oe)).catch((de)=>i.logVerbose(`Failed to archive session ${oe}: ${ce(de)}`))));try{await n.deregisterEnvironment(t),T("[bridge:shutdown] Environment deregistered, bridge offline"),i.logVerbose("Environment deregistered.")}catch(oe){i.logVerbose(`Failed to deregister environment: ${ce(oe)}`)}if(e.ownsPointer){let{clearBridgePointer:oe}=await Promise.resolve().then(() => (HRe(),LRe));await oe(e.d
+
+--- needle 'Environment offline.' total=2 shown=2 ---
+--- offset 142035296 ---
+ment: ..............#...........................M...Cannot destructure property 'clearBridgePointer' from null or undefined value...................oe......$.......................Environment offline.............................................................................................................................................
+
+--- offset 293369230 ---
+ailed to deregister environment: ${ce(oe)}`)}if(e.ownsPointer){let{clearBridgePointer:oe}=await Promise.resolve().then(() => (HRe(),LRe));await oe(e.dir,e.storageV5)}i.logVerbose("Environment offline.")}function Mjm(e){if(e&&typeof e==="object"&&"code"in e&&typeof e.code==="string"&&B1T.has(e.code))return!0;return!1}function Ljm(e){return
+
+--- needle 'ended while this machine was offline' total=1 shown=1 ---
+--- offset 293357015 ---
+ Session ${fe}, aborting poll loop to tear down environment`),d.abort();return}if(!p.aborted)Q()}}if(!l)Q();function ie(){let oe=v.size;i.logStatus(oe>0?`${oe} ${wt(oe,"session")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed.");let de=no(E);if(de.length>0)i.logStatus(`Your work is safe \u
+
+--- needle 'This environment was cleaned up while the machine was offline' total=2 shown=2 ---
+--- offset 142079568 ---
+c.l.e.a.n.e.d. .u.p. .o.n. .t.h.e. .s.e.r.v.e.r. .a.n.d. .c.a.n.'.t. .b.e. .r.e.s.u.m.e.d...........................S...This environment was cleaned up while the machine was offline and can't be resumed..............................E...........................$...Y.o.u.r. .w.o.r.k. .i.s. .s.a.f.e. ..  .w.o.r.k.t.r.e.e.s. .k.e.p.t.:. .....
+
+--- offset 293357128 ---
+ion")} ended while this machine was offline \u2014 the environment was cleaned up on the server and can't be resumed.`:"This environment was cleaned up while the machine was offline and can't be resumed.");let de=no(E);if(de.length>0)i.logStatus(`Your work is safe \u2014 worktrees kept: ${de.join(", ")}`);i.logStatus("Run `claude remote-c
+
+--- needle 'Remote Control disconnected' total=4 shown=4 ---
+--- offset 75031024 ---
+nly available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account..........I.......Remote Control disconnected.{.................../login..8>z.{...............W...R.e.m.o.t.e. .C.o.n.t.r.o.l. .g.o.t. .a.n. .u.n.e.x.p.e.c.t.e.d. .s.e.r.v.e.r. .
+
+--- offset 164192944 ---
+sewhere.............#... ..  .r.u.n. ./.r.e.m.o.t.e.-.c.o.n.t.r.o.l. .t.o. .r.e.c.o.n.n.e.c.t...........................Remote Control disconnected..................... ..  ............................... ..............................|......`...@....4...L...|...4...L..p}...4...L
+
+--- offset 288492571 ---
+ntrol is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account.",a$t="Remote Control disconnected.",Fur="/login",vGr="Remote Control got an unexpected server response \u2014 try again after updating Claude Code",B8n="Remote Contro
+
+--- offset 298129696 ---
+2014 run /login to restore Remote Control":di==="ended_elsewhere"||Pt?"":" \u2014 run /remote-control to reconnect",vr=`Remote Control disconnected${vo?` \u2014 ${vo}`:""}${Ar}`;t((Rr)=>{let Qn=Rr.at(-1);if(Qn?.type==="system"&&Qn.subtype==="informational"&&Qn.content===vr)return
+
+--- needle 'deregisterEnvironment' total=3 shown=3 ---
+--- offset 141720416 ---
+................registerBridgeEnvironment.......................pollForWork.....................acknowledgeWork.................stopWork........................deregisterEnvironment...........................archiveSession..................reconnectSession................heartbeatWork...................sendPermissionResponseEvent..... ...............P.......
+
+--- offset 293267730 ---
+:await o(d),timeout:1e4,validateStatus:(p)=>p<500}),"StopWork");fSt(u.status,u.data,"StopWork"),t(`[bridge:api] POST .../work/${l}/stop -> ${u.status}`)},async deregisterEnvironment(a){wO(a,"environmentId"),t(`[bridge:api] DELETE /v1/environments/bridge/${a}`);let l=await s(async(c)=>ni.delete(`${e.baseUrl}/v1/environments/bridge/${a}`,{headers:await o(c),ti
+
+--- offset 293368894 ---
+ Promise.allSettled([...ue].map((oe)=>n.archiveSession(X.get(oe)??jF(oe)).catch((de)=>i.logVerbose(`Failed to archive session ${oe}: ${ce(de)}`))));try{await n.deregisterEnvironment(t),T("[bridge:shutdown] Environment deregistered, bridge offline"),i.logVerbose("Environment deregistered.")}catch(oe){i.logVerbose(`Failed to deregister environment: ${ce(oe)}`)
+
+--- needle 'terminal close' total=1 shown=1 ---
+--- offset 296773460 ---
+rted");let p=await x$w(s,a);if(p.ok)return{err:null};T(`daemon: WMI spawn failed (${p.reason}); falling back to direct spawn \u2014 daemon will not survive SSH/terminal close`,{level:"warn"}),H("tengu_bg_daemon_wmi_fallback",{timeout:p.reason==="timeout",enoent:p.reason==="enoent",no_powershell:p.reason==="no-powershel
+
+--- needle 'reboots the view within seconds' total=3 shown=3 ---
+--- offset 286384218 ---
+);.    document.body.style.paddingBottom = '72px';.    waitingBar = w;.    showPainter(true);.    /* The shell normally reboots the view within seconds; if the session.       died first, don't leave a viewer staring at a spinner forever..       textContent-only escalation, same note element. A restored wait.       counts from the original confirm (marker.since), so the notes do.       not reset ac
+
+--- offset 286510426 ---
+);.    document.body.style.paddingBottom = '72px';.    waitingBar = w;.    showPainter(true);.    /* The shell normally reboots the view within seconds; if the session.       died first, don't leave a viewer staring at a spinner forever..       textContent-only escalation, same note element. A restored wait.       counts from the original confirm (marker.since), so the notes do.       not reset ac
+
+--- offset 298941142 ---
+);.    document.body.style.paddingBottom = '72px';.    waitingBar = w;.    showPainter(true);.    /* The shell normally reboots the view within seconds; if the session.       died first, don't leave a viewer staring at a spinner forever..       textContent-only escalation, same note element. A restored wait.       counts from the original confirm (marker.since), so the notes do.       not reset ac

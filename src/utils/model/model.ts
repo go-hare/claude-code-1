@@ -280,14 +280,18 @@ export function getRuntimeMainLoopModel(params: {
  * @returns The default model setting to use
  */
 export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
-  // Official org default (G5t attribution "org") takes priority over tier defaults
-  // when the user has not pinned a model. Lazy require avoids cycles.
+  // densable idt(): org → ANTHROPIC_DEFAULT_MODEL (env) → tier.
+  // Lazy require avoids cycles (model ↔ orgDefaultModel ↔ config).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { resolveOrgDefaultSetting } =
+  const { resolveOrgDefaultSetting, resolveAnthropicDefaultModelEnv } =
     require('./orgDefaultModel.js') as typeof import('./orgDefaultModel.js')
   const orgDefault = resolveOrgDefaultSetting()
   if (orgDefault) {
     return orgDefault
+  }
+  const envDefault = resolveAnthropicDefaultModelEnv()
+  if (envDefault) {
+    return envDefault
   }
 
   // Ants default to defaultModel from flag config, or Opus 1M if not configured
