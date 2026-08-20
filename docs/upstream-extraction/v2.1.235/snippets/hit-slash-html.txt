@@ -1,0 +1,64 @@
+# densable SEA gold — changelog #8 slash HTML entities while responding
+# SEA: /tmp/official-235/plat/package/claude
+# Official: Fixed slash commands run while Claude is responding showing HTML entities instead of the actual characters
+
+## NOT this surface (artifact-only; do not invent as #8)
+decodeHtmlEntities:()=>TDr
+function TDr(e){return e.replace(p7_,(t,r)=>{if(r.startsWith("#")){let o=r[1]==="x"||r[1]==="X"?parseInt(r.slice(2),16):parseInt(r.slice(1),10);return o<=1114111&&(o<55296||o>57343)?String.fromCodePoint(o):t}if(Object
+p7_=/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi
+
+## Display unescape oX (local-command + bash) — primary #8 gold
+function oX(e){return e.replace(C7_,(t)=>Fud[t]??t)}
+Fud={"&amp;":"&","&lt;":"<","&gt;":">"}
+
+## Write-side escape Ua (bash tags) + EHe (forked-skill-launch in slash/local cmd XML)
+uKt="forked-skill-launch"
+function Ua(e){return e.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")}
+function EHe(e){return e.replace(mVS,(t,r)=>`&lt;${r}${uKt}>`)}
+
+## Render sites applying oX before UI
+yVT=adD??oX(_VT);C1l[0]=Bio,C1l[1]=yVT}else yVT=C1l[1];let Tuh=yVT,bVT;if(C1l[2]!==Bio)bVT=oX(mu
+let Ouh=AVT===null?null:oX(AVT);let xVT=RVT===null?null:oX(RVT);rGi=[];if(Ouh?.trim()&&Ouh.trim()!==KD)rGi.push(Ih.jsx(Gio,{children:Ouh.trim()},"stdout"));if(xVT?.trim())rGi.push(Ih.jsx(Gio,{isError:!0,children:xVT.trim()}
+
+## Slash command XML formatters (args not Ua-escaped in Zff; xFt uses EHe on args)
+uz="command-name",GI="command-message",lKt="command-args"
+function Zff(e,t){return[`<${GI}>${e}</${GI}>`,`<${uz}>/${e}</${uz}>`,t?`<command-args>${t}</command-args>`:null].filter(Boolean).join(`
+function xFt(e,t){let r=EHe(t);return`<${uz}>/${e}</${uz}>
+lKt}>${r}</${lKt}>
+
+## Mid-response / queue path symbols
+deferSlashToEngine
+engineDefer
+isAlreadyProcessing
+Hit Enter to queue up additional messages while Claude is working.
+deferSlashToEngine
+engineDefer
+engineDefer
+deferSlashToEngine
+deferSlashToEngine
+engineDefer
+isAlreadyProcessing
+engineDefer
+engineDefer
+engineDefer
+engineDefer
+deferSlashToEngine
+deferSlashToEngine
+deferSlashToEngine
+deferSlashToEngine
+deferSlashToEngine
+deferSlashToEngine
+isAlreadyProcessing
+engineDefer
+engineDefer
+Hit Enter to queue up additional messages while Claude is working.
+engineDefer
+deferSlashToEngine
+deferSlashToEngine
+
+## Local command stdout write with EHe (needs oX on display)
+<local-command-stdout>${EHe(Q)}</local-command-stdout>
+<local-command-stdout>${EHe(String(k))}</local-command-stdout>
+<local-command-stderr>${EHe(String(k))}</local-command-stderr>
+<local-command-stdout>${EHe(E.displayText)}</local-command-stdout>
+<local-command-stdout>${EHe(E.value)}</local-command-stdout>

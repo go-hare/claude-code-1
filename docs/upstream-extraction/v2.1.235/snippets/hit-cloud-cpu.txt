@@ -1,0 +1,161 @@
+# densable SEA 2.1.235 — #11 cloud-cpu (ultrareview / autofix-pr event streams)
+# SEA: /tmp/official-235/plat/package/claude
+# Changelog: Improved memory and CPU while cloud sessions (/ultrareview|/autofix-pr) run in background — event streams no longer re-scanned and re-rendered on every update
+# densable-first: literal 're-scanned'/'re-rendered'/'memory and CPU' NOT present in SEA (release-notes-only)
+
+## gold user-facing / slash
+144619:cloud session was archived before producing output
+155671:Default environment ID to use for cloud sessions
+155672:Cloud session configuration
+158650:Cloud sessions are only available on the first-party Anthropic API provider.
+158668:Cloud sessions are only available on the first-party Anthropic API provider.
+158682:Cloud sessions are only available on the first-party Anthropic API provider.
+158714:Cloud sessions are only available on the first-party Anthropic API provider.
+160411:Remote Control is not available inside a cloud session.
+178841: See https://code.claude.com/docs/en/ultrareview.
+178845: Then run `claude auth login` to use it; see https://code.claude.com/docs/en/ultrareview.
+181207:Cloud sessions are only available on the first-party Anthropic API provider.
+181303:Cloud sessions are only available on the first-party Anthropic API provider.
+181375:Cloud sessions are only available on the first-party Anthropic API provider.
+181387:Unable to get organization UUID for cloud session creation
+193942:Failed to create cloud session
+198599:The cloud session list could not be fetched just now, so cloud sessions were not searched.
+207043:/v1/ultrareview/preflight
+207056:/v1/ultrareview/quota
+207076: free /ultrareview 
+207079:Tip: For a deeper cloud-based review, try /ultrareview next time
+207081:Tip: Run /ultrareview before you push to catch bugs with a cloud-based multi-agent review
+207314:/ultrareview 
+207320:Ultrareview could not start the cloud session: 
+207323:/ultrareview
+207465:Results will land as a pull request when the cloud session finishes. There is nothing to do here.
+208124: 1 cloud session
+208125: cloud sessions
+230792:autofix-pr
+230797:Spawned cloud autofix PR session on 
+230807:autofix-pr
+239790:Viewing plans in cloud sessions needs a newer session runtime.
+244692:History search isn't available in cloud sessions yet
+244798:Use /model to change the model in cloud sessions
+251394:'!' commands aren't available in cloud sessions yet
+251405: isn't available in cloud sessions yet
+251466:Rewind is not yet available in cloud sessions
+253380:Without sync, cloud sessions start from your repository's git state as they do today; untracked files stay on this machine. Yes and No are saved for this repository.
+254741:>/ultrareview
+259199:Do not post the findings to the PR (the default; accepted for parity with the /ultrareview and /code-review ultra flags)
+259297:Remote Control is not available inside a cloud session.
+271949:autofix-pr
+312517:autofix-pr
+312522:autofix-pr
+326799:Failed to create cloud session
+329854:The cloud session list could not be fetched just now, so cloud sessions were not searched.
+334541:autofix-pr
+334543:autofix-pr
+342728:/ultrareview
+342730:Run /ultrareview to confirm and launch the cloud review.
+342731:Run "claude ultrareview" from your terminal to consent and launch, or use /ultrareview in an interactive Claude Code session.
+343211:autofix-pr
+402993:/ultrareview
+405943:/ultrareview
+419386:interactive sessions and SDK main loops \u2014 not in cloud sessions,
+430618:The cloud session list could not be fetched just now, so cloud sessions were not searched.`;let C="";if(p.pinnedIdentityClaimedLocally)C+=`
+430636:The cloud session list could not be fetched just now, so cloud sessions were not searched.`:"",u=o.bridgeUnavailable?`
+434113:`):"";return H("tengu_autofix_pr_result",{result:xe("success")}),{kind:"ok",message:`Spawned cloud autofix PR session on ${R} (PR #${v})
+438594:`)}return c(`(ultra (cloud review) requires claude.ai account access this session doesn't have \u2014 see https://code.claude.com/docs/en/ultrareview. Falling back to a local ${s}-effort review.)
+438595:`)}return c(`(ultra (cloud review) isn't available in this environment \u2014 see https://code.claude.com/docs/en/ultrareview. Falling back to a local ${s}-effort review.)
+
+## analytics / settings keys / fixtures
+140718:claude-code-ultrareview-post
+142260:tengu_ultrareview_awareness
+142261:ultrareview-prose-pointer
+142262:ultrareview-post-commit
+144854:CLAUDE_CODE_ULTRAREVIEW_PREFLIGHT_FIXTURE
+144855:CLAUDE_CODE_ULTRAREVIEW_QUOTA_FIXTURE
+177481:tengu_ultrareview_post_enabled
+177611:tengu_ultrareview_post
+177614:ultrareview_post_disabled
+177618:ultrareview_post_no_findings
+177621:ultrareview_post_fire_failed
+177625:ultrareview_post_deadline
+177628:ultrareview_post_exception
+180093:autofix_pr
+205598:tengu_ultrareview_awareness_shown
+205834:ultrareview_launch
+229172:tengu_autofix_pr_started
+229204:tengu_autofix_pr_result
+229214:autofix_pr
+229237:tengu_autofix_pr_result
+229240:tengu_autofix_pr_result
+229257:hasSeenAutofixPrChatOpsNotice
+253944:ultrareview_launch
+256921:cli_ultrareview_launch_failed
+349150:ultrareview_launch
+399923:autofixPrMode
+431654:`):"";return H("tengu_autofix_pr_result",{result:xe("success")}),{kind:"ok",message:`Spawned cloud autofix PR session on ${R} (PR #${v})
+
+## API
+159302:/teleport-events2
+159307:teleport_events_fetch_fail
+159308:api_teleport_events_fetch
+203148:/v1/ultrareview/preflight
+203156:api_ultrareview_preflight
+203161:/v1/ultrareview/quota
+203163:api_ultrareview_quota
+
+## likely densable symbols (event stream / remote session / handlers)
+114528:disableBackgroundTasks
+119991:archiveRemoteSession
+120002:pollRemoteSessionEvents
+120006:sendControlRequestToRemoteSession
+120007:sendEventToRemoteSession
+120473:isPersistentRemoteSessionEnabled
+120849:backgroundTasksDisabled
+121364:awaitRemoteSessionResult
+121367:interruptRemoteSession
+121370:subscribeRemoteSessionToPR
+122291:isInteractiveRemoteSession
+122585:parseUltrareviewArgs
+122588:runUltrareviewHeadless
+122589:ultrareviewLaunchAcknowledgementNudge
+123072:hydrateRemoteSession
+123164:scanTranscriptForSuppression
+123446:registerUltrareviewPostCommitHook
+123846:buildUltrareviewOutcomeMessages
+123959:ultrareviewHandler
+128407:eventStreamPayloadHandlerProvider
+128408:eventStreamPayloadHandler
+129851:[sendEventToRemoteSession]
+129852:[sendControlRequestToRemoteSession]
+129892:[archiveRemoteSession] 
+129896:[archiveRemoteSession] archived 
+145603:backgroundTaskId
+145718:Cannot destructure property 'backgroundTaskId' from null or undefined value
+146471:ultrareviewPostRoutines
+146605:task_remote_agent
+146606:task_remote_agent_failed
+146617:task_remote_agent
+146629:task_remote_agent
+146630:task_remote_agent_review_failed
+146649:task_remote_agent_restore
+148638:[interruptRemoteSession] y3
+148643:[interruptRemoteSession] interrupted 
+153013:isUltrareviewOverageConfirmed
+153014:markUltrareviewOverageConfirmed
+170015:fetchUltrareviewPreflight schema mismatch: 
+170018:fetchUltrareviewPreflight failed: 
+183437:disableBackgroundTasks
+188810:Cannot destructure property 'runUltrareviewHeadless' from null or undefined value
+189462:hasSeenAutofixPrChatOpsNotice
+203542:Cannot destructure property 'interruptRemoteSession' from null or undefined value
+203550:Cannot destructure property 'archiveRemoteSession' from null or undefined value
+212120:Cannot destructure property 'ultrareviewHandler' from null or undefined value
+250597:AutofixPr
+250602:AutofixPr
+267132:task_remote_agent
+267133:task_remote_agent_review_failed
+328890:autofixPrMode
+
+## #19 VSCode host note
+SEA contains generic 'vscode' string hits (count below) but NO changelog #19 focus-jump host string.
+vscode short-string count: 120
+(no #19 host-only focus-jump strings)

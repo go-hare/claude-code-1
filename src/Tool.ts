@@ -591,6 +591,12 @@ export type Tool<
   // When we do that, we can also go through and make this a bit more type-safe.
   outputSchema?: z.ZodType<unknown>
   inputsEquivalent?(a: z.infer<Input>, b: z.infer<Input>): boolean
+  /**
+   * densable 2.1.235 #12 — when true for this input, hosts must omit the
+   * persistent "don't ask again" affordance and accept-path must strip
+   * whole-tool allow grants (see stripWholeToolGrantsForAsk).
+   */
+  suppressesAlwaysAllowRule?(input: z.infer<Input>): boolean
   isConcurrencySafe(input: z.infer<Input>): boolean
   isEnabled(): boolean
   isReadOnly(input: z.infer<Input>): boolean

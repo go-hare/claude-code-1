@@ -1,0 +1,55 @@
+# gold-vscode-focus — densable SEA 2.1.235 (#19 vscode-focus)
+# SEA: /tmp/official-235/plat/package/claude (Mach-O arm64)
+# Changelog #19:
+# [VSCode] Fixed focus jumping between open Claude tabs on its own when a window with several Claude panels is restored or reloaded
+# Dig: workflow w028l4cng · 2026-08-20 · densable-first · READ-ONLY agent → parent write
+
+## Verdict
+N/A — VS Code extension HOST-ONLY fix.
+SEA ABSENT all extension-host tab/panel focus APIs and changelog symptom strings.
+SEA PRESENT only IDE bridge/client identifiers (claude-vscode / anthropic.claude-code*).
+Do NOT invent WebviewPanel / preserveFocus restore code in CLI densable SEA.
+User 2026-08-20: 「那算了不管了」→ keep N/A, no land.
+
+## Changelog phrase / symptom strings (ABSENT · raw 0)
+ABSENT  focus jumping between open Claude tabs
+ABSENT  jumping between
+ABSENT  Claude tabs
+ABSENT  Claude panels
+ABSENT  several Claude panels
+ABSENT  restored or reloaded
+ABSENT  focus jumping
+
+## VS Code Extension Host APIs (ABSENT · raw 0)
+ABSENT  preserveFocus
+ABSENT  ViewColumn
+ABSENT  createWebviewPanel
+ABSENT  WebviewPanel
+ABSENT  activeWebviewPanel
+ABSENT  onDidChangeViewState
+ABSENT  retainContextWhenHidden
+ABSENT  WebviewPanelSerializer / serializeWebview / restoreWebview
+ABSENT  vscode.window.createWebviewPanel / vscode.ViewColumn
+ABSENT  showTextDocument / focusActiveEditorGroup
+ABSENT  webview.reveal(preserveFocus)
+
+## SEA-present IDE/bridge gold (NOT the #19 fix surface)
+PRESENT  claude-vscode (raw≈33; entrypoint / clientType / vscodeClient bridge)
+PRESENT  anthropic.claude-code (raw≈17; incl. com.anthropic.claude-code*)
+PRESENT  com.anthropic.claude-code-url-handler
+PRESENT  com.anthropic.claude-code.cli-no-window
+PRESENT  CLAUDE_CODE_ENTRYPOINT case claude-vscode → claude_code_vscode
+PRESENT  clientType()!=="claude-vscode"
+PRESENT  vscode-jsonrpc@8.2.0
+PRESENT  VS Code extension (docs phrasing only)
+
+## Local map (CLI-side only · host package ABSENT)
+- packages/vscode-ide-bridge ABSENT on disk (named in CLAUDE.md / comments only)
+- CLI bridge: src/utils/ide.ts lock discovery; MCP sse-ide|ws-ide; vscodeSdkMcp name claude-vscode
+- Siblings agent-extension / my-agent-extension = browser extensions, NOT anthropic.claude-code host
+- Official host = Anthropic VS Code marketplace extension ID anthropic.claude-code
+
+## Non-claims
+- Do not treat PRESENT claude-vscode / anthropic.claude-code* as #19 PARTIAL/HAVE
+- Do not invent extension-host focus restore in this CLI pack
+- Board: HAVE 18 / PARTIAL 0 / GAP 0 / N/A 1 (#19)

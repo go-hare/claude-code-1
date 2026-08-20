@@ -1,0 +1,26 @@
+gold densable 2.1.235 #6 AVo throw + Abf/Thf/OUd (clean ASCII extracts from SEA)
+SEA: /tmp/official-235/plat/package/claude
+
+// densable AVo + OUd defs
+var fi="Agent",t5="Task",kVo=1e5,OUd,AVo="subagent_type is required: the general-purpose agent is not available in this session";var ey=w(()=>{OUd=new Set(["Explore","Plan"])});
+
+// densable QJe (normalizeAgentTypeKey)
+function QJe(e){return e.normalize("NFKC").toLowerCase().replace(/[\p{White_Space}\p{Pd}_]+/gu,"")}
+
+// densable Abf (isGeneralPurposeAvailable)
+function Abf(e,t){let r=QJe(eAe.agentType),n=e.filter((s)=>QJe(s.agentType)===r),o=(s)=>t?.includes(s.agentType)??!0,i=n.find((s)=>s.agentType===eAe.agentType);if(i)return o(i);return n.length===1&&o(n[0])}
+
+// densable FTi (formatAvailableAgentTypes)
+function FTi(e){return e.join(", ")||"none"}
+
+// densable Thf omit-guidance (uses AVo when generalPurposeAvailable=n is false)
+async function Thf({model:e,isCoordinator:t,forkAvailable:r,generalPurposeAvailable:n}){let o=lLe(),i=o&&r,s=`${AVo}, so choose ${i?'`"fork"` or ':""}one of the listed agent types.`
+
+// densable AgentTool.call omit-gate BEFORE effectiveType default (gr=t??eAe.agentType)
+let Ye=l9r(k,R,y),Et=Ye.map((Rr)=>Rr.agentType);if(t===void 0&&!Abf(k,R)){H("tengu_subagent_type_miss",{requestedNormalized:xe("OMITTED"),availableCount:Ye.length}),pe("subagent_launch","subagent_type_missing");let Rr=P&&Rbf(W)===null?[xke,...Et]:Et;throw new Vyt(`${AVo}. Available agents: ${FTi(Rr)}`)}let gr=t??eAe.agentType,yr=Ye.find((Rr)=>Rr.agentType===gr);
+
+// densable typed-not-found (contrast: only when subagent_type provided)
+throw new Vyt(`Agent type '${t}' not found. Available agents: ${FTi(Et)}`)
+
+// densable OUd usage — Explore|Plan completed-result footer suppress ONLY (not omit gate)
+if(e.agentType&&OUd.has(e.agentType)&&!n)return{tool_use_id:t,type:"tool_result",content:o};

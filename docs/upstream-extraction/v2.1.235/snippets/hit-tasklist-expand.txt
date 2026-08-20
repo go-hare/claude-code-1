@@ -1,0 +1,38 @@
+ITEM #10 tasklist-expand — SEA gold from /tmp/official-235/plat/package/claude (2.1.235)
+Changelog: Fixed the expanded task list (`ctrl+t`) always starting collapsed when resuming or relaunching into a session that still has open tasks
+
+### needle showExpandedTodos:!1 hits=1+
+@277118657: tamps:!1,hasSeenTasksHint:!1,hasUsedStash:!1,hasUsedBackgroundTask:!1,queuedCommandUpHintCount:0,diffTool:"auto",customApiKeyResponses:{approved:[],rejected:[]},env:{},tipsHistory:{},memoryUsageCount:0,promptQueueUseCount:0,btwUseCount:0,todoFeatureEnabled:!0,showExpandedTodos:!1,briefTranscript:!1,messageIdleNotifThresholdMs:60000,autoConnectIde:!1,autoInstallIdeExtension:!0,fileCheckpointingEnabled:!0,terminalProgressBarEnabled:!0,cachedDynamicConfigs:{},cachedGrowthBookFeatures:{},respectGitignore:!0,copyFullResponse:!1,unpinOpus47
+
+### needle expandedView:ar().showExpandedTodos?"tasks":"none" hits=1+
+@300779389: ps:Vd("showMessageTimestamps",!1).value,mainLoopModel:k,mainLoopModelForSession:null,isBriefOnly:it,slackTagConnected:!1,replTab:"convo",diffPanelVisible:!1,panelFileView:null,briefTranscript:He?!1:C,expandedView:ar().showExpandedTodos?"tasks":"none",coordinatorTaskIndex:-1,workflowFooterIndex:0,viewSelectionMode:"none",queueEditIndex:null,footerSelection:null,footerLinks:[],toolPermissionContext:Mt,agent:r?.agentType,agentDefinitions:i,skillTool
+
+### needle e.expandedView!==t.expandedView hits=1+
+@290425115: ason:d.last_reason??null,met:!1}})}else n.notifyMetadataChanged({goal:null})}if(n&&(e.autoCompactWindow!==t.autoCompactWindow||e.mainLoopModel!==t.mainLoopModel||e.mainLoopModelForSession!==t.mainLoopModelForSession||e.settings!==t.settings))n.notifyAutocompactInputsChanged();if(e.expandedView!==t.expandedView){let c=e.expandedView==="tasks";tn((u)=>{if(u.showExpandedTodos===c)return u;return{...u,showExpandedTodos:c}})}if(e.verbose!==t.verbose)_pe("verbose",e.verbose);if(e.settings!==t.settings)try{if(DMr(),Eje(),tXt(),IIt(),e.settings.env!==t.settings.env&&Mf())jre(),fIi()}catch(c){
+
+### needle function KnE(GnE) hits=1+
+@294432931: ,JTc,XTc]}),Gyo[11]=YTc,Gyo[12]=JTc,Gyo[13]=XTc,Gyo[14]=DnE;else DnE=Gyo[14];return DnE}var b9t,aue,hcg;var gcg=w(()=>{Pt();Zv();Ri();b9t=I(kt(),1),aue=I(be(),1),hcg=I(Le(),1)});function VnE(rCL){return rCL.expandedView}function KnE(GnE){return{...GnE,expandedView:GnE.expandedView==="tasks"?"none":"tasks"}}function YnE(nCL){return nCL.isBriefOnly}function JnE(Ecg){if(!Ecg.isBriefOnly){return Ecg}return{...Ecg,isBriefOnly:!1}}function XnE(Ccg){if(!Ccg.is
+
+### needle tengu_toggle_todos hits=2+
+@161425520: ............................................v...........................!...............................................................................................i...........@...............`...............p...............................................tengu_toggle_todos..............................tasks...........................todo_toggle_panel................................................................@`...`..r....P/.......-..@.....................................0*......................H.......................P.....
+@294433525: .stdout)?.forceRedraw()}function Mun(V0L){let S9t=kcg.c(22),{screen:ZTc,onToggleTranscript:ycg,showAllInTranscript:LnE,messageCount:_cg}=V0L,bcg=LnE===void 0?!1:LnE,Scg=pt(VnE),i$e=zi();Tu();let vcg=yne();ha();let HnE;if(S9t[0]!==Scg||S9t[1]!==i$e)HnE=()=>{H("tengu_toggle_todos",{is_expanded:Scg==="tasks"}),_e("todo_toggle_panel"),i$e(KnE)},S9t[0]=Scg,S9t[1]=i$e,S9t[2]=HnE;else HnE=S9t[2];let K0L=HnE,Dun=pt(YnE),NnE,FnE;if(S9t[3]!==i$e)NnE=()=>{let{isBriefEnabled:QTc}=(wme(),an(hHe));let Y0L=QTc;let $nE=()=>{if(Y0L()){return}i$e(JnE
+
+### needle "ctrl+t":"app:toggleTodos" hits=1+
+@279414346: ,b3b=pZo!=="windows"||(Rye()?PXs("1.4.0",">=1.2.23"):PXs(process.versions.node,">=22.17.0 <23.0.0 || >=24.2.0")),Dnp=b3b?"shift+tab":"meta+m",T2r=[{context:"Global",bindings:{"ctrl+c":"app:interrupt","ctrl+d":"app:exit","ctrl+t":"app:toggleTodos","ctrl+o":"app:toggleTranscript","ctrl+shift+b":"app:toggleBrief","ctrl+r":"history:search","ctrl+up":"app:diffFileListUp","ctrl+down":"app:diffFileListDown","meta+up":"app:diffFileListUp","meta+down":"app:diffFileListDo
+
+### needle "ctrl+k ctrl+t":"app:toggleTodos" hits=1+
+@296391167: chat:externalEditor"}}]},fOE={context:"Chat",bindings:{"ctrl+s":null}},mOE={context:"Chat",bindings:{"ctrl+g":null,"ctrl+e":"chat:externalEditor"}},hOE={context:"Global",bindings:{"ctrl+k ctrl+t":"app:toggleTodos"}},gOE=["# Keybindings Skill","","Create or modify `~/.claude/keybindings.json` to customize keyboard shortcuts.","","## CRITICAL: Read Before Write","","**Always read `~/.claude/k
+
+### needle type:"set_expanded_view",expandedView:"tasks" hits=2+
+@284851098: (iWa(d.blockingError))}catch(d){if(!(d instanceof tw))throw d;T("TaskCreated hooks cancelled (control stream closed)")}if(c.length>0)throw await fai(LG(),l,o.storageV5),Error(c.join(`.`));return a?.({type:"set_expanded_view",expandedView:"tasks"}),{data:{task:{id:l,subject:e}}}},mapToolResultToToolResultBlockParam(e,t){let{task:r}=e;return{tool_use_id:t,type:"tool_result",content:`Task #${r.id} created successfully: ${r.subject}`}}})});var F
+@284857390: ect);return r.join(" ")},renderToolUseMessage(){return null},async call({taskId:e,subject:t,description:r,activeForm:n,status:o,owner:i,addBlocks:s,addBlockedBy:a,metadata:l},c,u,d,p){let f=LG();p?.({type:"set_expanded_view",expandedView:"tasks"});let m=c.storageV5,h=await b1e(f,e,m);if(!h)return{data:{success:!1,taskId:e,updatedFields:[],error:"Task not found"}};let g=[],y={};if(t!==void 0&&t!==h.subject)y.subject=t,g.push("subject");if(r!=
+
+### needle Cr==="teammates"?"none":Cr hits=1+
+@298731136: void 0&&Cr.replacesUuids.length>0?Cr.replacesUuids:null;else Y3.current=null;if(Cr.phase==="begin")XT.setSalvage(Cr.salvageText,Cr.join==="exact");else XT.setSalvage(null)},onNotification:Ge,onExpandedView:(Cr)=>{let mn=Cr==="teammates"?"none":Cr;Ue((fo)=>fo.expandedView===mn?fo:{...fo,expandedView:mn})},onPostTurnSummary:(Cr)=>Ue((mn)=>mn.postTurnSummary===Cr?mn:{...mn,postTurnSummary:Cr}),onActiveGoal:(Cr)=>Ue((mn)=>mn.activeGoal===Cr?mn:{...mn,activeGoal:Cr})
+
+### needle @internal Hint to expand a side panel hits=2+
+@266522144: s...........................teammates.......................0...............@...............P...............................none............................tasks...........................teammates...................r...@internal Hint to expand a side panel. Enum is a superset of AppState.expandedView for back-compat; do not narrow.................................................................`...........`n......`n.....@.l.B..h......lj......<vl.....L.....................
+@299130832: swallows a failed push's code also emits; the event is a prompt to look, never a claim).")),ZMH=Se(()=>ye({type:wt("set_expanded_view"),expanded_view:Nr(["none","tasks","teammates"]),uuid:Vu(),session_id:N()}).describe("@internal Hint to expand a side panel. Enum is a superset of AppState.expandedView for back-compat; do not narrow.")),Uzc=Se(()=>ye({type:wt("active_goal"),value:ye({condition:N(),iterations:rt().int(),set_at:rt().int(),tokens_at_start:rt().int(),last_reaso
+
+### needle "showExpandedTodos" hits=1+
+@277152511: ","editorMode","hasUsedBackslashReturn","autoCompactEnabled","autoScrollEnabled","showTurnDuration","externalEditorContext","showMessageTimestamps","diffTool","env","tipsHistory","todoFeatureEnabled","showExpandedTodos","briefTranscript","diffSidebarOpen","messageIdleNotifThresholdMs","autoConnectIde","autoInstallIdeExtension","fileCheckpointingEnabled","terminalProgressBarEnabled","showStatusInTerminalTab","taskCom

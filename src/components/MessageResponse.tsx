@@ -35,6 +35,14 @@ export function MessageResponse({ children, height }: Props): React.ReactNode {
 // to avoid rendering nested ⎿ characters.
 const MessageResponseContext = React.createContext(false);
 
+/**
+ * densable SEA `EZr` — true when already nested under a MessageResponse provider.
+ * Used by PTL (`ZOl`) to suppress the auto-compact-off suffix when nested.
+ */
+export function useIsMessageResponse(): boolean {
+  return useContext(MessageResponseContext);
+}
+
 function MessageResponseProvider({ children }: { children: React.ReactNode }): React.ReactNode {
   return <MessageResponseContext.Provider value={true}>{children}</MessageResponseContext.Provider>;
 }

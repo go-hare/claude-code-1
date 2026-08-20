@@ -1,0 +1,7 @@
+@91403440: ........................................	...H...Message too large for cross-session delivery: the serialized message is ................	.......en-US...................	....... characters and the limit is ..................... .S.h.o.r.t.e.n. .t.h.e. .m.e.s.s.a.g.e. .t.e.x.t. ..  .p.u.t. .b.u.l.k. .c.o.n.t.e.n.t. .i.n. .a. .f.i.l.e. .t.h.e. .r.e.c.i.p.i.e.n.t. .c.a.n. .
+---
+@277814661: domBytes(32)});function tFd(e,t){return new yt(`Message too large for cross-session delivery: the serialized message is ${e.toLocaleString("en-US")} characters and the limit is ${t.toLocaleString("en-US")}. Shorten the message text \u2014 put bulk content in a file the recipient can read rather than in the message \u2014 or split it into smaller messages.`,"cross-sessio
+---
+@73683088: ........	.......ENOINBOX................	.......message_too_large...........................V... ..  .t.h.e. .p.e.e.r. .i.s. .a.l.i.v.e. .b.u.t. .i.t.s. .p.i.p.e. .i.s. .m.o.m.e.n.t.a.r.i.l.y. .b.u.s.y... .R.e.t.r.y. .t.h.e. .s.a.m.e. .a.d.d.r.e.s.s. .s.h.o.r.t.l.y.........4&.k.CI.......................noteCorrespondent........................
+---
+@277815367: s.`}var Lra="no_live_inbox",QNd="ENOINBOX",eFd="message_too_large",jGo=" \u2014 the peer is alive but its pipe is momentarily busy. Retry the same address shortly.";var eOn=w(()=>{dt()});var bZt={};_t(bZt,{MAX_SANE_EPOCH_MS:()=>sFd,SessionRecordsUnreadableError:()=>oOn,admitReceiptForOutstandingSend:()=>Fra,findLivePeerBySessionId:()=>jra,isSa

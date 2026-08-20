@@ -1,0 +1,11 @@
+@117550512:  network path.......................................	.......the notebook could not be read..........................	...$...the notebook is too large to preview....................	.......utf-8...................	......Edit notebook...............u...P.r.o.p.o.s.e.d. .c.e.l.l. .c.o.n.t.e.n.t. .i.s. .t.o.o. .
+---
+@284151414: else try{if(!(await vr().stat(a.notebook_path)).isFile())p="the notebook could not be read";else{let h=await vr().readFileBytes(a.notebook_path,MG+1);if(h.length>MG)p="the notebook is too large to preview";else{let g=CAa(h.toString("utf-8"),a.cell_id);if(g.kind==="found")if(g.source.length>GFt||sRe(g.source))
+---
+@284151869: :"the target cell was not found in the notebook"}}}catch{p="the notebook could not be read"}let f=c||p!==void 0;return{title:"Edit notebook",subtitle:void 0,question:{kind:"file-action",verbPhrase:l,fileName:mvi(a.notebook_path,n)},content:c?{kind:"no-changes",message:"Proposed cell content is too large to sh
+---
+@117550576: notebook could not be read..........................	...$...the notebook is too large to preview....................	.......utf-8...................	......Edit notebook...............u...P.r.o.p.o.s.e.d. .c.e.l.l. .c.o.n.t.e.n.t. .i.s. .t.o.o. .l.a.r.g.e. .t.o. .s.h.o.w. ..  .c.a.n.n.o.t. .b.e. .r.e.v.i.e.w.e.d.,.
+---
+@284151522:  vr().readFileBytes(a.notebook_path,MG+1);if(h.length>MG)p="the notebook is too large to preview";else{let g=CAa(h.toString("utf-8"),a.cell_id);if(g.kind==="found")if(g.source.length>GFt||sRe(g.source))p="the current cell contents cannot be shown in full";else d=g.source;else p=g.kind==="unparsable"?"the notebook c
+---
+@284152079: i(a.notebook_path,n)},content:c?{kind:"no-changes",message:"Proposed cell content is too large to show \u2014 cannot be reviewed, so approval is one-time only (deny unless expected)."}:p!==void 0?{kind:"no-changes",message:`Current cell contents cannot be shown (${p}) \u2014 the ${a.edit_mode==="dele

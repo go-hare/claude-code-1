@@ -1,0 +1,82 @@
+# SEA gold: densable 2.1.235 #5 — Shift+Tab in permission comment field
+# Binary: /tmp/official-235/plat/package/claude
+# Item: shift-tab-comment / changelog "Fixed Shift+Tab inside the permission prompt's comment field..."
+#
+# Correct reading of changelog (matches SEA):
+#   BEFORE (bug): Shift+Tab while comment open approved edit + session-wide.
+#   AFTER (fix): Shift+Tab while comment open closes/collapses the comment field.
+#   When comment CLOSED: Shift+Tab still selects accept-session (session-wide).
+# NOT invent: accept-session does NOT carry acceptFeedback in densable ekE.
+
+## Keybindings (Dnp)
+```
+b3b=pZo!=="windows"||(Rye()?PXs("1.4.0",">=1.2.23"):PXs(process.versions.node,">=22.17.0 <23.0.0 || >=24.2.0"))
+Dnp=b3b?"shift+tab":"meta+m"
+// Confirmation bindings:
+[Dnp]:"confirm:cycleMode"
+// Chat also uses {[Dnp]:"chat:cycleMode"}
+```
+
+## File options aRg — session-row shortcut display
+```
+c=KB("confirm:cycleMode","Confirmation","shift+tab");
+// yes input: type:"input" label:"Yes" placeholder:"and tell Claude what to do next" option:{type:"accept-once"}
+// session: value:"yes-session" option:{type:"accept-session",row:u.row}
+//   label appends bold "("+c+")" when value==="yes-session" && operationType!=="read"
+// no input: placeholder:"and tell Claude what to do differently" option:{type:"reject"}
+```
+
+## Feedback hook xst (shared)
+```
+{acceptFeedback,rejectFeedback,setAcceptFeedback,setRejectFeedback,
+ acceptInputMode,rejectInputMode,handleInputModeToggle,handleFocus,
+ logSubmitted,logEscape,hintNode}=xst({feedbackTypeOf:ofn,...})
+```
+
+## File dialog ERg — confirm:cycleMode handler (THE #5 behavior)
+```
+v=(A,P)=>{ if(A.type==="reject") m("reject",P); else if(A.type==="accept-once") m("accept",P); t(ekE(A,e,P)) }
+E=()=>{
+  if(u){ p("yes"); return }   // acceptInputMode open → toggle/collapse only
+  if(d){ p("no");  return }   // rejectInputMode open → toggle/collapse only
+  let A=S.find((P)=>P.option.type==="accept-session");
+  if(A) v(A.option)           // NO second feedback arg
+}
+di({"confirm:cycleMode":E},{context:"Confirmation"})
+```
+
+## Decision builder ekE — accept-session ignores feedback
+```
+function ekE(e,t,r){switch(e.type){
+  case"accept-once": return {behavior:"allow",updatedInput:t.input,...r&&{feedback:r}};
+  case"accept-session": {
+    if(!OI(e.row)) return {behavior:"allow",updatedInput:t.input};
+    return {behavior:"allow",updatedInput:t.input,permissionUpdates:e.row.applies}
+    // note: no feedback on accept-session
+  }
+  case"reject": return {behavior:"deny",...r&&{feedback:r}}
+}}
+```
+
+## Select onChange still carries feedback only for accept-once / reject
+```
+if(P.option.type==="reject"){ let O=a.trim(); v(P.option,O||void 0); return }
+if(P.option.type==="accept-once"){ let O=s.trim(); v(P.option,O||void 0); return }
+v(P.option)  // accept-session: no feedback
+```
+
+## Adjacent (NOT this item): ExitPlanMode
+- description:"shift+tab to approve with this feedback"
+- placeholder:"Tell Claude what to change"
+- Do not conflate with file-permission comment Shift+Tab.
+
+## Local vs densable (dig 2026-08-19)
+| Surface | densable | local |
+| --- | --- | --- |
+| cycleMode while Yes/No comment open | collapse via handleInputModeToggle; do NOT accept | useFilePermissionDialog.handleCycleMode always accept-session |
+| accept-session + feedback | ekE / v(A.option) omit feedback | handleAcceptSession also omits feedback (aligned) |
+| session-row shortcut display | KB("confirm:cycleMode","Confirmation",…) | getShortcutDisplay('chat:cycleMode','Chat',…) |
+| Confirmation chord | [Dnp] shift+tab \| meta+m | hardcoded 'shift+tab' only |
+
+## Likely symbols
+aRg, RCE, ERg, xst, ekE, confirm:cycleMode, accept-session, yes-session, Dnp, KB/zd, acceptInputMode, handleInputModeToggle

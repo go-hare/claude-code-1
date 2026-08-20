@@ -4,6 +4,7 @@ import { Box, Text, useTheme } from '@anthropic/ink';
 import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js';
 import { env } from '../../utils/env.js';
 import { shouldShowAlwaysAllowOptions } from '../../utils/permissions/permissionsLoader.js';
+import { shouldShowPersistentAllowOption } from '../../utils/permissions/showAlwaysAllow.js';
 import { truncateToLines } from '../../utils/stringUtils.js';
 import { logUnaryEvent } from '../../utils/unaryLogging.js';
 import { type UnaryEvent, usePermissionRequestLogging } from './hooks.js';
@@ -116,8 +117,15 @@ export function FallbackPermissionRequest({
 
   const originalCwd = getOriginalCwd();
   // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
+  // densable 2.1.235 #12: also hide when suppressAlwaysAllowRule / tool.suppresses…
   const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg;
+  const showAlwaysAllowOptions = shouldShowPersistentAllowOption({
+    baseAllowed: shouldShowAlwaysAllowOptions(),
+    permissionResult: toolUseConfirm.permissionResult,
+    tool: toolUseConfirm.tool,
+    input: toolUseConfirm.input,
+    isAskCappedByOrg,
+  });
   const options = useMemo((): PermissionPromptOption<FallbackOptionValue>[] => {
     const result: PermissionPromptOption<FallbackOptionValue>[] = [
       {

@@ -27,6 +27,7 @@ import { isObserverTaskId } from 'src/utils/observerAgents.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { readAgentMetadata } from 'src/utils/sessionStorage.js'
 import { errorMessage } from 'src/utils/errors.js'
+import { isUdsMessageTooLargeError } from 'src/utils/udsMessaging.js'
 import { truncate } from 'src/utils/format.js'
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
@@ -1432,10 +1433,14 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               },
             }
           } catch (e) {
+            // densable yZt → too_large / message_too_large (tFd text already in message)
             return {
               data: {
                 success: false,
                 message: `Failed to send to ${recipient}: ${errorMessage(e)}`,
+                ...(isUdsMessageTooLargeError(e)
+                  ? { errorClass: 'message_too_large' }
+                  : {}),
               },
             }
           }
@@ -1700,10 +1705,14 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               },
             }
           } catch (e) {
+            // densable yZt → too_large / message_too_large (tFd text already in message)
             return {
               data: {
                 success: false,
                 message: `Failed to send to ${cand.name}: ${errorMessage(e)}`,
+                ...(isUdsMessageTooLargeError(e)
+                  ? { errorClass: 'message_too_large' }
+                  : {}),
               },
             }
           }

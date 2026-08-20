@@ -1,0 +1,7 @@
+@148070419: mpact or /clear to continue..........	....... . auto-compact is off . /config to turn it on..........	...............................	.......error...................	.......Context limit reached . ................	....... . ...............................................................
+---
+@292291883: ==void 0,jrD=EZr(),qOl=!UrD&&!jrD&&RPa()?" \xB7 auto-compact is off \xB7 /config to turn it on":"";const Ash=qOl||ksh?void 0:1;let WOl;if(Csh[1]!==qOl)WOl=Jl.jsxs(_,{color:"error",children:["Context limit reached \xB7 ",BrD,qOl,ksh?` \xB7 ${ksh}`:""]}),Csh[1]=qOl,Csh[2]=WOl;else WOl=Csh
+---
+@148070441: tinue..........	....... . auto-compact is off . /config to turn it on..........	...............................	.......error...................	.......Context limit reached . ................	....... . .................................................................................O.....
+---
+@292291908: rD&&!jrD&&RPa()?" \xB7 auto-compact is off \xB7 /config to turn it on":"";const Ash=qOl||ksh?void 0:1;let WOl;if(Csh[1]!==qOl)WOl=Jl.jsxs(_,{color:"error",children:["Context limit reached \xB7 ",BrD,qOl,ksh?` \xB7 ${ksh}`:""]}),Csh[1]=qOl,Csh[2]=WOl;else WOl=Csh[2];let iWT;if(Csh[3]!==Ash

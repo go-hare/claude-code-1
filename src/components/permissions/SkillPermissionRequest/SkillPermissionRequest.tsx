@@ -7,6 +7,7 @@ import { SKILL_TOOL_NAME } from '@claude-code/builtin-tools/tools/SkillTool/cons
 import { SkillTool } from '@claude-code/builtin-tools/tools/SkillTool/SkillTool.js';
 import { env } from '../../../utils/env.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import { shouldShowPersistentAllowOption } from '../../../utils/permissions/showAlwaysAllow.js';
 import { logUnaryEvent } from '../../../utils/unaryLogging.js';
 import { type UnaryEvent, usePermissionRequestLogging } from '../hooks.js';
 import { PermissionDialog } from '../PermissionDialog.js';
@@ -49,8 +50,15 @@ export function SkillPermissionRequest(props: PermissionRequestProps): React.Rea
 
   const originalCwd = getOriginalCwd();
   // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
+  // densable 2.1.235 #12: also honor suppressAlwaysAllowRule / tool.suppresses…
   const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg;
+  const showAlwaysAllowOptions = shouldShowPersistentAllowOption({
+    baseAllowed: shouldShowAlwaysAllowOptions(),
+    permissionResult: toolUseConfirm.permissionResult,
+    tool: toolUseConfirm.tool,
+    input: toolUseConfirm.input,
+    isAskCappedByOrg,
+  });
   const options = useMemo((): PermissionPromptOption<SkillOptionValue>[] => {
     const baseOptions: PermissionPromptOption<SkillOptionValue>[] = [
       {

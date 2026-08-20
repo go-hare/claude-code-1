@@ -1,0 +1,39 @@
+@155955492: 	.......ctrl+o..
+...............................	.......app:toggleTodos.........	.......ctrl+t..................	...	...chat:undo...............	.......Chat....................	.......ctrl+_..................	...
+...chat:stash..............	.......ctr
+---
+@161421748: ................	.......Global..................	.......app:toggleTodos.........................	.......app:toggleTranscript....................................	.......app:toggleBrief.........................	.......app:toggleTerminal.................
+---
+@164012788: cel.............	.......esc.....................	.......app:toggleTodos.........	.......Global..................	.......ctrl+t..................	.......voice:pushToTalk........	.......space...................	...+...Iterator result interface is not an
+---
+@218092884: rrupt...........	.......app:exit................	.......app:toggleTodos.........	.......app:toggleTranscript....................	.......app:toggleBrief.........	.......history:search..........	.......app:diffFileListUp......................	.......app
+---
+@218112788: rrupt...........	.......app:exit................	.......app:toggleTodos.........	.......app:toggleTranscript....................	.......app:toggleBrief.........	.......app:toggleReplTab.......................	.......app:toggleDiffNoiseFilter..........
+---
+@218120276: rrupt...........	.......app:exit................	.......app:toggleTodos.........	.......app:toggleTranscript....................	.......app:toggleBrief.........	.......app:toggleReplTab.......................	.......app:toggleDiffNoiseFilter..........
+---
+@264811044: ................	.......Global..................	.......app:toggleTodos.........	.......# Keybindings Skill.....................	...............	...N...Create or modify `~/.claude/keybindings.json` to customize keyboard shortcuts...........	.......## 
+---
+@279414360: {"ctrl+c":"app:interrupt","ctrl+d":"app:exit","ctrl+t":"app:toggleTodos","ctrl+o":"app:toggleTranscript","ctrl+shift+b":"app:toggleBrief","ctrl+r":"history:search","ctrl+up":"app:diffFileListUp","ctrl+down":"app:diffFileListDown","meta+up":"app:diffFi
+---
+@279424572:  (fullscreen layout)"},dha=["app:interrupt","app:exit","app:toggleTodos","app:toggleTranscript","app:toggleBrief","app:toggleReplTab","app:toggleDiffNoiseFilter","app:diffFileListUp","app:diffFileListDown","app:toggleDiffPreSession","app:cycleDiffBase
+---
+@293540478: ,_D[0]=ejh,_D[1]=zPw;else zPw=_D[1];let tjh=zPw,rjh=TC("app:toggleTodos","Global","ctrl+t"),njh=TC("chat:undo","Chat","ctrl+_"),ojh=TC("chat:stash","Chat","ctrl+s"),ijh=TC(afo(),"Chat","shift+tab"),sjh=TC("chat:modelPicker","Chat","alt+p"),ajh=TC("cha
+---
+@294434826: UnE={context:"Global"},S9t[17]=UnE;else UnE=S9t[17];bo("app:toggleTodos",K0L,UnE);let jnE;if(S9t[18]===le)jnE={context:"Global"},S9t[18]=jnE;else jnE=S9t[18];bo("app:toggleTranscript",X0L,jnE);let znE;if(S9t[19]===le)znE={context:"Global"},S9t[19]=znE
+---
+@294819909: ),G=zd("chat:cancel","Chat","esc").toLowerCase(),ne=zd("app:toggleTodos","Global","ctrl+t"),Z=zd("voice:pushToTalk","Chat","space"),[se]=hue.useState(()=>(ar().voiceFooterHintSeenCount??0)<rhE),ae=hue.useRef(!1);hue.useEffect(()=>{if(!J||!se)return;if
+---
+@296391188: tor"}},hOE={context:"Global",bindings:{"ctrl+k ctrl+t":"app:toggleTodos"}},gOE=["# Keybindings Skill","","Create or modify `~/.claude/keybindings.json` to customize keyboard shortcuts.","","## CRITICAL: Read Before Write","","**Always read `~/.claude/
+---
+@118914925: .......................................	...*...Complete all open tasks. Start with task #..............	.......: 
+
+ ...................	.......
+
+..................	............................@.?.C...@.d.H...@.l.L...@`}.L...@p.................)...E..
+---
+@284524826: every((n)=>!t.has(n))})}function gXS(e){let t=`Complete all open tasks. Start with task #${e.id}: 
+
+ ${e.subject}`;if(e.description)t+=`
+
+${e.description}`;return t}async function ubf(e,t,r,n){if(!r)return;try{let o=await b7(e,n),i=hXS(o);if(!i)retur

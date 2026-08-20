@@ -142,8 +142,9 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       down: 'confirm:next',
       tab: 'confirm:nextField',
       space: 'confirm:toggle',
-      // Cycle modes (used in file permission dialogs and teams dialog)
-      'shift+tab': 'confirm:cycleMode',
+      // Cycle modes (used in file permission dialogs and teams dialog).
+      // densable Dnp: Windows without VT uses meta+m (same as chat:cycleMode).
+      [MODE_CYCLE_KEY]: 'confirm:cycleMode',
       // Toggle permission explanation in permission dialogs
       'ctrl+e': 'confirm:toggleExplanation',
       // Toggle permission debug info

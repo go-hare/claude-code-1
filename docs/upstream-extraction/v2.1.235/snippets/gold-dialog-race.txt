@@ -1,0 +1,18 @@
+# gold — #16 dialog-race (densable 2.1.235)
+
+Changelog:
+Dialogs: arrow keys and Enter pressed in quick succession now select the option you navigated to instead of the previously highlighted one
+
+SEA-proven fix surface (CustomSelect):
+- getFocusedValue  (live read from sync o.state after focus-next/previous)
+- C4i dispatch: o.state=R; s(R) before React re-render
+- select:accept / selectFocusedOption / handleKeyDown all call getFocusedValue()
+- PFm validates focused value against current options
+
+Key strings/symbols:
+select:accept, select:next, select:previous, select:cancel, context:"Select",
+focusedValue, focusNextOption, selectFocusedOption, visibleFromIndex,
+currentViewport, hasInkFocus, (Use arrow keys)
+
+Local: ABSENT getFocusedValue — useReducer-only navigation → UNKNOWN→GAP candidate
+#19 VSCode host tab focus: SEA has claude-vscode strings but not extension host fix → N/A

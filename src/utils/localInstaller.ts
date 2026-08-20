@@ -4,6 +4,10 @@
 
 import { access, chmod, writeFile } from 'fs/promises'
 import { join } from 'path'
+import {
+  type InstallOutcome,
+  classifyNpmInstallFailure,
+} from './autoUpdater.js'
 import { type ReleaseChannel, saveGlobalConfig } from './config.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { getErrnoCode } from './errors.js'
@@ -97,11 +101,11 @@ export async function ensureLocalPackageEnvironment(): Promise<boolean> {
 export async function installOrUpdateClaudePackage(
   channel: ReleaseChannel,
   specificVersion?: string | null,
-): Promise<'in_progress' | 'success' | 'install_failed'> {
+): Promise<InstallOutcome> {
   try {
     // First ensure the environment is set up
     if (!(await ensureLocalPackageEnvironment())) {
-      return 'install_failed'
+      return { status: 'install_failed' }
     }
 
     // Use specific version if provided, otherwise use channel tag
@@ -117,11 +121,18 @@ export async function installOrUpdateClaudePackage(
     )
 
     if (result.code !== 0) {
+      if (result.code === 190) {
+        return { status: 'in_progress' }
+      }
+      const combined = `${result.stdout ?? ''} ${result.stderr ?? ''}`
+      const outcome = classifyNpmInstallFailure(combined)
       const error = new Error(
-        `Failed to install Claude CLI package: ${result.stderr}`,
+        outcome.failureHint === 'windows_running_exe_lock'
+          ? `Failed to install Claude CLI package (running executable is locked): ${result.stderr}`
+          : `Failed to install Claude CLI package: ${result.stderr}`,
       )
       logError(error)
-      return result.code === 190 ? 'in_progress' : 'install_failed'
+      return outcome
     }
 
     // Set installMethod to 'local' to prevent npm permission warnings
@@ -130,10 +141,10 @@ export async function installOrUpdateClaudePackage(
       installMethod: 'local',
     }))
 
-    return 'success'
+    return { status: 'success' }
   } catch (error) {
     logError(error)
-    return 'install_failed'
+    return { status: 'install_failed' }
   }
 }
 

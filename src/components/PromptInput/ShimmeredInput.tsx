@@ -82,6 +82,10 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
           ) : (
             lineParts.map((part, partIndex) => {
               if (part.highlight?.shimmerColor && part.highlight.color) {
+                // Shimmer path is theme-key only (ultrathink/buddy); raw Color
+                // highlights (spellcheck underline) never set shimmerColor.
+                const messageColor = part.highlight.color as keyof import('../../utils/theme.js').Theme;
+                const shimmerColor = part.highlight.shimmerColor;
                 return (
                   <Text key={partIndex}>
                     {part.text.split('').map((char, charIndex) => (
@@ -90,8 +94,8 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
                         char={char}
                         index={part.start + charIndex}
                         glimmerIndex={glimmerIndex}
-                        messageColor={part.highlight!.color!}
-                        shimmerColor={part.highlight!.shimmerColor!}
+                        messageColor={messageColor}
+                        shimmerColor={shimmerColor}
                       />
                     ))}
                   </Text>
@@ -103,6 +107,7 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
                   color={part.highlight?.color}
                   dimColor={part.highlight?.dimColor}
                   inverse={part.highlight?.inverse}
+                  underline={part.highlight?.underline}
                 >
                   <Ansi>{part.text}</Ansi>
                 </Text>

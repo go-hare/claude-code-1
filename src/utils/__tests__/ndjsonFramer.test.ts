@@ -150,4 +150,36 @@ describe('attachNdjsonFramer', () => {
     expect(errors).toHaveLength(1)
     expect(socket.destroyed).toBe(true)
   })
+
+  test('reassembles a multibyte character split across chunks', () => {
+    const socket = createTestSocket()
+    const messages: unknown[] = []
+
+    attachNdjsonFramer(socket, msg => messages.push(msg))
+
+    const body = '中'.repeat(10)
+    const frame = Buffer.from(`${JSON.stringify({ data: body })}\n`, 'utf8')
+    // Cut one byte into the first 3-byte character.
+    const cut = frame.indexOf(Buffer.from('中', 'utf8')) + 1
+    socket.emitData(frame.subarray(0, cut))
+    socket.emitData(frame.subarray(cut))
+
+    expect(messages).toEqual([{ data: body }])
+  })
+
+  test('reassembles multibyte characters split across many chunks', () => {
+    const socket = createTestSocket()
+    const messages: unknown[] = []
+
+    attachNdjsonFramer(socket, msg => messages.push(msg))
+
+    // Mix widths so cuts land inside 2-, 3- and 4-byte sequences.
+    const body = 'aé中𝄞'.repeat(50)
+    const frame = Buffer.from(`${JSON.stringify({ data: body })}\n`, 'utf8')
+    for (let i = 0; i < frame.length; i += 7) {
+      socket.emitData(frame.subarray(i, Math.min(i + 7, frame.length)))
+    }
+
+    expect(messages).toEqual([{ data: body }])
+  })
 })

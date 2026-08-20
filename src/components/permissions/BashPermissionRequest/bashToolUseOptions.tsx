@@ -4,6 +4,11 @@ import { isClassifierPermissionsEnabled } from '../../../utils/permissions/bashC
 import type { PermissionDecisionReason } from '../../../utils/permissions/PermissionResult.js';
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import {
+  type ShowPersistentAllowPermissionResult,
+  type ShowPersistentAllowTool,
+  shouldShowPersistentAllowOption,
+} from '../../../utils/permissions/showAlwaysAllow.js';
 import type { OptionWithDescription } from '../../CustomSelect/select.js';
 import { generateShellSuggestionsLabel } from '../shellPermissionHelpers.js';
 
@@ -45,6 +50,10 @@ export function bashToolUseOptions({
   noInputMode = false,
   editablePrefix,
   onEditablePrefixChange,
+  permissionResult,
+  tool,
+  input,
+  isAskCappedByOrg = false,
 }: {
   suggestions?: PermissionUpdate[];
   decisionReason?: PermissionDecisionReason;
@@ -61,6 +70,11 @@ export function bashToolUseOptions({
   editablePrefix?: string;
   /** Callback when the user edits the prefix value. */
   onEditablePrefixChange?: (value: string) => void;
+  /** densable 2.1.235 #12 showAlwaysAllow inputs */
+  permissionResult?: ShowPersistentAllowPermissionResult;
+  tool?: ShowPersistentAllowTool;
+  input?: unknown;
+  isAskCappedByOrg?: boolean;
 }): OptionWithDescription<BashToolUseOption>[] {
   const options: OptionWithDescription<BashToolUseOption>[] = [];
 
@@ -80,8 +94,16 @@ export function bashToolUseOptions({
     });
   }
 
-  // Only show "always allow" options when not restricted by allowManagedPermissionRulesOnly
-  if (shouldShowAlwaysAllowOptions()) {
+  // densable 2.1.235 #12: omit don't-ask-again when suppressAlwaysAllowRule
+  if (
+    shouldShowPersistentAllowOption({
+      baseAllowed: shouldShowAlwaysAllowOptions(),
+      permissionResult,
+      tool,
+      input,
+      isAskCappedByOrg,
+    })
+  ) {
     // Show an editable input for the prefix rule instead of the
     // Haiku-generated suggestion label — but only when the suggestions
     // don't contain non-Bash items (addDirectories, Read rules) that

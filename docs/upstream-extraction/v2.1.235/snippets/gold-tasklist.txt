@@ -1,0 +1,28 @@
+@151791760: theme:toggleSyntaxHighlighting..........	.......ctrl+t..................................	.......sCh.....................................	...G...Cannot destructure property 'customThemes' from null or undefined valu
+---
+@155955520: ........	.......app:toggleTodos.........	.......ctrl+t..................	...	...chat:undo...............	.......Chat....................	.......ctrl+_..................	...
+...chat:stash..............	.......ctrl+s
+---
+@164012848: ........	.......Global..................	.......ctrl+t..................	.......voice:pushToTalk........	.......space...................	...+...Iterator result interface is not an object..............	.......h.....
+---
+@168631328: ........	.......@ to mention............	...
+...ctrl+t to ..............	.......unpin...................	...
+...pin to top..............	.......alt+1...................	.......-.......................	.............
+---
+@218100656: ........	.......ctrl+d..................	.......ctrl+t..................	.......ctrl+o..................	.......ctrl+shift+b............	.......ctrl+r..................	.......ctrl+up.................	...	...ctrl+d
+---
+@264822759: .........@)......................	......ctrl+k ctrl+t................	X.:........	X......	X...X......D..P.......................................................x...............................................8c...
+---
+@279414347: :{"ctrl+c":"app:interrupt","ctrl+d":"app:exit","ctrl+t":"app:toggleTodos","ctrl+o":"app:toggleTranscript","ctrl+shift+b":"app:toggleBrief","ctrl+r":"history:search","ctrl+up":"app:diffFileListUp","ctrl+down":"app:d
+---
+@279417145: background"}},{context:"ThemePicker",bindings:{"ctrl+t":"theme:toggleSyntaxHighlighting","ctrl+e":"theme:editCustom"}},{context:"Scroll",bindings:{pageup:"scroll:pageUp",pagedown:"scroll:pageDown",wheelup:"scroll:l
+---
+@292878375: "theme:toggleSyntaxHighlighting","ThemePicker","ctrl+t"),blw;if(MM[3]!==uCh||MM[4]!==sCh||MM[5]!==_5l)blw=()=>{if(lCh===null){let Slw=!_5l;oa("userSettings",{syntaxHighlightingDisabled:Slw},void 0,sCh),uCh((vlw)=>(
+---
+@293540501: ;let tjh=zPw,rjh=TC("app:toggleTodos","Global","ctrl+t"),njh=TC("chat:undo","Chat","ctrl+_"),ojh=TC("chat:stash","Chat","ctrl+s"),ijh=TC(afo(),"Chat","shift+tab"),sjh=TC("chat:modelPicker","Chat","alt+p"),ajh=TC("c
+---
+@294819932: toLowerCase(),ne=zd("app:toggleTodos","Global","ctrl+t"),Z=zd("voice:pushToTalk","Chat","space"),[se]=hue.useState(()=>(ar().voiceFooterHintSeenCount??0)<rhE),ae=hue.useRef(!1);hue.useEffect(()=>{if(!J||!se)return;
+---
+@296391175: itor"}},hOE={context:"Global",bindings:{"ctrl+k ctrl+t":"app:toggleTodos"}},gOE=["# Keybindings Skill","","Create or modify `~/.claude/keybindings.json` to customize keyboard shortcuts.","","## CRITICAL: Read Befor
+---
+@298314025: f(yBg)YIe.push("@ to mention");if(gBg)YIe.push(`ctrl+t to ${pBg?"unpin":"pin to top"}`);if(xms>0)YIe.push(`alt+1${xms>1?`-${xms}`:""} to open`);if(KFc)YIe.push(`ctrl+x to ${KFc}`);if(_Bg)YIe.push(`${tt.arrowLeft} t

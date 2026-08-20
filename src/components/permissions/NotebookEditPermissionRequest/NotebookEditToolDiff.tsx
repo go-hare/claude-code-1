@@ -20,6 +20,8 @@ type Props = {
   edit_mode?: string;
   verbose: boolean;
   width: number;
+  /** densable oldCellSource — when provided, skip local notebook re-read. */
+  oldCellSource?: string;
 };
 
 type InnerProps = {
@@ -30,20 +32,24 @@ type InnerProps = {
   edit_mode?: string;
   verbose: boolean;
   width: number;
+  oldCellSource?: string;
   promise: Promise<NotebookContent | null>;
 };
 
+const SKIP_NOTEBOOK_READ = Promise.resolve(null);
+
 export function NotebookEditToolDiff(props: Props): React.ReactNode {
-  // Create a promise that never rejects so we can handle errors inline.
-  // Memoized on notebook_path so we don't re-read on every render.
-  const notebookDataPromise = useMemo(
-    () =>
-      getFsImplementation()
-        .readFile(props.notebook_path, { encoding: 'utf-8' })
-        .then(content => safeParseJSON(content) as NotebookContent | null)
-        .catch(() => null),
-    [props.notebook_path],
-  );
+  // Prefer precomputed oldCellSource from permission preview (avoids double-read
+  // and empty-diff when withhold path already resolved the cell).
+  const notebookDataPromise = useMemo(() => {
+    if (props.oldCellSource !== undefined) {
+      return SKIP_NOTEBOOK_READ;
+    }
+    return getFsImplementation()
+      .readFile(props.notebook_path, { encoding: 'utf-8' })
+      .then(content => safeParseJSON(content) as NotebookContent | null)
+      .catch(() => null);
+  }, [props.notebook_path, props.oldCellSource]);
 
   return (
     <Suspense fallback={null}>
@@ -60,11 +66,15 @@ function NotebookEditToolDiffInner({
   edit_mode = 'replace',
   verbose,
   width,
+  oldCellSource,
   promise,
 }: InnerProps): React.ReactNode {
   const notebookData = use(promise);
 
   const oldSource = useMemo(() => {
+    if (oldCellSource !== undefined) {
+      return oldCellSource;
+    }
     if (!notebookData || !cell_id) {
       return '';
     }
@@ -81,10 +91,13 @@ function NotebookEditToolDiffInner({
       return '';
     }
     return Array.isArray(cell.source) ? cell.source.join('') : cell.source;
-  }, [notebookData, cell_id]);
+  }, [notebookData, cell_id, oldCellSource]);
 
   const hunks = useMemo(() => {
-    if (!notebookData || edit_mode === 'insert' || edit_mode === 'delete') {
+    if (edit_mode === 'insert' || edit_mode === 'delete') {
+      return null;
+    }
+    if (oldCellSource === undefined && !notebookData) {
       return null;
     }
     // Create a "fake" file content with just the cell source
@@ -101,7 +114,7 @@ function NotebookEditToolDiffInner({
       ],
       ignoreWhitespace: false,
     });
-  }, [notebookData, notebook_path, oldSource, new_source, edit_mode]);
+  }, [notebookData, notebook_path, oldSource, new_source, edit_mode, oldCellSource]);
 
   let editTypeDescription: string;
   switch (edit_mode) {

@@ -1,0 +1,1 @@
+@281401735: Silent byoc fallthrough would launch into a dead env \u2014 fail fast instead.`,{level:"error"}),e.onCreateFail?.(we,"no_default_env"),null}}let y=d?void 0:h||g||f.find((we)=>we.kind!=="bridge")||f[0];if(!y&&!d)return Re(Error("No environments available for session cre

@@ -205,7 +205,7 @@ export function NativeAutoUpdater({
       )}
       {autoUpdaterResult?.status === 'install_failed' && (
         <Text color="error" wrap="truncate">
-          ✗ Auto-update failed &middot; Try <Text bold>/status</Text>
+          Auto-update failed · Run <Text bold>claude doctor</Text>
         </Text>
       )}
       {maxVersionIssue && process.env.USER_TYPE === 'ant' && (

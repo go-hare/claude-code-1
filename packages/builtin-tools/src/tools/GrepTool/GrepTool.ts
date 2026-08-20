@@ -435,7 +435,9 @@ export const GrepTool = buildTool({
     // We don't use AbortController for timeout to avoid interrupting the agent loop
     // If ripgrep times out, it throws RipgrepTimeoutError which propagates up
     // so Claude knows the search didn't complete (rather than thinking there were no matches)
-    const results = await ripGrep(args, absolutePath, abortController.signal)
+    const results = await ripGrep(args, absolutePath, abortController.signal, {
+      rejectOnInputError: true,
+    })
 
     if (output_mode === 'content') {
       // For content mode, results are the actual content lines

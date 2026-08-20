@@ -1,0 +1,3 @@
+@85743774: haracters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim"...............	...4...Show full tool output instead of truncated summaries....................	
+---
+@275280963: haracters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim".'),verbose:jt().optional().describe("Show full tool output instead of truncated summaries"),pre

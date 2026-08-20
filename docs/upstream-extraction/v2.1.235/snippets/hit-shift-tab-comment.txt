@@ -1,0 +1,31 @@
+# SEA gold: official changelog #5 — Shift+Tab permission prompt comment field
+# Binary: /tmp/official-235/plat/package/claude
+# Item key: shift-tab-comment
+# Gold extract: gold-shift-tab-comment.txt
+
+## Proven user-facing / binding strings
+- confirm:cycleMode (Confirmation context; default chord shift+tab; Windows fallback meta+m via Dnp)
+- Keybinding table: [Dnp]:"confirm:cycleMode" where Dnp=b3b?"shift+tab":"meta+m"
+- aRg(...) file permission options:
+  - Yes input: type:"input" label:"Yes" placeholder:"and tell Claude what to do next" option.type:"accept-once"
+  - Session row: option.type:"accept-session" value:"yes-session"; label appends bold (KB("confirm:cycleMode","Confirmation","shift+tab"))
+  - No input: placeholder:"and tell Claude what to do differently" option.type:"reject"
+- RCE(...): builds session row; includes setMode acceptEdits via o8e("acceptEdits") → value:"yes-session"
+- Handler ERg: case path via ekE("accept-session") → behavior:"allow" + permissionUpdates:e.row.applies (NO feedback field)
+- Shift+Tab while comment field open (acceptInputMode/rejectInputMode):
+    di({"confirm:cycleMode":E}) where E = if(u) toggle yes; else if(d) toggle no; else accept-session WITHOUT feedback
+  → densable closes/collapses the field; does NOT approve while open
+- Shared feedback hook xst: acceptFeedback/rejectFeedback/acceptInputMode/rejectInputMode/handleInputModeToggle/hintNode
+- Default placeholders txg={accept:"tell Claude what to do next",reject:"tell Claude what to do differently"}
+- Analytics: tengu_accept_feedback_mode_entered|collapsed, tengu_reject_feedback_mode_entered|collapsed, tengu_accept_submitted, tengu_reject_submitted, tengu_permission_request_escape
+- Adjacent (plan exit, not file-edit prompt): description:"shift+tab to approve with this feedback" + placeholder:"Tell Claude what to change"
+- Unrelated: commentFieldsFrom (artifact/cowork schema export)
+
+## Dig correction (vs earlier PARTIAL wording)
+- Do NOT invent "cycle carries acceptFeedback into accept-session".
+- densable ekE accept-session omits feedback; Select accept-session onChange also omits feedback.
+- Real #5 gap locally: handleCycleMode always accept-session even when yes/no input open (should collapse first).
+- Also: Confirmation chord hardcodes shift+tab (need MODE_CYCLE_KEY/Dnp); session-row display uses chat:cycleMode not confirm:cycleMode.
+
+## Likely symbols
+- aRg, RCE, ERg, xst, ekE, confirm:cycleMode, accept-session, yes-session, acceptFeedback, acceptInputMode, handleInputModeToggle, o8e, setMode/acceptEdits, Dnp, KB/zd

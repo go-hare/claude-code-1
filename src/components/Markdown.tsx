@@ -5,8 +5,10 @@ import { useSettings } from '../hooks/useSettings.js';
 import { Ansi, Box, useTheme } from '@anthropic/ink';
 import { type CliHighlight, getCliHighlightPromise } from '../utils/cliHighlight.js';
 import { hashContent } from '../utils/hash.js';
-import { configureMarked, formatToken } from '../utils/markdown.js';
+import { configureMarked, formatToken, shouldUseInkListLayout } from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import { MarkdownList } from './MarkdownList.js';
 import { MarkdownTable } from './MarkdownTable.js';
 
 type Props = {
@@ -124,10 +126,26 @@ function MarkdownBody({
       }
     }
 
-    for (const token of tokens) {
+    // densable ZIl: when GIl and not screen-reader, top-level lists use Ink
+    // WIl/n6T hanging layout; otherwise ANSI i3 string path.
+    const useInkLists = !isScreenReaderModeEnabled() && shouldUseInkListLayout(tokens);
+    const lastNonSpaceIndex = tokens.findLastIndex(t => t.type !== 'space');
+
+    for (const [index, token] of tokens.entries()) {
       if (token.type === 'table') {
         flushNonTableContent();
         elements.push(<MarkdownTable key={elements.length} token={token as Tokens.Table} highlight={highlight} />);
+      } else if (token.type === 'list' && useInkLists) {
+        flushNonTableContent();
+        elements.push(
+          <MarkdownList
+            key={elements.length}
+            token={token as Tokens.List}
+            highlight={highlight}
+            dimColor={dimColor}
+            tailWrap={index === lastNonSpaceIndex ? tailWrap : undefined}
+          />,
+        );
       } else {
         nonTableContent += formatToken(token, theme, 0, null, null, highlight);
       }

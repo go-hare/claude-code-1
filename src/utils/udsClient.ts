@@ -16,7 +16,12 @@ import { errorMessage, isFsInaccessible } from './errors.js'
 import { isProcessRunning } from './genericProcessUtils.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { SessionKind } from './concurrentSessions.js'
-import { MAX_UDS_FRAME_BYTES, type UdsMessage } from './udsMessaging.js'
+import {
+  MAX_UDS_FRAME_BYTES,
+  MAX_UDS_LINE_CHARS,
+  UdsMessageTooLargeError,
+  type UdsMessage,
+} from './udsMessaging.js'
 import { attachUdsResponseReader, getChunkBytes } from './udsResponseReader.js'
 
 // ---------------------------------------------------------------------------
@@ -314,8 +319,20 @@ export async function sendToUdsSocket(
     type: 'text',
     data,
     ts: new Date().toISOString(),
+    from: ownSocket,
+    meta: {
+      authToken,
+      ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
+      ...(opts.selfSent === true ? { selfSent: true } : {}),
+    },
   }
-  udsMsg.from = ownSocket
+
+  // densable oFd/X1r: refuse oversized on-wire line BEFORE createConnection.
+  // Local has no separate BVs auth preamble — auth lives in meta — so n = wire.length.
+  const wire = `${jsonStringify(udsMsg)}\n`
+  if (wire.length > MAX_UDS_LINE_CHARS) {
+    throw new UdsMessageTooLargeError(wire.length, MAX_UDS_LINE_CHARS)
+  }
 
   // densable $id — track outbound peer as rename-notice correspondent.
   try {
@@ -354,13 +371,7 @@ export async function sendToUdsSocket(
     }
 
     conn = createConnection(target.socketPath, () => {
-      udsMsg.meta = {
-        ...udsMsg.meta,
-        authToken,
-        ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
-        ...(opts.selfSent === true ? { selfSent: true } : {}),
-      }
-      conn.write(jsonStringify(udsMsg) + '\n', err => {
+      conn.write(wire, err => {
         if (err) finish(err)
       })
     })

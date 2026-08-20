@@ -3,9 +3,10 @@ import React from 'react';
 import { FileEditToolDiff } from 'src/components/FileEditToolDiff.js';
 import { getCwd } from 'src/utils/cwd.js';
 import type { z } from 'zod/v4';
-import { Text } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import { FileEditTool } from '@claude-code/builtin-tools/tools/FileEditTool/FileEditTool.js';
 import { FilePermissionDialog } from '../FilePermissionDialog/FilePermissionDialog.js';
+import { evaluateEditContentWithhold } from '../FilePermissionDialog/filePermissionPreviewWithhold.js';
 import {
   createSingleEditDiffConfig,
   type FileEdit,
@@ -39,6 +40,7 @@ export function FileEditPermissionRequest(props: PermissionRequestProps): React.
 
   const parsed = parseInput(props.toolUseConfirm.input);
   const { file_path, old_string, new_string, replace_all } = parsed;
+  const withhold = evaluateEditContentWithhold(old_string, new_string);
 
   return (
     <FilePermissionDialog
@@ -55,15 +57,22 @@ export function FileEditPermissionRequest(props: PermissionRequestProps): React.
         </Text>
       }
       content={
-        <FileEditToolDiff
-          file_path={file_path}
-          edits={[{ old_string, new_string, replace_all: replace_all || false }]}
-        />
+        withhold.contentWithheld ? (
+          <Box paddingX={1} marginBottom={1}>
+            <Text dimColor>{withhold.message}</Text>
+          </Box>
+        ) : (
+          <FileEditToolDiff
+            file_path={file_path}
+            edits={[{ old_string, new_string, replace_all: replace_all || false }]}
+          />
+        )
       }
       path={file_path}
       completionType="str_replace_single"
       parseInput={parseInput}
-      ideDiffSupport={ideDiffSupport}
+      ideDiffSupport={withhold.contentWithheld ? undefined : ideDiffSupport}
+      contentWithheld={withhold.contentWithheld}
     />
   );
 }

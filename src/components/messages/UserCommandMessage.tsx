@@ -4,6 +4,7 @@ import * as React from 'react';
 import { COMMAND_MESSAGE_TAG } from '../../constants/xml.js';
 import { Box, Text } from '@anthropic/ink';
 import { extractTag } from '../../utils/messages.js';
+import { unescapeXmlEntities } from '../../utils/xml.js';
 
 type Props = {
   addMargin: boolean;
@@ -11,8 +12,11 @@ type Props = {
 };
 
 export function UserCommandMessage({ addMargin, param: { text } }: Props): React.ReactNode {
-  const commandMessage = extractTag(text, COMMAND_MESSAGE_TAG);
-  const args = extractTag(text, 'command-args');
+  // densable oX — command-message/args may carry EHe/Ua entities (mid-response slash)
+  const commandMessageRaw = extractTag(text, COMMAND_MESSAGE_TAG);
+  const commandMessage = commandMessageRaw === null ? null : unescapeXmlEntities(commandMessageRaw);
+  const argsRaw = extractTag(text, 'command-args');
+  const args = argsRaw === null ? null : unescapeXmlEntities(argsRaw);
   const isSkillFormat = extractTag(text, 'skill-format') === 'true';
 
   if (!commandMessage) {

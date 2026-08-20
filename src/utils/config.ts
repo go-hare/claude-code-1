@@ -306,6 +306,12 @@ export type GlobalConfig = {
     lastShownTime?: number
   }
 
+  /**
+   * densable `ar().hasSeenAutoDefaultNudge` — IDE auto-default nudge latch
+   * (vscodeSdkMcp Fjc). Once true, further nudge events are ignored.
+   */
+  hasSeenAutoDefaultNudge?: boolean
+
   // Transcript share prompt tracking ("Don't ask again")
   transcriptShareDismissed?: boolean
 

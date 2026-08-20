@@ -1,0 +1,64 @@
+# densable 2.1.235 SEA — embedded ripgrep identity (gold)
+# Source: /tmp/official-235/plat/package/claude
+# Package: @anthropic-ai/claude-code-darwin-arm64@2.1.235
+# Binary: Mach-O 64-bit executable arm64, size 313334608
+# Dig: 2026-08-20 — strings + argv0='rg' live probe (NO invent JS)
+
+## Live identity (argv0 dispatch)
+Method: symlink SEA binary as `rg` then `./rg --version` / `./rg --pcre2-version`
+(direct `./claude --version` still prints Claude Code; embedding is argv0-gated)
+
+```
+ripgrep 14.1.1 (rev fdb5e06cce)
+
+features:+pcre2
+simd(compile):+NEON
+simd(runtime):+NEON
+
+PCRE2 10.45 is available (JIT is available)
+```
+
+`--pcre2-version`:
+```
+PCRE2 10.45 is available (JIT is available)
+```
+
+## Version / rev string evidence (in-binary)
+- Contiguous blob token near help/completions: `14.1.1fdb5e06cce+`
+  (offset ~64029581; adjacent PCRE2 JIT availability strings)
+- Manpage date stamp in embedded RG(1): `.TH RG 1 2024-09-08 "!!VERSION!!" "User Commands"`
+  (version placeholders remain `!!VERSION!!` in man/help templates; live --version fills real values)
+- Help/home: `https://github.com/BurntSushi/ripgrep`, author Andrew Gallant / jamslam@gmail.com
+
+## Module / crate path strings (embedded Rust rg surface)
+Present in SEA Mach-O string table (same region as after_context_left / searcher core):
+- `ripgrep::haystack`
+- `ripgrep::flags::hiargs`
+- `ripgrep::flags::parse`
+- `ripgrep::flags::config`
+- `ripgrep::search`
+- `grep_searcher::searcher`
+- `grep_searcher::searcher::core`
+- `grep_pcre2::matcher`
+- `grep_regex::config` / `grep_regex::matcher`
+- `grep_cli::decompress`
+- assertion: `assertion failed: self.after_context_left >= 1`
+- searcher strategy: `searcher core: will use slow line searcher` / `fast line searcher`
+- docs.rs reference: `https://docs.rs/grep-printer/*/grep_printer/struct.JSON.html`
+
+No separate Cargo lock / `crates.io` crate-version triples for grep-* crates were found as plain `name x.y.z` adjacent to those module paths (identity is the ripgrep package version + rev + feature flags above).
+
+## Packaging
+- Platform package files ONLY: `claude`, `README.md`, `LICENSE.md`, `package.json`
+  (`package.json` description: "Native binary for Claude Code on darwin-arm64"; files list has no `rg` sidecar)
+- ripgrep is EMBEDDED inside the single native Mach-O SEA binary (no vendor/rg sidecar in this npm platform package)
+- Dispatch: invoke embedded tool by argv0=`rg` (symlink/name `rg` → same Mach-O); Claude CLI argv0 stays Claude
+- Product messaging string (JS inside SEA):
+  `ripgrep not found on PATH. Install it (brew install ripgrep / apt install ripgrep / winget install BurntSushi.ripgrep.MSVC) or use the native claude binary which embeds it.`
+- Unrelated string hit: `@vscode/ripgrep` appears only inside a Bun native-addon / package denylist-style blob — NOT the embed mechanism
+- Note on hash collision risk: Bun v1.4.0 revision prefix `fdb5e06cce6b6c…` also appears elsewhere in the same binary; do not confuse Bun rev with ripgrep rev. Live `rg --version` line is authoritative for ripgrep: `(rev fdb5e06cce)`.
+
+## Gaps
+- Exact git full SHA for BurntSushi/ripgrep tag 14.1.1 not verified via GitHub API in this dig (no auth); short rev from live --version only
+- Per-crate versions (grep-searcher / grep-regex / ignore / etc.) not recoverable as explicit x.y.z strings from this SEA
+- Did not extract a standalone nested Mach-O for `rg` in the ripgrep string region; embedding is SEA/Bun argv0 multi-tool style inside the main executable

@@ -20,6 +20,7 @@ import {
   MAX_UDS_INBOX_ENTRIES,
   MAX_UDS_INBOX_BYTES,
   MAX_UDS_FRAME_BYTES,
+  MAX_UDS_LINE_CHARS,
   MAX_UDS_CLIENTS,
   MAX_UNIX_SOCKET_PATH_LENGTH,
   assertValidUnixSocketPath,
@@ -502,7 +503,8 @@ describe('UDS inbox retention', () => {
 
     await new Promise<void>((resolve, reject) => {
       const conn = createConnection(path, () => {
-        conn.write('x'.repeat(MAX_UDS_FRAME_BYTES + 1))
+        // densable X1r — recv drops when accumulated line exceeds 1MiB.
+        conn.write('x'.repeat(MAX_UDS_LINE_CHARS + 1))
       })
       conn.setTimeout(5_000, () => {
         conn.destroy()

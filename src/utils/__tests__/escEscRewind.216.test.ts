@@ -93,8 +93,9 @@ describe('esc-esc idle+bg rewind (2.1.216 #12 densable Opu/x4)', () => {
       join(import.meta.dir, '../../hooks/useCancelRequest.ts'),
       'utf8',
     )
-    expect(cancelSrc).toContain('isQueuedCommandEditable')
-    expect(cancelSrc).toContain('hasEditableCommandsInQueue')
+    // densable 2.1.234 narrowed Opu to NMt: bash entries only pop when the
+    // input is empty, so the gate reads isPoppableEditableCommand now.
+    expect(cancelSrc).toContain('isPoppableEditableCommand')
     // Must not reintroduce full-queue isActive for Esc
     expect(cancelSrc).not.toMatch(
       /hasQueuedCommands\s*=\s*queuedCommandsLength\s*>\s*0/,

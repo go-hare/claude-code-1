@@ -173,6 +173,17 @@ function extractRawUtilization(headers: globalThis.Headers): RawUtilization {
 type StatusChangeListener = (limits: ClaudeAILimits) => void
 export const statusListeners: Set<StatusChangeListener> = new Set()
 
+/**
+ * densable aZ.quotaRejected / yYp — 429 error path only (not headers).
+ * Second arg is densable hAm bucket: `main_thread` | `other`.
+ */
+export type QuotaRejectedQuerySourceBucket = 'main_thread' | 'other'
+type QuotaRejectedListener = (
+  limits: ClaudeAILimits,
+  querySourceBucket: QuotaRejectedQuerySourceBucket,
+) => void
+export const quotaRejectedListeners: Set<QuotaRejectedListener> = new Set()
+
 export function emitStatusChange(limits: ClaudeAILimits) {
   currentLimits = limits
   statusListeners.forEach(listener => listener(limits))
@@ -186,6 +197,20 @@ export function emitStatusChange(limits: ClaudeAILimits) {
     unifiedRateLimitFallbackAvailable: limits.unifiedRateLimitFallbackAvailable,
     hoursTillReset,
   })
+}
+
+/** densable quotaRejected.emit — keep separate from statusChanged. */
+export function emitQuotaRejected(
+  limits: ClaudeAILimits,
+  querySourceBucket: QuotaRejectedQuerySourceBucket,
+): void {
+  for (const listener of quotaRejectedListeners) {
+    try {
+      listener(limits, querySourceBucket)
+    } catch (e) {
+      logError(e as Error)
+    }
+  }
 }
 
 async function makeTestQuery() {
@@ -485,7 +510,14 @@ export function extractQuotaStatusFromHeaders(
   }
 }
 
-export function extractQuotaStatusFromError(error: APIError): void {
+/**
+ * densable extractQuotaStatusFromError / MNa.
+ * `querySourceBucket` is densable hAm (`main_thread` | `other`); drives s0v rearm.
+ */
+export function extractQuotaStatusFromError(
+  error: APIError,
+  querySourceBucket: QuotaRejectedQuerySourceBucket = 'other',
+): void {
   if (
     !shouldProcessRateLimits(isClaudeAISubscriber()) ||
     error.status !== 429
@@ -519,6 +551,9 @@ export function extractQuotaStatusFromError(error: APIError): void {
     }
     // For errors, always set status to rejected even if headers are not present.
     newLimits.status = 'rejected'
+
+    // densable: quotaRejected.emit(u, t) even when statusChanged is deduped
+    emitQuotaRejected(newLimits, querySourceBucket)
 
     if (!isEqual(currentLimits, newLimits)) {
       emitStatusChange(newLimits)

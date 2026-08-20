@@ -80,10 +80,54 @@ let inboxBytes = 0
 
 export const MAX_UDS_INBOX_ENTRIES = 1_000
 export const MAX_UDS_FRAME_BYTES = 64 * 1024
+/** densable X1r — hard 1MiB newline-framed cross-session line cap (send refuse + recv drop). */
+export const MAX_UDS_LINE_CHARS = 1_048_576
+/**
+ * Receive-side budget for the same X1r line, expressed in the bytes the framer
+ * actually counts. UTF-8 costs at most 3 bytes per UTF-16 code unit (astral
+ * chars are 4 bytes across 2 units), so a line the sender accepted under
+ * MAX_UDS_LINE_CHARS can never exceed this — otherwise multibyte payloads would
+ * pass the send refuse and then be dropped as an opaque connection reset.
+ */
+export const MAX_UDS_LINE_BYTES = 3 * MAX_UDS_LINE_CHARS
 export const MAX_UDS_INBOX_BYTES = 2 * 1024 * 1024
 export const MAX_UDS_CLIENTS = 128
 export const UDS_AUTH_TIMEOUT_MS = 2_000
 export const UDS_IDLE_TIMEOUT_MS = 30_000
+
+/** densable eFd — typed refuse when serialized UDS wire exceeds X1r. */
+export const UDS_MESSAGE_TOO_LARGE_ERROR_CLASS = 'message_too_large' as const
+
+/**
+ * densable yt/tFd — upfront refuse for oversized cross-session UDS lines.
+ * User message + short code match SEA exactly (en-US toLocaleString + em dash).
+ */
+export class UdsMessageTooLargeError extends Error {
+  readonly errorClass = UDS_MESSAGE_TOO_LARGE_ERROR_CLASS
+  /** densable yt short / second ctor arg */
+  readonly code = 'cross-session message exceeds the line cap'
+  readonly serializedChars: number
+  readonly limitChars: number
+
+  constructor(serializedChars: number, limitChars: number) {
+    super(
+      `Message too large for cross-session delivery: the serialized message is ${serializedChars.toLocaleString('en-US')} characters and the limit is ${limitChars.toLocaleString('en-US')}. Shorten the message text — put bulk content in a file the recipient can read rather than in the message — or split it into smaller messages.`,
+    )
+    this.name = 'UdsMessageTooLargeError'
+    this.serializedChars = serializedChars
+    this.limitChars = limitChars
+  }
+}
+
+/** densable yZt */
+export function isUdsMessageTooLargeError(
+  error: unknown,
+): error is UdsMessageTooLargeError {
+  return (
+    error instanceof UdsMessageTooLargeError &&
+    error.errorClass === UDS_MESSAGE_TOO_LARGE_ERROR_CLASS
+  )
+}
 
 /** macOS/BSD AF_UNIX `sun_path` limit (bytes, excluding NUL). */
 export const MAX_UNIX_SOCKET_PATH_LENGTH = 104
@@ -342,7 +386,7 @@ function getMessageBytes(message: UdsMessage): number {
 function enqueueInboxEntry(entry: UdsInboxEntry): boolean {
   const entryBytes = getMessageBytes(entry.message)
   if (
-    entryBytes > MAX_UDS_FRAME_BYTES ||
+    entryBytes > MAX_UDS_LINE_BYTES ||
     inbox.length >= MAX_UDS_INBOX_ENTRIES ||
     inboxBytes + entryBytes > MAX_UDS_INBOX_BYTES
   ) {
@@ -597,10 +641,15 @@ export async function startUdsMessaging(
           },
           text => jsonParse(text) as UdsMessage,
           {
-            maxFrameBytes: MAX_UDS_FRAME_BYTES,
-            onFrameError: error => {
-              logForDebugging(`[udsMessaging] ${error.message}`)
-              closeWithError(error.message)
+            // densable X1r — same 1MiB line cap as send refuse (oFd/tFd),
+            // measured in the framer's bytes rather than the sender's chars.
+            maxFrameBytes: MAX_UDS_LINE_BYTES,
+            onFrameError: () => {
+              // densable recv drop: log + destroy (no silent tool success).
+              logForDebugging(
+                `[uds-messaging] Line exceeded ${MAX_UDS_LINE_BYTES} bytes; dropping connection`,
+              )
+              if (!socket.destroyed) socket.destroy()
             },
             onInvalidFrame: error => {
               logForDebugging(

@@ -442,6 +442,9 @@ export function useRemoteSession({
             request.description ?? `${request.tool_name} requires permission`,
           suggestions: request.permission_suggestions as PermissionUpdate[],
           blockedPath: request.blocked_path,
+          ...(request.suppress_always_allow_rule !== undefined && {
+            suppressAlwaysAllowRule: request.suppress_always_allow_rule,
+          }),
         }
 
         const toolUseConfirm: ToolUseConfirm = {

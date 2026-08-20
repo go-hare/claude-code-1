@@ -9,11 +9,12 @@ import { isInBundledMode } from './bundledMode.js'
 import { logForDebugging } from './debug.js'
 import { distRoot } from './distRoot.js'
 import { isEnvDefinedFalsy } from './envUtils.js'
+import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './errors.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import { findExecutable } from './findExecutable.js'
 import { logError } from './log.js'
 import { getPlatform } from './platform.js'
-import { countCharInString } from './stringUtils.js'
+import { countCharInString, truncateCodeUnitsSafe } from './stringUtils.js'
 
 const __dirname = (() => {
   if (process.env.NODE_ENV === 'test') return path.resolve(distRoot)
@@ -243,6 +244,34 @@ export class RipgrepTimeoutError extends Error {
   }
 }
 
+/**
+ * densable iaT — stderr prefixes that mean ripgrep rejected the input
+ * (bad regex / glob / type / flag / compiled size) without searching.
+ */
+export const RIPGREP_INPUT_ERROR_RE =
+  /^rg: (?:regex parse error|error parsing glob|unrecognized file type|error parsing flag|compiled regex exceeds size limit)/m
+
+export type RipGrepOptions = {
+  /** densable rejectOnInputError — throw RipgrepUsageError on exit 2 + iaT stderr. */
+  rejectOnInputError?: boolean
+  /** Optional spawn/exec cwd (densable f1e/qTm `cwd`). */
+  cwd?: string
+}
+
+/**
+ * densable YTm / RipgrepUsageError — fail fast when rg rejects the pattern/glob/type.
+ * Extends TelemetrySafeError so toolExecution uses the vetted telemetryMessage.
+ */
+export class RipgrepUsageError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  constructor(stderr: string) {
+    super(
+      `Search failed — ripgrep rejected the pattern, glob, or file type without searching:\n${truncateCodeUnitsSafe(stderr.trim(), 2000)}`,
+      'ripgrep usage error (input rejected, stderr redacted)',
+    )
+    this.name = 'RipgrepUsageError'
+  }
+}
+
 function ripGrepRaw(
   args: string[],
   target: string,
@@ -253,6 +282,7 @@ function ripGrepRaw(
     stderr: string,
   ) => void,
   singleThread = false,
+  cwd?: string,
 ): ChildProcess {
   // NB: When running interactively, ripgrep does not require a path as its last
   // argument, but when run non-interactively, it will hang unless a path or file
@@ -298,6 +328,7 @@ function ripGrepRaw(
   if (argv0 || process.platform === 'win32') {
     const child = spawn(rgPath, fullArgs, {
       ...(argv0 ? { argv0 } : {}),
+      ...(cwd ? { cwd } : {}),
       signal: abortSignal,
       // Prevent visible console window on Windows (no-op on other platforms)
       windowsHide: true,
@@ -380,6 +411,7 @@ function ripGrepRaw(
       signal: abortSignal,
       timeout,
       killSignal: 'SIGKILL',
+      ...(cwd ? { cwd } : {}),
     },
     callback,
   )
@@ -500,6 +532,7 @@ export async function ripGrep(
   args: string[],
   target: string,
   abortSignal: AbortSignal,
+  options?: RipGrepOptions,
 ): Promise<string[]> {
   await codesignRipgrepIfNecessary()
 
@@ -550,15 +583,24 @@ export async function ripGrep(
           `rg EAGAIN error detected, retrying with single-threaded mode (-j 1)`,
         )
         logEvent('tengu_ripgrep_eagain_retry', {})
-        ripGrepRaw(
-          args,
-          target,
-          abortSignal,
-          (retryError, retryStdout, retryStderr) => {
-            handleResult(retryError, retryStdout, retryStderr, true)
-          },
-          true, // Force single-threaded mode for this retry only
-        )
+        try {
+          ripGrepRaw(
+            args,
+            target,
+            abortSignal,
+            (retryError, retryStdout, retryStderr) => {
+              handleResult(retryError, retryStdout, retryStderr, true)
+            },
+            true, // Force single-threaded mode for this retry only
+            options?.cwd,
+          )
+        } catch (retrySpawnError) {
+          reject(
+            retrySpawnError instanceof Error
+              ? retrySpawnError
+              : new Error(String(retrySpawnError)),
+          )
+        }
         return
       }
 
@@ -570,6 +612,13 @@ export async function ripGrep(
         error.code === 'ABORT_ERR'
       const isBufferOverflow =
         error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+      // densable: unexplained code=undefined exits (common signal-ish set)
+      const isUnexplainedSignal =
+        error.code === undefined &&
+        (error.signal === undefined ||
+          error.signal === 'SIGHUP' ||
+          error.signal === 'SIGINT' ||
+          error.signal === 'SIGPIPE')
 
       let lines: string[] = []
       if (hasOutput) {
@@ -579,7 +628,10 @@ export async function ripGrep(
           .map(line => line.replace(/\r$/, ''))
           .filter(Boolean)
         // Drop last line for timeouts and buffer overflow - it may be incomplete
-        if (lines.length > 0 && (isTimeout || isBufferOverflow)) {
+        if (
+          lines.length > 0 &&
+          (isTimeout || isBufferOverflow || isUnexplainedSignal)
+        ) {
           lines = lines.slice(0, -1)
         }
       }
@@ -587,6 +639,17 @@ export async function ripGrep(
       logForDebugging(
         `rg error (signal=${error.signal}, code=${error.code}, stderr: ${stderr}), ${lines.length} results`,
       )
+
+      // densable f1e: rejectOnInputError + exit 2 + empty stdout + iaT stderr → YTm
+      if (
+        options?.rejectOnInputError &&
+        error.code === 2 &&
+        lines.length === 0 &&
+        RIPGREP_INPUT_ERROR_RE.test(stderr)
+      ) {
+        reject(new RipgrepUsageError(stderr))
+        return
+      }
 
       // code 2 = ripgrep usage error (already handled); ABORT_ERR = caller
       // explicitly aborted (not an error, just a cancellation — interactive
@@ -610,9 +673,16 @@ export async function ripGrep(
       resolve(lines)
     }
 
-    ripGrepRaw(args, target, abortSignal, (error, stdout, stderr) => {
-      handleResult(error, stdout, stderr, false)
-    })
+    ripGrepRaw(
+      args,
+      target,
+      abortSignal,
+      (error, stdout, stderr) => {
+        handleResult(error, stdout, stderr, false)
+      },
+      false,
+      options?.cwd,
+    )
   })
 }
 

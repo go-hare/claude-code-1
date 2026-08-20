@@ -7,6 +7,8 @@ import {
   mock,
   test,
 } from 'bun:test'
+import type { UUID } from 'crypto'
+import type { QueuedCommand } from '../../types/textInputTypes.js'
 
 const getSettingsForSourceMock = mock(
   (_source?: string) =>
@@ -92,11 +94,14 @@ const {
   filterPendingQuotaContinuationIfRevoked,
   fireQuotaAutoResumeContinuation,
   formatAutoContinueWaitNotice,
+  getQuotaAutoResumeRearmCap,
   getQuotaAutoResumeState,
   hasPendingQuotaContinuationInQueue,
   isQuotaAutoResumeArmedOrPending,
+  isQuotaRearmEligibleRateLimit,
   cancelQuotaAutoResumeWithNotice,
   onQuotaAutoResumeHumanSubmit,
+  onQuotaRejectedForAutoResume,
   getWaitThenContinueOption,
   isAutoContinueAtUsageLimitEffective,
   isAutoContinueAtUsageLimitToggleable,
@@ -105,6 +110,7 @@ const {
   refreshAutoContinueKeyPresence,
   resetQuotaAutoResumeForTests,
   setAutoContinueAtUsageLimitSetting,
+  subscribeQuotaAutoResumeEvents,
   tickQuotaAutoResume,
   tryAutoArmQuotaAutoResume,
   TENGU_MAPLE_SUNDIAL,
@@ -399,14 +405,19 @@ describe('quotaAutoResume densable 2.1.234', () => {
   })
 
   test('z4f: Jqn killswitch strips continuation; otherwise keeps it', () => {
-    const uuid = fireQuotaAutoResumeContinuation()
+    const uuid = fireQuotaAutoResumeContinuation() as UUID
+    const humanUuid = 'human-1111-1111-1111-111111111111' as UUID
     const batch = [
-      { value: 'human', mode: 'prompt' as const, uuid: 'human-1' },
-      { value: CONTINUATION_PROMPT, mode: 'prompt' as const, uuid },
-    ]
+      { value: 'human', mode: 'prompt' as const, uuid: humanUuid },
+      {
+        value: CONTINUATION_PROMPT,
+        mode: 'prompt' as const,
+        uuid,
+      },
+    ] as QueuedCommand[]
     expect(
       filterPendingQuotaContinuationIfRevoked(batch).map(c => c.uuid),
-    ).toEqual(['human-1', uuid])
+    ).toEqual([humanUuid, uuid])
 
     getFeatureValueMock.mockImplementation((key, fallback) => {
       if (key === TENGU_MARBLE_HERON) return { enabled: false }
@@ -414,7 +425,7 @@ describe('quotaAutoResume densable 2.1.234', () => {
     })
     expect(
       filterPendingQuotaContinuationIfRevoked(batch).map(c => c.uuid),
-    ).toEqual(['human-1'])
+    ).toEqual([humanUuid])
   })
 
   test('W4f: Yqn after fire claims takeover (does not dequeue)', () => {
@@ -488,5 +499,151 @@ describe('quotaAutoResume densable 2.1.234', () => {
     expect(notice).toBeTruthy()
     expect(hasPendingQuotaContinuationInQueue()).toBe(false)
     expect(isQuotaAutoResumeArmedOrPending()).toBe(false)
+  })
+
+  test('T0S/HEv: getQuotaAutoResumeRearmCap === 2', () => {
+    expect(getQuotaAutoResumeRearmCap()).toBe(2)
+  })
+
+  test('xxi: five_hour/seven_day/overage eligible; undefined not', () => {
+    expect(isQuotaRearmEligibleRateLimit('five_hour', 'claude-opus-4')).toBe(
+      true,
+    )
+    expect(isQuotaRearmEligibleRateLimit('seven_day', 'claude-sonnet-4')).toBe(
+      true,
+    )
+    expect(isQuotaRearmEligibleRateLimit('overage', 'claude-haiku-4')).toBe(
+      true,
+    )
+    expect(isQuotaRearmEligibleRateLimit(undefined, 'claude-opus-4')).toBe(
+      false,
+    )
+    // densable xxi: yDe/ZWs → Wjo(family) — same-family eligible (not inverted)
+    expect(
+      isQuotaRearmEligibleRateLimit('seven_day_opus', 'claude-opus-4-6'),
+    ).toBe(true)
+    expect(
+      isQuotaRearmEligibleRateLimit('seven_day_opus', 'claude-sonnet-4'),
+    ).toBe(false)
+    expect(
+      isQuotaRearmEligibleRateLimit('seven_day_sonnet', 'claude-sonnet-4'),
+    ).toBe(true)
+    expect(
+      isQuotaRearmEligibleRateLimit('seven_day_sonnet', 'claude-opus-4-6'),
+    ).toBe(false)
+  })
+
+  test('s0v: continuation claim + main_thread reject rearms and increments', () => {
+    const events: string[] = []
+    const unsub = subscribeQuotaAutoResumeEvents(e => events.push(e))
+    const continuationUuid = fireQuotaAutoResumeContinuation()
+    const claim = claimQuotaAutoResumeTurn({
+      turnUuids: [continuationUuid],
+      isHumanTakeover: false,
+      humanCommandUuids: [],
+      willQuery: true,
+    })
+    expect(claim?.kind).toBe('continuation')
+    // densable GZa must be false — drain the queue pointer target
+    resetCommandQueue()
+    const nextResets = Math.floor(Date.now() / 1000) + 7200
+    onQuotaRejectedForAutoResume(
+      {
+        status: 'rejected',
+        resetsAt: nextResets,
+        rateLimitType: 'five_hour',
+        unifiedRateLimitFallbackAvailable: false,
+        isUsingOverage: false,
+      },
+      'main_thread',
+    )
+    const state = getQuotaAutoResumeState()
+    expect(state.phase).toBe('armed')
+    expect(state).toMatchObject({
+      consecutiveRearms: 1,
+      resetsAtSeconds: nextResets,
+    })
+    expect(events).toContain('rearmed')
+    expect(logEventMock).toHaveBeenCalledWith(
+      'tengu_quota_auto_resume_armed',
+      expect.objectContaining({ rearm: 1 }),
+    )
+    unsub()
+  })
+
+  test('s0v: other querySource does not rearm', () => {
+    const continuationUuid = fireQuotaAutoResumeContinuation()
+    claimQuotaAutoResumeTurn({
+      turnUuids: [continuationUuid],
+      isHumanTakeover: false,
+      humanCommandUuids: [],
+      willQuery: true,
+    })
+    resetCommandQueue()
+    onQuotaRejectedForAutoResume(
+      {
+        status: 'rejected',
+        resetsAt: Math.floor(Date.now() / 1000) + 7200,
+        rateLimitType: 'five_hour',
+        unifiedRateLimitFallbackAvailable: false,
+        isUsingOverage: false,
+      },
+      'other',
+    )
+    expect(getQuotaAutoResumeState().phase).toBe('idle')
+  })
+
+  test('s0v: third consecutive rearm emits cap-exhausted (HEv=2)', () => {
+    const events: string[] = []
+    const unsub = subscribeQuotaAutoResumeEvents(e => events.push(e))
+
+    const rejectMain = (resetsAt: number) => {
+      const uuid = fireQuotaAutoResumeContinuation()
+      claimQuotaAutoResumeTurn({
+        turnUuids: [uuid],
+        isHumanTakeover: false,
+        humanCommandUuids: [],
+        willQuery: true,
+      })
+      resetCommandQueue()
+      onQuotaRejectedForAutoResume(
+        {
+          status: 'rejected',
+          resetsAt,
+          rateLimitType: 'five_hour',
+          unifiedRateLimitFallbackAvailable: false,
+          isUsingOverage: false,
+        },
+        'main_thread',
+      )
+    }
+
+    const base = Math.floor(Date.now() / 1000)
+    rejectMain(base + 3600) // consecutiveRearms 0→1, rearmed
+    expect(getQuotaAutoResumeState().phase).toBe('armed')
+    expect(
+      (getQuotaAutoResumeState() as { consecutiveRearms: number })
+        .consecutiveRearms,
+    ).toBe(1)
+
+    // Simulate fire completing without PVr reset — leave consecutiveRearms=1,
+    // clear armed wait, keep claim path for next reject.
+    cancelQuotaAutoResume('fired')
+    rejectMain(base + 7200) // 1→2, rearmed
+    expect(
+      (getQuotaAutoResumeState() as { consecutiveRearms: number })
+        .consecutiveRearms,
+    ).toBe(2)
+    cancelQuotaAutoResume('fired')
+
+    events.length = 0
+    rejectMain(base + 10800) // >=2 → cap
+    expect(getQuotaAutoResumeState().phase).toBe('idle')
+    expect(events).toContain('cap-exhausted')
+    expect(logEventMock).toHaveBeenCalledWith(
+      'tengu_quota_auto_resume_cancelled',
+      expect.objectContaining({ reason: 'rearm_cap' }),
+    )
+    unsub()
   })
 })

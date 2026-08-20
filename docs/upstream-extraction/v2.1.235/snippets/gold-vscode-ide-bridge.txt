@@ -1,0 +1,73 @@
+# gold-vscode-ide-bridge — densable SEA 2.1.235 CLI IDE bridge (vscodeSdkMcp / uSm)
+# SEA: /tmp/official-235/plat/package/claude (Mach-O arm64) · sha256 83b8f806…
+# Scope: CLI ↔ VS Code MCP bridge (NOT #19 host focus). User: 对齐 CLI IDE bridge；#19 保持 N/A。
+# Dig/land: 2026-08-20 · densable-first 1:1 · full experiment_gates + log_event 对齐官方
+
+## Verdict
+HAVE (CLI product) — lock / sse-ide|ws-ide / claude-vscode / entrypoint Y$ MATCH;
+setupVscodeSdkMcp (uSm) experiment_gates 14-key + RnT + log_event special routing + print call-site options landed.
+#19 remains N/A (host-only). packages/vscode-ide-bridge ABSENT (not invent).
+
+## SEA MATCH (protocol / identity)
+PRESENT  claude-vscode MCP name
+PRESENT  sse-ide | ws-ide transports
+PRESENT  CLAUDE_CODE_SSE_PORT
+PRESENT  lock fields: workspaceFolders / ideName / authToken / transport / pid / runningInWindows
+PRESENT  getAnthropicClientPlatform (Y$ / tP) entrypoint claude-vscode
+PRESENT  densable v2 setNotificationHandler(method, {params}, handler)
+PRESENT  experiment_gates notification
+PRESENT  log_event notification
+
+## SEA uSm experiment_gates (14 keys · authoritative object)
+PRESENT  tengu_vscode_review_upsell     = et(..., false)
+PRESENT  tengu_cobalt_harbor_notice    = et(..., true)   # miss → true
+PRESENT  tengu_vscode_onboarding       = et(..., false)
+PRESENT  tengu_quiet_fern              = HARD true
+PRESENT  tengu_vscode_cc_auth          = HARD true
+PRESENT  tengu_slate_ribbon            = HARD true
+PRESENT  tengu_brick_follow            = et(..., false)
+PRESENT  tengu_vellum_siding           = et(..., false)
+PRESENT  tengu_loggia_carousel         = options.refusalFallbackLaneEnabled ?? false
+PRESENT  tengu_loggia_carousel_config  = options.refusalFallbackSettingToggleVisible ?? false
+PRESENT  fable5_launch_show            = options.fable5LaunchShow ?? false
+PRESENT  startup_announcement          = options.startupAnnouncement ?? false  # false | JSON string
+PRESENT  tengu_harbor_willow           = options.autoDefaultLaunchEnabled ?? false
+PRESENT  tengu_auto_mode_state         = ALWAYS written after RnT
+  RnT: tengu_auto_mode_config.enabled ∈ {enabled,disabled,opt-in} else 'enabled'
+  write: opt-in → 'enabled'; else passthrough
+
+## SEA log_event routing (uSm)
+PRESENT  tengu_feedback_survey_event → onFeedbackSurveyEvent when config.type==='sdk' && hUe()
+PRESENT  auto_default_nudge_shown|resolved → onAutoDefaultNudgeEvent (same host gate)
+PRESENT  else → logEvent('tengu_vscode_' + eventName)
+PRESENT  hUe = entrypoint==='claude-vscode' && !CHILD_SESSION && !CLAUDECODE
+PRESENT  onerror once-warn → vscode_notification_channel_error
+
+## SEA print call-site options
+PRESENT  onFeedbackSurveyEvent: VJg (appeared → feedbackSurveyState.lastShownTime, 60s B8E)
+PRESENT  refusalFallbackLaneEnabled: $re = !DISABLE_REFUSAL_FALLBACK && !NO_MODEL_FALLBACK
+PRESENT  refusalFallbackSettingToggleVisible: UAi() ? true : false  # UAi === $re locally
+PRESENT  fable5LaunchShow: false
+PRESENT  startupAnnouncement: vNh()  # false | JSON
+PRESENT  autoDefaultLaunchEnabled: HIn = et(harbor_willow) || meadow_lantern
+PRESENT  onAutoDefaultNudgeEvent: Fjc
+
+## Local land map
+- src/services/mcp/vscodeSdkMcp.ts — SetupVscodeSdkMcpOptions + 14 gates + RnT + routing + onerror
+- src/services/mcp/vscodeIdeBridgeCallbacks.ts — $re/HIn/vNh/hUe/VJg/Fjc
+- src/cli/print.ts — uSm options wiring (~1957)
+- src/utils/config.ts — hasSeenAutoDefaultNudge?: boolean
+- tests: src/services/mcp/__tests__/vscodeSdkMcp.235.test.ts (14 pass)
+
+## Residual (intentional · non-blocking)
+HAVE    HIn meadow: local reads `clientDataCache.meadow_lantern===true` (bootstrap flat cache). SEA `sZs` is slots+strict-gate; no local slots yet — same boolean field when bootstrap writes meadow. Do NOT invent GB meadow_lantern gate.
+HAVE    vNh: `tengu_startup_announcements` via getFeatureValue → top priority + SNh(`isModelAllowed`) → JSON `{id,title,text,footer}` | false. Impression caps (`N5t`/`announcementImpressions`) are UI path — not applied in vNh (SEA-accurate).
+ABSENT  file_updated in SEA external binary (deadstrip) — keep local ant-only; not GAP
+ABSENT  #19 preserveFocus / WebviewPanel — N/A host-only; do not invent
+ABSENT  packages/vscode-ide-bridge on disk — named only; not this land
+NOTE    Do NOT push tengu_vscode_feedback_survey / tengu_vscode_sdk_stream_ended_no_result as gates keys (not in SEA gates object)
+
+## Non-claims
+- Not a changelog #19 HAVE
+- Not inventing VS Code extension host package
+- No auto commit / no bump until user 「提交」

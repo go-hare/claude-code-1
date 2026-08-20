@@ -65,6 +65,8 @@ export function getFilePermissionOptions({
   onAcceptFeedbackChange,
   yesInputMode = false,
   noInputMode = false,
+  contentWithheld = false,
+  suppressPersistentAllow = false,
 }: {
   filePath: string;
   toolPermissionContext: ToolPermissionContext;
@@ -73,9 +75,17 @@ export function getFilePermissionOptions({
   onAcceptFeedbackChange?: (value: string) => void;
   yesInputMode?: boolean;
   noInputMode?: boolean;
+  /** densable contentWithheld — omit accept-session / don't-ask-again when true. */
+  contentWithheld?: boolean;
+  /**
+   * densable 2.1.235 #12 — omit accept-session when ask.suppressAlwaysAllowRule
+   * or tool.suppressesAlwaysAllowRule(input) is set.
+   */
+  suppressPersistentAllow?: boolean;
 }): PermissionOptionWithLabel[] {
   const options: PermissionOptionWithLabel[] = [];
-  const modeCycleShortcut = getShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
+  // densable: session-row shows confirm:cycleMode (Confirmation), not chat:cycleMode
+  const modeCycleShortcut = getShortcutDisplay('confirm:cycleMode', 'Confirmation', 'shift+tab');
 
   // When in input mode, show input field
   if (yesInputMode && onAcceptFeedbackChange) {
@@ -96,66 +106,69 @@ export function getFilePermissionOptions({
     });
   }
 
-  const inAllowedPath = pathInAllowedWorkingPath(filePath, toolPermissionContext);
+  // densable B7S / #12: withheld preview OR suppressAlwaysAllowRule → one-time only.
+  if (!contentWithheld && !suppressPersistentAllow) {
+    const inAllowedPath = pathInAllowedWorkingPath(filePath, toolPermissionContext);
 
-  // Check if this is a .claude/ folder path (project or global)
-  const inClaudeFolder = isInClaudeFolder(filePath);
-  const inGlobalClaudeFolder = isInGlobalClaudeFolder(filePath);
+    // Check if this is a .claude/ folder path (project or global)
+    const inClaudeFolder = isInClaudeFolder(filePath);
+    const inGlobalClaudeFolder = isInGlobalClaudeFolder(filePath);
 
-  // Option 2: For .claude/ folder, show special option instead of generic session option
-  // Note: Session-level options are always shown since they only affect in-memory state,
-  // not persisted settings. The allowManagedPermissionRulesOnly setting only restricts
-  // persisted permission rules.
-  if ((inClaudeFolder || inGlobalClaudeFolder) && operationType !== 'read') {
-    options.push({
-      label: 'Yes, allow edits to .claude/ config for this session',
-      value: 'yes-claude-folder',
-      option: {
-        type: 'accept-session',
-        scope: inGlobalClaudeFolder ? 'global-claude-folder' : 'claude-folder',
-      },
-    });
-  } else {
-    // Option 2: Allow all changes/reads during session
-    let sessionLabel: ReactNode;
-
-    if (inAllowedPath) {
-      // Inside working directory
-      if (operationType === 'read') {
-        sessionLabel = 'Yes, during this session';
-      } else {
-        sessionLabel = (
-          <Text>
-            Yes, allow all edits during this session <Text bold>({modeCycleShortcut})</Text>
-          </Text>
-        );
-      }
+    // Option 2: For .claude/ folder, show special option instead of generic session option
+    // Note: Session-level options are always shown since they only affect in-memory state,
+    // not persisted settings. The allowManagedPermissionRulesOnly setting only restricts
+    // persisted permission rules.
+    if ((inClaudeFolder || inGlobalClaudeFolder) && operationType !== 'read') {
+      options.push({
+        label: 'Yes, allow edits to .claude/ config for this session',
+        value: 'yes-claude-folder',
+        option: {
+          type: 'accept-session',
+          scope: inGlobalClaudeFolder ? 'global-claude-folder' : 'claude-folder',
+        },
+      });
     } else {
-      // Outside working directory - include directory name
-      const dirPath = getDirectoryForPath(filePath);
-      const dirName = basename(dirPath) || 'this directory';
+      // Option 2: Allow all changes/reads during session
+      let sessionLabel: ReactNode;
 
-      if (operationType === 'read') {
-        sessionLabel = (
-          <Text>
-            Yes, allow reading from <Text bold>{dirName}/</Text> during this session
-          </Text>
-        );
+      if (inAllowedPath) {
+        // Inside working directory
+        if (operationType === 'read') {
+          sessionLabel = 'Yes, during this session';
+        } else {
+          sessionLabel = (
+            <Text>
+              Yes, allow all edits during this session <Text bold>({modeCycleShortcut})</Text>
+            </Text>
+          );
+        }
       } else {
-        sessionLabel = (
-          <Text>
-            Yes, allow all edits in <Text bold>{dirName}/</Text> during this session{' '}
-            <Text bold>({modeCycleShortcut})</Text>
-          </Text>
-        );
-      }
-    }
+        // Outside working directory - include directory name
+        const dirPath = getDirectoryForPath(filePath);
+        const dirName = basename(dirPath) || 'this directory';
 
-    options.push({
-      label: sessionLabel,
-      value: 'yes-session',
-      option: { type: 'accept-session' },
-    });
+        if (operationType === 'read') {
+          sessionLabel = (
+            <Text>
+              Yes, allow reading from <Text bold>{dirName}/</Text> during this session
+            </Text>
+          );
+        } else {
+          sessionLabel = (
+            <Text>
+              Yes, allow all edits in <Text bold>{dirName}/</Text> during this session{' '}
+              <Text bold>({modeCycleShortcut})</Text>
+            </Text>
+          );
+        }
+      }
+
+      options.push({
+        label: sessionLabel,
+        value: 'yes-session',
+        option: { type: 'accept-session' },
+      });
+    }
   }
 
   // When in input mode, show input field for reject

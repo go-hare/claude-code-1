@@ -1,0 +1,280 @@
+# densable 2.1.235 SPELLCHECK UI / LIFECYCLE gold
+# Source: /tmp/official-235/plat/package/claude (SEA Mach-O)
+# Focus: DCc / ohg / nhg / ihg / mhg / fhg / edE + PromptInput wiring (~@294740560)
+# Companion: gold-spellcheck-runtime.txt (full ihg class), gold-spell-settings.txt
+
+## Symbol map
+| mangled | role |
+|---------|------|
+| `nhg` | per-editor host singleton map (`Ei(() => ({key, checker}))`) |
+| `DCc(host, checkerName, language)` | get-or-remint `ihg` for host; key=`${checker}:${lang??""}` |
+| `ohg(host)` | dispose singleton for host (disable path) |
+| `ihg` | checker process manager (status machine + verdicts) |
+| `edE(colorSetting)` | resolve misspell color → theme/ansi token (default `uhg="error"`) |
+| `fhg(baseRanges, spellRanges)` | merge non-overlapping ranges (spell into PromptInput highlights) |
+| `mhg({host,text,cursorOffset,active,placeholders})` | React hook: lifecycle + misspell highlight ranges |
+| `lhg(text)` | tokenize candidate words (skips code spans / CJK / etc.) |
+| `Ll` / `S4i` / `GSl` / `NSl` | input renderer path consuming `highlights` (no symbol `HighlightedInput`) |
+
+Offsets (JS string in SEA):
+- `DCc` @294731634
+- `ohg` @294731807
+- `ihg` class @294731861
+- `edE` @294739147
+- `fhg` @294739615
+- `mhg` @294739751
+- PromptInput `useMemo(edE/DCc)` wiring @294740560
+- `mhg(...)` call site @294865312
+- `fhg(Er,Xr)` merge @294866762
+- `highlights:yi` into `Ll` @294893432
+- `Ll` @290252443 → `S4i` → `GSl`/`NSl` underline paint @290246207–290250099
+
+---
+
+## 1) Per-editor checker singleton lifecycle
+
+```js
+// nhg = Ei(() => ({ key: undefined, checker: undefined }))
+function DCc(e, t, r) {
+  let n = nhg.of(e), o = `${t}:${r ?? ""}`;
+  if (n.checker && n.key === o) return n.checker;
+  return n.checker?.dispose(), n.key = o, n.checker = new ihg(() => AuE(t, r)), n.checker;
+}
+function ohg(e) {
+  let t = nhg.of(e);
+  t.checker?.dispose(), t.key = void 0, t.checker = void 0;
+}
+```
+
+- Host key is the PromptInput/`Ar.host` object (WeakMap-style `Ei.of`).
+- Remint when checker/language key changes: dispose old `ihg`, construct new.
+- Disable: `ohg(host)` clears singleton.
+
+### `ihg` status machine (public-facing + internal)
+
+User-facing / requested states:
+- `resolving` — `#w()` looking up checker binary via `#h()` (`AuE`)
+- `starting` — process spawned, waiting for banner
+- `ready` — banner parsed, stdin protocol live
+- `unavailable` — lookup miss / permanent failure after restart budget
+
+Also present (internal, not in the 4-name list):
+- `idle` — initial / after `#D()` teardown before next spawn; spawn failure temporarily returns here then `#E`
+
+Transitions (abbrev):
+1. `idle` → `resolving` (`#w`)
+2. lookup null → `unavailable` (+ clear queue); telemetry `checker_lookup_failed` / `checker_not_found`
+3. spawn ok → `starting` → banner ok → `ready` (telemetry `_e("input_spellcheck",{backend})`)
+4. any crash/protocol/timeout path → `#E` → restart-once or `#M` → `unavailable`
+
+---
+
+## 2) Restart-once on crash
+
+Constants (module `shg`):
+- `PuE = 1` — max restart count (`#n < PuE`)
+- `IuE = 1000` — delay before restart attempt
+- `thg = 3` — slow-response strikes before `checker_too_slow` → unavailable
+- `RuE = 3000` banner timeout; `xuE = 15000` response timeout
+
+```js
+#E(e, t) {
+  if (this.#r || this.#t.status === "unavailable") return;
+  if (this.#D(), this.#i = 0, this.#n < PuE) {
+    this.#n++;
+    T(`[spellcheck] ${e}; restarting once`, { level: "warn" });
+    this.#s = true;
+    this.#m = setTimeout(() => { this.#s = false; this.#b(); }, IuE);
+    this.#m.unref?.();
+    return;
+  }
+  this.#M(e, t);
+}
+#M(e, t) {
+  T(`[spellcheck] ${e}; spell checking is off for this session`, { level: "warn" });
+  pe("input_spellcheck", t);
+  this.#D();
+  this.#t = { status: "unavailable" };
+  this.#c.clear();
+}
+```
+
+`#D()` always resets status to `idle`, re-queues in-flight words (`#d` → `#c`), kills process if `starting|ready`.
+
+---
+
+## 3) Verdicts + `fhg` non-overlapping merge
+
+`ihg.verdicts` is a fresh object `{ isMisspelled(word) }` rebound on each `#C` batch; `changed` EventTarget/`ps()` notifies React.
+
+```js
+function fhg(e, t) {
+  if (t.length === 0) return e;
+  let r = [...e];
+  for (let n of t)
+    if (!e.some((o) => n.start < o.end && n.end > o.start)) r.push(n);
+  return r;
+}
+```
+
+Semantics: keep all base PromptInput ranges; append each spell range only if it does **not** overlap any *existing base* range (`e`, not the accumulating `r`). Spell ranges never displace higher-priority UI marks.
+
+---
+
+## 4) `mhg` React hook — useMemo around `edE` / `DCc` (@294740560)
+
+```js
+function mhg({ host: e, text: t, cursorOffset: r, active: n, placeholders: o }) {
+  let i = pt((A) => A.settings.spellcheck);
+  let s = lRt("spellcheck")[0], a = s?.value, l = s?.source;
+  // ... settings-tier warnings via dhg(host, msg) ...
+
+  let c = a?.enabled === true;
+  let u = c && a.checker?.trim() || void 0;
+  let d = c && a.language?.trim() || void 0;
+  let p = c ? a.color : void 0;
+
+  let f = OQ.useMemo(() => rdE(u), [u]);           // checker name | "auto"
+  let m = OQ.useMemo(() => {                        // language or undefined
+    if (d === void 0 || hEn(d)) return d;
+    T(`[spellcheck] ignoring spellcheck.language "${d}": not a plain dictionary name`);
+    return;
+  }, [d]);
+  let h = OQ.useMemo(() => edE(p), [p]);             // misspell color token
+
+  let [g, y] = OQ.useState(() => c ? DCc(e, f, m) : void 0);
+  OQ.useEffect(() => {
+    if (c) y(DCc(e, f, m));
+    else ohg(e), y(void 0);                         // dispose on disable
+  }, [c, e, f, m]);
+
+  let b = OQ.useMemo(() => g ? () => g.verdicts : idE, [g]);
+  let S = OQ.useSyncExternalStore(g ? g.changed.subscribe : odE, b);
+
+  let v = ll(); // e.g. screen reader / special mode gate
+  let E = OQ.useMemo(() => {
+    if (!g || !n || v) return XuE; // []
+    let A = lhg(t);
+    return o.length === 0 ? A
+      : A.filter((P) => !o.some((O) => P.start < O.index + O.match.length && P.end > O.index));
+  }, [g, n, v, t, o]);
+
+  // skip word still being typed (cursor after word + only quotes between)
+  let C = OQ.useCallback(
+    (A) => r >= A.end && JuE.test(t.slice(A.end, r)),
+    [t, r],
+  );
+
+  // debounce unknown words → g.request
+  let k = OQ.useMemo(
+    () => E.filter((A) => !C(A) && S.isMisspelled(A.word) === void 0)
+           .map((A) => A.word).join(`\n`),
+    [E, S, C],
+  );
+  let R = rre((A) => { g?.request(A.split(`\n`)); }, KuE /* 250ms */);
+  OQ.useEffect(() => { if (k) R(k); else R.cancel(); }, [k, t, g, R]);
+
+  return OQ.useMemo(() => {
+    let A = [];
+    for (let P of E) {
+      let { word: O, start: M, end: L } = P;
+      if (C(P)) continue;
+      if (S.isMisspelled(O) === true)
+        A.push({ start: M, end: L, color: h, underline: true, priority: YuE /* 2 */ });
+    }
+    return A.length > 0 ? A : ZuE; // []
+  }, [E, S, C, h]);
+}
+```
+
+`edE` color resolution:
+```js
+function edE(e) {
+  if (e === void 0) return uhg; // "error"
+  let t = e.trim().replace(/\s+(?=[^()]*\))/g, "");
+  let r = `ansi:${t}`;
+  if (phg(r)) return r;
+  if (phg(t)) return t;
+  T(`[spellcheck] ignoring unrecognized spellcheck.color "${e}"; using the theme's error color`);
+  return uhg;
+}
+```
+
+---
+
+## 5) PromptInput wiring → highlights → underline paint
+
+Call site (PromptInput body ~@294865312):
+```js
+Xr = mhg({
+  host: Ar.host,
+  text: Ia,
+  cursorOffset: Ie,
+  active: f === "prompt" && !he && !z,
+  placeholders: Ht,
+});
+
+yi = Ts.useMemo(() => {
+  let Er = [];
+  // ... image/audio inverse, ghost warning, teammate colors, suggestion ranges,
+  //     dim selection, ultrathink/ultraplan/autoAccept shimmer cells ...
+  return fhg(Er, Xr);   // spell ranges merged last, non-overlapping
+}, [/* ..., Xr */]);
+
+// later into Ll:
+{ ..., highlights: yi, inlineGhostText: $e, inputFilter: Zh }
+```
+
+Renderer chain (mangled; **not** named `HighlightedInput`):
+1. `Ll(props)` passes `highlights: e.highlights` into `S4i`
+2. `S4i` filters cursor-covered non-`dimColor` ranges, maps via `MNm` to rendered offsets
+3. `GSl({text, highlights})` → `NSl` priority-sort + non-nesting segmenter → line tokens
+4. Paint:
+```js
+_.jsx(_, {
+  color: Hrt.highlight?.color,
+  dimColor: Hrt.highlight?.dimColor,
+  inverse: Hrt.highlight?.inverse,
+  underline: Hrt.highlight?.underline,
+  children: _.jsx(nd, { children: Hrt.text }),
+})
+```
+Misspells therefore render as **theme/ansi `color` + `underline: true`** at priority `2`.
+
+`NSl` keeps higher-priority overlapping ranges (sort by start asc, priority desc) and drops nested/overlapping losers before segmentation — complementary to `fhg` which already refused overlapping spell inserts against base marks.
+
+---
+
+## 6) Dispose on disable
+
+From `mhg` effect:
+- `enabled !== true` → `ohg(host)` + React state `undefined`
+- `ohg` → `checker.dispose()`:
+  - sets `#r` disposed flag
+  - `#D()` kills process / clears timers
+  - clears pending word set + `changed` listeners
+
+Remint on checker/language change also disposes previous instance inside `DCc`.
+
+---
+
+## Constants cheat-sheet
+| name | value | meaning |
+|------|-------|---------|
+| `KuE` | 250 | debounce ms for `request` |
+| `YuE` | 2 | spell highlight priority |
+| `uhg` | `"error"` | default misspell color |
+| `PuE` | 1 | restart-once budget |
+| `IuE` | 1000 | restart delay ms |
+| `XuE`/`ZuE` | `[]` | empty word/highlight arrays |
+| `JuE` | `/^['’]*$/` | in-progress typing skip |
+
+---
+
+## Gaps / notes for local port
+1. No SEA symbol literally named `HighlightedInput` — port should wire through existing PromptInput → TextInput (`Ll`/`S4i`) `highlights` prop + `GSl`/`NSl` underline path (or local equivalent).
+2. `ihg` also uses internal `idle` status; product docs often only list resolving|starting|ready|unavailable.
+3. `fhg` overlap test is against the *pre-merge base array only*; two spell ranges that overlap each other would both be kept if neither overlaps base (lhg normally prevents that).
+4. PromptInput component itself is an anonymous large function; host object `Ar.host` is the singleton key identity.
+5. Cursor-under-range filtering in `S4i` (`cursorOffset` inside range hides non-dim highlights) applies to spell underlines while typing over them unless `dimColor`.
+6. Full aspell/hunspell/ispell protocol + `AuE` PATH lookup is covered in gold-spellcheck-runtime / protocol snippets — not duplicated here beyond lifecycle hooks.

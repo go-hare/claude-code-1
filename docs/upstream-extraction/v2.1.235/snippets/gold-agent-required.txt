@@ -1,0 +1,17 @@
+@73702928: t....~..fx..........	]......Task....................	~..U...subagent_type is required: the general-purpose agent is not available in this session....~..............	.......Glob.....yw..............{......- Fast file pattern matching tool that works with any codebase size
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matchi
+---
+@278062450: d});var zs="Read";var fi="Agent",t5="Task",kVo=1e5,OUd,AVo="subagent_type is required: the general-purpose agent is not available in this session";var ey=w(()=>{OUd=new Set(["Explore","Plan"])});var hm="Glob";function cia(e){if(ak(e))return'Fast file pattern matching. Supports glob patterns like "**/*.js" or "src/**/*.ts". Returns matching fil
+---
+@73702959: k....................	~..U...subagent_type is required: the general-purpose agent is not available in this session....~..............	.......Glob.....yw..............{......- Fast file pattern matching tool that works with any codebase size
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matching file paths sorted by modification time
+- 
+---
+@278062481: ",t5="Task",kVo=1e5,OUd,AVo="subagent_type is required: the general-purpose agent is not available in this session";var ey=w(()=>{OUd=new Set(["Explore","Plan"])});var hm="Glob";function cia(e){if(ak(e))return'Fast file pattern matching. Supports glob patterns like "**/*.js" or "src/**/*.ts". Returns matching file paths sorted by modification time.';return
+---
+@173386145: ...	.......[teammate] Custom agent ................	....... not found in available agents..........	.......agent...................	...(...[STARTUP] Commands and agents loaded in ................	.......action_commands_loaded..................	.......tool....................(...................
+....................j......	...............	.......te
+---
+@298908352: .agentType);else T(`[teammate] Custom agent ${de.agentType} not found in available agents`)}let xt=L??$En("agent");if(!fa&&!L&&xt)fa=_4c(ki.activeAgents,xt),BPe(fa?.agentType);T(`[STARTUP] Commands and agents loaded in ${Date.now()-tl}ms`),ld("action_commands_loaded");let Zt;if(Cn){let ur=z2r(Cn);if("tool"in ur){let Do=ur.tool;if(Ms()){let Po=Do.c

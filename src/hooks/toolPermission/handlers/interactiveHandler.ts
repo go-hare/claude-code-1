@@ -272,6 +272,10 @@ function handleInteractivePermission(
           permissionPromptStartTimeMs,
           contentBlocks,
           result.decisionReason,
+          {
+            askSuppressesAlwaysAllowRule:
+              result.suppressAlwaysAllowRule === true,
+          },
         ),
       )
     },

@@ -1,0 +1,9 @@
+version: 2.1.235
+platform: darwin-arm64
+package: @anthropic-ai/claude-code-darwin-arm64@2.1.235
+path: /tmp/official-235/plat/package/claude
+size: 313334608
+sha256: 83b8f806f6f2eea316cfe246628e6c23374711d868f1fd0409db551b877b7748
+tarball_shasum: c309a62611e4907ca193b9a169e662a59acd9750
+downloaded: 2026-08-19 via HTTPS_PROXY=127.0.0.1:12000 registry.npmjs.org temp npm_config_cache
+claude --version: 2.1.235 (Claude Code)

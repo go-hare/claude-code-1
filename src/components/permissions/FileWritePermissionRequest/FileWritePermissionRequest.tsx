@@ -1,12 +1,13 @@
 import { basename, relative } from 'path';
 import React, { useMemo } from 'react';
 import type { z } from 'zod/v4';
-import { Text } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import { FileWriteTool } from '@claude-code/builtin-tools/tools/FileWriteTool/FileWriteTool.js';
 import { getCwd } from '../../../utils/cwd.js';
 import { isENOENT } from '../../../utils/errors.js';
 import { readFileSync } from '../../../utils/fileRead.js';
 import { FilePermissionDialog } from '../FilePermissionDialog/FilePermissionDialog.js';
+import { evaluateWriteContentWithhold } from '../FilePermissionDialog/filePermissionPreviewWithhold.js';
 import {
   createSingleEditDiffConfig,
   type FileEdit,
@@ -67,6 +68,12 @@ export function FileWritePermissionRequest(props: PermissionRequestProps): React
   }, [file_path]);
 
   const actionText = fileExists ? 'overwrite' : 'create';
+  const withhold = evaluateWriteContentWithhold({
+    content,
+    filePath: file_path,
+    fileExists,
+    oldContent,
+  });
 
   return (
     <FilePermissionDialog
@@ -83,12 +90,24 @@ export function FileWritePermissionRequest(props: PermissionRequestProps): React
         </Text>
       }
       content={
-        <FileWriteToolDiff file_path={file_path} content={content} fileExists={fileExists} oldContent={oldContent} />
+        withhold.contentWithheld ? (
+          <Box paddingX={1} marginBottom={1}>
+            <Text dimColor>{withhold.message}</Text>
+          </Box>
+        ) : (
+          <FileWriteToolDiff
+            file_path={file_path}
+            content={content}
+            fileExists={fileExists}
+            oldContent={oldContent}
+          />
+        )
       }
       path={file_path}
       completionType="write_file_single"
       parseInput={parseInput}
-      ideDiffSupport={ideDiffSupport}
+      ideDiffSupport={withhold.contentWithheld ? undefined : ideDiffSupport}
+      contentWithheld={withhold.contentWithheld}
     />
   );
 }

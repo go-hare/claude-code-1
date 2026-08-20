@@ -3925,6 +3925,7 @@ async function run(): Promise<CommanderCommand> {
           return j;
         })(),
         viewSelectionMode: 'none',
+        queueEditIndex: null,
         footerSelection: null,
         toolPermissionContext: effectiveToolPermissionContext,
         agent: mainThreadAgentDefinition?.agentType,

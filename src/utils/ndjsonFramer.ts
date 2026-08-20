@@ -6,6 +6,7 @@
  * udsMessaging to avoid duplicating the same buffer logic.
  */
 import type { Socket } from 'net'
+import { StringDecoder } from 'node:string_decoder'
 
 export type NdjsonFramerOptions = {
   maxFrameBytes?: number
@@ -33,6 +34,11 @@ export function attachNdjsonFramer<T = unknown>(
   let buffer = ''
   let bufferBytes = 0
   const maxFrameBytes = options.maxFrameBytes ?? Number.POSITIVE_INFINITY
+  // Holds partial multibyte sequences across chunk boundaries. Decoding each
+  // chunk independently would turn any UTF-8 character split by the socket into
+  // replacement characters. Newline (0x0a) never appears inside a multibyte
+  // sequence, so scanning for it at the byte level stays safe.
+  const decoder = new StringDecoder('utf8')
 
   const rejectOversizedFrame = (bytes: number): void => {
     const error = new Error(
@@ -76,7 +82,7 @@ export function attachNdjsonFramer<T = unknown>(
         return
       }
 
-      buffer += chunk.subarray(start, index).toString('utf8')
+      buffer += decoder.write(chunk.subarray(start, index))
       emitLine(buffer)
       buffer = ''
       bufferBytes = 0
@@ -93,7 +99,7 @@ export function attachNdjsonFramer<T = unknown>(
     }
 
     if (tailBytes > 0) {
-      buffer += chunk.subarray(start).toString('utf8')
+      buffer += decoder.write(chunk.subarray(start))
       bufferBytes += tailBytes
     }
   })

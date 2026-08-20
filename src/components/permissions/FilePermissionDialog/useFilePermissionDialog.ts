@@ -15,6 +15,7 @@ import {
   type PermissionOption,
   type PermissionOptionWithLabel,
 } from './permissionOptions.js'
+import { resolveConfirmCycleModeAction } from './confirmCycleMode.js'
 import {
   PERMISSION_HANDLERS,
   type PermissionHandlerParams,
@@ -33,6 +34,8 @@ export type UseFilePermissionDialogProps<T extends ToolInput> = {
   onReject: () => void
   parseInput: (input: unknown) => T
   operationType?: FileOperationType
+  /** densable contentWithheld — omit accept-session when true. */
+  contentWithheld?: boolean
 }
 
 export type UseFilePermissionDialogResult<T> = {
@@ -59,7 +62,14 @@ export function useFilePermissionDialog<T extends ToolInput>({
   onReject,
   parseInput,
   operationType = 'write',
+  contentWithheld = false,
 }: UseFilePermissionDialogProps<T>): UseFilePermissionDialogResult<T> {
+  const suppressPersistentAllow =
+    (toolUseConfirm.permissionResult.behavior === 'ask' &&
+      toolUseConfirm.permissionResult.suppressAlwaysAllowRule === true) ||
+    toolUseConfirm.tool.suppressesAlwaysAllowRule?.(toolUseConfirm.input) ===
+      true
+
   const toolPermissionContext = useAppState(s => s.toolPermissionContext)
   const [acceptFeedback, setAcceptFeedback] = useState('')
   const [rejectFeedback, setRejectFeedback] = useState('')
@@ -81,8 +91,18 @@ export function useFilePermissionDialog<T extends ToolInput>({
         onAcceptFeedbackChange: setAcceptFeedback,
         yesInputMode,
         noInputMode,
+        contentWithheld,
+        suppressPersistentAllow,
       }),
-    [filePath, toolPermissionContext, operationType, yesInputMode, noInputMode],
+    [
+      filePath,
+      toolPermissionContext,
+      operationType,
+      yesInputMode,
+      noInputMode,
+      contentWithheld,
+      suppressPersistentAllow,
+    ],
   )
 
   // Handle option selection using shared handlers
@@ -135,14 +155,36 @@ export function useFilePermissionDialog<T extends ToolInput>({
     ],
   )
 
-  // Handler for confirm:cycleMode - select accept-session option
+  // densable ERg / confirm:cycleMode:
+  // open yes/no comment → collapse field only; otherwise accept-session.
   const handleCycleMode = useCallback(() => {
+    const action = resolveConfirmCycleModeAction({
+      yesInputMode,
+      noInputMode,
+    })
+    if (action === 'collapse-yes') {
+      setYesInputMode(false)
+      setFocusedOption('yes')
+      return
+    }
+    if (action === 'collapse-no') {
+      setNoInputMode(false)
+      setFocusedOption('no')
+      return
+    }
     const sessionOption = options.find(o => o.option.type === 'accept-session')
     if (sessionOption) {
       const parsedInput = parseInput(toolUseConfirm.input)
       onChange(sessionOption.option, parsedInput)
     }
-  }, [options, parseInput, toolUseConfirm.input, onChange])
+  }, [
+    yesInputMode,
+    noInputMode,
+    options,
+    parseInput,
+    toolUseConfirm.input,
+    onChange,
+  ])
 
   // Register keyboard shortcut handler via keybindings system
   useKeybindings(

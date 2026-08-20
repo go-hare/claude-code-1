@@ -115,7 +115,8 @@ export const useSelectInput = <T>({
       handlers['select:next'] = () => {
         if (onDownFromLastItem) {
           const lastOption = options[options.length - 1]
-          if (lastOption && state.focusedValue === lastOption.value) {
+          // densable: edge wrap checks live-read getFocusedValue()
+          if (lastOption && state.getFocusedValue() === lastOption.value) {
             onDownFromLastItem()
             return
           }
@@ -125,7 +126,7 @@ export const useSelectInput = <T>({
       handlers['select:previous'] = () => {
         if (onUpFromFirstItem && state.visibleFromIndex === 0) {
           const firstOption = options[0]
-          if (firstOption && state.focusedValue === firstOption.value) {
+          if (firstOption && state.getFocusedValue() === firstOption.value) {
             onUpFromFirstItem()
             return
           }
@@ -134,15 +135,16 @@ export const useSelectInput = <T>({
       }
       handlers['select:accept'] = () => {
         if (disableSelection === true) return
-        if (state.focusedValue === undefined) return
+        // densable select:accept — live focused value, not React snapshot
+        const focused = state.getFocusedValue()
+        if (focused === undefined) return
 
-        const focusedOption = options.find(
-          opt => opt.value === state.focusedValue,
-        )
+        const focusedOption = options.find(opt => opt.value === focused)
         if (focusedOption?.disabled === true) return
+        if (focusedOption?.type === 'input') return
 
         state.selectFocusedOption?.()
-        state.onChange?.(state.focusedValue)
+        state.onChange?.(focused)
       }
     }
 
@@ -172,14 +174,14 @@ export const useSelectInput = <T>({
   useInput(
     (input, key, event: InputEvent) => {
       const normalizedInput = normalizeFullWidthDigits(input)
-      const focusedOption = options.find(
-        opt => opt.value === state.focusedValue,
-      )
+      // densable handleKeyDown: S=r.getFocusedValue()
+      const liveFocused = state.getFocusedValue()
+      const focusedOption = options.find(opt => opt.value === liveFocused)
       const currentIsInInput = focusedOption?.type === 'input'
 
       // Handle Tab key for input mode toggling
-      if (key.tab && onInputModeToggle && state.focusedValue !== undefined) {
-        onInputModeToggle(state.focusedValue)
+      if (key.tab && onInputModeToggle && liveFocused !== undefined) {
+        onInputModeToggle(liveFocused)
         return
       }
 
@@ -198,7 +200,7 @@ export const useSelectInput = <T>({
         if (key.downArrow || (key.ctrl && input === 'n')) {
           if (onDownFromLastItem) {
             const lastOption = options[options.length - 1]
-            if (lastOption && state.focusedValue === lastOption.value) {
+            if (lastOption && state.getFocusedValue() === lastOption.value) {
               onDownFromLastItem()
               event.stopImmediatePropagation()
               return
@@ -211,7 +213,7 @@ export const useSelectInput = <T>({
         if (key.upArrow || (key.ctrl && input === 'p')) {
           if (onUpFromFirstItem && state.visibleFromIndex === 0) {
             const firstOption = options[0]
-            if (firstOption && state.focusedValue === firstOption.value) {
+            if (firstOption && state.getFocusedValue() === firstOption.value) {
               onUpFromFirstItem()
               event.stopImmediatePropagation()
               return
@@ -242,12 +244,12 @@ export const useSelectInput = <T>({
         if (
           isMultiSelect &&
           normalizeFullWidthSpace(input) === ' ' &&
-          state.focusedValue !== undefined
+          liveFocused !== undefined
         ) {
           const isFocusedOptionDisabled = focusedOption?.disabled === true
           if (!isFocusedOptionDisabled) {
             state.selectFocusedOption?.()
-            state.onChange?.(state.focusedValue)
+            state.onChange?.(liveFocused)
           }
         }
 

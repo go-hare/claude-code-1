@@ -1,0 +1,112 @@
+# densable SEA gold — changelog #18 rc-gateway
+# SEA: /tmp/official-235/plat/package/claude
+# Item: Remote Control: `claude rc` now applies the same enterprise-gateway availability check as interactive startup
+# Extracted: 2026-08-19 via strings/bytes (densable-first; no invention)
+
+## Changelog / checklist
+- changelog-2.1.235: "Remote Control: `claude rc` now applies the same enterprise-gateway availability check as interactive startup"
+- checklist #18 was PARTIAL (local has remoteControlEndpointReason.isEnterpriseGatewaySession; SEA proves shared getBridgeDisabledReason path)
+
+## Shared availability gate (interactive + claude rc)
+SEA export map:
+  getBridgeDisabledReason:()=>vqo
+  getBridgeDoctorInfo:()=>MXs
+  isBridgeFirstParty:()=>Pje
+  isBridgeEnabledBlocking:()=>DXs
+
+vqo() (getBridgeDisabledReason):
+  async function vqo(){
+    if(Sqo())return null;
+    if(!Pje())return mib();   // <-- enterprise/gateway endpoint reason
+    if(mX())return"Remote Control is not available inside a cloud session.";
+    if(dXt())return"Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).";
+    ...
+  }
+
+mib() (endpoint disabled reason; local ≈ getRemoteControlEndpointDisabledReason):
+  function mib(){let e=Gn();if(e!=="firstParty"){
+    if(e==="gateway")return Glt(Og())
+      ? `${KMr} This session is connected through an enterprise cloud gateway (set up via /login), which does not support Remote Control.`
+      : `${KMr} CLAUDE_CODE_USE_GATEWAY is set (the gateway on-ramp also requires ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN), so this session is routed through a cloud gateway — ${uCd}`;
+    ...
+  }}
+
+Enterprise-session predicate (local isEnterpriseGatewaySession; SEA name Glt):
+  function Og(){return fr.host.credentialSlots.gatewayAuth()}
+  function Glt(e){return!!e&&!e.unpinned}
+  // used as Glt(Og()) inside mib() when apiProvider==="gateway"
+
+### Interactive startup path
+Tos() preflight (used by /remote-control interactive enable):
+  async function Tos(){
+    let e=await vqo();
+    if(e)return{kind:"error",message:e};
+    ...
+    return T("[bridge] Prerequisites passed, enabling bridge"),null
+  }
+Caller effect:
+  let UJh=await Tos();
+  if(UJh?.kind==="error"){ H("tengu_bridge_command",{action:xe("preflight_failed")}), boe(UJh.message,{display:"system"}); return }
+
+### claude rc / remote-control CLI path (same vqo)
+Commander registration:
+  e.command("remote-control",{hidden:!0}).alias("rc")
+    .description("Control local sessions from claude.ai/code or the Claude mobile app")
+    .action(async()=>{ let{bridgeMain:l}=await ...; await l(process.argv.slice(3)) })
+
+Fast-path CLI (imports getBridgeDisabledReason before bridgeMain):
+  let{getBridgeDisabledReason:y,checkBridgeMinVersion:b,getBridgeAuthDebugInfo:S}=await ... ZMr
+  let{bridgeMain:E}=await ... xUi
+  if(k().settings.disableRemoteControl===!0)
+    C("Error: Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).");
+  if(!R())C(v+S());
+  let A=await y();          // y === vqo === getBridgeDisabledReason
+  if(A)C(`Error: ${A}`+S());
+  ...
+  await E(t.slice(1),z);    // bridgeMain
+
+Doctor reuses same gate:
+  async function MXs(){ ... let e=await vqo(), ... checks include
+    "Connected to the Anthropic API (api.anthropic.com)" /
+    "Not connected to the Anthropic API (api.anthropic.com)" }
+
+## Gold user-facing / schema strings (SEA)
+- This session is connected through an enterprise cloud gateway (set up via /login), which does not support Remote Control.
+- CLAUDE_CODE_USE_GATEWAY is set (the gateway on-ramp also requires ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN), so this session is routed through a cloud gateway
+- Remote Control is only available when using Claude via api.anthropic.com.
+- Remote Control is not available inside a cloud session.
+- Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).
+- Not available when using a Cloud gateway
+- reasonCode:"gateway"
+- Active API backend... "gateway" means the CLI is authenticated against an enterprise gateway.
+- apiProvider enum includes: firstParty,bedrock,vertex,foundry,anthropicAws,anthropicGoogleCloud,mantle,gateway
+- Force a specific login method: "claudeai" | "console" | "gateway" (Cloud gateway OIDC device flow)
+- forceLoginGatewayUrl: Cloud gateway URL to pre-fill and auto-connect to during login, alongside forceLoginMethod: "gateway" (managed settings only)
+- Connected to Cloud gateway.
+- Cloud gateway ${host} is not trusted on this machine — run /login to reconnect.
+- Cloud gateway session expired — run /login to reconnect.
+- Cloud gateway token expired — refresh ANTHROPIC_AUTH_TOKEN and restart.
+- CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is missing; ignoring
+- secureStorage key: enterpriseGateway (+ idpRefreshToken, gatewayTrust, jwt, url, expiresAt, tokenEndpoint)
+- debug: [gateway-refresh] refreshed gateway JWT / IdP rejected refresh token; clearing it
+- analytics near RC preflight: tengu_bridge_command (preflight_failed / preflight_login_for_enrollment)
+- tengu_oauth_gateway_forced / tengu_oauth_gateway_done
+
+## Likely densable symbols (minified → role)
+- vqo = getBridgeDisabledReason (shared RC availability check)
+- mib = getRemoteControlEndpointDisabledReason (enterprise-gateway branch)
+- Glt = isEnterpriseGatewaySession (session && !unpinned)
+- Og  = gatewayAuth() credential slot reader
+- Pje = isBridgeFirstParty
+- Gn  = getAPIProvider
+- jgT = bridgeMain
+- Tos = interactive RC preflight (awaits vqo)
+- OPm = remoteControlPolicyError
+- enterpriseGateway = SecureStorageData field
+
+## #19 VSCode host-only note (adjacent)
+SEA contains many VS Code *client/IDE* strings (anthropic.claude-code, claude-vscode, vscode://file hyperlinks, isVscodeTerm, supportedVSCodeTerminal) — count rg -i vscode ≈ 214.
+No dedicated VS Code extension host-only package / extension-host entry proven in this pass; treat #19 as "CLI has IDE detection/integration strings, not a bundled VS Code extension host product surface" unless a later extract finds extensionHost / contributes.* package.json gold.
+
+## Proof implication for #18
+SEA proves `claude remote-control`/`rc` CLI fast-path calls the same `getBridgeDisabledReason` (`vqo`) that interactive `/remote-control` preflight (`Tos`) and doctor (`MXs`) use; that function delegates non-firstParty gateway cases to `mib()` which distinguishes enterprise gateway sessions via `Glt(Og())` / `enterpriseGateway` credentials. This is the densable 1:1 meaning of "same enterprise-gateway availability check as interactive startup".

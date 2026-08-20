@@ -207,6 +207,7 @@ function useCanUseTool(
                     : {}),
                   updatedInput: result.updatedInput,
                   suggestions: result.suggestions,
+                  suppressAlwaysAllowRule: result.behavior === 'ask' ? result.suppressAlwaysAllowRule === true : false,
                 });
                 if (swarmDecision) {
                   resolve(swarmDecision);

@@ -313,6 +313,13 @@ import {
   filterToolsByServer,
 } from 'src/services/mcp/utils.js'
 import { setupVscodeSdkMcp } from 'src/services/mcp/vscodeSdkMcp.js'
+import {
+  getVscodeStartupAnnouncementGate,
+  handleVscodeAutoDefaultNudgeEvent,
+  handleVscodeFeedbackSurveyEvent,
+  isAutoDefaultLaunchEnabled,
+  isRefusalFallbackLaneEnabled,
+} from 'src/services/mcp/vscodeIdeBridgeCallbacks.js'
 import { getAllMcpConfigs } from 'src/services/mcp/config.js'
 import {
   isQualifiedForGrove,
@@ -1947,8 +1954,17 @@ function runHeadlessStreaming(
         },
       }))
 
-      // Set up the special internal VSCode MCP server if necessary.
-      setupVscodeSdkMcp(sdkClients)
+      // densable uSm — VSCode MCP + experiment_gates options call-site
+      const refusalLane = isRefusalFallbackLaneEnabled()
+      setupVscodeSdkMcp(sdkClients, {
+        onFeedbackSurveyEvent: handleVscodeFeedbackSurveyEvent,
+        onAutoDefaultNudgeEvent: handleVscodeAutoDefaultNudgeEvent,
+        refusalFallbackLaneEnabled: refusalLane,
+        refusalFallbackSettingToggleVisible: refusalLane,
+        fable5LaunchShow: false,
+        startupAnnouncement: getVscodeStartupAnnouncementGate(),
+        autoDefaultLaunchEnabled: isAutoDefaultLaunchEnabled(),
+      })
     }
   }
 

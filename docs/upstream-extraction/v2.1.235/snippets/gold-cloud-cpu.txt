@@ -1,0 +1,64 @@
+@73798380: tengu_review_bughunter_config.............
+.....claude-code-ultrareview-post.............K..
+...save_skill..............H.......#. .S.a.v.i.n.g. .s.k.i.l.l.s.
+.
+.Y.o.u. .c.a.n.n.o.t. .c.r.e.a.t.e. .o.r. .m.o.d.i.f.y. .s.k.i.l.l.s. .i.n. .t.h.i.s. .s.e.s.s.i.o.n... .S.k.i
+---
+@74990854: urn JSON with a "name" field..<F..>+..........	+......tengu_ultrareview_awareness.....................ultrareview-prose-pointer...............	F......ultrareview-post-commit.................	+..(...4b825dc642cb6eb9a060e54bf8d69288fbee4904.~..................T...
+.N.o.t.e
+---
+@74990896: ....	+......tengu_ultrareview_awareness.....................ultrareview-prose-pointer...............	F......ultrareview-post-commit.................	+..(...4b825dc642cb6eb9a060e54bf8d69288fbee4904.~..................T...
+.N.o.t.e.:. .-.-.p.o.s.t. .w.a.s. .i.g.n.o.r.e.d. 
+---
+@74990944: ............ultrareview-prose-pointer...............	F......ultrareview-post-commit.................	+..(...4b825dc642cb6eb9a060e54bf8d69288fbee4904.~..................T...
+.N.o.t.e.:. .-.-.p.o.s.t. .w.a.s. .i.g.n.o.r.e.d. ..  .p.o.s.t.i.n.g. .a.p.p.l.i.e.s. .o.n.l.y. .t
+---
+@81137040: ....	.......runUltrareviewHeadless..................	...%...ultrareviewLaunchAcknowledgementNudge...................	.......rejectCount.............	.......hasPendingPlan..........	.......MIN_BEHAVIOR_PCT........	.......collectUsageData........	.......loadPlanRateLimits.
+---
+@81199296: ....................	.......resolvePostFlag.........	.......ultrareviewHandler......................	.......autoModeConfigHandler...................	.......autoModeCritiqueHandler.................	.......autoModeDefaultsHandler.................	.......autoModeResetHandle
+---
+@105559814: ....i. ...............@.......................	.......tengu_ultrareview_post_enabled......................................................................................................M.......;6o.N.......#6o.....G6o.	:o......H..P........................{...............
+---
+@105561573: tra............	...1... See https://code.claude.com/docs/en/ultrareview........................................	...A...Cannot destructure property 'source' from null or undefined value.......................	.......CLAUDE_CODE_OAUTH_TOKEN.................	.......e.......
+---
+@105561965:  auth login` to use it; see https://code.claude.com/docs/en/ultrareview........................u.l.t.r.a. .(.c.l.o.u.d. .r.e.v.i.e.w.). .r.e.q.u.i.r.e.s. .a. .f.u.l.l.-.s.c.o.p.e. .l.o.g.i.n. .t.o.k.e.n. ..  .r.u.n. .`.c.l.a.u.d.e. .a.u.t.h. .l.o.g.i.n.`. .t.o. .u.s.e. .
+---
+@105612016: ............
+.......................................	...1...ultrareview post: environment resolution failed: .......................................	.......Couldn't find or create a cloud environment for the posting session. Open https://claude.ai/code once to finish set
+---
+@105630864: .............7......................................	.......ultrareviewPostRoutines.............`........`o.....r....`o.s....`o. ao.....	H..P........................k.......................k......x...............................................xv.........................
+---
+@105666678: ..............I.......
+.......................	.......tengu_ultrareview_post..................	.......disabled................	.......ultrareview_post........	.......ultrareview_post_disabled...............	...
+...not-posted..............	.......Posting to the pull reque
+---
+@105666752: st..................	.......disabled................	.......ultrareview_post........	.......ultrareview_post_disabled...............	...
+...not-posted..............	.......Posting to the pull request is currently turned off, so nothing went to the PR. The findings are ab
+---
+@105666784: bled................	.......ultrareview_post........	.......ultrareview_post_disabled...............	...
+...not-posted..............	.......Posting to the pull request is currently turned off, so nothing went to the PR. The findings are above if you want to post them by 
+---
+@105667088: ....	.......skipped_not_findings....................	.......ultrareview_post_no_findings............	...[...The review didn't produce findings that can be posted, so nothing went to the pull request..............................	.......fire_failed.............	.......ult
+---
+@105667296: ....................	.......fire_failed.............	.......ultrareview_post_fire_failed............	.......fired...................	.......posting.................	.......cli.....................	.......https://claude.ai/code..................	.......deadline...........
+---
+@105667520: de..................	.......deadline................	.......ultrareview_post_deadline.......................S.t.a.r.t.i.n.g. .t.h.e. .p.o.s.t. .t.o.o.k. .t.o.o. .l.o.n.g.,. .s.o. .t.h.e. .f.i.n.d.i.n.g.s. .a.r.e. .h.e.r.e. .w.i.t.h.o.u.t. .a. .c.o.n.f.i.r.m.e.d. .p.o.s.t
+---
+@105667968: q.u.e.s.t. .g.o.t. .t.h.r.o.u.g.h...................	... ...ultrareview post did not start: ........	...	...exception...............	.......ultrareview_post_exception..............	...:...The findings couldn't be handed to claude.ai for posting (..................l...)..
+---
+@105668048:  not start: ........	...	...exception...............	.......ultrareview_post_exception..............	...:...The findings couldn't be handed to claude.ai for posting (..................l...)... .C.h.e.c.k. .t.h.e. .p.u.l.l. .r.e.q.u.e.s.t. .b.e.f.o.r.e. .p.o.s.t.i.n.g. .b
+---
+@105766368: ....	.......task_remote_agent.......................	.......ultrareview.....1.......................	.......
+
+This review was launched with --fix: apply these findings to the local working tree now. Skip findings that are wrong or not worth fixing, and run the relevant c
+---
+@105773824: ....	.......task_remote_agent_review_failed.........	.......ultrareview.............	.......: ......................................................	.......[<>]....................................	.......remote_agent............	.......failed..................	.......Clo
+---
+@107696560: ....I........e2...............p.....................	.......ultrareview.............	...	...ultraplan...............................	.......v1alpha2................	.......v1..........................v...-.-.p.r.o.j.e.c.t. .r.e.q.u.i.r.e.s. .t.h.e. .n.e.w. .s.e.s.s.i.o.n
+---
+@124935936: ..........................i.........................	.......ultrareview..........................................................@ ....3....................................0!...................F..........]............................H..P........................).........
+---
+@129120804: ........
+.......................................	......./v1/ultrareview/preflight...............	.......teleport-org............................................	...i...Ultrareview runs in Claude Code on the web and is unavailable when essential-traffic-only mode is activ
+---
+@129121412: rareviewPreflight schema mismatch: .............	.......api_ultrareview_preflight...............	.......schema_mismatch.........	..."...fetchUltrareviewPreflight failed: ......................	.......request_failed......................................=..................

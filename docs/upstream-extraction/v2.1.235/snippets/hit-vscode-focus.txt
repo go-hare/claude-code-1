@@ -1,0 +1,46 @@
+# hit-vscode-focus — densable SEA 2.1.235 (#19 vscode-focus)
+# SEA: /tmp/official-235/plat/package/claude (Mach-O arm64 ~299M)
+# Changelog #19:
+# [VSCode] Fixed focus jumping between open Claude tabs on its own when a window with several Claude panels is restored or reloaded
+
+## Verdict
+N/A — VS Code extension HOST-ONLY fix. SEA has IDE clientType/bridge strings (claude-vscode) but ZERO extension-host tab/panel focus APIs or the changelog user phrase. Do not invent VS Code extension code in CLI SEA.
+
+## Changelog phrase / symptom strings (ABSENT)
+ABSENT(0)  focus jumping between open Claude tabs
+ABSENT(0)  jumping between
+ABSENT(0)  Claude tabs
+ABSENT(0)  Claude panels
+ABSENT(0)  several Claude panels
+ABSENT(0)  restored or reloaded
+ABSENT(0)  focus jumping
+
+## VS Code Extension Host APIs for tab/panel focus (ABSENT)
+ABSENT(0)  onDidChangeActiveTextEditor
+ABSENT(0)  onDidChangeActiveNotebookEditor
+ABSENT(0)  onDidChangeVisibleTextEditors
+ABSENT(0)  preserveFocus
+ABSENT(0)  ViewColumn
+ABSENT(0)  createWebviewPanel
+ABSENT(0)  WebviewPanel
+ABSENT(0)  activeWebviewPanel
+ABSENT(0)  onDidChangeViewState
+ABSENT(0)  retainContextWhenHidden
+ABSENT(0)  vscode.window.showTextDocument
+ABSENT(0)  workbench.action.focusActiveEditorGroup
+
+## SEA-present IDE/bridge gold (NOT the #19 fix surface)
+PRESENT  claude-vscode  (count=29)
+PRESENT  anthropic.claude-code  (count=14)
+PRESENT  anthropic.claude_code
+PRESENT  anthropic.claude-code-url-handler
+PRESENT  anthropic.claude-code.cli-no-window
+PRESENT  CLAUDE_CODE_SSE_PORT
+PRESENT  vscode-jsonrpc
+PRESENT  clientType()!=="claude-vscode"
+PRESENT  VS Code extension
+
+## Notes
+- Fix lives in VS Code extension host (webview panel restore/reload focus), not CLI densable SEA.
+- Local checklist already marks #19 N/A; packages/vscode-ide-bridge absent in this repo layout.
+- goldStrings below are bridge/client identifiers only; they do not implement tab focus restore.

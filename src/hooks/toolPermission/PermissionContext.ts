@@ -31,6 +31,7 @@ import {
   withMemoryCorrectionHint,
 } from '../../utils/messages.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
+import { stripWholeToolGrantsForAsk } from '../../utils/permissions/permissions.js'
 import {
   applyPermissionUpdates,
   persistPermissionUpdates,
@@ -296,9 +297,22 @@ function createPermissionContext(
       permissionPromptStartTimeMs?: number,
       contentBlocks?: ContentBlockParam[],
       decisionReason?: PermissionDecisionReason,
+      opts?: { askSuppressesAlwaysAllowRule?: boolean },
     ): Promise<PermissionAllowDecision> {
+      // densable 2.1.235 #12 accept-path: strip bare whole-tool allows when
+      // the ask or tool marks suppressAlwaysAllowRule.
+      const shouldStrip =
+        tool.suppressesAlwaysAllowRule?.(updatedInput) === true ||
+        opts?.askSuppressesAlwaysAllowRule === true
+      const updatesToPersist = shouldStrip
+        ? stripWholeToolGrantsForAsk(
+            permissionUpdates,
+            tool,
+            toolUseContext.getAppState().toolPermissionContext,
+          )
+        : permissionUpdates
       const acceptedPermanentUpdates =
-        await this.persistPermissions(permissionUpdates)
+        await this.persistPermissions(updatesToPersist)
       this.logDecision(
         {
           decision: 'accept',

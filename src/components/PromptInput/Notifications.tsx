@@ -163,10 +163,33 @@ export function Notifications({
       });
       return;
     }
-    if (autoUpdaterResult?.status === 'install_failed' || autoUpdaterResult?.status === 'no_permissions') {
+    if (autoUpdaterResult?.status === 'no_permissions') {
       addNotification({
         key: 'auto-updater-result',
-        text: `✗ Auto-update failed · try claude update`,
+        text: 'Auto-update failed: no write permission to npm prefix · Run claude doctor',
+        color: 'error',
+        priority: 'high',
+        timeoutMs: 20_000,
+      });
+      return;
+    }
+    if (
+      autoUpdaterResult?.status === 'install_failed' &&
+      autoUpdaterResult.failureHint === 'windows_running_exe_lock'
+    ) {
+      addNotification({
+        key: 'auto-updater-result',
+        text: 'Auto-update failed: claude.exe in use (close other Claude Code sessions, including VS Code) · Run claude doctor',
+        color: 'error',
+        priority: 'high',
+        timeoutMs: 20_000,
+      });
+      return;
+    }
+    if (autoUpdaterResult?.status === 'install_failed') {
+      addNotification({
+        key: 'auto-updater-result',
+        text: 'Auto-update failed · Try claude doctor',
         color: 'error',
         priority: 'high',
         timeoutMs: 20_000,

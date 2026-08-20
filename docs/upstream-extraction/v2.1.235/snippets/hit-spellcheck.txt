@@ -1,0 +1,52 @@
+=== settings schema (from SEA) ===
+spellcheck: { enabled?, checker?, language?, color? }
+Turn on spell checking of the prompt input (default: false)
+Which spell checker to run: "aspell", "hunspell", "ispell", or "auto" (default) for the first of those found on PATH
+Dictionary to use, passed to the checker as-is (aspell --lang, hunspell -d, ispell -d), e.g. "en_GB"; names are checker-specific (letters, digits and _ - . , only). Default: the checker's own default
+Color of misspelled words (they are also underlined): a terminal color name such as "red" or "magenta", "#rrggbb", "rgb(r,g,b)", "ansi256(n)" or "ansi:<name>". Default: the theme's error color
+Underline misspelled words in the prompt input as you type, using an installed aspell or hunspell/ispell (off unless "enabled" is true; does nothing if none is installed). Read from user, flag and managed settings only (the whole block from the highest-precedence of those applies); ignored in project .claude/settings.json and .claude/settings.local.json.
+
+=== policy / tier messages ===
+a spellcheck block in project or local settings is ignored, whatever else is configured; set it in your user settings (~/.claude/settings.json) instead
+the spellcheck block in <tier> applies (as a whole, over any lower tier) and has no usable "enabled": true, so spell checking is off
+
+=== log prefixes ===
+[spellcheck] ignoring language "<t>" (not a plain dictionary name); the checker's default dictionary applies
+[spellcheck] no checker found on PATH (looked for <list>); spell checking stays off
+[spellcheck] ignoring unrecognized spellcheck.color "
+[spellcheck] unknown spellcheck.checker "
+[spellcheck] ignoring spellcheck.language "
+[spellcheck] could not look for a checker: 
+[spellcheck] starting 
+[spellcheck] stderr: 
+[spellcheck] no answer for 
+(a missing dictionary usually means spellcheck.language needs setting)
+; spell checking is off for this session
+
+=== backends / protocol ===
+vKe=["aspell","hunspell","ispell"]
+hs_=/^[A-Za-z][A-Za-z0-9_.,-]{0,63}$/
+aspell args: -a --encoding=utf-8 --sug-mode=ultra [--lang=]
+hunspell args: -a -i utf-8 [-d]
+ispell args: -a [-d]
+banner detect: "@(#) International Ispell" + "but really Aspell" / "but really Hunspell"
+ispell pipe protocol parse: *|+|- correct; &|?|# misspelled
+jTu = "!\n" (ispell terse/version handshake line)
+
+=== analytics / status tokens ===
+input_spellcheck
+checker_lookup_failed
+checker_not_found
+unavailable
+checker_failed_to_start
+checker_protocol_error
+banner timeout
+
+=== minified symbols ===
+hEn / hs_ (language name validator)
+zTu (args builder)
+qTu (banner -> aspell|hunspell|ispell)
+WTu (pipe command "^words")
+GTu (parse checker response line)
+AuE (resolve checker on PATH)
+DCc / ohg / nhg / ihg (per-editor checker lifecycle class)

@@ -48,6 +48,11 @@ export type SelectState<T> = {
   focusedValue: T | undefined
 
   /**
+   * densable getFocusedValue — live read after same-tick navigation.
+   */
+  getFocusedValue: () => T | undefined
+
+  /**
    * 1-based index of the focused option in the full list.
    * Returns 0 if no option is focused.
    */
@@ -143,9 +148,10 @@ export function useSelectState<T>({
     focusValue,
   })
 
+  // densable Ovl: setValue(getFocusedValue()) — not closed-over focusedValue
   const selectFocusedOption = useCallback(() => {
-    setValue(navigation.focusedValue)
-  }, [navigation.focusedValue])
+    setValue(navigation.getFocusedValue())
+  }, [navigation.getFocusedValue])
 
   return {
     ...navigation,

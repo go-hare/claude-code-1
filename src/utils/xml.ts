@@ -8,6 +8,27 @@ export function escapeXml(s: string): string {
 }
 
 /**
+ * densable oX(C7_/Fud) — display-side unescape for `&amp;|&lt;|&gt;` only.
+ * Inverse of escapeXml / Ua for UI render of local-command / bash stdout·stderr
+ * and slash command-message/args that may carry write-side entities (EHe/Ua).
+ * Not artifact decodeHtmlEntities/TDr.
+ */
+const XML_DISPLAY_ENTITIES: Record<string, string> = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+}
+
+const XML_DISPLAY_ENTITY_RE = /&(?:amp|lt|gt);/g
+
+export function unescapeXmlEntities(s: string): string {
+  return s.replace(
+    XML_DISPLAY_ENTITY_RE,
+    entity => XML_DISPLAY_ENTITIES[entity] ?? entity,
+  )
+}
+
+/**
  * densable O8e — escape path/text for embedding inside system-reminder XML.
  * Adds CR/LF escapes densable uses so multiline paths cannot break the tag.
  */

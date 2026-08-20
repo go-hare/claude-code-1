@@ -1,0 +1,47 @@
+@142251776: iption..............	.......setupIssues.............	.......autoUpdaterResult.......................	.......frameOpenFailedPath.....................	.......frameOpenFailedSeen.....................	.......artifactPlanPublishConsentPaths.........	.......inbox
+---
+@290169903: edRemoteNotifications:{pending:[],drainedIds:[],nudge:null},autoUpdaterResult:null,prResolvedThisSession:!1,frameUrls:{},frameNavPath:null,frameExpanded:!1,frameOpenFailedPath:null,frameOpenFailedSeen:!1,artifactWatchApproved:!1,artifactDbWriteApproved:!1,a
+---
+@294590185: cessMessage:r,verbose:n}){let{storageV5:o}=wn(),i=pt((y)=>y.autoUpdaterResult),s=zi(),[a,l]=nW.useState({}),[c,u]=nW.useState(!1),d=E_o(i?.version);nW.useEffect(()=>{nUt().then(u)},[]);let p=nW.useRef(e),f=nW.useRef(i?.status),m=nW.useRef(i?.consecutiveExeL
+---
+@294593187: grated:M==="local",installationType:me(P)});s((U)=>{let W=U.autoUpdaterResult,J=W?.consecutiveExeLockFailures??0,X=O==="in_progress"?J:D==="windows_running_exe_lock"?J+1:0;if(W?.version===C&&W?.status===O&&W?.failureHint===D&&(W?.consecutiveExeLockFailures?
+---
+@294593413: (W?.consecutiveExeLockFailures??0)===X)return U;return{...U,autoUpdaterResult:{version:C,status:O,failureHint:D,consecutiveExeLockFailures:X}}})},[s,o]);if(nW.useEffect(()=>{h()},[h]),yp(h,1800000),!i?.version&&(!a.global||!a.latest))return null;if(!i?.vers
+---
+@294599348: cessMessage:r,verbose:n}){let{storageV5:o}=wn(),i=pt((b)=>b.autoUpdaterResult),s=zi(),[a,l]=CTr.useState({current:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"ht
+---
+@294601271: ative_auto_updater_success",{latency_ms:C}),s((k)=>{let R=k.autoUpdaterResult;if(R?.version===v.latestVersion&&R?.status==="success")return k;return{...k,autoUpdaterResult:{version:v.latestVersion,status:"success"}}});else H("tengu_native_auto_updater_up_to
+---
+@294601365: v.latestVersion&&R?.status==="success")return k;return{...k,autoUpdaterResult:{version:v.latestVersion,status:"success"}}});else H("tengu_native_auto_updater_up_to_date",{latency_ms:C})}catch(v){let E=Date.now()-S,C=v instanceof Error?v.message:String(v);T(
+---
+@294602604: ",error_av_quarantine:k==="av_quarantine"}),s((A)=>{let P=A.autoUpdaterResult;if(P?.version===null&&P?.status==="install_failed")return A;return{...A,autoUpdaterResult:{version:null,status:"install_failed"}}})}finally{t(!1)}}let m=CTr.useEffectEvent(f);CTr.
+---
+@294602694: n===null&&P?.status==="install_failed")return A;return{...A,autoUpdaterResult:{version:null,status:"install_failed"}}})}finally{t(!1)}}let m=CTr.useEffectEvent(f);CTr.useEffect(()=>{m()},[p]),yp(()=>void f(),1800000);let h=!!i?.status,g=!!a.current&&!!a.lat
+---
+@294603727: ;CTr=I(kt(),1),jGe=I(be(),1)});function ZaE(f1L){return f1L.autoUpdaterResult}function QaE(rfg){return rfg.autoUpdaterResult?.status==="install_failed"?{...rfg,autoUpdaterResult:null}:rfg}function nfg(e,t){switch(e){case"homebrew":return["brew","upgrade","-
+---
+@294603774: ){return f1L.autoUpdaterResult}function QaE(rfg){return rfg.autoUpdaterResult?.status==="install_failed"?{...rfg,autoUpdaterResult:null}:rfg}function nfg(e,t){switch(e){case"homebrew":return["brew","upgrade","--cask",t??"claude-code"];case"winget":{let r=pr
+---
+@294603827: rn rfg.autoUpdaterResult?.status==="install_failed"?{...rfg,autoUpdaterResult:null}:rfg}function nfg(e,t){switch(e){case"homebrew":return["brew","upgrade","--cask",t??"claude-code"];case"winget":{let r=process.env.LOCALAPPDATA;return[r?ifg.join(r,"Microsoft
+---
+@294608006: r_success",{...Qpg,latency_ms:VaE}),ics((efg)=>{let KaE=efg.autoUpdaterResult;if(KaE?.version===zGe&&KaE?.status==="success"){return efg}return{...efg,autoUpdaterResult:{version:zGe,status:"success"}}});else T(`PackageManagerAutoUpdater: ${GaE} exited ${I_o
+---
+@294608097: on===zGe&&KaE?.status==="success"){return efg}return{...efg,autoUpdaterResult:{version:zGe,status:"success"}}});else T(`PackageManagerAutoUpdater: ${GaE} exited ${I_o.code}: ${I_o.stderr||I_o.error||I_o.stdout}`),H("tengu_pkg_manager_auto_updater_fail",{...
+---
+@294608368: :VaE,exit_code:I_o.code}),scs=Date.now(),ics((tfg)=>{if(tfg.autoUpdaterResult?.status==="install_failed"){return tfg}return{...tfg,autoUpdaterResult:{version:zGe,status:"install_failed"}}})},Wwe[4]=D9t?.status,Wwe[5]=sdn,Wwe[6]=d0c,Wwe[7]=Xpg,Wwe[8]=ics,Wwe
+---
+@294608439: Result?.status==="install_failed"){return tfg}return{...tfg,autoUpdaterResult:{version:zGe,status:"install_failed"}}})},Wwe[4]=D9t?.status,Wwe[5]=sdn,Wwe[6]=d0c,Wwe[7]=Xpg,Wwe[8]=ics,Wwe[9]=jaE;else jaE=Wwe[9];let f0c=Roe.useEffectEvent(jaE),YaE;if(Wwe[10]!
+---
+@298324284: .useEffect(()=>{if(Zt)Q.current=0},[Zt]);let Br=pt((ct)=>ct.autoUpdaterResult?.status==="success"),{columns:Xn,rows:Eo}=un(),Xi=Bo.useRef(Date.now()),Li=Bo.useRef(!1),po=Bo.useRef(!1),Sl=Bo.useRef(!1),Jc=Bo.useRef(new Set),Ju=Xn>=120?1:0,qm=Bo.useRef(null),
+---
+@300781047: edRemoteNotifications:{pending:[],drainedIds:[],nudge:null},autoUpdaterResult:null,prResolvedThisSession:!1,ultrareviewOverageConfirmed:!1,frameUrls:{},elicitation:{queue:[]},todos:{},fileHistory:{snapshots:[],trackedFiles:new Set,snapshotSequence:0},attrib
+---
+@162616080: ess.................	.......r.......................	...#...Update installed . Restart to apply.....................	.......no_permissions..........	.......error...................	...;...Auto-update failed: no write permission to npm prefix . Run.........
+---
+@162648480: ess.................	.......r.......................	...$...Update installed . Restart to update....................	.......install_failed..........	.......error...................	.......Auto-update failed . Run ...............	......claude doctor.......
+---
+@294594112: cate",children:[Xh.jsx(ui,{status:"success",withSpace:!0}),"Update installed \xB7 Restart to apply"]}),i?.status==="no_permissions"&&Xh.jsxs(_,{color:"error",wrap:"truncate",children:[Xh.jsx(ui,{status:"error",withSpace:!0}),"Auto-update failed: no write p
+---
+@294603309: ate",children:[jGe.jsx(ui,{status:"success",withSpace:!0}),"Update installed \xB7 Restart to update"]}),i?.status==="install_failed"&&jGe.jsxs(_,{color:"error",wrap:"truncate",children:[jGe.jsx(ui,{status:"error",withSpace:!0}),"Auto-update failed \xB7 Run
+---
+@294609563: 3.jsxs(_,{color:"success",wrap:"truncate",children:["\u2713 Update installed",cst," \xB7 Restart to apply"]}),Wwe[16]=cst,Wwe[17]=M9t;else M9t=Wwe[17];let ldn;if(Wwe[18]!==c$e||Wwe[19]!==M9t)ldn=N3.jsxs(x,{flexDirection:"row",gap:1,children:[c$e,M9t]}),Wwe

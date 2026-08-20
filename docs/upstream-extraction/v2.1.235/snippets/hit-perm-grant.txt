@@ -1,0 +1,20 @@
+ cannot display it. The user can run this from an interactive Claude Code session, where the permission dialog renders the full disclosure.
+alwaysAllowRules
+askSuppressesAlwaysAllowRule
+dont_ask_again
+Error rendering tool use line (permission dialog table fallback)
+grants unbounded file-tool writes (toolAlwaysAllowedRule matches a bare 
+mcpAlwaysAllowOverride
+PermissionAskDecision
+showAlwaysAllow
+suppressAlwaysAllowRule
+toolAlwaysAllowedRule
+True when the dialog must not offer the persistent "don't ask again" row for this ask: accepting it would write a whole-tool allow rule broader than the ask's own verb (PermissionAskDecision.suppressAlwaysAllowRule). Hosts rendering approve options should omit any persistent-rule affordance when set.
+When a confirmation/permission dialog is shown
+When a permission dialog is displayed
+workflowPermissionDialog
+WorkflowPermissionDialog
+yes-dont-ask-again
+yes-dont-ask-again-domain
+Yes, and always allow access to 
+Yes, and don't ask again for

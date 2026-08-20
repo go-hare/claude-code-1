@@ -1,0 +1,31 @@
+# densable 2.1.235 gold — RPa / ZOl / helpers (SEA latin1)
+# Binary: /tmp/official-235/plat/package/claude
+
+## @281574390 z2p + IP + RPa (full bodies)
+function z2p(){return Boolean(K.DISABLE_COMPACT||K.DISABLE_AUTO_COMPACT)}
+function IP(){if(z2p())return!1;return Vd("autoCompactEnabled",!0).value}
+function RPa(){if(z2p())return!1;let e=Vd("autoCompactEnabled",!0);if(e.value)return!1;if(e.source==="userSettings")return!0;if(e.source==="legacyGlobalConfig")return ek().includes("userSettings");return!1}
+
+## @277098739 Vd (settings resolve with source) — partial through return
+function Vd(e,t){let r=ek(),n=r.includes("userSettings")&&kKe();for(let o=r.length-1;o>=0;o--){let i=r[o];if(i==="projectSettings"&&n)continue;let s=cn(i)?.[e];if(s!==void 0)return{value:s,source:i}}if(lXt.includes(e)){let o=e,i=ar()[o];if(i!==void 0&&i!==F_e[o])return{value:i,source:"legacyGlobalConfig"}}return{value:t,source:"default"}}
+
+## @275146505 ek (enabled setting sources)
+function ek(){let e=bVt(),t=J$();if(t.enabledSources?.allowed===e)return t.enabledSources.result;let r=new Set(e);r.add("flagSettings"),r.add("policySettings");let n=pB.filter((o)=>r.has(o));return t.enabledSources={allowed:e,result:n},n}
+
+## Symbol map
+- z2p: env gate Boolean(DISABLE_COMPACT || DISABLE_AUTO_COMPACT)
+- Vd(key, default): resolve setting value+source across enabled sources; falls back to legacyGlobalConfig for keys in lXt (includes autoCompactEnabled), else default
+- ek(): getEnabledSettingSources() equivalent
+- IP(): isAutoCompactEnabled equivalent (z2p → false else Vd(...).value)
+- RPa(): shouldShowAutoCompactOffHint — show PTL "auto-compact is off" suffix
+- BrD: continue hint string (DISABLE_COMPACT ? "/clear to continue" : "/compact or /clear to continue")
+- UrD: remoteAutocompactState defined (pt(mWT) !== undefined); mWT = e => e.remoteAutocompactState
+- jrD: EZr() nested MessageResponse / isNestedMessageResponse
+- ksh: Ket("warning") upgrade hint (getUpgradeMessage('warning'))
+- qOl: !UrD && !jrD && RPa() ? " · auto-compact is off · /config to turn it on" : ""
+
+## @292291638 ZOl PROMPT_TOO_LONG render (full function through return)
+function ZOl(){let Csh=Fen.c(6),oWT;if(Csh[0]===le)oWT=Ket("warning"),Csh[0]=oWT;else oWT=Csh[0];let ksh=oWT,BrD=K.DISABLE_COMPACT?"/clear to continue":"/compact or /clear to continue",UrD=pt(mWT)!==void 0,jrD=EZr(),qOl=!UrD&&!jrD&&RPa()?" \xB7 auto-compact is off \xB7 /config to turn it on":"";const Ash=qOl||ksh?void 0:1;let WOl;if(Csh[1]!==qOl)WOl=Jl.jsxs(_,{color:"error",children:["Context limit reached \xB7 ",BrD,qOl,ksh?` \xB7 ${ksh}`:""]}),Csh[1]=qOl,Csh[2]=WOl;else WOl=Csh[2];let iWT;if(Csh[3]!==Ash||Csh[4]!==WOl)iWT=Jl.jsx(on,{height:Ash,children:WOl}),Csh[3]=Ash,Csh[4]=WOl,Csh[5]=iWT;else iWT=Csh[5];return iWT}
+
+## Related app-state selector
+function mWT(zrD){return zrD.remoteAutocompactState}

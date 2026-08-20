@@ -1,0 +1,72 @@
+# densable 2.1.235 SEA gold — lsp-cache (#2)
+# binary: /tmp/official-235/plat/package/claude
+# changelog: Fixed whole-prompt-cache invalidation when a language server disconnected or reconnected mid-session
+
+## Mechanism (SEA-proven)
+LSPTool.isEnabled() latches via hasEverConnected (not live isConnected).
+Once any non-error LSP server has been seen connected, disconnect/reconnect must NOT
+flip tool schema presence → avoids toolSchemasChanged / whole prompt-cache break.
+
+SEA aliases:
+  GUr = hasEverConnected
+  ZMA = isConnected
+  Jnr = getStatus
+  zii = reinitialize
+  lpT = shouldDeferLspTool-like helper (if GUr() return false)
+
+## Key SEA strings / symbols
+hasEverConnected
+isConnected
+getStatus
+waitForInitialization
+reinitializeLspServerManager
+initializeLspServerManager
+userFacingName(){return"LSP"}
+isLsp:!0
+shouldDefer:!0,isEnabled(){return GUr()}
+GUr=a1t.hasEverConnected
+ZMA=a1t.isConnected
+function lpT(e){if(!("isLsp"in e)||!e.isLsp)return!1;if(GUr())return!1;let t=Jnr();return t.status==="pending"||t.status==="not-started"}
+LSP server ${e} connection closed
+LSP server ${e} connection error
+LSP server instance started:
+LSP server instance stopped:
+restartOnCrash
+maxRestarts
+Max restart attempts (
+Failed to stop LSP server '
+Failed to start LSP server '
+ during restart
+[LSP MANAGER] reinitializeLspServerManager() called
+[LSP MANAGER] initializeLspServerManager() called
+tengu_prompt_cache_break
+[PROMPT CACHE BREAK]
+toolSchemasChanged
+systemPromptChanged
+cacheBreakerPhrase
+promptCacheBreak
+cache-break-state-
+wouldInvalidateCache
+tengu_reload_plugins_cache_impact
+the whole conversation instead of using the cache
+lsp_count
+pluginReconnectKey
+lsp-manager
+tengu_lsp_diagnostics_injected
+tengu_lsp_diagnostics_disabled
+
+## Latch body (SEA fragment)
+let c=!1;function u(){if(!c&&l())c=!0;return c}
+... return{get:s,getStatus:a,isConnected:l,hasEverConnected:u,...}
+# l() = live isConnected over getAllServers(); u() sticky OR latch
+
+## Related user-facing (MCP reload, not LSP-specific but same "whole conversation" wording)
+This reload changes MCP tools (...) — your next message will re-read the whole conversation instead of using the cache. Run /reload-plugins --force to apply.
+
+## Note vs local tip
+Local packages/builtin-tools LSPTool.isEnabled still calls isLspConnected() (live).
+SEA 2.1.235 uses hasEverConnected latch for isEnabled / defer gate.
+
+## #19 VSCode host-only note
+SEA contains claude-vscode entrypoint mapping string, but this binary is the CLI SEA —
+no VS Code extension host package/source tree evidence in this extraction path.

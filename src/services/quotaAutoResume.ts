@@ -29,9 +29,12 @@ import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from './analytics/growthbook.js'
 import {
   type ClaudeAILimits,
+  type RateLimitType,
   currentLimits,
+  quotaRejectedListeners,
   statusListeners,
 } from './claudeAiLimits.js'
+import { getMainLoopModel } from '../utils/model/model.js'
 import {
   enqueue,
   getCommandQueue,
@@ -49,10 +52,18 @@ export const AUTO_CONTINUE_HORIZON_MS = 86_400_000
 /** densable x0S / C0S jitter bounds (ms) */
 const JITTER_MIN_MS = 30_000
 const JITTER_MAX_MS = 90_000
-/** densable T0S rearm cap */
+/** densable T0S / HEv rearm cap */
 const REARM_CAP = 2
+/**
+ * densable p4f — min delay after *now* when rearm !== null (JEv).
+ * Index by previous consecutiveRearms value passed into $Za/A4f.
+ */
+const REARM_MIN_DELAY_MS = [60_000, 300_000] as const
 /** densable iYm — tick while armed */
 export const QUOTA_AUTO_RESUME_TICK_MS = 30_000
+
+/** densable hAm bucket for s0v — only main_thread continues the rearm path */
+export type QuotaRejectQuerySourceBucket = 'main_thread' | 'other'
 
 /** densable A4f */
 export const CONTINUATION_PROMPT =
@@ -413,15 +424,64 @@ function setState(next: QuotaAutoResumeState): void {
   episode.changed.emit()
 }
 
-function computeFireAtMs(resetsAtSeconds: number): number {
-  // densable F0S with null rearm → resets*1000 + jitter
-  const jitter = Math.round(
+function computeJitterMs(): number {
+  // densable YEv — marble_heron can override; local keeps fixed bounds
+  return Math.round(
     JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS),
   )
-  return resetsAtSeconds * 1000 + jitter
 }
 
-/** densable L4f */
+/**
+ * densable JEv / F0S.
+ * rearm === null → resetsAt*1000 + jitter.
+ * rearm !== null → max(that, now + p4f[rearm] ?? last).
+ */
+function computeFireAtMs(
+  resetsAtSeconds: number,
+  rearm: number | null,
+  nowMs: number,
+): number {
+  const base = resetsAtSeconds * 1000 + computeJitterMs()
+  if (rearm === null) return base
+  const minDelay =
+    REARM_MIN_DELAY_MS[rearm] ??
+    REARM_MIN_DELAY_MS[REARM_MIN_DELAY_MS.length - 1] ??
+    0
+  return Math.max(base, nowMs + minDelay)
+}
+
+/**
+ * densable xxi — whether this rate-limit window should participate in rearm /
+ * autoArmDedupe bookkeeping for the current main-loop model.
+ */
+export function isQuotaRearmEligibleRateLimit(
+  rateLimitType: RateLimitType | undefined,
+  model?: string,
+): boolean {
+  switch (rateLimitType) {
+    case 'five_hour':
+    case 'seven_day':
+    case 'overage':
+      return true
+    case 'seven_day_opus': {
+      // densable yDe($o(model)) / Wjo(entry, "opus") — eligible when model family is opus
+      const m = (model ?? getMainLoopModel()).toLowerCase()
+      return m.includes('opus')
+    }
+    case 'seven_day_sonnet': {
+      // densable ZWs($o(model)) / Wjo(entry, "sonnet") — eligible when model family is sonnet
+      const m = (model ?? getMainLoopModel()).toLowerCase()
+      return m.includes('sonnet')
+    }
+    case undefined:
+      return false
+    default:
+      // densable also has seven_day_overage_included — local type omits it; fail closed
+      return false
+  }
+}
+
+/** densable L4f / A4f */
 export function armQuotaAutoResume(
   resetsAtSeconds: number,
   nowMs: number = Date.now(),
@@ -432,9 +492,10 @@ export function armQuotaAutoResume(
   episode.lastArmedResetsAtSeconds = resetsAtSeconds
   episode.autoArmDedupeResetKeys.add(resetsAtSeconds)
   episode.armedResetKeys.add(resetsAtSeconds)
-  episode.lastObservedMs = nowMs
+  episode.activeTurnClaim = null
   episode.sleptThroughReset = false
-  const fireAtMs = computeFireAtMs(resetsAtSeconds)
+  episode.lastObservedMs = nowMs
+  const fireAtMs = computeFireAtMs(resetsAtSeconds, rearm, nowMs)
   logEvent('tengu_quota_auto_resume_armed', {
     resets_in_sec: Math.max(0, Math.round(resetsAtSeconds - nowMs / 1000)),
     rearm: rearm === null ? 0 : rearm + 1,
@@ -445,6 +506,101 @@ export function armQuotaAutoResume(
     fireAtMs,
     consecutiveRearms: episode.consecutiveRearms,
   })
+}
+
+/**
+ * densable $Za — re-arm after a quota reject while the episode still owns a
+ * continuation/takeover claim. Emits `rearmed` (and `taken-over` when auto
+ * origin flips to dialog).
+ */
+function rearmQuotaAutoResume(
+  resetsAtSeconds: number,
+  rearm: number | null,
+  origin: EpisodeArmOrigin,
+): void {
+  if (isQuotaContinuationRevoked()) return
+  if (
+    episode.episodeArmOrigin === 'auto' &&
+    resetsAtSeconds * 1000 - Date.now() > AUTO_CONTINUE_HORIZON_MS
+  ) {
+    cancelQuotaAutoResume('horizon_exceeded')
+    episode.events.emit('horizon-exceeded')
+    return
+  }
+  const flippedAutoToDialog =
+    episode.episodeArmOrigin === 'auto' && origin === 'dialog'
+  armQuotaAutoResume(resetsAtSeconds, Date.now(), origin, rearm)
+  episode.events.emit('rearmed')
+  if (flippedAutoToDialog) {
+    episode.events.emit('taken-over')
+  }
+}
+
+/**
+ * densable s0v — quotaRejected listener.
+ * Rearm only after a main_thread reject while a turn claim is outstanding
+ * (continuation path increments consecutiveRearms; takeover resets to 0).
+ */
+export function onQuotaRejectedForAutoResume(
+  limits: ClaudeAILimits,
+  querySourceBucket: QuotaRejectQuerySourceBucket,
+): void {
+  if (!isQuotaRejectedForAutoContinue(limits)) return
+  if (!isQuotaAutoResumeSurfaceEligible()) return
+  const resetsAt = limits.resetsAt ?? 0
+  // Lazy model resolve only for opus/sonnet windows (avoids auth in tests for five_hour)
+  const eligible = isQuotaRearmEligibleRateLimit(limits.rateLimitType)
+
+  if (isQuotaAutoResumeLive() && eligible) {
+    episode.autoArmDedupeResetKeys.add(resetsAt)
+  }
+
+  if (episode.state.phase === 'armed') {
+    // Still waiting: if a *later* resetsAt arrives and window is eligible, rearm
+    // with null (does not consume consecutiveRearms — densable $Za(..., null, …)).
+    if (
+      resetsAt * 1000 > episode.state.fireAtMs &&
+      eligible
+    ) {
+      rearmQuotaAutoResume(resetsAt, null, episode.episodeArmOrigin)
+    }
+    return
+  }
+
+  if (hasPendingQuotaContinuationInQueue()) return
+  if (episode.state.phase === 'stale') return
+
+  const claim = episode.activeTurnClaim
+  if (claim === null) return
+  if (querySourceBucket !== 'main_thread') return
+
+  if (claim.kind === 'takeover') {
+    episode.consecutiveRearms = 0
+    rearmQuotaAutoResume(
+      eligible ? resetsAt : episode.lastArmedResetsAtSeconds,
+      null,
+      'dialog',
+    )
+    return
+  }
+
+  // continuation claim — densable T0S / HEv cap
+  if (episode.consecutiveRearms >= REARM_CAP) {
+    logEvent('tengu_quota_auto_resume_cancelled', {
+      reason:
+        'rearm_cap' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    episode.autoArmDedupeResetKeys.add(resetsAt)
+    // densable l8r — drop ownership bookkeeping then idle + cap-exhausted
+    resetQuotaEpisodeOwnership()
+    setState({ phase: 'idle' })
+    episode.events.emit('cap-exhausted')
+    return
+  }
+
+  const prior = episode.consecutiveRearms
+  episode.consecutiveRearms++
+  rearmQuotaAutoResume(resetsAt, prior, episode.episodeArmOrigin)
 }
 
 /** densable M4f / VXa — dialog/manual arm entry */
@@ -931,7 +1087,7 @@ export function setAutoContinueAtUsageLimitSetting(enabled: boolean): {
   return result
 }
 
-/** Hook limits → try auto-arm (idempotent) */
+/** Hook limits → try auto-arm + densable s0v rearm (idempotent) */
 export function ensureQuotaAutoResumeLimitsSubscription(): void {
   if (limitsHooked) return
   limitsHooked = true
@@ -941,6 +1097,8 @@ export function ensureQuotaAutoResumeLimitsSubscription(): void {
       tryAutoArmQuotaAutoResume(limits)
     }
   })
+  // densable yYp → s0v (429 error path only; headers do not emit quotaRejected)
+  quotaRejectedListeners.add(onQuotaRejectedForAutoResume)
   // Opportunistic arm on existing rejected state
   if (currentLimits.status === 'rejected') {
     tryAutoArmQuotaAutoResume(currentLimits)

@@ -1,0 +1,130 @@
+# densable 2.1.235 #13 — LOCAL sidecar vendor ripgrep probe
+# Binary: /Users/apple/work-py/hare-code/claude-code-1/src/utils/vendor/ripgrep/arm64-darwin/rg
+# Dig: 2026-08-20
+# Scope: BurntSushi #1642 class (-m with -A/-C), string markers, sha256 vs SEA packaging, ripgrep.ts sidecar usage
+
+## 1) --version (rev 3a612f88b8)
+
+```
+$ src/utils/vendor/ripgrep/arm64-darwin/rg --version
+ripgrep 15.0.0 (rev 3a612f88b8)
+
+features:+pcre2
+simd(compile):+NEON
+simd(runtime):+NEON
+
+PCRE2 10.45 is available (JIT is available)
+```
+
+file(1): Mach-O 64-bit executable arm64
+size: 4528512
+
+## 2) BurntSushi #1642 class — tiny fixture + -m with context
+
+Fixture (/tmp/rg-probe-235.*/fixture.txt):
+```
+1	alpha
+2	beta MATCH1
+3	gamma
+4	delta
+5	epsilon MATCH2
+6	zeta
+7	eta
+8	theta MATCH3
+9	iota
+```
+
+```
+$ rg -n -m 1 -A 2 'MATCH' fixture.txt
+2:beta MATCH1
+3-gamma
+4-delta
+exit:0
+```
+
+```
+$ rg -n -m 1 -C 1 'MATCH' fixture.txt
+1-alpha
+2:beta MATCH1
+3-gamma
+exit:0
+```
+
+```
+$ rg -n -m 2 -A 1 'MATCH' fixture.txt
+2:beta MATCH1
+3-gamma
+--
+5:epsilon MATCH2
+6-zeta
+exit:0
+```
+
+```
+$ rg -n -m 1 -B 1 -A 2 'MATCH' fixture.txt
+1-alpha
+2:beta MATCH1
+3-gamma
+4-delta
+exit:0
+```
+
+Verdict mWithContextOk=true:
+- -m 1 limits to first match only (MATCH1); MATCH2/MATCH3 omitted
+- -A 2 emits the two after-context lines (gamma, delta)
+- -C 1 emits before+after (alpha, gamma)
+- no panic / no `assertion failed` on stdout/stderr; exit 0
+
+## 3) Binary strings presence matrix (LOCAL sidecar)
+
+```
+count[after_context_left]=1
+count[assertion failed: self.after_context_left >= 1]=1
+count[Omitted long matching line]=1
+count[N4Grep]=0
+count[special mode demands short-circuiting]=1
+N4Grep case-insensitive: none
+```
+
+Expect:
+- after_context_left / assertion: YES (hasAfterContextAssert=true)
+- Omitted long matching line: YES
+- special mode demands short-circuiting: YES
+- N4Grep*: NO (SEA-only mangled Grep*Handler embed artifacts; local standalone has none)
+
+## 4) sha256 vs SEA packaging (already different)
+
+LOCAL sidecar:
+- path: src/utils/vendor/ripgrep/arm64-darwin/rg
+- sha256: 6ef40346bf31fcce79d9614c7745c198542925a0c7d4911e1ffe794c53392ac1
+- version: ripgrep 15.0.0 (rev 3a612f88b8)
+- packaging: standalone vendor Mach-O sidecar (~4.5MB)
+
+SEA (official @anthropic-ai/claude-code-darwin-arm64@2.1.235):
+- path: /tmp/official-235/plat/package/claude
+- package/claude sha256: 83b8f806f6f2eea316cfe246628e6c23374711d868f1fd0409db551b877b7748
+- embedded rg (argv0=rg): ripgrep 14.1.1 (rev fdb5e06cce)
+- packaging: rg EMBEDDED inside single native SEA Mach-O (~313MB); no vendor/rg sidecar in platform package
+
+Hashes are not comparable 1:1 (sidecar vs whole SEA). Versions differ: LOCAL newer (15.0.0) than SEA embed (14.1.1). Do not downgrade local sidecar to match SEA.
+
+## 5) src/utils/ripgrep.ts — sidecar usage (no invent JS fail-fast)
+
+Confirmed briefly:
+- getBuiltinRipgrepCandidates() resolves dist/src vendor paths under vendor/ripgrep/<arch-platform>/rg (sidecar).
+- Non-bundled / non-USE_BUILTIN_RIPGREP=0 path: resolveBuiltinWithFallback → mode 'builtin' when sidecar exists.
+- Bundled non-win32: resolveBundledRipgrep → mode 'embedded' with argv0='rg' (SEA-style dispatch).
+- RipgrepUsageError / rejectOnInputError = densable input-reject fail-fast for bad regex/glob/type (JS wrapper), NOT a substitute for native pathological-pattern short-circuiting.
+- #13 product behaviors (correct -m/-A/-C + native fail-fast) live in the vendor/embedded ripgrep binary; do NOT invent JS GrepHandler / N4Grep pseudo-fix.
+
+Cross-refs:
+- docs/upstream-extraction/v2.1.235/snippets/gold-embedded-rg-identity.txt
+- docs/upstream-extraction/v2.1.235/snippets/hit-embedded-grep.txt
+- BurntSushi/ripgrep#1642 / #1380
+
+## Return fields
+
+version: ripgrep 15.0.0 (rev 3a612f88b8)
+hasAfterContextAssert: true
+hasN4Grep: false
+mWithContextOk: true

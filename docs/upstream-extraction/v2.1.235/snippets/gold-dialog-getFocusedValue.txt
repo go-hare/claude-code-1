@@ -1,0 +1,80 @@
+# gold — densable 2.1.235 getFocusedValue (dialog arrow+Enter race #16)
+# SEA: /tmp/official-235/plat/package/claude
+# Offsets: C4i @ 290268814 ; getFocusedValue:C @ 290270165 ; Ovl @ 290273803 ; select:accept @ 290266511
+# NO invent — ASCII recovered from SEA binary.
+
+## Changelog surface
+Dialogs: arrow keys and Enter pressed in quick succession now select the option
+you navigated to instead of the previously highlighted one.
+
+## C4i — sync mutable bag + React state (live focus readable same tick)
+
+function C4i({visibleOptionCount:e=5,options:t,onFocus:r,focusValue:n}){
+  let[o]=b9.useState(()=>({state:IFm({visibleOptionCount:e,options:t,initialFocusValue:n})})),
+      [i,s]=b9.useState(o.state),
+      a=b9.useCallback((k)=>{
+        let R=LET(o.state,k);
+        if(R===o.state)return;
+        o.state=R,s(R)          // mutate bag BEFORE React re-render
+      },[o]);
+  // ...
+  E=b9.useMemo(()=>PFm(i.focusedValue,t),[i.focusedValue,t]);          // render / onFocus
+  C=b9.useCallback(()=>PFm(o.state.focusedValue,t),[o,t]);              // getFocusedValue LIVE
+  return {
+    focusedValue:E,
+    getFocusedValue:C,
+    visibleFromIndex:i.visibleFromIndex,
+    visibleToIndex:i.visibleToIndex,
+    visibleOptions:v,
+    focusNextOption:h,
+    focusPreviousOption:g,
+    focusNextPage:y,
+    focusPreviousPage:b,
+    focusOption:S,
+    options:t
+  }
+}
+
+function PFm(e,t){
+  if(e===void 0)return;
+  if(t.some((r)=>r.value===e))return e;
+  return t[0]?.value
+}
+
+## Ovl / useSelectState — selectFocusedOption reads live getter
+
+function Ovl({visibleOptionCount:e=5,options:t,defaultValue:r,onChange:n,onCancel:o,onFocus:i,focusValue:s}){
+  let[a,l]=k4i.useState(r),
+      c=C4i({visibleOptionCount:e,options:t,onFocus:i,focusValue:s}),
+      {getFocusedValue:u}=c,
+      d=k4i.useCallback(()=>{l(u())},[u]);   // setValue(getFocusedValue()) — NOT closed-over focusedValue
+  return{...c,value:a,selectFocusedOption:d,onChange:n,onCancel:o}
+}
+
+## select:accept / handleKeyDown — live read on accept (same tick after arrow)
+
+y["select:accept"]=()=>{
+  if(t===!0)return;
+  let b=r.getFocusedValue();
+  if(b===void 0)return;
+  let S=n.find((v)=>v.value===b);
+  if(S?.disabled===!0)return;
+  if(S?.type==="input")return;
+  r.selectFocusedOption?.(),r.onChange?.(b)
+};
+
+// edge wrap checks also live-read:
+// select:next  → if (r.getFocusedValue()===last.value) onDownFromLastItem?
+// select:previous → if (r.getFocusedValue()===first.value) onUpFromFirstItem?
+// handleKeyDown: S=r.getFocusedValue()
+
+## Why this fixes arrow+Enter race
+focusNext/Previous dispatch writes o.state synchronously; accept in the same
+event batch calls getFocusedValue() → PFm(o.state.focusedValue) and therefore
+sees the navigated option, not the previous React-state snapshot.
+
+## Local gap (go-hare) — ABSENT getFocusedValue
+- use-select-navigation.ts: useReducer only; returns focusedValue snapshot; no o.state bag; no getFocusedValue
+- use-select-state.ts: selectFocusedOption = setValue(navigation.focusedValue) deps [navigation.focusedValue]
+- use-select-input.ts: select:accept / onChange closes over state.focusedValue
+→ same-tick arrow then Enter can still commit previously highlighted option

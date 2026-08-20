@@ -1,0 +1,166 @@
+# densable 2.1.235 SPELLCHECK SETTINGS + POLICY gold
+# SEA: /tmp/official-235/plat/package/claude
+# Focus: Zod schema @275267894, tier policy, color/checker/language normalizers
+
+================================================================================
+1) ZOD / SCHEMA — spellcheck:{enabled,checker,language,color}  (@275267894)
+================================================================================
+
+spellcheck:ye({
+  enabled:jt().optional().catch(void 0).describe(
+    "Turn on spell checking of the prompt input (default: false)"
+  ),
+  checker:N().optional().catch(void 0).describe(
+    `Which spell checker to run: ${vKe.map((o)=>`"${o}"`).join(", ")}, or "auto" (default) for the first of those found on PATH`
+  ),
+  language:N().optional().catch(void 0).describe(
+    `Dictionary to use, passed to the checker as-is (aspell --lang, hunspell -d, ispell -d), e.g. "en_GB"; names are checker-specific (letters, digits and _ - . , only). Default: the checker's own default`
+  ),
+  color:N().optional().catch(void 0).describe(
+    `Color of misspelled words (they are also underlined): a terminal color name such as "red" or "magenta", "#rrggbb", "rgb(r,g,b)", "ansi256(n)" or "ansi:<name>". Default: the theme's error color`
+  )
+}).passthrough().optional().catch(void 0).describe(
+  `Underline misspelled words in the prompt input as you type, using an installed ${vKe.slice(0,-1).join(", ")} or ${vKe.at(-1)} (off unless "enabled" is true; does nothing if none is installed). Read from user, flag and managed settings only (the whole block from the highest-precedence of those applies); ignored in project .claude/settings.json and .claude/settings.local.json.`
+)
+
+Checker enum source (@275223975 / SLo init):
+  vKe=["aspell","hunspell","ispell"]
+
+Schema field summary:
+  - enabled: boolean optional (default false / off unless true)
+  - checker: string optional ("aspell"|"hunspell"|"ispell"|"auto")
+  - language: string optional (plain dictionary name)
+  - color: string optional (terminal color / #rrggbb / rgb() / ansi256() / ansi:<name>)
+  - whole object: passthrough + optional; outer describe encodes TIER POLICY
+
+================================================================================
+2) TIER POLICY — user / flag / managed ONLY; project+local IGNORE whole block
+================================================================================
+
+Outer schema describe (exact product rule text):
+  "Read from user, flag and managed settings only (the whole block from the highest-precedence of those applies); ignored in project .claude/settings.json and .claude/settings.local.json."
+
+Runtime warn (via dhg → T(`[spellcheck] ${t}`)) when project/local still contain a block
+(@294739038 dhg; call @294740009; string table @163355298):
+
+  EXACT message #1 (project/local IGNORE):
+  "a spellcheck block in project or local settings is ignored, whatever else is configured; set it in your user settings (~/.claude/settings.json) instead"
+
+  Logged as: `[spellcheck] a spellcheck block in project or local settings is ignored, whatever else is configured; set it in your user settings (~/.claude/settings.json) instead`
+
+Whole-block apply + missing enabled (still from allowed tier):
+  EXACT message #2:
+  `the spellcheck block in ${xwn(l)} applies (as a whole, over any lower tier) and has no usable "enabled": true, so spell checking is off`
+
+  Logged as: `[spellcheck] the spellcheck block in <source> applies (as a whole, over any lower tier) and has no usable "enabled": true, so spell checking is off`
+
+Tier resolution site (mhg):
+  s=lRt("spellcheck")[0]   // highest-precedence among allowed tiers
+  a=s?.value; l=s?.source
+  if (cn("projectSettings")?.spellcheck!==void 0 || cn("localSettings")?.spellcheck!==void 0)
+    dhg(e, /* message #1 */)
+  if (l && a?.enabled===void 0)
+    dhg(e, /* message #2 */)
+  c = a?.enabled===!0   // only explicit true enables
+
+Policy meaning:
+  - ALLOWED sources: user, flag, managed
+  - IGNORED sources: project (.claude/settings.json), local (.claude/settings.local.json)
+  - Winner among allowed tiers applies as a WHOLE block (not field-merged across tiers)
+  - enabled must be explicit true; otherwise spell checking stays off
+
+================================================================================
+3) COLOR RESOLVER — edE / uhg default theme error; unrecognized color warn
+================================================================================
+
+NOTE: color resolver symbol is edE (not ndE). ndE is the empty verdicts stub
+`{isMisspelled:()=>{return}}` used when no checker session exists (idE=()=>ndE).
+
+Defaults (@294739100 region):
+  uhg="error"            // theme error color token
+  edE(undefined) → uhg
+
+Resolver:
+  function edE(e){
+    if(e===void 0)return uhg;
+    let t=e.trim().replace(/\s+(?=[^()]*\))/g,""),
+        r=`ansi:${t}`;
+    if(phg(r))return r;          // phg = SLe color validity
+    if(phg(t))return t;
+    return T(`[spellcheck] ignoring unrecognized spellcheck.color "${e}"; using the theme's error color`),uhg
+  }
+
+EXACT warn:
+  `[spellcheck] ignoring unrecognized spellcheck.color "${e}"; using the theme's error color`
+
+Acceptance forms (from schema describe + edE):
+  - bare terminal color name ("red","magenta",...)
+  - "#rrggbb"
+  - "rgb(r,g,b)" (internal whitespace inside () stripped before validate)
+  - "ansi256(n)"
+  - "ansi:<name>" (also tried by prefixing ansi: to trimmed input)
+
+================================================================================
+4) CHECKER NORMALIZER — rdE / tdE → auto fallback
+================================================================================
+
+  function tdE(e){return vKe.some((t)=>t===e)}   // membership in ["aspell","hunspell","ispell"]
+
+  function rdE(e){
+    if(e===void 0||e==="auto")return"auto";
+    if(tdE(e))return e;
+    return T(`[spellcheck] unknown spellcheck.checker "${e}"; looking for ${vKe.join(", ")} instead`),"auto"
+  }
+
+EXACT warn:
+  `[spellcheck] unknown spellcheck.checker "${e}"; looking for aspell, hunspell, ispell instead`
+
+Fallback: always "auto" for undefined / "auto" / unrecognized.
+
+Call site (only when enabled):
+  u = c && a.checker?.trim() || void 0
+  f = rdE(u)
+
+================================================================================
+5) LANGUAGE SANITIZER — hEn (+ hs_ regex)
+================================================================================
+
+Init (SLo):
+  hs_=/^[A-Za-z][A-Za-z0-9_.,-]{0,63}$/
+
+  function hEn(e){return hs_.test(e)}
+
+Rules:
+  - must start with A–Z / a–z
+  - then up to 63 of [A-Za-z0-9_.,-]
+  - total length 1..64
+  - matches schema prose: letters, digits and _ - . , only
+
+Runtime (mhg) when enabled:
+  d = c && a.language?.trim() || void 0
+  m = useMemo(() => {
+    if (d === void 0 || hEn(d)) return d;
+    T(`[spellcheck] ignoring spellcheck.language "${d}": not a plain dictionary name`);
+    return;  // undefined → checker default dictionary
+  }, [d])
+
+EXACT warn (runtime path):
+  `[spellcheck] ignoring spellcheck.language "${d}": not a plain dictionary name`
+
+Also used when building checker argv (zTu): language only passed if hEn(t).
+
+STRING-TABLE VARIANT (also present in SEA; may be alternate / older path @163327873):
+  `[spellcheck] ignoring language "${...}" (not a plain dictionary name); the checker's default dictionary applies`
+  — not the mhg warn template; keep as secondary gold, prefer runtime mhg string above.
+
+================================================================================
+RELATED SYMBOLS (quick index)
+================================================================================
+  @275267894  spellcheck Zod shape + outer tier describe
+  @275223068  hEn
+  @275223975  vKe / hs_ (SLo)
+  @294739038  dhg (deduped `[spellcheck] ${msg}` banner)
+  @294739100  edE / tdE / rdE / uhg="error"
+  @294739859  mhg tier read + normalizers wiring
+  ndE         empty isMisspelled verdicts stub (NOT color)
+  uhg         "error" default misspell color

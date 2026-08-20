@@ -45,6 +45,12 @@ export type FilePermissionDialogProps<T extends ToolInput = ToolInput> = {
 
   // Worker badge for teammate permission requests
   workerBadge: WorkerBadgeProps | undefined;
+
+  /**
+   * densable contentWithheld — when true, omit accept-session / don't-ask-again
+   * because the proposed or current contents cannot be fully reviewed.
+   */
+  contentWithheld?: boolean;
 };
 
 export function FilePermissionDialog<T extends ToolInput = ToolInput>({
@@ -63,6 +69,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
   ideDiffSupport,
   workerBadge,
   languageName: languageNameOverride,
+  contentWithheld = false,
 }: FilePermissionDialogProps<T>): React.ReactNode {
   // Derive from path unless caller provided an explicit override (NotebookEdit
   // passes 'python'/'markdown' from cell_type). getLanguageName is async;
@@ -103,6 +110,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
     onReject,
     parseInput,
     operationType,
+    contentWithheld,
   });
 
   // Use file dialog results for options

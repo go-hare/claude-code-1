@@ -113,6 +113,10 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
         noInputMode,
         editablePrefix,
         onEditablePrefixChange,
+        permissionResult: toolUseConfirm.permissionResult,
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input,
+        isAskCappedByOrg: toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask',
       }),
     [toolUseConfirm, yesInputMode, noInputMode, editablePrefix, onEditablePrefixChange],
   );

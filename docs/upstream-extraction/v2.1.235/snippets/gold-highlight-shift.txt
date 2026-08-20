@@ -1,0 +1,29 @@
+SEA 2.1.235 gold — changelog #4 highlight-shift
+changelog (docs, not in SEA binary):
+- Fixed prompt input highlights (slash commands, keywords, mentions) appearing shifted by one or more characters in some multi-line prompts
+
+proven SEA strings/symbols:
+- findBtwTriggerPositions
+- shimmerColor / hasShimmer / sweepStart / cycleLength
+- renderedValue / highlightedText
+- visiblePos / stringPos / tokenIdx / charIdx  (HighlightSegmenter dual coords)
+- \bultrathink\b / ultrathink-active / tengu_ultrathink
+- ^\/btw\b / Usage: /btw <your question>
+- input_file_at_mention / input_dir_at_mention / input_peer_at_mention
+- tengu_at_mention_* / tengu_ext_at_mentioned
+
+proven SEA minified HighlightedInput multiline split (byte ~290248658):
+  BwT.text.split(`\n`); ... weo.push([]); Eeo=Eeo+1; ... push({text,highlight,start:Eeo}); Eeo+=len
+
+minified-away (not present as source identifiers):
+- segmentTextByHighlights / HighlightSegmenter / HighlightedInput / findSlashCommandPositions / TextHighlight / viewportCharOffset
+
+likely local symbols:
+- src/components/PromptInput/ShimmeredInput.tsx :: HighlightedInput
+- src/utils/textHighlighting.ts :: segmentTextByHighlights / TextHighlight
+- src/components/BaseTextInput.tsx :: filteredHighlights (viewport start/end remap)
+- src/components/PromptInput/PromptInput.tsx :: combinedHighlights / slashCommandTriggers / memberMentionHighlights
+- src/utils/suggestions/commandSuggestions.ts :: findSlashCommandPositions
+
+notes:
+- CLI prompt-input path (not VSCode host-only). Changelog prose itself not embedded in SEA.

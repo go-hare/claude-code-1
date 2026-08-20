@@ -9,10 +9,13 @@ import { useUpdateNotification } from '../hooks/useUpdateNotification.js';
 import { Box, Text } from '@anthropic/ink';
 import {
   type AutoUpdaterResult,
+  EXE_LOCK_FAILURE_DAMP_THRESHOLD,
   getLatestVersion,
   getMaxVersion,
+  type InstallOutcome,
   type InstallStatus,
   installGlobalPackage,
+  mergeAutoUpdaterResult,
   shouldSkipVersion,
 } from '../utils/autoUpdater.js';
 import { getGlobalConfig, isAutoUpdaterDisabled } from '../utils/config.js';
@@ -58,9 +61,27 @@ export function AutoUpdater({
   // progress.
   const isUpdatingRef = useRef(isUpdating);
   isUpdatingRef.current = isUpdating;
+  // densable merge reads previous autoUpdaterResult; keep a live ref so the
+  // memoized checkForUpdates callback does not close over a stale value.
+  const autoUpdaterResultRef = useRef(autoUpdaterResult);
+  autoUpdaterResultRef.current = autoUpdaterResult;
 
   const checkForUpdates = React.useCallback(async () => {
     if (isUpdatingRef.current) {
+      return;
+    }
+
+    // densable: no_permissions persists for the session — don't keep retrying.
+    if (autoUpdaterResultRef.current?.status === 'no_permissions') {
+      logForDebugging('AutoUpdater: Skipping update check (no_permissions persists this session)');
+      return;
+    }
+
+    // densable Vpg=2: damp after consecutive windows exe lock failures.
+    if ((autoUpdaterResultRef.current?.consecutiveExeLockFailures ?? 0) >= EXE_LOCK_FAILURE_DAMP_THRESHOLD) {
+      logForDebugging(
+        'AutoUpdater: Skipping update check (claude.exe locked by another process; damped for this session)',
+      );
       return;
     }
 
@@ -111,10 +132,12 @@ export function AutoUpdater({
 
     // Auto-install off: still report so Notifications can toast "Update available".
     if (isDisabled && needsUpdate && latestVersion) {
-      onAutoUpdaterResult({
-        version: latestVersion,
-        status: 'available',
-      });
+      onAutoUpdaterResult(
+        mergeAutoUpdaterResult(autoUpdaterResultRef.current, {
+          version: latestVersion,
+          status: 'available',
+        }),
+      );
       return;
     }
 
@@ -142,19 +165,19 @@ export function AutoUpdater({
       }
 
       // Choose the appropriate update method based on what's actually running
-      let installStatus: InstallStatus;
+      let installOutcome: InstallOutcome;
       let updateMethod: 'local' | 'global';
 
       if (installationType === 'npm-local') {
         // Use local update for local installations
         logForDebugging('AutoUpdater: Using local update method');
         updateMethod = 'local';
-        installStatus = await installOrUpdateClaudePackage(channel);
+        installOutcome = await installOrUpdateClaudePackage(channel);
       } else if (installationType === 'npm-global') {
         // Use global update for global installations
         logForDebugging('AutoUpdater: Using global update method');
         updateMethod = 'global';
-        installStatus = await installGlobalPackage();
+        installOutcome = await installGlobalPackage();
       } else if (installationType === 'native') {
         // This shouldn't happen - native should use NativeAutoUpdater
         logForDebugging('AutoUpdater: Unexpected native installation in non-native updater');
@@ -167,14 +190,15 @@ export function AutoUpdater({
         updateMethod = isMigrated ? 'local' : 'global';
 
         if (isMigrated) {
-          installStatus = await installOrUpdateClaudePackage(channel);
+          installOutcome = await installOrUpdateClaudePackage(channel);
         } else {
-          installStatus = await installGlobalPackage();
+          installOutcome = await installGlobalPackage();
         }
       }
 
       onChangeIsUpdating(false);
 
+      const installStatus: InstallStatus = installOutcome.status;
       if (installStatus === 'success') {
         logEvent('tengu_auto_updater_success', {
           fromVersion: currentVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -183,7 +207,7 @@ export function AutoUpdater({
           wasMigrated: updateMethod === 'local',
           installationType: installationType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         });
-      } else {
+      } else if (installStatus !== 'in_progress') {
         logEvent('tengu_auto_updater_fail', {
           fromVersion: currentVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           attemptedVersion: latestVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -194,10 +218,14 @@ export function AutoUpdater({
         });
       }
 
-      onAutoUpdaterResult({
-        version: latestVersion,
-        status: installStatus,
-      });
+      // densable: merge failureHint + consecutiveExeLockFailures into result.
+      onAutoUpdaterResult(
+        mergeAutoUpdaterResult(autoUpdaterResultRef.current, {
+          version: latestVersion,
+          status: installStatus,
+          failureHint: installOutcome.failureHint,
+        }),
+      );
     }
     // isUpdating intentionally omitted from deps; we read isUpdatingRef
     // instead so the guard is always current without changing callback
@@ -264,16 +292,29 @@ export function AutoUpdater({
           </Text>
         </Text>
       )}
-      {(autoUpdaterResult?.status === 'install_failed' || autoUpdaterResult?.status === 'no_permissions') && (
+      {autoUpdaterResult?.status === 'no_permissions' && (
         <Text color="error" wrap="truncate">
-          ✗ Auto-update failed &middot; Try <Text bold>claude doctor</Text> or{' '}
-          <Text bold>
-            {hasLocalInstall
-              ? `cd ~/.claude/local && npm update ${MACRO.PACKAGE_URL}`
-              : `npm i -g ${MACRO.PACKAGE_URL}`}
-          </Text>
+          Auto-update failed: no write permission to npm prefix · Run <Text bold>claude doctor</Text>
         </Text>
       )}
+      {autoUpdaterResult?.status === 'install_failed' &&
+        autoUpdaterResult.failureHint === 'windows_running_exe_lock' && (
+          <Text color="error" wrap="truncate">
+            Auto-update failed: claude.exe in use (close other Claude Code sessions, including VS Code) · Run{' '}
+            <Text bold>claude doctor</Text>
+          </Text>
+        )}
+      {autoUpdaterResult?.status === 'install_failed' &&
+        autoUpdaterResult.failureHint !== 'windows_running_exe_lock' && (
+          <Text color="error" wrap="truncate">
+            Auto-update failed · Try <Text bold>claude doctor</Text> or{' '}
+            <Text bold>
+              {hasLocalInstall
+                ? `cd ~/.claude/local && npm update ${MACRO.PACKAGE_URL}`
+                : `npm i -g ${MACRO.PACKAGE_URL}`}
+            </Text>
+          </Text>
+        )}
     </Box>
   );
 }

@@ -1,6 +1,7 @@
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import React, { useContext } from 'react';
 import { ERROR_MESSAGE_USER_ABORT } from 'src/services/compact/compact.js';
+import { shouldShowAutoCompactOffHint } from 'src/services/compact/autoCompact.js';
 import { isRateLimitErrorMessage } from 'src/services/rateLimitMessages.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { Box, NoSelect, Text } from '@anthropic/ink';
@@ -17,6 +18,7 @@ import {
   startsWithApiErrorPrefix,
   TOKEN_REVOKED_ERROR_MESSAGE,
 } from '../../services/api/errors.js';
+import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isEmptyMessageText, NO_RESPONSE_REQUESTED } from '../../utils/messages.js';
 import { getUpgradeMessage } from '../../utils/model/contextWindowUpgradeCheck.js';
 import { getDefaultSonnetModel, renderModelName } from '../../utils/model/model.js';
@@ -24,7 +26,7 @@ import { isMacOsKeychainLocked } from '../../utils/secureStorage/macOsKeychainSt
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { InterruptedByUser } from '../InterruptedByUser.js';
 import { Markdown } from '../Markdown.js';
-import { MessageResponse } from '../MessageResponse.js';
+import { MessageResponse, useIsMessageResponse } from '../MessageResponse.js';
 import { MessageActionsSelectedContext } from '../messageActions.js';
 import { RateLimitMessage } from './RateLimitMessage.js';
 
@@ -48,6 +50,47 @@ function InvalidApiKeyMessage(): React.ReactNode {
         <Text color="error">{INVALID_API_KEY_ERROR_MESSAGE}</Text>
         {isKeychainLocked && <Text dimColor>· Run in another terminal: security unlock-keychain</Text>}
       </Box>
+    </MessageResponse>
+  );
+}
+
+/**
+ * densable SEA `ZOl` text assembly for PROMPT_TOO_LONG (wire const JG).
+ * Exported for focused unit tests — keep user-facing strings 1:1.
+ */
+export function buildPromptTooLongContextLimitText(options: {
+  disableCompact: boolean;
+  autoCompactOffHint: boolean;
+  upgradeHint: string | null;
+}): string {
+  const continueHint = options.disableCompact ? '/clear to continue' : '/compact or /clear to continue';
+  const autoCompactOffSuffix = options.autoCompactOffHint ? ' · auto-compact is off · /config to turn it on' : '';
+  const upgradeSuffix = options.upgradeHint ? ` · ${options.upgradeHint}` : '';
+  return `Context limit reached · ${continueHint}${autoCompactOffSuffix}${upgradeSuffix}`;
+}
+
+/**
+ * densable SEA `ZOl` — render PROMPT_TOO_LONG via assembled hint, not raw JG.
+ * remoteAutocompactState (UrD) is ABSENT locally → treated as false for this item.
+ */
+function PromptTooLongMessage(): React.ReactNode {
+  const upgradeHint = getUpgradeMessage('warning');
+  const isNestedMessageResponse = useIsMessageResponse();
+  const remoteAutocompactStateDefined = false;
+  const autoCompactOffHint =
+    !remoteAutocompactStateDefined && !isNestedMessageResponse && shouldShowAutoCompactOffHint();
+  const disableCompact = isEnvTruthy(process.env.DISABLE_COMPACT);
+  const height = autoCompactOffHint || upgradeHint ? undefined : 1;
+
+  return (
+    <MessageResponse height={height}>
+      <Text color="error">
+        {buildPromptTooLongContextLimitText({
+          disableCompact,
+          autoCompactOffHint,
+          upgradeHint,
+        })}
+      </Text>
     </MessageResponse>
   );
 }
@@ -76,17 +119,8 @@ export function AssistantTextMessage({
     case NO_RESPONSE_REQUESTED:
       return null;
 
-    case PROMPT_TOO_LONG_ERROR_MESSAGE: {
-      const upgradeHint = getUpgradeMessage('warning');
-      return (
-        <MessageResponse height={1}>
-          <Text color="error">
-            Context limit reached · /compact or /clear to continue
-            {upgradeHint ? ` · ${upgradeHint}` : ''}
-          </Text>
-        </MessageResponse>
-      );
-    }
+    case PROMPT_TOO_LONG_ERROR_MESSAGE:
+      return <PromptTooLongMessage />;
 
     case CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE:
       return (

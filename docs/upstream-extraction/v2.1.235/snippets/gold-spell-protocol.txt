@@ -1,0 +1,41 @@
+=== densable 2.1.235 spellcheck protocol (SEA) ===
+
+vKe=["aspell","hunspell","ispell"]
+hs_=/^[A-Za-z][A-Za-z0-9_.,-]{0,63}$/
+jTu="!\n"
+
+zTu(checker, language):
+  aspell: ["-a","--encoding=utf-8","--sug-mode=ultra", ...`--lang=${lang}`]
+  hunspell: ["-a","-i","utf-8", ..."-d", lang]
+  ispell: ["-a", ..."-d", lang]
+
+qTu(banner):
+  must start "@(#) International Ispell"
+  /but really Aspell/i → aspell
+  /but really Hunspell/i → hunspell
+  else ispell
+
+WTu(words) → `^${words.join(" ")}\n`
+
+GTu(line):
+  "" → end
+  *|+|- → correct
+  &|? → /^[&?] (\S+) \d+ \d+:/ → misspelled
+  # → /^# (\S+) \d+/ → misspelled
+
+Constants (ihg):
+  RuE=3000 banner timeout
+  xuE=15000 response timeout
+  IuE=1000 restart delay
+  PuE=1 max restarts
+  thg=3 max slow batches
+  DuE=128 max word length
+  LuE=20 batch counter reset
+  HuE=4096 max stdin bytes
+  NuE=65536 max stdout line buf
+  FuE=1e4 max cache
+  OCc=80 log truncate
+  OuE={aspell:256,hunspell:16,ispell:256}
+
+B$s spellcheck sources = ["policySettings","flagSettings","userSettings"]
+KuE=250 debounce · YuE=2 highlight priority · uhg="error"

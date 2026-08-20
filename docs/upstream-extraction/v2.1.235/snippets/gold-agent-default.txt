@@ -1,0 +1,85 @@
+@173386158: tom agent ................	....... not found in available agents..........	.......agent...................	...(...[STARTUP] Commands and agents loaded in ................	.......action_commands_loaded..................	.......tool....................(...................
+....................j......	.....
+---
+@298908365: mate] Custom agent ${de.agentType} not found in available agents`)}let xt=L??$En("agent");if(!fa&&!L&&xt)fa=_4c(ki.activeAgents,xt),BPe(fa?.agentType);T(`[STARTUP] Commands and agents loaded in ${Date.now()-tl}ms`),ld("action_commands_loaded");let Zt;if(Cn){let ur=z2r(Cn);if("tool"in ur){let Do=ur.tool;
+---
+@73702959: .........	~..U...subagent_type is required: the general-purpose agent is not available in this session....~..............	.......Glob.....yw..............{......- Fast file pattern matching tool that works with any codebase size
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matchin
+---
+@101461328: @.......................................	.......general-purpose.
+................................................@.$..P6.....D!<.@`4.C...@.<..@......@.4.......T.@ .....................
+...4...W...o...........................`.P.....................h.N.....................p.H......................K.....
+---
+@105506832: ........	.......d.......................	.......general-purpose.1.......................................	.......p.......................	.......f.......................	.......l...................................................4....................................@ ...04..0..@ ....3...;...;.@P-..04.@ 
+---
+@105509824: completed...............	...............	.......general-purpose.1...............................
+...................................+..............................<.@ ..H...@.M.L...@.f.J..F.....P0N....@.<.....@.=.J...@.L.J...@...H...@pe.N.... M.....@ m.N...@.e.K...@...J...@...P...@Pe.J.....4..........p
+---
+@105513264: ........	.......d.......................	.......general-purpose.1.......................
+...............	.......l.......................	.......c.......................(...................
+................... .......	...........................................E............................D.......@ ...0
+---
+@111877312: ........	.......disallowed_tools........	.......general-purpose.........	...'...No agent available for forked execution.................	.......Forked command .........	...	...: agent '...............	.../...' is not available as a fork base, running on '.........	.......'.......................	......
+---
+@111886240: ...........i............................	.......general-purpose..................................................@`..J...........................b..........................Q...................Q...l........D..P................................................!5.....x......................................
+---
+@117357760: ype to use. ............	.......If omitted, the general-purpose agent is used...........	.......t.......................	.......`grep` via the Bash tool................	.......the ....................	....... tool...................	...J...
+## When not to use
+
+If the target is already known, use the di
+---
+@119277088: ........	.......string..................	.......general-purpose..................................................@.$.G...@.4.2.;.@./.D...@`4.C...@.<.F...@.......@.<.J...@pm.J.....^.@ ..@ ..@ .....................7...:...>...H...U...]...`...~.......................................................h.?....
+---
+@221099808: ........................................	.......general-purpose.........	.......General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first
+---
+@266151960: ................	.......Agent type name (e.g., "general-purpose", "code-reviewer"). Present when the hook fires from within a subagent (alongside agent_id), or on the main thread of a session started with --agent (without agent_id).........	.......Active effort level for the current turn (e.g., "low", 
+---
+@278062481: kVo=1e5,OUd,AVo="subagent_type is required: the general-purpose agent is not available in this session";var ey=w(()=>{OUd=new Set(["Explore","Plan"])});var hm="Glob";function cia(e){if(ak(e))return'Fast file pattern matching. Supports glob patterns like "**/*.js" or "src/**/*.ts". Returns matching file
+---
+@280396761: ?e.agentDefinitionColor}function $Lt(e){if(e==="general-purpose")return;let r=dAo().get(e);if(r&&sI.includes(r))return tZ[r];return}function gUr(e,t){let r=dAo();if(!t){r.delete(e);return}if(sI.includes(t))r.set(e,t)}var tZ,sI;var _5=w(()=>{ht();tZ={red:"red_FOR_SUBAGENTS_ONLY",blue:"blue_FOR_SUBAGENTS
+---
+@280424317: gent.`}`}var eAe;var yUr=w(()=>{eAe={agentType:"general-purpose",whenToUse:"General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few
+---
+@281130035: t,cwd:d,selectedAgent:a,agentType:a.agentType??"general-purpose",...Wq(a)&&{webFetchSavedFiles:rXe()},abortController:m,retrieved:!1,lastReportedToolCount:0,lastReportedTokenCount:0,isBackgrounded:!0,isObserver:p,forkedSkillName:f,isIdle:!1,pendingMessages:[],retain:!1,diskLoaded:!1,keepaliveReasons:ne
+---
+@281130639: :e.spawnDepth,prompt:"",agentType:e.agentType??"general-purpose",forkedSkillName:e.forkedSkillName,...e.agentType===J1&&{webFetchSavedFiles:rXe()},retrieved:!1,lastReportedToolCount:0,lastReportedTokenCount:0,isBackgrounded:!0,isIdle:!1,pendingMessages:[],retain:!1,diskLoaded:!1,keepaliveReasons:new Se
+---
+@281131307: t,cwd:d,selectedAgent:a,agentType:a.agentType??"general-purpose",...Wq(a)&&{webFetchSavedFiles:rXe()},abortController:p,retrieved:!1,lastReportedToolCount:0,lastReportedTokenCount:0,isBackgrounded:!1,isIdle:!1,pendingMessages:[],retain:!1,diskLoaded:!1,keepaliveReasons:new Set},m,h=new Promise((y)=>{m=
+---
+@283334316: allowed_tools",disallowedTools:c}]],f=e.agent??"general-purpose",m=Gei(r.options.agentDefinitions.activeAgents),h=m.find((E)=>E.agentType===f)??m.find((E)=>E.agentType==="general-purpose")??m[0];if(!h)throw Error("No agent available for forked execution");if(h.agentType!==f)T(`Forked command ${e.name}:
+---
+@283334439: )=>E.agentType===f)??m.find((E)=>E.agentType==="general-purpose")??m[0];if(!h)throw Error("No agent available for forked execution");if(h.agentType!==f)T(`Forked command ${e.name}: agent '${f}' is not available as a fork base, running on '${h.agentType}'`);let g=OG(m7),y=hMt(e),b=o?.extractAttachments&
+---
+@284106427: 014 or omitting it \u2014 starts a fresh agent (general-purpose by default).":`any other type starts a fresh agent. ${s}`}`:`When using the ${fi} tool, specify a subagent_type parameter to select which agent type to use. ${n?"If omitted, the general-purpose agent is used.":s}`}`;if(t)return b;let S=tH(
+---
+@284106621: t which agent type to use. ${n?"If omitted, the general-purpose agent is used.":s}`}`;if(t)return b;let S=tH()&&Qm()?"`grep` via the Bash tool":`the ${im} tool`,v=i?"":`
+## When not to use
+
+If the target is already known, use the direct tool: ${zs} for a known path, ${S} for a specific symbol or string
+---
+@284453694: ts.agentType uses a custom subagent type (e.g. 'general-purpose', 'code-reviewer') instead of the default workflow subagent \u2014 resolved from the same registry as the Agent tool; composes with schema (the custom agent's system prompt gets a StructuredOutput instruction appended).
+- pipeline(items, s
+---
+@284606871: n n&&typeof n.agentType==="string"?n.agentType:"general-purpose";eZS(e,o,r)}}async function eZS(e,t,r){try{let n=await s7(Dd(e),r);if(n?.stoppedByUser)return;await YQe(Dd(e),{...n??{agentType:t},stoppedByUser:!0},r)}catch(n){if(Ki(n)||w0e(sct(n))){T(`failed to persist stop marker for ${e}: ${bLe(n)}`,{
+---
+@295527112: m:
+
+\`\`\`
+${xxE}
+\`\`\`
+
+Use \`subagent_type: "general-purpose"\` unless a more specific agent type fits.
+
+## Phase 3: Track Progress
+
+After launching all workers, render an initial status table:
+
+| # | Unit | Status | PR |
+|---|------|--------|----|
+| 1 | <title> | running | \u2014 |
+| 2 | <title> | 
+---
+@297740668: ows, context, and best practices that transform general-purpose agents into specialists. Unlike prompts (conversation-level instructions for one-off tasks), skills load on-demand and eliminate the need to repeatedly provide the same guidance across multiple conversations.\n\nSkills reach the agent two 
+---
+@299036476: ().optional().describe('Agent type name (e.g., "general-purpose", "code-reviewer"). Present when the hook fires from within a subagent (alongside agent_id), or on the main thread of a session started with --agent (without agent_id).'),effort:ye({level:N().describe('Active effort level for the current t

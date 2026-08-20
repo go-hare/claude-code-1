@@ -1,0 +1,20 @@
+@118199615: .ms for a same-prefix sibling's first response (prompt-cache warm-up)....................................	.......progress................	.......workflow_log............	.......[.......................	...&...] throttled response (no stop_reason, .............
+---
+@176835596: nto the first user message. Improves cross-user prompt-cache reuse. Only applies with the default system prompt (ignored with --system-prompt)..............	.......--permission-mode <mode>................	...&...Permission mode to use for the session..........
+---
+@277887744: 
+This session's requests use a 1-hour Anthropic prompt-cache TTL, so effectively every allowed delay (the runtime clamps to [60, 3600]) wakes up with your conversation context still cached. There is no cache cliff inside that range to pace around, and scheduli
+---
+@277889028: n's requests use the default 5-minute Anthropic prompt-cache TTL. Sleeping past 300 seconds means the next wake-up reads your full conversation context uncached \u2014 slower and more expensive. So the natural breakpoints:
+
+- **Under 5 minutes (60s\u2013270s)*
+---
+@284415893: }ms for a same-prefix sibling's first response (prompt-cache warm-up)`);let Ge;try{Ge=await Ve(Ct,ge,1)}finally{ot.done()}let ut=(en)=>!en.stalled&&!en.skipped&&en.stopReason==null&&en.structured===void 0&&(en.outputTokens??1/0)<50&&en.durationMs>Ee*0.5,Gt=ut(
+---
+@297858552:  and subagents. Start at 64K and tune.
+
+**Lower prompt-cache minimum.** The minimum cacheable prompt is **512 tokens** on {{OPUS_NAME}}, down from 1024 on Opus 4.8. Prompts previously too short to cache now create entries with no code change \u2014 worth re-ch
+---
+@297942883: . Full effort ladder through \`max\`; 512-token prompt-cache minimum (down from 1024 on Opus 4.8); fast mode on the Claude API only. Elevated cybersecurity safeguards. Separate rate-limit bucket from the combined Opus 4.x pool. 1M context window (default and m
+---
+@299543215: nto the first user message. Improves cross-user prompt-cache reuse. Only applies with the default system prompt (ignored with --system-prompt).").default(!1)).addOption(new op("--permission-mode <mode>","Permission mode to use for the session").choices(_zc).ar

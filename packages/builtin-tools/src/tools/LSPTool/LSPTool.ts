@@ -15,7 +15,7 @@ import { z } from 'zod/v4'
 import {
   getInitializationStatus,
   getLspServerManager,
-  isLspConnected,
+  hasEverConnected,
   waitForInitialization,
 } from 'src/services/lsp/manager.js'
 import type { ValidationResult } from 'src/Tool.js'
@@ -135,7 +135,8 @@ export const LSPTool = buildTool({
   userFacingName,
   shouldDefer: true,
   isEnabled() {
-    return isLspConnected()
+    // densable SEA GUr: sticky latch — do not flip schema on mid-session disconnect
+    return hasEverConnected()
   },
   get inputSchema(): InputSchema {
     return inputSchema()

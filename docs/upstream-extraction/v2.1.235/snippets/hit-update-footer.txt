@@ -1,0 +1,75 @@
+# densable SEA 2.1.235 — update-footer (#9)
+# binary: /tmp/official-235/plat/package/claude
+
+## string counts
+1	Update installed \xB7 Restart to apply
+1	Update installed \xB7 Restart to update
+1	\u2713 Update installed
+2	Auto-update failed: no write permission to npm prefix
+2	Auto-update failed: claude.exe in use (close other Claude Code sessions, including VS Code)
+1	Auto-update failed \xB7 Run
+1	Auto-update failed \xB7 Try
+19	autoUpdaterResult
+6	consecutiveExeLockFailures
+11	windows_running_exe_lock
+6	av_quarantine
+2	error_av_quarantine
+10	disableAutoUpdates
+11	autoUpdatesProtectedForNative
+4	autoUpdaterEnforcementHours
+79	autoUpdates
+2	PackageManagerAutoUpdater: Update available
+2	tengu_native_auto_updater_success
+2	tengu_pkg_manager_auto_updater_success
+2	tengu_auto_updater_success
+2	Update available! Run:
+
+## analytics events
+tengu_auto_updater_fail
+tengu_auto_updater_forced_downgrade
+tengu_auto_updater_lock_contention
+tengu_auto_updater_npm_failure
+tengu_auto_updater_success
+tengu_auto_updater_windows_npm_in_wsl
+tengu_native_auto_updater_fail
+tengu_native_auto_updater_lock_contention
+tengu_native_auto_updater_start
+tengu_native_auto_updater_success
+tengu_native_auto_updater_up_to_date
+tengu_pkg_manager_auto_updater_fail
+tengu_pkg_manager_auto_updater_start
+tengu_pkg_manager_auto_updater_success
+
+## config/state keys
+19	autoUpdaterResult
+79	autoUpdates
+10	disableAutoUpdates
+11	autoUpdatesProtectedForNative
+4	autoUpdaterEnforcementHours
+36	installMethod
+8	failureHint
+6	consecutiveExeLockFailures
+17	installationType
+
+## proven short literals present
+Update installed \xB7 Restart to apply
+Update installed \xB7 Restart to update
+Auto-update failed: no write permission to npm prefix
+Auto-update failed: claude.exe in use (close other Claude Code sessions, including VS Code)
+PackageManagerAutoUpdater: Update available
+Native installer: Set installMethod to "native" and disabled legacy auto-updater for protection
+Update available! Run:
+error_av_quarantine
+windows_running_exe_lock
+disableAutoUpdates
+autoUpdatesProtectedForNative
+autoUpdaterEnforcementHours
+
+## JSX/minified snippets (truncated)
+FOUND=True	status:"success",withSpace:!0}),"Update installed \xB7 Restart to apply"
+FOUND=True	status:"success",withSpace:!0}),"Update installed \xB7 Restart to update"
+FOUND=True	children:["\u2713 Update installed"
+FOUND=True	Auto-update failed \xB7 Run ",jGe.jsx(_,{bold:!0,children:"claude doctor"})
+FOUND=True	Auto-update failed \xB7 Try ",Xh.jsx(_,{bold:!0,children:"claude doctor"})
+FOUND=True	yp(h,1800000)
+FOUND=True	yp(()=>void f(),1800000)

@@ -1,0 +1,143 @@
+SEA: /tmp/official-235/plat/package/claude
+item: #15 vim-preserve (NORMAL mode cursor preserved on ctrl+o transcript panel close)
+
+--- savedCursorOffset occ=1 @ 114125792 ---
+.................... .......................(.......................launchWarning...................savedCursorOffset...............@...1:......"...k...4.......5.......b........H..P.......................................................x...............................................(....................................................
+
+--- savedCursorOffset occ=2 @ 283678577 ---
+==e)return t;if(t.launchWarning!==null&&t.value!==""&&e==="")return{...t,value:e,launchWarning:null,savedCursorOffset:null};return{...t,value:e,savedCursorOffset:null}})}function ulr(e){$4.setState((t)=>t.active===e?t:{...t,active:e})}function q4a(e){$4.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function acf(e){$4.setState((t)=>t.
+
+--- savedCursorOffset occ=3 @ 283678621 ---
+lue!==""&&e==="")return{...t,value:e,launchWarning:null,savedCursorOffset:null};return{...t,value:e,savedCursorOffset:null}})}function ulr(e){$4.setState((t)=>t.active===e?t:{...t,active:e})}function q4a(e){$4.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function acf(e){$4.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOff
+
+--- savedCursorOffset occ=4 @ 283678814 ---
+nction q4a(e){$4.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function acf(e){$4.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function lcf(){return $4.getState().launchWarning}function fyt(e){$4.setState((t)=>t.launchWarning?.type===e.type&&t.launchWarning.prefillLength===e.prefillLength?t:{...t,launchWarning:
+
+--- savedCursorOffset occ=5 @ 283678844 ---
+>t.vimMode===e?t:{...t,vimMode:e})}function acf(e){$4.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function lcf(){return $4.getState().launchWarning}function fyt(e){$4.setState((t)=>t.launchWarning?.type===e.type&&t.launchWarning.prefillLength===e.prefillLength?t:{...t,launchWarning:e})}var iWS,$4;var I5e=w(()=>{
+
+--- vimMode:"INSERT" occ=1 @ 283679130 ---
+:{...t,launchWarning:e})}var iWS,$4;var I5e=w(()=>{Kbe();iWS={value:"",active:!1,launchWarning:null,vimMode:"INSERT",savedCursorOffset:null},$4=oI({...iWS})});class ccf{resolver=null;registerResolver(e){this.resolver=e}}function u6r(e,t){ucf.of(e).registerResolver(t)}function dcf(e,t){return ucf.of(e).resolver?.(t)??!1}var ucf;var W4a
+
+--- hideVimModeIndicator occ=1 @ 85763952 ---
+OnlyCustomization...................padding.........................refreshInterval.................hideVimModeIndicator............................statusLine......................prUrlTemplate...................footerLinksRegexes..............................subagentStatusLine..............................enabledPlugins..................
+
+--- hideVimModeIndicator occ=2 @ 275258863 ---
+d 0).describe("Re-run the status line command every N seconds in addition to event-driven updates"),hideVimModeIndicator:jt().optional().describe("Hide the built-in `-- INSERT --` / `-- VISUAL --` indicator below the prompt. Use this when your status line script renders `vim.mode` itself.")}).optional().describe("Custom status line displa
+
+--- hideVimModeIndicator occ=3 @ 294814167 ---
+plate}function Aus(EqL){let $Ie=npn.c(61),{exitMessage:wus,leftArrowDetachAvailable:n_g,vimMode:IEt,hideVimModeIndicator:o_g,mode:i_g,toolPermissionContext:s_g,suppressHint:OmE,suppressHintExceptStatusline:DmE,isInputEmpty:a_g,isLoading:aRc,isExternalLoading:MmE,betweenCalls:LmE,tasksSelected:l_g,isPasting:CqL,showExpandPasteHint:kqL,isSe
+
+--- hideVimModeIndicator occ=4 @ 294839738 ---
+24]=fbg,Qwe[25]=apn,Qwe[26]=zRc,Qwe[27]=Cbo,Qwe[28]=Tbo,Qwe[29]=GRc;else GRc=Qwe[29];const Ibg=BhE?.hideVimModeIndicator??!1,Pbg=!IhE;let VRc;if(Qwe[30]!==vbg||Qwe[31]!==spn||Qwe[32]!==ybg||Qwe[33]!==hbg||Qwe[34]!==Sbg||Qwe[35]!==lbg||Qwe[36]!==upn||Qwe[37]!==jRc||Qwe[38]!==ebg||Qwe[39]!==apn||Qwe[40]!==bbg||Qwe[41]!==_bg||Qwe[42]!==Abg||
+
+--- hideVimModeIndicator occ=5 @ 294840170 ---
+e[49]!==abg||Qwe[50]!==Tbo)VRc=oO.jsx(Aus,{exitMessage:spn,leftArrowDetachAvailable:ebg,vimMode:Tbo,hideVimModeIndicator:Ibg,mode:apn,toolPermissionContext:abg,suppressHint:xbg,suppressHintExceptStatusline:qRc,isInputEmpty:Pbg,isLoading:lbg,isExternalLoading:Sbg,betweenCalls:vbg,tasksSelected:Abg,isPasting:upn,showExpandPasteHint:Tbg,isSe
+
+--- app:toggleTranscript occ=1 @ 96832720 ---
+....................................................................................................app:toggleTranscript............................Global..........................ctrl+o..........................(............................... to expand)........................................................$......@?.....@.L...k........
+
+--- app:toggleTranscript occ=2 @ 114412944 ---
+....................stop-hook-error.................Stop hook error occurred . .....................app:toggleTranscript............................Global..........................ctrl+o.......................... to see.........................immediate.......9...............................Stop hook cancelled (abort or stream teardown)..
+
+--- app:toggleTranscript occ=3 @ 114477424 ---
+ed..e.......h.......l.......p.......................suggestion......u...............................app:toggleTranscript............................Global..........................ctrl+o..........................notification....................stop-hook-error.................Stop hook error occurred . ..................... to see.........
+
+--- app:toggleTranscript occ=4 @ 127426304 ---
+.................... ...............................................tip.............................app:toggleTranscript............................Global..........................ctrl+o..........................(............................... to see full summary)...........................Compacted ......................................
+
+--- app:toggleTranscript occ=5 @ 147788848 ---
+....................................................................................................app:toggleTranscript............................Global..........................ctrl+o..........................................lower...........................................expand..............................1...........................
+
+--- ctrl+o occ=1 @ 85741346 ---
+..Request API-side thinking summaries and show them in the conversation and in the transcript view (ctrl+o). Set explicitly to override the default for your install..........................@...Whether the user has accepted the bypass permissions mode dialog................@internal Whether the user has accepted the multi-ag
+
+--- ctrl+o occ=2 @ 96832800 ---
+....................app:toggleTranscript............................Global..........................ctrl+o..........................(............................... to expand)........................................................$......@?.....@.L...k................................................................h.........
+
+--- ctrl+o occ=3 @ 114413024 ---
+....................app:toggleTranscript............................Global..........................ctrl+o.......................... to see.........................immediate.......9...............................Stop hook cancelled (abort or stream teardown)..................tengu_stop_hook_error...........................St
+
+--- ctrl+o occ=4 @ 114477504 ---
+....................app:toggleTranscript............................Global..........................ctrl+o..........................notification....................stop-hook-error.................Stop hook error occurred . ..................... to see.........................immediate.......y.......|.........................
+
+--- ctrl+o occ=5 @ 127426384 ---
+....................app:toggleTranscript............................Global..........................ctrl+o..........................(............................... to see full summary)...........................Compacted .........................................................................................T.......<.....@
+
+--- Vim INSERT-mode key-sequence remaps occ=1 @ 85743632 ---
+for the UI......................%...Key binding mode for the prompt input...........................Vim INSERT-mode key-sequence remaps, e.g. {"jj": "<Esc>"}. Each key is exactly two printable characters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim"...................4...Show full tool 
+
+--- Vim INSERT-mode key-sequence remaps occ=2 @ 275280821 ---
+ing mode for the prompt input"),vimInsertModeRemaps:ao(N(),Wn()).optional().catch(void 0).describe('Vim INSERT-mode key-sequence remaps, e.g. {"jj": "<Esc>"}. Each key is exactly two printable characters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim".'),verbose:jt().optional().describe("
+
+--- "mode": "INSERT" | "NORMAL" | "VISUAL" | "VISUAL LINE" occ=1 @ 280432966 ---
+     },.     "vim": {                     // Optional, only present when vim mode is enabled.       "mode": "INSERT" | "NORMAL" | "VISUAL" | "VISUAL LINE"  // Current vim editor mode.     },.     "agent": {                    // Optional, only present when Claude is started with --agent flag.       "name": "string",           // Agent name (e.g., "code-architect", "test-r
+
+--- textInputCursorOffset occ=1 @ 162439504 ---
+....................accordionOptionIndex............................textInputValue..................textInputCursorOffset...........................setTextInputCursorOffset........................handleTextInputChange...........................handleTextInputSubmit...........`.......(................&......./.......3......`9.......[.......
+
+--- textInputCursorOffset occ=2 @ 294571763 ---
+:m,validationErrors:g,resolvingFields:P,expandedAccordion:M,accordionOptionIndex:D,textInputValue:C,textInputCursorOffset:R,setTextInputCursorOffset:A,handleTextInputChange:oe,handleTextInputSubmit:ue,columns:q}),xo.jsxs(x,{children:[xo.jsx(_,{color:"success",children:d==="accept"?tt.pointer:" "}),xo.jsx(_,{bold:d==="accept",color:d==="acc
+
+--- textInputCursorOffset occ=3 @ 294582137 ---
+ionErrors:Dls,resolvingFields:Mls,expandedAccordion:__o,accordionOptionIndex:b_o,textInputValue:Lls,textInputCursorOffset:Hls,setTextInputCursorOffset:Nls,handleTextInputChange:Fls,handleTextInputSubmit:$ls,columns:Bls}=wML;if(!TTr.length){return null}let Epg=uue.start>0,Cpg=uue.end<TTr.length,GEc;if(Uls[0]!==Epg||Uls[1]!==uue.start)GEc=Ep
+
+--- setTextInputCursorOffset occ=1 @ 162439552 ---
+....................textInputValue..................textInputCursorOffset...........................setTextInputCursorOffset........................handleTextInputChange...........................handleTextInputSubmit...........`.......(................&......./.......3......`9.......[.......j......Xm.......z......h...................J.<.%...
+
+--- setTextInputCursorOffset occ=2 @ 294571787 ---
+solvingFields:P,expandedAccordion:M,accordionOptionIndex:D,textInputValue:C,textInputCursorOffset:R,setTextInputCursorOffset:A,handleTextInputChange:oe,handleTextInputSubmit:ue,columns:q}),xo.jsxs(x,{children:[xo.jsx(_,{color:"success",children:d==="accept"?tt.pointer:" "}),xo.jsx(_,{bold:d==="accept",color:d==="accept"?"success":void 0,dimCo
+
+--- setTextInputCursorOffset occ=3 @ 294582163 ---
+lds:Mls,expandedAccordion:__o,accordionOptionIndex:b_o,textInputValue:Lls,textInputCursorOffset:Hls,setTextInputCursorOffset:Nls,handleTextInputChange:Fls,handleTextInputSubmit:$ls,columns:Bls}=wML;if(!TTr.length){return null}let Epg=uue.start>0,Cpg=uue.end<TTr.length,GEc;if(Uls[0]!==Epg||Uls[1]!==uue.start)GEc=Epg&&xo.jsx(x,{marginLeft:2,chi
+
+--- isVimModeEnabled occ=1 @ 163808288 ---
+.... ...............................initialText.....................getWorkspaceGit.................isVimModeEnabled................isTrustAccepted.................onTrustBlocked..0.......x....................... .......(...................~.?.#.......#.......~.?...?......D..P................................................+......x...
+
+--- isVimModeEnabled occ=2 @ 294430619 ---
+ys()),mainLoopModel:l.mainLoopModel,gitWorktree:s,repo:a,prStatus:l.prStatus,vimModeEnabled:this.#e.isVimModeEnabled(),vimMode:l.vimMode,cwd:i,effortValue:l.effortValue,thinkingEnabled:l.thinkingEnabled}),e,r)},getCommandLength:()=>this.#t.statusLine?.command.length,pendingResultLogRef:this.#p,onResult:(l)=>this.#S(l),logFn:this.#e.lo
+
+--- isVimModeEnabled occ=3 @ 294794143 ---
+eout(S,v),initialText:s.getState().statusLineText,execute:(S,v,E)=>Rml(o,S,v,E),getWorkspaceGit:dcg,isVimModeEnabled:()=>h3(),isTrustAccepted:()=>Mf(),onTrustBlocked:()=>s.setState((S)=>S.setupIssues.statuslineIssueCount===1?S:{...S,setupIssues:{...S.setupIssues,statuslineIssueCount:1}}),logEvent:H},{statusLine:u,settings:c,lastAssist
+
+--- vimModeEnabled occ=1 @ 161400208 ---
+..............................................}.....................addedDirs.......................vimModeEnabled..................session_name....................current_dir.....................project_dir.....................added_dirs......................git_worktree....................context_window..................exceeds_20
+
+--- vimModeEnabled occ=2 @ 294426606 ---
+kens:r,fastMode:n,settings:o,messages:i,addedDirs:s,mainLoopModel:a,gitWorktree:l,repo:c,prStatus:u,vimModeEnabled:d,vimMode:p,cwd:f,effortValue:m,thinkingEnabled:h}){let g=Z$(),y=cS(),b=YH({permissionMode:t,mainLoopModel:a,exceeds200kTokens:r}),S=o?.outputStyle||qq,v=m4r(i),E=VA(b,jR()),C=Hfr(e.id),k=_3n(),R={...k.five_hour&&{five_
+
+--- vimModeEnabled occ=3 @ 294430596 ---
+alWorkingDirectories.keys()),mainLoopModel:l.mainLoopModel,gitWorktree:s,repo:a,prStatus:l.prStatus,vimModeEnabled:this.#e.isVimModeEnabled(),vimMode:l.vimMode,cwd:i,effortValue:l.effortValue,thinkingEnabled:l.thinkingEnabled}),e,r)},getCommandLength:()=>this.#t.statusLine?.command.length,pendingResultLogRef:this.#p,onResult:(l)=>th
+
+--- onToggleTranscript occ=1 @ 161423856 ---
+.....<..............................................."......................(_......................onToggleTranscript.............. ...............P.......H...................X.:.....Y.......Z...X.:...:......D..P...............................................0.......H...............................................H.....................
+
+--- onToggleTranscript occ=2 @ 294433337 ---
+unction QnE(){Rm.get(process.stdout)?.forceRedraw()}function Mun(V0L){let S9t=kcg.c(22),{screen:ZTc,onToggleTranscript:ycg,showAllInTranscript:LnE,messageCount:_cg}=V0L,bcg=LnE===void 0?!1:LnE,Scg=pt(VnE),i$e=zi();Tu();let vcg=yne();ha();let HnE;if(S9t[0]!==Scg||S9t[1]!==i$e)HnE=()=>{H("tengu_toggle_todos",{is_expanded:Scg==="tasks"}),_
+
+--- onToggleTranscript occ=3 @ 294448999 ---
+c;if(Uwe[48]!==xQ.messages.length||Uwe[49]!==Zyo||Uwe[50]!==s$e)Dwc=gl.jsx(Mun,{screen:"transcript",onToggleTranscript:Zyo,showAllInTranscript:s$e,messageCount:xQ.messages.length}),Uwe[48]=xQ.messages.length,Uwe[49]=Zyo,Uwe[50]=s$e,Uwe[51]=Dwc;else Dwc=Uwe[51];let tiE;if(Uwe[52]===le)tiE=()=>QCL(siE),Uwe[52]=tiE;else tiE=Uwe[52];let Mwc
+
+--- onToggleTranscript occ=4 @ 298776429 ---
+s(Imr,{children:[Yd.jsx(zjc,{isAnimating:Zr,title:qt,disabled:F,noPrefix:Nt}),Yd.jsx(Mun,{screen:qe,onToggleTranscript:()=>Xe((Lt)=>Lt==="transcript"?"prompt":"transcript"),messageCount:dO.messages.length}),Yd.jsx(kcs,{onSubmit:ED,isActive:!Rc?.isLocalJSXCommand}),Yd.jsx(cuo,{scrollRef:eyn?je:ie,isActive:Ws()&&(xlt||!$k),onScroll:xlt||!
+
+--- Exit code 0 - stdout shown in transcript mode (ctrl+o) occ=1 @ 261683561 ---
+ to command is JSON with fields "inputs" (tool call arguments) and "response" (tool call response)..Exit code 0 - stdout shown in transcript mode (ctrl+o).Exit code 2 - show stderr to model immediately.Other exit codes - show stderr to user only......................After tool execution fails......................Input to command is JSON with tool_name, tool_input, tool_u
+
+--- Exit code 0 - stdout shown in transcript mode (ctrl+o) occ=2 @ 261683891 ---
+d is JSON with tool_name, tool_input, tool_use_id, error, error_type, is_interrupt, and is_timeout..Exit code 0 - stdout shown in transcript mode (ctrl+o).Exit code 2 - show stderr to model immediately.Other exit codes - show stderr to user only........................$...After a batch of tool calls resolves........................z...Fires once after every tool call in a
+
+--- Exit code 0 - stdout shown in transcript mode (ctrl+o) occ=3 @ 261684782 ---
+kSpecificOutput":{"hookEventName":"PermissionDenied","retry":true}} to tell the model it may retry..Exit code 0 - stdout shown in transcript mode (ctrl+o).Other exit codes - show stderr to user only................When notifications are sent.....................Input to command is JSON with notification message and type..Exit code 0 - stdout/stderr not shown.Other exit co
+
+--- Exit code 0 - stdout shown in transcript mode (ctrl+o) occ=4 @ 293550780 ---
+ to command is JSON with fields "inputs" (tool call arguments) and "response" (tool call response)..Exit code 0 - stdout shown in transcript mode (ctrl+o).Exit code 2 - show stderr to model immediately.Other exit codes - show stderr to user only`,matcherMetadata:{fieldToMatch:"tool_name",values:e}},PostToolUseFailure:{summary:"After tool execution fails",description:`Inpu
+
+--- Exit code 0 - stdout shown in transcript mode (ctrl+o) occ=5 @ 293551165 ---
+d is JSON with tool_name, tool_input, tool_use_id, error, error_type, is_interrupt, and is_timeout..Exit code 0 - stdout shown in transcript mode (ctrl+o).Exit code 2 - show stderr to model immediately.Other exit codes - show stderr to user only`,matcherMetadata:{fieldToMatch:"tool_name",values:e}},PostToolBatch:{summary:"After a batch of tool calls resolves",description:
+
+---  (ctrl+o to expand) occ=1 @ 148452784 ---
+.... new diagnostic................. ............................... in ............................ (ctrl+o to expand)......................................................................................................D!L...?...............4......@3..p%.......4......P&.......4.. ...`'...........5.......3.. =.......v.......4......0=...
+
+---  (ctrl+o to expand) occ=2 @ 292367386 ---
+sxs(_,{dimColor:!0,wrap:"wrap",children:["Found ",hLl," new diagnostic"," ",cch," in ",mLl," ",uch," (ctrl+o to expand)"]})}),lch[6]=mLl,lch[7]=hLl,lch[8]=cch,lch[9]=uch,lch[10]=w8T;else w8T=lch[10];PWi=w8T;break bb0}}lch[0]=ich.files,lch[1]=ach,lch[2]=sch,lch[3]=PWi}else PWi=lch[3];if(PWi!==$a)return PWi}var gLl,dch,JN,pch;var fch=w(()=

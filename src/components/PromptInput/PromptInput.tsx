@@ -78,6 +78,13 @@ import type { BaseTextInputProps, PromptInputMode, VimMode } from '../../types/t
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { count } from '../../utils/array.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
+import {
+  clampNormalModeCursorOffset,
+  resolveRemountCursorOffset,
+  savePromptInputCursorOffset,
+  setPromptInputStoreVimMode,
+} from '../../utils/promptInputCursorStore.js';
+import { mergeSpellcheckHighlights, useSpellcheckHighlights } from '../../utils/spellcheck/index.js';
 import { Cursor } from '../../utils/Cursor.js';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
 import { resolveThemeSetting } from '../../utils/systemTheme.js';
@@ -340,7 +347,37 @@ function PromptInput({
     show: boolean;
     key?: string;
   }>({ show: false });
-  const [cursorOffset, setCursorOffset] = useState<number>(input.length);
+  // densable #15: remount restores savedCursorOffset (acf) + Oyr clamp in NORMAL.
+  const vimEnabled = isVimModeEnabled();
+  const [cursorOffset, setCursorOffset] = useState<number>(() =>
+    resolveRemountCursorOffset({
+      input,
+      vimEnabled,
+      vimMode,
+    }),
+  );
+  // Persist caret on unmount (ctrl+o transcript remount / overlay).
+  const remountCursorOffsetRef = React.useRef(cursorOffset);
+  remountCursorOffsetRef.current = cursorOffset;
+  useEffect(
+    () => () => {
+      savePromptInputCursorOffset(remountCursorOffsetRef.current);
+    },
+    [],
+  );
+  // densable q4a: keep $4.vimMode in sync; reset INSERT when vim disabled.
+  const setVimModeAndStore = React.useCallback(
+    (mode: VimMode) => {
+      setPromptInputStoreVimMode(mode);
+      setVimMode(mode);
+    },
+    [setVimMode],
+  );
+  useEffect(() => {
+    if (!vimEnabled) {
+      setPromptInputStoreVimMode('INSERT');
+    }
+  }, [vimEnabled]);
   const [leftArrowHintShown, setLeftArrowHintShown] = useState(false);
   /** densable odp/idp/sdp gesture state (2.1.218 editing-quiet confirm) */
   const leftArrowGestureRef = useRef(createLeftArrowGestureState());
@@ -353,10 +390,14 @@ function PromptInput({
   prevInputForLeftArrowRef.current = input;
   // Track the last input value set via internal handlers so we can detect
   // external input changes (e.g. speech-to-text injection) and move cursor to end.
+  // densable: NORMAL remount/external path applies Oyr (not RgE) on NFC text.
   const lastInternalInputRef = React.useRef(input);
   if (input !== lastInternalInputRef.current) {
-    // Input changed externally (not through any internal handler) — move cursor to end
-    setCursorOffset(input.length);
+    const nextOffset =
+      vimEnabled && vimMode === 'NORMAL'
+        ? clampNormalModeCursorOffset(input.normalize('NFC'), input.length)
+        : input.length;
+    setCursorOffset(nextOffset);
     lastInternalInputRef.current = input;
   }
   // Synchronous ref for keybinding handlers (chat:submit) that fire within the
@@ -870,6 +911,17 @@ function PromptInput({
     }
   }, [cursorOffset, imageRefPositions, setCursorOffset]);
 
+  // densable 2.1.235 #1 — underline misspellings (aspell/hunspell/ispell).
+  const spellcheckHighlights = useSpellcheckHighlights({
+    text: input,
+    cursorOffset,
+    active: !isModalOverlayActive,
+    placeholders: imageRefPositions.map(ref => ({
+      index: ref.start,
+      match: input.slice(ref.start, ref.end),
+    })),
+  });
+
   const combinedHighlights = useMemo((): TextHighlight[] => {
     const highlights: TextHighlight[] = [];
 
@@ -1012,7 +1064,8 @@ function PromptInput({
       }
     }
 
-    return highlights;
+    // densable fhg — spellcheck underlines fill gaps (priority 2).
+    return mergeSpellcheckHighlights(highlights, spellcheckHighlights);
   }, [
     isSearchingHistory,
     historyQuery,
@@ -1031,6 +1084,7 @@ function PromptInput({
     ultraplanTriggers,
     ultrareviewTriggers,
     buddyTriggers,
+    spellcheckHighlights,
   ]);
 
   const { addNotification, removeNotification } = useNotifications();
@@ -2865,7 +2919,7 @@ function PromptInput({
   }
 
   const textInputElement = isVimModeEnabled() ? (
-    <VimTextInput {...baseProps} initialMode={vimMode} onModeChange={setVimMode} />
+    <VimTextInput {...baseProps} initialMode={vimMode} onModeChange={setVimModeAndStore} />
   ) : (
     <TextInput {...baseProps} />
   );

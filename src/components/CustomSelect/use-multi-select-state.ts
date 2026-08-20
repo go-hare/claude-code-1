@@ -98,6 +98,11 @@ export type MultiSelectState<T> = {
   focusedValue: T | undefined
 
   /**
+   * densable getFocusedValue — live read after same-tick navigation.
+   */
+  getFocusedValue: () => T | undefined
+
+  /**
    * Index of the first visible option.
    */
   visibleFromIndex: number
@@ -245,9 +250,9 @@ export function useMultiSelectState<T>({
   useInput(
     (input, key, event: InputEvent) => {
       const normalizedInput = normalizeFullWidthDigits(input)
-      const focusedOption = options.find(
-        opt => opt.value === navigation.focusedValue,
-      )
+      // densable #16: live-read focus for toggle/edge (same tick after arrow)
+      const liveFocused = navigation.getFocusedValue()
+      const focusedOption = options.find(opt => opt.value === liveFocused)
       const isInInput = focusedOption?.type === 'input'
 
       // When in input field, only allow navigation keys
@@ -269,7 +274,7 @@ export function useMultiSelectState<T>({
         if (
           submitButtonText &&
           onSubmit &&
-          navigation.focusedValue === lastOptionValue &&
+          liveFocused === lastOptionValue &&
           !isSubmitFocused
         ) {
           setIsSubmitFocused(true)
@@ -301,14 +306,14 @@ export function useMultiSelectState<T>({
         } else if (
           submitButtonText &&
           onSubmit &&
-          navigation.focusedValue === lastOptionValue &&
+          liveFocused === lastOptionValue &&
           !isSubmitFocused
         ) {
           setIsSubmitFocused(true)
         } else if (
           !submitButtonText &&
           onDownFromLastItem &&
-          navigation.focusedValue === lastOptionValue
+          liveFocused === lastOptionValue
         ) {
           // No submit button — exit from the last option
           onDownFromLastItem()
@@ -329,7 +334,7 @@ export function useMultiSelectState<T>({
           navigation.focusOption(lastOptionValue)
         } else if (
           onUpFromFirstItem &&
-          navigation.focusedValue === options[0]?.value
+          navigation.getFocusedValue() === options[0]?.value
         ) {
           onUpFromFirstItem()
         } else {
@@ -370,10 +375,11 @@ export function useMultiSelectState<T>({
         }
 
         // Enter or Space toggles selection (including for input fields)
-        if (navigation.focusedValue !== undefined) {
-          const newValues = selectedValues.includes(navigation.focusedValue)
-            ? selectedValues.filter(v => v !== navigation.focusedValue)
-            : [...selectedValues, navigation.focusedValue]
+        const focused = navigation.getFocusedValue()
+        if (focused !== undefined) {
+          const newValues = selectedValues.includes(focused)
+            ? selectedValues.filter(v => v !== focused)
+            : [...selectedValues, focused]
           updateSelectedValues(newValues)
         }
         return

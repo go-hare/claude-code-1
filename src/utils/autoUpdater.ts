@@ -40,10 +40,107 @@ export type InstallStatus =
   /** Newer version on registry; auto-install skipped (config/env). UI should prompt. */
   | 'available'
 
+/** densable failureHint — currently only windows exe lock surfaces in footer. */
+export type AutoUpdateFailureHint = 'windows_running_exe_lock'
+
+/** densable Vpg — damp further AutoUpdater polls after this many exe-lock fails. */
+export const EXE_LOCK_FAILURE_DAMP_THRESHOLD = 2
+
+/** densable installGlobalPackage / Zfr outcome (status + optional failureHint). */
+export type InstallOutcome = {
+  status: InstallStatus
+  failureHint?: AutoUpdateFailureHint
+}
+
 export type AutoUpdaterResult = {
   version: string | null
   status: InstallStatus
+  failureHint?: AutoUpdateFailureHint
+  consecutiveExeLockFailures?: number
   notifications?: string[]
+}
+
+/**
+ * densable AutoUpdater footer copy for failure statuses (npm path).
+ * Returns null when the status is not a footer failure.
+ */
+export function getAutoUpdaterFailureFooterMessage(
+  result: Pick<AutoUpdaterResult, 'status' | 'failureHint'> | null | undefined,
+): string | null {
+  if (!result) return null
+  if (result.status === 'no_permissions') {
+    return 'Auto-update failed: no write permission to npm prefix · Run claude doctor'
+  }
+  if (result.status === 'install_failed') {
+    if (result.failureHint === 'windows_running_exe_lock') {
+      return 'Auto-update failed: claude.exe in use (close other Claude Code sessions, including VS Code) · Run claude doctor'
+    }
+    return null
+  }
+  return null
+}
+
+/**
+ * densable npm/bun install stderr classifier (windows exe lock + permissions).
+ */
+export function classifyNpmInstallFailure(
+  combinedOutput: string,
+  platform: NodeJS.Platform = process.platform,
+): InstallOutcome {
+  if (
+    platform === 'win32' &&
+    /\b(?:claude|cli)\.exe\b/i.test(combinedOutput) &&
+    (/\bEBUSY\b|resource busy or locked/i.test(combinedOutput) ||
+      (/\bEPERM\b|operation not permitted/i.test(combinedOutput) &&
+        /\b(?:rename|copyfile|unlink)\b[^\r\n]*\b(?:claude|cli)\.exe\b/i.test(
+          combinedOutput,
+        )))
+  ) {
+    return { status: 'install_failed', failureHint: 'windows_running_exe_lock' }
+  }
+  if (/\b(EACCES|EPERM|permission denied)\b/i.test(combinedOutput)) {
+    return { status: 'no_permissions' }
+  }
+  return { status: 'install_failed' }
+}
+
+/**
+ * densable AppState autoUpdaterResult merge — bump consecutiveExeLockFailures
+ * on windows_running_exe_lock; preserve count while in_progress; else reset.
+ */
+export function mergeAutoUpdaterResult(
+  prev: AutoUpdaterResult | null | undefined,
+  next: {
+    version: string | null
+    status: InstallStatus
+    failureHint?: AutoUpdateFailureHint
+    notifications?: string[]
+  },
+): AutoUpdaterResult {
+  const prevCount = prev?.consecutiveExeLockFailures ?? 0
+  const consecutiveExeLockFailures =
+    next.status === 'in_progress'
+      ? prevCount
+      : next.failureHint === 'windows_running_exe_lock'
+        ? prevCount + 1
+        : 0
+  if (
+    prev &&
+    prev.version === next.version &&
+    prev.status === next.status &&
+    prev.failureHint === next.failureHint &&
+    (prev.consecutiveExeLockFailures ?? 0) === consecutiveExeLockFailures &&
+    prev.notifications === next.notifications
+  ) {
+    return prev
+  }
+  return {
+    version: next.version,
+    status: next.status,
+    failureHint: next.failureHint,
+    consecutiveExeLockFailures,
+    notifications: next.notifications,
+  }
 }
 
 export type MaxVersionConfig = {
@@ -468,7 +565,7 @@ export async function getVersionHistory(limit: number): Promise<string[]> {
 
 export async function installGlobalPackage(
   specificVersion?: string | null,
-): Promise<InstallStatus> {
+): Promise<InstallOutcome> {
   if (!(await acquireLock())) {
     logError(
       new AutoUpdaterError('Another process is currently installing an update'),
@@ -479,7 +576,7 @@ export async function installGlobalPackage(
       currentVersion:
         MACRO.VERSION as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
-    return 'in_progress'
+    return { status: 'in_progress' }
   }
 
   try {
@@ -502,12 +599,12 @@ To fix this issue:
   2. Make sure Linux NPM is in your PATH before the Windows version
   3. Try updating again with 'claude update'
 `)
-      return 'install_failed'
+      return { status: 'install_failed' }
     }
 
     const { hasPermissions } = await checkGlobalInstallPermissions()
     if (!hasPermissions) {
-      return 'no_permissions'
+      return { status: 'no_permissions' }
     }
 
     // Use specific version if provided, otherwise use latest
@@ -524,11 +621,15 @@ To fix this issue:
       { cwd: homedir() },
     )
     if (installResult.code !== 0) {
+      const combined = `${installResult.stdout} ${installResult.stderr}`
+      const outcome = classifyNpmInstallFailure(combined)
       const error = new AutoUpdaterError(
-        `Failed to install new version of claude: ${installResult.stdout} ${installResult.stderr}`,
+        outcome.failureHint === 'windows_running_exe_lock'
+          ? `Failed to install new version of claude (running executable is locked): ${combined}`
+          : `Failed to install new version of claude: ${combined}`,
       )
       logError(error)
-      return 'install_failed'
+      return outcome
     }
 
     // Set installMethod to 'global' to track npm global installations
@@ -537,7 +638,7 @@ To fix this issue:
       installMethod: 'global',
     }))
 
-    return 'success'
+    return { status: 'success' }
   } finally {
     // Ensure we always release the lock
     await releaseLock()

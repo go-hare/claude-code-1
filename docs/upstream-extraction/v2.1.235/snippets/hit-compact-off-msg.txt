@@ -1,0 +1,32 @@
+=== gold #14 compact-off-msg (exact SEA strings) ===
+ · auto-compact is off · /config to turn it on
+/compact or /clear to continue
+Without autocompact, you will hit context limits and lose the conversation. Enable it in /config or use /compact manually.
+Autocompact is disabled. Use /compact to free space, or enable autocompact in /config.
+Auto-compact is currently disabled (see /config)
+Autocompact is disabled
+Compaction is disabled.
+ /autocompact to configure
+
+=== warn/log / circuit breaker (related) ===
+autocompact: circuit breaker tripped after ${o} consecutive failures${t?" (reactive path)":""} — skipping future attempts this session
+tengu_auto_compact_circuit_breaker
+tengu_auto_compact_prefix_overflow
+tengu_auto_compact_rapid_refill_breaker
+tengu_auto_compact_routed_reactive
+tengu_auto_compact_succeeded
+tengu_auto_compact_setting_changed
+compact_auto_prefix_overflow
+compact_auto_rapid_refill_breaker
+
+=== settings / symbols ===
+autoCompactEnabled
+isAutoCompactEnabled
+autoCompactWindow
+autoCompactThreshold
+applyAutoCompactWindow
+DISABLE_AUTO_COMPACT
+DISABLE_COMPACT
+cleared_context_limit
+context limit reached
+ conversation could not be reduced below the context limit

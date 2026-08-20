@@ -1,0 +1,62 @@
+# SEA gold: nested markdown list depth 3+ + hanging indent (changelog #3 / key=md-list)
+# Official text: Fixed nested markdown list items misaligning at depth 3+ and added a hanging indent to wrapped list items in the terminal UI
+# SEA: /tmp/official-235/plat/package/claude
+
+## Unique / structural symbols (proven in SEA)
+
+### Cap constant
+OIl=32
+# Used as Math.min(f.length, OIl) / Math.min(r+f, OIl) — caps nested list indent width (fixes depth 3+ misalignment when indent would otherwise grow unbounded / misalign)
+
+### Marker helpers
+function DIl(e){let t=e.start===""?1:e.start;return{first:t,last:t+e.items.length-1}}function MIl(e,t){return t===null?"-":`${G5T(e+1,t)}.`}function G5T(e,{number:t,first:r,last:n}){switch(e){case 2:return r>=1?z5T(t):t.toString();case 3:return r>=1&&n<=3999?W5T(t):t.toString();default:return t.toString()}}function Iqi(e,t,r,n){let o=Math.max(0,r-t);if(n==="center"){let i=Math.floor(o/2);return" ".repeat(i)+e+Wh(" ",o-i)}if(n==="right")return" ".repeat(o)+e;return e+" ".repeat(o)}function LIl(e,t){function r(s){ret
+
+### ANSI string path list_item (hanging indent on wrap)
+# First content line: `${c}${p} ` (indent + marker + space)
+# Continuation lines: `f+k` where f = c + spaces(markerWidth+1)  — hanging indent
+# Nested child indent: m = spaces(min(f.length, OIl=32))
+case"list_item":{let p=MIl(n,o!==null&&i?.type==="list"?{number:o,...DIl(i)}:null),f=c+Wh(" ",Xt(p)+1),m=Wh(" ",Math.min(f.length,OIl)),h=(e.tokens??[]).find((S)=>S.type!=="space"),g=h!==void 0&&(h.type==="code"||h.type==="blockquote"||h.type==="hr"||h.type==="table"||h.type==="list"),y=!g,b=(e.tokens??[]).map((S)=>{let v=i3(S,t,{listDepth:n+1,orderedListNumber:o,parent:e,highlight:s,glueProse:!1,linkCap:d,screenReader:l,listIndent:m,promptMode:u});if(S.type==="code"||S.type==="blockquote"||S.type==="hr"||S.type==="table"||S.type==="list"||S.type==="space")return v;let E=y?`${c}${p} `:f;y=!1;let C=v.split(BU).map((k,R)=>R===0?E+k:k===""?k:f+k).join(BU);return S.type==="html"&&!C.endsWith(BU)?C+BU:C}).join("");return y||g?`${c}${p}${BU}${b.replace(/^\n+/,"")}`:b}case"par
+
+### Ink component path WIl / n6T (terminal UI hanging indent)
+# flex row: [indent spacer width=r][marker cell width=f minWidth=qIl=2][content column]
+# nested list recurse: indent:m = Math.min(r+f, OIl)
+# wrap prop on content = hanging wrap for wrapped list items
+function WIl({token:e,indent:t,listDepth:r,...n}){let o=DIl(e);return e.items.map((i,s)=>Mne.jsx(n6T,{item:i,marker:MIl(r,e.ordered?{number:o.first+s,...o}:null),indent:t,listDepth:r,blankLineBefore:s>0&&Jrh(e.items[s-1]),...n,tailWrap:s===e.items.length-1?n.tailWrap:void 0},s))}function Jrh(e){let t=e.tokens.at(-1);if(t?.type==="space"||t?.type==="heading"||t?.type==="table")return!0;if(t?.type==="list"){let r=t.items.at(-1);return r?Jrh(r):!1}return t?.type==="html"&&QQr(t.raw)}function n6T({item:e,marker:t,indent:r,listDepth:n,blankLineBefore:o,theme:i,highlight:s,dimColor:a,italic:l,linkCap:c,tailWrap:u,minContentWidth:d}){let p=[];for(let b of e.tokens){if(b.type==="list"){p.push({kind:"list",token:b});continue}let S=i3(b,i,{listDepth:n+1,orderedListNumber:null,parent:e,highlight:s,glueProse:!1,linkCap:c});if(Yrh(b)){p.push({kind:"block",text:S,code:b.type==="code"});continue}let v=p.at(-1);if(v?.kind==="inline")v.text+=S;else p.push({kind:"inline",text:S})}if(p[0]?.kind!=="inline")p.unshift({kind:"inline",text:""});let f=Xt(t)+1,m=Math.min(r+f,OIl),h=[],g=o,y=p.length-1;return p.forEach((b,S)=>{let v=S===y?u:void 0;if(b.kind==="inline"){let E=b.text.startsWith(`
+`),C=QQr(b.text),k=b.text.replace(/^\n+/,"").trimEnd();if(!k&&S>0){g||=b.text.includes(`
+`);return}h.push(Mne.jsxs(x,{flexDirection:"row",marginTop:g||S>0&&E?1:0,children:[Mne.jsx(x,{flexShrink:1,width:r}),Mne.jsx(x,{flexShrink:1,width:f,minWidth:qIl,children:S===0&&Mne.jsx(_,{dimColor:a,italic:l,children:t})}),Mne.jsx(x,{flexDirection:"column",flexShrink:1000,minWidth:d,children:Mne.jsx(nd,{dimColor:a,italic:l,wrap:v,children:k})})]},S)),g=C}else if(b.kind==="block")h.push(Mne.jsx(x,{marginTop:g?1:0,children:Mne.jsx(nd,{dimColor:a,italic:l,wrap:v,children:b.code?b.text.replace(/\n$/,""):b.text.replace(/^\n+/,"").trimEnd()})},S)),g=!1;else h.push(Mne.jsx(x,{flexDirection:"column",marginTop:g?1:0,children:Mne.jsx(WIl,{token:b.token,indent:m,listDepth:n+1,theme:i,highlight:s,dimColor:a,italic:l,linkCap:c,tailWrap:v,minContentWidth:d})},S)),g=!1}),h}var Mne,Xrh,Krh=10,qIl=2,zIl=300,r6T=64;var Zrh=w(()=>{NO();Pt();ugr();JH();Wl();BIl();Mne=I(be(),1),Xrh=I(Le(),1)});function v6T(WJO){return WJO.type!=="
+
+### Destructure property names (user/runtime-visible via errors)
+Cannot destructure property 'listDepth' from null or undefined value
+listIndent
+orderedListNumber
+markerWidth (also present elsewhere; list path uses Xt(marker)+1 instead of literal markerWidth prop in this snippet)
+minContentWidth
+tailWrap
+blankLineBefore
+
+### Related tokens / property names near markdown renderer
+listDepth
+orderedListNumber
+blockquote
+strong
+codespan
+paragraph
+list_item
+glueProse
+screenReader
+listIndent
+promptMode
+linkCap
+supportsLanguage
+
+### Module constants near WIl
+Krh=10,qIl=2,zIl=300,r6T=64
+# qIl=2 = minWidth of marker cell
+
+### Not found as literal user-facing changelog string in SEA
+# "hanging indent" / "nested markdown list" / "misaligning at depth 3+" — changelog-only; behavior encoded via OIl=32 + list_item wrap prefix + WIl flex layout
+
+### Notes
+# - No dedicated settings key / analytics event found for this fix.
+# - Fix is in terminal markdown renderer (ANSI string i3 + Ink WIl/n6T), not VS Code extension.
+# - Depth 3+ ordered markers: G5T case 3 uses W5T (roman) when first>=1 && last<=3999; case 2 uses z5T (alpha).

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Box, Text, useTheme } from '@anthropic/ink';
 import { WebFetchTool } from '@claude-code/builtin-tools/tools/WebFetchTool/WebFetchTool.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import { shouldShowPersistentAllowOption } from '../../../utils/permissions/showAlwaysAllow.js';
 import { type OptionWithDescription, Select } from '../../CustomSelect/select.js';
 import { type UnaryEvent, usePermissionRequestLogging } from '../hooks.js';
 import { PermissionDialog } from '../PermissionDialog.js';
@@ -43,8 +44,15 @@ export function WebFetchPermissionRequest({
 
   // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow
   // (WebFetch domain always-allow is gated the same way as MCP tools).
+  // densable 2.1.235 #12: also honor suppressAlwaysAllowRule / tool.suppresses…
   const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg && hostname !== '';
+  const showAlwaysAllowOptions = shouldShowPersistentAllowOption({
+    baseAllowed: shouldShowAlwaysAllowOptions() && hostname !== '',
+    permissionResult: toolUseConfirm.permissionResult,
+    tool: toolUseConfirm.tool,
+    input: toolUseConfirm.input,
+    isAskCappedByOrg,
+  });
   const options = useMemo((): OptionWithDescription<string>[] => {
     const result: OptionWithDescription<string>[] = [
       {

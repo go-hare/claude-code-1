@@ -10,9 +10,17 @@ import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
 import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
-import { AGENT_TOOL_NAME } from './constants.js'
+import {
+  AGENT_TOOL_NAME,
+  SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE,
+} from './constants.js'
 import { isForkSubagentEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
+
+export type AgentPromptAvailability = {
+  forkAvailable?: boolean
+  generalPurposeAvailable?: boolean
+}
 
 function getToolsDescription(agent: AgentDefinition): string {
   const { tools, disallowedTools } = agent
@@ -69,6 +77,7 @@ export async function getPrompt(
   agentDefinitions: AgentDefinition[],
   isCoordinator?: boolean,
   allowedAgentTypes?: string[],
+  availability?: AgentPromptAvailability,
 ): Promise<string> {
   // Filter agents by allowed types when Agent(x,y) restricts which agents can be spawned
   const effectiveAgents = allowedAgentTypes
@@ -77,7 +86,12 @@ export async function getPrompt(
 
   // Fork subagent feature: when enabled, insert the "When to fork" section
   // (fork semantics, directive-style prompts) and swap in fork-aware examples.
-  const forkEnabled = isForkSubagentEnabled()
+  // densable Thf receives forkAvailable from the caller (kbf); when omitted,
+  // fall back to the local session gate.
+  const forkEnabled = availability?.forkAvailable ?? isForkSubagentEnabled()
+  // densable n = generalPurposeAvailable (Abf); default true when unspecified
+  // so existing callers keep prior omit-defaults-to-GP copy.
+  const generalPurposeAvailable = availability?.generalPurposeAvailable ?? true
 
   const whenToForkSection = forkEnabled
     ? `
@@ -119,6 +133,13 @@ ${forkEnabled ? 'For non-fork agents, terse' : 'Terse'} command-style prompts pr
     : `Available agent types and the tools they have access to:
 ${effectiveAgents.map(agent => formatAgentLine(agent)).join('\n')}`
 
+  // densable s when n=false: `${AVo}, so choose ${i?'`"fork"` or ':''}one of the listed agent types.`
+  const omitGuidance = generalPurposeAvailable
+    ? 'If omitted, the general-purpose agent is used.'
+    : `${SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE}, so choose ${
+        forkEnabled ? '`"fork"` or ' : ''
+      }one of the listed agent types.`
+
   // Shared core prompt used by both coordinator and non-coordinator modes
   const shared = `Launch a new agent to handle complex, multi-step tasks autonomously.
 
@@ -126,7 +147,11 @@ The ${AGENT_TOOL_NAME} tool launches specialized agents (subprocesses) that auto
 
 ${agentListSection}
 
-When using the ${AGENT_TOOL_NAME} tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used.${forkEnabled ? ` Set \`fork: true\` to fork from the parent conversation context, inheriting full history and model.` : ''}`
+When using the ${AGENT_TOOL_NAME} tool, specify a subagent_type parameter to select which agent type to use. ${omitGuidance}${
+    forkEnabled && generalPurposeAvailable
+      ? ` Set \`fork: true\` to fork from the parent conversation context, inheriting full history and model.`
+      : ''
+  }`
 
   // Coordinator mode gets the slim prompt -- the coordinator system prompt
   // already covers usage notes, examples, and when-not-to-use guidance.

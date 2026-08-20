@@ -1,0 +1,95 @@
+=== densable SEA gold: SendMessage / UDS cross-session size refuse (#17 / sendmessage-size) ===
+SEA: /tmp/official-235/plat/package/claude
+Proven via: python printable-strings extract (strings-equivalent) + exact/substring filters
+
+## Primary refuse gold (exact string fragments as stored in SEA)
+exact count=1 :: 'Message too large for cross-session delivery: the serialized message is '
+exact count=1 :: ' characters and the limit is '
+exact count=1 :: 'cross-session message exceeds the line cap'
+exact count=1 :: 'message_too_large'
+exact count=22 :: 'en-US'
+
+## Advice clause (bounded-length contains; avoid minified megablobs)
+contains count(len<=500)=0 :: 'Shorten the message text'
+contains count(len<=500)=0 :: 'put bulk content in a file the recipient can read rather than in the message'
+contains count(len<=500)=0 :: 'or split it into smaller messages'
+
+## Recv drop / framing
+contains count(len<=300)=1 :: '[uds-messaging] Line exceeded '
+  HIT: '[uds-messaging] Line exceeded '
+contains count(len<=300)=1 :: ' chars; dropping connection'
+  HIT: ' chars; dropping connection'
+contains count(len<=300)=0 :: 'maxFrameBytes'
+
+## Combined template presence
+combined template count(len<=2000)=0
+
+## Supporting cross-session / SendMessage surface counts (exact)
+exact count=1 :: SendMessageTool
+exact count=3 :: SendMessagePreconditionError
+exact count=1 :: cross-session-message
+exact count=1 :: </cross-session-message>
+exact count=1 :: tengu_cross_session_inbound_changed
+exact count=2 :: cross_session_inbox_auth
+exact count=2 :: agents_cross_session_inbox
+exact count=1 :: Require explicit approval before SendMessage can reach a peer session on another machine via Remote Control
+exact count=0 :: UdsMessageTooLargeError
+exact count=0 :: MAX_UDS_LINE_CHARS
+exact count=0 :: isUdsMessageTooLargeError
+exact count=0 :: X1r
+exact count=0 :: tFd
+exact count=0 :: yZt
+
+## Index neighborhood around refuse fragments (string-table order)
+--- around idx=351194 target='Message too large for cross-session delivery: the serialized message is ' ---
+351190: (redacted: fragment may carry an auth token)
+351191: string
+351192: msgV
+351193: msg_id
+351194: Message too large for cross-session delivery: the serialized message is 
+351195: en-US
+351196:  characters and the limit is 
+351197: cross-session message exceeds the line cap
+351198: errorClass
+351199: ENOENT
+351200: ECONNREFUSED
+351201:  to get the current address.
+--- around idx=351197 target='cross-session message exceeds the line cap' ---
+351193: msg_id
+351194: Message too large for cross-session delivery: the serialized message is 
+351195: en-US
+351196:  characters and the limit is 
+351197: cross-session message exceeds the line cap
+351198: errorClass
+351199: ENOENT
+351200: ECONNREFUSED
+351201:  to get the current address.
+351202: object
+351203: Cannot destructure property 'name' from null or undefined value
+351204: string
+--- around idx=326762 target='message_too_large' ---
+326758: REPL
+326759: Cross-session messaging is not available in this session.
+326760: no_live_inbox
+326761: ENOINBOX
+326762: message_too_large
+326763: k.CI
+326764: noteCorrespondent
+326765: announceYield
+326766: must be the recording stamp: 1 to 16 decimal digits (epoch milliseconds)I
+326767: .cast
+326768: .meta.json
+326769: .meta is reserved for the list metadata key, under every spelling that opens its file
+--- around idx=424560 target='[uds-messaging] Line exceeded ' ---
+424556: authOkReported
+424557: authRequired
+424558: [uds-messaging] Failed to handle line: 
+424559: warn
+424560: [uds-messaging] Line exceeded 
+424561:  chars; dropping connection
+424562: warn
+424563: a blank line
+424564: [uds-messaging] Failed to parse JSON line: 
+424565: an unparseable line
+424566: [uds-messaging] Failed to parse final buffer: 
+424567: warn

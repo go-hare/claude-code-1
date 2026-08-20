@@ -1,0 +1,46 @@
+# densable 2.1.235 SEA gold — embedded ripgrep Grep*Handler mangled symbols + fail-fast/-m context strings
+# SEA: /tmp/official-235/plat/package/claude (2.1.235 Mach-O arm64)
+# Verified 2026-08-20 against hit-embedded-grep.txt — all known markers still present; no extra N4Grep*Handler symbols found
+# SEA-only claim: N4Grep* Itanium mangled names absent from local vendor rg (src/utils/vendor/ripgrep/arm64-darwin/rg)
+# Shared claim: fail-fast / -m context strings present in BOTH SEA and local vendor rg
+
+## SEA-only mangled Grep*Handler family (Itanium; Grep::<Name>)
+# demangle: N4Grep<len><Name>E → Grep::<Name>
+N4Grep11GrepHandlerE
+N4Grep12StdInHandlerE
+N4Grep13BinaryHandlerE
+N4Grep18AnyLineGrepHandlerE
+N4Grep18ContextGrepHandlerE
+N4Grep22InvertMatchGrepHandlerE
+N4Grep24InvertContextGrepHandlerE
+N4Grep28FormatInvertMatchGrepHandlerE
+N4Grep30OnlyMatchingContextGrepHandlerE
+
+## Related SEA-only Grep mangled symbol (not *Handler)
+N4Grep11EXIT_SEARCHE
+
+## Demangled map
+Grep::GrepHandler
+Grep::StdInHandler
+Grep::BinaryHandler
+Grep::AnyLineGrepHandler
+Grep::ContextGrepHandler
+Grep::InvertMatchGrepHandler
+Grep::InvertContextGrepHandler
+Grep::FormatInvertMatchGrepHandler
+Grep::OnlyMatchingContextGrepHandler
+Grep::EXIT_SEARCH
+
+## Shared fail-fast / -m / long-line context strings (SEA + local vendor rg)
+assertion failed: self.after_context_left >= 1
+[Omitted long context line]
+[Omitted long matching line]
+special mode demands short-circuiting
+heap limit exceeded
+
+## Notes
+- No additional N4Grep*HandlerE symbols beyond the 9 listed (full SEA scan of N4Grep[0-9]+[A-Za-z0-9_]+E).
+- ContextGrepHandler family present: ContextGrepHandler, InvertContextGrepHandler, OnlyMatchingContextGrepHandler.
+- Packed-string neighborhood also contains searcher core: will use {slow,fast} line searcher / grep_searcher::searcher::core (not required for this gold).
+- Nearby format/debug template (not a shared literal for this catalog): [Omitted long line with … matches]
+- Changelog #13 implication: pathological fail-fast + correct -m with -A/-C live in embedded native ripgrep, not JS prompt text.

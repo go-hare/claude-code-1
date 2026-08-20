@@ -3,6 +3,7 @@ import { Box, Text, useTheme } from '@anthropic/ink';
 import { getTheme, type Theme } from 'src/utils/theme.js';
 import { env } from 'src/utils/env.js';
 import { shouldShowAlwaysAllowOptions } from 'src/utils/permissions/permissionsLoader.js';
+import { shouldShowPersistentAllowOption } from 'src/utils/permissions/showAlwaysAllow.js';
 import { logUnaryEvent } from 'src/utils/unaryLogging.js';
 import { PermissionDialog } from 'src/components/permissions/PermissionDialog.js';
 import { PermissionPrompt, type PermissionPromptOption } from 'src/components/permissions/PermissionPrompt.js';
@@ -30,7 +31,17 @@ export function WorkflowPermissionRequest({
     args?: string;
   };
 
-  const showAlwaysAllowOptions = useMemo(() => shouldShowAlwaysAllowOptions(), []);
+  // densable 2.1.235 #12: honor suppressAlwaysAllowRule / tool.suppresses…
+  const showAlwaysAllowOptions = useMemo(
+    () =>
+      shouldShowPersistentAllowOption({
+        baseAllowed: shouldShowAlwaysAllowOptions(),
+        permissionResult: toolUseConfirm.permissionResult,
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input,
+      }),
+    [toolUseConfirm.permissionResult, toolUseConfirm.tool, toolUseConfirm.input],
+  );
 
   const options: PermissionPromptOption<OptionValue>[] = useMemo(() => {
     const opts: PermissionPromptOption<OptionValue>[] = [

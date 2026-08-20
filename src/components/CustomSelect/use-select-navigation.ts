@@ -1,14 +1,24 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isDeepStrictEqual } from 'util'
 import OptionMap from './option-map.js'
 import type { OptionWithDescription } from './select.js'
+
+/**
+ * densable PFm — validate focused value against current options.
+ * Live accept path and render path both use this.
+ */
+function validateFocusedValue<T>(
+  focusedValue: T | undefined,
+  options: OptionWithDescription<T>[],
+): T | undefined {
+  if (focusedValue === undefined) {
+    return undefined
+  }
+  if (options.some(opt => opt.value === focusedValue)) {
+    return focusedValue
+  }
+  return options[0]?.value
+}
 
 type State<T> = {
   /**
@@ -365,6 +375,11 @@ export type SelectNavigation<T> = {
   focusedValue: T | undefined
 
   /**
+   * densable getFocusedValue — live read from sync bag (same tick after arrow).
+   */
+  getFocusedValue: () => T | undefined
+
+  /**
    * 1-based index of the focused option in the full list.
    * Returns 0 if no option is focused.
    */
@@ -509,14 +524,28 @@ export function useSelectNavigation<T>({
   onFocus,
   focusValue,
 }: UseSelectNavigationProps<T>): SelectNavigation<T> {
-  const [state, dispatch] = useReducer(
-    reducer<T>,
-    {
+  // densable C4i: stable mutable bag + mirrored React state.
+  // Dispatch mutates bag.state synchronously so getFocusedValue() sees the
+  // navigated option in the same tick as arrow+Enter (before re-render).
+  const [bag] = useState(() => ({
+    state: createDefaultState<T>({
       visibleOptionCount,
       options,
       initialFocusValue: focusValue || initialFocusValue,
-    } as Parameters<typeof createDefaultState<T>>[0],
-    createDefaultState<T>,
+    }),
+  }))
+  const [state, setState] = useState(bag.state)
+
+  const dispatch = useCallback(
+    (action: Action<T>) => {
+      const next = reducer(bag.state, action)
+      if (next === bag.state) {
+        return
+      }
+      bag.state = next
+      setState(next)
+    },
+    [bag],
   )
 
   // Store onFocus in a ref to avoid re-running useEffect when callback changes
@@ -532,10 +561,10 @@ export function useSelectNavigation<T>({
         visibleOptionCount,
         options,
         initialFocusValue:
-          focusValue ?? state.focusedValue ?? initialFocusValue,
+          focusValue ?? bag.state.focusedValue ?? initialFocusValue,
         currentViewport: {
-          visibleFromIndex: state.visibleFromIndex,
-          visibleToIndex: state.visibleToIndex,
+          visibleFromIndex: bag.state.visibleFromIndex,
+          visibleToIndex: bag.state.visibleToIndex,
         },
       }),
     })
@@ -547,34 +576,37 @@ export function useSelectNavigation<T>({
     dispatch({
       type: 'focus-next-option',
     })
-  }, [])
+  }, [dispatch])
 
   const focusPreviousOption = useCallback(() => {
     dispatch({
       type: 'focus-previous-option',
     })
-  }, [])
+  }, [dispatch])
 
   const focusNextPage = useCallback(() => {
     dispatch({
       type: 'focus-next-page',
     })
-  }, [])
+  }, [dispatch])
 
   const focusPreviousPage = useCallback(() => {
     dispatch({
       type: 'focus-previous-page',
     })
-  }, [])
+  }, [dispatch])
 
-  const focusOption = useCallback((value: T | undefined) => {
-    if (value !== undefined) {
-      dispatch({
-        type: 'set-focus',
-        value,
-      })
-    }
-  }, [])
+  const focusOption = useCallback(
+    (value: T | undefined) => {
+      if (value !== undefined) {
+        dispatch({
+          type: 'set-focus',
+          value,
+        })
+      }
+    },
+    [dispatch],
+  )
 
   const visibleOptions = useMemo(() => {
     return options
@@ -585,21 +617,17 @@ export function useSelectNavigation<T>({
       .slice(state.visibleFromIndex, state.visibleToIndex)
   }, [options, state.visibleFromIndex, state.visibleToIndex])
 
-  // Validate that focusedValue exists in current options.
-  // This handles the case where options change during render but the reset
-  // action hasn't been processed yet - without this, the cursor would disappear
-  // because focusedValue points to an option that no longer exists.
-  const validatedFocusedValue = useMemo(() => {
-    if (state.focusedValue === undefined) {
-      return undefined
-    }
-    const exists = options.some(opt => opt.value === state.focusedValue)
-    if (exists) {
-      return state.focusedValue
-    }
-    // Fall back to first option if focused value doesn't exist
-    return options[0]?.value
-  }, [state.focusedValue, options])
+  // densable PFm on React snapshot — for render / onFocus
+  const validatedFocusedValue = useMemo(
+    () => validateFocusedValue(state.focusedValue, options),
+    [state.focusedValue, options],
+  )
+
+  // densable getFocusedValue — live PFm(bag.state.focusedValue, options)
+  const getFocusedValue = useCallback(
+    () => validateFocusedValue(bag.state.focusedValue, options),
+    [bag, options],
+  )
 
   const isInInput = useMemo(() => {
     const focusedOption = options.find(
@@ -625,7 +653,7 @@ export function useSelectNavigation<T>({
         value: focusValue,
       })
     }
-  }, [focusValue])
+  }, [focusValue, dispatch])
 
   // Compute 1-based focused index for scroll position display
   const focusedIndex = useMemo(() => {
@@ -638,6 +666,7 @@ export function useSelectNavigation<T>({
 
   return {
     focusedValue: validatedFocusedValue,
+    getFocusedValue,
     focusedIndex,
     visibleFromIndex: state.visibleFromIndex,
     visibleToIndex: state.visibleToIndex,

@@ -108,9 +108,15 @@ import {
   buildForkedMessages,
   buildWorktreeNotice,
   FORK_AGENT,
+  FORK_SUBAGENT_TYPE,
   isForkSubagentEnabled,
   isInForkChild,
 } from './forkSubagent.js';
+import {
+  formatAvailableAgentTypes,
+  isGeneralPurposeAvailable,
+  SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE,
+} from './generalPurposeAvailability.js';
 import { normalizeAgentOwnedFiles, resolveAgentTaskExecutionContext, shouldExposeTaskIdInput } from './taskLinking.js';
 import type { AgentDefinition } from './loadAgentsDir.js';
 import { filterAgentsByMcpRequirements, hasRequiredMcpServers, isBuiltInAgent } from './loadAgentsDir.js';
@@ -353,7 +359,13 @@ export const AgentTool = buildTool({
 
     // isCoordinatorMode densable (COORDINATOR_MODE feature + env).
     const isCoordinator = isCoordinatorMode();
-    return await getPrompt(filteredAgents, isCoordinator, allowedAgentTypes);
+    // densable Thf({forkAvailable, generalPurposeAvailable}) — Abf over
+    // activeAgents∩allowlist; forkAvailable is the local fork session gate.
+    const generalPurposeAvailable = isGeneralPurposeAvailable(agents, allowedAgentTypes);
+    return await getPrompt(filteredAgents, isCoordinator, allowedAgentTypes, {
+      forkAvailable: isForkSubagentEnabled(),
+      generalPurposeAvailable,
+    });
   },
   name: AGENT_TOOL_NAME,
   searchHint: 'delegate work to a subagent',
@@ -532,7 +544,42 @@ export const AgentTool = buildTool({
     // Fork subagent experiment routing:
     // - subagent_type set: use it (explicit wins)
     // - subagent_type omitted, gate on: fork path (undefined)
-    // - subagent_type omitted, gate off: default general-purpose
+    // - subagent_type omitted, gate off: default general-purpose — but only
+    //   when densable Abf says GP is available; otherwise throw AVo before
+    //   defaulting (never emit `Agent type 'general-purpose' not found`).
+    const allAgents = toolUseContext.options.agentDefinitions.activeAgents;
+    const { allowedAgentTypes } = toolUseContext.options.agentDefinitions;
+    const forkPathWouldBeTaken = subagent_type === undefined && isForkSubagentEnabled();
+    if (subagent_type === undefined && !forkPathWouldBeTaken) {
+      if (!isGeneralPurposeAvailable(allAgents, allowedAgentTypes)) {
+        const agents = filterDeniedAgents(
+          allowedAgentTypes ? allAgents.filter(a => allowedAgentTypes.includes(a.agentType)) : allAgents,
+          appState.toolPermissionContext,
+          AGENT_TOOL_NAME,
+        );
+        const availableTypes = agents.map(a => a.agentType);
+        // densable Rr = P&&Rbf(W)===null ? [fork,...Et] : Et
+        const forkConstraintsOk =
+          isolation !== 'remote' &&
+          toolUseContext.options.querySource !== `agent:builtin:${FORK_AGENT.agentType}` &&
+          !isInForkChild(toolUseContext.messages);
+        const listed =
+          isForkSubagentEnabled() && forkConstraintsOk ? [FORK_SUBAGENT_TYPE, ...availableTypes] : availableTypes;
+        logEvent('tengu_subagent_type_miss', {
+          requestedNormalized: 'OMITTED' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          availableCount: agents.length,
+        });
+        // densable pe("subagent_launch","subagent_type_missing") → tengu_feature_bad
+        logEvent('tengu_feature_bad', {
+          feature_name: 'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code: 'subagent_type_missing' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+        throw new Error(
+          `${SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE}. Available agents: ${formatAvailableAgentTypes(listed)}`,
+        );
+      }
+    }
+
     const effectiveType = subagent_type ?? (isForkSubagentEnabled() ? undefined : GENERAL_PURPOSE_AGENT.agentType);
     const isForkPath = effectiveType === undefined;
 
@@ -553,8 +600,6 @@ export const AgentTool = buildTool({
       selectedAgent = FORK_AGENT;
     } else {
       // Filter agents to exclude those denied via Agent(AgentName) syntax
-      const allAgents = toolUseContext.options.agentDefinitions.activeAgents;
-      const { allowedAgentTypes } = toolUseContext.options.agentDefinitions;
       const agents = filterDeniedAgents(
         // When allowedAgentTypes is set (from Agent(x,y) tool spec), restrict to those types
         allowedAgentTypes ? allAgents.filter(a => allowedAgentTypes.includes(a.agentType)) : allAgents,
@@ -573,7 +618,7 @@ export const AgentTool = buildTool({
           );
         }
         throw new Error(
-          `Agent type '${effectiveType}' not found. Available agents: ${agents.map(a => a.agentType).join(', ')}`,
+          `Agent type '${effectiveType}' not found. Available agents: ${formatAvailableAgentTypes(agents.map(a => a.agentType))}`,
         );
       }
       selectedAgent = found;

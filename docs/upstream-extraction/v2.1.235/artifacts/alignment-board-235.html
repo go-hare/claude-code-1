@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>densable 2.1.235 · go-hare alignment</title>
+  <style>
+    :root {
+      --bg: #1c1917;
+      --surface: #292524;
+      --text: #fafaf9;
+      --muted: #a8a29e;
+      --have: #4ade80;
+      --partial: #fbbf24;
+      --gap: #f87171;
+      --na: #94a3b8;
+      --accent: #D77757;
+      --border: #44403c;
+    }
+    body {
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1.25rem 3rem;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); margin-bottom: 1.5rem; }
+    .counts { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .pill {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.35rem 0.85rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .pill b.have { color: var(--have); }
+    .pill b.partial { color: var(--partial); }
+    .pill b.gap { color: var(--gap); }
+    .pill b.na { color: var(--na); }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0 1.5rem; }
+    th, td { border: 1px solid var(--border); padding: 0.45rem 0.65rem; text-align: left; }
+    th { background: var(--surface); color: var(--muted); font-weight: 600; }
+    .HAVE { color: var(--have); font-weight: 600; }
+    .N\/A, .NA { color: var(--na); font-weight: 600; }
+    .AUDITING { color: var(--partial); font-weight: 600; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; }
+    .note { color: var(--muted); font-size: 0.92rem; }
+    a { color: var(--accent); }
+    h2 { font-size: 1.1rem; margin-top: 1.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  </style>
+</head>
+<body>
+  <h1>densable 2.1.235 · go-hare alignment</h1>
+  <p class="sub">SEA <code>2.1.235</code> · densable-first 1:1 · <strong>no auto commit</strong> · updated 2026-08-20</p>
+
+  <div class="counts">
+    <span class="pill">HAVE <b class="have">18</b></span>
+    <span class="pill">PARTIAL <b class="partial">0</b></span>
+    <span class="pill">GAP <b class="gap">0</b></span>
+    <span class="pill">UNKNOWN <b class="na">0</b></span>
+    <span class="pill">N/A <b class="na">1</b> (#19)</span>
+  </div>
+
+  <h2>Checklist #1–#19</h2>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>spellcheck underline-as-you-type</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>2</td><td>LSP <code>hasEverConnected</code></td><td class="HAVE">HAVE</td></tr>
+      <tr><td>3</td><td>md-list OIl + hanging</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>4</td><td>highlight multiline shift</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>5</td><td>Shift+Tab ERg collapse</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>6</td><td>Agent <code>AVo</code> GP unavailable</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>7</td><td>notebook <code>contentWithheld</code></td><td class="HAVE">HAVE</td></tr>
+      <tr><td>8</td><td>slash <code>oX</code> unescape</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>9</td><td>update-footer failureHint</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>10</td><td>tasklist expand persist</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>11</td><td>cloud CPU delta/same-ref</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>12</td><td><code>suppressAlwaysAllowRule</code></td><td class="HAVE">HAVE</td></tr>
+      <tr><td>13</td><td>embedded/vendor ripgrep</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>14</td><td>compact-off <code>/config</code></td><td class="HAVE">HAVE</td></tr>
+      <tr><td>15</td><td>vim <code>savedCursorOffset</code></td><td class="HAVE">HAVE</td></tr>
+      <tr><td>16</td><td>dialog <code>getFocusedValue</code></td><td class="HAVE">HAVE</td></tr>
+      <tr><td>17</td><td>SendMessage <code>message_too_large</code></td><td class="HAVE">HAVE</td></tr>
+      <tr><td>18</td><td><code>claude rc</code> enterprise-gateway</td><td class="HAVE">HAVE</td></tr>
+      <tr><td>19</td><td>VSCode host focus</td><td class="NA">N/A</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Extra (not checklist row)</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>CLI IDE bridge <code>uSm</code> / vscodeSdkMcp</td>
+        <td class="HAVE">HAVE</td>
+        <td>14 gates + RnT + log_event + print；verify PASS；#19 仍 N/A</td>
+      </tr>
+      <tr>
+        <td>CLI SDK host（全交互面）</td>
+        <td class="HAVE">HAVE / MATCH</td>
+        <td>control / uSm + HIn meadow + vNh announcements 1:1；GAP 0</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Residuals (intentional)</h2>
+  <ul class="note">
+    <li><code>HIn</code> meadow：读 <code>clientDataCache.meadow_lantern===true</code>（SEA <code>sZs</code> slots 本地扁平等价；非 GB gate）</li>
+    <li><code>vNh</code>：GB <code>tengu_startup_announcements</code> top+SNh → JSON|<code>false</code>（impression 计数属 UI <code>N5t</code>，不进 vNh）</li>
+    <li><code>file_updated</code> SEA 外发 ABSENT → 本地 ant-only</li>
+    <li>#19 preserveFocus / WebviewPanel — 不 invent</li>
+  </ul>
+
+  <p class="note">等用户「提交」再 Conventional Commit · 禁止自动 bump</p>
+</body>
+</html>

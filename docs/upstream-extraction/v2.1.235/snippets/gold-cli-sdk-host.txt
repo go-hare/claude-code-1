@@ -1,0 +1,37 @@
+# gold-cli-sdk-host — densable SEA 2.1.235 CLI↔SDK interaction surfaces
+# SEA: /tmp/official-235/plat/package/claude · sha256 83b8f806…
+# User 2026-08-20: 「cli sdk host 也看一下」「全部 跟 sdk 交互的」
+# Dig: Explore a66aed1217a7e3c4d · densable-first · READ-ONLY
+# Sibling land: gold-vscode-ide-bridge.txt (uSm) · #19 N/A
+
+## Verdict
+HAVE / MATCH for CLI SDK host product surfaces vs densable external SEA.
+GAP: 0. meadow_lantern + vNh landed 1:1 (clientDataCache / tengu_startup_announcements).
+#19 / packages/vscode-ide-bridge = N/A (do not invent).
+
+## MATCH
+| Surface | Local | SEA evidence |
+| --- | --- | --- |
+| uSm / setupVscodeSdkMcp | vscodeSdkMcp.ts 14 gates + RnT + log_event | experiment_gates, tengu_vscode_*, setNotificationHandler |
+| print options bag | print.ts ~1957 | $re/UAi/HIn/vNh/VJg/Fjc, fable5:!1 |
+| IDE lock / sse-ide\|ws-ide | ide.ts | PRESENT sse-ide/ws-ide, lock fields, CLAUDE_CODE_SSE_PORT |
+| ENTRYPOINT / tP platform | getAnthropicClientPlatform + hUe | CLAUDE_CODE_ENTRYPOINT → claude_code_vscode |
+| control initialize / mcp_set_servers | controlSchemas.ts + print handlers | mcp_set_servers, sdkMcpServers, control_request/response |
+| sdkClients/tools merge then uSm | print updateSdkMcp | SEA MCP update path then uSm |
+| control subtype host surface | print StructuredIO/QueryEngine | interrupt/initialize/set_*/mcp_*/reload_plugins/… |
+| bridge/remote control family | remoteBridge / SdkControlTransport | control_request/response present |
+
+## Closed PARTIAL → MATCH
+- HIn: `et(harbor_willow) || clientDataCache.meadow_lantern===true` (SEA sZs slots residual: local flat cache)
+- vNh: `bNh`/`SNh`/`vNh` — GB `tengu_startup_announcements`, priority sort, `isModelAllowed`, JSON|false
+
+## N/A / non-claims
+- #19 preserveFocus / WebviewPanel / packages/vscode-ide-bridge
+- file_updated: SEA external ABSENT (0) — local ant-only keep, not GAP
+- tengu_vscode_sdk_stream_ended_no_result: analytics allowlist only, not gates/protocol gap
+- QueryEngine string ABSENT in SEA (mangled) ≠ local QueryEngine GAP
+
+## Tests / verify
+- vscodeSdkMcp.235.test.ts: 14 pass
+- verification agent a45ee9594dd7d14dd: PASS (IDE bridge gates)
+- verification agent af14d5cf2f064927b: PASS (meadow/vNh residual + adversarial 22/22 + tsc 0)

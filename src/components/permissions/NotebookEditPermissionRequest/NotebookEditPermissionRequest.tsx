@@ -1,12 +1,13 @@
 import { basename } from 'path';
-import React from 'react';
+import React, { Suspense, use, useMemo } from 'react';
 import type { z } from 'zod/v4';
-import { Text } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import { NotebookEditTool } from '@claude-code/builtin-tools/tools/NotebookEditTool/NotebookEditTool.js';
 import { logError } from '../../../utils/log.js';
 import { FilePermissionDialog } from '../FilePermissionDialog/FilePermissionDialog.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { NotebookEditToolDiff } from './NotebookEditToolDiff.js';
+import { buildNotebookPermissionPreview, type NotebookPermissionPreviewResult } from './notebookPermissionPreview.js';
 
 type NotebookEditInput = z.infer<typeof NotebookEditTool.inputSchema>;
 
@@ -26,6 +27,42 @@ export function NotebookEditPermissionRequest(props: PermissionRequestProps): Re
   };
 
   const parsed = parseInput(props.toolUseConfirm.input);
+  const previewPromise = useMemo(
+    () =>
+      buildNotebookPermissionPreview({
+        notebook_path: parsed.notebook_path,
+        cell_id: parsed.cell_id,
+        new_source: parsed.new_source,
+        cell_type: parsed.cell_type,
+        edit_mode: parsed.edit_mode,
+        remoteWorkspace: false,
+      }),
+    [parsed.notebook_path, parsed.cell_id, parsed.new_source, parsed.cell_type, parsed.edit_mode],
+  );
+
+  return (
+    <Suspense fallback={null}>
+      <NotebookEditPermissionRequestInner
+        {...props}
+        parsed={parsed}
+        parseInput={parseInput}
+        previewPromise={previewPromise}
+      />
+    </Suspense>
+  );
+}
+
+function NotebookEditPermissionRequestInner({
+  parsed,
+  parseInput,
+  previewPromise,
+  ...props
+}: PermissionRequestProps & {
+  parsed: NotebookEditInput;
+  parseInput: (input: unknown) => NotebookEditInput;
+  previewPromise: Promise<NotebookPermissionPreviewResult>;
+}): React.ReactNode {
+  const preview = use(previewPromise);
   const { notebook_path, edit_mode, cell_type } = parsed;
 
   const language = cell_type === 'markdown' ? 'markdown' : 'python';
@@ -36,6 +73,24 @@ export function NotebookEditPermissionRequest(props: PermissionRequestProps): Re
       : edit_mode === 'delete'
         ? 'delete this cell from'
         : 'make this edit to';
+
+  const content =
+    preview.kind === 'no-changes' ? (
+      <Box paddingX={1} marginBottom={1}>
+        <Text dimColor>{preview.message}</Text>
+      </Box>
+    ) : (
+      <NotebookEditToolDiff
+        notebook_path={parsed.notebook_path}
+        cell_id={parsed.cell_id}
+        new_source={parsed.new_source}
+        cell_type={parsed.cell_type}
+        edit_mode={parsed.edit_mode}
+        verbose={props.verbose}
+        width={props.verbose ? 120 : 80}
+        oldCellSource={preview.oldCellSource}
+      />
+    );
 
   return (
     <FilePermissionDialog
@@ -50,21 +105,12 @@ export function NotebookEditPermissionRequest(props: PermissionRequestProps): Re
           Do you want to {editTypeText} <Text bold>{basename(notebook_path)}</Text>?
         </Text>
       }
-      content={
-        <NotebookEditToolDiff
-          notebook_path={parsed.notebook_path}
-          cell_id={parsed.cell_id}
-          new_source={parsed.new_source}
-          cell_type={parsed.cell_type}
-          edit_mode={parsed.edit_mode}
-          verbose={props.verbose}
-          width={props.verbose ? 120 : 80}
-        />
-      }
+      content={content}
       path={notebook_path}
       completionType="tool_use_single"
       languageName={language}
       parseInput={parseInput}
+      contentWithheld={preview.contentWithheld}
     />
   );
 }

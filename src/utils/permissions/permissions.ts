@@ -368,6 +368,44 @@ export function toolAlwaysAllowedRule(
 }
 
 /**
+ * densable 2.1.235 #12 `jze` / stripWholeToolGrantsForAsk.
+ *
+ * When an ask sets suppressAlwaysAllowRule (or the tool's
+ * suppressesAlwaysAllowRule(input) is true), accepting with permanent updates
+ * must not mint a bare whole-tool allow broader than the ask verb. Strip
+ * addRules(allow) entries whose ruleContent is absent and match this tool.
+ */
+export function stripWholeToolGrantsForAsk(
+  updates: PermissionUpdate[],
+  tool: Pick<Tool, 'name' | 'mcpInfo'>,
+  _context?: ToolPermissionContext,
+): PermissionUpdate[] {
+  const out: PermissionUpdate[] = []
+  for (const update of updates) {
+    if (update.type !== 'addRules' || update.behavior !== 'allow') {
+      out.push(update)
+      continue
+    }
+    const rules = update.rules.filter(rule => {
+      // Keep scoped rules (have content) and rules that do not whole-match tool.
+      if (rule.ruleContent !== undefined) return true
+      return !toolMatchesRule(tool, {
+        source: 'session',
+        ruleBehavior: 'allow',
+        ruleValue: rule,
+      })
+    })
+    if (rules.length === 0) continue
+    if (rules.length === update.rules.length) {
+      out.push(update)
+      continue
+    }
+    out.push({ ...update, rules })
+  }
+  return out
+}
+
+/**
  * Check if the tool is listed in the always deny rules
  */
 export function getDenyRuleForTool(

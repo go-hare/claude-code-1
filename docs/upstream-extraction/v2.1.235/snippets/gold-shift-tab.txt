@@ -1,0 +1,18 @@
+@79455380: commended to only use in isolated environments. Shift+Tab to change mode............H.*.....3'.......................9......seedFromBackend.........	_......onThrow.I.................*.....logThrowOnce............	n......primes..I.*......
+---
+@298185425: ermission-mode auto\`. Auto mode is also in the Shift+Tab cycle when it's available in the session |
+
+## Removed keyboard and input shortcuts
+
+| Removed | Replacement |
+|---|---|
+| \`#\` prefix for quick memory entry | Ask Claude to edit
+---
+@298187282: ome from the schema; don't invent them.
+- The \`Shift+Tab\` permission-mode cycle is \`default \u2192 acceptEdits \u2192 plan \u2192 bypassPermissions \u2192 auto \u2192 default\`, where \`bypassPermissions\` and \`auto\` appear only whe
+---
+@298188937: \`/output-style\`.
+- Auto mode is available via Shift+Tab or \`--permission-mode auto\`. On Bedrock, Vertex, and Foundry, auto mode availability may differ from first-party \u2014 check the provider's docs page.
+- WebSearch is unavailabl
+---
+@298686086: commended to only use in isolated environments. Shift+Tab to change mode.",b9g,S9g;var T9g=w(()=>{Yo();b9g=`${y9g} ${y4E} ${_9g}`,S9g=`${y9g} ${_9g}`});var I9g={};_t(I9g,{REPL:()=>dgs});function I4E(jmH){return(jmH+1)%cgs.length}function

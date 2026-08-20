@@ -1,0 +1,56 @@
+# densable SEA gold — changelog #6 agent-default
+# SEA: /tmp/official-235/plat/package/claude
+# Proven via strings|rg (do not invent)
+
+## User-facing constant (omitted subagent_type when GP unavailable)
+AVo="subagent_type is required: the general-purpose agent is not available in this session"
+
+## Agent tool symbols colocated
+var zs="Read";var fi="Agent",t5="Task",kVo=1e5,OUd,AVo="subagent_type is required: the general-purpose agent is not available in this session";
+var ey=w(()=>{OUd=new Set(["Explore","Plan"])});
+xke="fork"
+function FTi(e){return e.join(", ")||"none"}
+Vyt=class Vyt extends Error{constructor(e){super(e);this.name="AgentTypeError"}}
+
+## Prompt builder when GP unavailable vs available
+async function Thf({model:e,isCoordinator:t,forkAvailable:r,generalPurposeAvailable:n}){
+  ...
+  s=`${AVo}, so choose ${i?'`"fork"` or ':""}one of the listed agent types.`
+  ...
+  `When using the ${fi} tool, specify a subagent_type parameter to select which agent type to use. ${n?"If omitted, the general-purpose agent is used.":s}`
+}
+
+## Runtime throw on omitted subagent_type + GP unavailable (THE #6 fix)
+if(t===void 0&&!Abf(k,R)){
+  H("tengu_subagent_type_miss",{requestedNormalized:xe("OMITTED"),availableCount:Ye.length}),
+  pe("subagent_launch","subagent_type_missing");
+  let Rr=P&&Rbf(W)===null?[xke,...Et]:Et;
+  throw new Vyt(`${AVo}. Available agents: ${FTi(Rr)}`)
+}
+
+## GP availability helper
+function Abf(e,t){
+  let r=QJe(eAe.agentType),n=e.filter((s)=>QJe(s.agentType)===r),
+  o=(s)=>t?.includes(s.agentType)??!0,
+  i=n.find((s)=>s.agentType===eAe.agentType);
+  if(i)return o(i);return n.length===1&&o(n[0])
+}
+# eAe.agentType === "general-purpose"
+
+## Related not-found / ambiguous (same FTi listing pattern)
+throw new Vyt(`Agent type '${gr}' not found. Available agents: ${FTi(Et)}`)
+`None of these are available. Available agents: ${FTi(Et)}`
+pe("subagent_launch","subagent_type_not_found")
+pe("subagent_launch","subagent_type_ambiguous")
+H("tengu_subagent_type_normalized",...)
+H("tengu_subagent_type_miss",...)
+
+## Gold strings
+- subagent_type is required: the general-purpose agent is not available in this session
+- ${AVo}. Available agents: ${FTi(...)}
+- If omitted, the general-purpose agent is used.
+- so choose `"fork"` or one of the listed agent types. / so choose one of the listed agent types.
+- tengu_subagent_type_miss
+- subagent_launch / subagent_type_missing
+- requestedNormalized: "OMITTED"
+- AgentTypeError

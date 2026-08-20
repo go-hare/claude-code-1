@@ -40,6 +40,14 @@ let initializationGeneration = 0
 let initializationPromise: Promise<void> | undefined
 
 /**
+ * Sticky latch (densable SEA `hasEverConnected` / GUr): once any non-error LSP
+ * server has been observed connected, stays true for the process lifetime even
+ * across disconnect/reinitialize. Keeps LSPTool.isEnabled stable so mid-session
+ * reconnect does not flip toolSchemasChanged → tengu_prompt_cache_break.
+ */
+let everConnectedLatch = false
+
+/**
  * Get the singleton LSP server manager instance.
  * Returns undefined if not yet initialized, initialization failed, or still pending.
  *
@@ -81,8 +89,8 @@ export function getInitializationStatus():
 }
 
 /**
- * Check whether at least one language server is connected and healthy.
- * Backs LSPTool.isEnabled().
+ * Check whether at least one language server is connected and healthy (live).
+ * densable SEA `isConnected` / ZMA — not used for LSPTool.isEnabled.
  */
 export function isLspConnected(): boolean {
   if (initializationState === 'failed') return false
@@ -94,6 +102,67 @@ export function isLspConnected(): boolean {
     if (server.state !== 'error') return true
   }
   return false
+}
+
+/**
+ * Sticky ever-connected latch (densable SEA `hasEverConnected` / GUr).
+ * Latches true the first time isLspConnected() is true; never clears.
+ */
+export function hasEverConnected(): boolean {
+  if (!everConnectedLatch && isLspConnected()) {
+    everConnectedLatch = true
+  }
+  return everConnectedLatch
+}
+
+/**
+ * densable SEA `lpT`: defer LSP tool only while init is still pending/not-started
+ * and we have never seen a connected server. Once hasEverConnected latches,
+ * never defer for init (avoids schema churn / prompt-cache break).
+ */
+export function shouldDeferLspTool(tool: { isLsp?: boolean }): boolean {
+  if (!('isLsp' in tool) || !tool.isLsp) {
+    return false
+  }
+  if (hasEverConnected()) {
+    return false
+  }
+  const status = getInitializationStatus()
+  return status.status === 'pending' || status.status === 'not-started'
+}
+
+/**
+ * Test-only: clear singleton + sticky latch so *235* unit tests can start fresh.
+ * densable SEA has no reset; process-lifetime latch is the product behavior.
+ */
+export function resetLspManagerForTests(): void {
+  lspManagerInstance = undefined
+  initializationState = 'not-started'
+  initializationError = undefined
+  initializationPromise = undefined
+  initializationGeneration++
+  everConnectedLatch = false
+}
+
+/**
+ * Test-only: install a fake manager / init status for latch + defer coverage.
+ */
+export function setLspManagerForTests(opts: {
+  manager?: LSPServerManager | undefined
+  status?: InitializationState
+  error?: Error
+}): void {
+  if ('manager' in opts) {
+    lspManagerInstance = opts.manager
+  }
+  if (opts.status !== undefined) {
+    initializationState = opts.status
+    if (opts.status !== 'failed') {
+      initializationError = undefined
+    } else if (opts.error) {
+      initializationError = opts.error
+    }
+  }
 }
 
 /**

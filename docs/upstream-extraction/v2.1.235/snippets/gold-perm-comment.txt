@@ -1,0 +1,65 @@
+@74953584: usion pattern, but exclusions only exempt a command where a permission prompt can approve the unsandboxed run, and none is available here. Shell command execution is blocked by policy..............(.....markAvailable...........IW......ListCapExceeded.........I.$.....**IMPORTA
+---
+@75070685:  mode..	.&.............	.......Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.......	.&.............I.&.0...https:
+---
+@77090178: ---|---------|
+| PermissionRequest | Tool name | Run before permission prompt |
+| PreToolUse | Tool name | Run before tool, can block |
+| PostToolUse | Tool name | Run after successful tool |
+| PostToolUseFailure | Tool name | Run after tool fails |
+| Notification | Notificati
+---
+@83811949:  but the page may be loading, unresponsive, or waiting on a permission prompt in the extension side panel. Try a lighter operation (e.g., "get_page_text" instead of a screenshot) or ask the user to check the page and any pending prompts...........................	...~..." tool
+---
+@83826829: . The Chrome extension may be slow to start or waiting on a permission prompt. Retry navigate, or call tabs_context_mcp explicitly to get a tabId first................	.......text....................	...#...tabs_context_mcp returned an error......................	...@...Cannot
+---
+@85638334: sable.................	...0...Disable the ability to bypass permission prompts1.......................	...9...Additional directories to include in the permission scope...........................F.....................................@........;.Ir<...4.	%<.s.L...o..@........;.Ir
+---
+@85734527: -dialog deadline; "never" disables the deadline. Local-only permission prompts (no remote client) are unaffected. The CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS env var, when set, overrides this. Read from trusted sources only (never a checked-in repo settings file)...................
+---
+@85747174:  control).....................	...>...Push to mobile when a permission prompt or question is waiting..........	...3...Allow Claude to push proactive mobile notifications............................................................................................................
+---
+@94533456: ....	.......Error in permission callback: ..........	.......permission prompt failed............................................e...........................e................@ /.^.4..`N.@ ........T.....
+...@.4.....@.lE,......G....@.,.R.4...M.@ ......@`T...........4..03...L.....
+---
+@107618789: sion ..........	....... entered 'requires_action' (likely a permission prompt) with no client to answer it. Ensure the cloud agent's allowed_tools cover what it needs, or set a permissive mode...............	.......: fetchSession failed ..................	....... times in a ro
+---
+@119422252:  via updatedInput.......................	......., bypassing permission prompt.......................................................z...
+.........................p..@ ......@@..@...@...R...@p5.J...@.}.@...E...f j.@ O.@...@`..J.....[.@.%.J.....ZB....@.D.@ ..@ ..@ ..@ ..@ ..K`.]
+---
+@120316704: ....................	.......?.......................	.......permission prompt ......................	...	...tool_name.......d.......................	.......: ......................	.......dialog prompt: .........	.......dialog_kind.............	.......MCP prompt .............	
+---
+@135127513: ...........	...]...Action requires interactive approval and permission prompts are not available in this context.....................................................`^.@ ..........................................7
+.....................8.?.....................`#................
+---
+@138460027:  from the user's project, and can generally be used without permission prompts.......................	..............................$.....@0e.Y....`g.....@p<.....@.L.................... ...:...<...W...Y...............................................Hn......................`...
+---
+@159354225: ...	...b.... Keep this session open; it may still pause for permission prompts. Press esc to cancel the wait...................................#............................@p<.w...../..0........T..0........T......IN..PT .......@......<..0........4.......3...=.......2...6......
+---
+@166841129: d not attest its permission mode, and this session bypasses permission prompts.............	...-...Your "crossSessionInbound" setting is "hold"............	...I...Your organization's managed settings set "crossSessionInbound" to "hold"................	...u...This repository's 
+---
+@167324720: ............ ...............
+.......................	.......permission prompt................................................................@....@M.@ .............
+...&...................0.`..................\......MKG.	-..>...5KG.?...YKG..KG......H..P........................
+---
+@167863712: itized allowlist to project .claude/settings.json to reduce permission prompts..............
+.................................................P...	...........................................F..............................................^.......................................
+---
+@171422525: olumn..................	.......Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.....................................
+---
+@173694274: ..	...U...Browser actions still go through Claude's regular permission prompts before they run....................	...6...Site-level permissions come from the Chrome extension...................................	...
+...permission..............	......./chrome.	...............	..
+---
+@174369444: ................	.......deny....................	...+...SDK permission prompt deny+interrupt: tool=.............	...	... message=...............	.......ask-path............................P...........................3....@..D$...@...E...@ e.@`L.I...@...S...@pM.Z...@.M.C...@...
+---
+@176511588: ................	.......error...................	...B...The permission prompt tool returned an invalid permission result. ......................	...N...MCP tool requires user interaction; not supported via --permission-prompt-tool...............................................
+---
+@176834276: sion-prompt-tool <tool>.........	...@...MCP tool to use for permission prompts (only works with --print)........	.......--system-prompt <prompt>................	...$...System prompt to use for the session....................	.......--system-prompt-file <file>.............	....
+---
+@181651108:  finished,
+                                  or parked at a permission prompt, user idle). Runner exits if this
+                                  drops it to zero active sessions.
+                                  Default: never. Max: .........................?.....
+. . . . . 
+---
+@234639859: ng directory. Resolved to an absolute path and shown in the permission prompt........................?...r.e.p.o.r.t._.v.a.l.i.d.a.t.e.:. .a.g.g.r.e.g.a.t.e. .f.r.o.m. .t.h.e. .f.i.n.a.l. ...r.e.n.d.e.r.-.c.h.e.c.k...j.s.o.n. ..  ...........	...)...counts only, no component na

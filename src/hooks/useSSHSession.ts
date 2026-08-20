@@ -110,6 +110,12 @@ export function useSSHSession({
             request.description ?? `${request.tool_name} requires permission`,
           suggestions: request.permission_suggestions,
           blockedPath: request.blocked_path,
+          ...((request as { suppress_always_allow_rule?: boolean })
+            .suppress_always_allow_rule !== undefined && {
+            suppressAlwaysAllowRule: (
+              request as { suppress_always_allow_rule?: boolean }
+            ).suppress_always_allow_rule,
+          }),
         }
 
         const toolUseConfirm: ToolUseConfirm = {

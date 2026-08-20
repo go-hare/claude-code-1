@@ -24,6 +24,8 @@ type SwarmWorkerPermissionParams = {
   pendingClassifierCheck?: PendingClassifierCheck | undefined
   updatedInput: Record<string, unknown> | undefined
   suggestions: PermissionUpdate[] | undefined
+  /** densable 2.1.235 #12 — ask-side suppressAlwaysAllowRule for accept-path strip */
+  suppressAlwaysAllowRule?: boolean
 }
 
 /**
@@ -107,6 +109,11 @@ async function handleSwarmWorkerPermission(
                 feedback,
                 undefined,
                 contentBlocks,
+                undefined,
+                {
+                  askSuppressesAlwaysAllowRule:
+                    params.suppressAlwaysAllowRule === true,
+                },
               ),
             )
           },

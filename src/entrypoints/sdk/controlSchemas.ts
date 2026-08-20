@@ -121,6 +121,20 @@ export const SDKControlPermissionRequestSchema = lazySchema(() =>
       tool_use_id: z.string(),
       agent_id: z.string().optional(),
       description: z.string().optional(),
+      /**
+       * densable 2.1.235 #12 wire field.
+       * True when the dialog must not offer the persistent "don't ask again" row
+       * for this ask: accepting it would write a whole-tool allow rule broader
+       * than the ask's own verb (PermissionAskDecision.suppressAlwaysAllowRule).
+       * Hosts rendering approve options should omit any persistent-rule
+       * affordance when set.
+       */
+      suppress_always_allow_rule: z
+        .boolean()
+        .optional()
+        .describe(
+          'True when the dialog must not offer the persistent "don\'t ask again" row for this ask: accepting it would write a whole-tool allow rule broader than the ask\'s own verb (PermissionAskDecision.suppressAlwaysAllowRule). Hosts rendering approve options should omit any persistent-rule affordance when set.',
+        ),
     })
     .describe('Requests permission to use a tool with the given input.'),
 )

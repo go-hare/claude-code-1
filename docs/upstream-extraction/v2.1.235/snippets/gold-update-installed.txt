@@ -1,0 +1,9 @@
+@162616080: ........	.......r.......................	...#...Update installed . Restart to apply.....................	.......no_permissions..........	.......error...................	...;...Auto-update failed: no write
+---
+@162648480: ........	.......r.......................	...$...Update installed . Restart to update....................	.......install_failed..........	.......error...................	.......Auto-update failed . Run ...
+---
+@294594112: en:[Xh.jsx(ui,{status:"success",withSpace:!0}),"Update installed \xB7 Restart to apply"]}),i?.status==="no_permissions"&&Xh.jsxs(_,{color:"error",wrap:"truncate",children:[Xh.jsx(ui,{status:"error",withSp
+---
+@294603309: n:[jGe.jsx(ui,{status:"success",withSpace:!0}),"Update installed \xB7 Restart to update"]}),i?.status==="install_failed"&&jGe.jsxs(_,{color:"error",wrap:"truncate",children:[jGe.jsx(ui,{status:"error",wit
+---
+@294609563: lor:"success",wrap:"truncate",children:["\u2713 Update installed",cst," \xB7 Restart to apply"]}),Wwe[16]=cst,Wwe[17]=M9t;else M9t=Wwe[17];let ldn;if(Wwe[18]!==c$e||Wwe[19]!==M9t)ldn=N3.jsxs(x,{flexDirect

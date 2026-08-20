@@ -128,6 +128,7 @@ import {
   currentLimits,
   extractQuotaStatusFromError,
   extractQuotaStatusFromHeaders,
+  type QuotaRejectedQuerySourceBucket,
 } from '../claudeAiLimits.js'
 import { getAPIContextManagement } from '../compact/apiMicrocompact.js'
 import { bedrockAdapter } from '../providerUsage/adapters/bedrock.js'
@@ -276,7 +277,7 @@ import {
   markToolsSentToAPIState,
   pinCacheEdits,
 } from '../compact/microCompact.js'
-import { getInitializationStatus } from '../lsp/manager.js'
+import { shouldDeferLspTool } from '../lsp/manager.js'
 import { isToolFromMcpServer } from '../mcp/utils.js'
 import { recordLLMObservation } from '../langfuse/index.js'
 import type { LangfuseSpan } from '../langfuse/index.js'
@@ -961,19 +962,6 @@ export async function* queryModelWithStreaming({
 }
 
 /**
- * Determines if an LSP tool should be deferred (tool appears with defer_loading: true)
- * because LSP initialization is not yet complete.
- */
-function shouldDeferLspTool(tool: Tool): boolean {
-  if (!('isLsp' in tool) || !tool.isLsp) {
-    return false
-  }
-  const status = getInitializationStatus()
-  // Defer when pending or not started
-  return status.status === 'pending' || status.status === 'not-started'
-}
-
-/**
  * Per-attempt timeout for non-streaming fallback requests, in milliseconds.
  * Reads API_TIMEOUT_MS when set so slow backends and the streaming path
  * share the same ceiling.
@@ -1327,6 +1315,19 @@ async function* queryModel(
     options.querySource === 'sdk' ||
     options.querySource === 'hook_agent' ||
     options.querySource === 'verification_agent'
+
+  /**
+   * densable hAm: Hz(agentContext)=agentType==="main" (no ALS store ⇒ main) AND
+   * B1(querySource)==="main" (repl_main_thread* | sdk) → main_thread; else other.
+   * Passed to extractQuotaStatusFromError → quotaRejected → s0v rearm gate.
+   */
+  const quotaRejectQuerySourceBucket: QuotaRejectedQuerySourceBucket = (() => {
+    // Local ALS has no agentType:"main" object — undefined store ⇒ main (SEA Hz).
+    const isMainAgent = getAgentContext() === undefined
+    const qs = options.querySource
+    const isMainSource = qs.startsWith('repl_main_thread') || qs === 'sdk'
+    return isMainAgent && isMainSource ? 'main_thread' : 'other'
+  })()
   // densable mzt → sticky-filter o3: if midConvLatchedOff (Iz sticky reject),
   // drop o3 from the request beta list for the rest of the session.
   let betas = getMergedBetas(options.model, { isAgenticQuery }).filter(
@@ -4434,7 +4435,7 @@ async function* queryModel(
             }
 
             if (error instanceof APIError) {
-              extractQuotaStatusFromError(error)
+              extractQuotaStatusFromError(error, quotaRejectQuerySourceBucket)
             }
 
             const requestId =
@@ -4492,7 +4493,7 @@ async function* queryModel(
 
           // Extract quota status from error headers if it's a rate limit error
           if (error instanceof APIError) {
-            extractQuotaStatusFromError(error)
+            extractQuotaStatusFromError(error, quotaRejectQuerySourceBucket)
           }
 
           // Extract requestId from stream, error header, or error body

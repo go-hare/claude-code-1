@@ -3,6 +3,7 @@ import { DIAMOND_FILLED, DIAMOND_OPEN } from '../../constants/figures.js';
 import { NO_CONTENT_MESSAGE } from '../../constants/messages.js';
 import { Box, Text } from '@anthropic/ink';
 import { extractTag } from '../../utils/messages.js';
+import { unescapeXmlEntities } from '../../utils/xml.js';
 import { Markdown } from '../Markdown.js';
 import { MessageResponse } from '../MessageResponse.js';
 
@@ -11,8 +12,11 @@ type Props = {
 };
 
 export function UserLocalCommandOutputMessage({ content }: Props): React.ReactNode {
-  const stdout = extractTag(content, 'local-command-stdout');
-  const stderr = extractTag(content, 'local-command-stderr');
+  // densable oX — unescape &amp;|&lt;|&gt; before UI (write path may escapeXml/EHe)
+  const stdoutRaw = extractTag(content, 'local-command-stdout');
+  const stderrRaw = extractTag(content, 'local-command-stderr');
+  const stdout = stdoutRaw === null ? null : unescapeXmlEntities(stdoutRaw);
+  const stderr = stderrRaw === null ? null : unescapeXmlEntities(stderrRaw);
   if (!stdout && !stderr) {
     return (
       <MessageResponse>

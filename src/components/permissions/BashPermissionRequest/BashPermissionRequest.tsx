@@ -285,6 +285,10 @@ function BashPermissionRequestInner({
         noInputMode,
         editablePrefix,
         onEditablePrefixChange,
+        permissionResult: toolUseConfirm.permissionResult,
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input,
+        isAskCappedByOrg: toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask',
       }),
     [
       toolUseConfirm,

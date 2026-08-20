@@ -1,0 +1,45 @@
+# gold-quota-rearm-T0S — densable SEA 2.1.235 quota auto-resume rearm cap
+# SEA: /tmp/official-235/plat/package/claude · HEv=2 · p4f=[60000,300000]
+# Dig: 2026-08-20 · densable-first · READ-ONLY then wire
+
+## Verdict
+Local REARM_CAP / consecutiveRearms / rearmed / rearm_cap were hollow.
+SEA rearm is **same episode, after continuation claim hits quota again** — not merely new resetsAt autoArm.
+
+## SEA symbols
+- HEv = 2 (T0S / REARM_CAP)
+- p4f = [60000, 300000] — min delay after now when rearm !== null (JEv)
+- s0v(episode, limits, querySourceBucket) — yYp/quotaRejected subscriber
+- $Za — rearm arm + emit `rearmed` (+ `taken-over` if auto→dialog)
+- A4f / arm — rearm telemetry `rearm: r===null?0:r+1`
+- xxi(rateLimitType, model) — five_hour|seven_day|overage always; seven_day_opus → yDe/Wjo(family===opus); seven_day_sonnet → ZWs/Wjo(family===sonnet). Same-family eligible (NOT inverted).
+
+## s0v selection (authoritative)
+```
+if !OVn(limits) || !S4f(): return
+n = resetsAt
+if udr(live) && xxi(type, model): autoArmDedupe.add(n)
+if phase==="armed":
+  if n*1000 > fireAtMs && xxi(...): $Za(e,n,null,origin)
+  return
+if pendingContinuationInQueue: return
+if phase==="stale": return
+if activeTurnClaim===null: return
+if querySourceBucket !== "main_thread": return
+if claim.kind==="takeover":
+  consecutiveRearms=0; $Za(..., null, "dialog"); return
+if consecutiveRearms >= HEv:
+  cancel rearm_cap; dedupe.add(n); idle; emit cap-exhausted; return
+i = consecutiveRearms; consecutiveRearms++; $Za(e,n,i,origin)
+```
+
+## querySourceBucket (hAm)
+`Hz(agentContext)=agentType==="main"` AND `B1(querySource)==="main"`
+(`repl_main_thread*` | `sdk`) → `"main_thread"` else `"other"`.
+quotaRejected emits only from extractQuotaStatusFromError (not headers).
+
+## Local land
+- Wire s0v/$Za/JEv rearm path in quotaAutoResume.ts
+- Emit quotaRejected(limits, bucket) from claudeAiLimits error path
+- Pass bucket from claude.ts API error handlers
+- Tests: increment, cap@2, rearmed event, no invent cross-window-only cap

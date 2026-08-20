@@ -7,14 +7,17 @@ import {
   tokenize,
   undoAnsiCodes,
 } from '@alcalzone/ansi-tokenize'
+import type { Color } from '@anthropic/ink'
 import type { Theme } from './theme.js'
 
 export type TextHighlight = {
   start: number
   end: number
-  color: keyof Theme | undefined
+  /** Theme key or raw Ink Color (densable spellcheck underline uses either). */
+  color: keyof Theme | Color | undefined
   dimColor?: boolean
   inverse?: boolean
+  underline?: boolean
   shimmerColor?: keyof Theme
   priority: number
 }

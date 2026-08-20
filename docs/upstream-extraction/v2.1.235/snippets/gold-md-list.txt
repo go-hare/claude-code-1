@@ -1,0 +1,51 @@
+@147577040: ........................................	...	...listDepth...............	.......orderedListNumber....................X.......8...'..,...w8.......8...9.......H..P.......................................................x
+---
+@147586477: ...........	...D...Cannot destructure property 'listDepth' from null or undefined value....................................................	...............(...................
+...........................	.............
+---
+@292212950: {return cgr(),gw.lexer(Ubt(e)).map((n)=>i3(n,t,{listDepth:0,orderedListNumber:null,parent:null,highlight:r})).join("").trim()}function QQr(e){if(!e.endsWith(`
+`))return!1;for(let t=e.length-2;t>=0;t--){let r=e[t];if(r
+---
+@292213195: (r))return!1}return!1}function i3(e,t,r={}){let{listDepth:n=0,orderedListNumber:o=null,parent:i=null,highlight:s=null,glueProse:a=!1,screenReader:l=!1,listIndent:c="",promptMode:u=!1}=r,d=r.linkCap??CL();switch(e.type
+---
+@292213422: ckquote":{let p=(e.tokens??[]).map((m)=>i3(m,t,{listDepth:0,orderedListNumber:null,parent:null,highlight:s,glueProse:!1,linkCap:d,screenReader:l,promptMode:u})).join(""),f=Qt.dim(hTu);return p.split(BU).map((m)=>is(m)
+---
+@292213992: eturn Qt.italic((e.tokens??[]).map((p)=>i3(p,t,{listDepth:0,orderedListNumber:null,parent:i,highlight:s,glueProse:a,linkCap:d,promptMode:u})).join(""));case"strong":return Qt.bold((e.tokens??[]).map((p)=>i3(p,t,{listD
+---
+@292214156: :return Qt.bold((e.tokens??[]).map((p)=>i3(p,t,{listDepth:0,orderedListNumber:null,parent:i,highlight:s,glueProse:a,linkCap:d,promptMode:u})).join(""));case"del":{let p=(e.tokens??[]).map((f)=>i3(f,t,{listDepth:0,orde
+---
+@292214309: ase"del":{let p=(e.tokens??[]).map((f)=>i3(f,t,{listDepth:0,orderedListNumber:null,parent:i,highlight:s,glueProse:a,linkCap:d,promptMode:u})).join("");return Uno()&&Qt.level>0?Qt.strikethrough(p):`~~${p}~~`}case"headi
+---
+@292214521: heading":{let p=(e.tokens??[]).map((m)=>i3(m,t,{listDepth:0,orderedListNumber:null,parent:null,highlight:s,glueProse:!1,linkCap:d,promptMode:u})).join("");return(e.depth===1?Qt.bold.italic.underline:Qt.bold)(XQr(p))+B
+---
+@292215111: ??PIl(e.href),g=(e.tokens??[]).map((A)=>i3(A,t,{listDepth:0,orderedListNumber:null,parent:e,highlight:s,glueProse:!1,linkCap:d,promptMode:u})).join(""),y=is(g),b=k3o(e.href),S=Boolean(y&&y!==e.href),v=(A)=>A.replace(I
+---
+@292215743: +p}case"list":return e.items.map((p,f)=>i3(p,t,{listDepth:n,orderedListNumber:e.ordered?e.start+f:null,parent:e,highlight:s,glueProse:!1,linkCap:d,screenReader:l,listIndent:c,promptMode:u})).join("");case"list_item":{
+---
+@292216227: ),y=!g,b=(e.tokens??[]).map((S)=>{let v=i3(S,t,{listDepth:n+1,orderedListNumber:o,parent:e,highlight:s,glueProse:!1,linkCap:d,screenReader:l,listIndent:m,promptMode:u});if(S.type==="code"||S.type==="blockquote"||S.typ
+---
+@292216726: aph":return XQr((e.tokens??[]).map((p)=>i3(p,t,{listDepth:0,orderedListNumber:null,parent:null,highlight:s,glueProse:!1,linkCap:d,promptMode:u})).join(""))+BU;case"space":return BU;case"br":return BU;case"text":{if(i?
+---
+@292216995: "){let f=e.tokens?XQr(e.tokens.map((g)=>i3(g,t,{listDepth:n,orderedListNumber:o,parent:e,highlight:s,glueProse:!0,linkCap:d,promptMode:u})).join("")):Arh(krh(e.text,t,d,i,u)),m=i.tokens?.[0]===e;return`${i.task&&m?`[$
+---
+@292217307: et f=function(y){return XQr(y?.map((b)=>i3(b,t,{listDepth:0,orderedListNumber:null,parent:null,highlight:s,glueProse:!1,linkCap:d,promptMode:u})).join("")??"")},m=function(y){return is(f(y))},p=e;if(l)return LIl(p.hea
+---
+@292222866: ==void 0)return U;let W=XQr(D?.map((J)=>i3(J,r,{listDepth:0,orderedListNumber:null,parent:null,highlight:n,glueProse:!1,linkCap:o})).join("")??"");return l.set(D,W),W}function u(D){return is(c(D))}if(i){let D=LIl(e.he
+---
+@292228196: olumn",children:Mne.jsx(WIl,{token:jIl,indent:0,listDepth:0,minContentWidth:Vrh,...UIl})}),e6T[3]=Vrh,e6T[4]=UIl,e6T[5]=jIl,e6T[6]=t6T;else t6T=e6T[6];return t6T}function WIl({token:e,indent:t,listDepth:r,...n}){let o
+---
+@292228341: 6T[6];return t6T}function WIl({token:e,indent:t,listDepth:r,...n}){let o=DIl(e);return e.items.map((i,s)=>Mne.jsx(n6T,{item:i,marker:MIl(r,e.ordered?{number:o.first+s,...o}:null),indent:t,listDepth:r,blankLineBefore:s
+---
+@292228481: .ordered?{number:o.first+s,...o}:null),indent:t,listDepth:r,blankLineBefore:s>0&&Jrh(e.items[s-1]),...n,tailWrap:s===e.items.length-1?n.tailWrap:void 0},s))}function Jrh(e){let t=e.tokens.at(-1);if(t?.type==="space"||
+---
+@292228834: r(t.raw)}function n6T({item:e,marker:t,indent:r,listDepth:n,blankLineBefore:o,theme:i,highlight:s,dimColor:a,italic:l,linkCap:c,tailWrap:u,minContentWidth:d}){let p=[];for(let b of e.tokens){if(b.type==="list"){p.push
+---
+@292229050: h({kind:"list",token:b});continue}let S=i3(b,i,{listDepth:n+1,orderedListNumber:null,parent:e,highlight:s,glueProse:!1,linkCap:c});if(Yrh(b)){p.push({kind:"block",text:S,code:b.type==="code"});continue}let v=p.at(-1);
+---
+@292230247: :0,children:Mne.jsx(WIl,{token:b.token,indent:m,listDepth:n+1,theme:i,highlight:s,dimColor:a,italic:l,linkCap:c,tailWrap:v,minContentWidth:d})},S)),g=!1}),h}var Mne,Xrh,Krh=10,qIl=2,zIl=300,r6T=64;var Zrh=w(()=>{NO();
+---
+@292233018: nReader:Bqi}),"block");else{_4t=_4t+i3(een,$qi,{listDepth:0,orderedListNumber:null,parent:null,highlight:Jno,glueProse:!1,linkCap:Xno,screenReader:Bqi,promptMode:y4t});_4t}}),qqi(Fqi),y4t&&jqi.length===0&&Uqi.trim())_
+---
+@292233788: h[8]!==Kqi||cnh[9]!==Gqi)Jqi=(VJO)=>i3(VJO,Gqi,{listDepth:0,orderedListNumber:null,parent:null,highlight:Vqi,glueProse:!1,linkCap:Kqi,screenReader:Yqi}),cnh[6]=Vqi,cnh[7]=Yqi,cnh[8]=Kqi,cnh[9]=Gqi,cnh[10]=Jqi;else Jqi
+---
+@293165249: ){return cgr(),dSw(gw.lexer(e).map((r)=>i3(r,t,{listDepth:0,orderedListNumber:null,parent:null,highlight:oce(),linkCap:!1})).join("")).trim()}function _Sw(e,t,r,n){let o=Math.max(1,t),i=n?.colorLevel??sSw,s=n?.theme??

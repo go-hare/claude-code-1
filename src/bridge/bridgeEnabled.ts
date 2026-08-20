@@ -92,6 +92,22 @@ export async function isBridgeEnabledBlocking(): Promise<boolean> {
     : false
 }
 
+/** densable `vqo` / `mX` — Remote Control unavailable inside CLAUDE_CODE_REMOTE. */
+export const BRIDGE_DISABLED_IN_CLOUD_SESSION =
+  'Remote Control is not available inside a cloud session.'
+
+/**
+ * densable `mX` — pure cloud-session denial for shared `getBridgeDisabledReason`.
+ * Extracted for unit tests (runtime `feature('BRIDGE_MODE')` is compile-time).
+ */
+export function getBridgeDisabledReasonForCloudSession(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  return isEnvTruthy(env.CLAUDE_CODE_REMOTE)
+    ? BRIDGE_DISABLED_IN_CLOUD_SESSION
+    : null
+}
+
 /**
  * Diagnostic message for why Remote Control is unavailable, or null if
  * it's enabled. Call this instead of a bare `isBridgeEnabledBlocking()`
@@ -128,6 +144,11 @@ export async function getBridgeDisabledReason(): Promise<string | null> {
       }
     } catch {
       // keep prior diagnostic chain if module fails to load
+    }
+    // densable 2.1.235 vqo/mX — after endpoint gate, before subscription.
+    const cloudDenial = getBridgeDisabledReasonForCloudSession()
+    if (cloudDenial) {
+      return cloudDenial
     }
     if (!isClaudeAISubscriber()) {
       return 'Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.'

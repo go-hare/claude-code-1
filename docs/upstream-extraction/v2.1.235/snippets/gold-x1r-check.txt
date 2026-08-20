@@ -1,0 +1,145 @@
+=== densable SEA gold: X1r / oFd / tFd call site (#17 message_too_large) ===
+SEA: /tmp/official-235/plat/package/claude (2.1.235)
+Offsets (approx byte): X1r@277812982 · tFd@277814637 · eFd@277815362 · oFd check in same cluster · recv Line exceeded@290329065
+Related string-table gold: docs/upstream-extraction/v2.1.235/snippets/gold-sendmessage-size.txt
+
+## Constants / error class
+```js
+var X1r = 1048576; // 1 MiB newline-framed cross-session line cap
+var Lra = "no_live_inbox",
+  QNd = "ENOINBOX",
+  eFd = "message_too_large",
+  jGo = " — the peer is alive but its pipe is momentarily busy. Retry the same address shortly.";
+```
+
+## Auth preamble budget reserved into size check (separate from payload)
+```js
+// FVs=16 → 32 hex zeros; BVs(token) = JSON.stringify({type:"auth",token}) + "\n"
+function BVs(e) {
+  return Oe({ type: kdd, token: e }) + `\n`;
+}
+var FVs = 16,
+  Ddd; // module init:
+Ddd = BVs("0".repeat(FVs * 2)).length; // ≈ 59 chars — ALWAYS reserved in oFd budget
+```
+
+## tFd / yZt (TelemetrySafeError yt)
+```js
+function tFd(e, t) {
+  return new yt(
+    `Message too large for cross-session delivery: the serialized message is ${e.toLocaleString("en-US")} characters and the limit is ${t.toLocaleString("en-US")}. Shorten the message text — put bulk content in a file the recipient can read rather than in the message — or split it into smaller messages.`,
+    "cross-session message exceeds the line cap",
+    eFd,
+  );
+}
+function yZt(e) {
+  return e instanceof yt && e.errorClass === eFd;
+}
+// yt = TelemetrySafeError(message, telemetryMessage, errorClass)
+```
+
+## FULL send-side check site — oFd (before connect / write)
+Called from sendToUdsSocket `rOn` and sendControlToUdsSocket `nOn`.
+```js
+async function oFd(e, t) {
+  let r = Oe(t), // JSON.stringify(payload)
+    n = Ddd + r.length + 1; // ALWAYS budgets auth preamble + payload + trailing "\n"
+  if (n > X1r) throw tFd(n, X1r); // upfront refuse — NOT silent drop
+  if (!fCe(e)) throw Error(`Refusing to connect to non-local IPC path: ${e}`);
+  let o = Q3o(),
+    i = await Odd(e, { requireLiveOwner: o }),
+    s = i.kind === "token" ? i.token : void 0;
+  if (o && i.kind !== "token") {
+    if (!(i.kind === "no-key" && (await Rbb(e))))
+      throw new yt(
+        `No running session has registered an inbox at ${e} (${QNd}: ${i.kind}) — refusing to send to an unvouched pipe`,
+        "no live inbox registered for the target pipe",
+        Lra,
+      );
+    s = void 0;
+  }
+  // Wire may omit auth line when unvouched-allow path, but size check still used Ddd.
+  let l = (s !== void 0 ? BVs(s) : "") + r + `\n`;
+  return new Promise((c, u) => {
+    let d = Nra.connect({ path: e }),
+      p = !1;
+    d.setTimeout(5000, () => {
+      p = !0;
+      d.destroy();
+      u(Error(`Timed out sending to ${e}`));
+    });
+    d.on("error", (f) => {
+      p = !0;
+      u(f);
+    });
+    d.on("connect", () => {
+      if (d.write(l), Wt() === "macos")
+        setTimeout((f) => {
+          if (!f.destroyed) f.end();
+        }, Abb, d);
+      else d.end();
+    });
+    d.on("close", () => {
+      if (!p) T(`[uds-client] Sent to ${DK(e)}`);
+      c();
+    });
+  });
+}
+```
+
+## High-level sendToUdsSocket → oFd (payload shape only; size gate is oFd)
+```js
+async function rOn(e, t, r, n, o, i, { trackReceipts: s = !0 } = {}) {
+  let a = Q1r(),
+    l = a ? PDr(a) : void 0,
+    c = ODr(l, r, t, void 0, j3o(o, l ? eOt(l) : void 0), i);
+  T(`[uds-client] Sending ${t.length} chars to ${DK(e)}`);
+  let u = QPt();
+  if (s) nFd(u.msg_id, PDr(e));
+  return (
+    await oFd(e, {
+      ...u,
+      type: "user",
+      message: { role: "user", content: c },
+      priority: "next",
+      from: l,
+      ...((n?.length ?? 0) > 0 && { file_attachments: n }),
+    }),
+    { msgId: u.msg_id }
+  );
+}
+```
+
+## Recv path — same X1r (not a separate 64KiB frame limit)
+```js
+e.on("data", (p) => {
+  if (((s += p), s.length > X1r)) {
+    T(`[uds-messaging] Line exceeded ${X1r} chars; dropping connection`, {
+      level: "warn",
+    });
+    e.destroy();
+    s = "";
+    return;
+  }
+  // ... split on "\n", JSON.parse lines ...
+});
+```
+
+## X1r vs frame limits (densable)
+- **X1r = 1_048_576**: the ONLY cross-session NDJSON line cap used for:
+  1) send refuse in `oFd` (`n = Ddd + JSON.length + 1 > X1r` → `tFd` / `eFd`)
+  2) recv buffer drop (`s.length > X1r` → log + destroy)
+- **No densable `MAX_UDS_FRAME_BYTES=64KiB`** on this messaging path. 64KiB hits elsewhere in the SEA binary are unrelated (Bun writers / unrelated maxBuffer).
+- Auth preamble `Ddd` is budgeted into the send check even when the written wire omits `BVs(token)`.
+
+## Exact user-facing error text (tFd)
+Message too large for cross-session delivery: the serialized message is ${e.toLocaleString("en-US")} characters and the limit is ${t.toLocaleString("en-US")}. Shorten the message text — put bulk content in a file the recipient can read rather than in the message — or split it into smaller messages.
+
+telemetryMessage / short code: `cross-session message exceeds the line cap`
+errorClass: `message_too_large`
+
+## Local map (HAVE as of 2.1.235 verify)
+- `src/utils/udsMessaging.ts` — `MAX_UDS_LINE_CHARS=1048576`, `UdsMessageTooLargeError` / `isUdsMessageTooLargeError`, server `maxFrameBytes: MAX_UDS_LINE_CHARS` + Line exceeded log
+- `src/utils/udsClient.ts` — `sendToUdsSocket` refuses `wire.length > MAX_UDS_LINE_CHARS` before connect
+- `packages/builtin-tools/.../SendMessageTool/SendMessageTool.ts` — catch → `errorClass: 'message_too_large'`
+- Keep separate: `MAX_UDS_FRAME_BYTES = 64 * 1024` for ping/response-reader / non-line-cap helpers — NOT the SendMessage X1r gate

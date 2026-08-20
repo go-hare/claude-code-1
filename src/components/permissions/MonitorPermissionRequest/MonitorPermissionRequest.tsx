@@ -3,6 +3,7 @@ import { Box, Text, useTheme } from '@anthropic/ink';
 import { getTheme } from '../../../utils/theme.js';
 import { env } from '../../../utils/env.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import { shouldShowPersistentAllowOption } from '../../../utils/permissions/showAlwaysAllow.js';
 import { truncateToLines } from '../../../utils/stringUtils.js';
 import { logUnaryEvent } from '../../../utils/unaryLogging.js';
 import { replaceHiddenControlChars } from '../../../utils/controlChars.js';
@@ -33,8 +34,19 @@ export function MonitorPermissionRequest({
   };
 
   // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
+  // densable 2.1.235 #12: also honor suppressAlwaysAllowRule / tool.suppresses…
   const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
-  const showAlwaysAllowOptions = useMemo(() => shouldShowAlwaysAllowOptions() && !isAskCappedByOrg, [isAskCappedByOrg]);
+  const showAlwaysAllowOptions = useMemo(
+    () =>
+      shouldShowPersistentAllowOption({
+        baseAllowed: shouldShowAlwaysAllowOptions(),
+        permissionResult: toolUseConfirm.permissionResult,
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input,
+        isAskCappedByOrg,
+      }),
+    [isAskCappedByOrg, toolUseConfirm.permissionResult, toolUseConfirm.tool, toolUseConfirm.input],
+  );
 
   const options: PermissionPromptOption<OptionValue>[] = useMemo(() => {
     const opts: PermissionPromptOption<OptionValue>[] = [

@@ -10,6 +10,7 @@ import { isEnvTruthy } from '../../utils/envUtils.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
 import { logError } from '../../utils/log.js'
+import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import { tokenCountWithEstimation } from '../../utils/tokens.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { getMaxOutputTokensForModel } from '../api/claude.js'
@@ -213,6 +214,36 @@ export function isAutoCompactEnabled(): boolean {
   // Check if user has disabled auto-compact in their settings
   const userConfig = getGlobalConfig()
   return userConfig.autoCompactEnabled
+}
+
+/**
+ * densable SEA `RPa` — whether PTL UI should append
+ * ` · auto-compact is off · /config to turn it on`.
+ *
+ * Gold: env disable (`z2p`) → false; if autoCompact on → false; if
+ * `resolveSetting` source is `userSettings` → true; if
+ * `legacyGlobalConfig` → `getEnabledSettingSources().includes('userSettings')`;
+ * else false.
+ *
+ * Local Config persists `autoCompactEnabled` only via GlobalConfig (densable
+ * legacyGlobalConfig path), so when off return
+ * `getEnabledSettingSources().includes('userSettings')`. Do not overload
+ * `isAutoCompactEnabled`.
+ */
+export function shouldShowAutoCompactOffHint(): boolean {
+  if (
+    isEnvTruthy(process.env.DISABLE_COMPACT) ||
+    isEnvTruthy(process.env.DISABLE_AUTO_COMPACT)
+  ) {
+    return false
+  }
+
+  if (getGlobalConfig().autoCompactEnabled) {
+    return false
+  }
+
+  // densable legacyGlobalConfig branch of Vd("autoCompactEnabled", true)
+  return getEnabledSettingSources().includes('userSettings')
 }
 
 // Official zNy — re-export portable cold-compact gate for compact callers.

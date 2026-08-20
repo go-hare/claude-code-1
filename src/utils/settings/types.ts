@@ -1021,6 +1021,45 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe('Whether to disable syntax highlighting in diffs'),
+      // densable 2.1.235 #1 — underline-as-you-type spellcheck (aspell/hunspell/ispell).
+      // Whole block from highest-precedence of user/flag/managed only; project/local ignored.
+      spellcheck: z
+        .object({
+          enabled: z
+            .boolean()
+            .optional()
+            .catch(undefined)
+            .describe(
+              'Turn on spell checking of the prompt input (default: false)',
+            ),
+          checker: z
+            .string()
+            .optional()
+            .catch(undefined)
+            .describe(
+              'Which spell checker to run: "aspell", "hunspell", "ispell", or "auto" (default) for the first of those found on PATH',
+            ),
+          language: z
+            .string()
+            .optional()
+            .catch(undefined)
+            .describe(
+              'Dictionary to use, passed to the checker as-is (aspell --lang, hunspell -d, ispell -d), e.g. "en_GB"; names are checker-specific (letters, digits and _ - . , only). Default: the checker\'s own default',
+            ),
+          color: z
+            .string()
+            .optional()
+            .catch(undefined)
+            .describe(
+              'Color of misspelled words (they are also underlined): a terminal color name such as "red" or "magenta", "#rrggbb", "rgb(r,g,b)", "ansi256(n)" or "ansi:<name>". Default: the theme\'s error color',
+            ),
+        })
+        .passthrough()
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Underline misspelled words in the prompt input as you type, using an installed aspell, hunspell or ispell (off unless "enabled" is true; does nothing if none is installed). Read from user, flag and managed settings only (the whole block from the highest-precedence of those applies); ignored in project .claude/settings.json and .claude/settings.local.json.',
+        ),
       terminalTitleFromRename: z
         .boolean()
         .optional()

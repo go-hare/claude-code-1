@@ -1,0 +1,77 @@
+# densable 2.1.235 SEA gold — changelog #13 embedded grep pathological / -m -A -C
+# SEA: /tmp/official-235/plat/package/claude (2.1.235)
+# SEA embedded rg (argv0=rg): ripgrep 14.1.1 (rev fdb5e06cce) +pcre2
+# Local vendor rg: src/utils/vendor/ripgrep/arm64-darwin/rg → ripgrep 15.0.0 (rev 3a612f88b8)
+# Official blurb: pathological patterns fail fast (no mem exhaust); -m N with -A/-C prints correct context
+# Note: no Claude JS user string literally saying "pathological" for this item; fix lives in native ripgrep
+# Dig 2026-08-20: SEA "pathological"/"fail fast" string hits are unrelated JS (DOM walk / BYOC / gh --fail-fast),
+# NOT ripgrep. Shared rg strings (after_context_left / Omitted long / heap limit / short-circuiting) present in BOTH.
+
+## Version matrix
+SEA embed  | ripgrep 14.1.1 (rev fdb5e06cce)
+LOCAL vendor | ripgrep 15.0.0 (rev 3a612f88b8)  ← newer; sha256 6ef40346… (src + @go-hare darwin package identical)
+LOCAL package Mach-O | does NOT argv0-dispatch rg (returns Claude --version); uses sidecar vendor
+
+## Presence matrix (SEA vs local standalone vendor rg)
+SEA ----- | N4Grep30OnlyMatchingContextGrepHandlerE
+SEA ----- | N4Grep18ContextGrepHandlerE
+SEA ----- | N4Grep24InvertContextGrepHandlerE
+SEA ----- | N4Grep18AnyLineGrepHandlerE
+SEA ----- | N4Grep22InvertMatchGrepHandlerE
+SEA ----- | N4Grep28FormatInvertMatchGrepHandlerE
+SEA ----- | N4Grep11GrepHandlerE
+SEA ----- | N4Grep13BinaryHandlerE
+SEA ----- | N4Grep12StdInHandlerE
+SEA ----- | N4Grep11EXIT_SEARCHE
+SEA LOCAL | assertion failed: self.after_context_left >= 1
+SEA LOCAL | [Omitted long context line]
+SEA LOCAL | [Omitted long matching line]
+SEA LOCAL | special mode demands short-circuiting
+SEA LOCAL | heap limit exceeded
+SEA LOCAL | regex could not be compiled with either the default regex engine or with PCRE2.
+SEA LOCAL | searcher core: will use slow line searcher
+SEA LOCAL | searcher core: will use fast line searcher
+SEA LOCAL | grep_searcher::searcher::core
+SEA LOCAL | ripgrep may abort unexpectedly when using default settings if it searches a
+SEA LOCAL | Note that ripgrep may abort unexpectedly when memory maps are used if it
+SEA ----- | ripgrep not found on PATH. Install it (brew install ripgrep / apt install ripgrep / winget install BurntSushi.ripgrep.MSVC) or use the native claude binary which embeds it.
+SEA ----- | ripgrep failed with exit code
+SEA ----- | [Sandbox] ripgrep scan failed:
+---- LOCAL | 3a612f88b8
+SEA ----- | OnlyMatchingContextGrepHandler
+SEA ----- | fdb5e06cce   (SEA embed rev; absent from local standalone strings)
+
+## Behavioral probe (Bun argv0 SEA vs local vendor) — identical
+-m1 -A1 MATCH fixture → "MATCH me\nbeta\n" (both)
+-m1 -C1 → alpha/MATCH/beta (both)
+-m2 -A1 → two matches + after (both)
+-m1 -A2 on classic context-match fixture (d/e/d…) → "4:d\n5-e\n6:d\n" (both; #1380 shape)
+pathological (a+)+b / -P / no-match / alt-bomb → both exit fast (<50ms), no hang
+
+## SEA-only mangled Grep* handlers (Itanium-style; Bun embed/link strip artifact)
+N4Grep11EXIT_SEARCHE
+N4Grep11GrepHandlerE
+N4Grep12StdInHandlerE
+N4Grep13BinaryHandlerE
+N4Grep18AnyLineGrepHandlerE
+N4Grep18ContextGrepHandlerE
+N4Grep22InvertMatchGrepHandlerE
+N4Grep24InvertContextGrepHandlerE
+N4Grep28FormatInvertMatchGrepHandlerE
+N4Grep30OnlyMatchingContextGrepHandlerE
+
+## densable wrapper gold (JS; SEA f1e / iaT / YTm)
+SEA LOCAL | rejectOnInputError
+SEA LOCAL | RipgrepUsageError
+SEA LOCAL | /^rg: (?:regex parse error|error parsing glob|unrecognized file type|error parsing flag|compiled regex exceeds size limit)/m
+SEA LOCAL | Search failed — ripgrep rejected the pattern, glob, or file type without searching:
+SEA LOCAL | ripgrep usage error (input rejected, stderr redacted)
+
+## Diff notes / verdict
+- SEA embeds ripgrep inside the native Mach-O (argv0='rg'); local go-hare package uses sidecar vendor rg (microsoft/ripgrep-prebuilt **v15.0.1** tag; binary still reports 15.0.0 rev 3a612f88b8). Win32 vendor bumped to same prebuilt tag (sha f9dde634…).
+- Changelog product claims (correct -m/-A/-C context + fail-fast pathological) are **behaviorally HAVE** on local vendor; local is **newer** than SEA embed 14.1.1 — do **not** downgrade.
+- SEA-only Grep*Handler symbols are embed/link artifacts, not a missing JS surface — **no invent** JS pathological engine.
+- Wrapper path: `src/utils/ripgrep.ts` prefers embedded argv0 in `isInBundledMode()` non-win32; builtin/sidecar otherwise. **Plus** densable `rejectOnInputError` → `RipgrepUsageError` (iaT/YTm) wired into GrepTool + glob.
+- Test lock: `embeddedRipgrep.235.test.ts` + `ripgrepUsageError.235.test.ts`
+- Historical upstream: BurntSushi/ripgrep#1642 / #1380 (printer context vs max-count); stock changelog 15.0.0 notes related -m multiline / memory items.
+- #19 VSCode host-only remains out of scope.

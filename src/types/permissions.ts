@@ -212,6 +212,24 @@ export type PermissionAskDecision<
   blockedPath?: string
   metadata?: PermissionMetadata
   /**
+   * densable 2.1.235 #12 / PermissionAskDecision.suppressAlwaysAllowRule.
+   * True when the dialog must not offer the persistent "don't ask again" row for
+   * this ask: accepting it would write a whole-tool allow rule broader than the
+   * ask's own verb. Hosts rendering approve options should omit any
+   * persistent-rule affordance when set.
+   */
+  suppressAlwaysAllowRule?: boolean
+  /**
+   * densable localDisplayOnly — ask is for local Ink display only; SDK hosts
+   * may map this onto requires_user_interaction.
+   */
+  localDisplayOnly?: boolean
+  /**
+   * densable matchedAskRule — set when a user-configured ask RULE forced this
+   * prompt but the ask carries the tool's own decisionReason.
+   */
+  matchedAskRule?: PermissionRule
+  /**
    * If true, this ask decision was triggered by a bashCommandIsSafe_DEPRECATED security check
    * for patterns that splitCommand_DEPRECATED could misparse (e.g. line continuations, shell-quote
    * transformations). Used by bashToolHasPermission to block early before splitCommand_DEPRECATED

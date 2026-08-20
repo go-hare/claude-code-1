@@ -1,0 +1,79 @@
+# densable 2.1.235 SEA gold — changelog #16 dialog-race
+# SEA: /tmp/official-235/plat/package/claude
+# Item: Dialogs: arrow keys and Enter pressed in quick succession now select
+#       the option you navigated to instead of the previously highlighted one
+# Key: dialog-race
+
+## Proven SEA string / symbol hits (strings|rg / binary context)
+
+### Keybindings / Select overlay
+- select:next
+- select:previous
+- select:accept
+- select:cancel
+- context:"Select"
+- Enter (bound near select:accept in keybinding tables)
+
+### CustomSelect navigation API (ASCII identifiers in SEA)
+- focusedValue
+- initialFocusValue
+- visibleFromIndex
+- visibleToIndex
+- currentViewport
+- getFocusedValue          <-- densable race-fix surface (ABSENT locally)
+- focusNextOption
+- focusPreviousOption
+- focusNextPage
+- focusPreviousPage
+- focusOption
+- selectFocusedOption
+- focus-next-option / focus-previous-option / focus-next-page / focus-previous-page / set-focus / reset
+- disableSelection
+- onUpFromFirstItem / onDownFromLastItem
+- allowEmptySubmitToCancel
+- imagesSelected / onEnterImageSelection / onExitImageSelection
+- hasInkFocus
+- focusDirection (ink focus manager; used by densable select input)
+
+### Inquirer-ish help strings (also present; not the race fix itself)
+- (Use arrow keys)
+- (Use arrow keys to reveal more choices)
+
+## densable race-fix mechanism (minified SEA @ ~290268814 C4i)
+
+Sync mutable bag + React state:
+  let[o]=useState(()=>({state:IFm(...)}))
+  let[i,s]=useState(o.state)
+  a=useCallback((k)=>{let R=LET(o.state,k); if(R===o.state)return; o.state=R; s(R)},[o])
+
+Validated render value vs live value:
+  E=useMemo(()=>PFm(i.focusedValue,t),[i.focusedValue,t])          // for UI / onFocus
+  C=useCallback(()=>PFm(o.state.focusedValue,t),[o,t])              // getFocusedValue
+
+Return:
+  {focusedValue:E, getFocusedValue:C, visibleFromIndex, ..., focusNextOption:h, ...}
+
+selectFocusedOption (Ovl / useSelectState densable):
+  {getFocusedValue:u}=c
+  d=useCallback(()=>{l(u())},[u])   // setValue(getFocusedValue()) — not closed-over focusedValue
+
+select:accept / handleKeyDown:
+  let b=r.getFocusedValue()
+  ...
+  r.selectFocusedOption?.(); r.onChange?.(b)
+
+Edge-check on wrap also uses getFocusedValue():
+  select:next  → if (r.getFocusedValue()===last.value) onDownFromLastItem?
+  select:previous → if (r.getFocusedValue()===first.value) onUpFromFirstItem?
+
+PFm(e,t): if e undefined return; if t.some(r=>r.value===e) return e; return t[0]?.value
+
+## Local gap (go-hare)
+- src/components/CustomSelect/use-select-navigation.ts uses useReducer only — NO o.state sync bag, NO getFocusedValue
+- src/components/CustomSelect/use-select-input.ts select:accept closes over state.focusedValue
+- src/components/CustomSelect/use-select-state.ts selectFocusedOption = setValue(navigation.focusedValue) with [navigation.focusedValue] dep
+→ arrow then Enter in same tick can still commit previously highlighted option
+
+## #19 VSCode note
+SEA contains `claude-vscode` / `claude_code_vscode` / settings strings about VS Code-owned sessions,
+but no evidence this SEA embeds the VS Code extension host tab-focus fix. #19 remains N/A for CLI 1:1.
