@@ -1,0 +1,128 @@
+@204045629: ead:outputStyle:custom.....................	...$...repl_main_thread:outputStyle:Concise....................	...&...repl_main_thread:outputStyle:Proactive..................	...(...repl_main_thread:outputStyle:Explanatory................	...%...repl_main_thread:outputStyle:Learning........................|'..........|'......|'..|'......D..P.......................................................x...........
+---
+@253096816: ately and minimizing interruptions.
+
+# Proactive Style Active
+..........	.......Concise.................	...Q...Claude responds tersely, leading with results and skipping preamble and narration.......................	.......You are an interactive CLI tool that helps users with software engineering tasks. Keep your responses short and direct while doing the work just as thoroughly.
+
+# Concise Style Active
+---
+@253097123: eep your responses short and direct while doing the work just as thoroughly.
+
+# Concise Style Active
+................	.......Explanatory.............	...@...Claude explains its implementation choices and codebase patterns........	.......You are an interactive CLI tool that helps users with software engineering tasks. In addition to software engineering tasks, you should provide educational insights about
+---
+@253104688: ................p.......................	...	...Proactive...............	.......Concise.................	.......Explanatory.............	.......Learning.............R......D
+../...K... 
+..L...D
+...
+.......D..P.......................................................x..............................................................................................................................................
+---
+@279781693: hread:!0,"repl_main_thread:outputStyle:custom":!0,"repl_main_thread:outputStyle:Concise":!0,"repl_main_thread:outputStyle:Proactive":!0,"repl_main_thread:outputStyle:Explanatory":!0,"repl_main_thread:outputStyle:Learning":!0,sdk:!0},vib=new Set([...Object.keys(yYs),"agent:custom","agent:default","agent:builtin","compact","hook_agent","hook_prompt","side_question","web_search_tool","web_fetch_apply","repl
+---
+@292655472: st** \u2014 When the user asks for an explanation or detail, answer completely. Conciseness never means withholding requested information.
+6. **Never trade correctness for brevity** \u2014 Error reports, failing test output, security warnings, and confirmations for destructive actions keep their full content.
+
+Where these rules conflict with more general communication or formatting guidance elsewhere in 
+---
+@292657432: d minimizing interruptions.
+
+# Proactive Style Active
+${NAT}`,turnReminder:FAT},Concise:{name:"Concise",source:"built-in",description:"Claude responds tersely, leading with results and skipping preamble and narration",keepCodingInstructions:!0,prompt:`You are an interactive CLI tool that helps users with software engineering tasks. Keep your responses short and direct while doing the work just as thoroug
+---
+@292657447: terruptions.
+
+# Proactive Style Active
+${NAT}`,turnReminder:FAT},Concise:{name:"Concise",source:"built-in",description:"Claude responds tersely, leading with results and skipping preamble and narration",keepCodingInstructions:!0,prompt:`You are an interactive CLI tool that helps users with software engineering tasks. Keep your responses short and direct while doing the work just as thoroughly.
+
+# Concise
+---
+@292657767: eep your responses short and direct while doing the work just as thoroughly.
+
+# Concise Style Active
+${$AT}`,turnReminder:BAT},Explanatory:{name:"Explanatory",source:"built-in",description:"Claude explains its implementation choices and codebase patterns",keepCodingInstructions:!0,prompt:`You are an interactive CLI tool that helps users with software engineering tasks. In addition to software engineering
+---
+@75115843:  (tools used, files modified)
+3. Any friction or issues
+4. The outcome
+
+Keep it concise - 3-5 sentences. Preserve specific details like file names, error messages, and user feedback.
+
+TRANSCRIPT CHUNK:
+...........	.......Autocompact buffer......................	.......Compact buffer..........	...
+...Free space.............@@...............	.......mcp.....................	.......handleError.............	.
+---
+@75125731: .t.r.u.c.t.i.o.n.s.,. .t.h.e.s.e. .r.u.l.e.s. .w.i.n...%..............q..]...Be concise: lead with the result, skip preamble and narration, keep only what the user needs..............%.....loaded...................4..
+...originalOf..............I.
+.....Tool loaded.....................The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string 
+---
+@75164999: .I.8...............8.H...Claude completes coding tasks efficiently and provides concise responses.z
+.............	.8.U...Changing thinking mode mid-conversation will increase latency and may reduce quality....	................8.....Failed to load usage data...............I......Usage credits...........I.8.....stats-cache.json..........8..:..7X1Jk+2wd5eLNQtVkUWoClUi5IUpgIEwBxDzDA4kBAIBMc9g5pnSAqpYUGWGD2
+---
+@79717461: *Actionability**: Is the rule specific enough for the classifier to act on?
+
+Be concise and constructive. Only comment on rules that could be improved. If all rules look good, say so.............	...$...5f3a2c5e-6b8f-4b27-9c0e-2d7f1a9b3c44.............$......................	...&.../home/claude/.claude/remote/spare.sock..................	.......updateConfig............	...(...Usage: claude daemon [subcom
+---
+@92824406:  .l.i.n.e.s. .a.f.t.e.r. .........	...-... will be truncated, so keep the index concise........................................................................@.l6........@...@04.@0e...........4.....@pTP....@...........@.O...d........ ..... .L.........`.....................)...6...]...f.......}....................................................................................Oe.......................h..
+---
+@92981590: a.f.t.e.r. .......................	...-... will be truncated, so keep the index concise...........	.......# Memory................	.......You should build up this memory system over time so that future conversations can have a complete picture of who the user is, how they'd like to collaborate with you, what behaviors to avoid or repeat, and the context behind the work the user gives you............	....
+---
+@92991439: .t. ..  .l.i.n.e.s. .a.f.t.e.r. .........	...&... will be truncated, so keep it concise..................	...K...- Keep the index concise so you can scan it quickly when recalling memories.............	...Y...- Keep the name, description, and type fields in memory files up-to-date with the content...............	...<...- Organize memory semantically by topic, not chronologically............	...A...- Upda
+---
+@92991489: will be truncated, so keep it concise..................	...K...- Keep the index concise so you can scan it quickly when recalling memories.............	...Y...- Keep the name, description, and type fields in memory files up-to-date with the content...............	...<...- Organize memory semantically by topic, not chronologically............	...A...- Update or remove memories that turn out to be wrong or
+---
+@95456266: ..............................................................	.......Provide a concise response based on the content above. Include relevant details, code examples, and documentation excerpts as needed....................	...N...Provide a concise response based only on the content above. In your response:
+..........	.......
+Web page content:
+---
+.................	.......
+---
+
+..................	.......
+
+---
+@95456426: ples, and documentation excerpts as needed....................	...N...Provide a concise response based only on the content above. In your response:
+..........	.......
+Web page content:
+---
+.................	.......
+---
+
+..................	.......
+
+......................	.......
+................................................@.$.......\.@@..@.L.@`L....................&....................................
+---
+@97597531: : loop.md was truncated to ..................	...#... bytes. Keep the task list concise...............................................................@.$.G.....,..0..@`%.@...L....@M1...pI.......@@=.F...@.L.....@P$..@,..A.)......o............R...W...g.............................x.......................(................................................8.V.[...P... .V.Q...D.V...V......H..P.................
+---
+@118524201: how the user the result, you should send a text message back to the user with a concise summary of the result..................	.......When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.....................	.......
+---
+@118524470: how the user the result, you should send a text message back to the user with a concise summary of the result.....................	.......
+- Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an agent writes or edits code, check the actual changes before reporting the work as done...........................
+.-. .A.g.e.n.t.s. .r.u.n. .i.n. .t.h.e. .b.a
+---
+@126049016: ................	....... minutes).
+  - It is very helpful if you write a clear, concise description of what this command does.
+  - If the output exceeds .......................	...D... characters, output will be truncated before being returned to you.
+....................	...{...  - Avoid using PowerShell to run commands that have dedicated tools, unless explicitly instructed:
+    - File search: Use ....
+---
+@136112304: ). Warn the user if they specifically request to commit those files
+  - Draft a concise (1-2 sentences) commit message that focuses on the "why" rather than the "what"
+  - Ensure it accurately reflects the changes and their purpose
+3. Run the following commands in parallel:
+   - Add relevant untracked files to the staging area.
+   - Create the commit with a message.........	.......o......................
+---
+@140142387: nication unless asked................	...+...Your responses should be short and concise..............	.......When referencing specific functions or pieces of code include the pattern file_path:line_number to allow the user to easily navigate to the source code location........................	.......Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text lik
+---
+@140143091: nication unless asked................	...+...Your responses should be short and concise..............	.......When referencing specific functions or pieces of code include the pattern file_path:line_number to allow the user to easily navigate to the source code location........................	.......Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text lik
+---
+@152975259: .............).......................
+.......................	...|...Generate a concise, technical issue title (max 80 chars) for a public GitHub issue based on this bug report for Claude Code.............	...@...Claude Code is an agentic coding CLI based on the Anthropic API.........	.......The title should:.......................	...V...- Include the type of issue [Bug] or [Feature Request] as the firs
+---
+@152975637: [Feature Request] as the first thing in the title..................	...<...- Be concise, specific and descriptive of the actual problem............	...<...- Use technical terminology appropriate for a software issue............	...l...- For error messages, extract the key error (e.g., "Missing Tool Result Block" rather than the full message)............	...>...- Be direct and clear for developers to unde
+---
+@152976779: .....................................p.......................	...|...Generate a concise, technical issue title (max 80 chars) for a public GitHub issue based on this bug report for Claude Code.............	...@...Claude Code is an agentic coding CLI based on the Anthropic API.........	.......The title should:.......................	...V...- Include the type of issue [Bug] or [Feature Request] as the firs
+---
+@152977157: [Feature Request] as the first thing in the title..................	...<...- Be concise, specific and descriptive of the actual problem............	...<...- Use technical terminology appropriate for a software issue............	...l...- For error messages, extract the key error (e.g., "Missing Tool Result Block" rather than the full message)............	...>...- Be direct and clear for developers to unde

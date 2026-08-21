@@ -24,7 +24,11 @@ import {
 import { MID_CONVERSATION_SYSTEM_BETA_HEADER } from '../constants/betas.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
-import { type APIProvider, getAPIProvider } from './model/providers.js'
+import {
+  type APIProvider,
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from './model/providers.js'
 
 const KNOWN_UNSUPPORTED_EXACT = new Set([
   'claude-opus-4-0',
@@ -88,7 +92,8 @@ export function isExperimentalBetasDisabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return (
-    isEnvTruthy(env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) || isHipaaPolicy()
+    isEnvTruthy(env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) ||
+    isHipaaPolicy(env)
   )
 }
 
@@ -235,11 +240,123 @@ export function isApiSystemCacheControlRejected(error: unknown): boolean {
 }
 
 /**
- * densable Jdy c: allow cache_control on api_system when experimental betas
- * live and promotion not demoted.
+ * densable SEA 2.1.237 eDT `canMarkApiSystem` provider/base-URL eligibility.
+ * Message-tail ephemeral caching is unaffected — this only gates **api_system**
+ * `cache_control` so custom BASE_URL / gateway sessions do not stamp a proxy-
+ * rejected breakpoint (proactive; midConv demote remains as reactive backup).
+ *
+ * Gold: `docs/upstream-extraction/v2.1.237/snippets/gold-canMarkApiSystem-eDT.txt`
+ *   !latched && !dje() && (
+ *     FF()&&rXt&&H2m  ||  (bedrock|vertex|mantle)&&rzi  ||  foundry&&JOT
+ *   )
  */
-export function shouldCacheControlOnApiSystem(): boolean {
-  return !isExperimentalBetasDisabled() && !isMidConvCachePromotionRejected()
+export function isApiSystemCacheControlEligible(
+  provider: APIProvider = getAPIProvider(),
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  // FF() = Dzo() && !dje(); dje checked by caller. Dzo = firstParty|anthropicAws|foundry
+  // (SEA also VJ anthropicGoogleCloud — tip has no such provider; invent-ban).
+  if (
+    isExperimentalApiSystemCacheProvider(provider) &&
+    isApiSystemCacheBaseUrlEligibleRxt(provider, env) &&
+    isApiSystemCacheHostEligibleH2m(provider, env)
+  ) {
+    return true
+  }
+  if (
+    (provider === 'bedrock' ||
+      provider === 'vertex' ||
+      provider === 'mantle') &&
+    isCloudProviderDefaultBaseUrlUnset(provider, env)
+  ) {
+    return true
+  }
+  if (provider === 'foundry' && isFoundryApiSystemCacheEligible(env)) {
+    return true
+  }
+  return false
+}
+
+/** SEA Dzo — providers that participate in FF()∧rXt∧H2m branch. */
+function isExperimentalApiSystemCacheProvider(provider: APIProvider): boolean {
+  return (
+    provider === 'firstParty' ||
+    provider === 'anthropicAws' ||
+    provider === 'foundry'
+  )
+}
+
+/** SEA rXt — firstParty requires om(); anthropicAws requires AWS base unset. */
+function isApiSystemCacheBaseUrlEligibleRxt(
+  provider: APIProvider,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  if (provider === 'anthropicAws') {
+    return env.ANTHROPIC_AWS_BASE_URL === undefined
+  }
+  if (provider === 'firstParty') {
+    return isFirstPartyAnthropicBaseUrl(env)
+  }
+  return false
+}
+
+/**
+ * SEA H2m — WiF / credentials base_url probe when firstParty + BASE_URL unset.
+ * Tip has no Udt/zAn WiF latch equivalent → early-exit paths yield true
+ * (ASSUME / non-firstParty / BASE_URL defined / !Udt).
+ */
+function isApiSystemCacheHostEligibleH2m(
+  provider: APIProvider,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  if (provider !== 'firstParty') return true
+  if (env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL) return true
+  if (env.ANTHROPIC_BASE_URL !== undefined) return true
+  // SEA: !Udt() → true. Tip WiF Udt absent → treat as !Udt.
+  return true
+}
+
+/** SEA rzi */
+function isCloudProviderDefaultBaseUrlUnset(
+  provider: 'bedrock' | 'vertex' | 'mantle',
+  env: NodeJS.ProcessEnv,
+): boolean {
+  switch (provider) {
+    case 'bedrock':
+      return env.ANTHROPIC_BEDROCK_BASE_URL === undefined
+    case 'vertex':
+      return env.ANTHROPIC_VERTEX_BASE_URL === undefined
+    case 'mantle':
+      return env.ANTHROPIC_BEDROCK_MANTLE_BASE_URL === undefined
+  }
+}
+
+/** SEA JOT — unset foundry base → true; else hostname *.services.ai.azure.com */
+function isFoundryApiSystemCacheEligible(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const base = env.ANTHROPIC_FOUNDRY_BASE_URL
+  if (base === undefined) return true
+  try {
+    return new URL(base).hostname.endsWith('.services.ai.azure.com')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable Jdy c / SEA eDT canMarkApiSystem: allow cache_control on api_system
+ * when not demoted, experimental betas live, and provider/base-URL eligible.
+ */
+export function shouldCacheControlOnApiSystem(
+  provider: APIProvider = getAPIProvider(),
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    !isMidConvCachePromotionRejected() &&
+    !isExperimentalBetasDisabled(env) &&
+    isApiSystemCacheControlEligible(provider, env)
+  )
 }
 
 /**

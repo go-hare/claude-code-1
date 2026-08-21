@@ -7,19 +7,44 @@ import {
   resetStickyBetas,
   setMidConvCachePromotionRejected,
 } from '../../../bootstrap/state.js'
+import { clearGatewayAuth } from '../../../utils/gatewayEnv.js'
 import { createApiSystemMessage } from '../../../utils/midConversationSystem.js'
 import { createUserMessage } from '../../../utils/messages.js'
 import { addCacheBreakpoints } from '../claude.js'
 
 describe('addCacheBreakpoints Jdy api_system', () => {
+  const prevEnv = { ...process.env }
+
   beforeEach(() => {
     resetStickyBetas()
     setMidConvCachePromotionRejected(false)
+    // Sticky gatewayAuth short-circuits getAPIProvider() → 'gateway' even after
+    // USE_* env scrub; clear so shouldCacheControlOnApiSystem() sees firstParty.
+    clearGatewayAuth()
+    // densable eDT eligibility: pin firstParty + official base so host
+    // gateway/custom BASE_URL cannot starve api_system cache_control.
+    delete process.env.ANTHROPIC_BASE_URL
+    delete process.env.CLAUDE_CODE_USE_GATEWAY
+    delete process.env.CLAUDE_CODE_USE_BEDROCK
+    delete process.env.CLAUDE_CODE_USE_VERTEX
+    delete process.env.CLAUDE_CODE_USE_FOUNDRY
+    delete process.env.CLAUDE_CODE_USE_OPENAI
+    delete process.env.CLAUDE_CODE_USE_GEMINI
+    delete process.env.CLAUDE_CODE_USE_GROK
+    delete process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
+    delete process.env.CLAUDE_CODE_HIPAA
+    delete process.env.CLAUDE_CODE_HIPAA_COMPLIANCE
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
   })
 
   afterEach(() => {
     resetStickyBetas()
     setMidConvCachePromotionRejected(false)
+    clearGatewayAuth()
+    for (const k of Object.keys(process.env)) {
+      if (!(k in prevEnv)) delete process.env[k]
+    }
+    Object.assign(process.env, prevEnv)
   })
 
   test('maps api_system to role:system and prefers cache_control on trailing system', () => {

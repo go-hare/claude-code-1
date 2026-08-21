@@ -112,20 +112,52 @@ export function renderTruncatedContent(
     .join('\n')
 }
 
-/** Fast check: would OutputLine truncate this content? Counts raw newlines
- *  only (ignores terminal-width wrapping), so it may return false for a single
- *  very long line that wraps past 3 visual rows — acceptable, since the common
- *  case is multi-line output. */
-export function isOutputLineTruncated(content: string): boolean {
+/**
+ * densable SEA `r7`/`t7` (2.1.236+ / 2.1.237): would OutputLine truncate?
+ *
+ * 1. Non-string → false (MessagesBoundary / MCPTool may pass object toolUseResult).
+ * 2. Raw newline count on trimEnd'd text (MAX_LINES_TO_SHOW+1 probes).
+ * 3. Optional terminalWidth: wrap-aware visual-line budget (densable `t` arg).
+ *    When width omitted, match SEA: only the newline probe decides.
+ */
+export function isOutputLineTruncated(
+  content: unknown,
+  terminalWidth?: number,
+): boolean {
+  // densable: if(typeof e!=="string")return!1
+  if (typeof content !== 'string') return false
+
+  const trimmed = content.trimEnd()
   let pos = 0
-  // Need more than MAX_LINES_TO_SHOW newlines (content fills > 3 lines).
-  // The +1 accounts for wrapText showing an extra line when remainingLines==1.
+  let newlineCount = 0
+  // densable: for(c=0;c<=dMt;c++) with dMt=3 — need >3 newlines to truncate
   for (let i = 0; i <= MAX_LINES_TO_SHOW; i++) {
-    pos = content.indexOf('\n', pos)
-    if (pos === -1) return false
+    pos = trimmed.indexOf('\n', pos)
+    if (pos === -1) break
+    newlineCount++
     pos++
   }
-  // A trailing newline is a terminator, not a new line — match
-  // renderTruncatedContent's trimEnd() behavior.
-  return pos < content.length
+  // densable: if(n!==-1&&n<r.length)return!0
+  if (pos !== -1 && pos < trimmed.length) return true
+  // densable: if(t===void 0)return!1
+  if (terminalWidth === undefined) return false
+
+  const wrapWidth = Math.max(terminalWidth - PADDING_TO_PREVENT_OVERFLOW, 10)
+  // densable s=dMt+1 — wrapText shows MAX+1 when remainingLines===1
+  const maxVisibleLines = MAX_LINES_TO_SHOW + 1
+  const maxChars = MAX_LINES_TO_SHOW * wrapWidth * 4
+  if (trimmed.length > maxChars) return true
+
+  if (newlineCount === 0) {
+    const singleLineBudget = maxVisibleLines * wrapWidth
+    if (trimmed.length <= singleLineBudget) return false
+    return stringWidth(trimmed) > singleLineBudget
+  }
+
+  let visualLines = 0
+  for (const line of trimmed.split('\n')) {
+    visualLines += Math.max(1, Math.ceil(stringWidth(line) / wrapWidth))
+    if (visualLines > maxVisibleLines) return true
+  }
+  return false
 }

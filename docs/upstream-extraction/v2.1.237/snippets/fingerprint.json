@@ -1,0 +1,14 @@
+{
+  "version": "2.1.237",
+  "path": "/tmp/official-237/plat/package/claude",
+  "size": 317110288,
+  "sha256": "338901351d4ff17495738c67fc3e12a32c1b506738ac5e012eb782d3d8b5be43",
+  "vs236": {
+    "size": 317044624,
+    "sha256": "6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848",
+    "deltaBytes": 65664
+  },
+  "npm": "@anthropic-ai/claude-code-darwin-arm64@2.1.237",
+  "releaseDate": "2026-08-20",
+  "releaseCommit": "770933ea1ad2fa7b858191e397a65e6644771c64"
+}

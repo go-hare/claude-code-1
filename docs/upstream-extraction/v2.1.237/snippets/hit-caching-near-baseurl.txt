@@ -1,0 +1,74 @@
+@223206797 pat=prompt caching
+ing custom agents; (3) Claude API (formerly Anthropic API) - Messages API for directly passing messages to Claude, Tool Runner (`client.beta.messages.tool_runner`) for running an agentic loop over your own tools, manual tool-use loops, Managed Agents for server-hosted agents with a managed sandbox, prompt caching, and general Anthropic SDK usage; (4) Claude Tag (Claude in Slack) - what it is, setting it up for a Slack workspace, `/install-slack-app`; (5) `claude plugin eval` (writing and running plugin eval suites, its JSON/report, sandbox, CI, early-access enablement) and the `/skill-doctor` report. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently 
+====
+@269887404 pat=prompt caching
+ol execution path resolves the mapped name instead. Single-hop (no chains). See Options.toolAliases.....................	.......When true, omit per-user dynamic sections (working directory, auto-memory path) from the cached system prompt and re-inject them as the first user message. Lets cross-user prompt caching hit on a static system prompt prefix. Tradeoff: the model sees this context slightly later in the prompt, so steering on the working directory and memory location is marginally less authoritative. Has no effect when a custom (non-preset) system prompt is in use........................	.......Custom session title. When provided, the session uses this title and skips automatic title g
+====
+@283846844 pat=prompt caching
+g custom agents; (3) Claude API (formerly Anthropic API) - Messages API for directly passing messages to Claude, Tool Runner (\`client.beta.messages.tool_runner\`) for running an agentic loop over your own tools, manual tool-use loops, Managed Agents for server-hosted agents with a managed sandbox, prompt caching, and general Anthropic SDK usage; (4) Claude Tag (Claude in Slack) - what it is, setting it up for a Slack workspace, \`/install-slack-app\`; (5) \`claude plugin eval\` (writing and running plugin eval suites, its JSON/report, sandbox, CI, early-access enablement) and the \`/skill-doctor\` report. **IMPORTANT:** Before spawning a new agent, check if there is already a running or rec
+====
+@301379581 pat=prompt caching
+hread list with \`agent\` set to the advisor form as configured (\`{"type": "advisor", "model": ...}\`) and \`parent_thread_id\` set to the primary thread. Consultations are billed at the advisor model's rates; their tokens appear in the advisor thread's usage and the session's totals. Advisor-side prompt caching is automatic \u2014 nothing to configure.
+
+**Removing the advisor:** update the agent with a roster that omits the entry; if the advisor is the roster's only entry, clear the roster with \`"multiagent": null\`.
+
+---
+
+## Tool permissions and custom tools from subagent threads
+
+When a subagent needs your client (an \`always_ask\` confirmation, or a custom tool result), the request is 
+====
+@301585315 pat=prompt caching
+isting prompts and evals should carry over with strong out-of-the-box performance. **It is a drop-in upgrade at Opus 4.8's pricing** \u2014 $5 per million input tokens, $25 per million output \u2014 with the same feature set: 1M context (default, no beta header), 128K max output, adaptive thinking, prompt caching, batch processing, the Files API, PDF support, vision, and the full server-side and client-side tool set. \`{{OPUS_ID}}\` is a fixed ID with no date suffix, same scheme as \`claude-opus-4-8\`.
+
+The migration is **the model-ID swap plus prompt re-tuning**, with two breaking changes covered below.
+
+**Availability at launch:** Claude API (\`{{OPUS_ID}}\`), Amazon Bedrock (\`anthropic.{
+====
+@301618110 pat=prompt caching
+he \`refusal\` stop-reason guidance in the {{FABLE_NAME}} section if the caller needs a fallback path).
+
+**Unchanged from Sonnet 4.6:** assistant-turn prefills still return a 400 (use \`output_config.format\` or a system-prompt instruction); the 1M-token context window, the 128k max-output ceiling, prompt caching, batch processing, the Files API, PDF support, vision, and the full server- and client-side tool set all carry over.
+
+### Silent default change: adaptive thinking on when \`thinking\` is omitted
+
+On Sonnet 4.6, a request with no \`thinking\` field runs **without** thinking. On {{SONNET_NEXT_NAME}}, the same request runs with **adaptive thinking**. This is not an error \u2014 but cal
+====
+@301688511 pat=prompt caching
+ strict tool use | \u2705 | \u2705 | \u2705 | \u2705 | \u03B2 | |
+| Adaptive thinking / effort | \u2705 | \u2705 | \u2705 | \u2705 | \u03B2 | |
+| Extended thinking | \u2705 | \u2705 | \u2705 | \u2705 | \u03B2 | |
+| Prompt caching (5m, 1h) | \u2705 | \u2705 | \u2705 | \u2705 | \u03B2 | |
+| Automatic prompt caching | \u2705 | \u2705 | \u274C | \u274C | \u03B2 | |
+| Token counting | \u2705 | \u2705 | \u2705 | \u2705 | \u03B2 | |
+| Citations | \u2705 | \u2705 | \u2705 | \u2705 | \u03B2 | |
+| Search results content blocks | \u2705 | \u2705 | \u2705 | \u2705 | \u03B2 | |
+| Fine-grained tool streaming | \u2705 | \u2705 | \u2705 | \u2705 | \u2705 | |
+| Compaction | \u03B2 | \u03B2 | \u03B2 | \u03B2 
+====
+@301750286 pat=prompt caching
+ervene.
+- **Error interception** \u2014 inspect the tool result before it returns to Claude (\`generate_tool_call_response()\` / \`generateToolResponse()\`); stop early or handle it yourself.
+- **Result modification** \u2014 mutate the tool result before it goes back (e.g. add \`cache_control\` for prompt caching, or transform the output).
+- **Per-turn retries / param changes** \u2014 e.g. bump \`max_tokens\` and re-run a truncated turn; bound the whole loop with \`max_iterations\`.
+- **Streaming and automatic compaction** are both supported.
+
+These hooks are SDK helper features, not separate API parameters \u2014 for the exact method names and worked examples, WebFetch the per-language SDK 
+====
+@302890658 pat=prompt caching
+es the mapped name instead. Single-hop (no chains). See Options.toolAliases."),excludeDynamicSections:zt().optional().describe("When true, omit per-user dynamic sections (working directory, auto-memory path) from the cached system prompt and re-inject them as the first user message. Lets cross-user prompt caching hit on a static system prompt prefix. Tradeoff: the model sees this context slightly later in the prompt, so steering on the working directory and memory location is marginally less authoritative. Has no effect when a custom (non-preset) system prompt is in use."),agents:uo(H(),Xcy()).optional(),title:H().optional().describe("Custom session title. When provided, the session uses thi
+====
+@304395168 pat=prompt caching
+.type\` (any status, and a
+status-less mid-stream \`event: error\` routes the same), renders the
+message with no retry and no sign-in prompt, and never substitutes a
+fallback model. Never rewrite a request or response body instead \u2014 blocking
+substitutes the whole response; modification poisons prompt caching and
+diverges the client's view of the conversation.
+
+**Discovery additions.** This deployment's
+\`/.well-known/oauth-authorization-server\` carries one extra field:
+\`cri_enabled: true\` (CRI callers are accepted). The earlier
+\`cri_passthrough\` and \`first_party_compatible\` fields are RETIRED with
+the credential-relay mode \u2014 no deployment can truthfully advertise a
+verbatim 

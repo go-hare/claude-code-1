@@ -4782,6 +4782,7 @@ Read the team config to discover your teammates' names. Check the task list peri
       ])
     }
     case 'output_style': {
+      // densable SEA: Oke[style] + `${name} output style is active. ${turnReminder??fallback}`
       const outputStyle =
         OUTPUT_STYLE_CONFIG[
           attachment.style as keyof typeof OUTPUT_STYLE_CONFIG
@@ -4789,9 +4790,12 @@ Read the team config to discover your teammates' names. Check the task list peri
       if (!outputStyle) {
         return []
       }
+      const reminder =
+        attachment.turnReminder ??
+        'Remember to follow the specific guidelines for this style.'
       return wrapMessagesInSystemReminder([
         createUserMessage({
-          content: `${outputStyle.name} output style is active. Remember to follow the specific guidelines for this style.`,
+          content: `${outputStyle.name} output style is active. ${reminder}`,
           isMeta: true,
         }),
       ])

@@ -4845,8 +4845,8 @@ export function addCacheBreakpoints(
   pinnedEdits?: CachedMCPinnedEdits[],
   skipCacheWrite = false,
 ): MessageParam[] {
-  // densable Jdy: prefer cache_control on trailing nonempty api_system when
-  // experimental betas live and promotion not demoted (Gri/Vme).
+  // densable Jdy / SEA eDT canMarkApiSystem: prefer cache_control on trailing
+  // nonempty api_system when !demote && !dje() && provider/base-URL eligible.
   const allowApiSystemCache = shouldCacheControlOnApiSystem()
 
   const isCacheableAssistant = (m: (typeof messages)[number]): boolean => {

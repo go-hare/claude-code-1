@@ -1,0 +1,8 @@
+function t7(e,t){if(typeof e!=="string")return!1;let r=e.trimEnd(),n=0,o=0;for(let c=0;c<=lMt;c++){if(n=r.indexOf(`
+`,n),n===-1)break;o++,n++}if(n!==-1&&n<r.length)return!0;if(t===void 0)return!1;let i=Math.max(t-lmp,10),s=lMt+1,a=lMt*i*4;if(r.length>a)return!0;if(o===0){let c=s*i;if(r.length<=c)return!1;return tr(r)>c}let l=0;for(let c of r.split(`
+`))if(l+=Math.max(1,Math.ceil(tr(c)/i)),l>s)return!0;return!1}var lMt=3,lmp=10;var rmt=w(()=>{Am();L3e();As();WH();aMt()});var dLe="ListMcpResourcesTool",cmp=`
+Lists available resources from configured MCP servers.
+Each resource object includes a 'server' field indicating which server it's from.
+
+Usage examples:
+- List all resources from all serv

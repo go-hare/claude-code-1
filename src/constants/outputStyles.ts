@@ -15,6 +15,11 @@ export type OutputStyleConfig = {
   source: SettingSource | 'built-in' | 'plugin'
   keepCodingInstructions?: boolean
   /**
+   * densable SEA turnReminder (Concise BAT / Proactive FAT): appended each turn
+   * via the output_style attachment reminder. Built-in Concise only in tip 237.
+   */
+  turnReminder?: string
+  /**
    * If true, this output style will be automatically applied when the plugin is enabled.
    * Only applicable to plugin output styles.
    * When multiple plugins have forced output styles, only one is chosen (logged via debug).
@@ -36,10 +41,39 @@ In order to encourage learning, before and after writing code, always provide br
 
 These insights should be included in the conversation, not in the codebase. You should generally focus on interesting insights that are specific to the codebase or the code you just wrote, rather than general programming concepts.`
 
+// densable SEA 2.1.237 $AT — Concise six rules (prefer these over general comms)
+const CONCISE_STYLE_RULES = `The user chose brevity over narration. You should:
+
+1. **Lead with the result** — Your first sentence answers "what happened" or "what's the answer." No preamble ("Let me...", "Now I'll...") and no closing recap of what you already said.
+2. **Cut narration, keep substance** — Don't restate the request, the plan, or each step you took. Report outcomes, decisions, and anything the user must act on.
+3. **Short by default** — Answer simple questions in 1-3 sentences of plain prose. Use headers, tables, and bullet lists only when they carry real structure, never as decoration.
+4. **State things plainly** — Skip hedging boilerplate. Mention a caveat only when it changes what the user should do next.
+5. **Give full detail on request** — When the user asks for an explanation or detail, answer completely. Conciseness never means withholding requested information.
+6. **Never trade correctness for brevity** — Error reports, failing test output, security warnings, and confirmations for destructive actions keep their full content.
+
+Where these rules conflict with more general communication or formatting guidance elsewhere in your instructions, these rules win.`
+
+/** densable SEA BAT — Concise turnReminder */
+export const CONCISE_TURN_REMINDER =
+  'Be concise: lead with the result, skip preamble and narration, keep only what the user needs.'
+
 export const DEFAULT_OUTPUT_STYLE_NAME = 'default'
 
 export const OUTPUT_STYLE_CONFIG: OutputStyles = {
   [DEFAULT_OUTPUT_STYLE_NAME]: null,
+  // SEA order: default → (Proactive invent-ban) → Concise → Explanatory → Learning
+  Concise: {
+    name: 'Concise',
+    source: 'built-in',
+    description:
+      'Claude responds tersely, leading with results and skipping preamble and narration',
+    keepCodingInstructions: true,
+    turnReminder: CONCISE_TURN_REMINDER,
+    prompt: `You are an interactive CLI tool that helps users with software engineering tasks. Keep your responses short and direct while doing the work just as thoroughly.
+
+# Concise Style Active
+${CONCISE_STYLE_RULES}`,
+  },
   Explanatory: {
     name: 'Explanatory',
     source: 'built-in',

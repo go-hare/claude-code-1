@@ -212,9 +212,19 @@ describe('Jdy cache gate + xNi o3 allowlist', () => {
   })
 
   test('shouldCacheControlOnApiSystem respects demote latch', () => {
-    expect(shouldCacheControlOnApiSystem()).toBe(true)
+    // Pass firstParty + clean env so SEA eDT eligibility is not polluted by
+    // process.env gateway / custom BASE_URL from the host shell.
+    const env = {
+      ...process.env,
+      ANTHROPIC_BASE_URL: undefined,
+      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: undefined,
+      CLAUDE_CODE_HIPAA: undefined,
+      CLAUDE_CODE_HIPAA_COMPLIANCE: undefined,
+      _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL: undefined,
+    }
+    expect(shouldCacheControlOnApiSystem('firstParty', env)).toBe(true)
     latchMidConvCachePromotionRejected()
-    expect(shouldCacheControlOnApiSystem()).toBe(false)
+    expect(shouldCacheControlOnApiSystem('firstParty', env)).toBe(false)
   })
 
   test('THIRD_PARTY_BETA_ALLOWLIST keeps o3', () => {

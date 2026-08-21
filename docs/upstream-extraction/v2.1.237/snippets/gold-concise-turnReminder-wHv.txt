@@ -1,0 +1,30 @@
+# SEA 2.1.237 — Concise turnReminder injection (wHv / messages)
+
+## Attachment producer (≈ tip getOutputStyleAttachment)
+async function wHv(){
+  let t=Pa()?.outputStyle||"default";
+  if(t==="default")return[];
+  let r=await JPi(); // getOutputStyleConfig
+  return[{type:"output_style",style:t,turnReminder:r?.turnReminder}]
+}
+
+## Message render
+output_style:(e)=>{
+  let t=Oke[e.style];
+  if(!t)return[];
+  return ky([Sn({
+    content:`${t.name} output style is active. ${e.turnReminder??"Remember to follow the specific guidelines for this style."}`,
+    isMeta:!0
+  })])
+}
+
+## Concise config fragment
+Concise:{
+  name:"Concise",
+  source:"built-in",
+  description:"Claude responds tersely, leading with results and skipping preamble and narration",
+  keepCodingInstructions:!0,
+  prompt:`…# Concise Style Active\n${$AT}`,
+  turnReminder:BAT
+}
+BAT="Be concise: lead with the result, skip preamble and narration, keep only what the user needs."

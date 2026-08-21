@@ -1,0 +1,30 @@
+# densable SEA 2.1.237 — isOutputLineTruncated ≈ r7 (also 236 as t7)
+# Near NtS/EtS `(${e} to expand)` / FtS wrapText / Fva renderTruncatedContent
+# dMt=3, _mp=10, tr=stringWidth
+
+function r7(e,t){
+  if(typeof e!=="string")return!1;
+  let r=e.trimEnd(),n=0,o=0;
+  for(let c=0;c<=dMt;c++){
+    if(n=r.indexOf(`\n`,n),n===-1)break;
+    o++,n++
+  }
+  if(n!==-1&&n<r.length)return!0;
+  if(t===void 0)return!1;
+  let i=Math.max(t-_mp,10),s=dMt+1,a=dMt*i*4;
+  if(r.length>a)return!0;
+  if(o===0){
+    let c=s*i;
+    if(r.length<=c)return!1;
+    return tr(r)>c
+  }
+  let l=0;
+  for(let c of r.split(`\n`))
+    if(l+=Math.max(1,Math.ceil(tr(c)/i)),l>s)return!0;
+  return!1
+}
+var dMt=3,_mp=10;
+
+# Crash context (tip): MessagesBoundary → isItemClickable → tool.isResultTruncated(toolUseResult)
+# MCPTool.isResultTruncated passes Output object into isOutputLineTruncated → indexOf crash
+# SEA typeof guard returns false (same as 236 t7) — not 237-only delta; tip GAP vs SEA.

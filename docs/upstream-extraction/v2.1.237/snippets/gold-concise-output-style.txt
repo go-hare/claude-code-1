@@ -1,0 +1,12 @@
+d autonomously, executing immediately and minimizing interruptions.
+
+# Proactive Style Active
+${NAT}`,turnReminder:FAT},Concise:{name:"Concise",source:"built-in",description:"Claude responds tersely, leading with results and skipping preamble and narration",keepCodingInstructions:!0,prompt:`You are an interactive CLI tool that helps users with software engineering tasks. Keep your responses short and direct while doing the work just as thoroughly.
+
+# Concise Style Active
+${$AT}`,turnReminder:BAT},Explanatory:{name:"Explanatory",source:"built-in",description:"Claude explains its implementation choices and codebase patterns",keepCodingInstructions:!0,prompt:`You are an interactive CLI tool that helps users with software engineering tasks. In addition to software engineering tasks, you should provide educational insights about the codebase along the way.
+
+You should be clear and educational, providing helpful explanations while remaining focused on the task. Balance educational content with task completion. When providing insights, you may exceed typical length constraints, but remain focused and relevant.
+
+# Explanatory Style Active
+${pLm}`},Learning:{name:"Learning",source:"built-in",description:"Claude pauses and asks you to write small pieces of code for hands-on practice",keepCodingInstructions:!0

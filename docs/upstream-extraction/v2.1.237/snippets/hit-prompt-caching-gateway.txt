@@ -1,0 +1,72 @@
+@81252368: SE_URL..................	.......ANTHROPIC_AWS_WORKSPACE_ID..............	.......ANTHROPIC_BASE_URL'.......7..............	*.....ANTHROPIC_BEDROCK_BASE_URL..............	...!...ANTHROPIC_BEDROCK_MANTLE_BASE_URL.......................	.......ANTHROPIC_BEDROCK_REGION_PREFIX.........	.......ANTHROPIC_BEDROCK_SERVICE_TIER..........	.......ANTHROPIC_FOUNDRY_BASE_URL(...............,.....ANTHROPIC_FOUNDRY_RESOURCE4.......
+---
+@87337856: TY_TOKEN_FILE...........	.......ANTHROPIC_WORKSPACE_ID..................	.......ANTHROPIC_BASE_URL......................	.......oidc_federation.........	.......ANTHROPIC_SERVICE_ACCOUNT_ID............	.......file....................	.......ANTHROPIC_SCOPE.................<.......;..........................................................................<..............`>.....@ >.@0....4.....@._...5......pn....R....@
+---
+@88457962: tings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry.
+................................................@..............................
+............................v*..........v*......v*..w*......H..P........................;.......................:......x...................................................
+---
+@89376627: .............
+.......................	...B...CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL is invalid: ......................................................	...b...CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is missing; ignoring......................	.......warn.....................................H..............................	...............	.......Cloud gateway .......
+---
+@89376755: .....................................	...b...CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is missing; ignoring......................	.......warn.....................................H..............................	...............	.......Cloud gateway ..............;... .i.s. .n.o.t. .t.r.u.s.t.e.d. .o.n. .t.h.i.s. .m.a.c.h.i.n.e. ..  .r.u.n. ./.l.o.g.i.n. .t.o. .r.e.c.o.n.n.e.c.t...
+
+---
+@92846130: ......	...
+...firstParty..............	...5...[ToolSearch:optimistic] disabled: ANTHROPIC_BASE_URL=...................	....... is not a first-party Anthropic host. Set ENABLE_TOOL_SEARCH=true (or auto / auto:N) if your proxy forwards tool_reference blocks.......................	......, result=true.......................................'..............................$.....@p<..@%.....#bL.@PV.@ ..@.M.S.._....@P.n...
+---
+@182384885: .`. ..  .c.o.m.p.a.r.e. .t.o. .e.x.p.e.c.t.e.d. .`.................	...r...` | `ANTHROPIC_BASE_URL` mis-set | Fix or unset `ANTHROPIC_BASE_URL` |
+| `Rate limited (429). Polling too frequently.` on PollWork | Custom poll interval below 5s? Many replicas sharing one environment? | Backend rate-limiting | Restore default poll interval; reduce replica fan-out |
+| Mid-run `poll auth failed` on an otherwise-healthy runne
+---
+@182384929: .d. .`.................	...r...` | `ANTHROPIC_BASE_URL` mis-set | Fix or unset `ANTHROPIC_BASE_URL` |
+| `Rate limited (429). Polling too frequently.` on PollWork | Custom poll interval below 5s? Many replicas sharing one environment? | Backend rate-limiting | Restore default poll interval; reduce replica fan-out |
+| Mid-run `poll auth failed` on an otherwise-healthy runner | `date -u` vs `curl -sI .................
+---
+@182462107: CLAUDE_CODE_SESSION_ACCESS_TOKEN is unset....................	...&...code-sign: ANTHROPIC_BASE_URL is unset..................	.......utf8....................................	.......git_repository..........	......./v1/code/sessions/......................	......./sign-commit............	.......POST....................	.......application/json........	...
+...2023-06-01..............	.......shr-....................	...D
+---
+@182951095: .	....... .......................	....... (......................	....... args) ANTHROPIC_BASE_URL=..............	....... CLAUDE_CODE_WORKER_EPOCH=..............	....... cwd=...................	.......a.......................	.......pipe............................@...............P...............`...............p.......................	.......pipe....................	.......pipe....................	.......pipe.....
+---
+@186014512: ........................	.......ANTHROPIC_WORKSPACE_ID..................	.......ANTHROPIC_BASE_URL......................	.......oidc_federation.........	.......ANTHROPIC_SERVICE_ACCOUNT_ID............	.......file....................	.......ANTHROPIC_SCOPE.........	.......failed to parse config file ............	.......config file ............	....... is missing "authentication"............	...
+...user_oauth........
+---
+@194127504: ANT_OTEL_LOGS_EXPORTER..................	.......ANT_....................	.......ANTHROPIC_BASE_URL......................	...(..._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL........................ ...............@.......................	.......ANTHROPIC_BASE_URL......................	...(..._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL................	.......ANTHROPIC_BEDROCK_BASE_URL..............	.......ANTHROPIC_AWS_BASE
+---
+@194127664: BASE_URL........................ ...............@.......................	.......ANTHROPIC_BASE_URL......................	...(..._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL................	.......ANTHROPIC_BEDROCK_BASE_URL..............	.......ANTHROPIC_AWS_BASE_URL..................	...!...ANTHROPIC_BEDROCK_MANTLE_BASE_URL.......................	.......ANTHROPIC_VERTEX_BASE_URL...............	.......ANTHROPIC_GOOGLE_C
+---
+@194129024: ................0...............P.......................................	.......ANTHROPIC_BASE_URL......................	...(..._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL................	.......ANTHROPIC_CUSTOM_HEADERS................	.......ANTHROPIC_API_KEY.......................	.......ANTHROPIC_AUTH_TOKEN....................	.......CLAUDE_CODE_OAUTH_TOKEN.................	.......ANTHROPIC_FOUNDRY_API_KEY.........
+---
+@233256864: h.......................	.......ANTHROPIC_UNIX_SOCKET...................	.......ANTHROPIC_BASE_URL......................	.......ANTHROPIC_API_KEY.......................	.......ANTHROPIC_AUTH_TOKEN....................	.......CLAUDE_CODE_OAUTH_TOKEN.................................	.......policySettings..........	.......projectSettings.........	......localSettings...................0...............@...............P.
+---
+@234992272: K_REGION_PREFIX.........	.......CLAUDE_CODE_SUBAGENT_MODEL..............	.......ANTHROPIC_BASE_URL......................	.......CLAUDE_CONFIG_DIR.......................	.......CLAUDE_CODE_REMOTE......................	.......CLAUDE_CODE_REMOTE_MEMORY_DIR...........	.......HTTPS_PROXY.............	.......https_proxy.............	...
+...HTTP_PROXY..............	...
+...http_proxy..............	.......NO_PROXY..........
+---
+@277434715: onfig:{organization_id:d,workspace_id:i0("ANTHROPIC_WORKSPACE_ID"),base_url:i0("ANTHROPIC_BASE_URL"),authentication:{type:"oidc_federation",federation_rule_id:f,service_account_id:i0("ANTHROPIC_SERVICE_ACCOUNT_ID"),identity_token:p?{source:"file",path:p}:void 0,scope:i0("ANTHROPIC_SCOPE")}}};return null}let c;try{c=JSON.parse(l)}catch(d){throw Error(`failed to parse config file ${a}: ${d}`)}if(!c.authentication)thr
+---
+@277435422: e_id??(c.workspace_id=i0("ANTHROPIC_WORKSPACE_ID")),c.base_url??(c.base_url=i0("ANTHROPIC_BASE_URL")),(t=c.authentication).scope??(t.scope=i0("ANTHROPIC_SCOPE")),c.authentication.type==="oidc_federation"){if(!c.authentication.identity_token){let d=i0("ANTHROPIC_IDENTITY_TOKEN_FILE");if(d)c.authentication.identity_token={source:"file",path:d}}if(!c.authentication.federation_rule_id)c.authentication.federation_rule_i
+---
+@277578715: a0{get credentials(){return this._authState.provider}constructor({baseURL:e=i0("ANTHROPIC_BASE_URL"),apiKey:t,authToken:r,webhookKey:n=i0("ANTHROPIC_WEBHOOK_SIGNING_KEY")??null,...o}={}){if(o1s.add(this),this._requestAuthFlags=new WeakMap,mOo.set(this,void 0),t===void 0)t=o.profile!=null?null:i0("ANTHROPIC_API_KEY")??null;if(r===void 0)r=o.profile!=null?null:i0("ANTHROPIC_AUTH_TOKEN")??null;if(o.profile!=null&&(o.c
+---
+@277887207: Y_URL:()=>en_,ANTHROPIC_AWS_BASE_URL:()=>gr_,ANTHROPIC_AWS_WORKSPACE_ID:()=>yr_,ANTHROPIC_BASE_URL:()=>cr_,ANTHROPIC_BEDROCK_BASE_URL:()=>pr_,ANTHROPIC_BEDROCK_MANTLE_BASE_URL:()=>hr_,ANTHROPIC_BEDROCK_REGION_PREFIX:()=>fr_,ANTHROPIC_BEDROCK_SERVICE_TIER:()=>mr_,ANTHROPIC_FOUNDRY_BASE_URL:()=>Cr_,ANTHROPIC_FOUNDRY_RESOURCE:()=>kr_,ANTHROPIC_GOOGLE_CLOUD_BASE_URL:()=>vr_,ANTHROPIC_GOOGLE_CLOUD_LOCATION:()=>br_,ANTHR
+---
+@278523751: _ENDPOINT","ANT_OTEL_LOGS_EXPORTER"],Qxu=[qHo,`ANT_${qHo}`],eIu={apiKeyHelper:["ANTHROPIC_BASE_URL","_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL"],awsAuthRefresh:[...C4s,"ANTHROPIC_BEDROCK_BASE_URL","ANTHROPIC_AWS_BASE_URL","ANTHROPIC_BEDROCK_MANTLE_BASE_URL"],awsCredentialExport:[...C4s,"ANTHROPIC_BEDROCK_BASE_URL","ANTHROPIC_AWS_BASE_URL","ANTHROPIC_BEDROCK_MANTLE_BASE_URL"],gcpAuthRefresh:["CLAUDE_CODE_USE_VERTEX",
+---
+@278524271: ]},tIu=["CLAUDE_CODE_MEMORY_API_BASE_URL","CLAUDE_CODE_MEMORY_API_TOKEN"];LOe=["ANTHROPIC_BASE_URL","_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL","ANTHROPIC_BEDROCK_BASE_URL","ANTHROPIC_VERTEX_BASE_URL","ANTHROPIC_FOUNDRY_BASE_URL","ANTHROPIC_AWS_BASE_URL","ANTHROPIC_GOOGLE_CLOUD_BASE_URL","ANTHROPIC_BEDROCK_MANTLE_BASE_URL","CLAUDE_CODE_ARTIFACTS_API_BASE_URL","CLAUDE_CODE_ARTIFACTS_API_TOKEN","CLAUDE_CODE_ARTIFACT_A
+---
+@278524714: DE_ARTIFACT_LIVE_BASE_URL","CLAUDE_CODE_ARTIFACT_VIEWER_BASE_URL",...tIu],lYt=["ANTHROPIC_BASE_URL","_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL","ANTHROPIC_CUSTOM_HEADERS"],HOe=["ANTHROPIC_API_KEY","ANTHROPIC_AUTH_TOKEN","CLAUDE_CODE_OAUTH_TOKEN","AWS_BEARER_TOKEN_BEDROCK","ANTHROPIC_FOUNDRY_API_KEY","ANTHROPIC_FOUNDRY_AUTH_TOKEN","ANTHROPIC_AWS_API_KEY"],k4s=["CLAUDE_CODE_SKIP_BEDROCK_AUTH","CLAUDE_CODE_SKIP_VERTEX_
+---
+@279554565: UME_FIRST_PARTY_BASE_URL)return!0;return Nut()}function Nut(){let e=process.env.ANTHROPIC_BASE_URL;if(!e)return!0;return cDe(e)}function cDe(e){try{let t=new URL(e).host;return["api.anthropic.com"].includes(t)}catch{return!1}}function fJt(){return om()||G.CLAUDE_CODE_PROPAGATE_TRACEPARENT}var Vie,QOr;var xs=w(()=>{ot();tl();ub();Cz();Vie={bedrock:"Amazon Bedrock",vertex:"Google Vertex AI",foundry:"Microsoft Foundry
+---
+@279765750: ;if(e===null)return Czo=null,null;let t=cK()==="env-quad"?null:await bAr(e),r=G.ANTHROPIC_BASE_URL||e.base_url,n={...e,base_url:r,...e.authentication.credentials_path||t===null?{}:{authentication:{...e.authentication,credentials_path:t}}},[{getUserAgent:o},{getProxyFetchOptions:i}]=await Promise.all([Promise.resolve().then(() => (gB(),hmd)),Promise.resolve().then(() => (gy(),fxt))]),s=bKt(n,{baseURL:r||"https://api
+---
+@279769127: turn{organization_id:t,workspace_id:$Jt("ANTHROPIC_WORKSPACE_ID"),base_url:$Jt("ANTHROPIC_BASE_URL"),authentication:{type:"oidc_federation",federation_rule_id:e,service_account_id:$Jt("ANTHROPIC_SERVICE_ACCOUNT_ID"),identity_token:r?{source:"file",path:r}:void 0,scope:$Jt("ANTHROPIC_SCOPE")}}}}return vPo()}var Ezo,tYs,Czo,BJt,Gob=20,$Jt=(e)=>process.env[e]?.trim()||void 0;var Yut=w(()=>{FSn();TPo();gPo();a0e();Ye()
+---
+@279800114: MODEL_DISCOVERY)return!1;if(Zn()!=="firstParty")return!1;if(om())return!1;if(!G.ANTHROPIC_BASE_URL)return!1;return!0}function IYs(){return OYs.join(kn(),"cache")}function MYs(){return OYs.join(IYs(),"gateway-models.json")}function PYs(){return An.cache("gateway-models","gateway-models.json")}function Uzo(e){let t=Bib().safeParse(ml(e,!1));return t.success?t.data:null}function tRn(){return zR().gatewayModelsByCacheP
+---
+@279801128: ageV5=e}function nRn(){if(!DYs())return[];let e=ohd(MYs());if(!e||e.baseUrl!==G.ANTHROPIC_BASE_URL)return[];let t=thd.get(e);if(t)return t;let r=e.models.map((n)=>({value:n.id,label:Nie(n.display_name??"")||Nie(n.id),description:"From gateway"}));return thd.set(e,r),r}async function shd(e){if(!DYs())return;if(ba())return;try{let t=G.ANTHROPIC_BASE_URL;if(!t)return;let r=G.ANTHROPIC_AUTH_TOKEN,n=n_e();if(!r&&!n)retu
+---
+@279801383: hd.set(e,r),r}async function shd(e){if(!DYs())return;if(ba())return;try{let t=G.ANTHROPIC_BASE_URL;if(!t)return;let r=G.ANTHROPIC_AUTH_TOKEN,n=n_e();if(!r&&!n)return;let o={};for(let p of(G.ANTHROPIC_CUSTOM_HEADERS??"").split(/\r?\n/)){let f=p.indexOf(":");if(f<=0)continue;let m=p.slice(0,f).trim(),h=p.slice(f+1).trim();if(m&&h)o[m]=h}let i=`${t.replace(/\/+$/,"")}/v1/models?limit=1000`,s=await fetch(i,{method:"GET
+---
+@279972313: atch{return}}function Hbd(){return process.env.SESSION_INGRESS_URL??process.env.ANTHROPIC_BASE_URL}var OXs,sdb,$bd;var vje=w(()=>{sIt();OXs=["/v2/session_ingress/shttp/mcp/","/v2/session_ingress/mcp/ws/","/v2/ccr-sessions/","/v1/code/"];sdb=new Nbd;$bd=new Set(["bridge.claudeusercontent.com","bridge-staging.claudeusercontent.com"])});function xMr(e){return ddb.has(Kc(e))}function w6o(e,t){let r=`mcp__${Kc(e)}__${t}

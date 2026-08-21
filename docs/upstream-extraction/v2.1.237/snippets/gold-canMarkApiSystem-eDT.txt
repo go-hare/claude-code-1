@@ -1,0 +1,59 @@
+# SEA 2.1.237 — canMarkApiSystem / api_system cache_control eligibility (changelog #1)
+
+## 237-only (vs 236 DOT unconditional)
+
+```
+function eDT(..., s=Zn()){
+  let a=!i&&!dje()&&(
+    FF()&&rXt(s)&&H2m(s)
+    || (s==="bedrock"||s==="vertex"||s==="mantle")&&rzi(s)
+    || s==="foundry"&&JOT()
+  );
+  // ... canMarkApiSystem:a ... api_system ... cache_control
+}
+```
+
+## Helpers
+
+```
+// firstParty host / assume / BASE_URL unset path (shape existed 236 as xOT, unwired)
+function H2m(e=Zn()){
+  if(e!=="firstParty"||G._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL||G.ANTHROPIC_BASE_URL!==void 0||!Udt())return!0;
+  let t=zAn();
+  return t===null||t!==void 0&&cDe(t)
+}
+
+function rXt(e=Zn()){
+  if(e==="anthropicAws")return G.ANTHROPIC_AWS_BASE_URL===void 0;
+  return e==="firstParty"&&om()
+}
+
+function rzi(e){
+  switch(e){
+    case"bedrock":return G.ANTHROPIC_BEDROCK_BASE_URL===void 0;
+    case"vertex":return G.ANTHROPIC_VERTEX_BASE_URL===void 0;
+    case"mantle":return G.ANTHROPIC_BEDROCK_MANTLE_BASE_URL===void 0
+  }
+}
+
+function JOT(){
+  let e=G.ANTHROPIC_FOUNDRY_BASE_URL;
+  if(e===void 0)return!0;
+  try{return new URL(e).hostname.endsWith(".services.ai.azure.com")}catch{return!1}
+}
+```
+
+## Contract (read carefully)
+
+- **Not** "enable caching on gateway". Message-tail ephemeral caching still runs.
+- **Is** proactive: do **not** stamp `cache_control` on **api_system** when provider/base-URL is custom/gateway-ineligible — avoids proxy rejection.
+- For `firstParty` + custom `ANTHROPIC_BASE_URL`, `rXt→om()` false → `canMarkApiSystem` false.
+- For `gateway`, `rXt` only true for firstParty/anthropicAws → branch fails → false.
+- tip (pre-land): `shouldCacheControlOnApiSystem()` ≈ `!experimentalBetasDisabled && !midConvCachePromotionRejected` only (reactive demote) — lacked eligibility → PARTIAL.
+- tip (2026-08-21 land): eligibility wired → **HAVE**.
+
+## tip land status (2026-08-21) — HAVE
+
+Wired into `shouldCacheControlOnApiSystem(provider?, env?)` via `isApiSystemCacheControlEligible`.
+Keep midConv demote. Do **not** invent a hard off-switch for all ephemeral breakpoints on custom BASE_URL.
+Tests: `canMarkApiSystem.237.test.ts` · `midConversationSystem.test.ts` · `addCacheBreakpoints.midConv.test.ts`.

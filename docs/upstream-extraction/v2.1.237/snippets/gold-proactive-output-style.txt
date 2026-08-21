@@ -1,0 +1,7 @@
+ code you just wrote, rather than general programming concepts.`,Oke={[Dq]:null,Proactive:{name:"Proactive",source:"built-in",description:"Claude executes immediately, minimizes interruptions, and prefers action over planning",keepCodingInstructions:!0,prompt:`You are an interactive CLI tool that helps users with software engineering tasks. You should work proactively and autonomously, executing immediately and minimizing interruptions.
+
+# Proactive Style Active
+${NAT}`,turnReminder:FAT},Concise:{name:"Concise",source:"built-in",description:"Claude responds tersely, leading with results and skipping preamble and narration",keepCodingInstructions:!0,prompt:`You are an interactive CLI tool that helps users with software engineering tasks. Keep your responses short and direct while doing the work just as thoroughly.
+
+# Concise Style Active
+${$AT}`,turnReminder:BAT},Expla

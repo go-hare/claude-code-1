@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>densable 2.1.237 · Alignment Progress</title>
+  <style>
+    :root {
+      --bg: #1c1917;
+      --fg: #f5f5f4;
+      --muted: #a8a29e;
+      --card: #292524;
+      --border: #44403c;
+      --orange: #d77757;
+      --blue: #5769f7;
+      --gap: #f87171;
+      --partial: #fbbf24;
+      --have: #34d399;
+    }
+    body {
+      margin: 0;
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    main { max-width: 920px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+    h1 { font-size: 1.55rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
+    h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; color: var(--orange); }
+    .meta { color: var(--muted); margin-bottom: 1.25rem; }
+    .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.6rem; }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 0.7rem;
+      text-align: center;
+    }
+    .stat .n { font-size: 1.6rem; font-weight: 700; }
+    .stat .l { color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }
+    .have .n { color: var(--have); }
+    .partial .n { color: var(--partial); }
+    .gap .n { color: var(--gap); }
+    table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; }
+    th, td { border-bottom: 1px solid var(--border); padding: 0.65rem 0.75rem; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.8rem; }
+    tr:last-child td { border-bottom: 0; }
+    .badge {
+      display: inline-block;
+      padding: 0.12rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .badge.gap { background: rgba(248,113,113,0.18); color: var(--gap); }
+    .badge.partial { background: rgba(251,191,36,0.16); color: var(--partial); }
+    .badge.have { background: rgba(52,211,153,0.16); color: var(--have); }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; }
+    ul { padding-left: 1.15rem; color: var(--muted); }
+    li { margin: 0.3rem 0; }
+    a { color: var(--blue); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.9rem 1rem;
+      margin-top: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>densable 2.1.237 · Alignment Progress</h1>
+    <p class="meta">2026-08-21 · SEA <span class="mono">2.1.237</span> · tip baseline <span class="mono">2.1.236 land / npm 2.7.45</span> · <strong>#1/#2/#3 全 HAVE</strong></p>
+
+    <div class="grid">
+      <div class="stat have"><div class="n">3</div><div class="l">HAVE</div></div>
+      <div class="stat partial"><div class="n">0</div><div class="l">PARTIAL</div></div>
+      <div class="stat gap"><div class="n">0</div><div class="l">GAP</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">N/A</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">UNKNOWN</div></div>
+    </div>
+
+    <h2>Checklist</h2>
+    <table>
+      <thead>
+        <tr><th>#</th><th>key</th><th>状态</th><th>证据摘要</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td class="mono">gateway-custom-baseurl-prompt-caching</td>
+          <td><span class="badge have">HAVE</span></td>
+          <td>SEA <span class="mono">eDT</span>/<span class="mono">canMarkApiSystem</span> → tip <span class="mono">isApiSystemCacheControlEligible</span> + <span class="mono">shouldCacheControlOnApiSystem</span>；custom BASE_URL/gateway 不盖 api_system <span class="mono">cache_control</span>；focused tests 29 pass。</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td class="mono">concise-output-style</td>
+          <td><span class="badge have">HAVE</span></td>
+          <td>SEA Concise + 六规则 <span class="mono">$AT</span> + <span class="mono">turnReminder:BAT</span>；attachment/messages/withRetry 已接线；不 invent Proactive。</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td class="mono">isOutputLineTruncated-r7</td>
+          <td><span class="badge have">HAVE</span></td>
+          <td>SEA <span class="mono">r7</span>/<span class="mono">t7</span> typeof + wrap-aware；修 MessagesBoundary ← MCPTool object → <span class="mono">indexOf</span> crash。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>SEA fingerprint</h2>
+    <div class="card">
+      <div><span class="mono">/tmp/official-237/plat/package/claude</span></div>
+      <div>size <span class="mono">317110288</span> · sha256 <span class="mono">338901351d4ff17495738c67fc3e12a32c1b506738ac5e012eb782d3d8b5be43</span></div>
+      <div>vs 236 Δ <span class="mono">+65664</span> B</div>
+    </div>
+
+    <h2>Official bullets</h2>
+    <ul>
+      <li>Fixed prompt caching for sessions using an LLM gateway or custom base URL</li>
+      <li>Added built-in <strong>Concise</strong> output style (lead with results, skip preamble/narration)</li>
+    </ul>
+
+    <h2>Next</h2>
+    <ul>
+      <li>等用户：提交 / bump / 扩 238</li>
+      <li>旁注：Proactive 故意不 invent（非 237 bullet）</li>
+      <li>no auto commit / push / bump</li>
+    </ul>
+
+    <p class="meta" style="margin-top:1.5rem">
+      Docs:
+      <span class="mono">docs/upstream-extraction/v2.1.237/</span>
+      · checklist · changelog · boards · snippets
+    </p>
+  </main>
+</body>
+</html>

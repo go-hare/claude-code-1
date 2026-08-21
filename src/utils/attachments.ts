@@ -75,6 +75,7 @@ import {
 } from './imageResizer.js'
 import type { PastedContent } from './config.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
+import { getOutputStyleConfig } from '../constants/outputStyles.js'
 import {
   getDefaultSonnetModel,
   getDefaultHaikuModel,
@@ -632,6 +633,8 @@ export type Attachment =
   | {
       type: 'output_style'
       style: string
+      /** densable SEA turnReminder (Concise BAT); optional for other styles */
+      turnReminder?: string
     }
   | {
       type: 'diagnostics'
@@ -1216,9 +1219,7 @@ export async function getAttachments(
         maybe('ide_opened_file', async () =>
           getOpenedFileFromIDE(ideSelection, toolUseContext),
         ),
-        maybe('output_style', async () =>
-          Promise.resolve(getOutputStyleAttachment()),
-        ),
+        maybe('output_style', async () => getOutputStyleAttachment()),
         maybe('diagnostics', async () =>
           getDiagnosticAttachments(toolUseContext),
         ),
@@ -2056,7 +2057,11 @@ function getCriticalSystemReminderAttachment(
   return [{ type: 'critical_system_reminder', content: reminder }]
 }
 
-function getOutputStyleAttachment(): Attachment[] {
+/**
+ * densable SEA wHv — non-default style → {type:output_style, style, turnReminder?}
+ * turnReminder from getOutputStyleConfig (JPi), e.g. Concise BAT.
+ */
+async function getOutputStyleAttachment(): Promise<Attachment[]> {
   const settings = getSettings_DEPRECATED()
   const outputStyle = settings?.outputStyle || 'default'
 
@@ -2065,10 +2070,13 @@ function getOutputStyleAttachment(): Attachment[] {
     return []
   }
 
+  const config = await getOutputStyleConfig()
+
   return [
     {
       type: 'output_style',
       style: outputStyle,
+      turnReminder: config?.turnReminder,
     },
   ]
 }

@@ -28,6 +28,7 @@ describe('densable #35 FOREGROUND_529 / O6t for web tools', () => {
 
   test('O6t: densable swh extras present', () => {
     expect(shouldRetry529('repl_main_thread:outputStyle:Proactive')).toBe(true)
+    expect(shouldRetry529('repl_main_thread:outputStyle:Concise')).toBe(true)
     expect(shouldRetry529('repl_sampling')).toBe(true)
     expect(shouldRetry529('chrome_mcp')).toBe(true)
     expect(shouldRetry529('compact_fab_check')).toBe(true)
