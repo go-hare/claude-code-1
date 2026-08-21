@@ -10,8 +10,8 @@
 
 | 状态 | 计数 | 备注 |
 | ---- | ---- | ---- |
-| **HAVE** | **18** | Batch A/B + Batch C `#17/#22/#26` |
-| **PARTIAL** | **14** | 含 gold-weak `#18/#24/#31/#32` |
+| **HAVE** | **19** | Batch A/B + Batch C `#17/#22/#26` + `#25` Bqn |
+| **PARTIAL** | **13** | 含 gold-weak `#18/#24/#31/#32` |
 | **GAP** | **0** | — |
 | **N/A** | **1** | #33 VSCode host a11y（invent-ban） |
 | **UNKNOWN** | **0** | — |
@@ -44,7 +44,7 @@
 | 22 | auto-mode-bedrock-defaults | Auto mode on Bedrock/Vertex/Foundry + telemetry-off: classifier same defaults incl severity-scored | **HAVE** | tip Gdu/`DO_NOT_TRACK` + KIt（3P/telemetry-off/DISABLE_GROWTHBOOK）+ KD→qTa `severityByModel` + yoloClassifier thresholds（`autoModeKdQta.236`） |
 | 23 | status-showUntrackedFiles | Auto mode git status not fooled by status.showUntrackedFiles=no | **HAVE** | tip always `--untracked-files=normal|all`（Batch A） |
 | 24 | model-picker-highlight | `/model` highlight only newest model name | **PARTIAL** | SEA hit `found:false`（gold-weak）；tip ModelPicker 无「只高亮最新名」可锁合同；invent-ban |
-| 25 | goal-idle-checkin | `/goal`: idle+parked behind bg work auto check-in 30m then 1h/2h | **PARTIAL** | tip 固定 30m。SEA `t*2**Math.min(checkinCount,jsv)`（`jsv=2`）→ 30→60→120 |
+| 25 | goal-idle-checkin | `/goal`: idle+parked behind bg work auto check-in 30m then 1h/2h | **HAVE** | tip `Bqn`/`Wsv`：`base*2**min(checkinCount,jsv=2)` → 30→60→120；rbf 仍用底数；`goalIdleCheckin.236`。**tip invent（explicit）**：空 deferring 注入后 clear（停 parked 循环 nudge）；arm generation 防 cancel/turn_end 双注入（SEA Wsv 无此二门） |
 | 26 | usage-credits-row | `/usage` usage-credits spend row for Team/Enterprise; capped 0% before spend | **HAVE** | tip iXl gate team\|enterprise + `Usage credits` + util clamp 0% + `formatUsageCreditsAmount`/`am` currency（Batch C） |
 | 27 | sigterm-print | SIGTERM print/SDK: no interrupted-turn / synthetic denials; still kill cmds + exit 143 | **PARTIAL** | tip SIGTERM→abort+`gracefulShutdown(143)` HAVE；interrupted-turn / synthetic denial 清理未完全对齐 |
 | 28 | slash-typo-enter | Enter on slash typo/unavailable reports instead of closest fuzzy; prefixes/aliases still run | **PARTIAL** | tip 不自动跑最近模糊 + 报 unknown；SEA 式 Did you mean 建议弱 |
@@ -61,7 +61,8 @@
 ### Done → HAVE
 Batch A: `#1` `#15` `#19` `#21` `#23`  
 Batch B: `#13` `#14` `#5` `#30` `#2`  
-Batch C: `#17` `#22` `#26`（`#18/#24/#31/#32` → PARTIAL gold-weak）
+Batch C: `#17` `#22` `#26`（`#18/#24/#31/#32` → PARTIAL gold-weak）  
+#25: idle timer `Bqn`/`Wsv` 30→60→120（`goalIdleCheckin.236`）
 
 ## 本轮相对初稿的加强
 

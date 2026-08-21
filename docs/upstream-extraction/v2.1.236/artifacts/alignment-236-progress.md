@@ -8,7 +8,7 @@
 | Phase | State |
 | ----- | ----- |
 | SEA pack | **done** — `/tmp/official-236/plat/package/claude` · sha256 `6bc4ba992d…` · 317044624 B |
-| Changelog / checklist | **updated** — HAVE **18** / PARTIAL **14** / GAP **0** |
+| Changelog / checklist | **updated** — HAVE **19** / PARTIAL **13** / GAP **0** |
 | Dig / map | **done** |
 | Implement | **Batch A+B+C done** |
 
@@ -16,9 +16,9 @@
 
 | HAVE | PARTIAL | GAP | N/A | UNKNOWN |
 | ---- | ------- | --- | --- | ------- |
-| **18** | **14** | **0** | **1** (#33) | **0** |
+| **19** | **13** | **0** | **1** (#33) | **0** |
 
-### HAVE（18）
+### HAVE（19）
 
 | # | key |
 | - | --- |
@@ -38,12 +38,13 @@
 | 21 | auto-mode-monitor |
 | 22 | auto-mode-bedrock-defaults |
 | 23 | status-showUntrackedFiles |
+| 25 | goal-idle-checkin |
 | 26 | usage-credits-row |
 | 30 | sendmessage-burst |
 
-### PARTIAL（14）
+### PARTIAL（13）
 
-`#4` `#6` `#7` `#9` `#10` `#11` `#18` `#24` `#25` `#27` `#28` `#29` `#31` `#32`
+`#4` `#6` `#7` `#9` `#10` `#11` `#18` `#24` `#27` `#28` `#29` `#31` `#32`
 
 - `#18/#24/#31/#32`：SEA hit `found:false`/weak — **PARTIAL**（gold-weak，invent-ban，不硬造 UI 修复）
 

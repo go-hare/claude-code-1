@@ -10,16 +10,16 @@
 | ----- | ----- |
 | SEA pack | **done** |
 | Fan-out dig/map | **done** |
-| Synthesis | **done** — HAVE **18** / PARTIAL **14** / GAP **0** / N/A **1** |
+| Synthesis | **done** — HAVE **19** / PARTIAL **13** / GAP **0** / N/A **1** |
 | Implement | **Batch A/B/C done** |
 
 ## Counts
 
 | HAVE | PARTIAL | GAP | N/A |
 | ---- | ------- | --- | --- |
-| 18 | 14 | 0 | 1 |
+| 19 | 13 | 0 | 1 |
 
-## HAVE（18）
+## HAVE（19）
 
 | # | key |
 | - | --- |
@@ -39,12 +39,13 @@
 | 21 | auto-mode-monitor |
 | 22 | auto-mode-bedrock-defaults |
 | 23 | status-showUntrackedFiles |
+| 25 | goal-idle-checkin（HAVE；tip invent: empty-clear + arm gen） |
 | 26 | usage-credits-row |
 | 30 | sendmessage-burst |
 
-## PARTIAL（14）
+## PARTIAL（13）
 
-`#4` cwd-removed · `#6` model-picker-height · `#7` sendmessage-malformed-tag · `#9` fullscreen-resize-message · `#10` fullscreen-blank-band · `#11` managed-settings-prompt · `#18` clawd-eyes（gold-weak） · `#24` model-picker-highlight（gold-weak） · `#25` goal-idle-checkin · `#27` sigterm-print · `#28` slash-typo-enter · `#29` rc-offline-seconds · `#31` title-chip-align（gold-weak） · `#32` footer-right-margin（gold-weak）
+`#4` cwd-removed · `#6` model-picker-height · `#7` sendmessage-malformed-tag · `#9` fullscreen-resize-message · `#10` fullscreen-blank-band · `#11` managed-settings-prompt · `#18` clawd-eyes（gold-weak） · `#24` model-picker-highlight（gold-weak） · `#27` sigterm-print · `#28` slash-typo-enter · `#29` rc-offline-seconds · `#31` title-chip-align（gold-weak） · `#32` footer-right-margin（gold-weak）
 
 ## GAP
 

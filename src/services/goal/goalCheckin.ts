@@ -1,5 +1,6 @@
 /**
- * densable 2.1.234 `/goal` background-defer check-in (wPv / APv / kPv / iYp / DMv).
+ * densable 2.1.234 `/goal` background-defer check-in (wPv / APv / kPv / iYp / DMv)
+ * + 2.1.236 idle-timer backoff helpers (Bqn: jsv / G9a / rLe).
  *
  * Gold:
  *   wPv — GB `tengu_saffron_wren` (default on) × env minutes (SPv=30) → ms; 0 disables
@@ -12,10 +13,19 @@
 import type { TaskState } from '../../tasks/types.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 
-/** densable SPv — default minutes when env unset. */
+/** densable SPv / Usv — default minutes when env unset. */
 export const DEFAULT_GOAL_CHECKIN_MINUTES = 30
 
-/** densable EPv — max chars per task line in check-in body. */
+/** densable jsv — idle-timer exponential cap (`2 ** min(checkinCount, jsv)`). */
+export const GOAL_CHECKIN_BACKOFF_CAP = 2
+
+/** densable G9a — minimum idle-timer delay (also busy/queued retry). */
+export const GOAL_CHECKIN_TIMER_MIN_MS = 60_000
+
+/** densable rLe — setTimeout clamp. */
+export const GOAL_CHECKIN_TIMER_MAX_MS = 2_147_483_647
+
+/** densable EPv / zsv — max chars per task line in check-in body. */
 export const GOAL_CHECKIN_TASK_LINE_MAX = 120
 
 export type GoalCheckinActiveGoal = {
@@ -104,6 +114,39 @@ export function getGoalCheckinIntervalMs(
   }
   if (minutes <= 0) return 0
   return minutes * 60_000
+}
+
+/**
+ * densable Bqn interval before remainder clamp:
+ * `base * 2 ** Math.min(checkinCount ?? 0, jsv)` → 30 → 60 → 120 min.
+ */
+export function getGoalCheckinBackoffIntervalMs(
+  baseMs: number,
+  checkinCount: number | undefined,
+): number {
+  return baseMs * 2 ** Math.min(checkinCount ?? 0, GOAL_CHECKIN_BACKOFF_CAP)
+}
+
+/**
+ * densable Bqn delay: `min(rLe, max(G9a, backoff - (now - deferredSince)))`.
+ */
+export function getGoalIdleCheckinDelayMs(args: {
+  baseMs: number
+  checkinCount?: number
+  deferredSince: number
+  now: number
+}): number {
+  const backoff = getGoalCheckinBackoffIntervalMs(
+    args.baseMs,
+    args.checkinCount,
+  )
+  return Math.min(
+    GOAL_CHECKIN_TIMER_MAX_MS,
+    Math.max(
+      GOAL_CHECKIN_TIMER_MIN_MS,
+      backoff - (args.now - args.deferredSince),
+    ),
+  )
 }
 
 /**

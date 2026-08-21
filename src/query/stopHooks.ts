@@ -50,6 +50,7 @@ const jobClassifierModule = feature('TEMPLATES')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 import type { QuerySource } from '../constants/querySource.js'
+import type { GoalCheckinActiveGoal } from '../services/goal/goalCheckin.js'
 import { executeAutoDream } from '../services/autoDream/autoDream.js'
 import { executePromptSuggestion } from '../services/PromptSuggestion/promptSuggestion.js'
 import { isBareMode, isEnvDefinedFalsy } from '../utils/envUtils.js'
@@ -258,14 +259,22 @@ export async function* handleStopHooks(
     })
   }
 
+  // densable 2.1.236 Bqn: arm idle+parked check-in after Stop hooks (finally).
+  let goalToArm: GoalCheckinActiveGoal | undefined
   try {
     const blockingErrors: Message[] = [...briefEnforceBlocking]
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
 
-    // densable 2.1.234: defer goal Stop while DMv bg work runs; iYp check-in
-    // after CLAUDE_CODE_GOAL_CHECKIN_MINUTES (default 30). Do not bump
-    // iterations on defer (local invent) — use deferredSince / checkinCount.
+    // densable 2.1.234: defer goal Stop while DMv bg work runs; iYp/rbf check-in
+    // after CLAUDE_CODE_GOAL_CHECKIN_MINUTES (default 30). 2.1.236 Bqn idle
+    // timer then backs off 30→60→120. Do not bump iterations on defer.
+    if (!toolUseContext.agentId) {
+      const { cancelPendingGoalIdleCheckin } = await import(
+        '../services/goal/goalIdleCheckin.js'
+      )
+      cancelPendingGoalIdleCheckin()
+    }
     if (appState.activeGoal && !toolUseContext.agentId) {
       const tasks = appState.tasks ?? {}
       const {
@@ -328,6 +337,7 @@ export async function* handleStopHooks(
               },
             },
           )
+          goalToArm = plan.nextGoal
           if (plan.nextGoal !== appState.activeGoal) {
             toolUseContext.setAppState(prev => {
               if (!prev.activeGoal) return prev
@@ -343,6 +353,7 @@ export async function* handleStopHooks(
             yield checkinMsg
           }
         } catch (err) {
+          goalToArm = appState.activeGoal
           logForDebugging(`[goal] check-in plan failed: ${errorMessage(err)}`, {
             level: 'error',
           })
@@ -661,5 +672,27 @@ export async function* handleStopHooks(
       'warning',
     )
     return { blockingErrors: [], preventContinuation: false }
+  } finally {
+    // densable Bqn: interactive + planned nextGoal only (not after clear).
+    if (
+      goalToArm !== undefined &&
+      !toolUseContext.options.isNonInteractiveSession
+    ) {
+      try {
+        const { armGoalIdleCheckin } = await import(
+          '../services/goal/goalIdleCheckin.js'
+        )
+        armGoalIdleCheckin({
+          goal: goalToArm,
+          now: Date.now(),
+          getAppState: toolUseContext.getAppState,
+          setAppState: toolUseContext.setAppState,
+        })
+      } catch (err) {
+        logForDebugging(`[goal] check-in arm failed: ${errorMessage(err)}`, {
+          level: 'error',
+        })
+      }
+    }
   }
 }
