@@ -33,6 +33,7 @@ import {
   type SpawnHint,
 } from './runnerApi.js'
 import { parseDenseInt, redactLogText, withTimeoutMs } from './rootRunner.js'
+import { assertOrchestratorProxyAuthUnset } from './egressProxyAuth.js'
 import {
   startScmConnector,
   type ScmConnectorConfig as ScmTunnelConfig,
@@ -1591,6 +1592,8 @@ export async function selfHostedRunnerOrchestratorMain(
 
   let args: OrchestratorArgs
   try {
+    // densable 2.1.238 $4y — refuse proxy-authorization knobs on orchestrator
+    assertOrchestratorProxyAuthUnset(argv)
     args = parseOrchestratorArgs(argv)
   } catch (err) {
     console.error(

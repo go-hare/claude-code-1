@@ -19,6 +19,10 @@
  * sees config-provided CLAUDE_CODE_USE_BEDROCK/ANTHROPIC_BASE_URL. That call
  * computes once and mirrors the result here via setEligibility(). Every
  * subsequent read hits the cached bool instead of re-running the auth chain.
+ *
+ * densable 2.1.238 OBu / dD — sessionCache + verifiedPayload + consentedPayload
+ * (Qxn triple-pointer). Does NOT invent storageV5 backendView / resetEpoch /
+ * helper attestation (MN_).
  */
 
 import { join } from 'path'
@@ -26,6 +30,7 @@ import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { readFileSync } from '../../utils/fileRead.js'
 import { stripBOM } from '../../utils/jsonRead.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
+import { SETTINGS_KEY_ALIASES } from '../../utils/settings/settingsAliases.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { jsonParse } from '../../utils/slowOperations.js'
 import { getRemoteSettingsPath } from '../../utils/residualFinalEnvGates.js'
@@ -33,14 +38,73 @@ import { getRemoteSettingsPath } from '../../utils/residualFinalEnvGates.js'
 const SETTINGS_FILENAME = 'remote-settings.json'
 
 let sessionCache: SettingsJson | null = null
+let verifiedPayload: SettingsJson | null = null
+let consentedPayload: SettingsJson | null = null
 let eligible: boolean | undefined
 
-export function setSessionCache(value: SettingsJson | null): void {
+export type ReplaceSessionCacheOptions = {
+  /** densable RMr(..., {verified:true}) — marks this object as the verified pointer. */
+  verified?: boolean
+}
+
+/**
+ * densable RMr / OBu.replaceSessionCache.
+ * Always writes sessionCache. verifiedPayload updates only when opts.verified.
+ */
+export function setSessionCache(
+  value: SettingsJson | null,
+  opts?: ReplaceSessionCacheOptions,
+): void {
   sessionCache = value
+  if (opts?.verified) {
+    verifiedPayload = value
+  }
+}
+
+/**
+ * densable q8s portable: auto-consent from disk only when there is no
+ * policy-helper / extraKnownMarketplaces surface (canonical or nxn alias
+ * `additionalMarketplaces`). Full q8s hashes helpers against MN_()
+ * attestation — tip has no backendView, so a helper surface does NOT
+ * auto-consent (do not invent helper attestation).
+ */
+function shouldAutoConsentFromDisk(settings: SettingsJson): boolean {
+  const rec = settings as SettingsJson & {
+    policyHelpers?: unknown
+  } & Record<string, unknown>
+  return (
+    rec.policyHelpers === undefined &&
+    rec.extraKnownMarketplaces === undefined &&
+    !SETTINGS_KEY_ALIASES.some(
+      ({ alias, canonical }) =>
+        canonical === 'extraKnownMarketplaces' && rec[alias] !== undefined,
+    )
+  )
+}
+
+/**
+ * densable OBu.seedFromDisk — sessionCache = e; consentedPayload ??= e when
+ * q8s(e) is undefined (no helper surface). Does not set verifiedPayload.
+ */
+export function seedSessionCacheFromDisk(value: SettingsJson): void {
+  sessionCache = value
+  if (shouldAutoConsentFromDisk(value)) {
+    consentedPayload ??= value
+  }
+}
+
+/**
+ * densable W8s / OBu.markConsented. Caller must pass the same object currently
+ * in sessionCache for Qxn identity to hold.
+ */
+export function markSessionCacheConsented(value: SettingsJson | null): void {
+  consentedPayload = value
 }
 
 export function resetSyncCache(): void {
   sessionCache = null
+  verifiedPayload = null
+  consentedPayload = null
   eligible = undefined
 }
 
@@ -54,6 +118,29 @@ export function getSettingsPath(): string {
   const override = getRemoteSettingsPath()
   if (override) return override
   return join(getClaudeConfigHomeDir(), SETTINGS_FILENAME)
+}
+
+/**
+ * densable Qxn — sessionCache, verifiedPayload and consentedPayload are the
+ * same non-null object (pointer identity, not deep equal).
+ */
+export function isRemoteManagedSettingsTripleConsented(): boolean {
+  return (
+    sessionCache !== null &&
+    sessionCache === verifiedPayload &&
+    sessionCache === consentedPayload
+  )
+}
+
+/**
+ * densable psr — `Z_e()!=="remote" || Qxn()`.
+ *
+ * Full sIn origin (plist / hklm / helper) is not portable. Tip treats origin
+ * as remote iff the remote session cache is populated this session.
+ */
+export function isRemoteManagedPolicyConsented(): boolean {
+  if (sessionCache === null) return true
+  return isRemoteManagedSettingsTripleConsented()
 }
 
 // sync IO — settings pipeline is sync. fileRead and jsonRead are leaves;
@@ -76,7 +163,7 @@ export function getRemoteManagedSettingsSyncFromCache(): SettingsJson | null {
   if (sessionCache) return sessionCache
   const cachedSettings = loadSettings()
   if (cachedSettings) {
-    sessionCache = cachedSettings
+    seedSessionCacheFromDisk(cachedSettings)
     // Remote settings just became available for the first time. Any merged
     // getSettings_DEPRECATED() result cached before this moment is missing
     // the policySettings layer (the `eligible !== true` guard above returned

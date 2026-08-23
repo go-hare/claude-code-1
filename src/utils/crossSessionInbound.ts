@@ -268,6 +268,20 @@ export function getHeldPeerInboundMessages<
   return [...holdBuffer] as HeldPeerInboundMessage<T>[]
 }
 
+/** densable sendPeerReceipt — lazy to keep this module free of UDS/pacer imports. */
+function firePeerReceipt(
+  message: unknown,
+  status: 'held' | 'denied' | 'expired' | 'delivered' | 'refused',
+): void {
+  try {
+    const { sendPeerReceipt } =
+      require('./peerReceipts.js') as typeof import('./peerReceipts.js')
+    sendPeerReceipt(message as never, status)
+  } catch {
+    // optional — UDS inbox may not be bound
+  }
+}
+
 function summarizeHeld(entry: HeldPeerInboundMessage): string {
   const m = entry.message as
     | {
@@ -308,6 +322,7 @@ export function applyPeerInboundPolicy<T>(
       logForDebugging(
         `[cross-session-inbound] refused inbound peer message (crossSessionInbound=refuse: ${summarizeHeld({ message, heldAt: Date.now(), holdCause: decision.holdCause })})`,
       )
+      firePeerReceipt(message, 'refused')
       return 'refused'
     case 'hold': {
       if (holdBuffer.length >= PEER_INBOUND_HOLD_BUFFER_MAX) {
@@ -317,6 +332,7 @@ export function applyPeerInboundPolicy<T>(
             `[cross-session-inbound] hold buffer full — evicted oldest as expired: ${summarizeHeld(evicted)}`,
           )
           holdListeners.onState?.(evicted, 'expired')
+          firePeerReceipt(evicted.message, 'expired')
         }
       }
       const entry: HeldPeerInboundMessage<T> = {
@@ -334,6 +350,7 @@ export function applyPeerInboundPolicy<T>(
         decision.holdCause,
       )
       holdListeners.onState?.(entry as HeldPeerInboundMessage, 'held')
+      firePeerReceipt(message, 'held')
       return 'held'
     }
   }
@@ -434,6 +451,7 @@ export function releaseHeldPeerInboundMessages(
     if (dropAll) {
       dropped += 1
       holdListeners.onState?.(entry, 'denied')
+      firePeerReceipt(entry.message, 'denied')
       continue
     }
     const decision = decidePeerInboundPolicy({
@@ -447,6 +465,7 @@ export function releaseHeldPeerInboundMessages(
     } else if (decision.policy === 'refuse') {
       dropped += 1
       holdListeners.onState?.(entry, 'denied')
+      firePeerReceipt(entry.message, 'denied')
     } else {
       kept.push(entry)
     }
@@ -466,6 +485,7 @@ export function releaseHeldPeerInboundMessages(
   holdListeners.onReleased?.(released, reason)
   for (const entry of released) {
     holdListeners.onState?.(entry, 'delivered')
+    firePeerReceipt(entry.message, 'delivered')
   }
   logForDebugging(
     `[cross-session-inbound] released ${released.length} held peer message(s) (${reason}); ${holdBuffer.length} still held`,
@@ -487,6 +507,7 @@ export function resolveHeldPeerInboundMessage(
   if (action === 'approve') {
     holdListeners.onReleased?.([removed], 'approved')
     holdListeners.onState?.(removed, 'delivered')
+    firePeerReceipt(removed.message, 'delivered')
     logForDebugging(
       '[cross-session-inbound] held peer message APPROVED — released to queue',
     )
@@ -495,7 +516,9 @@ export function resolveHeldPeerInboundMessage(
   logForDebugging(
     `[cross-session-inbound] held peer message ${action === 'deny' ? 'DENIED' : 'EXPIRED/CANCELLED'} — dropped with denial receipt`,
   )
-  holdListeners.onState?.(removed, action === 'deny' ? 'denied' : 'expired')
+  const terminal = action === 'deny' ? 'denied' : 'expired'
+  holdListeners.onState?.(removed, terminal)
+  firePeerReceipt(removed.message, terminal)
   return 'dropped'
 }
 

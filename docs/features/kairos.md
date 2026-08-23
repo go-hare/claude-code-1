@@ -146,8 +146,8 @@ export async function isKairosEnabled(): Promise<boolean>
 | `/proactive` | `src/commands/proactive.ts` | **已实现** | proactive 开关 |
 | Proactive 状态 | `src/proactive/index.ts` | **已实现** | activate / pause / tick 调度状态 |
 | Tick hook | `src/proactive/useProactive.ts` | **已实现** | REPL 内 `<tick>` 注入 |
-| BriefTool | `packages/builtin-tools/.../BriefTool/` | **已实现** | `SendUserMessage` |
-| SleepTool | `packages/builtin-tools/.../SleepTool/` | **已实现** | 节奏；仅 PROACTIVE\|\|KAIROS 注册 |
+| BriefTool | `packages/builtin-tools/src/tools/BriefTool/` | **已实现** | `SendUserMessage` |
+| SleepTool | `packages/builtin-tools/src/tools/SleepTool/` | **已实现** | 节奏；仅 PROACTIVE\|\|KAIROS 注册 |
 | SendUserFile | `.../SendUserFileTool/` | **已实现** | `feature('KAIROS')` 时注册 |
 | PushNotification | `.../PushNotificationTool/` | **已实现** | KAIROS \|\| PUSH 时注册 |
 | SubscribePR | `.../SubscribePRTool/` | **已实现** | `KAIROS_GITHUB_WEBHOOKS` |
@@ -306,12 +306,12 @@ CLAUDE_CODE_BRIEF=1 claude --brief
 | `src/screens/REPL.tsx` | UI 集成 |
 | `src/utils/sessionState.ts` | automation_state |
 | `src/services/mcp/channelNotification.ts` | 频道通知 |
-| `packages/builtin-tools/.../BriefTool/` | SendUserMessage |
-| `packages/builtin-tools/.../SleepTool/` | Sleep |
-| `packages/builtin-tools/.../SendUserFileTool/` | SendUserFile |
-| `packages/builtin-tools/.../PushNotificationTool/` | Push |
-| `packages/builtin-tools/.../SubscribePRTool/` | SubscribePR |
-| `packages/builtin-tools/.../ScheduleCronTool/prompt.ts` | kairos cron GB 门 |
+| `packages/builtin-tools/src/tools/BriefTool/` | SendUserMessage |
+| `packages/builtin-tools/src/tools/SleepTool/` | Sleep |
+| `packages/builtin-tools/src/tools/SendUserFileTool/` | SendUserFile |
+| `packages/builtin-tools/src/tools/PushNotificationTool/` | Push |
+| `packages/builtin-tools/src/tools/SubscribePRTool/` | SubscribePR |
+| `packages/builtin-tools/src/tools/ScheduleCronTool/prompt.ts` | kairos cron GB 门 |
 | `scripts/defines.ts` | `DEFAULT_BUILD_FEATURES` |
 | `docs/features/proactive.md` | Proactive 专文 |
 | `docs/features/auto-dream.md` | 记忆整理（非 KAIROS_DREAM flag） |

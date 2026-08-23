@@ -57,6 +57,14 @@ export class RemoteIO extends StructuredIO {
     | null
   > | null = null
 
+  /**
+   * densable remote StructuredIO — drop/repair malformed inbound instead of
+   * process.exit (EM0 nested-user unwrap).
+   */
+  override isRemoteTransport(): boolean {
+    return true
+  }
+
   constructor(
     streamUrl: string,
     initialPrompt?: AsyncIterable<string>,

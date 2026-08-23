@@ -17,7 +17,7 @@ describe('REPL agent-view transcript swap repin', () => {
     expect(slice).toMatch(/prevViewingAgentRef/)
     expect(slice).toMatch(/useLayoutEffect\s*\(/)
     expect(slice).toMatch(/viewingAgentTaskId/)
-    expect(slice).toMatch(/repinScroll\s*\(\s*\)/)
+    expect(slice).toMatch(/repinScroll\(true,\s*'agent-view-change'\)/)
     expect(slice).toMatch(/\[viewingAgentTaskId,\s*repinScroll\]/)
   })
 })

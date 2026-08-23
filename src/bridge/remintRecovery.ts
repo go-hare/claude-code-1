@@ -228,9 +228,29 @@ export function formatOAuthAdoptRetryStatus(
   return `OAuth refresh failed — waiting for a fresh login (${attempt}/${maxAttempts})`
 }
 
-/** densable nn reauth-required user message. */
+/** densable nn reauth-required user message (remint Hde after adopt). Keep 1:1. */
 export const OAUTH_REAUTH_REQUIRED_DETAIL =
   'OAuth token refresh failed — run /login to re-authenticate'
+
+/** densable cr — remint missing oauth after signed_out classifier miss. */
+export const JWT_REFRESH_NO_OAUTH_DETAIL =
+  'JWT refresh failed: no OAuth token — run /login'
+
+/** densable kt — session-create `terminal===false` (401 oauth_rejected). */
+export const CLAUDE_AI_LOGIN_REJECTED_DETAIL =
+  'Claude.ai login was rejected — run /login, then /remote-control'
+
+/** densable Gt — initial `/bridge` soe/Hde. */
+export const CLAUDE_AI_LOGIN_EXPIRED_THEN_REMOTE_CONTROL_DETAIL =
+  'Claude.ai login expired — run /login, then /remote-control'
+
+/** densable yr — proactive refresh null/soe. */
+export const CLAUDE_AI_LOGIN_EXPIRED_RESTORE_DETAIL =
+  'Claude.ai login expired — run /login to restore Remote Control'
+
+/** densable x1r onExhausted copy. */
+export const OAUTH_TOKEN_UNAVAILABLE_RESTORE_DETAIL =
+  'OAuth token unavailable — run /login to restore Remote Control'
 
 /**
  * densable G7 fail / rebuild suppress — session already teleported to cloud.

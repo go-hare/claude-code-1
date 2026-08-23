@@ -5,6 +5,7 @@ import { dirname, join } from 'path'
 import { createInterface } from 'readline'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import { debugTruncate } from './debugUtils.js'
+import { buildSessionChildEnv } from './sessionChildEnv.js'
 import type {
   SessionActivity,
   SessionDoneStatus,
@@ -303,19 +304,15 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
           : []),
       ]
 
+      // densable 2.1.238 #21 NDl: Vso/MDl/Eot/wot. Do not apply mrn.
+      // Tip extras POST_FOR_SESSION_INGRESS_V2 / USE_CCR_V2 overlay after NDl.
       const env: NodeJS.ProcessEnv = {
-        ...deps.env,
-        // Strip the bridge's OAuth token so the child CC process uses
-        // the session access token for inference instead.
-        CLAUDE_CODE_OAUTH_TOKEN: undefined,
-        CLAUDE_CODE_ENVIRONMENT_KIND: 'bridge',
-        ...(deps.sandbox && { CLAUDE_CODE_FORCE_SANDBOX: '1' }),
-        CLAUDE_CODE_SESSION_ACCESS_TOKEN: opts.accessToken,
-        // v1: HybridTransport (WS reads + POST writes) to Session-Ingress.
-        // Harmless in v2 mode — transportUtils checks CLAUDE_CODE_USE_CCR_V2 first.
+        ...buildSessionChildEnv(deps.env, {
+          accessToken: opts.accessToken,
+          workerEpoch: opts.workerEpoch,
+          sandbox: deps.sandbox,
+        }),
         CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2: '1',
-        // v2: SSETransport + CCRClient to CCR's /v1/code/sessions/* endpoints.
-        // Same env vars environment-manager sets in the container path.
         ...(opts.useCcrV2 && {
           CLAUDE_CODE_USE_CCR_V2: '1',
           CLAUDE_CODE_WORKER_EPOCH: String(opts.workerEpoch),

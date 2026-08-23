@@ -266,6 +266,7 @@ export {
   type ScrollBoxHandle,
 } from './components/ScrollBox.js'
 export { AlternateScreen } from './components/AlternateScreen.js'
+export { setAppCallbacks } from './components/App.js'
 
 // App types
 export type { Props as AppProps } from './components/AppContext.js'

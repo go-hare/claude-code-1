@@ -104,6 +104,9 @@ export function useLspPluginRecommendation(): UseLspPluginRecommendationResult {
               'user',
               undefined, // projectPath - not needed for user scope
               localSourcePath,
+              // SEA ayi(..., {explicitInstall:!1}) — LSP recommendation is
+              // not an explicit /plugin or CLI install.
+              { runEntryHelper: false },
             );
             // Enable in user settings so it loads on restart
             const settings = getSettingsForSource('userSettings');

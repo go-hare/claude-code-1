@@ -68,3 +68,5 @@ export const VERTEX_COUNT_TOKENS_ALLOWED_BETAS = new Set([
   CONTEXT_MANAGEMENT_BETA_HEADER,
 ])
 export const CACHE_EDITING_BETA_HEADER: string = ''
+/** densable Opt — cache-diagnosis-2026-04-07 (tengu_prompt_cache_diagnostics). */
+export const CACHE_DIAGNOSIS_BETA_HEADER = 'cache-diagnosis-2026-04-07'

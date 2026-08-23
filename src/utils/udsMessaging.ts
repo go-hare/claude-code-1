@@ -67,6 +67,10 @@ export type UdsMessage = {
   from_mode?: string
   status?: string
   reason?: string
+  /** densable 2.1.238 #29 — refused is wire-mapped as expired + status_detail. */
+  status_detail?: string
+  drop_reason?: string
+  dropped_msg_ids?: string[]
 }
 
 export type UdsInboxEntry = {
@@ -628,6 +632,14 @@ export async function startUdsMessaging(
               status: 'pending',
             }
             if (!enqueueInboxEntry(entry)) {
+              // densable 2.1.238 #30 — queue-full drop receipt; keep close string.
+              try {
+                const { noteInboxQueueFullDrop } =
+                  require('./peerReceipts.js') as typeof import('./peerReceipts.js')
+                noteInboxQueueFullDrop(sanitizedMessage)
+              } catch {
+                // optional
+              }
               closeWithError('inbox full')
               return
             }
@@ -819,6 +831,39 @@ export async function startUdsMessaging(
         flushIdleSubscribers,
       } = require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
       setPeerIdleNoticeSender(buildPeerIdleNoticeSender(path))
+      // densable afl — sendPeerReceipt over the same control plane.
+      try {
+        const { installPeerReceiptSender } =
+          require('./peerReceipts.js') as typeof import('./peerReceipts.js')
+        const { vetReplyAddress } =
+          require('./udsIdleNotify.js') as typeof import('./udsIdleNotify.js')
+        const from = formatUdsAddress(path)
+        installPeerReceiptSender({
+          ownSocketPath: path,
+          from,
+          vetReplyAddress,
+          send: async (target, fields) => {
+            const token = await readUdsCapabilityToken(target)
+            if (!token) {
+              throw new Error(`no capability token for ${target}`)
+            }
+            await sendUdsMessage(
+              target,
+              {
+                type: 'control',
+                from: path,
+                ts: new Date().toISOString(),
+                ...fields,
+              },
+              { authToken: token },
+            )
+          },
+        })
+      } catch (receiptErr) {
+        logForDebugging(
+          `[udsMessaging] peer-receipt sender wire failed: ${errorMessage(receiptErr)}`,
+        )
+      }
       // Arm idle fire when main-loop refcount returns to 0 (turn finished).
       try {
         const { setMainLoopBecameIdleListener } =
@@ -884,6 +929,13 @@ export async function stopUdsMessaging(): Promise<void> {
     setPeerIdleNoticeSender(null)
   } catch {
     // best-effort
+  }
+  try {
+    const { setSendPeerReceipt } =
+      require('./peerReceipts.js') as typeof import('./peerReceipts.js')
+    setSendPeerReceipt(null)
+  } catch {
+    // optional
   }
   try {
     const { setMainLoopBecameIdleListener } =

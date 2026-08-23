@@ -79,7 +79,10 @@ export type InitBridgeOptions = {
   onInboundMessage?: (msg: SDKMessage) => void | Promise<void>
   onPermissionResponse?: (response: SDKControlResponse) => void
   onInterrupt?: () => void
-  onSetModel?: (model: string | undefined) => void
+  onStopTask?: (taskId: string) => Promise<unknown>
+  onSetModel?: (
+    model: string | undefined,
+  ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   onSetPermissionMode?: (
     mode: PermissionMode,
@@ -137,6 +140,7 @@ export async function initReplBridge(
     onInboundMessage,
     onPermissionResponse,
     onInterrupt,
+    onStopTask,
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
@@ -591,6 +595,7 @@ export async function initReplBridge(
       onUserMessage,
       onPermissionResponse,
       onInterrupt,
+      onStopTask,
       onSetModel,
       onSetMaxThinkingTokens,
       onSetPermissionMode,
@@ -691,6 +696,7 @@ export async function initReplBridge(
     onInboundMessage,
     onPermissionResponse,
     onInterrupt,
+    onStopTask,
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,

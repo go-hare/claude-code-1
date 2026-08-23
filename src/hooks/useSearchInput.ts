@@ -11,6 +11,7 @@ import {
   updateYankLength,
   yankPop,
 } from '../utils/Cursor.js'
+import { getKeybindingFlavor } from '../utils/keybindingFlavor.js'
 import { useTerminalSize } from './useTerminalSize.js'
 
 type UseSearchInputOptions = {
@@ -163,7 +164,7 @@ export function useSearchInput({
         if (backspaceExitsOnEmpty) (onCancel ?? onExit)()
         return
       }
-      const newCursor = cursor.backspace()
+      const newCursor = cursor.backspaceH()
       setQueryState(newCursor.text)
       setCursorOffset(newCursor.offset)
       return
@@ -248,7 +249,7 @@ export function useSearchInput({
             if (backspaceExitsOnEmpty) (onCancel ?? onExit)()
             return
           }
-          const newCursor = cursor.backspace()
+          const newCursor = cursor.backspaceH()
           setQueryState(newCursor.text)
           setCursorOffset(newCursor.offset)
           return
@@ -268,7 +269,11 @@ export function useSearchInput({
           return
         }
         case 'w': {
-          const { cursor: newCursor, killed } = cursor.deleteWordBefore()
+          // densable 2.1.238 — Ctrl+W flavored; Meta+Backspace stays classic.
+          const { cursor: newCursor, killed } =
+            getKeybindingFlavor() === 'readline'
+              ? cursor.deleteWORDBefore()
+              : cursor.deleteWordBefore()
           pushToKillRing(killed, 'prepend')
           setQueryState(newCursor.text)
           setCursorOffset(newCursor.offset)

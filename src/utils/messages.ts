@@ -23,7 +23,7 @@ import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js
 import type { AgentId } from 'src/types/ids.js'
 import { companionIntroText } from '../buddy/prompt.js'
 import { NO_CONTENT_MESSAGE } from '../constants/messages.js'
-import { OUTPUT_STYLE_CONFIG } from '../constants/outputStyles.js'
+import { OUTPUT_STYLE_NAME_MAX } from '../constants/outputStyles.js'
 import { isAutoMemoryEnabled } from '../memdir/paths.js'
 import {
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
@@ -168,6 +168,7 @@ import type { PermissionMode } from '../types/permissions.js'
 import { normalizeToolInput, normalizeToolInputForAPI } from './api.js'
 import { getCurrentProjectConfig } from './config.js'
 import { logAntError, logForDebugging } from './debug.js'
+import { escapeOutputStyleName } from './xml.js'
 import { stripIdeContextTags } from './displayTags.js'
 import { hasEmbeddedSearchTools } from './embeddedTools.js'
 import { formatFileSize } from './format.js'
@@ -4782,12 +4783,16 @@ Read the team config to discover your teammates' names. Check the task list peri
       ])
     }
     case 'output_style': {
-      // densable SEA: Oke[style] + `${name} output style is active. ${turnReminder??fallback}`
-      const outputStyle =
-        OUTPUT_STYLE_CONFIG[
-          attachment.style as keyof typeof OUTPUT_STYLE_CONFIG
-        ]
-      if (!outputStyle) {
+      // densable 238 s3T/pze: style is catalog name; renderer does not look up
+      // OUTPUT_STYLE_CONFIG (custom/plugin miss used to drop the reminder).
+      if (typeof attachment.style !== 'string' || attachment.style === '') {
+        return []
+      }
+      if (attachment.style.length > OUTPUT_STYLE_NAME_MAX) {
+        logForDebugging(
+          `Output style name exceeds ${OUTPUT_STYLE_NAME_MAX} characters (${attachment.style.length}); suppressing its per-turn reminder`,
+          { level: 'error' },
+        )
         return []
       }
       const reminder =
@@ -4795,7 +4800,7 @@ Read the team config to discover your teammates' names. Check the task list peri
         'Remember to follow the specific guidelines for this style.'
       return wrapMessagesInSystemReminder([
         createUserMessage({
-          content: `${outputStyle.name} output style is active. ${reminder}`,
+          content: `${escapeOutputStyleName(attachment.style)} output style is active. ${reminder}`,
           isMeta: true,
         }),
       ])

@@ -845,6 +845,26 @@ export function Config({
               });
             },
           },
+          // densable autoScroll (fullscreen only). Dual-write settings + global.
+          {
+            id: 'autoScroll',
+            label: 'Auto-scroll',
+            value: settingsData?.autoScrollEnabled ?? globalConfig.autoScrollEnabled ?? true,
+            type: 'boolean' as const,
+            onChange(autoScrollEnabled: boolean) {
+              const result = updateSettingsForSource('userSettings', {
+                autoScrollEnabled,
+              });
+              if (result.error) return;
+              saveGlobalConfig(current => ({ ...current, autoScrollEnabled }));
+              setGlobalConfig({ ...getGlobalConfig(), autoScrollEnabled });
+              setSettingsData(getInitialSettings());
+              logEvent('tengu_config_changed', {
+                setting: 'autoScrollEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                value: String(autoScrollEnabled) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              });
+            },
+          },
           // Official wheelScrollAccelerationEnabled (2.1.210 settings densable).
           // Only meaningful in fullscreen where app-side wheel accel runs.
           {
@@ -1513,6 +1533,9 @@ export function Config({
     }
     if (globalConfig.autoCompactEnabled !== initialConfig.current.autoCompactEnabled) {
       formattedChanges.push(`${globalConfig.autoCompactEnabled ? 'Enabled' : 'Disabled'} auto-compact`);
+    }
+    if (globalConfig.autoScrollEnabled !== initialConfig.current.autoScrollEnabled) {
+      formattedChanges.push(`${globalConfig.autoScrollEnabled ? 'Enabled' : 'Disabled'} auto-scroll`);
     }
     if (
       (settingsData?.autoContinueAtUsageLimit ?? true) !==

@@ -38,6 +38,7 @@ import {
   type ModelSetting,
 } from './model.js'
 import { applyFableCreditsLabel } from './fableCreditsLabel.js'
+import { DRAWS_FROM_USAGE_CREDITS_SUFFIX } from '../extraUsage.js'
 import { has1mContext } from '../context.js'
 import { getGlobalConfig } from '../config.js'
 import {
@@ -390,7 +391,9 @@ function getMaxOpusOption(fastMode = false): ModelOption {
 
 export function getMaxSonnet5_1MOption(): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
-  const billingInfo = isClaudeAISubscriber() ? ' · Billed as extra usage' : ''
+  const billingInfo = isClaudeAISubscriber()
+    ? DRAWS_FROM_USAGE_CREDITS_SUFFIX
+    : ''
   return {
     value: 'sonnet[1m]',
     label: 'Sonnet 5 (1M context)',
@@ -404,7 +407,9 @@ export function getMaxSonnet46_1MOption(): ModelOption {
 }
 
 export function getMaxOpus47_1MOption(fastMode = false): ModelOption {
-  const billingInfo = isClaudeAISubscriber() ? ' · Billed as extra usage' : ''
+  const billingInfo = isClaudeAISubscriber()
+    ? DRAWS_FROM_USAGE_CREDITS_SUFFIX
+    : ''
   const model = getModelStrings().opus5
   return {
     value: 'opus[1m]',

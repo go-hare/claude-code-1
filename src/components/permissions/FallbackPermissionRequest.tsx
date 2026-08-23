@@ -1,12 +1,18 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getOriginalCwd } from '../../bootstrap/state.js';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, type DOMElement, measureElement, Text, useTheme } from '@anthropic/ink';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js';
 import { env } from '../../utils/env.js';
 import { shouldShowAlwaysAllowOptions } from '../../utils/permissions/permissionsLoader.js';
 import { shouldShowPersistentAllowOption } from '../../utils/permissions/showAlwaysAllow.js';
 import { truncateToLines } from '../../utils/stringUtils.js';
 import { logUnaryEvent } from '../../utils/unaryLogging.js';
+import {
+  dontAskAgainMaxLabelWidthFromTracked,
+  initialDontAskAgainSelectWidth,
+  renderDontAskAgainLabel,
+} from './dontAskAgainLabel.js';
 import { type UnaryEvent, usePermissionRequestLogging } from './hooks.js';
 import { PermissionDialog } from './PermissionDialog.js';
 import { PermissionPrompt, type PermissionPromptOption, type ToolAnalyticsContext } from './PermissionPrompt.js';
@@ -116,6 +122,7 @@ export function FallbackPermissionRequest({
   }, [toolUseConfirm, onDone, onReject]);
 
   const originalCwd = getOriginalCwd();
+  const { columns } = useTerminalSize();
   // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
   // densable 2.1.235 #12: also hide when suppressAlwaysAllowRule / tool.suppresses…
   const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
@@ -126,6 +133,16 @@ export function FallbackPermissionRequest({
     input: toolUseConfirm.input,
     isAskCappedByOrg,
   });
+  // densable sVc: Aa0 initial cap 40, then measureElement(Select) → max(20, width-2).
+  const selectRef = useRef<DOMElement>(null);
+  const [trackedSelectWidth, setTrackedSelectWidth] = useState(() => initialDontAskAgainSelectWidth(columns));
+  useLayoutEffect(() => {
+    if (!selectRef.current) return;
+    const { width } = measureElement(selectRef.current);
+    if (width > 0) {
+      setTrackedSelectWidth(Math.max(20, width - 2));
+    }
+  }, [columns, userFacingName, originalCwd, showAlwaysAllowOptions]);
   const options = useMemo((): PermissionPromptOption<FallbackOptionValue>[] => {
     const result: PermissionPromptOption<FallbackOptionValue>[] = [
       {
@@ -135,16 +152,19 @@ export function FallbackPermissionRequest({
       },
     ];
 
+    // densable 2.1.238 MYg: width-gate DAA; null → omit option
     if (showAlwaysAllowOptions) {
-      result.push({
-        label: (
-          <Text>
-            Yes, and don&apos;t ask again for <Text bold>{userFacingName}</Text> commands in{' '}
-            <Text bold>{originalCwd}</Text>
-          </Text>
-        ),
-        value: 'yes-dont-ask-again',
+      const daaLabel = renderDontAskAgainLabel({
+        toolName: userFacingName,
+        cwd: originalCwd,
+        maxLabelWidth: dontAskAgainMaxLabelWidthFromTracked(trackedSelectWidth, columns),
       });
+      if (daaLabel !== null) {
+        result.push({
+          label: daaLabel,
+          value: 'yes-dont-ask-again',
+        });
+      }
     }
 
     result.push({
@@ -154,7 +174,7 @@ export function FallbackPermissionRequest({
     });
 
     return result;
-  }, [userFacingName, originalCwd, showAlwaysAllowOptions]);
+  }, [userFacingName, originalCwd, showAlwaysAllowOptions, columns, trackedSelectWidth]);
 
   const toolAnalyticsContext = useMemo(
     (): ToolAnalyticsContext => ({
@@ -182,6 +202,7 @@ export function FallbackPermissionRequest({
           onSelect={handleSelect}
           onCancel={handleCancel}
           toolAnalyticsContext={toolAnalyticsContext}
+          selectRef={selectRef}
         />
       </Box>
     </PermissionDialog>

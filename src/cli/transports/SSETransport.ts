@@ -9,6 +9,13 @@ import { sleep } from '../../utils/sleep.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import type { Transport } from './Transport.js'
+import {
+  advanceNonOriginStreak,
+  classify403RejectSource,
+  closedCauseFor403,
+  isNonOrigin403Retryable,
+  type NonOrigin403Streak,
+} from './nonOrigin403.js'
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -171,7 +178,7 @@ export type StreamClientEvent = {
 export class SSETransport implements Transport {
   private state: SSETransportState = 'idle'
   private onData?: (data: string) => void
-  private onCloseCallback?: (closeCode?: number) => void
+  private onCloseCallback?: (closeCode?: number, cause?: string) => void
   private onEventCallback?: (event: StreamClientEvent) => void
   private headers: Record<string, string>
   private sessionId?: string
@@ -197,6 +204,14 @@ export class SSETransport implements Transport {
 
   // Runtime epoch for CCR v2 event format
 
+  /**
+   * densable 2.1.238 #33 — non-origin 403 streak. Default on; remote-bridge
+   * may pass tengu_ethereal_mist. Origin 403 / expired streak still close.
+   */
+  private nonOrigin403Enabled: boolean
+  private onNonOrigin403Recover?: (streak: NonOrigin403Streak) => void
+  private nonOrigin403Streak: NonOrigin403Streak | null = null
+
   constructor(
     private readonly url: URL,
     headers: Record<string, string> = {},
@@ -210,11 +225,17 @@ export class SSETransport implements Transport {
      * global and would stomp across sessions.
      */
     getAuthHeaders?: () => Record<string, string>,
+    nonOrigin403?: {
+      enabled?: boolean
+      onRecover?: (streak: NonOrigin403Streak) => void
+    },
   ) {
     this.headers = headers
     this.sessionId = sessionId
     this.refreshHeaders = refreshHeaders
     this.getAuthHeaders = getAuthHeaders ?? getSessionIngressAuthHeaders
+    this.nonOrigin403Enabled = nonOrigin403?.enabled ?? true
+    this.onNonOrigin403Recover = nonOrigin403?.onRecover
     this.postUrl = convertSSEUrlToPostUrl(url)
     // Seed with a caller-provided high-water mark so the first connect()
     // sends from_sequence_num / Last-Event-ID. Without this, a fresh
@@ -288,9 +309,27 @@ export class SSETransport implements Transport {
       })
 
       if (!response.ok) {
-        const isPermanent = PERMANENT_HTTP_CODES.has(response.status)
+        const now = Date.now()
+        const rejectSource =
+          response.status === 403
+            ? classify403RejectSource(response.headers)
+            : undefined
+        if (this.nonOrigin403Enabled && response.status === 403) {
+          this.nonOrigin403Streak = advanceNonOriginStreak(
+            this.nonOrigin403Streak,
+            rejectSource,
+            now,
+          )
+        } else if (response.status === 403) {
+          this.nonOrigin403Streak = null
+        }
+        const retryNonOrigin =
+          this.nonOrigin403Enabled &&
+          isNonOrigin403Retryable(this.nonOrigin403Streak, now)
+        const isPermanent =
+          PERMANENT_HTTP_CODES.has(response.status) && !retryNonOrigin
         logForDebugging(
-          `SSETransport: HTTP ${response.status}${isPermanent ? ' (permanent)' : ''}`,
+          `SSETransport: HTTP ${response.status}${isPermanent ? ' (permanent)' : ''}${rejectSource ? ` source=${rejectSource}` : ''}`,
           { level: 'error' },
         )
         logForDiagnosticsNoPII('error', 'cli_sse_connect_http_error', {
@@ -298,8 +337,13 @@ export class SSETransport implements Transport {
         })
 
         if (isPermanent) {
+          const cause =
+            response.status === 403
+              ? closedCauseFor403(rejectSource, this.nonOrigin403Streak)
+              : undefined
+          this.nonOrigin403Streak = null
           this.state = 'closed'
-          this.onCloseCallback?.(response.status)
+          this.onCloseCallback?.(response.status, cause)
           return
         }
 
@@ -372,6 +416,7 @@ export class SSETransport implements Transport {
         for (const frame of frames) {
           // Any frame (including keepalive comments) proves the connection is alive
           this.resetLivenessTimer()
+          this.settleNonOrigin403Recovered()
 
           if (frame.id) {
             const seqNum = parseInt(frame.id, 10)
@@ -698,8 +743,16 @@ export class SSETransport implements Transport {
     this.onData = callback
   }
 
-  setOnClose(callback: (closeCode?: number) => void): void {
+  setOnClose(callback: (closeCode?: number, cause?: string) => void): void {
     this.onCloseCallback = callback
+  }
+
+  /** densable settleNonOriginStreakRecovered — first live frame after a streak. */
+  private settleNonOrigin403Recovered(): void {
+    const streak = this.nonOrigin403Streak
+    if (!streak) return
+    this.nonOrigin403Streak = null
+    this.onNonOrigin403Recover?.(streak)
   }
 
   setOnEvent(callback: (event: StreamClientEvent) => void): void {

@@ -61,6 +61,11 @@ import {
 } from './addDirPluginSettings.js'
 import { markPluginVersionOrphaned } from './cacheUtils.js'
 import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
+import {
+  createMarketplaceCatalogBeforeRedirect,
+  inheritedMarketplaceHeaderNames,
+  MARKETPLACE_CATALOG_MAX_BYTES,
+} from './pluginArchive.js'
 import { removeAllPluginsForMarketplace } from './installedPluginsManager.js'
 import {
   extractHostFromSource,
@@ -82,6 +87,7 @@ import {
 } from './pluginDirectories.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import { deletePluginOptions } from './pluginOptionsStorage.js'
+import { collectMarketplaceHeadersHelperAdvisories } from './marketplaceHeadersHelper.js'
 import {
   isLocalMarketplaceSource,
   isMarketplaceAutoUpdate,
@@ -95,6 +101,24 @@ import {
   validateOfficialNameSource,
 } from './schemas.js'
 import { isEssentialTrafficOnly } from '../privacyLevel.js'
+
+/**
+ * densable 2.1.238 — log non-fatal headersHelper authoring advisories after a
+ * successful marketplace schema parse (parse itself stays hard-fail only on
+ * real schema errors; advisories must not reject the marketplace).
+ */
+function logMarketplaceHeadersHelperAdvisories(
+  marketplace: PluginMarketplace,
+  label: string,
+): void {
+  for (const advisory of collectMarketplaceHeadersHelperAdvisories(
+    marketplace,
+  )) {
+    logForDebugging(`${label}: ${advisory.path}: ${advisory.message}`, {
+      level: 'warn',
+    })
+  }
+}
 
 /**
  * Result of loading and caching a marketplace
@@ -1517,20 +1541,41 @@ async function cacheMarketplaceFromUrl(
   cachePath: string,
   customHeaders?: Record<string, string>,
   onProgress?: MarketplaceProgressCallback,
+  /**
+   * densable 2.1.238 — when set with headersHelper, mint dynamic headers
+   * (helper overrides static). Callers pass the full url MarketplaceSource.
+   */
+  urlSource?: Extract<MarketplaceSource, { source: 'url' }>,
+  marketplaceName?: string,
 ): Promise<void> {
   const fs = getFsImplementation()
 
   const redactedUrl = redactUrlCredentials(url)
   safeCallProgress(onProgress, `Downloading marketplace from ${redactedUrl}`)
   logForDebugging(`Downloading marketplace from URL: ${redactedUrl}`)
-  if (customHeaders && Object.keys(customHeaders).length > 0) {
+
+  let resolvedHeaders = customHeaders
+  if (urlSource) {
+    const { resolveUrlMarketplaceHeaders } = await import(
+      './marketplaceHeadersHelper.js'
+    )
+    // SEA `_5n`/`ret`: mint only trustedDeclaration.headersHelper, not state.
+    resolvedHeaders = await resolveUrlMarketplaceHeaders(urlSource, {
+      marketplaceName,
+      label: marketplaceName
+        ? `marketplace ${marketplaceName}`
+        : `marketplace ${redactedUrl}`,
+    })
+  }
+
+  if (resolvedHeaders && Object.keys(resolvedHeaders).length > 0) {
     logForDebugging(
-      `Using custom headers: ${jsonStringify(redactHeaders(customHeaders))}`,
+      `Using custom headers: ${jsonStringify(redactHeaders(resolvedHeaders))}`,
     )
   }
 
   const headers = {
-    ...customHeaders,
+    ...resolvedHeaders,
     // User-Agent must come last to prevent override (for consistency with WebFetch)
     'User-Agent': 'Claude-Code-Plugin-Manager',
   }
@@ -1538,9 +1583,15 @@ async function cacheMarketplaceFromUrl(
   let response
   const fetchStarted = performance.now()
   try {
+    // SEA n7p: maxContentLength jhi=5MiB + beforeRedirect Y8p(e,k$a(t))
     response = await axios.get(url, {
       timeout: 10000,
+      maxContentLength: MARKETPLACE_CATALOG_MAX_BYTES,
       headers,
+      beforeRedirect: createMarketplaceCatalogBeforeRedirect(
+        url,
+        inheritedMarketplaceHeaderNames(resolvedHeaders),
+      ),
     })
   } catch (error) {
     logPluginFetch(
@@ -1594,6 +1645,10 @@ async function cacheMarketplaceFromUrl(
     url,
     'success',
     performance.now() - fetchStarted,
+  )
+  logMarketplaceHeadersHelperAdvisories(
+    result.data,
+    `marketplace headersHelper advisory (${redactedUrl})`,
   )
 
   safeCallProgress(onProgress, 'Saving marketplace to cache')
@@ -1717,6 +1772,7 @@ async function loadAndCacheMarketplace(
           temporaryCachePath,
           source.headers,
           onProgress,
+          source,
         )
         marketplacePath = temporaryCachePath
         break
@@ -1985,6 +2041,10 @@ async function loadAndCacheMarketplace(
         `Failed to parse marketplace file at ${marketplacePath}: ${errorMessage(e)}`,
       )
     }
+    logMarketplaceHeadersHelperAdvisories(
+      marketplace,
+      `marketplace headersHelper advisory (${marketplacePath})`,
+    )
 
     // Now rename the cache path to use the marketplace's actual name
     const finalCachePath = join(cacheDir, marketplace.name)
@@ -3009,6 +3069,8 @@ export async function refreshMarketplace(
         installLocation,
         source.headers,
         onProgress,
+        source,
+        name,
       )
     } else if (isLocalMarketplaceSource(source)) {
       // Local sources: no remote to update from, but validate the file still exists and is valid

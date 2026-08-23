@@ -127,6 +127,44 @@ function redirectHref(redirect: {
   return redirect.protocol && host ? `${redirect.protocol}//${host}` : ''
 }
 
+type AxiosRedirectOptions = {
+  href?: string
+  protocol?: string
+  host?: string
+  hostname?: string
+  port?: string
+  headers?: Record<string, string>
+}
+
+/**
+ * densable K8p — drop inherited marketplace headers when redirect leaves origin.
+ * User-Agent is excluded from inheritedNames by callers (k$a).
+ */
+function createCrossOriginHeaderDrop(
+  originalUrl: string,
+  inheritedHeaderNames: string[],
+  label: string,
+): (options: AxiosRedirectOptions) => void {
+  const drop = new Set(inheritedHeaderNames.map(h => h.toLowerCase()))
+  return options => {
+    if (drop.size === 0 || !options.headers) return
+    const next = redirectHref(options)
+    if (next && isSameOrigin(originalUrl, next)) return
+    let removed = 0
+    for (const key of Object.keys(options.headers)) {
+      if (drop.has(key.toLowerCase())) {
+        delete options.headers[key]
+        removed++
+      }
+    }
+    if (removed > 0) {
+      logForDebugging(
+        `Fetch of ${label} redirected to a different origin; dropped inherited marketplace headers`,
+      )
+    }
+  }
+}
+
 /**
  * densable fty + aid — every redirect hop must pass Lio; drop inherited
  * marketplace headers when origin changes (except User-Agent).
@@ -134,15 +172,12 @@ function redirectHref(redirect: {
 function createArchiveBeforeRedirect(
   originalUrl: string,
   inheritedHeaderNames: string[],
-): (options: {
-  href?: string
-  protocol?: string
-  host?: string
-  hostname?: string
-  port?: string
-  headers?: Record<string, string>
-}) => void {
-  const drop = new Set(inheritedHeaderNames.map(h => h.toLowerCase()))
+): (options: AxiosRedirectOptions) => void {
+  const dropHeaders = createCrossOriginHeaderDrop(
+    originalUrl,
+    inheritedHeaderNames,
+    'plugin archive',
+  )
   return options => {
     const next = redirectHref(options)
     if (!isAllowedArchiveUrl(next)) {
@@ -154,21 +189,61 @@ function createArchiveBeforeRedirect(
           )}): ${next ? redactUrlCredentials(next) : '(unparseable redirect target)'}`,
       )
     }
-    if (drop.size === 0 || !options.headers) return
-    if (next && isSameOrigin(originalUrl, next)) return
-    let removed = 0
-    for (const key of Object.keys(options.headers)) {
-      if (drop.has(key.toLowerCase())) {
-        delete options.headers[key]
-        removed++
-      }
-    }
-    if (removed > 0) {
-      logForDebugging(
-        'Fetch of plugin archive redirected to a different origin; dropped inherited marketplace headers',
+    dropHeaders(options)
+  }
+}
+
+/** densable jhi — marketplace catalog JSON max body (5 MiB). */
+export const MARKETPLACE_CATALOG_MAX_BYTES = 5_242_880
+
+/**
+ * densable Y8p → K8p — marketplace catalog redirect policy.
+ * Same-origin hops are exempt; cross-origin hops must be https:// and must not
+ * point at a loopback, link-local, or cloud-metadata host. Cross-origin also
+ * drops inherited marketplace headers (Authorization etc.).
+ */
+export function createMarketplaceCatalogBeforeRedirect(
+  originalUrl: string,
+  inheritedHeaderNames: string[],
+): (options: AxiosRedirectOptions) => void {
+  const dropHeaders = createCrossOriginHeaderDrop(
+    originalUrl,
+    inheritedHeaderNames,
+    'marketplace catalog',
+  )
+  return options => {
+    const next = redirectHref(options)
+    const allowed =
+      next !== '' &&
+      (isSameOrigin(originalUrl, next) ||
+        (next.toLowerCase().startsWith('https:') &&
+          !isArchiveBlockedHostname(
+            (() => {
+              try {
+                return new URL(next).hostname
+              } catch {
+                return ''
+              }
+            })(),
+          )))
+    if (!allowed) {
+      throw new Error(
+        'Marketplace catalog redirected to a disallowed URL and was refused — ' +
+          'a server-chosen cross-origin redirect must use https:// and must not point at a loopback, link-local, or cloud-metadata host (only a hop that stays on the origin you started from is exempt): ' +
+          (next ? redactUrlCredentials(next) : '(unparseable redirect target)'),
       )
     }
+    dropHeaders(options)
   }
+}
+
+/** densable k$a — inherited header names excluding User-Agent. */
+export function inheritedMarketplaceHeaderNames(
+  headers: Record<string, string> | undefined,
+): string[] {
+  return Object.keys(headers ?? {}).filter(
+    name => name.toLowerCase() !== 'user-agent',
+  )
 }
 
 function formatArchiveDownloadError(

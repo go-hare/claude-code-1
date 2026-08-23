@@ -72,11 +72,17 @@ const REFRESH_RETRY_DELAY_MS = 60_000
 export function createTokenRefreshScheduler({
   getAccessToken,
   onRefresh,
+  onExhausted,
   label,
   refreshBufferMs = TOKEN_REFRESH_BUFFER_MS,
 }: {
   getAccessToken: () => string | undefined | Promise<string | undefined>
   onRefresh: (sessionId: string, oauthToken: string) => void
+  /**
+   * densable x1r `onExhausted` — fired after Ccb=3 consecutive no-oauth
+   * failures. Do **not** invent adaptiveBuffer / rescheduleFromNewToken.
+   */
+  onExhausted?: (sessionId: string, reason: 'no_oauth_token') => void
   label: string
   /** How long before expiry to fire refresh. Defaults to 5 min. */
   refreshBufferMs?: number
@@ -201,7 +207,14 @@ export function createTokenRefreshScheduler({
           gen,
         )
         timers.set(sessionId, retryTimer)
+        return
       }
+      logForDebugging(
+        `[${label}:token] Refresh chain exhausted for sessionId=${sessionId} after ${failures} consecutive failures`,
+        { level: 'error' },
+      )
+      logForDiagnosticsNoPII('error', 'bridge_token_refresh_exhausted')
+      onExhausted?.(sessionId, 'no_oauth_token')
       return
     }
 

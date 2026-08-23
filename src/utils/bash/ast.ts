@@ -1187,6 +1187,7 @@ function collectCommands(
         commands,
         varScope,
         bareAssignmentNames,
+        isDoubleBracket,
       )
       if (err) return err
     }
@@ -1234,6 +1235,26 @@ function collectCommands(
   }
 
   return tooComplex(node)
+}
+
+/**
+ * densable `QSa` — true when a `[[ ]]` pattern leaf contains a standalone
+ * `]]` closer (not class-colliding `:]]` / `=foo=]]` / `.foo.]]`).
+ */
+function hasStandaloneTestCloser(text: string): boolean {
+  const masked = text.replace(
+    /\[(?::[a-zA-Z]+:|=[A-Za-z0-9-]*=|\.[A-Za-z0-9-]*\.|[!^]?)\]\](?!\])/g,
+    '\x00',
+  )
+  const word = /[A-Za-z0-9_]/
+  let idx = masked.indexOf(']]')
+  while (idx !== -1) {
+    const before = idx > 0 ? masked[idx - 1]! : ''
+    const after = idx + 2 < masked.length ? masked[idx + 2]! : ''
+    if (!(word.test(before) && word.test(after))) return true
+    idx = masked.indexOf(']]', idx + 1)
+  }
+  return false
 }
 
 /** densable `pnu` — structural nodes inside test_command expressions. */
@@ -1381,6 +1402,7 @@ function walkTestExpr(
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
   bareAssignmentNames: string[],
+  isDoubleBracket: boolean,
 ): ParseForSecurityResult | null {
   // densable mnu first — structural nodes may hide $name[expr] / $name:mod
   const zsh = detectZshSubscriptOrModifier(node)
@@ -1399,6 +1421,7 @@ function walkTestExpr(
           innerCommands,
           varScope,
           bareAssignmentNames,
+          isDoubleBracket,
         )
         if (err) return err
       }
@@ -1456,6 +1479,82 @@ function walkTestExpr(
           i++
         }
       }
+      // densable 2.1.238 QSa / regex walker: glued `||`, unquoted `&`,
+      // quotes, paren depth — NOT a JS `/\|\|/` fail-fast.
+      if (node.type === 'regex') {
+        const s = node.text
+        let depth = 0
+        let i = 0
+        while (i < s.length) {
+          const c = s[i]
+          if (c === '\\' && i + 1 < s.length) {
+            i += 2
+            continue
+          }
+          if (depth === 0 && c === '|' && s[i + 1] === c) {
+            return {
+              kind: 'too-complex',
+              reason:
+                '[[ ]] regex contains glued || (zsh splits it as a cond operator)',
+              differential: true,
+            }
+          }
+          if (c === '&') {
+            return {
+              kind: 'too-complex',
+              reason:
+                '[[ ]] regex contains unquoted & (zsh splits the word at & at any depth)',
+              differential: true,
+            }
+          }
+          if (c === '"' || c === "'") {
+            const quote = c
+            i++
+            while (i < s.length && s[i] !== quote) {
+              if (quote === '"' && s[i] === '\\' && i + 1 < s.length) i++
+              i++
+            }
+            if (i < s.length) i++
+            continue
+          }
+          if (c === '(') depth++
+          else if (c === ')') {
+            depth--
+            if (depth < 0) {
+              return {
+                kind: 'too-complex',
+                reason:
+                  '[[ ]] regex has unbalanced parentheses (parser desync)',
+                differential: true,
+              }
+            }
+          }
+          i++
+        }
+        if (depth !== 0) {
+          return {
+            kind: 'too-complex',
+            reason: '[[ ]] regex has unbalanced parentheses (parser desync)',
+            differential: true,
+          }
+        }
+      }
+      if (node.text.includes('&&')) {
+        return {
+          kind: 'too-complex',
+          reason:
+            '[[ ]] pattern leaf contains `&&` — shell cond-lexer divergence (zsh splits the word there)',
+          differential: true,
+        }
+      }
+      if (hasStandaloneTestCloser(node.text)) {
+        return {
+          kind: 'too-complex',
+          reason:
+            '[[ ]] pattern leaf contains a potential standalone `]]` closer — shell cond-lexer divergence (zsh may close the conditional early)',
+          differential: true,
+        }
+      }
       argv.push(node.text)
       return null
     default: {
@@ -1479,7 +1578,28 @@ function walkTestExpr(
         varScope,
         bareAssignmentNames,
       )
-      if (typeof arg !== 'string') return arg
+      if (typeof arg !== 'string') {
+        if (isDoubleBracket && arg.kind === 'too-complex') {
+          const { nodeType: _nodeType, ...rest } = arg
+          return { ...rest, differential: true }
+        }
+        return arg
+      }
+      // densable Bop default: i&&(QSa(s)||QSa(e.text))||/]].*[;\n&|<>]/s.test(s)
+      if (
+        (isDoubleBracket &&
+          (hasStandaloneTestCloser(arg) ||
+            hasStandaloneTestCloser(node.text))) ||
+        /]].*[;\n&|<>]/s.test(arg)
+      ) {
+        return {
+          kind: 'too-complex',
+          reason: isDoubleBracket
+            ? '[[ ]] quoted operand contains `]]` closer or `]]`+separator bytes — possible parser quote-state desync'
+            : 'test command quoted operand contains `]]`+separator bytes — possible parser quote-state desync',
+          differential: true,
+        }
+      }
       argv.push(arg)
       return null
     }
@@ -2921,17 +3041,23 @@ function walkString(
   if (sawDynamicPlaceholder && !sawLiteralContent) {
     return tooComplex(node)
   }
-  // SECURITY: tree-sitter-bash quirk — a double-quoted string containing
-  // ONLY whitespace (` "`, `" "`, `"\t"`) produces NO string_content child;
-  // the whitespace is attributed to the closing `"` node's text. Our loop
-  // only adds to `result` from string_content/expansion children, so we'd
-  // return "" when bash sees " ". Detect: we saw no content children
-  // (both flags false — neither literal nor placeholder added) but the
-  // source span is longer than bare `""`. Genuine `""` has text.length==2.
-  // `"$V"` with V="" doesn't hit this — the simple_expansion child sets
-  // sawLiteralContent via the `else` branch even when v is empty.
+  // densable Gop empty-walk: delimiters-only `string` (no child-derived
+  // literal/placeholder, span longer than `""`) returns the inner text so
+  // Bop `QSa(s)||QSa(e.text)` can still run. Unparsed `` ` `` / `$(`
+  // inside that inner slice is fail-closed — tree-sitter did not emit the
+  // substitution as a child.
   if (!sawLiteralContent && !sawDynamicPlaceholder && node.text.length > 2) {
-    return tooComplex(node)
+    const inner = node.text.slice(1, -1)
+    if (inner.includes('`') || inner.includes('$(')) {
+      return {
+        kind: 'too-complex',
+        reason:
+          'Delimiters-only string node contains unparsed command substitution',
+        nodeType: 'string',
+        differential: true,
+      }
+    }
+    return inner
   }
   return result
 }

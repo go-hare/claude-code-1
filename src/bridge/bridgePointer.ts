@@ -4,6 +4,11 @@ import { z } from 'zod/v4'
 import { logForDebugging } from '../utils/debug.js'
 import { isENOENT } from '../utils/errors.js'
 import { getWorktreePathsPortable } from '../utils/getWorktreePathsPortable.js'
+import {
+  isProcessRunning,
+  isSameProcessAsync,
+  ownProcStartAsync,
+} from '../utils/genericProcessUtils.js'
 import { lazySchema } from '../utils/lazySchema.js'
 import {
   getProjectsDir,
@@ -21,20 +26,24 @@ const MAX_WORKTREE_FANOUT = 50
 /**
  * Crash-recovery pointer for Remote Control sessions.
  *
- * Written immediately after a bridge session is created, periodically
- * refreshed during the session, and cleared on clean shutdown. If the
- * process dies unclean (crash, kill -9, terminal closed), the pointer
- * persists. On next startup, `claude remote-control` detects it and offers
- * to resume via the --session-id flow from #20460.
+ * densable 2.1.238 (YKT / JKT / FDl): written after a bridge session is
+ * created (with pid + procStart), periodically refreshed, and cleared on
+ * full teardown only when this process owns the file. If the process dies
+ * unclean, the next `claude remote-control` (no --session-id) reuses the
+ * leftover standalone pointer on registration — next message reconnects.
+ *
+ * Occupancy: a live writer pid that still matches procStart defers the
+ * write (fresh env, no split-brain). `--session-id` against a live pointer
+ * for the same session/env exits instead of racing.
  *
  * Staleness is checked against the file's mtime (not an embedded timestamp)
  * so that a periodic re-write with the same content serves as a refresh —
- * matches the backend's rolling BRIDGE_LAST_POLL_TTL (4h) semantics. A
- * bridge that's been polling for 5+ hours and then crashes still has a
- * fresh pointer as long as the refresh ran within the window.
+ * matches the backend's rolling BRIDGE_LAST_POLL_TTL (4h) semantics.
  *
  * Scoped per working directory (alongside transcript JSONL files) so two
  * concurrent bridges in different repos don't clobber each other.
+ *
+ * storageV5 (SEA 3rd arg) is not ported — invent-ban.
  */
 
 export const BRIDGE_POINTER_TTL_MS = 4 * 60 * 60 * 1000
@@ -44,45 +53,63 @@ const BridgePointerSchema = lazySchema(() =>
     sessionId: z.string(),
     environmentId: z.string(),
     source: z.enum(['standalone', 'repl']),
+    pid: z.number().optional(),
+    procStart: z.string().optional(),
   }),
 )
 
 export type BridgePointer = z.infer<ReturnType<typeof BridgePointerSchema>>
+
+export type BridgePointerWithAge = BridgePointer & { ageMs: number }
 
 export function getBridgePointerPath(dir: string): string {
   return join(getProjectsDir(), sanitizePath(dir), 'bridge-pointer.json')
 }
 
 /**
- * Write the pointer. Also used to refresh mtime during long sessions —
- * calling with the same IDs is a cheap no-content-change write that bumps
- * the staleness clock. Best-effort — a crash-recovery file must never
- * itself cause a crash. Logs and swallows on error.
+ * densable `JKT` — write the pointer. Returns boolean (false on I/O failure).
+ * Best-effort — a crash-recovery file must never itself cause a crash.
  */
 export async function writeBridgePointer(
   dir: string,
   pointer: BridgePointer,
-): Promise<void> {
+): Promise<boolean> {
   const path = getBridgePointerPath(dir)
   try {
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, jsonStringify(pointer), 'utf8')
     logForDebugging(`[bridge:pointer] wrote ${path}`)
+    return true
   } catch (err: unknown) {
     logForDebugging(`[bridge:pointer] write failed: ${err}`, { level: 'warn' })
+    return false
   }
 }
 
 /**
- * Read the pointer and its age (ms since last write). Operates directly
- * and handles errors — no existence check (CLAUDE.md TOCTOU rule). Returns
- * null on any failure: missing file, corrupted JSON, schema mismatch, or
- * stale (mtime > 4h ago). Stale/invalid pointers are deleted so they don't
- * keep re-prompting after the backend has already GC'd the env.
+ * Stamp pid + own procStart onto a session/env pointer (SEA write payload).
+ */
+export async function stampBridgePointer(
+  dir: string,
+  pointer: Pick<BridgePointer, 'sessionId' | 'environmentId' | 'source'>,
+): Promise<boolean> {
+  return writeBridgePointer(dir, {
+    ...pointer,
+    pid: process.pid,
+    procStart: await ownProcStartAsync(),
+  })
+}
+
+/**
+ * densable `FDl` — read the pointer and its age (ms since last write).
+ * `opts.noClear` skips deleting invalid/stale files (occupancy / race reads).
+ * Returns null on missing file, corrupted JSON, schema mismatch, or stale
+ * (mtime > 4h ago).
  */
 export async function readBridgePointer(
   dir: string,
-): Promise<(BridgePointer & { ageMs: number }) | null> {
+  opts?: { noClear?: boolean },
+): Promise<BridgePointerWithAge | null> {
   const path = getBridgePointerPath(dir)
   let raw: string
   let mtimeMs: number
@@ -97,19 +124,71 @@ export async function readBridgePointer(
 
   const parsed = BridgePointerSchema().safeParse(safeJsonParse(raw))
   if (!parsed.success) {
-    logForDebugging(`[bridge:pointer] invalid schema, clearing: ${path}`)
-    await clearBridgePointer(dir)
+    if (!opts?.noClear) {
+      logForDebugging(`[bridge:pointer] invalid schema, clearing: ${path}`)
+      await clearBridgePointer(dir)
+    }
     return null
   }
 
   const ageMs = Math.max(0, Date.now() - mtimeMs)
   if (ageMs > BRIDGE_POINTER_TTL_MS) {
-    logForDebugging(`[bridge:pointer] stale (>4h mtime), clearing: ${path}`)
-    await clearBridgePointer(dir)
+    if (!opts?.noClear) {
+      logForDebugging(`[bridge:pointer] stale (>4h mtime), clearing: ${path}`)
+      await clearBridgePointer(dir)
+    }
     return null
   }
 
   return { ...parsed.data, ageMs }
+}
+
+export type StandalonePointerReuseDecision =
+  | { kind: 'defer'; pid: number }
+  | {
+      kind: 'reuse'
+      environmentId: string
+      sessionId: string
+      ageMs: number
+    }
+  | { kind: 'none' }
+
+/**
+ * densable `!S&&fe` occupancy/reuse table (injectable for tests):
+ * writer pid live + identity match → defer; else standalone source → reuse.
+ */
+export async function decideStandalonePointerReuse(
+  prior: BridgePointerWithAge | null,
+  deps?: {
+    pid?: number
+    isProcessRunning?: (pid: number) => boolean
+    isSameProcessAsync?: (
+      pid: number,
+      procStart: string | undefined,
+    ) => Promise<boolean>
+  },
+): Promise<StandalonePointerReuseDecision> {
+  if (!prior) return { kind: 'none' }
+  const selfPid = deps?.pid ?? process.pid
+  const running = deps?.isProcessRunning ?? isProcessRunning
+  const same = deps?.isSameProcessAsync ?? isSameProcessAsync
+  if (
+    prior.pid !== undefined &&
+    prior.pid !== selfPid &&
+    running(prior.pid) &&
+    (await same(prior.pid, prior.procStart))
+  ) {
+    return { kind: 'defer', pid: prior.pid }
+  }
+  if (prior.source === 'standalone') {
+    return {
+      kind: 'reuse',
+      environmentId: prior.environmentId,
+      sessionId: prior.sessionId,
+      ageMs: prior.ageMs,
+    }
+  }
+  return { kind: 'none' }
 }
 
 /**
@@ -128,7 +207,7 @@ export async function readBridgePointer(
  */
 export async function readBridgePointerAcrossWorktrees(
   dir: string,
-): Promise<{ pointer: BridgePointer & { ageMs: number }; dir: string } | null> {
+): Promise<{ pointer: BridgePointerWithAge; dir: string } | null> {
   // Fast path: current dir. Covers standalone bridge (always matches) and
   // REPL bridge when no worktree mutation happened.
   const here = await readBridgePointer(dir)
@@ -167,7 +246,7 @@ export async function readBridgePointerAcrossWorktrees(
   // resume reconnects to the right env regardless of which worktree
   // --continue was invoked from.
   let freshest: {
-    pointer: BridgePointer & { ageMs: number }
+    pointer: BridgePointerWithAge
     dir: string
   } | null = null
   for (const r of results) {

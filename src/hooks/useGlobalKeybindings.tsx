@@ -6,7 +6,7 @@
  */
 import { feature } from 'bun:bundle';
 import { useCallback, useEffect } from 'react';
-import { bootstrapXtermAtlas, instances, useProbeExternalClear } from '@anthropic/ink';
+import { bootstrapXtermAtlas, instances } from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import type { Screen } from '../screens/REPL.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
@@ -16,7 +16,6 @@ import {
 } from '../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { count } from '../utils/array.js';
-import { isFullscreenActive } from '../utils/fullscreen.js';
 import { getTerminalPanel } from '../utils/terminalPanel.js';
 
 type Props = {
@@ -234,9 +233,8 @@ export function GlobalKeybindingHandlers({
     });
   }, []);
 
-  // densable QPf(handleRedraw) — iTerm.app / Apple_Terminal DECXCPR poll
-  // detects external alt-buffer wipe and forceRedraws (Cmd+K recovery).
-  useProbeExternalClear(handleRedraw, isFullscreenActive());
+  // densable 2.1.238 Wzg lives in PromptInput (no extra onDetected redraw).
+  // app:redraw remains registered so user keybindings.json can still bind it.
 
   // Transcript-specific bindings (only active when in transcript mode)
   const isInTranscript = screen === 'transcript';

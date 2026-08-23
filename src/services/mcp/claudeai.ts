@@ -10,6 +10,7 @@ import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isEnvDefinedFalsy } from 'src/utils/envUtils.js'
 import { clearMcpAuthCache } from './client.js'
+import { claudeAiMcpInitProjectionHeaders } from './claudeAiProxyStateless.js'
 import { normalizeNameForMCP } from './normalization.js'
 import type { ScopedMcpServerConfig } from './types.js'
 
@@ -29,6 +30,8 @@ type ClaudeAIMcpServer = {
   tools?: ClaudeAIMcpServerTool[]
   stateless?: boolean
   cached_init_response?: Record<string, unknown> | null
+  discover_support?: 'legacy' | 'supported'
+  cached_discover_response?: Record<string, unknown> | null
   /** densable: whether the connector is connected/authorized in claude.ai */
   eligible?: boolean
   eligibility_reason?: string
@@ -159,6 +162,7 @@ export const fetchClaudeAIMcpConfigsIfEligible = memoize(
           'Content-Type': 'application/json',
           'anthropic-beta': MCP_SERVERS_BETA_HEADER,
           'anthropic-version': '2023-06-01',
+          ...claudeAiMcpInitProjectionHeaders(),
         },
         timeout: FETCH_TIMEOUT_MS,
       })
@@ -198,6 +202,12 @@ export const fetchClaudeAIMcpConfigsIfEligible = memoize(
             : {}),
           ...(server.cached_init_response !== undefined
             ? { cachedInitResponse: server.cached_init_response }
+            : {}),
+          ...(server.discover_support !== undefined
+            ? { discoverSupport: server.discover_support }
+            : {}),
+          ...(server.cached_discover_response !== undefined
+            ? { cachedDiscoverResponse: server.cached_discover_response }
             : {}),
           // densable: plumb eligible / eligibility_reason for DYo filter
           ...(server.eligible !== undefined

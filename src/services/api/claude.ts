@@ -1,18 +1,15 @@
 import type {
   BetaContentBlock,
   BetaContentBlockParam,
-  BetaImageBlockParam,
   BetaJSONOutputFormat,
   BetaMessage,
   BetaMessageDeltaUsage,
   BetaMessageStreamParams,
   BetaOutputConfig,
   BetaRawMessageStreamEvent,
-  BetaRequestDocumentBlock,
   BetaStopReason,
   BetaToolChoiceAuto,
   BetaToolChoiceTool,
-  BetaToolResultBlockParam,
   BetaToolUnion,
   BetaUsage,
   BetaMessageParam as MessageParam,
@@ -77,7 +74,11 @@ import {
   latchMidConvSystemRejected,
   shouldCacheControlOnApiSystem,
 } from '../../utils/midConversationSystem.js'
-import { isStickyBetaRejected } from '../../bootstrap/state.js'
+import {
+  isStickyBetaRejected,
+  isStickyBetaSentActive,
+  stickySendBeta,
+} from '../../bootstrap/state.js'
 import {
   isStreamPingEvent,
   planStreamCloseAfterComplete,
@@ -236,11 +237,18 @@ import {
   isSearchExtraToolsEnabled,
 } from 'src/utils/searchExtraTools.js'
 import { stripFoundryUnsupportedToolFields } from 'src/utils/foundryCapabilities.js'
-import { API_MAX_MEDIA_PER_REQUEST } from '../../constants/apiLimits.js'
 import {
   ADVISOR_BETA_HEADER,
+  CACHE_DIAGNOSIS_BETA_HEADER,
   MID_CONVERSATION_SYSTEM_BETA_HEADER,
 } from '../../constants/betas.js'
+import {
+  getRequestLimitMediaByteCap,
+  getRequestLimitMediaKeepCount,
+  HWT_BYTE_PADDING,
+  HWT_KEEP_PADDING,
+  stripStoredMediaForRequestLimit,
+} from '../../utils/subagentCacheEvict.js'
 import {
   formatDeferredToolLine,
   isDeferredTool,
@@ -308,6 +316,8 @@ import {
 /**
  * densable 2.1.219 zie — network-down codes (no route / refuse / DNS).
  * Mid-stream: cause=network_down when finalizing partial content.
+ * densable 2.1.238 #17: SEA `rhe` 仍含 ERR_PROXY_TUNNEL — 不从本集合移除。
+ * 点名文案在 formatAPIError（T9r），不是新 cause enum / F4y。
  */
 const STREAM_NETWORK_DOWN_CODES = new Set([
   'ECONNREFUSED',
@@ -509,6 +519,37 @@ function should1hCacheTTL(querySource?: QuerySource): boolean {
         : querySource === pattern,
     )
   )
+}
+
+/**
+ * densable MWT — tengu_prompt_cache_diagnostics, gated by J2 + ZQt.
+ * ZQt: anthropicAws iff ANTHROPIC_AWS_BASE_URL unset; else firstParty && 1P URL.
+ */
+function isPromptCacheDiagnosticsEnabled(): boolean {
+  if (!shouldIncludeFirstPartyOnlyBetas()) return false
+  const provider = getAPIProvider()
+  const hostEligible =
+    provider === 'anthropicAws'
+      ? process.env.ANTHROPIC_AWS_BASE_URL === undefined
+      : provider === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+  if (!hostEligible) return false
+  return getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_prompt_cache_diagnostics',
+    false,
+  )
+}
+
+/** densable DWT — last assistant message.id with requestId and not API error. */
+function lastAssistantMessageId(messages: Message[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg || msg.type !== 'assistant') continue
+    const assistant = msg as AssistantMessage
+    if (!assistant.requestId || assistant.isApiErrorMessage) continue
+    const id = assistant.message?.id
+    if (typeof id === 'string' && id.length > 0) return id
+  }
+  return undefined
 }
 
 /**
@@ -1115,18 +1156,6 @@ function getPreviousRequestIdFromMessages(
   return undefined
 }
 
-function isMedia(
-  block: BetaContentBlockParam,
-): block is BetaImageBlockParam | BetaRequestDocumentBlock {
-  return block.type === 'image' || block.type === 'document'
-}
-
-function isToolResult(
-  block: BetaContentBlockParam,
-): block is BetaToolResultBlockParam {
-  return block.type === 'tool_result'
-}
-
 /**
  * Append a `<system-reminder>` text block to the last user message in the
  * batch instead of creating a standalone user message.
@@ -1169,75 +1198,6 @@ export function appendSystemReminderToLastUserMessage(
       message: { ...last.message, content: newContent },
     },
   ]
-}
-
-/**
- * Ensures messages contain at most `limit` media items (images + documents).
- * Strips oldest media first to preserve the most recent.
- */
-export function stripExcessMediaItems<
-  T extends {
-    type: string
-    message?: { content?: unknown }
-  },
->(messages: T[], limit: number): T[] {
-  let toRemove = 0
-  for (const msg of messages) {
-    if (msg.type === 'api_system') continue
-    if (!Array.isArray(msg.message!.content)) continue
-    for (const block of msg.message!.content) {
-      if (isMedia(block)) toRemove++
-      if (isToolResult(block) && Array.isArray(block.content)) {
-        for (const nested of block.content) {
-          if (isMedia(nested as BetaContentBlockParam)) toRemove++
-        }
-      }
-    }
-  }
-  toRemove -= limit
-  if (toRemove <= 0) return messages
-
-  return messages.map(msg => {
-    if (msg.type === 'api_system') return msg
-    if (toRemove <= 0) return msg
-    const content = msg.message!.content
-    if (!Array.isArray(content)) return msg
-
-    const before = toRemove
-    const stripped = content
-      .map(block => {
-        if (
-          toRemove <= 0 ||
-          !isToolResult(block) ||
-          !Array.isArray(block.content)
-        )
-          return block
-        const filtered = block.content.filter(n => {
-          if (toRemove > 0 && isMedia(n as BetaContentBlockParam)) {
-            toRemove--
-            return false
-          }
-          return true
-        })
-        return filtered.length === block.content.length
-          ? block
-          : { ...block, content: filtered }
-      })
-      .filter(block => {
-        if (toRemove > 0 && isMedia(block)) {
-          toRemove--
-          return false
-        }
-        return true
-      })
-
-    return before === toRemove
-      ? msg
-      : ({
-          ...msg,
-          message: { ...msg.message, content: stripped },
-        } as T)
-  })
 }
 
 /**
@@ -1599,11 +1559,6 @@ async function* queryModel(
       next = stripAdvisorBlocks(next)
     }
 
-    // Strip excess media items before making the API call.
-    // The API rejects requests with >100 media items but returns a confusing error.
-    // Rather than erroring (which is hard to recover from in Cowork/CCD), we
-    // silently drop the oldest media items to stay within the limit.
-    next = stripExcessMediaItems(next, API_MAX_MEDIA_PER_REQUEST)
     return next
   }
 
@@ -1611,22 +1566,41 @@ async function* queryModel(
     normalizeMessagesForAPI(messages, filteredTools, normalizeModel),
   )
   queryCheckpoint('query_message_normalization_end')
+  // densable qWT → HWT after query_message_normalization_end (keep 100/600 +
+  // pad 20 + NWT byte cap). Not gated on LWT / tengu_subagent_cache_evict.
+  // Does not invent display-window GC of tool results.
+  const hwtKeep = getRequestLimitMediaKeepCount(options.model, betas)
+  const hwtByteCap = getRequestLimitMediaByteCap()
+  const applyHwt = (
+    msgs: (UserMessage | AssistantMessage | ApiSystemMessage)[],
+  ): (UserMessage | AssistantMessage | ApiSystemMessage)[] =>
+    stripStoredMediaForRequestLimit(
+      msgs,
+      hwtKeep,
+      HWT_KEEP_PADDING,
+      hwtByteCap,
+      HWT_BYTE_PADDING,
+    )
+  messagesForAPI = applyHwt(messagesForAPI)
 
-  // densable Ydy midConvFallback: if primary path emitted api_system and o3 is
-  // live, precompute a demoted re-normalize (model omitted) so KQn can swap
-  // bodies without another full turn setup.
+  // densable qWT midConvFallback: `!midConvLatchedOff && (e8 || fZ)` where
+  // e8 = mid-conversation-system beta and fZ = effort beta. Do not invent
+  // c8m perTurnEffort (no tip helper).
   let midConvFallback:
     | (() => (UserMessage | AssistantMessage | ApiSystemMessage)[])
     | null = null
   if (
     !midConvLatchedOff &&
-    betas.includes(MID_CONVERSATION_SYSTEM_BETA_HEADER)
+    (betas.includes(MID_CONVERSATION_SYSTEM_BETA_HEADER) ||
+      betas.includes(EFFORT_BETA_HEADER))
   ) {
     const primary = messagesForAPI
     midConvFallback = primary.some(m => isApiSystemMessage(m))
       ? () =>
-          postNormalizeForAPI(
-            normalizeMessagesForAPI(messages, filteredTools, undefined),
+          applyHwt(
+            postNormalizeForAPI(
+              normalizeMessagesForAPI(messages, filteredTools, undefined),
+            ),
           )
       : () => primary
   }
@@ -1837,6 +1811,15 @@ async function* queryModel(
   // Numeric effort_override (ant-only) is intentionally NOT recorded.
   let effortLevelForTranscript: EffortLevel | undefined
 
+  // densable MWT/pje/a7e — latch cache-diagnosis beta independently of YNe /
+  // PROMPT_CACHE_BREAK_DETECTION. SEA still injects Opt when t1f is skipped.
+  if (isPromptCacheDiagnosticsEnabled()) {
+    stickySendBeta(CACHE_DIAGNOSIS_BETA_HEADER)
+  }
+  const cacheDiagnosisLatched = isStickyBetaSentActive(
+    CACHE_DIAGNOSIS_BETA_HEADER,
+  )
+
   if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
     // Exclude defer_loading tools from the hash -- the API strips them from the
     // prompt, so they never affect the actual cache key. Including them creates
@@ -1860,8 +1843,13 @@ async function* queryModel(
       autoModeActive: afkHeaderLatched,
       isUsingOverage: currentLimits.isUsingOverage ?? false,
       cachedMCEnabled: cacheEditingHeaderLatched,
+      anyDeferLoading: toolsForCacheDetection.length !== allTools.length,
+      is1hCacheTTL: should1hCacheTTL(options.querySource),
+      queryDepth: options.queryTracking?.depth,
+      cacheDiagnosis: cacheDiagnosisLatched,
       effortValue: effort,
       extraBodyParams: getExtraBodyParams(),
+      messagesForAPI,
     })
   }
 
@@ -2098,6 +2086,15 @@ async function* queryModel(
       logForDebugging(
         'Cache editing beta header enabled for cached microcompact',
       )
+    }
+
+    // densable `_e&&!yt.includes(Opt))yt.push(Opt)` — send cache-diagnosis when
+    // sticky sent&&!rejected (latched above via MWT/pje).
+    if (
+      isStickyBetaSentActive(CACHE_DIAGNOSIS_BETA_HEADER) &&
+      !betasParams.includes(CACHE_DIAGNOSIS_BETA_HEADER)
+    ) {
+      betasParams.push(CACHE_DIAGNOSIS_BETA_HEADER)
     }
 
     // Only send temperature when thinking is disabled — the API requires
@@ -3619,6 +3616,7 @@ async function* queryModel(
               messages,
               options.agentId,
               streamRequestId,
+              lastAssistantMessageId(messages),
             )
           }
 

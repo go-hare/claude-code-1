@@ -96,20 +96,25 @@ void assertMinVersion();
 
 ## 手动 CLI 命令
 
-### `claude update` / `claude upgrade`
+### `claude update`
 
-**文件**: `src/cli/update.ts`
+**注册**: `src/main.tsx`（`.command('update')`）→ **实现**: `src/cli/updateCCB.ts` 的 `updateCCB()`
 
-完整流程：
-1. 运行 `getDoctorDiagnostic()` 检查系统健康状态
-2. 检查是否存在多个安装及配置不一致
-3. 根据安装类型路由：
-   - `development` → 报错（"开发版本不支持自动更新"）
-   - `package-manager` → 打印对应操作系统的更新命令
-   - `native` → 使用原生安装器的 `updateLatest()`
-   - `npm-local` → 在 `~/.claude/local/` 执行 `npm install`
-   - `npm-global` → 执行 `npm install -g`（含权限检查）
-4. 报告当前版本、最新版本、成功/失败状态
+这条命令在本 fork 里被简化过，**不再走 `getDoctorDiagnostic()` 和五路安装类型分派**，只在 bun 和 npm 之间二选一：
+
+1. `getCurrentVersion()` — 从 `distRoot/../package.json` 读版本，回退到 `MACRO.VERSION`
+2. 选包管理器 — `isBunInstallation()`（`process.execPath` 含 `bun`，或 `~/.bun/install/global/node_modules/<pkg>` 存在）且 `bun` 可执行时用 bun，否则用 npm
+3. `getLatestVersion()` — `npm view <pkg>@latest version --prefer-online`，10 秒超时
+4. 本地版本 >= 远端时打印 "up to date" 并 `gracefulShutdown(0)`
+5. 否则执行 `bun install -g <pkg>@latest` 或 `npm install -g <pkg>@latest`，120 秒超时
+6. 失败时把手动升级命令打到 stderr，并以退出码 1 退出
+
+包名取自 `MACRO.PACKAGE_URL`（本 fork 为 `@go-hare/claude-code`），不是上游的 `@anthropic-ai/claude-code`。
+
+<Warning>
+下文「后台自动更新器」描述的 native / npm-global / npm-local / package-manager 四路策略仍然存在于
+`AutoUpdaterWrapper.tsx`，但 `claude update` **手动命令**已不再复用那套编排。两条路径的行为并不一致。
+</Warning>
 
 ### `claude rollback [target]`（仅限内部）
 
@@ -199,9 +204,11 @@ Windows 系统使用文件复制而非符号链接。
 
 ### 配置迁移
 
-**文件**: `src/migrations/migrateAutoUpdatesToSettings.ts`
+**文件**: `src/utils/config.ts` 的 `migrateConfigFields()`
 
-一次性将旧版 `globalConfig.autoUpdates = false` 迁移为 settings 中的 `DISABLE_AUTOUPDATER=1` 环境变量。定义于 `src/migrations/migrateAutoUpdatesToSettings.ts`（当前未接入启动流程）。
+独立的 `src/migrations/migrateAutoUpdatesToSettings.ts` 已被删除，迁移逻辑收进了 `config.ts`：读取 config 时若 `installMethod === undefined`，就从旧字段 `autoUpdaterStatus`（`migrated` / `installed` / `disabled` / `enabled`）推导出新的 `installMethod` + `autoUpdates` 两个字段。`autoUpdaterStatus` 已从 `GlobalConfig` 类型里移除，只在旧配置文件里可能残留。
+
+这是**读时迁移**，不是启动阶段的一次性 migration——所以不存在「未接入启动流程」的问题，任何一次读 config 都会顺带完成。
 
 ---
 
@@ -259,7 +266,7 @@ React hook `useUpdateNotification(updatedVersion)` — 确保每次 semver 变�
 | 文件 | 职责 |
 |---|---|
 | `src/utils/autoUpdater.ts` | 核心逻辑：版本检查、npm 安装、文件锁、最低/最高版本门控 |
-| `src/cli/update.ts` | `claude update` 命令处理 |
+| `src/cli/updateCCB.ts` | `claude update` 命令处理（bun/npm 二选一的简化实现） |
 | `src/utils/nativeInstaller/installer.ts` | 原生二进制安装器：下载、版本管理、符号链接、清理 |
 | `src/utils/nativeInstaller/download.ts` | 从 GCS/Artifactory 下载二进制文件并校验 |
 | `src/utils/localInstaller.ts` | 本地安装器（`~/.claude/local/`）基于 npm |
@@ -272,7 +279,7 @@ React hook `useUpdateNotification(updatedVersion)` — 确保每次 semver 变�
 | `src/utils/semver.ts` | Semver 版本比较（Bun 原生 + npm 回退） |
 | `src/utils/doctorDiagnostic.ts` | 安装类型检测与健康诊断 |
 | `src/utils/config.ts:1737` | `getAutoUpdaterDisabledReason()` — 禁用检查逻辑 |
-| `src/migrations/migrateAutoUpdatesToSettings.ts` | 旧版配置迁移 |
+| `src/utils/config.ts` → `migrateConfigFields()` | 旧版 `autoUpdaterStatus` 读时迁移 |
 | `src/screens/Doctor.tsx` | Doctor 命令 UI，展示自动更新状态 |
 
 ---
@@ -282,7 +289,7 @@ React hook `useUpdateNotification(updatedVersion)` — 确保每次 semver 变�
 ```
 启动阶段
   ├── assertMinVersion() → 版本过低时硬性拦截，拒绝启动
-  ├── migrateAutoUpdatesToSettings() → 一次性配置迁移
+  ├── migrateConfigFields() → 读 config 时顺带把 autoUpdaterStatus 迁成 installMethod
   └── checkForReleaseNotes() → 展示新版本的更新日志
 
 REPL 运行中（每 30 分钟）
@@ -309,5 +316,5 @@ REPL 运行中（每 30 分钟）
         └── 显示 "Run: brew upgrade ..."（不自动安装）
 
 手动操作
-  └── claude update → 完整诊断 + 安装编排
+  └── claude update → updateCCB()：探测 bun/npm → npm view 查最新 → install -g
 ```

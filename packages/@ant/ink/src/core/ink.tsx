@@ -425,7 +425,7 @@ export default class Ink {
   // tracked separately from frame.cursor (which must stay at content-bottom
   // for log-update's relative-move invariants). Alt-screen doesn't need
   // this — every frame begins with CSI H. null = no move emitted last frame.
-  private displayCursor: { x: number; y: number } | null = null;
+  private displayCursor: { x: number; y: number; emittedRows: number } | null = null;
   private readonly logger: Logger;
 
   constructor(private readonly options: Options) {
@@ -1237,7 +1237,7 @@ export default class Ink {
             optimized.push({ type: 'stdout', content: cursorMove(dx, dy) });
           }
         }
-        this.displayCursor = target;
+        this.displayCursor = { ...target, emittedRows: this.stdoutSize().rows };
       } else {
         // Declaration cleared (input blur, unmount). Restore physical cursor
         // to frame.cursor before forgetting the park position — otherwise
@@ -1631,20 +1631,32 @@ export default class Ink {
     recordAtlasReset('focus');
   }
 
+  /** densable `stdoutSize()` — live TTY rows/cols with constructor fallback. */
+  stdoutSize(): { columns: number; rows: number } {
+    return {
+      columns: this.options.stdout.columns || this.terminalColumns || 80,
+      rows: this.options.stdout.rows || this.terminalRows || 24,
+    };
+  }
+
   /**
    * densable probeExternalClear(querier) — iTerm.app / Apple_Terminal only
-   * (caller gates). If displayCursor is parked at y≥1 but DECXCPR reports
-   * row=1, the host wiped the alt buffer (Cmd+K / external clear) without
-   * notifying us — forceRedraw.
+   * (caller gates). 1-based clamp: `min(max(y+1,1), rows, emittedRows)`.
+   * When rows===1 the clamp is always ≤1 so 1-row nvim never wipe-redraws.
    */
   async probeExternalClear(querier: TerminalQuerier): Promise<boolean> {
     if (!this.altScreenActive || this.isPaused || this.isUnmounted) return false;
-    const parked = this.displayCursor;
-    if (!parked || parked.y < 1) return false;
+    const sent = this.displayCursor;
+    if (!sent) return false;
+    const rowOf = (cursor: { y: number; emittedRows: number }): number =>
+      Math.min(Math.max(cursor.y + 1, 1), this.stdoutSize().rows, cursor.emittedRows);
+    if (rowOf(sent) <= 1) return false;
     const pos = await querier.send(cursorPositionQuery());
     if (pos?.row !== 1) return false;
+    const parked = this.displayCursor;
+    if (parked === null || rowOf(parked) <= 1) return false;
     this.logger.debug(
-      `probeExternalClear: detected wipe (parked at y=${parked.y}, terminal reports row=1 col=${pos.col})`,
+      `probeExternalClear: detected wipe (parked at y=${parked.y}, sent at y=${sent.y}, terminal reports row=1 col=${pos.col})`,
       { level: 'warn' },
     );
     this.forceRedraw();

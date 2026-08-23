@@ -999,6 +999,13 @@ export const SettingsSchema = lazySchema(() =>
           'Whether mouse-wheel scroll acceleration is enabled in fullscreen. ' +
             'When false, each wheel event scrolls a fixed base number of rows.',
         ),
+      // densable autoScrollEnabled (fullscreen). Consumed by REPL uT / OJh.
+      autoScrollEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Auto-scroll the conversation view to bottom (fullscreen mode only)',
+        ),
       spinnerVerbs: z
         .object({
           mode: z.enum(['append', 'replace']),
@@ -1383,6 +1390,16 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Render screen-reader friendly output (flat text, no decorative borders or animations). Overridden by the CLAUDE_AX_SCREEN_READER env var and the --ax-screen-reader CLI flag.',
+        ),
+      /**
+       * densable 2.1.238 — prompt editing key conventions (SEA keybindingFlavor).
+       * Only Ctrl+W is flavored; Meta/Ctrl+Backspace stay classic word delete.
+       */
+      keybindingFlavor: z
+        .enum(['classic', 'readline'])
+        .optional()
+        .describe(
+          'Which conventions the prompt\'s editing keys follow: "readline" matches Bash and other readline programs (Ctrl+W deletes back to the previous whitespace); "classic" (default) keeps Claude Code\'s long-standing behavior (Ctrl+W deletes the previous word)',
         ),
       /**
        * Official vimInsertModeRemaps — INSERT two-key sequences → NORMAL.

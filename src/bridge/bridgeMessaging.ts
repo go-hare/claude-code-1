@@ -17,11 +17,15 @@ import type {
   SDKControlResponse,
 } from '../entrypoints/sdk/controlTypes.js'
 import type { SDKResultSuccess } from '../entrypoints/sdk/coreTypes.js'
-import { logEvent } from '../services/analytics/index.js'
+import {
+  logEvent,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from '../services/analytics/index.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import type { Message } from '../types/message.js'
 import { normalizeControlMessageKeys } from '../utils/controlMessageCompat.js'
 import { logForDebugging } from '../utils/debug.js'
+import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
 import { rcLog } from './rcDebugLog.js'
 import { stripDisplayTagsAllowEmpty } from '../utils/displayTags.js'
 import { errorMessage } from '../utils/errors.js'
@@ -83,20 +87,50 @@ export function isSDKControlRequest(
 }
 
 /**
- * True for message types that should be forwarded to the bridge transport.
- * The server only wants user/assistant turns and slash-command system events;
- * everything else (tool_result, progress, etc.) is internal REPL chatter.
+ * densable O7 — queued_command origin is human / auto-continuation / unset.
+ */
+export function isBridgeQueuedCommandOriginEligible(
+  origin: { kind?: string } | undefined,
+): boolean {
+  return (
+    origin === undefined ||
+    origin.kind === 'human' ||
+    origin.kind === 'auto-continuation'
+  )
+}
+
+/**
+ * densable SOt — messages forwarded to the bridge transport.
+ * Virtual user/assistant are display-only. Attachments: hook_system_message
+ * always; queued_command when prompt + !isMeta + O7 origin. System:
+ * local_command, plus compact_boundary (no tip bridgeStateFramesGate → true).
  */
 export function isEligibleBridgeMessage(m: Message): boolean {
-  // Virtual messages (REPL inner calls) are display-only — bridge/SDK
-  // consumers see the REPL tool_use/result which summarizes the work.
   if ((m.type === 'user' || m.type === 'assistant') && m.isVirtual) {
     return false
+  }
+  if (m.type === 'attachment') {
+    const attachment = m.attachment as
+      | {
+          type?: string
+          commandMode?: string
+          isMeta?: boolean
+          origin?: { kind?: string }
+        }
+      | undefined
+    if (attachment?.type === 'hook_system_message') return true
+    return (
+      attachment?.type === 'queued_command' &&
+      attachment.commandMode === 'prompt' &&
+      !attachment.isMeta &&
+      isBridgeQueuedCommandOriginEligible(attachment.origin)
+    )
   }
   return (
     m.type === 'user' ||
     m.type === 'assistant' ||
-    (m.type === 'system' && m.subtype === 'local_command')
+    (m.type === 'system' &&
+      (m.subtype === 'local_command' || m.subtype === 'compact_boundary'))
   )
 }
 
@@ -314,7 +348,19 @@ export type ServerControlRequestHandlers = {
    */
   outboundOnly?: boolean
   onInterrupt?: () => void
-  onSetModel?: (model: string | undefined) => void
+  /**
+   * densable 2.1.238 #19 — control field onStopTask. Host maps to
+   * stopTask(..., source:"user"). Async; UHr writes the control_response.
+   */
+  onStopTask?: (taskId: string) => Promise<unknown>
+  /**
+   * densable 2.1.238 Zkd `p?.(e.request.model??void 0)`.
+   * Return `{ok:false}` to emit an error control_response; void / `{ok:true}`
+   * is success (`if (M && !M.ok)`).
+   */
+  onSetModel?: (
+    model: string | undefined,
+  ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   onSetPermissionMode?: (
     mode: PermissionMode,
@@ -335,6 +381,57 @@ const OUTBOUND_ONLY_ERROR =
   'This session is outbound-only. Enable Remote Control locally to allow inbound control.'
 
 /**
+ * densable UHr — async stop_task control_response. Must return from the
+ * switch so the sync write at the end of handleServerControlRequest is skipped.
+ */
+function replyStopTaskAsync(
+  request: SDKControlRequest,
+  transport: ReplBridgeTransport,
+  sessionId: string,
+  result: Promise<unknown>,
+): void {
+  void result
+    .then(
+      payload =>
+        ({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: request.request_id,
+            response:
+              payload && typeof payload === 'object' && !Array.isArray(payload)
+                ? (payload as Record<string, unknown>)
+                : {},
+          },
+        }) satisfies SDKControlResponse,
+    )
+    .catch(
+      err =>
+        ({
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: errorMessage(err),
+          },
+        }) satisfies SDKControlResponse,
+    )
+    .then(response => {
+      const event = { ...response, session_id: sessionId }
+      void transport.write(event)
+      const resultSubtype = response.response.subtype
+      rcLog(
+        `control_response: subtype=stop_task` +
+          ` request_id=${request.request_id}` +
+          ` result=${resultSubtype}`,
+      )
+      logForDebugging(
+        `[bridge:repl] Sent control_response for stop_task request_id=${request.request_id} result=${resultSubtype}`,
+      )
+    })
+}
+
+/**
  * Respond to inbound control_request messages from the server. The server
  * sends these for session lifecycle events (initialize, set_model) and
  * for turn-level coordination (interrupt, set_max_thinking_tokens). If we
@@ -352,6 +449,7 @@ export function handleServerControlRequest(
     sessionId,
     outboundOnly,
     onInterrupt,
+    onStopTask,
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
@@ -371,7 +469,7 @@ export function handleServerControlRequest(
   // if it doesn't — see comment above).
   const req = request.request as {
     subtype: string
-    model?: string
+    model?: unknown
     max_thinking_tokens?: number | null
     mode?: string
     [key: string]: unknown
@@ -414,16 +512,50 @@ export function handleServerControlRequest(
       }
       break
 
-    case 'set_model':
-      onSetModel?.(req.model)
-      response = {
-        type: 'control_response',
-        response: {
-          subtype: 'success',
-          request_id: request.request_id,
-        },
+    case 'set_model': {
+      // densable Zkd: non-string (except null/undefined) → invalid_model_type;
+      // callback `{ok:false}` → error control_response; else success.
+      const requested = req.model
+      if (requested != null && typeof requested !== 'string') {
+        logEvent('tengu_feature_bad', {
+          feature_name:
+            'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code:
+            'invalid_model_type' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: 'set_model: model must be a string',
+          },
+        }
+        break
+      }
+      const verdict = onSetModel?.(
+        typeof requested === 'string' ? requested : undefined,
+      )
+      if (verdict && !verdict.ok) {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: verdict.error,
+          },
+        }
+      } else {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: request.request_id,
+          },
+        }
       }
       break
+    }
 
     case 'set_max_thinking_tokens':
       onSetMaxThinkingTokens?.(req.max_thinking_tokens ?? null)
@@ -480,6 +612,41 @@ export function handleServerControlRequest(
         },
       }
       break
+
+    case 'stop_task': {
+      const taskId = req.task_id
+      if (typeof taskId !== 'string') {
+        logForDiagnosticsNoPII('info', 'task_stop_user', {
+          invalid_task_id: true,
+        })
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: 'stop_task: task_id must be a string',
+          },
+        }
+        break
+      }
+      if (!onStopTask) {
+        logForDiagnosticsNoPII('info', 'task_stop_user', {
+          not_supported: true,
+        })
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error:
+              'stop_task is not supported in this context (callback not registered)',
+          },
+        }
+        break
+      }
+      replyStopTaskAsync(request, transport, sessionId, onStopTask(taskId))
+      return
+    }
 
     case 'set_mcp_permission_mode_override': {
       // Official 2.1.x tighten-only per-server pin (print.ts snt / WDu).

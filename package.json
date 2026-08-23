@@ -79,8 +79,9 @@
     "health": "bun run scripts/health-check.ts",
     "postinstall": "node install.cjs",
     "docs:dev": "npx mintlify dev",
+    "docs:check": "bun run scripts/docs-check.ts",
     "typecheck": "tsc --noEmit",
-    "precheck": "bun run typecheck && bun run check:fix && bun test",
+    "precheck": "bun run typecheck && bun run check:fix && bun run docs:check --quiet && bun test",
     "rcs": "bun run scripts/rcs.ts"
   },
   "dependencies": {

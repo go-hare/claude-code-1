@@ -77,26 +77,47 @@ Claude Code 是一个**运行在本地终端中的 agentic coding system**。它
 
 ## 启动入口解剖
 
-真正的代码入口是 `src/entrypoints/cli.tsx`，它做了三件关键的事：
+真正的代码入口是 `src/entrypoints/cli.tsx`。开头三件事的顺序是刻意安排的：
 
 ```typescript
-// 1. 注入运行时 polyfill —— feature() 永远返回 false
-const feature = (_name: string) => false;
+// 1. performance shim 必须是第一个 import。
+//    它在 React / OTel 抓到原生引用之前替换掉 globalThis.performance，
+//    否则 JSC 的 C++ Vector 会在长会话里无界增长。
+import '../utils/performanceShim.js';
 
-// 2. 注入构建时宏
-globalThis.MACRO = { VERSION: "2.1.888", BUILD_TIME: ..., };
+// 2. feature 从 bun:bundle 导入 —— 不是自己写的函数。
+//    构建器会把 feature('X') 内联成常量，从而做死代码消除。
+import { feature } from 'bun:bundle';
 
-// 3. 声明构建目标
-globalThis.BUILD_TARGET = "external";  // 外部构建（非 Anthropic 内部）
-globalThis.BUILD_ENV = "production";
-globalThis.INTERFACE_TYPE = "stdio";   // 标准 I/O 交互
+// 3. MACRO.* 的运行时兜底。只在直接执行 cli.tsx（既没走 `bun run dev`
+//    也没走构建产物）时生效；正常路径由 scripts/defines.ts 注入。
+if (typeof globalThis.MACRO === 'undefined') {
+  globalThis.MACRO = { VERSION: process.env.CLAUDE_CODE_VERSION || '2.1.888', ... };
+}
 ```
 
-然后控制流传递到 `src/main.tsx`：
-1. Commander.js 解析命令行参数
+<Warning>
+两个容易读错的地方：
+
+**`feature()` 不是恒 false 的 polyfill。** 它是 `bun:bundle` 提供的构建器内置，dev 和
+build 都会注入 `scripts/defines.ts` 里的 `DEFAULT_BUILD_FEATURES` 默认开启一批 flag。只有裸跑
+`cli.tsx` 且没有任何 `FEATURE_*` 环境变量时才全部为 false。也正因为它要参与死代码消除，
+`feature()` **只能**直接写在 `if` 或三元的条件位置。
+
+**上面那个 `2.1.888` 不是当前版本。** 它是兜底分支里的硬编码常量（本身已经过期）。真实版本由
+`scripts/defines.ts` 从 `package.json` 读取后注入，避免版本漂移——想知道当前版本请查 `package.json`。
+</Warning>
+
+`cli.tsx` 的主体是一串 **fast path**：`--version`（零模块加载，直接打 `MACRO.VERSION`）、
+`--acp`、`--computer-use-mcp`、`--daemon-worker`、`remote-control`、`daemon`、`self-hosted-runner`
+等等，每条都在 `feature()` 门后面，命中就直接处理并退出，**完全绕开 Commander 和 Ink**。
+这是为了压启动时间，不是历史包袱。
+
+全都没命中时才动态 import `src/main.tsx`：
+1. Commander.js 解析命令行参数与子命令
 2. 初始化认证、遥测、策略限制
 3. 加载工具列表（`getTools()`）
-4. 启动 REPL（`launchRepl()`）或管道模式（`-p`）
+4. 启动 REPL 或管道模式（`-p`）
 
 ## 为什么选择终端
 

@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import type { ToolPermissionContext, ToolUseContext } from 'src/Tool.js'
 import { FILE_EDIT_TOOL_NAME } from '../../FileEditTool/constants.js'
 import { FILE_UNEXPECTEDLY_MODIFIED_ERROR } from '../../FileEditTool/constants.js'
-import { FILE_READ_TOOL_NAME } from '../../FileReadTool/prompt.js'
+import { FILE_READ_TOOL_NAME } from '../../FileReadTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '../../FileWriteTool/prompt.js'
 
 // Preload real modules BEFORE mock.module (process-global last-write-wins).

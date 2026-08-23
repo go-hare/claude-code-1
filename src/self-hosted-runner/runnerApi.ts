@@ -6,6 +6,9 @@ import axios, { type AxiosInstance } from 'axios'
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
+/** densable `Zdu` — pollWork HTTP timeout (not the 30s spawn-hint timeout) */
+export const POLL_WORK_TIMEOUT_MS = 10_000
+
 /** densable `Z6v` — id safety for path segments */
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/
 
@@ -429,7 +432,7 @@ export function createSelfHostedRunnerApi(
         },
         {
           headers: runnerAuthHeaders(runnerToken, runnerVersion),
-          timeout: 30_000,
+          timeout: POLL_WORK_TIMEOUT_MS,
           signal,
           validateStatus: s => s < 500,
         },

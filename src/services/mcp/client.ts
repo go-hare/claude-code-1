@@ -36,6 +36,8 @@ import {
   getMcpClientConnectTimeoutMs,
   getMcpPinnedLegacyRetryTimeoutMs,
   getMcpTimeoutMs,
+  isMcpCcrProxyServerConfig,
+  resolveMcpNegotiationTransportKind,
   resolveMcpProtocolNegotiationPlan,
   shouldPreserveConnectTimeoutAfterPinnedLegacyRetry,
   truncateMcpErrorSnippet,
@@ -118,7 +120,10 @@ import {
   isPersistError,
   persistToolResult,
 } from '../../utils/toolResultStorage.js'
-import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import {
+  checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
+  getFeatureValue_CACHED_MAY_BE_STALE,
+} from '../analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -164,6 +169,11 @@ import {
   joinOrStartAuthReconnect,
 } from './authReconnect.js'
 import { markClaudeAiMcpConnected } from './claudeai.js'
+import {
+  isStatelessClaudeAiProxy,
+  suppressGetSseOnEndpoint,
+  wrapStatelessClaudeAiProxyTransport,
+} from './claudeAiProxyStateless.js'
 import {
   armAllCallWatchdogs,
   clearCallWatchdogArm,
@@ -980,13 +990,18 @@ export const connectToServer = memoize(
         const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
 
         const proxyOptions = getProxyFetchOptions()
+        const timedFetch = wrapFetchWithTimeout(fetchWithAuth)
         const transportOptions: StreamableHTTPClientTransportOptions = {
-          // Wrap fetchWithAuth with fresh timeout per request
-          fetch: wrapFetchWithTimeout(fetchWithAuth),
+          // Wrap fetchWithAuth with fresh timeout per request.
+          // densable: oGn(t)?F_f(dGn(oe,t),re):dGn(oe,t) + Accept-Encoding identity.
+          fetch: isStatelessClaudeAiProxy(serverRef)
+            ? suppressGetSseOnEndpoint(timedFetch, proxyUrl)
+            : timedFetch,
           requestInit: {
             ...proxyOptions,
             headers: {
               'User-Agent': getMCPUserAgent(),
+              'Accept-Encoding': 'identity',
               'X-Mcp-Client-Session-Id': getSessionId(),
             },
           },
@@ -1133,34 +1148,22 @@ export const connectToServer = memoize(
         }
       }
 
-      // densable BNf transport kind for BVa negotiation plan.
-      // At this point transport is already built; 'sdk' is handled earlier and
-      // is not in the residual serverRef.type union here.
-      const negotiationTransportKind = (() => {
-        if (inProcessServer) return 'in-process'
-        switch (serverRef.type) {
-          case 'http':
-            return 'http'
-          case 'sse':
-            return 'sse'
-          case 'ws':
-            return 'ws'
-          case 'sse-ide':
-          case 'ws-ide':
-            return 'ide'
-          case 'claudeai-proxy':
-            return 'claudeai-proxy'
-          case 'stdio':
-          case undefined:
-            return 'stdio'
-          default:
-            return 'stdio'
-        }
-      })()
+      // densable n_f(type, {inProcess, ccrProxy: pMn(config)}) for Pwi.
+      // sdk is handled earlier; n_f still maps it to sdk-control.
+      const negotiationTransportKind = resolveMcpNegotiationTransportKind(
+        serverRef.type,
+        {
+          inProcess: inProcessServer !== undefined,
+          ccrProxy: isMcpCcrProxyServerConfig(serverRef),
+        },
+      )
 
-      // densable 2.1.232/233: protocol plan → Client versionNegotiation + init timeout
+      // densable 2.1.232/238: Pwi(kind, serverConfig) — GB denylist after auto.
       const protocolPlan = resolveMcpProtocolNegotiationPlan(
         negotiationTransportKind,
+        process.env,
+        (key, def) => getFeatureValue_CACHED_MAY_BE_STALE(key, def),
+        serverRef,
       )
       // densable k(Z) — factory takes versionNegotiation plan (BVa)
       const createMcpSdkClient = (
@@ -1300,12 +1303,16 @@ export const connectToServer = memoize(
           // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
           const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
           const proxyOptions = getProxyFetchOptions()
+          const timedFetch = wrapFetchWithTimeout(fetchWithAuth)
           const transportOptions: StreamableHTTPClientTransportOptions = {
-            fetch: wrapFetchWithTimeout(fetchWithAuth),
+            fetch: isStatelessClaudeAiProxy(serverRef)
+              ? suppressGetSseOnEndpoint(timedFetch, proxyUrl)
+              : timedFetch,
             requestInit: {
               ...proxyOptions,
               headers: {
                 'User-Agent': getMCPUserAgent(),
+                'Accept-Encoding': 'identity',
                 'X-Mcp-Client-Session-Id': getSessionId(),
               },
             },
@@ -1381,6 +1388,13 @@ export const connectToServer = memoize(
         serverRef.type === 'stdio' ||
         !serverRef.type
 
+      // densable N_f(u,S,v) — claudeai-proxy send-intercept only (never stdio).
+      if (serverRef.type === 'claudeai-proxy') {
+        wrapStatelessClaudeAiProxyTransport(transport, serverRef, msg =>
+          logMCPDebug(name, msg),
+        )
+      }
+
       try {
         try {
           await raceConnect(
@@ -1420,6 +1434,15 @@ export const connectToServer = memoize(
             stdioT.stderr?.off('data', stderrHandler)
           }
           transport = await recreateTransportForPinnedLegacy()
+          // densable reconnect `_9a(u,M)` — init intercept only (discover omitted).
+          if (serverRef.type === 'claudeai-proxy') {
+            wrapStatelessClaudeAiProxyTransport(
+              transport,
+              serverRef,
+              msg => logMCPDebug(name, msg),
+              { includeDiscover: false },
+            )
+          }
           if (
             (serverRef.type === 'stdio' || !serverRef.type) &&
             transport instanceof StdioClientTransport &&

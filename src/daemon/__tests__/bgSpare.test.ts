@@ -145,6 +145,7 @@ describe('buildSpareHostEnv (official _mO)', () => {
     try {
       const env = buildSpareHostEnv()
       expect(env.CLAUDE_CODE_SESSION_KIND).toBe('bg')
+      expect(env.CLAUDE_BG_SOURCE).toBe('spare')
       expect(env.CLAUDE_BG_BACKEND).toBe('daemon')
       expect(env.FORCE_COLOR).toBe('3')
       expect(env.CLAUDECODE).toBeUndefined()

@@ -2,6 +2,7 @@ import {
   DANGEROUS_SHELL_SETTINGS,
   isSafeManagedEnv,
 } from '../../utils/managedEnvConstants.js'
+import { SETTINGS_KEY_ALIASES } from '../../utils/settings/settingsAliases.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 
@@ -22,19 +23,65 @@ export type DangerousSandboxBinaryKey =
 
 type DangerousShellSetting = (typeof DANGEROUS_SHELL_SETTINGS)[number]
 
-/** densable shellSettings keys: S3l helpers + `sandbox.${sJc}` dotted keys. */
+/**
+ * densable shellSettings keys: S3l helpers + `sandbox.${sJc}` + dynamic
+ * `extraKnownMarketplaces[...]` / `policyHelpers.*` projection keys (Y_e).
+ */
 export type DangerousShellKey =
   | DangerousShellSetting
   | `sandbox.${DangerousSandboxBinaryKey}`
+  | string
 
 export type DangerousSettings = {
-  shellSettings: Partial<Record<DangerousShellKey, string>>
+  shellSettings: Record<string, string>
   envVars: Record<string, string>
   hasHooks: boolean
   hooks?: unknown
   /** densable hFt hasClaudeMd — managed CLAUDE.md injection */
   hasClaudeMd: boolean
   claudeMd?: string
+}
+
+/**
+ * densable PN_ — resolve extraKnownMarketplaces, falling back to nxn alias
+ * `additionalMarketplaces` when the canonical key is absent.
+ */
+export function resolveExtraKnownMarketplacesProjection(
+  settings: SettingsJson | null | undefined,
+): Record<string, unknown> | undefined {
+  if (!settings) return undefined
+  const rec = settings as SettingsJson & Record<string, unknown>
+  const canonical = rec.extraKnownMarketplaces
+  if (canonical !== undefined && canonical !== null) {
+    return canonical as Record<string, unknown>
+  }
+  for (const { alias, canonical: canon } of SETTINGS_KEY_ALIASES) {
+    if (canon !== 'extraKnownMarketplaces') continue
+    const aliased = rec[alias]
+    if (
+      aliased !== undefined &&
+      aliased !== null &&
+      typeof aliased === 'object'
+    ) {
+      return aliased as Record<string, unknown>
+    }
+  }
+  return undefined
+}
+
+/**
+ * densable vBu — project a headersHelper command with optional source/url.
+ */
+export function formatExtraKnownHeadersHelperValue(
+  command: string,
+  source: string | undefined,
+  url: string | undefined,
+): string {
+  return jsonStringify([
+    command,
+    typeof source === 'string' ? source : null,
+    typeof url === 'string' ? url : null,
+  ])
 }
 
 /**
@@ -107,7 +154,7 @@ export function extractDangerousSettings(
     }
   }
 
-  const shellSettings: Partial<Record<DangerousShellKey, string>> = {}
+  const shellSettings: Record<string, string> = {}
   const settingsRecord = settings as Record<string, unknown>
   for (const key of DANGEROUS_SHELL_SETTINGS) {
     const value = settingsRecord[key]
@@ -124,6 +171,85 @@ export function extractDangerousSettings(
     }
     if (command !== undefined && command.length > 0) {
       shellSettings[key] = command
+    }
+  }
+
+  // densable Y_e / PN_: extraKnownMarketplaces[*].source.headersHelper +
+  // settings-source plugins[*].headersHelper / .source.command
+  const extraKnown = resolveExtraKnownMarketplacesProjection(settings)
+  if (extraKnown && typeof extraKnown === 'object') {
+    for (const [marketplaceName, marketplaceValue] of Object.entries(
+      extraKnown,
+    )) {
+      const marketplace =
+        marketplaceValue !== null && typeof marketplaceValue === 'object'
+          ? (marketplaceValue as Record<string, unknown>)
+          : undefined
+      const source = marketplace?.source
+      if (!source || typeof source !== 'object') continue
+      const sourceRec = source as Record<string, unknown>
+      if (
+        sourceRec.source === 'url' &&
+        typeof sourceRec.headersHelper === 'string' &&
+        sourceRec.headersHelper.length > 0
+      ) {
+        shellSettings[
+          `extraKnownMarketplaces[${jsonStringify(marketplaceName)}].source.headersHelper`
+        ] = formatExtraKnownHeadersHelperValue(
+          sourceRec.headersHelper,
+          'url',
+          typeof sourceRec.url === 'string' ? sourceRec.url : undefined,
+        )
+      }
+      if (sourceRec.source === 'settings' && Array.isArray(sourceRec.plugins)) {
+        const nameCounts = new Map<string, number>()
+        for (const plugin of sourceRec.plugins) {
+          const pluginRec =
+            plugin !== null && typeof plugin === 'object'
+              ? (plugin as Record<string, unknown>)
+              : undefined
+          const pluginName = jsonStringify(pluginRec?.name)
+          const idx = nameCounts.get(pluginName) ?? 0
+          nameCounts.set(pluginName, idx + 1)
+          const pluginSource = pluginRec?.source
+          if (
+            pluginSource !== null &&
+            typeof pluginSource === 'object' &&
+            'source' in pluginSource &&
+            (pluginSource as { source?: unknown }).source === 'command' &&
+            'command' in pluginSource &&
+            typeof (pluginSource as { command?: unknown }).command ===
+              'string' &&
+            (pluginSource as { command: string }).command.length > 0
+          ) {
+            shellSettings[
+              `extraKnownMarketplaces[${jsonStringify(marketplaceName)}].plugins[${jsonStringify(pluginRec?.name)}][${idx}].source.command`
+            ] = (pluginSource as { command: string }).command
+          }
+          if (
+            typeof pluginRec?.headersHelper === 'string' &&
+            pluginRec.headersHelper.length > 0
+          ) {
+            const h = pluginRec.source
+            const g = h !== null && typeof h === 'object'
+            const sourceKind =
+              g && 'source' in (h as object)
+                ? (h as { source?: unknown }).source
+                : undefined
+            const sourceUrl =
+              g && 'url' in (h as object)
+                ? (h as { url?: unknown }).url
+                : undefined
+            shellSettings[
+              `extraKnownMarketplaces[${jsonStringify(marketplaceName)}].plugins[${jsonStringify(pluginRec.name)}][${idx}].headersHelper`
+            ] = formatExtraKnownHeadersHelperValue(
+              pluginRec.headersHelper,
+              typeof sourceKind === 'string' ? sourceKind : undefined,
+              typeof sourceUrl === 'string' ? sourceUrl : undefined,
+            )
+          }
+        }
+      }
     }
   }
 
@@ -217,14 +343,56 @@ export function hasDangerousSettingsChanged(
 }
 
 /**
- * densable KFs — format dangerous settings as name list for the UI.
+ * densable SN_ — parse vBu JSON `[command, source|null, url|null]`.
+ */
+function parseExtraKnownHeadersHelperValue(
+  value: string,
+): { command: string; url?: string } | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length !== 3 ||
+      typeof parsed[0] !== 'string'
+    ) {
+      return undefined
+    }
+    return {
+      command: parsed[0],
+      url: typeof parsed[2] === 'string' ? parsed[2] : undefined,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * densable U8s / KFs — format dangerous settings as name list for the UI.
+ * extraKnownMarketplaces[*].headersHelper shows command (+ optional → url).
  */
 export function formatDangerousSettingsList(
   dangerous: DangerousSettings,
 ): string[] {
   const items: string[] = []
 
-  for (const key of Object.keys(dangerous.shellSettings)) {
+  for (const [key, value] of Object.entries(dangerous.shellSettings)) {
+    if (value === undefined) continue
+    if (key.startsWith('extraKnownMarketplaces[')) {
+      if (key.endsWith('.headersHelper')) {
+        const parsed = parseExtraKnownHeadersHelperValue(value)
+        if (parsed !== undefined) {
+          items.push(
+            `${key}: ${parsed.command}${
+              parsed.url === undefined ? '' : ` → ${parsed.url}`
+            }`,
+          )
+          continue
+        }
+      } else if (key.endsWith('.source.command')) {
+        items.push(`${key}: ${value}`)
+        continue
+      }
+    }
     items.push(key)
   }
 

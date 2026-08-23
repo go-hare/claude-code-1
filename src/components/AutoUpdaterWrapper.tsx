@@ -17,6 +17,14 @@ type Props = {
   verbose: boolean;
 };
 
+/** densable 2.1.238 DGT — first auto-update check waits until ~10s uptime. */
+export const UPDATE_CHECK_STARTUP_DELAY_MS = 10_000;
+
+/** densable 2.1.238 kOl — remaining delay before first check may run. */
+export function getUpdateCheckStartupDelayMs(uptimeSeconds: number = process.uptime()): number {
+  return Math.max(0, UPDATE_CHECK_STARTUP_DELAY_MS - uptimeSeconds * 1000);
+}
+
 export function AutoUpdaterWrapper({
   isUpdating,
   onChangeIsUpdating,
@@ -27,6 +35,19 @@ export function AutoUpdaterWrapper({
 }: Props): React.ReactNode {
   const [useNativeInstaller, setUseNativeInstaller] = React.useState<boolean | null>(null);
   const [isPackageManager, setIsPackageManager] = React.useState<boolean | null>(null);
+  // densable kOl: hold mounting Updater until startup delay elapses
+  const [startupDelayDone, setStartupDelayDone] = React.useState(() => getUpdateCheckStartupDelayMs() === 0);
+
+  React.useEffect(() => {
+    if (startupDelayDone) return;
+    const remaining = getUpdateCheckStartupDelayMs();
+    if (remaining <= 0) {
+      setStartupDelayDone(true);
+      return;
+    }
+    const timer = setTimeout(() => setStartupDelayDone(true), remaining);
+    return () => clearTimeout(timer);
+  }, [startupDelayDone]);
 
   React.useEffect(() => {
     async function checkInstallation() {
@@ -46,8 +67,8 @@ export function AutoUpdaterWrapper({
     void checkInstallation();
   }, []);
 
-  // Don't render until we know the installation type
-  if (useNativeInstaller === null || isPackageManager === null) {
+  // Don't render until we know the installation type and startup delay has elapsed
+  if (!startupDelayDone || useNativeInstaller === null || isPackageManager === null) {
     return null;
   }
 

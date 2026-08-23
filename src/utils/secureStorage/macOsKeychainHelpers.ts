@@ -109,12 +109,21 @@ export function clearKeychainCache(): void {
 }
 
 /**
- * Prime the keychain cache from a prefetch result (keychainPrefetch.ts).
- * Only writes if the cache hasn't been touched yet — if sync read() or
- * update() already ran, their result is authoritative and we discard this.
+ * densable `mkd` — prime the keychain cache from a prefetch result.
+ * Skip if the cache was already written (`cachedAt !== 0`) **or** the
+ * generation snapshot from `startKeychainPrefetch` no longer matches
+ * (sync `read()` / `update()` / `clearKeychainCache()` won the race).
  */
-export function primeKeychainCacheFromPrefetch(stdout: string | null): void {
-  if (keychainCacheState.cache.cachedAt !== 0) return
+export function primeKeychainCacheFromPrefetch(
+  stdout: string | null,
+  generation: number,
+): void {
+  if (
+    keychainCacheState.cache.cachedAt !== 0 ||
+    keychainCacheState.generation !== generation
+  ) {
+    return
+  }
   let data: SecureStorageData | null = null
   if (stdout) {
     try {

@@ -120,11 +120,24 @@ export function getSuggestionSuppressReason(appState: AppState): string | null {
     return 'pending_permission'
   if (appState.elicitation.queue.length > 0) return 'elicitation_active'
   if (appState.toolPermissionContext.mode === 'plan') return 'plan_mode'
-  if (
-    process.env.USER_TYPE === 'external' &&
-    currentLimits.status !== 'allowed'
-  )
-    return 'rate_limit'
+  // densable 2.1.238 YUv: allowed_warning + CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION===true
+  // still allows suggestions; other non-allowed statuses suppress as rate_limit.
+  if (process.env.USER_TYPE === 'external') {
+    const { status } = currentLimits
+    let envPromptSuggestionOn = false
+    try {
+      const { resolvePromptSuggestionEnvOverride } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+      envPromptSuggestionOn = resolvePromptSuggestionEnvOverride() === true
+    } catch {
+      envPromptSuggestionOn = isEnvTruthy(
+        process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION,
+      )
+    }
+    const warningAllowed = status === 'allowed_warning' && envPromptSuggestionOn
+    if (status !== 'allowed' && !warningAllowed) return 'rate_limit'
+  }
   return null
 }
 

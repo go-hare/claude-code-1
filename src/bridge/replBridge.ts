@@ -234,7 +234,10 @@ export type BridgeCoreParams = {
   onInboundMessage?: (msg: SDKMessage) => void
   onPermissionResponse?: (response: SDKControlResponse) => void
   onInterrupt?: () => void
-  onSetModel?: (model: string | undefined) => void
+  onStopTask?: (taskId: string) => Promise<unknown>
+  onSetModel?: (
+    model: string | undefined,
+  ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   /**
    * Returns a policy verdict so this module can emit an error control_response
@@ -358,6 +361,7 @@ export async function initBridgeCore(
     onInboundMessage,
     onPermissionResponse,
     onInterrupt,
+    onStopTask,
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
@@ -378,7 +382,7 @@ export async function initBridgeCore(
 
   // bridgePointer import hoisted: perpetual mode reads it before register;
   // non-perpetual writes it after session create; both use clear at teardown.
-  const { writeBridgePointer, clearBridgePointer, readBridgePointer } =
+  const { stampBridgePointer, clearBridgePointer, readBridgePointer } =
     await import('./bridgePointer.js')
 
   // Perpetual mode: read the crash-recovery pointer and treat it as prior
@@ -559,7 +563,7 @@ export async function initBridgeCore(
   // or left alone (perpetual mode — pointer survives clean exit too).
   // `claude remote-control --continue` from the same directory will detect
   // it and offer to resume.
-  await writeBridgePointer(dir, {
+  await stampBridgePointer(dir, {
     sessionId: currentSessionId,
     environmentId,
     source: 'repl',
@@ -885,7 +889,7 @@ export async function initBridgeCore(
     // new ID — setReplBridgeHandle only fires at init/teardown, not reconnect.
     void updateSessionBridgeId(toCompatSessionId(newSessionId)).catch(() => {})
     // Reset per-session transport state IMMEDIATELY after the session swap,
-    // before any await. If this runs after `await writeBridgePointer` below,
+    // before any await. If this runs after `await stampBridgePointer` below,
     // there's a window where handle.bridgeSessionId already returns session B
     // but getSSESequenceNum() still returns session A's seq — a daemon
     // persistState() in that window writes {bridgeSessionId: B, seq: OLD_A},
@@ -911,7 +915,7 @@ export async function initBridgeCore(
     // Rewrite the crash-recovery pointer with the new IDs so a crash after
     // this point resumes the right session. (The reconnect-in-place path
     // above doesn't touch the pointer — same session, same env.)
-    await writeBridgePointer(dir, {
+    await stampBridgePointer(dir, {
       sessionId: currentSessionId,
       environmentId,
       source: 'repl',
@@ -1203,7 +1207,7 @@ export async function initBridgeCore(
       // mtime (not embedded timestamp) so this re-write bumps the clock —
       // a 5h+ session that crashes still has a fresh pointer. Fires once
       // per work dispatch (infrequent — bounded by user message rate).
-      void writeBridgePointer(dir, {
+      void stampBridgePointer(dir, {
         sessionId: currentSessionId,
         environmentId,
         source: 'repl',
@@ -1296,6 +1300,7 @@ export async function initBridgeCore(
           transport,
           sessionId: currentSessionId,
           onInterrupt,
+          onStopTask,
           onSetModel,
           onSetMaxThinkingTokens,
           onSetPermissionMode,
@@ -1636,7 +1641,7 @@ export async function initBridgeCore(
         // leaving the pointer at the now-archived old session. doReconnect
         // writes the pointer itself, so skipping here is free.
         if (reconnectPromise) return
-        void writeBridgePointer(dir, {
+        void stampBridgePointer(dir, {
           sessionId: currentSessionId,
           environmentId,
           source: 'repl',
@@ -1732,7 +1737,7 @@ export async function initBridgeCore(
         flushGate.drop()
         // Refresh the pointer mtime so that sessions lasting longer than
         // BRIDGE_POINTER_TTL_MS (4h) don't appear stale on next start.
-        await writeBridgePointer(dir, {
+        await stampBridgePointer(dir, {
           sessionId: currentSessionId,
           environmentId,
           source: 'repl',

@@ -2071,12 +2071,16 @@ async function getOutputStyleAttachment(): Promise<Attachment[]> {
   }
 
   const config = await getOutputStyleConfig()
+  if (!config) {
+    return []
+  }
 
+  // densable s3T: style is catalog `r.name`, not the settings key
   return [
     {
       type: 'output_style',
-      style: outputStyle,
-      turnReminder: config?.turnReminder,
+      style: config.name,
+      turnReminder: config.turnReminder,
     },
   ]
 }

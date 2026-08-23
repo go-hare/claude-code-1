@@ -623,29 +623,102 @@ export function useReplBridge(
               }
               handleRemoteInterrupt(abortControllerRef.current);
             },
+            async onStopTask(taskId) {
+              // densable 2.1.238 #19 — RC panel stop_task → stopTask source:"user".
+              // Invent-ban: do not pass storageV5 / Desktop tasks UI.
+              const { stopTask } = await import('../tasks/stopTask.js');
+              return stopTask(taskId, {
+                getAppState: store.getState,
+                setAppState,
+                source: 'user',
+              });
+            },
             onSetModel(model) {
-              // densable 2.1.218 #31 — Remote Control set_model applies uU/dU
-              // (remote branch: keep prev only if model still supports fast).
-              const resolved = model === 'default' ? null : (model ?? null);
-              setMainLoopModelOverride(resolved);
-              // Lazy import keeps bootstrap isolation for bridge hook module graph.
-              const { applyFastModeOnModelSwitch, clearFastModeCooldown, isFastModeEnabled } =
-                require('../utils/fastMode.js') as typeof import('../utils/fastMode.js');
+              // densable 2.1.238 REPL onSetModel (Zkd callback): default/null →
+              // CE(); restricted family-alias steps down; unrecognized ids still
+              // apply (RGf is print-only). Restricted with no step-down →
+              // {ok:false} so Zkd emits error control_response.
+              const { decideReplBridgeSetModel, modelNotAllowedMessage, sanitizeModelIdForError } =
+                require('../utils/model/printSetModel.js') as typeof import('../utils/model/printSetModel.js');
+              const { logEvent } =
+                require('../services/analytics/index.js') as typeof import('../services/analytics/index.js');
+              const prevSession = store.getState().mainLoopModelForSession;
+              const decision = decideReplBridgeSetModel(
+                model,
+                typeof prevSession === 'string' ? prevSession : undefined,
+              );
+              if (!decision.ok) {
+                const keyId = sanitizeModelIdForError(typeof model === 'string' && model.trim() ? model : 'default');
+                addNotification({
+                  key: `model-restricted-bridge-${keyId}`,
+                  text: decision.error,
+                  color: 'warning',
+                  priority: 'immediate',
+                });
+                logEvent('tengu_feature_bad', {
+                  feature_name:
+                    'model_switch' as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  error_code:
+                    'not_allowed' as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+                return { ok: false as const, error: decision.error };
+              }
+              if (decision.steppedDown) {
+                addNotification({
+                  key: `model-restricted-bridge-${sanitizeModelIdForError(decision.requestedArg)}`,
+                  text: modelNotAllowedMessage(decision.requestedArg, decision.model),
+                  color: 'warning',
+                  priority: 'immediate',
+                });
+                logEvent('tengu_feature_sad', {
+                  feature_name:
+                    'model_switch' as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  error_code:
+                    'family_alias_stepped_down' as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              } else {
+                logEvent('tengu_feature_ok', {
+                  feature_name:
+                    'model_switch' as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              }
+              setMainLoopModelOverride(decision.model);
+              const {
+                applyFastModeOnModelSwitch,
+                clearFastModeCooldown,
+                formatBridgeFastModeToast,
+                isFastModeEnabled,
+              } = require('../utils/fastMode.js') as typeof import('../utils/fastMode.js');
               if (isFastModeEnabled()) {
                 clearFastModeCooldown();
               }
+              let prevFast: boolean | undefined;
+              let nextFast: boolean | undefined;
               setAppState(prev => {
-                const applied = applyFastModeOnModelSwitch(resolved, prev.fastMode, {
+                const applied = applyFastModeOnModelSwitch(decision.model, prev.fastMode, {
                   remoteSession: true,
                 });
-                const modelSame = prev.mainLoopModelForSession === resolved;
+                prevFast = !!prev.fastMode;
+                nextFast = applied.nextFastMode;
+                const modelSame = prev.mainLoopModelForSession === decision.model;
                 if (modelSame && !applied.changed) return prev;
                 return {
                   ...prev,
-                  mainLoopModelForSession: resolved,
+                  mainLoopModelForSession: decision.model,
                   ...(applied.changed ? { fastMode: applied.nextFastMode } : null),
                 };
               });
+              if (prevFast !== undefined && nextFast !== undefined) {
+                const toast = formatBridgeFastModeToast(prevFast, nextFast, decision.model);
+                if (toast !== null) {
+                  addNotification({
+                    key: 'model-switch-fast-mode',
+                    text: toast,
+                    priority: 'immediate',
+                    timeoutMs: 3000,
+                  });
+                }
+              }
             },
             onSetMaxThinkingTokens(maxTokens) {
               const enabled = maxTokens !== null;

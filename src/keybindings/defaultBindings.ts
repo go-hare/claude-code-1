@@ -39,7 +39,6 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // will show an error if users try to override these keys.
       'ctrl+c': 'app:interrupt',
       'ctrl+d': 'app:exit',
-      'ctrl+l': 'app:redraw',
       'ctrl+t': 'app:toggleTodos',
       'ctrl+o': 'app:toggleTranscript',
       ...(feature('KAIROS') || feature('KAIROS_BRIEF')
@@ -73,6 +72,9 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       enter: 'chat:submit',
       // densable 2.1.212: ctrl+j → chat:newline (extended key reporting / agent dispatch)
       'ctrl+j': 'chat:newline',
+      // densable 2.1.238 #36: Chat ctrl+l / cmd+k only forceRedraw (not /clear).
+      'ctrl+l': 'chat:clearInput',
+      'cmd+k': 'chat:clearScreen',
       up: 'history:previous',
       down: 'history:next',
       // Editing shortcuts (defined here, migration in progress)

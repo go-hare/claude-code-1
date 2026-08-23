@@ -2,6 +2,7 @@ import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
 import { CCRClient } from '../cli/transports/ccrClient.js'
 import type { HybridTransport } from '../cli/transports/HybridTransport.js'
 import { SSETransport } from '../cli/transports/SSETransport.js'
+import type { NonOrigin403Streak } from '../cli/transports/nonOrigin403.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { updateSessionIngressAuthToken } from '../utils/sessionIngressAuth.js'
@@ -158,6 +159,14 @@ export async function createV2ReplTransport(opts: {
    * When omitted, falls back to the env var (single-session callers).
    */
   getAuthToken?: () => string | undefined
+  /**
+   * densable 2.1.238 #33 — non-origin 403 streak. Default enabled.
+   * onRecover fires when the SSE stream is live again after a retryable streak.
+   */
+  nonOrigin403?: {
+    enabled?: boolean
+    onRecover?: (streak: NonOrigin403Streak) => void
+  }
 }): Promise<ReplBridgeTransport> {
   const {
     sessionUrl,
@@ -165,6 +174,7 @@ export async function createV2ReplTransport(opts: {
     sessionId,
     initialSequenceNum,
     getAuthToken,
+    nonOrigin403,
   } = opts
 
   // Auth header builder. If getAuthToken is provided, read from it
@@ -202,6 +212,7 @@ export async function createV2ReplTransport(opts: {
     undefined,
     initialSequenceNum,
     getAuthHeaders,
+    nonOrigin403,
   )
   let onCloseCb: ((closeCode?: number, cause?: string) => void) | undefined
   const fireClassifiedClose = (reason: string): never => {
@@ -316,9 +327,9 @@ export async function createV2ReplTransport(opts: {
       // heartbeat timer before notifying replBridge. (sse.close() doesn't
       // invoke this, so the epoch-mismatch path above isn't double-firing.)
       // densable SSE path has code only; classified closes use onCloseCb(code, reason).
-      sse.setOnClose(code => {
+      sse.setOnClose((code, cause) => {
         ccr.close()
-        cb(code ?? 4092)
+        cb(code ?? 4092, cause)
       })
     },
     setOnConnect(cb) {

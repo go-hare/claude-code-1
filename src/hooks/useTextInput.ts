@@ -23,6 +23,7 @@ import {
 import { env } from '../utils/env.js'
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
+import { getKeybindingFlavor } from '../utils/keybindingFlavor.js'
 import { isModifierPressed, prewarmModifiers } from '../utils/modifiers.js'
 import { useDoublePress } from './useDoublePress.js'
 
@@ -244,10 +245,22 @@ export function useTextInput({
     return newCursor
   }
 
+  // densable 2.1.238 — Meta/Ctrl+Backspace always classic word delete.
   function killWordBefore(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteWordBefore()
     pushToKillRing(killed, 'prepend')
     // densable Ozs
+    announceDeletedText(killed, mask)
+    return newCursor
+  }
+
+  // densable 2.1.238 SEA Ctrl+W: readline → WORD (whitespace), classic → word.
+  function killCtrlW(): Cursor {
+    const { cursor: newCursor, killed } =
+      getKeybindingFlavor() === 'readline'
+        ? cursor.deleteWORDBefore()
+        : cursor.deleteWordBefore()
+    pushToKillRing(killed, 'prepend')
     announceDeletedText(killed, mask)
     return newCursor
   }
@@ -285,12 +298,12 @@ export function useTextInput({
     ['d', handleCtrlD],
     ['e', () => cursor.endOfLine()],
     ['f', () => cursor.right()],
-    ['h', () => cursor.deleteTokenBefore() ?? cursor.backspace()],
+    ['h', () => cursor.deleteTokenBefore() ?? cursor.backspaceH()],
     ['k', killToLineEnd],
     ['n', () => downOrHistoryDown()],
     ['p', () => upOrHistoryUp()],
     ['u', killToLineStart],
-    ['w', killWordBefore],
+    ['w', killCtrlW],
     ['y', yank],
   ])
 
@@ -309,7 +322,7 @@ export function useTextInput({
     ) {
       // Track that the user has used backslash+return
       markBackslashReturnUsed()
-      return cursor.backspace().insert('\n')
+      return cursor.backspaceH().insert('\n')
     }
     // Meta+Enter or Shift+Enter inserts a newline
     if (key.meta || key.shift) {
@@ -394,7 +407,7 @@ export function useTextInput({
       case key.backspace:
         return key.meta || key.ctrl
           ? killWordBefore
-          : () => cursor.deleteTokenBefore() ?? cursor.backspace()
+          : () => cursor.deleteTokenBefore() ?? cursor.backspaceH()
       case key.delete:
         return key.meta ? killToLineEnd : () => cursor.del()
       case key.ctrl:
@@ -545,7 +558,7 @@ export function useTextInput({
       let currentCursor = cursor
       for (let i = 0; i < delCount; i++) {
         currentCursor =
-          currentCursor.deleteTokenBefore() ?? currentCursor.backspace()
+          currentCursor.deleteTokenBefore() ?? currentCursor.backspaceH()
       }
 
       // Update state once with the final result

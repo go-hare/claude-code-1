@@ -36,6 +36,7 @@ import { ConfigParseError, errorMessage } from '../utils/errors.js'
 // showInvalidConfigDialog is dynamically imported in the error path to avoid loading React at init
 import {
   gracefulShutdownSync,
+  isShuttingDown,
   setupGracefulShutdown,
 } from '../utils/gracefulShutdown.js'
 import {
@@ -57,7 +58,7 @@ import { setShellIfWindows } from '../utils/windowsPaths.js'
 import { initSentry } from '../utils/sentry.js'
 import { initUser } from '../utils/user.js'
 import { initLangfuse, shutdownLangfuse } from '../services/langfuse/index.js'
-import { setThemeConfigCallbacks } from '@anthropic/ink'
+import { setAppCallbacks, setThemeConfigCallbacks } from '@anthropic/ink'
 
 // initialize1PEventLogging is dynamically imported to defer OpenTelemetry sdk-logs/resources
 
@@ -77,6 +78,10 @@ export const init = memoize(async (): Promise<void> => {
       loadTheme: () => getGlobalConfig().theme,
       saveTheme: setting =>
         saveGlobalConfig(current => ({ ...current, theme: setting })),
+    })
+    // densable Ym → Ink hasReleasedTerminal (no ink→src import).
+    setAppCallbacks({
+      isShutdownCommitted: isShuttingDown,
     })
     logForDiagnosticsNoPII('info', 'init_configs_enabled', {
       duration_ms: Date.now() - configsStart,

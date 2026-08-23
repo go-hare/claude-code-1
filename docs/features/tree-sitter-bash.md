@@ -80,7 +80,7 @@ checkSemantics(commands)
 | Bash 解析器 | `src/utils/bash/bashParser.ts` | 4437 | 纯 TS 词法分析 + 递归下降解析器 |
 | 安全分析器 | `src/utils/bash/ast.ts` | 2680 | 树遍历安全分析 + `parseForSecurity()` |
 | AST 分析辅助 | `src/utils/bash/treeSitterAnalysis.ts` | 507 | 引号上下文、复合结构、危险模式提取 |
-| 权限检查入口 | `src/tools/BashTool/bashPermissions.ts` | — | 集成 AST 结果到权限决策 |
+| 权限检查入口 | `packages/builtin-tools/src/tools/BashTool/bashPermissions.ts` | — | 集成 AST 结果到权限决策 |
 
 ### 3.2 Bash 解析器
 

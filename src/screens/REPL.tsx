@@ -241,7 +241,7 @@ import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTo
 import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prompt.js';
 import { clearSpeculativeChecks } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js';
 import type { AutoUpdaterResult } from '../utils/autoUpdater.js';
-import { getGlobalConfig, saveGlobalConfig, getGlobalConfigWriteCount } from '../utils/config.js';
+import { getGlobalConfig, saveGlobalConfig, getGlobalConfigWriteCount, getAutoScrollEnabled } from '../utils/config.js';
 import { hasConsoleBillingAccess } from '../utils/billing.js';
 import {
   logEvent,
@@ -559,11 +559,6 @@ const EMPTY_MCP_CLIENTS: MCPServerConnection[] = [];
 // Stable stub for useAssistantHistory's non-KAIROS branch — avoids a new
 // function identity each render, which would break composedOnScroll's memo.
 const HISTORY_STUB = { maybeLoadOlder: (_: ScrollBoxHandle) => {} };
-// Window after a user-initiated scroll during which type-into-empty does NOT
-// repin to bottom. Josh Rosen's workflow: Claude emits long output → scroll
-// up to read the start → start typing → before this fix, snapped to bottom.
-// https://anthropic.slack.com/archives/C07VBSHV7EV/p1773545449871739
-const RECENT_SCROLL_REPIN_WINDOW_MS = 3000;
 
 // Use LRU cache to prevent unbounded memory growth
 // 100 files should be sufficient for most coding sessions while preventing
@@ -1479,13 +1474,6 @@ export function REPL({
   // PgUp/PgDn/wheel always scroll the transcript behind the modal.
   // Plumbing kept for future modal-scroll wiring.
   const modalScrollRef = useRef<ScrollBoxHandle>(null);
-  // Timestamp of the last user-initiated scroll (wheel, PgUp/PgDn, ctrl+u,
-  // End/Home, G, drag-to-scroll). Stamped in composedOnScroll — the single
-  // chokepoint ScrollKeybindingHandler calls for every user scroll action.
-  // Programmatic scrolls (repinScroll's scrollToBottom, sticky auto-follow)
-  // do NOT go through composedOnScroll, so they don't stamp this. Ref not
-  // state: no re-render on every wheel tick.
-  const lastUserScrollTsRef = useRef(0);
 
   // Synchronous state machine for the query lifecycle. Replaces the
   // error-prone dual-state pattern where isLoading (React state, async
@@ -2212,14 +2200,25 @@ export function REPL({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- length change covers appends; useUnseenDivider's count-drop guard clears dividerIndex on replace/rewind
     [dividerIndex, messages.length],
   );
-  // Re-pin scroll to bottom and clear the unseen-messages baseline. Called
-  // on any user-driven return-to-live action (submit, type-into-empty,
-  // overlay appear/dismiss).
-  const repinScroll = useCallback(() => {
-    scrollRef.current?.scrollToBottom();
-    onRepin();
-    setCursor(null);
-  }, [onRepin, setCursor]);
+  // densable Hi.current — scrolled-away latch. Sticky → false; not-sticky → true.
+  // typedIntoEmpty only fires when still sticky (`!scrolledAwayRef.current`).
+  const scrolledAwayRef = useRef(false);
+  // densable uT(force, reason): skip when !force && !autoScrollEnabled.
+  // Overlay / agent-view / submit pass force=true so autoScroll-off still pins.
+  const repinScroll = useCallback(
+    (force = false, reason = '?') => {
+      if (!force && !getAutoScrollEnabled()) return;
+      const handle = scrollRef.current;
+      if (handle && !handle.isSticky()) {
+        logForDebugging(`repinScroll(${reason}, force=${force}): yanking from scrollTop=${handle.getScrollTop()}`);
+      }
+      handle?.scrollToBottom();
+      onRepin();
+      setCursor(null);
+      scrolledAwayRef.current = false;
+    },
+    [onRepin, setCursor],
+  );
   // Backstop for the submit-handler repin at onSubmit. If a buffered stdin
   // event (wheel/drag) races between handler-fire and state-commit, the
   // handler's scrollToBottom can be undone. This effect fires on the render
@@ -2230,7 +2229,7 @@ export function REPL({
   const lastMsgIsHuman = lastMsg != null && isHumanTurn(lastMsg);
   useEffect(() => {
     if (lastMsgIsHuman) {
-      repinScroll();
+      repinScroll(false, 'lastMsgIsHuman');
     }
   }, [lastMsgIsHuman, lastMsg, repinScroll]);
   // Assistant-chat: lazy-load remote history on scroll-up. No-op unless
@@ -2245,9 +2244,11 @@ export function REPL({
   });
   const { maybeLoadOlder } = feature('KAIROS') ? assistantHistoryResult : HISTORY_STUB;
   // Compose useUnseenDivider's callbacks with the lazy-load trigger.
+  // densable $n: Hi.current = !sticky (scrolled-away latch). Timestamp exists
+  // on the official scroll path but is NOT used to gate typedIntoEmpty.
   const composedOnScroll = useCallback(
     (sticky: boolean, handle: ScrollBoxHandle) => {
-      lastUserScrollTsRef.current = Date.now();
+      scrolledAwayRef.current = !sticky;
       if (sticky) {
         onRepin();
       } else {
@@ -2312,23 +2313,12 @@ export function REPL({
   const setInputValue = useCallback(
     (value: string) => {
       if (trySuggestBgPRIntercept(inputValueRef.current, value)) return;
-      // In fullscreen mode, typing into an empty prompt re-pins scroll to
-      // bottom. Only fires on empty→non-empty so scrolling up to reference
-      // something while composing a message doesn't yank the view back on
-      // every keystroke. Restores the pre-fullscreen muscle memory of
-      // typing to snap back to the end of the conversation.
-      // Skipped if the user scrolled within the last 3s — they're actively
-      // reading, not lost. lastUserScrollTsRef starts at 0 so the first-
-      // ever keypress (no scroll yet) always repins.
-      // Also skip when already sticky: scrollToBottom would force-remount
-      // the virtual list and flash white until the next repin (e.g. Enter).
-      if (
-        inputValueRef.current === '' &&
-        value !== '' &&
-        Date.now() - lastUserScrollTsRef.current >= RECENT_SCROLL_REPIN_WINDOW_MS &&
-        scrollRef.current?.isSticky() !== true
-      ) {
-        repinScroll();
+      // densable typedIntoEmpty: empty→non-empty while still sticky
+      // (`!Hi.current`). Reading-up + typing must NOT yank. Sticky first
+      // keystroke does not remount-from-scrolled-range because scrollToBottom
+      // is a no-op when already at bottom / sticky follow is live.
+      if (inputValueRef.current === '' && value !== '' && !scrolledAwayRef.current) {
+        repinScroll(false, 'typedIntoEmpty');
       }
       // Sync ref immediately (like setMessages) so callers that read
       // inputValueRef before React commits — e.g. the auto-restore finally
@@ -3496,7 +3486,7 @@ export function REPL({
   useLayoutEffect(() => {
     const was = prevDialogRef.current === 'tool-permission';
     const now = focusedInputDialog === 'tool-permission';
-    if (was !== now) repinScroll();
+    if (was !== now) repinScroll(true, 'overlay');
     prevDialogRef.current = focusedInputDialog;
   }, [focusedInputDialog, repinScroll]);
 
@@ -3509,7 +3499,7 @@ export function REPL({
   useLayoutEffect(() => {
     if (prevViewingAgentRef.current === viewingAgentTaskId) return;
     prevViewingAgentRef.current = viewingAgentTaskId;
-    repinScroll();
+    repinScroll(true, 'agent-view-change');
   }, [viewingAgentTaskId, repinScroll]);
 
   function onCancel() {
@@ -5419,8 +5409,9 @@ export function REPL({
           : pastedContents;
 
       // Re-pin scroll to bottom on submit so the user always sees the new
-      // exchange (matches OpenCode's auto-scroll behavior).
-      repinScroll();
+      // exchange. force=true: autoScroll-off still pins on submit (SEA
+      // neighborhood did not gate this path on autoScrollEnabled).
+      repinScroll(true, 'submit');
 
       // Resume loop mode if paused
       if (feature('PROACTIVE') || feature('KAIROS')) {

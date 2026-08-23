@@ -75,9 +75,83 @@ import {
   type RequiresActionDetails,
   type SessionExternalMetadata,
 } from '../utils/sessionState.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import { Stream } from '../utils/stream.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import { ndjsonSafeStringify } from './ndjsonSafeStringify.js'
+
+/** densable TM0 — keys allowed on a plain nested-user unwrap envelope. */
+const PLAIN_NESTED_USER_KEYS = new Set([
+  'type',
+  'message',
+  'uuid',
+  'session_id',
+  'parent_tool_use_id',
+  'timestamp',
+])
+
+type NestedUserRepairOutcome =
+  | 'dropped'
+  | 'unwrap_refused'
+  | 'repair_disabled'
+  | 'repaired'
+
+type NestedUserUnwrap = {
+  inner: { role: 'user'; content: string | unknown[] }
+  plain: boolean
+}
+
+/** densable wM0 — envelope entry is a known SDK user-message field (or default flag). */
+function isPlainNestedUserEntry([key, value]: [string, unknown]): boolean {
+  return (
+    PLAIN_NESTED_USER_KEYS.has(key) ||
+    (key === 'isSynthetic' && value === false) ||
+    (key === 'shouldQuery' && value === true)
+  )
+}
+
+/**
+ * densable EM0 — one-level unwrap of `{message:{role:"user",content}}` nested
+ * inside the user-message payload. Returns undefined when the shape is not
+ * a nested user envelope.
+ */
+export function tryUnwrapNestedUserMessage(
+  payload: unknown,
+): NestedUserUnwrap | undefined {
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('message' in payload)
+  ) {
+    return undefined
+  }
+  const inner = (payload as { message: unknown }).message
+  if (
+    typeof inner !== 'object' ||
+    inner === null ||
+    !('role' in inner) ||
+    (inner as { role: unknown }).role !== 'user' ||
+    !('content' in inner)
+  ) {
+    return undefined
+  }
+  const content = (inner as { content: unknown }).content
+  if (typeof content !== 'string' && !Array.isArray(content)) {
+    return undefined
+  }
+  const rec = payload as Record<string, unknown>
+  const plain =
+    (!('type' in rec) || rec.type === 'user') &&
+    Object.entries(rec).every(isPlainNestedUserEntry)
+  return {
+    inner: inner as { role: 'user'; content: string | unknown[] },
+    plain,
+  }
+}
 
 /**
  * Synthetic tool name used when forwarding sandbox network permission
@@ -216,6 +290,25 @@ export class StructuredIO {
   ) {
     this.input = input
     this.structuredInput = this.read()
+  }
+
+  /**
+   * densable YPo.isRemoteTransport — false on local StructuredIO; RemoteIO
+   * overrides to true. Remote transports drop/repair malformed frames instead
+   * of process.exit.
+   */
+  isRemoteTransport(): boolean {
+    return false
+  }
+
+  /**
+   * densable retireDroppedFrame — close command_lifecycle for a dropped inbound
+   * uuid so the host does not wait on a frame that will never yield.
+   */
+  private retireDroppedFrame(uuid: unknown): void {
+    if (typeof uuid === 'string' && uuid.length > 0) {
+      notifyCommandLifecycle(uuid, 'completed')
+    }
   }
 
   /**
@@ -604,10 +697,48 @@ export class StructuredIO {
         logForDebugging(`Ignoring unknown message type: ${message.type}`, {
           level: 'warn',
         })
+        this.retireDroppedFrame(
+          typeof message === 'object' && message !== null && 'uuid' in message
+            ? (message as { uuid?: unknown }).uuid
+            : undefined,
+        )
         return undefined
       }
       if (message.type === 'control_request') {
-        if (!message.request) {
+        if (this.isRemoteTransport()) {
+          const request = (message as { request?: unknown }).request
+          const missing =
+            typeof request !== 'object' ||
+            request === null ||
+            Array.isArray(request)
+          if (
+            missing ||
+            !('subtype' in request) ||
+            typeof (request as { subtype?: unknown }).subtype !== 'string'
+          ) {
+            logEvent('tengu_sdk_malformed_input', {
+              message_type:
+                'control_request' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              reason: (missing
+                ? 'missing_request'
+                : 'subtype_not_string') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              transport:
+                'remote' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              outcome:
+                'dropped' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            logForDebugging(
+              'Dropping control_request: missing request object or non-string subtype',
+              { level: 'warn' },
+            )
+            this.retireDroppedFrame(
+              'uuid' in message
+                ? (message as { uuid?: unknown }).uuid
+                : undefined,
+            )
+            return undefined
+          }
+        } else if (!message.request) {
           exitWithMessage(`Error: Missing request on control_request`)
         }
         return message
@@ -618,9 +749,62 @@ export class StructuredIO {
       if (
         (message as { message?: { role?: string } }).message?.role !== 'user'
       ) {
-        exitWithMessage(
-          `Error: Expected message role 'user', got '${(message as { message?: { role?: string } }).message?.role}'`,
+        if (!this.isRemoteTransport()) {
+          exitWithMessage(
+            `Error: Expected message role 'user', got '${(message as { message?: { role?: string } }).message?.role}'`,
+          )
+        }
+        const unwrap = tryUnwrapNestedUserMessage(
+          (message as { message?: unknown }).message,
         )
+        const outcome: NestedUserRepairOutcome =
+          unwrap === undefined
+            ? 'dropped'
+            : !unwrap.plain
+              ? 'unwrap_refused'
+              : isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_NESTED_USER_REPAIR)
+                ? 'repair_disabled'
+                : 'repaired'
+        logEvent('tengu_sdk_malformed_input', {
+          message_type:
+            'user' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          reason:
+            'invalid_message_role' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          transport:
+            'remote' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          outcome:
+            outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        logForDiagnosticsNoPII('warn', 'cli_malformed_user_message', {
+          outcome,
+        })
+        if (unwrap === undefined || outcome !== 'repaired') {
+          const inner = (message as { message?: unknown }).message
+          const role =
+            inner && typeof inner === 'object' && 'role' in inner
+              ? (inner as { role?: unknown }).role
+              : undefined
+          const got =
+            inner === undefined || inner === null
+              ? 'no message'
+              : typeof inner !== 'object'
+                ? 'a non-object message'
+                : role === undefined
+                  ? 'no role'
+                  : `a role of JSON type ${role === null ? 'null' : Array.isArray(role) ? 'array' : typeof role}`
+          logForDebugging(
+            `Dropping malformed user message (${outcome}): expected message role 'user', got ${got}`,
+            { level: 'warn' },
+          )
+          this.retireDroppedFrame(
+            'uuid' in message
+              ? (message as { uuid?: unknown }).uuid
+              : undefined,
+          )
+          return undefined
+        }
+        ;(message as { message: unknown }).message = unwrap.inner
+        logForDebugging('Repaired a nested user message (one level)')
       }
       return message
     } catch (error) {

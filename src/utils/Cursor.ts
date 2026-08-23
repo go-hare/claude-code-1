@@ -845,11 +845,20 @@ export class Cursor {
     return this.modifyText(this.right())
   }
 
-  backspace(): Cursor {
+  /**
+   * densable 2.1.238 `backspaceH` — same body as classic backspace; renamed so
+   * Ctrl+H / Backspace callers share one symbol (no invent burst coalescer).
+   */
+  backspaceH(): Cursor {
     if (this.isAtStart()) {
       return this
     }
     return this.left().modifyText(this)
+  }
+
+  /** @deprecated Use backspaceH — kept as alias for any residual callers. */
+  backspace(): Cursor {
+    return this.backspaceH()
   }
 
   deleteToLineStart(): { cursor: Cursor; killed: string } {
@@ -896,6 +905,20 @@ export class Cursor {
     const prevWordCursor = new Cursor(this.measuredText, target)
     const killed = this.text.slice(prevWordCursor.offset, this.offset)
     return { cursor: prevWordCursor.modifyText(this), killed }
+  }
+
+  /**
+   * densable 2.1.238 — readline/Bash WORD delete (whitespace-delimited).
+   * Used when settings.keybindingFlavor === "readline" for Ctrl+W only.
+   */
+  deleteWORDBefore(): { cursor: Cursor; killed: string } {
+    if (this.isAtStart()) {
+      return { cursor: this, killed: '' }
+    }
+    const target = this.snapOutOfImageRef(this.prevWORD().offset, 'start')
+    const prevWORDCursor = new Cursor(this.measuredText, target)
+    const killed = this.text.slice(prevWORDCursor.offset, this.offset)
+    return { cursor: prevWORDCursor.modifyText(this), killed }
   }
 
   /**

@@ -77,6 +77,11 @@ import {
   type WorkHintsStreamHandle,
   type PollWakeSource,
 } from './workHintsSse.js'
+import { logEvent } from 'src/services/analytics/index.js'
+import {
+  enableEgressProxyAuth,
+  type EgressProxyHandle,
+} from './egressProxyAuth.js'
 
 // ── densable constants (OBh init) ──────────────────────────────────────────
 
@@ -90,8 +95,16 @@ export const DEFAULT_BASE_DIR = '/workspace'
 export const DEFAULT_HEALTH_PORT = 8080
 /** densable `tXl` */
 export const TRUST_WORKSPACE_DEFAULT = true
-/** densable `VUi` — poll failure retry */
+/** densable `VUi` / `vMo` — poll failure retry (non-timeout/transport) */
 export const POLL_ERROR_RETRY_MS = 20_000
+/** densable `i5y` — timeout/transport exponential base */
+export const POLL_TIMEOUT_BACKOFF_BASE_MS = 2_000
+/** densable `SoC` — timeout/transport backoff cap (= vMo) */
+export const POLL_TIMEOUT_BACKOFF_CAP_MS = POLL_ERROR_RETRY_MS
+/** densable `voC` = Zdu+2000 — lease remaining pad */
+export const POLL_LEASE_SAFETY_PAD_MS = 12_000
+/** densable `ToC` — 5xx clamp floor vs remaining lease */
+export const POLL_5XX_LEASE_FLOOR_MS = 5_000
 /** densable `_Bh` — default startup timeout (15 min) */
 export const DEFAULT_STARTUP_TIMEOUT_MS = 900_000
 /** densable `pBh` — min poll interval when lease near */
@@ -169,8 +182,35 @@ export type RootRunnerArgs = {
   pushOutcomeOnRelease: boolean
   trustWorkspace: boolean
   confineRepoSettings: ConfineRepoSettings
+  /**
+   * densable 2.1.238 — `--proxy-authorization-command` value (pre-resolve).
+   * Merged with env in `resolveProxyAuthorizationConfig` (N4y/rrC).
+   */
+  proxyAuthorizationCommand: string | undefined
+  /**
+   * densable 2.1.238 — `--proxy-authorization-file` value (pre-resolve).
+   */
+  proxyAuthorizationFile: string | undefined
   /** env keys set via CLI flags (not ambient env) */
   envSetByFlag: Set<string>
+}
+
+/** densable `spu` / `S7_` — HTTPS_PROXY|HTTP_PROXY only (ALL_PROXY excluded). */
+const RUNNER_UPSTREAM_PROXY_ENV_KEYS = [
+  'https_proxy',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'HTTP_PROXY',
+] as const
+
+export type ProxyAuthorizationSource =
+  | { kind: 'command'; command: string }
+  | { kind: 'file'; path: string }
+
+/** densable `N4y` return — source + upstream proxy URL string. */
+export type ProxyAuthorizationConfig = {
+  source: ProxyAuthorizationSource
+  upstreamProxyUrl: string
 }
 
 // ── small densable helpers ─────────────────────────────────────────────────
@@ -198,6 +238,119 @@ export function readDrainWaitMs(): number {
     return readEnvMs('SELF_HOSTED_RUNNER_DRAIN_WAIT_MS')
   }
   return readEnvMs('SELF_HOSTED_RUNNER_DRAIN_WAIT_BG_TASKS_MS')
+}
+
+/** densable `MV`-style read for defer ceiling (0 disables; invalid → 0). */
+export function readDeferShutdownMaxMs(): number {
+  return readEnvMs('SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS')
+}
+
+/**
+ * densable `G(ue)` — append `(sig; uptime …; N active session(s), M of them idle)`
+ * to first-signal / drain log lines. `health` may be undefined during startup.
+ */
+export function formatShutdownSignalContext(
+  sig: string,
+  health?: Pick<RunnerHealthState, 'sessionIdle'>,
+  uptimeMs: number = process.uptime() * 1000,
+): string {
+  const idle = health?.sessionIdle
+  const pe =
+    idle === undefined
+      ? 'session counts not yet initialized (startup in progress)'
+      : `${idle.size} active session(s), ${[...idle.values()].filter(v => v !== null).length} of them idle`
+  return `(${sig}; uptime ${formatDelayMs(uptimeMs)}; ${pe})`
+}
+
+/**
+ * densable `ypt`/`c9` subset for runner proxy-auth: first set among
+ * https_proxy/HTTPS_PROXY/http_proxy/HTTP_PROXY (ALL_PROXY ignored).
+ */
+export function readUpstreamHttpProxyUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  for (const key of RUNNER_UPSTREAM_PROXY_ENV_KEYS) {
+    const v = env[key]
+    if (v !== undefined && v !== '') return v
+  }
+  return undefined
+}
+
+function parseProxyUrlOrUndefined(raw: string): URL | undefined {
+  try {
+    const u = new URL(raw)
+    return u.host ? u : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * densable `rrC` — merge flag args with env; mutex / empty checks.
+ * Returns undefined when neither command nor file is set.
+ */
+export function resolveProxyAuthorizationSource(
+  args: {
+    command?: string | undefined
+    file?: string | undefined
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): ProxyAuthorizationSource | undefined {
+  if (
+    (args.command !== undefined && args.command.trim() === '') ||
+    (args.file !== undefined && args.file.trim() === '')
+  ) {
+    throw new Error(
+      '--proxy-authorization-command / --proxy-authorization-file must not be empty',
+    )
+  }
+  const command = (
+    args.command ?? env.SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_COMMAND
+  )?.trim()
+  const fileRaw = (
+    args.file ?? env.SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_FILE
+  )?.trim()
+  const file = fileRaw ? pathResolve(fileRaw) : fileRaw
+  const hasCommand = command !== undefined && command !== ''
+  const hasFile = file !== undefined && file !== ''
+  if (hasCommand && hasFile) {
+    throw new Error(
+      'set only one of --proxy-authorization-command (SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_COMMAND) and --proxy-authorization-file (SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_FILE)',
+    )
+  }
+  if (hasCommand) return { kind: 'command', command: command! }
+  if (hasFile) return { kind: 'file', path: file! }
+  return undefined
+}
+
+/**
+ * densable `N4y` — resolve source + require HTTPS_PROXY|HTTP_PROXY with http(s) scheme.
+ * Returns undefined when proxy-authorization is unset (no-op).
+ */
+export function resolveProxyAuthorizationConfig(
+  args: {
+    command?: string | undefined
+    file?: string | undefined
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): ProxyAuthorizationConfig | undefined {
+  const source = resolveProxyAuthorizationSource(args, env)
+  if (!source) return undefined
+  const upstreamProxyUrl = readUpstreamHttpProxyUrl(env)
+  const parsed = upstreamProxyUrl
+    ? parseProxyUrlOrUndefined(upstreamProxyUrl)
+    : undefined
+  if (!upstreamProxyUrl || !parsed) {
+    throw new Error(
+      '--proxy-authorization-command / --proxy-authorization-file require HTTPS_PROXY (or HTTP_PROXY) to be set to the upstream proxy URL that the Proxy-Authorization value is for (ALL_PROXY alone is not consulted)',
+    )
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      '--proxy-authorization-command / --proxy-authorization-file support http:// and https:// upstream proxies only (check the scheme of HTTPS_PROXY / HTTP_PROXY)',
+    )
+  }
+  return { source, upstreamProxyUrl }
 }
 
 /** densable `bBh` — retire-at env → ms epoch, or 0 */
@@ -266,6 +419,50 @@ export function computeShutdownBudgetSec(
       pushOutcomeMs +
       SHUTDOWN_BUDGET_PAD_MS) /
       1000,
+  )
+}
+
+/**
+ * densable `E5y` — clamp a delay against remaining lease minus voC.
+ * If lease is missing/expired, return the requested delay unchanged.
+ */
+export function clampPollDelayToLease(
+  delayMs: number,
+  leaseExpiresAt: unknown,
+  floorMs: number,
+  nowMs: number = Date.now(),
+): number {
+  const remaining =
+    leaseExpiresAt === undefined
+      ? Number.NaN
+      : Date.parse(String(leaseExpiresAt)) - nowMs
+  if (!(remaining > 0)) return delayMs
+  return Math.min(
+    delayMs,
+    Math.max(floorMs, remaining - POLL_LEASE_SAFETY_PAD_MS),
+  )
+}
+
+/**
+ * densable `w5y` — timeout/transport exponential backoff with half-interval
+ * jitter, then E5y-clamped to the lease. `attempt` is the 1-based streak.
+ */
+export function timeoutTransportBackoffMs(
+  attempt: number,
+  leaseExpiresAt: unknown,
+  nowMs: number = Date.now(),
+  random: () => number = Math.random,
+): number {
+  const cap = Math.min(
+    POLL_TIMEOUT_BACKOFF_CAP_MS,
+    POLL_TIMEOUT_BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1),
+  )
+  const jittered = Math.floor(cap / 2 + random() * (cap / 2))
+  return clampPollDelayToLease(
+    jittered,
+    leaseExpiresAt,
+    POLL_TIMEOUT_BACKOFF_BASE_MS,
+    nowMs,
   )
 }
 
@@ -452,6 +649,8 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
     confineRepoSettings: parseConfineRepoSettingsEnv(
       process.env.SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS,
     ),
+    proxyAuthorizationCommand: undefined,
+    proxyAuthorizationFile: undefined,
     envSetByFlag: new Set(),
   }
 
@@ -714,6 +913,27 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
         }
         break
       }
+      case '--defer-shutdown-max-min': {
+        // densable 2.1.238 — minutes → SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS
+        const s = argv[++n]
+        const a = Number(s)
+        if (
+          s === undefined ||
+          s.trim() === '' ||
+          !Number.isFinite(a) ||
+          a < 0 ||
+          a > MAX_MINUTES_FLAG
+        ) {
+          throw new Error(
+            `--defer-shutdown-max-min must be a non-negative number of minutes (0 disables, max ${MAX_MINUTES_FLAG}), got: ${s}`,
+          )
+        }
+        process.env.SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS = String(
+          a * 60 * 1000,
+        )
+        t.envSetByFlag.add('SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS')
+        break
+      }
       case '--retire-at': {
         const s = argv[++n]
         const a = Number(s)
@@ -742,6 +962,22 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
           n++
         }
         break
+      case '--proxy-authorization-command':
+      case '--proxy-authorization-file': {
+        // densable 2.1.238 — require a non-flag value; mutex/empty/proxy checked in N4y
+        if (i === undefined || i.startsWith('--')) {
+          throw new Error(
+            '--proxy-authorization-command / --proxy-authorization-file requires a value',
+          )
+        }
+        if (o === '--proxy-authorization-command') {
+          t.proxyAuthorizationCommand = i
+        } else {
+          t.proxyAuthorizationFile = i
+        }
+        n++
+        break
+      }
       default:
         if (o?.startsWith('--')) throw new Error(`unknown flag ${o}`)
         if (o === '') {
@@ -838,6 +1074,19 @@ Connection:
   --lock-to-account <id>      Lock runner to a single account at registration (webhook-driven on-demand
                               spawn). Only that account's sessions are assigned.
                               [env: SELF_HOSTED_RUNNER_LOCK_TO_ACCOUNT]
+  --proxy-authorization-command <shell command>
+                              For egress proxies that require a Proxy-Authorization header (for
+                              example a short-lived bearer token) on every CONNECT. The command's
+                              stdout is the full header value (e.g. "Bearer <token>"); it is run
+                              afresh for each new connection to the proxy, so rotating tokens stay
+                              current. Requires HTTPS_PROXY (or HTTP_PROXY) to name that upstream
+                              proxy; ALL_PROXY alone is not consulted. Not supported with the
+                              orchestrator subcommand yet.
+                              [env: SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_COMMAND]
+  --proxy-authorization-file <path>
+                              Same, but the header value is read from a file (re-read for each new
+                              connection, so a file rotated in place is picked up). Set only one of
+                              the two. [env: SELF_HOSTED_RUNNER_PROXY_AUTHORIZATION_FILE]
 
 Runtime:
   --capacity <n>              Max concurrent sessions (default: ${DEFAULT_CAPACITY})
@@ -861,6 +1110,14 @@ Runtime:
                               turn and running background tasks before sending the session process
                               its SIGTERM. Default: 0. Max: 86400.
                               [env: SELF_HOSTED_RUNNER_DRAIN_WAIT_MS, in ms]
+  --defer-shutdown-max-min <m>
+                              On the FIRST SIGTERM/SIGINT, do not drain: stop taking new work (the runner
+                              advertises zero capacity and keeps polling only as its lease heartbeat) and
+                              otherwise keep running as it does today, then finish shutting down M minutes
+                              later. Attached sessions are served normally until released/idle/ceiling;
+                              a SECOND signal drains immediately. Fractional minutes are accepted.
+                              Default: 0 (off — drain on the first signal). Max: ${MAX_MINUTES_FLAG}.
+                              [env: SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS, in ms]
   --git-ssh-rewrite <host>    Rewrite https://<host>/... to git@<host>:... (repeatable).
   --git-host-rewrite <f>=<t>  Rewrite https://<f>/... to https://<t>/... (repeatable).
   --use-anthropic-git-proxy   Clone via Anthropic's git proxy.
@@ -1003,6 +1260,22 @@ export type PollSkeletonOpts = {
   configureGitSigningArtifacts?: GitArtifactFile[]
   /** densable `S` — shared canonical sanitize locks across sessions */
   canonicalLocks?: Map<string, Promise<unknown>>
+  /**
+   * densable 2.1.238 `deferShutdown` — separate abort from poll `signal`.
+   * First SIGTERM aborts this signal only (keep serving); ceiling/second signal drains.
+   */
+  deferShutdown?: {
+    signal: AbortSignal
+    maxMs: number
+    requestDrain: (reason: string) => void
+    /** densable `ceilingGraceMsOverride` — tests only */
+    ceilingGraceMsOverride?: number
+    /**
+     * densable `onClosed` — poll `finally` fires this so the outer `F` latch
+     * closes (a SIGTERM after the loop has exited cannot re-enter defer).
+     */
+    onClosed?: () => void
+  }
 }
 
 type ActiveSessionSlot = {
@@ -1011,6 +1284,8 @@ type ActiveSessionSlot = {
   liveBgTasks: number
   turnInFlight: boolean
   releaseForRetire: () => void
+  /** densable releaseForShutdown — same park path as retire (ceiling). */
+  releaseForShutdown: () => void
 }
 
 /**
@@ -1052,25 +1327,57 @@ export async function runPollSkeleton(
   const releaseFalseCounts = new Map<string, number>()
   /** densable `z` — ordered idle-release promises still settling after post-session */
   const orderedReleaseInFlight = new Map<string, Promise<unknown>>()
+  /**
+   * densable `Ne` — released=false (pending user event) while deferring, before
+   * the ceiling. Occupies a slot and is re-spawned on the next poll.
+   */
+  const declinedHeldForRespawn = new Set<string>()
   const retireSkipLogged = new Set<string>()
   const platformBySession = new Map<string, string>()
-  /** densable `Q` — active slots + in-flight releases that already left `active` */
+  /** densable `ue` — attached, not aborted, not already releasing */
+  const liveAttachedCount = (): number =>
+    [...active.entries()].filter(
+      ([sid, slot]) =>
+        !slot.controller.signal.aborted && !releasedAwaitingDeassign.has(sid),
+    ).length
+  /** densable `me` — abort in flight, not yet in ordered-release settle */
+  const releasingInFlightCount = (): number =>
+    [...active.entries()].filter(
+      ([sid, slot]) =>
+        !slot.controller.signal.aborted &&
+        releasedAwaitingDeassign.has(sid) &&
+        !orderedReleaseInFlight.has(sid),
+    ).length
+  /** densable `Pe` — active + in-flight releases that already left `active` + declined held */
   const occupiedSlotCount = (): number => {
     let n = active.size
     for (const sid of orderedReleaseInFlight.keys()) {
       if (!active.has(sid)) n++
     }
+    for (const sid of declinedHeldForRespawn) {
+      if (!active.has(sid) && !orderedReleaseInFlight.has(sid)) n++
+    }
     return n
   }
   let consecutive404 = 0
+  /** densable `v` — timeout/transport streak; reset only on successful poll */
+  let consecutiveTimeout = 0
+  /** densable `w` — last successful poll's lease_expires_at (used by w5y/E5y) */
+  let lastLeaseExpiresAt: unknown
   let lastPollAt = Date.now()
   let sessionsHandled = 0
   let successfulPolls = 0
   let idleSince: number | null = null
   let sawAnyAssignment = false
   let retiring = false
+  /** densable `W` — why we refuse new work: retire vs deferred shutdown */
+  let refuseReason: 'retire' | 'shutdown' | undefined
   let retireTimer: ReturnType<typeof setTimeout> | undefined
   let drainNotify: (() => void) | undefined
+  let deferCeilingTimer: ReturnType<typeof setTimeout> | undefined
+  let deferPostCeilingTimer: ReturnType<typeof setTimeout> | undefined
+  /** densable `X` — defer ceiling has fired (not "timer armed") */
+  let deferCeilingReached = false
 
   const sseEnabled =
     opts.sseHintsEnabledOverride ?? isSseHintsEnabled(process.env)
@@ -1090,6 +1397,17 @@ export async function runPollSkeleton(
     })
   }
 
+  const deferShutdown = opts.deferShutdown
+  const deferEnabled = deferShutdown !== undefined && deferShutdown.maxMs > 0
+  // densable `re` / `ie` (K7t=15s): post-ceiling grace before requestDrain
+  const deferCeilingGraceMs =
+    deferShutdown?.ceilingGraceMsOverride ??
+    Math.max(drainWaitMs, retireDeferredGraceMs)
+  const deferPostCeilingMarginMs =
+    deferShutdown?.ceilingGraceMsOverride !== undefined
+      ? Math.max(10, Math.floor(deferShutdown.ceilingGraceMsOverride / 10))
+      : 15_000
+
   const armRetireTimer = (): void => {
     retireTimer = undefined
     const remaining = retireAtMs - Date.now()
@@ -1101,10 +1419,12 @@ export async function runPollSkeleton(
       return
     }
     retiring = true
+    refuseReason = 'retire'
     opts.onStatus(
       `[runner:retire] retire time reached — releasing ${active.size} active session(s), refusing new work; exiting once the slots are empty`,
     )
     for (const slot of active.values()) slot.releaseForRetire()
+    wakeQueue.wake('LOCAL')
   }
   if (retireAtMs > 0) {
     const remaining = retireAtMs - Date.now()
@@ -1116,11 +1436,105 @@ export async function runPollSkeleton(
     armRetireTimer()
   }
 
+  const onDeferShutdownAbort = (): void => {
+    if (!deferEnabled || deferShutdown === undefined) return
+    const signaledAt =
+      typeof deferShutdown.signal.reason === 'number'
+        ? deferShutdown.signal.reason
+        : Date.now()
+    if (deferCeilingTimer === undefined) {
+      const untilCeiling = signaledAt + deferShutdown.maxMs - Date.now()
+      deferCeilingTimer = setTimeout(
+        onDeferCeiling,
+        Math.min(Math.max(0, untilCeiling), 2_147_483_647),
+      )
+    }
+    if (retiring) {
+      opts.onStatus(
+        '[runner:shutdown] shutdown requested while already retiring — sessions are already being released',
+      )
+      return
+    }
+    retiring = true
+    refuseReason = 'shutdown'
+    const idleBit =
+      sessionIdleMs > 0
+        ? `each is released once its user has been idle ${formatDelayMs(sessionIdleMs)} (--release-idle-session-min) or when it ends`
+        : 'none is released early (--release-idle-session-min is not set)'
+    opts.onStatus(
+      `[runner:shutdown] shutdown requested — deferring drain: ${active.size} active session(s), refusing new work; ${idleBit}; ${formatDelayMs(deferShutdown.maxMs)} after the signal every session still attached is released at once; exiting as soon as the slots are empty`,
+    )
+    wakeQueue.wake('LOCAL')
+  }
+
+  const onDeferCeiling = (): void => {
+    deferCeilingTimer = undefined
+    if (deferShutdown === undefined || signal.aborted) return
+    deferCeilingReached = true
+    const dropped = declinedHeldForRespawn.size
+    if (dropped > 0) {
+      declinedHeldForRespawn.clear()
+      wakeQueue.wake('LOCAL')
+    }
+    const dropNote = (): void => {
+      if (dropped > 0) {
+        opts.onStatus(
+          `[runner:shutdown] ${dropped} declined session(s) held for re-spawn dropped at the ceiling — requeued at exit instead`,
+        )
+      }
+    }
+    const live = liveAttachedCount()
+    if (live === 0 && releasingInFlightCount() === 0) {
+      dropNote()
+      return
+    }
+    opts.onStatus(
+      `[runner:shutdown] defer ceiling reached (${formatDelayMs(deferShutdown.maxMs)}) — ${
+        live > 0
+          ? `releasing the remaining ${live} session(s) now`
+          : `waiting on ${releasingInFlightCount()} in-flight release(s)`
+      }; any still attached after ${formatDelayMs(deferCeilingGraceMs + deferPostCeilingMarginMs)} will be drained`,
+    )
+    dropNote()
+    for (const slot of active.values()) slot.releaseForShutdown()
+    let remainingMargin = deferPostCeilingMarginMs
+    const tick = (): void => {
+      deferPostCeilingTimer = undefined
+      if (signal.aborted) return
+      const stillLive = liveAttachedCount()
+      const stillReleasing = releasingInFlightCount()
+      if (stillLive === 0 && stillReleasing === 0) return
+      if (remainingMargin > 0) {
+        remainingMargin -= 1000
+        deferPostCeilingTimer = setTimeout(tick, 1000)
+        return
+      }
+      opts.onStatus(
+        `[runner:shutdown] ${stillLive + stillReleasing} session(s) still attached after the post-ceiling grace — falling back to a drain`,
+      )
+      deferShutdown.requestDrain(
+        'post-ceiling grace expired with sessions still attached',
+      )
+    }
+    deferPostCeilingTimer = setTimeout(tick, deferCeilingGraceMs)
+  }
+
+  if (deferEnabled && deferShutdown !== undefined) {
+    if (deferShutdown.signal.aborted) onDeferShutdownAbort()
+    else {
+      deferShutdown.signal.addEventListener('abort', onDeferShutdownAbort, {
+        once: true,
+      })
+    }
+  }
+
   try {
     while (!signal.aborted) {
       if (retiring && occupiedSlotCount() === 0) {
         opts.onStatus(
-          '[runner:exit] retire time passed and no active sessions — exiting before the host kills this runner.',
+          refuseReason === 'shutdown'
+            ? '[runner:exit] shutdown requested and every attached session has been released — exiting.'
+            : '[runner:exit] retire time passed and no active sessions — exiting before the host kills this runner.',
         )
         return 'drained'
       }
@@ -1175,6 +1589,8 @@ export async function runPollSkeleton(
         }
         lastPollAt = Date.now()
         consecutive404 = 0
+        consecutiveTimeout = 0
+        lastLeaseExpiresAt = lease
         if (health) {
           health.lastPollAt = lastPollAt
           health.activeSessions = occupiedSlotCount()
@@ -1215,13 +1631,27 @@ export async function runPollSkeleton(
           continue
         }
         consecutive404 = 0
+        const kind = classifyPollError(err)
+        let delay: number
+        if (kind === 'timeout' || kind === 'transport') {
+          consecutiveTimeout++
+          delay = timeoutTransportBackoffMs(
+            consecutiveTimeout,
+            lastLeaseExpiresAt,
+          )
+        } else if (kind === '5xx') {
+          delay = clampPollDelayToLease(
+            POLL_ERROR_RETRY_MS,
+            lastLeaseExpiresAt,
+            POLL_5XX_LEASE_FLOOR_MS,
+          )
+        } else {
+          delay = POLL_ERROR_RETRY_MS
+        }
         opts.onStatus(
-          `Poll failed: ${msg} — retrying in ${POLL_ERROR_RETRY_MS / 1000}s`,
+          `Poll failed: ${msg} — retrying in ${(delay / 1000).toFixed(1)}s`,
         )
-        await sleepMs(
-          opts.pollIntervalOverrideMs ?? POLL_ERROR_RETRY_MS,
-          signal,
-        )
+        await sleepMs(opts.pollIntervalOverrideMs ?? delay, signal)
         continue
       }
 
@@ -1268,6 +1698,11 @@ export async function runPollSkeleton(
       for (const sid of [...releaseFalseCounts.keys()]) {
         if (!assignedSet.has(sid)) releaseFalseCounts.delete(sid)
       }
+      for (const sid of [...declinedHeldForRespawn]) {
+        if (!assignedSet.has(sid) || stuckSessions.has(sid)) {
+          declinedHeldForRespawn.delete(sid)
+        }
+      }
 
       if (
         fresh.length > 0 &&
@@ -1295,6 +1730,7 @@ export async function runPollSkeleton(
           continue
         }
         if (stuckSessions.has(sessionId)) {
+          declinedHeldForRespawn.delete(sessionId)
           opts.onDebug(
             `[runner:main] Ignoring stuck session ${sessionId} — already failed, not re-spawning`,
           )
@@ -1312,14 +1748,28 @@ export async function runPollSkeleton(
           )
           continue
         }
-        if (retiring) {
-          const msg = `[runner:retire] not starting session ${sessionId} — retire time has passed; it will be requeued when this runner exits`
+        const serveDuringDefer =
+          retiring && refuseReason === 'shutdown' && !deferCeilingReached
+        if (retiring && !serveDuringDefer) {
+          const msg =
+            refuseReason === 'shutdown'
+              ? `[runner:shutdown] not starting session ${sessionId} — shutdown requested and the defer ceiling has passed; it will be requeued when this runner exits`
+              : `[runner:retire] not starting session ${sessionId} — retire time has passed; it will be requeued when this runner exits`
           if (retireSkipLogged.has(sessionId)) opts.onDebug(msg)
           else {
             retireSkipLogged.add(sessionId)
             opts.onStatus(msg)
           }
+          declinedHeldForRespawn.delete(sessionId)
           continue
+        }
+        if (serveDuringDefer) {
+          opts.onStatus(
+            declinedHeldForRespawn.has(sessionId)
+              ? `[runner:shutdown] ${sessionId} re-spawning after its declined release to serve the pending user event; it is released again like the others (its idle clock, or the ceiling)`
+              : `[runner:shutdown] ${sessionId} was assigned after the shutdown signal — serving it; it is released like the others (its idle clock, or the ceiling)`,
+          )
+          declinedHeldForRespawn.delete(sessionId)
         }
 
         sessionsHandled++
@@ -1353,6 +1803,18 @@ export async function runPollSkeleton(
         let retireBgTimer: ReturnType<typeof setTimeout> | undefined
         let deferredRemindTimer: ReturnType<typeof setTimeout> | undefined
         let retiringThis = false
+        /** densable `Je` — standing release request: retire vs defer-ceiling shutdown */
+        let standingRelease: 'retire' | 'shutdown' = 'retire'
+        const standingWhy = (): string =>
+          standingRelease === 'shutdown'
+            ? 'defer ceiling passed'
+            : 'retire time passed'
+        const standingWhile = (): string =>
+          standingRelease === 'shutdown'
+            ? 'while shutting down'
+            : 'while retiring'
+        const standingGrace = (): string =>
+          standingRelease === 'shutdown' ? 'shutdown grace' : 'retire grace'
 
         const clearIdleTimer = (): void => {
           if (idleTimer !== undefined) {
@@ -1476,7 +1938,7 @@ export async function runPollSkeleton(
                 : `in ${formatDelayMs(retireReleaseRetryMs)}`
               : `in ${formatDelayMs(waitMs)}`
           const why = initObserved
-            ? 'retire time passed'
+            ? standingWhy()
             : kind === 'startup'
               ? `no child output for ${formatDelayMs(baseMs)}`
               : kind === 'awaiting-action'
@@ -1534,6 +1996,7 @@ export async function runPollSkeleton(
                   orderedReleaseInFlight.delete(sessionId)
                   releasedAwaitingDeassign.delete(sessionId)
                   releaseFalseCounts.delete(sessionId)
+                  if (retiring) wakeQueue.wake('LOCAL')
                   if (released) {
                     opts.onStatus(
                       `[runner:session] ${sessionId} released after post-session hook — parked server-side`,
@@ -1543,13 +2006,29 @@ export async function runPollSkeleton(
                     }
                     return
                   }
+                  if (refuseReason === 'shutdown') {
+                    const beforeCeiling = !deferCeilingReached
+                    if (beforeCeiling) declinedHeldForRespawn.add(sessionId)
+                    opts.onStatus(
+                      beforeCeiling
+                        ? `[runner:session] ${sessionId} released=false after post-session hook (pending user event) while shutting down — the next poll re-spawns it to serve that event (its --release-idle-session-min window, if set, starts over; otherwise it stays until the ceiling)`
+                        : `[runner:session] ${sessionId} released=false after post-session hook (pending user event) after the defer ceiling — not re-spawned; it is requeued, snapshot complete, when this runner exits`,
+                    )
+                    return
+                  }
                   opts.onStatus(
-                    `[runner:session] ${sessionId} released=false after post-session hook (pending user event) — respawns on the next poll, or is requeued by this runner's exit if it is draining (grace=0) or retiring`,
+                    initObserved
+                      ? `[runner:session] ${sessionId} released=false after post-session hook (pending user event) while retiring — not re-spawned; it is requeued, snapshot complete, when this runner exits`
+                      : `[runner:session] ${sessionId} released=false after post-session hook (pending user event) — respawns on the next poll, or is requeued by this runner's exit if it is draining (grace=0) or retiring`,
                   )
                 })
                 .catch(err => {
                   orderedReleaseInFlight.delete(sessionId)
                   releasedAwaitingDeassign.delete(sessionId)
+                  if (refuseReason === 'shutdown' && !deferCeilingReached) {
+                    declinedHeldForRespawn.add(sessionId)
+                  }
+                  if (retiring) wakeQueue.wake('LOCAL')
                   opts.onStatus(
                     `[runner:session] ${sessionId} ordered release failed after the post-session hook: ${errMsg(err)} — keeping session; respawns on the next poll, or is requeued by this runner's exit if it is draining (grace=0) or retiring`,
                   )
@@ -1578,7 +2057,7 @@ export async function runPollSkeleton(
                 releasedAwaitingDeassign.delete(sessionId)
                 if (initObserved) {
                   opts.onStatus(
-                    `[runner:session] ${sessionId} release declined (${kind === 'awaiting-action' ? 'queued event behind the parked prompt' : 'pending user event'}) while retiring — keeping session${turnInFlight || deferredHold ? '' : `, retrying ${whenLabel()}`}`,
+                    `[runner:session] ${sessionId} release declined (${kind === 'awaiting-action' ? 'queued event behind the parked prompt' : 'pending user event'}) ${standingWhile()} — keeping session${turnInFlight || deferredHold ? '' : `, retrying ${whenLabel()}`}`,
                   )
                   if (!turnInFlight && !deferredHold) armIdleClock(kind)
                   return
@@ -1620,7 +2099,7 @@ export async function runPollSkeleton(
           const bg = active.get(sessionId)?.liveBgTasks ?? 0
           if (bg === 0) {
             opts.onStatus(
-              `[runner:session] ${sessionId} retire time passed with only perpetual monitor task(s) / a scheduled wakeup holding the turn — releasing now`,
+              `[runner:session] ${sessionId} ${standingWhy()} with only perpetual monitor task(s) / a scheduled wakeup holding the turn — releasing now`,
             )
             deferredHold = false
             clearRetireBg()
@@ -1629,7 +2108,7 @@ export async function runPollSkeleton(
           }
           if (retireBgTimer !== undefined) return
           opts.onStatus(
-            `[runner:session] ${sessionId} retire time passed with ${bg} background task(s) live — allowing ${formatDelayMs(retireDeferredGraceMs)} to finish before releasing`,
+            `[runner:session] ${sessionId} ${standingWhy()} with ${bg} background task(s) live — allowing ${formatDelayMs(retireDeferredGraceMs)} to finish before releasing`,
           )
           retireBgTimer = setTimeout(() => {
             retireBgTimer = undefined
@@ -1637,17 +2116,24 @@ export async function runPollSkeleton(
             const still = active.get(sessionId)?.liveBgTasks ?? 0
             opts.onStatus(
               still === 0
-                ? `[runner:session] ${sessionId} background work finished during the retire grace; only perpetual monitor task(s) / a scheduled wakeup still hold the turn — releasing now`
-                : `[runner:session] ${sessionId} ${still} background task(s) still live after the retire grace — releasing anyway (a parked session beats a lost worker)`,
+                ? `[runner:session] ${sessionId} background work finished during the ${standingGrace()}; only perpetual monitor task(s) / a scheduled wakeup still hold the turn — releasing now`
+                : `[runner:session] ${sessionId} ${still} background task(s) still live after the ${standingGrace()} — releasing anyway (a parked session beats a lost worker)`,
             )
             deferredHold = false
             armIdleClock('turn-end')
           }, retireDeferredGraceMs)
         }
 
-        const releaseForRetire = (): void => {
+        const requestStandingRelease = (kind: 'retire' | 'shutdown'): void => {
           if (finished || childAc.signal.aborted) return
+          if (retiringThis) {
+            opts.onDebug(
+              `[runner:session] ${sessionId} ${kind} release request adds nothing to the standing ${standingRelease} request — ignored`,
+            )
+            return
+          }
           retiringThis = true
+          standingRelease = kind
           initObserved = true
           if (lastIdleKind === undefined) {
             if (deferredHold && !turnInFlight) {
@@ -1655,15 +2141,19 @@ export async function runPollSkeleton(
               return
             }
             opts.onStatus(
-              `[runner:session] ${sessionId} retire time passed ${turnInFlight ? 'mid-turn — releasing as soon as the current turn finishes' : 'before the child reported an idle state — releasing on its first idle transition'}`,
+              `[runner:session] ${sessionId} ${standingWhy()} ${turnInFlight ? 'mid-turn — releasing as soon as the current turn finishes' : 'before the child reported an idle state — releasing on its first idle transition'}`,
             )
             return
           }
           opts.onStatus(
-            `[runner:session] ${sessionId} retire time passed while idle — releasing now`,
+            `[runner:session] ${sessionId} ${standingWhy()} while idle — releasing now`,
           )
           armIdleClock(lastIdleKind)
         }
+
+        const releaseForRetire = (): void => requestStandingRelease('retire')
+        const releaseForShutdown = (): void =>
+          requestStandingRelease('shutdown')
 
         const onSessionActivity = (
           kind: SessionActivityKind,
@@ -1858,8 +2348,9 @@ export async function runPollSkeleton(
             }
             const wasAtCap = occupiedSlotCount() >= opts.capacity
             active.delete(sessionId)
-            if (health) health.activeSessions = occupiedSlotCount()
             drainNotify?.()
+            if (health) health.activeSessions = occupiedSlotCount()
+            if (active.size === 0 && retiring) wakeQueue.wake('LOCAL')
             if (sseEnabled && wasAtCap) wakeQueue.wake('LOCAL')
           })
 
@@ -1869,6 +2360,7 @@ export async function runPollSkeleton(
           liveBgTasks: 0,
           turnInFlight: false,
           releaseForRetire,
+          releaseForShutdown,
         })
         if (health) health.activeSessions = occupiedSlotCount()
       }
@@ -1894,7 +2386,9 @@ export async function runPollSkeleton(
 
       const interval = opts.pollIntervalOverrideMs ?? derivePollInterval(lease)
       if (sseEnabled) {
-        wakeQueue.atCapacity = occupiedSlotCount() >= opts.capacity
+        // densable `Be.atCapacity=U||d.size>=i.capacity` — refuse new work
+        // (defer/retire) also parks the SSE wake so we don't chase assignments.
+        wakeQueue.atCapacity = retiring || occupiedSlotCount() >= opts.capacity
         await wakeQueue.wait(interval, signal)
       } else {
         await sleepMs(interval, signal)
@@ -1905,6 +2399,18 @@ export async function runPollSkeleton(
     if (retireTimer !== undefined) {
       clearTimeout(retireTimer)
       retireTimer = undefined
+    }
+    if (deferCeilingTimer !== undefined) {
+      clearTimeout(deferCeilingTimer)
+      deferCeilingTimer = undefined
+    }
+    if (deferPostCeilingTimer !== undefined) {
+      clearTimeout(deferPostCeilingTimer)
+      deferPostCeilingTimer = undefined
+    }
+    if (deferShutdown !== undefined) {
+      deferShutdown.signal.removeEventListener('abort', onDeferShutdownAbort)
+      deferShutdown.onClosed?.()
     }
     sseHandle?.close()
 
@@ -2060,8 +2566,14 @@ export async function selfHostedRunnerMain(
 
   let args: RootRunnerArgs
   let secret: string
+  let proxyAuth: ProxyAuthorizationConfig | undefined
   try {
     args = parseRootArgs(argv)
+    // densable 2.1.238 N4y — validate proxy-authorization flags/env (+ HTTPS_PROXY) at startup
+    proxyAuth = resolveProxyAuthorizationConfig({
+      command: args.proxyAuthorizationCommand,
+      file: args.proxyAuthorizationFile,
+    })
     // densable 2.1.229 n_g — Windows requires explicit base-dir (no /workspace default)
     assertWindowsBaseDirSource(args.baseDirSource)
     secret = await (deps.resolveSecret ?? resolveEnvironmentSecret)(args)
@@ -2173,6 +2685,27 @@ export async function selfHostedRunnerMain(
   )
   const capWarn = sessionBoundCapacityWarning(secret, args.capacity)
   if (capWarn !== null) onStatus(capWarn)
+
+  // densable 2.1.238 F4y — loopback egress proxy minting Proxy-Authorization
+  let egressProxy: EgressProxyHandle | undefined
+  if (proxyAuth) {
+    try {
+      egressProxy = await enableEgressProxyAuth(proxyAuth, {
+        onStatus,
+        onDebug,
+      })
+      logEvent('self_hosted_egress_proxy_auth', {})
+    } catch (ue) {
+      logEvent('self_hosted_egress_proxy_auth', {
+        listener_start_failed: true,
+      })
+      onStatus(
+        `[runner:fatal] could not start the proxy-authorization listener: ${errMsg(ue)}`,
+      )
+      await flushLog()
+      process.exit(1)
+    }
+  }
 
   // densable azv git-proxy/configure order:
   // 1) wipe HOME git configs when proxy  2) configureGit  3) configure proxy + snapshot
@@ -2341,14 +2874,47 @@ export async function selfHostedRunnerMain(
 
   if (deps.enterPollLoop === false) {
     healthServer?.close()
+    if (egressProxy) {
+      await withTimeoutMs(
+        egressProxy.close(),
+        2000,
+        '[runner:exit] egress proxy close',
+      ).catch(() => {})
+    }
     await flushLog()
     return
   }
 
   const ac = new AbortController()
-  let forced = false
-  const onSignal = (sig: string): void => {
-    if (forced) {
+  // densable 2.1.238 — separate defer abort (M) from drain abort (L/ac)
+  const deferAc = new AbortController()
+  const deferMaxMs = readDeferShutdownMaxMs()
+  /** densable `D`: running | deferring | draining */
+  let shutdownPhase: 'running' | 'deferring' | 'draining' = 'running'
+  /**
+   * densable `F` — starts true; poll `finally` `onClosed` clears it so a
+   * late SIGTERM cannot re-enter defer after the loop has exited.
+   * `beginDrain` does **not** clear F (SEA Y() only sets D="draining").
+   */
+  let deferPathOpen = true
+
+  const idleMs = readEnvMs('SELF_HOSTED_RUNNER_SESSION_IDLE_MS')
+  const idleBit =
+    idleMs > 0
+      ? `each is released (parked, resumable) once its user has been idle ${formatDelayMs(idleMs)} (--release-idle-session-min)`
+      : 'none is released early (--release-idle-session-min is not set)'
+  // densable `h = Math.max(HMs(), LMs) + K7t` — post-ceiling grace shown in banner
+  const deferPostCeilingMs =
+    Math.max(readDrainWaitMs(), RETIRE_DEFERRED_GRACE_MS) +
+    SHUTDOWN_BUDGET_PAD_MS
+  const deferBanner =
+    deferMaxMs > 0
+      ? `[runner] --defer-shutdown-max-min is set (${formatDelayMs(deferMaxMs)}): the FIRST shutdown signal does not start that ${budgetSec}s budget — the runner stops taking work but keeps serving the attached sessions; ${idleBit}, and the runner exits as soon as it holds no session; ${formatDelayMs(deferMaxMs)} after the signal every remaining session is released at once and anything still attached ${formatDelayMs(deferPostCeilingMs)} later is drained. If your supervisor's stop timeout ends first, every still-attached session is killed WITHOUT its post-session hook or deregister and is requeued to another runner about a minute later. Size the stop timeout to at least ${Math.ceil((deferMaxMs + deferPostCeilingMs) / 1000) + budgetSec}s (M + post-ceiling grace + the budget above). A second signal drains immediately.`
+      : undefined
+  if (deferBanner !== undefined) onStatus(deferBanner)
+
+  const beginDrain = (sig: string, via: 'signal' | 'loop' = 'signal'): void => {
+    if (shutdownPhase === 'draining') {
       const still = getPostSessionHookInFlightCount()
       if (still > 0) {
         onStatus(
@@ -2360,16 +2926,35 @@ export async function selfHostedRunnerMain(
       void flushLog().finally(() => process.exit(1))
       return
     }
-    forced = true
-    onStatus(`Received shutdown signal, draining active sessions... (${sig})`)
+    shutdownPhase = 'draining'
+    onStatus(
+      via === 'signal'
+        ? `Received shutdown signal, draining active sessions... ${formatShutdownSignalContext(sig, healthState)}`
+        : `[runner:shutdown] ${sig} — draining active sessions... ${formatShutdownSignalContext('no new signal', healthState)}`,
+    )
     onStatus(budgetMsg)
     const running = getPostSessionHookInFlightCount()
     if (running > 0) {
       onStatus(
-        `[runner] ${running} post-session hook(s) still running — waiting for them within the budget above. A second SIGTERM force-exits the runner immediately; make sure your supervisor's stop timeout covers the full budget so hooks are not cut short.`,
+        `[runner] ${running} post-session hook(s) still running — waiting for them within the budget above. Another SIGTERM force-exits the runner immediately; make sure your supervisor's stop timeout covers the full budget so hooks are not cut short.`,
       )
     }
     ac.abort()
+  }
+
+  /** densable `Q` — first signal may defer; else drain */
+  const onSignal = (sig: string): void => {
+    if (shutdownPhase === 'running' && deferMaxMs > 0 && deferPathOpen) {
+      shutdownPhase = 'deferring'
+      onStatus(
+        `Received shutdown signal, deferring drain: refusing new work, serving the attached sessions until they are released or ${formatDelayMs(deferMaxMs)} passes; a second signal drains immediately ${formatShutdownSignalContext(sig, healthState)}`,
+      )
+      onStatus(budgetMsg)
+      if (deferBanner !== undefined) onStatus(deferBanner)
+      deferAc.abort(Date.now())
+      return
+    }
+    beginDrain(sig, 'signal')
   }
   const onTerm = (): void => onSignal('SIGTERM')
   const onInt = (): void => onSignal('SIGINT')
@@ -2437,6 +3022,20 @@ export async function selfHostedRunnerMain(
         // tests that set exitOnAssignment still skip real child spawn by default
         skipSessionSpawn: deps.exitOnAssignment === true,
         flushLogSink: flushLog,
+        // densable always passes `te` (even maxMs=0); v5y no-ops the abort
+        // listener when maxMs==0 but still fires `onClosed` in finally.
+        deferShutdown: {
+          signal: deferAc.signal,
+          maxMs: deferMaxMs,
+          requestDrain: reason => {
+            if (shutdownPhase !== 'draining') {
+              beginDrain(reason, 'loop')
+            }
+          },
+          onClosed: () => {
+            deferPathOpen = false
+          },
+        },
       },
       ac.signal,
     )
@@ -2456,6 +3055,13 @@ export async function selfHostedRunnerMain(
   } finally {
     runnerTokenRefresh.cancelAll()
     healthServer?.close()
+    if (egressProxy) {
+      await withTimeoutMs(
+        egressProxy.close(),
+        2000,
+        '[runner:exit] egress proxy close',
+      ).catch(() => {})
+    }
     process.removeListener('SIGTERM', onTerm)
     process.removeListener('SIGINT', onInt)
     await flushLog()

@@ -32,6 +32,7 @@ import {
   formatSingleInstallActivateSuffix,
   type PluginInstallAutoActivateOutcome,
 } from '../../utils/plugins/activateAfterInstall.js';
+import { resolveShownArchiveHeadersHelper } from '../../utils/plugins/marketplaceHeadersHelper.js';
 import { installPluginFromMarketplace } from '../../utils/plugins/pluginInstallationHelpers.js';
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js';
 import { plural } from '../../utils/stringUtils.js';
@@ -43,8 +44,11 @@ import { PluginTrustWarning } from './PluginTrustWarning.js';
 import {
   buildPluginDetailsMenuOptions,
   extractGitHubRepo,
+  gateHeadersHelperPaneForAction,
   type InstallablePlugin,
+  PluginHeadersHelperDisclosure,
   PluginSelectionKeyHint,
+  useHeadersHelperPaneConsent,
 } from './pluginDetailsHelpers.js';
 import type { ViewState as ParentViewState } from './types.js';
 import { usePagination } from './usePagination.js';
@@ -117,6 +121,20 @@ export function BrowseMarketplace({
   const [viewState, setViewState] = useState<ViewState>('marketplace-list');
   const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
   const [selectedPlugin, setSelectedPlugin] = useState<InstallablePlugin | null>(null);
+
+  const detailsHelper =
+    viewState === 'plugin-details' && selectedPlugin
+      ? (resolveShownArchiveHeadersHelper({
+          entry: selectedPlugin.entry,
+          marketplaceName: selectedPlugin.marketplaceName,
+          marketplaceSource: selectedPlugin.marketplaceSource,
+          catchOverlayRefusal: true,
+        }) ?? undefined)
+      : undefined;
+  const headersHelperPane = useHeadersHelperPaneConsent(detailsHelper);
+  React.useEffect(() => {
+    if (detailsHelper) headersHelperPane.record(detailsHelper);
+  }, [detailsHelper?.command, detailsHelper?.archiveUrl, headersHelperPane]);
 
   // Data state
   const [marketplaces, setMarketplaces] = useState<MarketplaceInfo[]>([]);
@@ -250,6 +268,7 @@ export function BrowseMarketplace({
                     // exists (nothing to add). Project/local-scope installs don't
                     // block — user may want to promote to user scope (gh-29997).
                     isInstalled: isPluginGloballyInstalled(pluginId),
+                    marketplaceSource: config[name]?.source,
                   };
                   foundMarketplace = name;
                   return;
@@ -278,6 +297,7 @@ export function BrowseMarketplace({
                   marketplaceName: name,
                   pluginId,
                   isInstalled: isPluginGloballyInstalled(pluginId),
+                  marketplaceSource: config[name]?.source,
                 };
                 foundMarketplace = name;
                 break;
@@ -341,6 +361,9 @@ export function BrowseMarketplace({
           throw new Error(`Failed to load marketplace: ${marketplaceName}`);
         }
 
+        const known = await loadKnownMarketplacesConfig();
+        if (cancelled) return;
+
         // Filter out already installed plugins
         const installablePlugins: InstallablePlugin[] = [];
         for (const entry of marketplace.plugins) {
@@ -354,6 +377,7 @@ export function BrowseMarketplace({
             // Project/local installs don't block — user can add user scope
             // via the plugin-details view (gh-29997).
             isInstalled: isPluginGloballyInstalled(pluginId),
+            marketplaceSource: known[marketplaceName]?.source,
           });
         }
 
@@ -413,11 +437,28 @@ export function BrowseMarketplace({
     const installedIds: string[] = [];
 
     for (const plugin of pluginsToInstall) {
+      const paneBlock = gateHeadersHelperPaneForAction({
+        pluginId: plugin.pluginId,
+        entry: plugin.entry,
+        kind: 'install',
+        marketplaceName: plugin.marketplaceName,
+        marketplaceSource: plugin.marketplaceSource,
+        consented: headersHelperPane.pinned(),
+      });
+      if (paneBlock) {
+        failureCount++;
+        newFailedPlugins.push({
+          name: plugin.entry.name,
+          reason: paneBlock,
+        });
+        continue;
+      }
       const result = await installPluginFromMarketplace({
         pluginId: plugin.pluginId,
         entry: plugin.entry,
         marketplaceName: plugin.marketplaceName,
         scope: 'user',
+        consentedEntryHelper: headersHelperPane.pinned(),
       });
 
       if (result.success) {
@@ -474,11 +515,26 @@ export function BrowseMarketplace({
     setIsInstalling(true);
     setInstallError(null);
 
+    const paneBlock = gateHeadersHelperPaneForAction({
+      pluginId: plugin.pluginId,
+      entry: plugin.entry,
+      kind: 'install',
+      marketplaceName: plugin.marketplaceName,
+      marketplaceSource: plugin.marketplaceSource,
+      consented: headersHelperPane.pinned(),
+    });
+    if (paneBlock) {
+      setIsInstalling(false);
+      setInstallError(paneBlock);
+      return;
+    }
+
     const result = await installPluginFromMarketplace({
       pluginId: plugin.pluginId,
       entry: plugin.entry,
       marketplaceName: plugin.marketplaceName,
       scope,
+      consentedEntryHelper: headersHelperPane.pinned(),
     });
 
     if (result.success) {
@@ -850,6 +906,13 @@ export function BrowseMarketplace({
               </>
             )}
         </Box>
+
+        <PluginHeadersHelperDisclosure
+          pluginId={selectedPlugin.pluginId}
+          entry={selectedPlugin.entry}
+          marketplaceName={selectedPlugin.marketplaceName}
+          marketplaceSource={selectedPlugin.marketplaceSource}
+        />
 
         <PluginTrustWarning />
 

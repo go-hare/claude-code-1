@@ -43,6 +43,12 @@ import sharedErrorCodes from './claude-api/shared/error-codes.md' with {
 import sharedLiveSources from './claude-api/shared/live-sources.md' with {
   type: 'text',
 }
+import sharedManagedAgentsSelfHosted from './claude-api/shared/managed-agents-self-hosted-sandboxes.md' with {
+  type: 'text',
+}
+import sharedManagedAgentsTools from './claude-api/shared/managed-agents-tools.md' with {
+  type: 'text',
+}
 import sharedModelMigration from './claude-api/shared/model-migration.md' with {
   type: 'text',
 }
@@ -128,6 +134,9 @@ export const SKILL_FILES: Record<string, string> = {
   'shared/agent-design.md': sharedAgentDesign,
   'shared/error-codes.md': sharedErrorCodes,
   'shared/live-sources.md': sharedLiveSources,
+  'shared/managed-agents-self-hosted-sandboxes.md':
+    sharedManagedAgentsSelfHosted,
+  'shared/managed-agents-tools.md': sharedManagedAgentsTools,
   'shared/model-migration.md': sharedModelMigration,
   'shared/models.md': sharedModels,
   'shared/prompt-audit.md': sharedPromptAudit,

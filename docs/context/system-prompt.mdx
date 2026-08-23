@@ -6,7 +6,7 @@ keywords: ["System Prompt", "系统提示词", "动态组装", "CLAUDE.md", "Pro
 
 ## 从数组到 API 调用：System Prompt 的完整链路
 
-System Prompt 在 Claude Code 中不是一段写死的文本，而是一个 **`string[]` 数组**（品牌类型 `SystemPrompt`，定义于 `src/utils/systemPromptType.ts:8`），经过组装、分块、缓存标记后发送给 API。
+System Prompt 在 Claude Code 中不是一段写死的文本，而是一个 **`string[]` 数组**（品牌类型 `SystemPrompt`，原始定义在 `packages/@ant/model-provider`，由 `src/utils/systemPromptType.ts` 做向后兼容的 re-export），经过组装、分块、缓存标记后发送给 API。
 
 ### 三阶段管道
 

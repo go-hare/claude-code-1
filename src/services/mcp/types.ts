@@ -240,6 +240,9 @@ export const McpClaudeAIProxyServerConfigSchema = lazySchema(() =>
     toolPermissions: z.record(z.string(), McpToolPermissionSchema()).optional(),
     stateless: z.boolean().optional(),
     cachedInitResponse: z.record(z.string(), z.unknown()).nullish(),
+    // densable 2.1.238 N_f: cached server/discover projection (claudeai-proxy only).
+    discoverSupport: z.enum(['legacy', 'supported']).optional(),
+    cachedDiscoverResponse: z.record(z.string(), z.unknown()).nullish(),
     // densable 2.1.218: org connector eligibility from claude.ai API.
     // eligible===false means not connected/authorized in claude.ai — exclude
     // from needs-auth startup count unless session-connected this process.
@@ -293,6 +296,15 @@ export type ScopedMcpServerConfig = McpServerConfig & {
   // (e.g. 'slack@anthropic'). Stashed at config-build time so the channel
   // gate doesn't have to race AppState.plugins.enabled hydration.
   pluginSource?: string
+  /** densable `pluginPath` — absolute plugin root for headersHelper cwd/overlay. */
+  pluginPath?: string
+  /**
+   * densable `agentSource` — Umf maps projectSettings/localSettings → repo,
+   * plugin/additionalDirectory → thirdParty, user/flag/policy/built-in → operator.
+   */
+  agentSource?: string
+  /** densable `declaredIn` — repo-resident origin for trust/cwd. */
+  declaredIn?: string
 }
 
 export const McpJsonConfigSchema = lazySchema(() =>

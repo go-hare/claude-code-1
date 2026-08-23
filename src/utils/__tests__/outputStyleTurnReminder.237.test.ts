@@ -1,26 +1,27 @@
 /**
  * densable SEA output_style reminder wording — mirrors messages.ts case exactly:
- * `${name} output style is active. ${attachment.turnReminder ?? fallback}`
- * (does NOT re-read config.turnReminder at render time)
+ * `${escapeOutputStyleName(style)} output style is active. ${attachment.turnReminder ?? fallback}`
+ * Renderer does NOT look up OUTPUT_STYLE_CONFIG (238 s3T/pze).
  */
 import { describe, expect, test } from 'bun:test'
 import {
   CONCISE_TURN_REMINDER,
   OUTPUT_STYLE_CONFIG,
+  OUTPUT_STYLE_NAME_MAX,
 } from '../../constants/outputStyles.js'
+import { escapeOutputStyleName } from '../xml.js'
 
-/** Exact tip messages.ts render contract for output_style attachments. */
+/** Exact tip messages.ts render contract for output_style attachments (238 pze). */
 function renderMessagesOutputStyle(
-  styleKey: string,
+  styleName: string,
   attachmentTurnReminder?: string,
 ): string | null {
-  const outputStyle =
-    OUTPUT_STYLE_CONFIG[styleKey as keyof typeof OUTPUT_STYLE_CONFIG]
-  if (!outputStyle) return null
+  if (typeof styleName !== 'string' || styleName === '') return null
+  if (styleName.length > OUTPUT_STYLE_NAME_MAX) return null
   const reminder =
     attachmentTurnReminder ??
     'Remember to follow the specific guidelines for this style.'
-  return `${outputStyle.name} output style is active. ${reminder}`
+  return `${escapeOutputStyleName(styleName)} output style is active. ${reminder}`
 }
 
 describe('densable output_style turnReminder 237', () => {
@@ -37,7 +38,6 @@ describe('densable output_style turnReminder 237', () => {
   })
 
   test('messages render falls back when attachment omits turnReminder', () => {
-    // messages.ts does not consult OUTPUT_STYLE_CONFIG.turnReminder at render
     expect(renderMessagesOutputStyle('Concise')).toBe(
       'Concise output style is active. Remember to follow the specific guidelines for this style.',
     )
@@ -48,5 +48,11 @@ describe('densable output_style turnReminder 237', () => {
 
   test('Explanatory config has no turnReminder (SEA)', () => {
     expect(OUTPUT_STYLE_CONFIG.Explanatory?.turnReminder).toBeUndefined()
+  })
+
+  test('custom catalog name still renders (no OUTPUT_STYLE_CONFIG miss-drop)', () => {
+    expect(renderMessagesOutputStyle('Team Style', 'Stay brief.')).toBe(
+      'Team Style output style is active. Stay brief.',
+    )
   })
 })

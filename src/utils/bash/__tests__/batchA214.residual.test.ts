@@ -190,6 +190,171 @@ describe('densable #5 zsh [[ ]] fnu/mnu', () => {
     // no expansion / no unquoted & → simple (or may still be simple with [[ argv)
     expect(r.kind).not.toBe('too-complex')
   })
+
+  test('densable 2.1.238: regex glued || → too-complex (not JS fail-fast)', () => {
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('regex', 'foo||bar', 3, 11)
+    const close = node(']]', ']]', 12, 14)
+    const parent = node('test_command', '[[ foo||bar ]]', 0, 14, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo||bar ]]', parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] regex contains glued || (zsh splits it as a cond operator)',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.238: quoted || in regex is allowed', () => {
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('regex', 'foo"||"bar', 3, 13)
+    const close = node(']]', ']]', 14, 16)
+    const parent = node('test_command', '[[ foo"||"bar ]]', 0, 16, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo"||"bar ]]', parent)
+    expect(r.kind).not.toBe('too-complex')
+  })
+
+  test('densable 2.1.238: regex unquoted & → too-complex', () => {
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('regex', 'foo&bar', 3, 10)
+    const close = node(']]', ']]', 11, 13)
+    const parent = node('test_command', '[[ foo&bar ]]', 0, 13, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo&bar ]]', parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] regex contains unquoted & (zsh splits the word at & at any depth)',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.238: unquoted extglob && hits 2.1.221 & walker first', () => {
+    // Gold walker order: extglob `&` scan runs before the `&&` leaf.
+    // Unquoted `foo&&bar` must NOT invent a JS fail-fast to the leaf.
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('extglob_pattern', 'foo&&bar', 3, 11)
+    const close = node(']]', ']]', 12, 14)
+    const parent = node('test_command', '[[ foo&&bar ]]', 0, 14, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo&&bar ]]', parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] pattern contains unquoted & (zsh splits the word at & at any depth)',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.238: pattern leaf && → too-complex', () => {
+    // Regex walker skips quoted sections, so foo"&&"bar reaches the
+    // includes("&&") leaf after the type-specific `&` scan.
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('regex', 'foo"&&"bar', 3, 13)
+    const close = node(']]', ']]', 14, 16)
+    const parent = node('test_command', '[[ foo"&&"bar ]]', 0, 16, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo"&&"bar ]]', parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] pattern leaf contains `&&` — shell cond-lexer divergence (zsh splits the word there)',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.238: standalone ]] closer in pattern leaf → too-complex', () => {
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('regex', 'foo]]', 3, 8)
+    const close = node(']]', ']]', 9, 11)
+    const parent = node('test_command', '[[ foo]] ]]', 0, 11, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo]] ]]', parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] pattern leaf contains a potential standalone `]]` closer — shell cond-lexer divergence (zsh may close the conditional early)',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.238 Bop default: quoted operand ]]+separator → too-complex', () => {
+    const cmd = "[[ 'a]]b;foo' ]]"
+    const open = node('[[', '[[', 0, 2)
+    const operand = node('raw_string', "'a]]b;foo'", 3, 13)
+    const close = node(']]', ']]', 14, 16)
+    const parent = node('test_command', cmd, 0, 16, [open, operand, close])
+    const r = parseForSecurityFromAst(cmd, parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] quoted operand contains `]]` closer or `]]`+separator bytes — possible parser quote-state desync',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.238 Gop empty-walk: empty-children string inner hits Bop', () => {
+    // SEA Gop: no child-derived literal/placeholder + text.length>2 → inner
+    // slice, then Bop `QSa(s)||QSa(e.text)||/]].*[;\n&|<>]/s`. Must NOT
+    // fail-close as Unhandled node type: string.
+    // Spans: `[[` 0-2, space, `"a]]b;foo"` 3-13, space, `]]` 14-16.
+    const cmd = '[[ "a]]b;foo" ]]'
+    const open = node('[[', '[[', 0, 2)
+    const operand = node('string', '"a]]b;foo"', 3, 13, [])
+    const close = node(']]', ']]', 14, 16)
+    const parent = node('test_command', cmd, 0, 16, [open, operand, close])
+    const r = parseForSecurityFromAst(cmd, parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] quoted operand contains `]]` closer or `]]`+separator bytes — possible parser quote-state desync',
+      )
+      expect(r.reason).not.toMatch(/Unhandled node type: string/)
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.238 Gop empty-walk: unparsed cmdsub in delimiters-only string', () => {
+    const cmd = '[[ "`foo`" ]]'
+    const open = node('[[', '[[', 0, 2)
+    const operand = node('string', '"`foo`"', 3, 10, [])
+    const close = node(']]', ']]', 11, 13)
+    const parent = node('test_command', cmd, 0, 13, [open, operand, close])
+    const r = parseForSecurityFromAst(cmd, parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        'Delimiters-only string node contains unparsed command substitution',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
 })
 
 describe('densable #4 secondary K0e sites', () => {

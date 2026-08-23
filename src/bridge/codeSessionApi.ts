@@ -24,6 +24,113 @@ function oauthHeaders(accessToken: string): Record<string, string> {
   }
 }
 
+/**
+ * densable OAi return: cse_* string | typed failure | null (network/transient).
+ * 401 is `{terminal:false, reason:"oauth_rejected"}` so withRetry does not
+ * retry oauth_rejected. Do **not** invent git sources / cwd / model / 401
+ * callback `u?.()`.
+ */
+export type CodeSessionCreateResult = string | BridgeCredentialFailure | null
+
+/** densable $Yr — malformed create-session response copy. */
+export const SESSION_CREATE_MALFORMED_RESPONSE_DETAIL =
+  'Remote Control got an unexpected server response — try again after updating Claude Code'
+
+/**
+ * densable FOf — grouping rejection body:
+ * `not_found_error` + `session_grouping`, or reason
+ * `public_grouping_hosted_only` / `feature_disabled`.
+ */
+export function isGroupingRejection(data: unknown): boolean {
+  if (
+    data === null ||
+    typeof data !== 'object' ||
+    !('error' in data) ||
+    data.error === null ||
+    typeof data.error !== 'object'
+  ) {
+    return false
+  }
+  const err = data.error as {
+    type?: unknown
+    resource_type?: unknown
+    reason?: unknown
+  }
+  const type = 'type' in err ? err.type : undefined
+  const resourceType = 'resource_type' in err ? err.resource_type : undefined
+  const reason = 'reason' in err ? err.reason : undefined
+  return (
+    (type === 'not_found_error' && resourceType === 'session_grouping') ||
+    reason === 'public_grouping_hosted_only' ||
+    reason === 'feature_disabled'
+  )
+}
+
+/** densable PAi — terminal create-session failure (same shape as mdt). */
+export function isCreateSessionFailure(
+  value: unknown,
+): value is BridgeCredentialTerminalFailure {
+  return isTerminalBridgeFailure(value)
+}
+
+/**
+ * densable `$Of` on create-session non-2xx, after FOf.
+ * FOf is checked first so a 4xx grouping body is grouping_rejected even on 401.
+ */
+export function classifyCodeSessionCreateStatus(
+  status: number,
+  data: unknown,
+): Exclude<CodeSessionCreateResult, string> {
+  const detail = extractErrorDetail(data)
+  if (status >= 400 && status < 500 && isGroupingRejection(data)) {
+    return {
+      terminal: true,
+      reason: 'grouping_rejected',
+      status,
+      detail,
+    }
+  }
+  switch (classifyBridgeHttpStatus(status)) {
+    case 'oauth_rejected':
+      return { terminal: false, reason: 'oauth_rejected' }
+    case 'transient':
+      return null
+    case 'rejected':
+      return {
+        terminal: true,
+        reason: 'request_rejected',
+        status,
+        detail,
+      }
+  }
+}
+
+/**
+ * densable `mr(Vr)` — user-facing session-create failure copy.
+ * `requestedGrouping` ≈ `_e`; `groupingId` ≈ `vt` (must be set for grouping copy).
+ */
+export function formatCodeSessionCreateFailure(
+  failure: BridgeCredentialTerminalFailure | null | undefined,
+  opts?: { groupingId?: string; requestedGrouping?: boolean },
+): string {
+  if (
+    failure?.reason === 'grouping_rejected' &&
+    opts?.groupingId !== undefined
+  ) {
+    const extra = failure.detail ? `: ${failure.detail}` : ''
+    return opts.requestedGrouping
+      ? `Couldn't create a session in the requested Project (server ${failure.status}${extra}). The Project may not exist or may not be available to you.`
+      : `Couldn't recreate the session in its previous Project (server ${failure.status}${extra}) — the Project may have been deleted or is no longer available.`
+  }
+  if (failure?.reason === 'request_rejected') {
+    return `Session creation failed (server ${failure.status}) — see debug log`
+  }
+  if (failure?.reason === 'malformed_response') {
+    return SESSION_CREATE_MALFORMED_RESPONSE_DETAIL
+  }
+  return 'Session creation failed — see debug log'
+}
+
 export async function createCodeSession(
   baseUrl: string,
   accessToken: string,
@@ -35,7 +142,7 @@ export async function createCodeSession(
    * claude.ai session cards / reattach GROUPING.
    */
   sessionGroupingId?: string,
-): Promise<string | null> {
+): Promise<CodeSessionCreateResult> {
   const url = `${baseUrl}/v1/code/sessions`
   let response
   try {
@@ -71,7 +178,7 @@ export async function createCodeSession(
     logForDebugging(
       `[code-session] Session create failed ${response.status}${detail ? `: ${detail}` : ''}`,
     )
-    return null
+    return classifyCodeSessionCreateStatus(response.status, response.data)
   }
 
   const data: unknown = response.data
@@ -88,7 +195,11 @@ export async function createCodeSession(
     logForDebugging(
       `[code-session] No session.id (cse_*) in response: ${jsonStringify(data).slice(0, 200)}`,
     )
-    return null
+    return {
+      terminal: true,
+      reason: 'malformed_response',
+      status: response.status,
+    }
   }
   return data.session.id
 }

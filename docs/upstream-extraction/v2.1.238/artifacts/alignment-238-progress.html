@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>densable 2.1.238 alignment</title>
+  <style>
+    :root {
+      --bg: #1c1917;
+      --fg: #f5f5f4;
+      --muted: #a8a29e;
+      --have: #16a34a;
+      --partial: #d77757;
+      --gap: #dc2626;
+      --unknown: #57534e;
+      --card: #292524;
+      --border: #44403c;
+    }
+    body {
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1.25rem 3rem;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .meta { color: var(--muted); margin-bottom: 1.5rem; }
+    .counts {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.75rem;
+      margin: 1rem 0 1.5rem;
+    }
+    .tile {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.9rem 0.75rem;
+      text-align: center;
+    }
+    .tile .n { font-size: 1.8rem; font-weight: 700; }
+    .tile.have .n { color: var(--have); }
+    .tile.partial .n { color: var(--partial); }
+    .tile.gap .n { color: var(--gap); }
+    .tile.unknown .n { color: var(--unknown); }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { border: 1px solid var(--border); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: var(--card); color: var(--muted); font-weight: 600; }
+    .tag {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .tag.have { background: #14532d; color: #86efac; }
+    .tag.partial { background: #7c2d12; color: #fdba74; }
+    .tag.gap { background: #7f1d1d; color: #fca5a5; }
+    .tag.unknown { background: #292524; color: #a8a29e; }
+    ul { padding-left: 1.2rem; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <h1>densable 2.1.238 alignment</h1>
+  <p class="meta">
+    2026-08-23 · SEA size <code>321263536</code> · HAVE 34 / PARTIAL 5 / GAP 0 / UNKNOWN 0
+    · <strong>Review-3 GOLD_HARD</strong> Y8p/K8p + Y_e/PN_/vBu + KQe + Fme（计数不变）· <code>DNt</code>/<code>Ryt</code>/<code>vBa</code> overlay + <code>_5n</code>/<code>ret</code> · PCr/Oyw/Zxv · <strong>#31 HAVE</strong> · leftover #1+#2 · leftover #3/#4/#5 invent-ban · <strong>no commit</strong>
+  </p>
+
+  <div class="counts">
+    <div class="tile have"><div class="n">34</div>HAVE</div>
+    <div class="tile partial"><div class="n">5</div>PARTIAL</div>
+    <div class="tile gap"><div class="n">0</div>GAP</div>
+    <div class="tile unknown"><div class="n">0</div>UNKNOWN</div>
+    <div class="tile"><div class="n">0</div>N/A</div>
+  </div>
+
+  <h2>Gold-hard land（本轮）</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Key</th><th>Status</th><th>Note</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>2</td><td>marketplace headersHelper</td><td><span class="tag have">HAVE</span></td><td>Qxn 三指针 + psr；leftover ggw/ayi/P5r + qhi/dwo/zgh；<code>_5n</code>/<code>ret</code> 不从 state mint；<code>DNt</code>/<code>Ryt</code>/<code>vBa</code> overlay；<strong>Y8p/K8p</strong> catalog <code>beforeRedirect</code> + <code>jhi=5242880</code>；<strong>Y_e</strong> ManagedSettings disclosure；<strong>KQe</strong> 空串缺席；<strong>Fme</strong> <code>split('@')</code> length===2；pane 必传 <code>marketplaceSource</code>；无 storageV5 <code>backendView</code></td></tr>
+      <tr><td>3</td><td>catalog headersHelper confirm</td><td><span class="tag have">HAVE</span></td><td>同 Qxn <code>remote_policy_unconsented</code>；CLI <code>shownEntryHelper</code> 绑 zgh；pane <code>dwo.pinned()</code>；browse/startup 默认不 mint；<strong>Oyw</strong> declined|unconfirmed → <code>Aborted — the command was not run.</code>；不 land leftover #3 <code>identity_changed</code>；不 invent Se</td></tr>
+      <tr><td>5</td><td>F4y egress proxy auth</td><td><span class="tag have">HAVE</span></td><td>VtC/ZtC/erC/trC/H4y/$4y 1:1；close 不 restore <code>process.env</code>；禁止 CCR <code>upstreamproxy</code> / session <code>proxyAuthHelper</code></td></tr>
+      <tr><td>6</td><td>qWT → HWT</td><td><span class="tag have">HAVE</span></td><td><code>query_message_normalization_end</code> 之后（含 midConvFallback）；不 invent display-window GC</td></tr>
+      <tr><td>20</td><td>EM0 nested-user</td><td><span class="tag have">HAVE</span></td><td><code>V.X</code>=<code>isEnvTruthy</code>；<code>"0"</code>/<code>"false"</code> 仍 repair</td></tr>
+      <tr><td>33</td><td>f8r 403</td><td><span class="tag have">HAVE</span></td><td>origin iff <code>request-id</code> <code>req_…</code>；非 UUID；无 <code>x-request-id</code></td></tr>
+      <tr><td>27</td><td>Aom/Rom</td><td><span class="tag have">HAVE</span></td><td>TMn then KL；垃圾 sid → no-container-address</td></tr>
+      <tr><td>11</td><td>MYg DAA + WBc PCr</td><td><span class="tag have">HAVE</span></td><td>Ih 先；改写 overflow → null；FJe tilde 非 basename；PCr <code>{trim:false, hard:true}</code></td></tr>
+      <tr><td>32</td><td>Bop default + Gop empty-walk</td><td><span class="tag have">HAVE</span></td><td>empty-children <code>string</code> 返回 inner；Bop <code>QSa</code>；无 JS fail-fast</td></tr>
+      <tr><td>38/39</td><td>headersHelper</td><td><span class="tag have">HAVE</span></td><td>Aiv/Riv/H4S；local 不 scrub；bare dynamic 非 resident</td></tr>
+      <tr><td>9</td><td>ODt</td><td><span class="tag have">HAVE</span></td><td>PPl create 无 ODt；CLI <code>--worktree</code> wrapper ODt；EZn rwe-after-ODt（磁盘孤儿是 SEA，不 invent rm）</td></tr>
+      <tr><td>14</td><td>DH/pAb wrapAnsi</td><td><span class="tag have">HAVE</span></td><td>256/truecolor wrap newline → 39/49 reopen；无 ColorDiff NAPI</td></tr>
+      <tr><td>16</td><td>Pwi + LGa + n_f + N_f</td><td><span class="tag partial">PARTIAL</span></td><td>invalid-env warn + GB denylist（env auto 不跑）；<code>n_f</code> http+CCR → <code>ccr-proxy</code>；stdio GB 永远 legacy；<strong>N_f-on-claudeai-proxy</strong> oGn/L_f/H_f/F_f/$Yp 1:1；reconnect <code>includeDiscover:false</code>；live <code>server/discover</code> E2E 未证；无 N_f-on-stdio / cliOwnedConfigs invent</td></tr>
+      <tr><td>24</td><td>Zkd + KSl/ASm/qjt</td><td><span class="tag partial">PARTIAL</span></td><td>callback <code>{ok:false}</code> + concrete default；<strong>KSl</strong> copy <code> · Draws from usage credits</code>；ASm OFF 永不 bill；<code>/fast</code> + Cep/kep suffix 同金标；chrome UI 未 invent。verifier <code>a378e3cf191711ab5</code> PASS</td></tr>
+      <tr><td>22</td><td>rc-crash-reuse</td><td><span class="tag have">HAVE</span></td><td>删 leftover-clear；YKT/JKT/FDl pid+procStart；standalone reuse-on-registration；occupancy live-pid only；无 storageV5</td></tr>
+      <tr><td>25</td><td>login-expired copy/OAi/x1r</td><td><span class="tag partial">PARTIAL</span></td><td>cr/kt/Gt/yr/exhausted + typed 401 + onExhausted after Ccb=3；live remint E2E 未证；禁止 3rd onStateChange kind</td></tr>
+      <tr><td>18</td><td>q$t persist + t1f extras</td><td><span class="tag partial">PARTIAL</span></td><td>Zxv extras（anyDeferLoading/is1hCacheTTL/cacheDiagnosis/messageHashes/perBlockHashes）；三数组无 <code>.default([])</code>；MWT latch 独立于 tracking；DWT previousMessageId；CLI 不落盘；cachedMCEnabled 仅内存；用户可见 /model /effort SEA 也不隔离</td></tr>
+      <tr><td>4</td><td>defer-shutdown F/onClosed/G/Ne/Je</td><td><span class="tag partial">PARTIAL</span></td><td><code>F</code> 初值 true，<code>Y()</code> 不清 F；<code>onClosed</code> 无条件（含 maxMs=0）；<code>G()</code> 首次+drain；<strong>Another SIGTERM</strong>；banner supervisor timeout；始终传 <code>te</code>；<code>X</code> 只在 ceiling 置 true；ceiling 前仍 serve 新 assignment；<code>Pe</code> 含 <code>Ne</code>。verifier <code>ab65d8ecfee9e4ab8</code> PASS。live ceiling E2E 未证</td></tr>
+      <tr><td>31</td><td>macos-bare-claude-startup</td><td><span class="tag have">HAVE</span></td><td><code>joa</code>/<code>Akd</code>/<code>LDn(Uoa=250)</code>/<code>jg</code>/<code>mkd</code> generation；无 darwin early-return；fast path 250ms deadline；REPL preAction 无界 <code>LDn()</code>；<strong>≠</strong> #34 DGT=10s。测：<code>keychainPrefetch.238.test.ts</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Stay PARTIAL（gold-soft）</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Key</th><th>Why still PARTIAL</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>4</td><td>defer-shutdown-max-min</td><td>F/onClosed/G/Ne/Je 已 1:1；缺 live-session ceiling E2E</td></tr>
+      <tr><td>16</td><td>server/discover</td><td>Pwi + LGa + n_f + N_f-on-claudeai-proxy 1:1；live discover E2E 未证</td></tr>
+      <tr><td>18</td><td>r1f TTL + persist + t1f extras</td><td>q$t + t1f extras 已 1:1；用户可见 /model /effort SEA 也不隔离</td></tr>
+      <tr><td>24</td><td>phone/web model sync</td><td>Zkd + KSl/ASm/qjt 已 1:1；chrome UI 未 invent</td></tr>
+      <tr><td>25</td><td>login-expired-retry</td><td>copy/OAi/x1r 1:1；live remint E2E 未证</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Extra 1:1（非 checklist #）</h2>
+  <p class="meta">typedIntoEmpty 白闪：SEA <code>Hi</code> latch + <code>uT(force, reason)</code> + <code>autoScrollEnabled</code> dual-write。无 3s 窗口。OJh wheel-past-max。ScrollBox <code>alreadySticky</code> 本轮保留。</p>
+
+  <h2>UNKNOWN 残留</h2>
+  <p class="meta">无（#31 HAVE：keychain prefetch <code>LDn(Uoa)</code> / <code>jg</code>）。</p>
+
+  <h2>Review-3 GOLD_HARD（残差「现在修」，计数不变）</h2>
+  <ul>
+    <li><strong>Y8p/K8p</strong>：<code>createMarketplaceCatalogBeforeRedirect</code> + <code>MARKETPLACE_CATALOG_MAX_BYTES=5242880</code>；同源豁免；跨源须 https + !blocked；跨源 drop inherited（不含 User-Agent）。archive <code>$4S</code> every-hop Lio 不变。</li>
+    <li><strong>Y_e/PN_/vBu</strong>：仅 <code>ManagedSettingsSecurityDialog/utils.ts</code> 投影 <code>extraKnownMarketplaces[*].source.headersHelper</code> + settings-source plugins helper/command；<code>additionalMarketplaces</code> alias；列表 <code>command → url</code>。<strong>禁止</strong> invent TrustDialog project-key / marketplace-add TTY。</li>
+    <li><strong>KQe</strong>：<code>entryHasArchiveHeadersHelper</code> → <code>entryDeclaresHeadersHelper</code>（<code>''</code> 缺席）。schema 仍无 <code>.min(1)</code>。</li>
+    <li><strong>Fme</strong>：<code>pluginId.split('@')</code>；marketplaceName 仅 <code>length===2 &amp;&amp; t[1]</code>；邻域 <code>resolveMarketplaceArchiveAuth</code> 同步 Fme（禁 <code>slice(1).join('@')</code>）。</li>
+    <li><strong>DNt</strong>：<code>marketplaceSource===undefined</code> 仍 settings-strip（SEA 故意）；红测 fixture 补 source。<strong>勿</strong>改成 keep-helper。</li>
+    <li>docs：checklist 37/2 漂移已拉回 board <strong>34/5</strong>（#4/#16/#25 仍 PARTIAL）。</li>
+    <li>测：parent spot-check <strong>74 pass / 0 fail / 188 expects</strong>（5 files）· Fme 邻域修后 51/0/141。verifier <code>af33141f95d46e7e0</code> <strong>PASS</strong>。</li>
+  </ul>
+
+  <h2>Gates</h2>
+  <ul>
+    <li>HAVE 内 GOLD_HARD Y8p/Y_e/KQe/Fme：verifier <code>af33141f95d46e7e0</code> <strong>PASS</strong>（74/0/188；biome 9 files；parent spot-check 同：DNt undefined → <code>{kind:'run', runEntryHelper:false}</code>；jhi=5242880；precheck 12559/0）。不 invent leftover #3/#4/#5 / TrustDialog / add-TTY / pane pluginId Map / Z5r <code>{name}</code> / DNt undefined keep-helper</li>
+    <li>HAVE 内 <code>DNt</code>/<code>Ryt</code>/<code>vBa</code> overlay：verifier <code>a22dc16b8a9b3c818</code> <strong>PASS</strong>（41 pass / 0 fail / 121 expects；tsc EXIT 0；biome 9 files；parent spot-check 同：<code>src/commands/plugin</code> 无 <code>getArchiveHeadersHelperForPane</code>；pane identity <code>command\0archiveUrl</code>）。Ryt named-key only；DNt URL mismatch 清空；policySettings + !psr 抛 O3n；addDir strip helper；pane 必传 <code>marketplaceSource</code>；G4S 只看 KQe。不 invent leftover #3/#4/#5 / marketplace-add TTY / pane pluginId Map / Z5r <code>{name}</code></li>
+    <li>HAVE 内 <code>_5n</code>/<code>ret</code>/<code>P5r</code>：verifier <code>ae7349be302bd45f4</code> <strong>PASS</strong>（49 pass / 0 fail / 121 expects；biome 5 files；tsc EXIT 0；parent spot-check 同：qhi&lt;auth / J8p&lt;_5n&lt;G4S / 无 state mint / pane <code>command\0archiveUrl</code>）。mint 只跑 trustedDeclaration.headersHelper；state helper 不 exec；ayi qhi 先于 archive auth；P5r J8p → same-origin <code>_5n</code> → G4S。不 invent marketplace-add TTY / pane pluginId Map</li>
+    <li>HAVE 内金标修 PCr/Oyw/Zxv：verifier <code>ab80148f3b6fa9a20</code> <strong>PASS</strong>（69 pass / 0 fail / 227 expects；biome 7 files；tsc EXIT 0；parent spot-check 同）。PCr <code>hard:true</code>；Oyw <code>Aborted — the command was not run.</code>；Zxv 三数组无 <code>.default([])</code></li>
+    <li>#2/#3 leftover qhi/dwo/zgh：verifier <code>a164c43238580e28c</code> <strong>PASS</strong>（44 pass / 0 fail / 135 expects；parent spot-check 同：LSP <code>runEntryHelper false count 1</code> / zgh <code>exact true</code> / EZn <code>assign_before 0</code> <code>cleanup_in_after []</code>）。LSP <code>explicitInstall:!1</code>；CLI <code>shownEntryHelper</code> 绑 zgh；pane 非 Map；ManagePlugins 始终 <code>pinned()</code>；磁盘孤儿是 SEA</li>
+    <li>#2/#3 leftover ggw/ayi/P5r：verifier <code>a57860c9d7010fe28</code> <strong>PARTIAL</strong>（gold-hard PASS；live plugin install/update E2E 未跑）。parent spot-check：35 pass / 0 fail / 86 expects；biome 9 files EXIT 0；update <code>manifest: entry</code> + <code>runEntryHelper: explicit</code></li>
+    <li>#24 KSl/ASm/qjt：verifier <code>a378e3cf191711ab5</code> <strong>PASS</strong>（32 pass / 0 fail / 55 expects；parent spot-check 同）。copy <code> · Draws from usage credits</code>；ASm OFF 永不 bill；<code>/fast</code> + Cep/kep suffix 同金标；<code>MHs</code>/<code>zpt</code> fail-closed；chrome UI 未 invent</li>
+    <li>#4 F/onClosed/G/Ne/Je：verifier <code>ab65d8ecfee9e4ab8</code> <strong>PASS</strong>（54 pass / 0 fail / 152 expects；biome EXIT 0；parent spot-check 同）</li>
+    <li>#18 q$t persist：verifier <code>a3d0608a58c376411</code> <strong>PASS</strong>（11/0/44）· t1f extras verifier <code>aa3b3ec7430b3fa93</code> <strong>PASS</strong>（20/0/92；parent spot-check 同：tsc / biome 4 files）</li>
+    <li>#16/#25 gold-hard：verifier <code>ad23505a20e7f6438</code> <strong>PASS</strong>（55 pass / 0 fail / 230 expects + adversarial）</li>
+    <li>n_f/Cke/pMn follow-up：verifier <code>ac118907c655cdf83</code> <strong>PASS</strong>（42 pass / 0 fail / 93 expects；tsc 0；biome 3 files）。http+CCR → <code>ccr-proxy</code>；无 vbe/cliOwnedConfigs invent</li>
+    <li>#16 N_f-on-claudeai-proxy：verifier <code>a4bf07aa9f60da1a8</code> <strong>PASS</strong>（51 pass / 0 fail / 99 expects；biome 5 files EXIT 0；parent spot-check 同）。oGn/L_f/H_f/F_f/$Yp 1:1；reconnect <code>includeDiscover:false</code>；stdio 永不 wrap</li>
+    <li>#22 crash-reuse tests：12 pass / 0 fail / 28 expects（<code>bridgePointer.238.test.ts</code>）· verifier <code>a6cb3d5b000528f23</code> <strong>PASS</strong></li>
+    <li>#5 F4y tests：57 pass / 0 fail / 184 expects（4 files）· verifier <code>aeefc5acf2830e073</code> <strong>PASS</strong></li>
+    <li>PARTIAL gold-hard tests：64 pass / 0 fail / 162 expects（6 files）</li>
+    <li>review-2 + Gop empty-walk tests：85 pass / 0 fail / 199 expects（7 files）</li>
+    <li>verifier <code>a42e3a8e10d97b70a</code> <strong>PASS</strong>（先前 <code>af0557a8cf1aa1357</code> FAIL：empty-children <code>string</code> 未达 Bop）</li>
+    <li>#6 不 invent display-window GC / LWT gate</li>
+    <li>#2/#3 不 invent storageV5 backendView / MN_ attestation</li>
+    <li>#5 F4y 1:1 from SEA；禁止 CCR <code>upstreamproxy</code> / session <code>proxyAuthHelper</code> · #9 不在 PPl create 塞 ODt</li>
+    <li>#32 不 invent JS <code>/\|\|/</code> fail-fast</li>
+    <li>#31 macos-bare-claude-startup：verifier <code>afc8425005002154b</code> <strong>PASS</strong>（32 pass / 0 fail / 52 expects；tsc EXIT 0；parent spot-check 同）。<code>LDn(Uoa=250)</code> 仅 fast path；preAction 无界；无 darwin early-return；≠ #34 DGT</li>
+    <li>no commit / bump / push until「提交」</li>
+  </ul>
+</body>
+</html>

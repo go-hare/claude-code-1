@@ -3,6 +3,7 @@
  * Pure recovered surface — full process lifecycle lives in sessionHandler.
  */
 import { join } from 'node:path'
+import { sessionChildProxyEnvOverlay } from './egressProxyAuth.js'
 
 /** densable `ojv` — flags blocked from server-supplied claude_code_args */
 export const BLOCKED_CLAUDE_CODE_ARGS = new Set([
@@ -384,6 +385,7 @@ export function buildSessionChildEnv(
         : { CCR_AGENT_PROXY_ENABLED: undefined }),
     SELF_HOSTED_RUNNER_POOL_SECRET: undefined,
     SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET: undefined,
+    ...sessionChildProxyEnvOverlay(),
     SELF_HOSTED_RUNNER_HOST_CONFIG_DIR: undefined,
     CLAUDE_CODE_EXIT_AFTER_STOP_DELAY: undefined,
     CLAUDE_CODE_WORKER_EPOCH: String(opts.workerEpoch),

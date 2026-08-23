@@ -104,6 +104,17 @@ export type BridgeConfig = {
    * rejected with 400.
    */
   reuseEnvironmentId?: string
+  /**
+   * densable `preserveOnShutdown` — skip archive+deregister on clean shutdown
+   * so the next `claude remote-control` can reuse the env/session.
+   */
+  preserveOnShutdown?: boolean
+  /**
+   * densable `ownsPointer` — this process wrote `bridge-pointer.json`.
+   * Clean teardown clears the pointer only when we own it; `--session-id`
+   * resume preserves the env but does not claim the pointer (`ownsPointer=false`).
+   */
+  ownsPointer?: boolean
   /** API base URL the bridge is connected to (used for polling). */
   apiBaseUrl: string
   /** Session ingress base URL for WebSocket connections (may differ from apiBaseUrl locally). */

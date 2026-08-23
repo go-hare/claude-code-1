@@ -38,6 +38,16 @@ import {
 } from './commitAttribution.js'
 import { updateSessionName } from './concurrentSessions.js'
 import { getCwd } from './cwd.js'
+import { getErrnoCode } from './errors.js'
+import {
+  isHardIsolationPinRefuse,
+  liveLaunchDirs,
+  probeIsolationWorktreePinSync,
+  processLaunchCwd,
+  realpathOrSelf,
+  uniqueLiveRoots,
+} from './isolationWorktreePin.js'
+import { logEvent } from '../services/analytics/index.js'
 import { logForDebugging } from './debug.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
 import { fileHistoryRestoreStateFromLog } from './fileHistory.js'
@@ -371,13 +381,47 @@ export function restoreWorktreeForResume(
   }
   if (!worktreeSession) return
 
+  const launchCwd = processLaunchCwd()
+  const pin = probeIsolationWorktreePinSync(
+    worktreeSession.worktreePath,
+    liveLaunchDirs(worktreeSession.originalCwd),
+    uniqueLiveRoots([
+      realpathOrSelf(launchCwd),
+      ...liveLaunchDirs(launchCwd),
+      realpathOrSelf(processLaunchCwd()),
+      ...liveLaunchDirs(processLaunchCwd()),
+    ]),
+    { declineSelfOwningPinUnderLiveRoot: true },
+  )
+  if (!pin.ok) {
+    const poisoned = isHardIsolationPinRefuse(pin.reason)
+    logForDebugging(
+      `[worktree] declining to resume into ${worktreeSession.worktreePath} (${pin.reason}): ${pin.message}`,
+      { level: 'error' },
+    )
+    logEvent('tengu_worktree_resume_root_rejected', {
+      poisoned,
+    })
+    if (poisoned) {
+      saveWorktreeState(null)
+    }
+    return
+  }
+
   try {
     process.chdir(worktreeSession.worktreePath)
-  } catch {
-    // Directory is gone. Override the stale cache so the next
-    // reAppendSessionMetadata records "exited" instead of re-persisting
-    // a path that no longer exists.
-    saveWorktreeState(null)
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      saveWorktreeState(null)
+      logEvent('tengu_worktree_resume_root_rejected', {
+        poisoned: true,
+      })
+      return
+    }
+    logEvent('tengu_worktree_resume_root_rejected', {
+      poisoned: false,
+    })
     return
   }
 

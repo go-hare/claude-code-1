@@ -1,0 +1,112 @@
+---
+title: "模型 Provider 层"
+description: "10 个 provider、优先级排序规则、以及三个第三方兼容层的流适配器模式"
+---
+
+Claude Code 的对话循环从来不直接和某个具体 API 打交道。中间隔了一层 provider 抽象：
+`getAPIProvider()` 决定这次请求走哪条路，下游的 `query.ts` 完全不知道底下是 Anthropic、
+Bedrock 还是 Ollama。
+
+## 10 个 provider
+
+`src/utils/model/providers.ts` 的 `APIProvider` 联合类型：
+
+| Provider | 说明 |
+|----------|------|
+| `firstParty` | Anthropic 直连，默认值 |
+| `bedrock` | AWS Bedrock |
+| `vertex` | Google Cloud Vertex AI |
+| `foundry` | Azure AI Foundry |
+| `anthropicAws` | Anthropic 托管在 AWS 上的入口 |
+| `mantle` | 内部网关 |
+| `gateway` | 网关会话（`gatewayAuth` 固定） |
+| `openai` | 任意 OpenAI Chat Completions 兼容端点 |
+| `gemini` | Google Gemini |
+| `grok` | xAI Grok |
+
+<Note>
+`CLAUDE.md` 里写的「7 providers」已经过期，实际是 **10 个**。以
+`src/utils/model/providers.ts` 的类型定义为准。
+</Note>
+
+其中 `firstParty` / `anthropicAws` / `gateway` 三者共享 Anthropic 风格的 API 形状，由
+`isAnthropicStyleApiProvider()` 统一判定——写分支逻辑时用这个函数，不要逐个比字符串。
+
+## 优先级排序
+
+这段顺序是**对齐上游 `xn()` 的**，不是随意排的，改动前请先读代码注释：
+
+```
+1. modelType === 'openai' | 'gemini' | 'grok'   → 直接钉住，压过 gateway 和所有环境变量
+2. ensureGatewayAuthApplied()                    → 冷启动时先应用 USE_GATEWAY / 安全存储
+3. getGatewayAuth() 有值                          → 'gateway'
+4. 环境变量依次判定：bedrock → foundry → anthropicAws → mantle → vertex
+5. modelType === 'anthropic'                     → 'firstParty'（提前返回，见下方警告）
+6. 环境变量：openai → gemini → grok
+7. 兜底                                           → 'firstParty'
+```
+
+<Warning>
+第 5 步的提前返回是**刻意**的。OAuth 登录会把 `modelType` 设成 `anthropic`，但常常在
+`settings.env` 里留下上一次 `/login` 写的 `CLAUDE_CODE_USE_OPENAI` 之类的残留标志。
+如果不在这里截断，用户明明登录了 Anthropic 却会被路由到 OpenAI。
+
+所以：`modelType === 'anthropic'` 时**故意不认** `CLAUDE_CODE_USE_OPENAI` /
+`_GEMINI` / `_GROK`。别把这个提前返回"优化"掉。
+</Warning>
+
+`gateway` 排在第 3 位（高于 `modelType`）也是有原因的：这样 OAuth + gateway 的用户能保持
+gateway 路由。
+
+## 三个第三方兼容层
+
+OpenAI / Gemini / Grok 三条兼容层都用同一个套路：**流适配器**。把第三方的响应流转成
+Anthropic 内部的 `BetaRawMessageStreamEvent` 格式，于是 `query.ts`、工具执行、UI 渲染
+**一行都不用改**。
+
+<Tabs>
+  <Tab title="OpenAI">
+    `src/services/api/openai/`
+
+    | 文件 | 职责 |
+    |------|------|
+    | `client.ts` | 客户端构造 |
+    | `requestBody.ts` | 消息与工具格式转换 |
+    | `responsesAdapter.ts` | 流适配（→ Anthropic 事件） |
+    | `chatgptAuth.ts` | ChatGPT 账号认证路径 |
+    | `openaiShared.ts` | 共享工具函数 |
+
+    开关：`CLAUDE_CODE_USE_OPENAI=1`
+
+    配置：`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_AUTH_MODE`、`OPENAI_ORG_ID`、
+    `OPENAI_PROJECT_ID`、`OPENAI_MAX_TOKENS`、`OPENAI_ENABLE_THINKING`、`OPENAI_USAGE`
+
+    因为只要求端点符合 OpenAI Chat Completions 协议，Ollama / DeepSeek / vLLM 都能接。
+    DeepSeek 的 thinking mode 也支持（`OPENAI_ENABLE_THINKING`）。
+  </Tab>
+  <Tab title="Gemini">
+    `src/services/api/gemini/` — `client.ts` + `index.ts`
+
+    配置：`GEMINI_API_KEY`（必填）、`GEMINI_BASE_URL`、`GEMINI_THOUGHT_SIGNATURE_FIELD`
+
+    模型映射优先级：`GEMINI_MODEL` → `GEMINI_DEFAULT_SONNET_MODEL` /
+    `GEMINI_DEFAULT_OPUS_MODEL` → `ANTHROPIC_DEFAULT_*_MODEL`（已废弃）→ 原样返回
+  </Tab>
+  <Tab title="Grok">
+    `src/services/api/grok/` — `client.ts` + `requestBody.ts` + `index.ts`
+
+    配置：`GROK_API_KEY` 或 `XAI_API_KEY`、`GROK_BASE_URL`、`GROK_MAX_TOKENS`
+  </Tab>
+</Tabs>
+
+三条兼容层都通过 `/login` 命令配置，不必手写环境变量。
+
+## 抽象层的位置
+
+provider 抽象本身在 workspace 包 `packages/@ant/model-provider/` 里，分
+`client/`、`providers/`、`hooks/`、`shared/`、`types/`。核心 API 客户端
+`src/services/api/claude.ts` 负责组装请求参数（system prompt、messages、tools、betas）并
+处理流事件；重试逻辑在 `src/services/api/withRetry.ts`。
+
+新增 provider 需要在 `src/utils/model/providers.ts` 注册，并想清楚它在上面那个优先级链条里
+插在哪一格。

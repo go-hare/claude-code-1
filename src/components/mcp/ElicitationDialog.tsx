@@ -15,6 +15,16 @@ import type {
 } from '../../services/mcp/types.js';
 import { openBrowser } from '../../utils/browser.js';
 import {
+  URL_WITHHELD_MARKER,
+  canOneClickOpen,
+  hrefForOpen,
+  isExactShowableUrl,
+  knockAcceptIfUnsafe,
+  toggleAcceptDecline,
+  urlOverflowsScreen,
+  urlPromptWarning,
+} from './elicitationUrlSafety.js';
+import {
   getEnumLabel,
   getEnumValues,
   getMultiSelectLabel,
@@ -1122,9 +1132,12 @@ function ElicitationURLDialog({
   const { serverName, signal, waitingState } = event;
   const urlParams = event.params as ElicitRequestURLParams;
   const { message, url } = urlParams;
+  const { columns, rows } = useTerminalSize();
+  const href = hrefForOpen(url);
+  const exact = isExactShowableUrl(url, href);
+  const oneClick = canOneClickOpen(href, exact);
   const [phase, setPhase] = useState<'prompt' | 'waiting'>('prompt');
   const phaseRef = useRef<'prompt' | 'waiting'>('prompt');
-  const [focusedButton, setFocusedButton] = useState<'accept' | 'decline' | 'open' | 'action' | 'cancel'>('accept');
   const showCancel = waitingState?.showCancel ?? false;
 
   useNotifyAfterTimeout('Claude Code needs your input', 'elicitation_url_dialog');
@@ -1151,19 +1164,35 @@ function ElicitationURLDialog({
     return () => signal.removeEventListener('abort', handleAbort);
   }, [signal, onResponse]);
 
-  // Parse URL to highlight the domain
+  // densable WBc: split the href (Yz), not the raw elicitation string
+  let domainParsed = false;
   let domain = '';
   let urlBeforeDomain = '';
   let urlAfterDomain = '';
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(href);
     domain = parsed.hostname;
-    const domainStart = url.indexOf(domain);
-    urlBeforeDomain = url.slice(0, domainStart);
-    urlAfterDomain = url.slice(domainStart + domain.length);
+    const domainStart = href.indexOf(domain);
+    if (domain !== '' && domainStart !== -1) {
+      domainParsed = true;
+      urlBeforeDomain = href.slice(0, domainStart);
+      urlAfterDomain = href.slice(domainStart + domain.length);
+    }
   } catch {
-    domain = url;
+    domain = href;
   }
+
+  const overflows = urlOverflowsScreen(href, columns, rows);
+  const warning = urlPromptWarning(exact, oneClick, overflows);
+  const [focusedButton, setFocusedButton] = useState<'accept' | 'decline' | 'open' | 'action' | 'cancel'>(
+    oneClick && !overflows ? 'accept' : 'decline',
+  );
+
+  useEffect(() => {
+    if (!oneClick || overflows) {
+      setFocusedButton(prev => knockAcceptIfUnsafe(prev));
+    }
+  }, [oneClick, overflows]);
 
   // Auto-dismiss when the server sends a completion notification (sets completed flag)
   useEffect(() => {
@@ -1173,18 +1202,38 @@ function ElicitationURLDialog({
   }, [phase, event.completed, onWaitingDismiss, showCancel]);
 
   const handleAccept = useCallback(() => {
-    void openBrowser(url);
+    if (!oneClick) {
+      return;
+    }
+    void openBrowser(href);
     onResponse('accept');
     setPhase('waiting');
     phaseRef.current = 'waiting';
     setFocusedButton('open');
-  }, [onResponse, url]);
+  }, [href, onResponse, oneClick]);
+
+  const urlDisplay =
+    oneClick || exact ? (
+      domainParsed ? (
+        <Text>
+          {urlBeforeDomain}
+          <Text bold>{domain}</Text>
+          {urlAfterDomain}
+        </Text>
+      ) : (
+        <Text>{href}</Text>
+      )
+    ) : (
+      <Text>{URL_WITHHELD_MARKER}</Text>
+    );
 
   // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw input for button navigation
   useInput((_input, key) => {
     if (phase === 'prompt') {
       if (key.leftArrow || key.rightArrow) {
-        setFocusedButton(prev => (prev === 'accept' ? 'decline' : 'accept'));
+        if (oneClick) {
+          setFocusedButton(prev => (prev === 'accept' || prev === 'decline' ? toggleAcceptDecline(prev) : prev));
+        }
         return;
       }
       if (key.return) {
@@ -1208,7 +1257,9 @@ function ElicitationURLDialog({
       }
       if (key.return) {
         if (focusedButton === 'open') {
-          void openBrowser(url);
+          if (oneClick) {
+            void openBrowser(href);
+          }
         } else if (focusedButton === 'cancel') {
           onWaitingDismiss?.('cancel');
         } else {
@@ -1222,7 +1273,7 @@ function ElicitationURLDialog({
     const actionLabel = waitingState?.actionLabel ?? 'Continue without waiting';
     return (
       <Dialog
-        title={`MCP server \u201c${serverName}\u201d \u2014 waiting for completion`}
+        title={`MCP server “${serverName}” — waiting for completion`}
         subtitle={`\n${message}`}
         color="permission"
         onCancel={() => onWaitingDismiss?.('cancel')}
@@ -1238,18 +1289,14 @@ function ElicitationURLDialog({
                 fallback="Esc"
                 description="cancel"
               />
-              <KeyboardShortcutHint shortcut="\u2190\u2192" action="switch" />
+              <KeyboardShortcutHint shortcut="←→" action="switch" />
             </Byline>
           )
         }
       >
         <Box flexDirection="column">
           <Box marginBottom={1} flexDirection="column">
-            <Text>
-              {urlBeforeDomain}
-              <Text bold>{domain}</Text>
-              {urlAfterDomain}
-            </Text>
+            {urlDisplay}
           </Box>
           <Box marginBottom={1}>
             <Text dimColor italic>
@@ -1294,7 +1341,7 @@ function ElicitationURLDialog({
 
   return (
     <Dialog
-      title={`MCP server \u201c${serverName}\u201d wants to open a URL`}
+      title={`MCP server “${serverName}” wants to open a URL`}
       subtitle={`\n${message}`}
       color="permission"
       onCancel={() => onResponse('cancel')}
@@ -1305,28 +1352,33 @@ function ElicitationURLDialog({
         ) : (
           <Byline>
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
-            <KeyboardShortcutHint shortcut="\u2190\u2192" action="switch" />
+            <KeyboardShortcutHint shortcut="←→" action="switch" />
           </Byline>
         )
       }
     >
       <Box flexDirection="column">
         <Box marginBottom={1} flexDirection="column">
-          <Text>
-            {urlBeforeDomain}
-            <Text bold>{domain}</Text>
-            {urlAfterDomain}
-          </Text>
+          {urlDisplay}
         </Box>
+        {warning && (
+          <Box marginBottom={1}>
+            <Text dimColor>{warning}</Text>
+          </Box>
+        )}
         <Box>
-          <Text color="success">{focusedButton === 'accept' ? figures.pointer : ' '}</Text>
-          <Text
-            bold={focusedButton === 'accept'}
-            color={focusedButton === 'accept' ? 'success' : undefined}
-            dimColor={focusedButton !== 'accept'}
-          >
-            {' Accept  '}
-          </Text>
+          {oneClick && (
+            <>
+              <Text color="success">{focusedButton === 'accept' ? figures.pointer : ' '}</Text>
+              <Text
+                bold={focusedButton === 'accept'}
+                color={focusedButton === 'accept' ? 'success' : undefined}
+                dimColor={focusedButton !== 'accept'}
+              >
+                {' Accept  '}
+              </Text>
+            </>
+          )}
           <Text color="error">{focusedButton === 'decline' ? figures.pointer : ' '}</Text>
           <Text
             bold={focusedButton === 'decline'}

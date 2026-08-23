@@ -2,114 +2,154 @@
  * Minimal module for firing macOS keychain reads in parallel with main.tsx
  * module evaluation, same pattern as startMdmRawRead() in settings/mdm/rawRead.ts.
  *
- * isRemoteManagedSettingsEligible() reads two separate keychain entries
- * SEQUENTIALLY via sync execSync during applySafeConfigEnvironmentVariables():
- *   1. "Claude Code-credentials" (OAuth tokens)  — ~32ms
- *   2. "Claude Code" (legacy API key)            — ~33ms
- * Sequential cost: ~65ms on every macOS startup.
- *
- * Firing both here lets the subprocesses run in parallel with the ~65ms of
- * main.tsx imports. ensureKeychainPrefetchCompleted() is awaited alongside
- * ensureMdmSettingsLoaded() in main.tsx preAction — nearly free since the
- * subprocesses finish during import evaluation. Sync read() and
- * getApiKeyFromConfigOrMacOSKeychain() then hit their caches.
+ * densable 2.1.238 (`joa` / `Akd` / `LDn` / `F8o` / `$8o` / `Uoa`):
+ *   - no `process.platform === 'darwin'` guard (missing `security` → Akd catch null)
+ *   - spawn timeout / sync throw → null (do not prime; pending sentinel stays)
+ *   - legacy slot `FHr = "pending"` until a non-null spawn result lands
+ *   - fast paths `LDn(Uoa)` cap wait at 250ms via `withDeadline` (`jg`)
+ *   - REPL preAction still `LDn()` unbounded
  *
  * Imports stay minimal: child_process + macOsKeychainHelpers.ts (NOT
  * macOsKeychainStorage.ts — that pulls in execa → human-signals →
- * cross-spawn, ~58ms of synchronous module init). The helpers file's own
- * import chain (envUtils, oauth constants, crypto) is already evaluated by
- * startupProfiler.ts at main.tsx:5, so no new module-init cost lands here.
+ * cross-spawn, ~58ms of synchronous module init).
  */
 
 import { execFile } from 'child_process'
 import { isBareMode } from '../envUtils.js'
+import { withDeadline } from '../sleep.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
   getMacOsKeychainStorageServiceName,
   getUsername,
+  keychainCacheState,
   primeKeychainCacheFromPrefetch,
 } from './macOsKeychainHelpers.js'
 
 const KEYCHAIN_PREFETCH_TIMEOUT_MS = 10_000
 
-// Shared with auth.ts getApiKeyFromConfigOrMacOSKeychain() so it can skip its
-// sync spawn when the prefetch already landed. Distinguishing "not started" (null)
-// from "completed with no key" ({ stdout: null }) lets the sync reader only
-// trust a completed prefetch.
-let legacyApiKeyPrefetch: { stdout: string | null } | null = null
+/** densable `Uoa` — fast-path wait budget for hung `security` (ms). */
+export const KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS = 250
+
+type PrefetchSpawnResult = { stdout: string | null }
+
+type ExecFileCallback = (
+  error: Error | null,
+  stdout: string,
+  stderr: string,
+) => void
+
+type SpawnExecFile = (
+  file: string,
+  args: readonly string[],
+  options: { encoding: string; timeout: number; windowsHide: boolean },
+  callback: ExecFileCallback,
+) => unknown
+
+let execFileImpl: SpawnExecFile = execFile as SpawnExecFile
+
+/**
+ * Shared with auth.ts getApiKeyFromConfigOrMacOSKeychain(). densable `FHr`:
+ *   null            — not started / cleared
+ *   "pending"       — in flight (or timed out — sync reader must retry)
+ *   { stdout }      — completed with a spawn result (stdout may still be null)
+ */
+let legacyApiKeyPrefetch: PrefetchSpawnResult | 'pending' | null = null
 
 let prefetchPromise: Promise<void> | null = null
 
-type SpawnResult = { stdout: string | null; timedOut: boolean }
-
-function spawnSecurity(serviceName: string): Promise<SpawnResult> {
+function spawnSecurity(
+  serviceName: string,
+): Promise<PrefetchSpawnResult | null> {
   return new Promise(resolve => {
-    execFile(
-      'security',
-      ['find-generic-password', '-a', getUsername(), '-w', '-s', serviceName],
-      { encoding: 'utf-8', timeout: KEYCHAIN_PREFETCH_TIMEOUT_MS },
-      (err, stdout) => {
-        // Exit 44 (entry not found) is a valid "no key" result and safe to
-        // prime as null. But timeout (err.killed) means the keychain MAY have
-        // a key we couldn't fetch — don't prime, let sync spawn retry.
-        resolve({
-          stdout: err ? null : stdout?.trim() || null,
-          timedOut: Boolean(err && 'killed' in err && err.killed),
-        })
-      },
-    )
+    try {
+      execFileImpl(
+        'security',
+        ['find-generic-password', '-a', getUsername(), '-w', '-s', serviceName],
+        {
+          encoding: 'utf-8',
+          timeout: KEYCHAIN_PREFETCH_TIMEOUT_MS,
+          windowsHide: true,
+        },
+        (err, stdout) => {
+          const timedOut = Boolean(err && 'killed' in err && err.killed)
+          resolve(
+            timedOut ? null : { stdout: err ? null : stdout?.trim() || null },
+          )
+        },
+      )
+    } catch {
+      resolve(null)
+    }
   })
 }
 
 /**
- * Fire both keychain reads in parallel. Called at main.tsx top-level
- * immediately after startMdmRawRead(). Non-darwin is a no-op.
+ * densable `joa` — fire both keychain reads in parallel. Called at main.tsx
+ * top-level immediately after startMdmRawRead(). Bare mode is a no-op.
+ * Missing `security` (non-darwin) is swallowed by Akd try/catch → null.
  */
 export function startKeychainPrefetch(): void {
-  if (process.platform !== 'darwin' || prefetchPromise || isBareMode()) return
+  if (prefetchPromise || isBareMode()) return
 
-  // Fire both subprocesses immediately (non-blocking). They run in parallel
-  // with each other AND with main.tsx imports. The await in Promise.all
-  // happens later via ensureKeychainPrefetchCompleted().
+  const generation = keychainCacheState.generation
+  legacyApiKeyPrefetch = 'pending'
   const oauthSpawn = spawnSecurity(
     getMacOsKeychainStorageServiceName(CREDENTIALS_SERVICE_SUFFIX),
-  )
-  const legacySpawn = spawnSecurity(getMacOsKeychainStorageServiceName())
-
-  prefetchPromise = Promise.all([oauthSpawn, legacySpawn]).then(
-    ([oauth, legacy]) => {
-      // Timed-out prefetch: don't prime. Sync read/spawn will retry with its
-      // own (longer) timeout. Priming null here would shadow a key that the
-      // sync path might successfully fetch.
-      if (!oauth.timedOut) primeKeychainCacheFromPrefetch(oauth.stdout)
-      if (!legacy.timedOut) legacyApiKeyPrefetch = { stdout: legacy.stdout }
+  ).then(result => {
+    if (result) primeKeychainCacheFromPrefetch(result.stdout, generation)
+  })
+  const legacySpawn = spawnSecurity(getMacOsKeychainStorageServiceName()).then(
+    result => {
+      if (result && legacyApiKeyPrefetch === 'pending') {
+        legacyApiKeyPrefetch = result
+      }
     },
   )
+  prefetchPromise = Promise.all([oauthSpawn, legacySpawn]).then(() => {})
 }
 
 /**
- * Await prefetch completion. Called in main.tsx preAction alongside
- * ensureMdmSettingsLoaded() — nearly free since subprocesses finish during
- * the ~65ms of main.tsx imports. Resolves immediately on non-darwin.
+ * densable `LDn` — await prefetch. `ms === undefined` waits forever (REPL
+ * preAction). Else `withDeadline` (`jg`) so fast paths cannot stall on hung
+ * keychain. No-op when prefetch was never started.
  */
-export async function ensureKeychainPrefetchCompleted(): Promise<void> {
-  if (prefetchPromise) await prefetchPromise
+export async function ensureKeychainPrefetchCompleted(
+  ms?: number,
+): Promise<void> {
+  if (!prefetchPromise) return
+  await (ms === undefined ? prefetchPromise : withDeadline(prefetchPromise, ms))
 }
 
 /**
- * Consumed by getApiKeyFromConfigOrMacOSKeychain() in auth.ts before it
- * falls through to sync execSync. Returns null if prefetch hasn't completed.
+ * densable `F8o` — consumed by getApiKeyFromConfigOrMacOSKeychain() before
+ * it falls through to sync execSync. Returns null if prefetch hasn't
+ * completed (including in-flight / timeout pending).
  */
 export function getLegacyApiKeyPrefetchResult(): {
   stdout: string | null
 } | null {
-  return legacyApiKeyPrefetch
+  return legacyApiKeyPrefetch === 'pending' ? null : legacyApiKeyPrefetch
 }
 
 /**
- * Clear prefetch result. Called alongside getApiKeyFromConfigOrMacOSKeychain
- * cache invalidation so a stale prefetch doesn't shadow a fresh write.
+ * densable `$8o` — clear prefetch result. Called alongside
+ * getApiKeyFromConfigOrMacOSKeychain cache invalidation so a stale
+ * prefetch doesn't shadow a fresh write.
  */
 export function clearLegacyApiKeyPrefetch(): void {
   legacyApiKeyPrefetch = null
+}
+
+/** Test-only: restore module locals + default execFile. */
+export function _resetKeychainPrefetchForTesting(): void {
+  prefetchPromise = null
+  legacyApiKeyPrefetch = null
+  execFileImpl = execFile as SpawnExecFile
+}
+
+/** Test-only: inject spawn (do not mock `child_process` globally). */
+export function _setKeychainPrefetchExecFileForTesting(
+  impl: SpawnExecFile,
+): void {
+  execFileImpl = impl
 }

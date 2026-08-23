@@ -29,6 +29,15 @@ import {
   type ResolutionResult,
   resolveDependencyClosure,
 } from './dependencyResolver.js'
+import {
+  compareConsentedEntryHelper,
+  formatEntryHelperPolicyRefusalMessage,
+  formatHeadersHelperPaneMismatch,
+  lookupTrustedSettingsEntryAuth,
+  overlayTrustedSettingsEntryAuth,
+  getShownArchiveHeadersHelperFromOverlay,
+  type HeadersHelperPaneShown,
+} from './marketplaceHeadersHelper.js'
 import { denyCommandProducerDir } from './commandProducerDirs.js'
 import {
   addInstalledPlugin,
@@ -57,10 +66,14 @@ import {
   getVersionedCachePath,
   getVersionedZipCachePath,
 } from './pluginLoader.js'
-import { isPluginBlockedByPolicy } from './pluginPolicy.js'
+import {
+  headersHelperPolicyRefusal,
+  isPluginBlockedByPolicy,
+} from './pluginPolicy.js'
 import { calculatePluginVersion } from './pluginVersioning.js'
 import {
   isLocalPluginSource,
+  type MarketplaceSource,
   type PluginMarketplaceEntry,
   type PluginScope,
   type PluginSource,
@@ -121,18 +134,25 @@ export function validatePathWithinBase(
 
 /**
  * densable archive auth for install/update: when pluginId is `name@marketplace`
- * and known_marketplaces records a url-source, forward that source's headers
- * (and origin URL) into cachePlugin → installFromArchive (same-origin only).
- * Headers live on known_marketplaces.json, not the catalog JSON.
+ * and known_marketplaces records a url-source, forward that source's **static**
+ * headers (and origin URL) into cachePlugin. Marketplace `headersHelper` is
+ * minted later by SEA `P5r`/`_5n` (pluginLoader archive case) from `ret()`,
+ * never from this state copy — and never before ayi `qhi`.
  */
 export async function resolveMarketplaceArchiveAuth(pluginId: string): Promise<{
   marketplaceHeaders?: Record<string, string>
   marketplaceUrl?: string
 }> {
-  if (!pluginId.includes('@')) {
+  // SEA Fme/hyt: marketplace name only when exactly one '@' and non-empty right.
+  // Multi-'@' ids must not resolve static marketplace auth via join('@').
+  const pluginIdParts = pluginId.split('@')
+  const marketplaceName =
+    pluginIdParts.length === 2 && pluginIdParts[1]
+      ? pluginIdParts[1]
+      : undefined
+  if (marketplaceName === undefined) {
     return {}
   }
-  const marketplaceName = pluginId.split('@').slice(1).join('@')
   try {
     const known = await loadKnownMarketplacesConfigSafe()
     const src = known[marketplaceName]?.source
@@ -183,6 +203,17 @@ export async function cacheAndRegisterPlugin(
   options?: {
     /** densable 2.1.229 #4 — command-source consent for Oxd/d6_ */
     commandSourceConsent?: CommandSourceConsent
+    /**
+     * densable 2.1.238 ayi `explicitInstall` — catalog entry headersHelper
+     * only when the caller is an explicit install/update of this plugin.
+     * Defaults false (browse / startup / deps leave it unset).
+     */
+    runEntryHelper?: boolean
+    /**
+     * SEA ayi `d.consented` — qhi snapshot from CLI shownEntryHelper or
+     * pane dwo.pinned(). Compared only when runEntryHelper && archive helper.
+     */
+    consentedEntryHelper?: HeadersHelperPaneShown | null
   },
 ): Promise<string> {
   // For local plugins, we need the resolved absolute path
@@ -192,7 +223,63 @@ export async function cacheAndRegisterPlugin(
       ? (localSourcePath as PluginSource)
       : entry.source
 
-  // densable archive auth: same-origin url-source headers (install + update).
+  // SEA Fme: marketplace only when exactly one '@' and non-empty right side.
+  // Plugin name stays the left segment (or whole id when no '@').
+  const pluginIdParts = pluginId.split('@')
+  const marketplaceName =
+    pluginIdParts.length === 2 && pluginIdParts[1]
+      ? pluginIdParts[1]
+      : undefined
+  const pluginName =
+    pluginIdParts.length >= 2 && pluginIdParts[0] ? pluginIdParts[0] : pluginId
+
+  // densable P5r/ayi — policy allowlist matches source object, not name only.
+  const known = await loadKnownMarketplacesConfigSafe()
+  const marketplaceSource: MarketplaceSource | undefined =
+    marketplaceName !== undefined ? known[marketplaceName]?.source : undefined
+
+  // SEA ayi: Ryt → DNt → g5n → fgt → qhi, then P5r/_5n (pluginLoader).
+  const runEntryHelper = options?.runEntryHelper === true
+  const trustedSettingsEntryAuth = lookupTrustedSettingsEntryAuth(
+    marketplaceName,
+    pluginName,
+  )
+  if (
+    runEntryHelper &&
+    typeof source === 'object' &&
+    source !== null &&
+    'source' in source &&
+    source.source === 'archive'
+  ) {
+    const overlay = overlayTrustedSettingsEntryAuth({
+      entry,
+      archiveUrl: source.url,
+      marketplaceSource,
+      trustedSettingsEntryAuth,
+    })
+    const helper = getShownArchiveHeadersHelperFromOverlay(overlay, source.url)
+    if (helper) {
+      const refusal = headersHelperPolicyRefusal(
+        marketplaceSource,
+        marketplaceName,
+      )
+      if (refusal !== null) {
+        throw new Error(
+          formatEntryHelperPolicyRefusalMessage(pluginName, refusal),
+        )
+      }
+    }
+    const qhi = compareConsentedEntryHelper({
+      consented: options?.consentedEntryHelper,
+      helper,
+      pluginName,
+      kind: 'install',
+    })
+    if (!qhi.ok) {
+      throw new Error(formatHeadersHelperPaneMismatch(qhi))
+    }
+  }
+
   const { marketplaceHeaders, marketplaceUrl } =
     await resolveMarketplaceArchiveAuth(pluginId)
 
@@ -201,6 +288,12 @@ export async function cacheAndRegisterPlugin(
     marketplaceHeaders,
     marketplaceUrl,
     commandSourceConsent: options?.commandSourceConsent,
+    runEntryHelper,
+    pluginName,
+    marketplaceName,
+    marketplaceSource,
+    operatorAuthored: trustedSettingsEntryAuth?.origin === 'settings',
+    trustedSettingsEntryAuth,
   })
 
   // For local plugins, use the original source path for Git SHA calculation
@@ -444,6 +537,8 @@ export async function installResolvedPlugin({
   scope,
   marketplaceInstallLocation,
   commandSourceConsent,
+  runEntryHelper,
+  consentedEntryHelper,
 }: {
   pluginId: string
   entry: PluginMarketplaceEntry
@@ -451,6 +546,13 @@ export async function installResolvedPlugin({
   marketplaceInstallLocation?: string
   /** densable 2.1.229 #4 — Pkr.commandSourceConsent (shown/accepted/recorded) */
   commandSourceConsent?: CommandSourceConsent
+  /**
+   * SEA ayi `explicitInstall` for the install root. Deps always false.
+   * Defaults true on this install path (CLI / UI). Hint/startup pass false.
+   */
+  runEntryHelper?: boolean
+  /** SEA ayi `d.consented` — CLI shownEntryHelper / pane pinned snapshot. */
+  consentedEntryHelper?: HeadersHelperPaneShown | null
 }): Promise<InstallCoreResult> {
   const settingSource = scopeToSettingSource(scope)
 
@@ -563,17 +665,23 @@ export async function installResolvedPlugin({
         source,
       )
     }
-    // densable $Tn: only the install root gets explicit consent; deps use
-    // recorded/none via cachePlugin assert (command deps rare).
+    // densable $Tn / ayi: only the install root gets explicit consent +
+    // entry helper; deps use recorded/none and runEntryHelper:!1.
     await cacheAndRegisterPlugin(
       id,
       info.entry,
       scope,
       projectPath,
       localSourcePath,
-      id === pluginId && commandSourceConsent
-        ? { commandSourceConsent }
-        : undefined,
+      {
+        ...(id === pluginId && commandSourceConsent
+          ? { commandSourceConsent }
+          : {}),
+        runEntryHelper: id === pluginId && runEntryHelper !== false,
+        ...(id === pluginId && consentedEntryHelper
+          ? { consentedEntryHelper }
+          : {}),
+      },
     )
   }
 
@@ -612,6 +720,8 @@ export type InstallPluginParams = {
    * (`{kind:"shown", command:HK(source), pluginId}`).
    */
   commandSourceConsent?: CommandSourceConsent
+  /** SEA pane `consentedEntryHelper: pinned()`. */
+  consentedEntryHelper?: HeadersHelperPaneShown | null
 }
 
 /**
@@ -643,6 +753,7 @@ export async function installPluginFromMarketplace({
   scope = 'user',
   trigger = 'user',
   commandSourceConsent,
+  consentedEntryHelper,
 }: InstallPluginParams): Promise<InstallPluginResult> {
   try {
     // Look up the marketplace install location for local-source plugins.
@@ -661,6 +772,9 @@ export async function installPluginFromMarketplace({
       scope,
       marketplaceInstallLocation,
       commandSourceConsent: consent,
+      // SEA X5r explicit: trigger==="user"
+      runEntryHelper: trigger !== 'hint',
+      consentedEntryHelper,
     })
 
     if (!result.ok) {

@@ -64,7 +64,7 @@
 
 | 文件 | 改动 |
 |------|------|
-| `src/assistant/AssistantSessionChooser.ts` | 恢复交互式选择器 |
+| `src/assistant/AssistantSessionChooser.tsx` | 恢复交互式选择器 |
 
 **行为:**
 - 多 session 时可交互选择
@@ -79,7 +79,7 @@
 
 | 文件 | 改动 |
 |------|------|
-| `src/commands/assistant/assistant.ts` | 恢复 install wizard 辅助函数 |
+| `src/commands/assistant/assistant.tsx` | 恢复 install wizard 辅助函数 |
 
 **行为:**
 - 没有 session 时如何引导用户

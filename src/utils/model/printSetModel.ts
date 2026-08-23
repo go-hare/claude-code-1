@@ -317,3 +317,58 @@ export function decidePrintSetModel(
     injectBreadcrumbs: mainChanged || familyChanged,
   }
 }
+
+/**
+ * densable REPL/SDK bridge `onSetModel` (Zkd callback, not print RGf).
+ *
+ * SEA: `po=$o==null||$o.trim().toLowerCase()==="default"`, `qi=po?CE():$o`,
+ * `Dr=!po&&!$P(qi)&&!(m9(qi)??Uu(qi))`, `cn=Dr?u3(qi):null`. Restricted
+ * family-alias steps down; else `{ok:false}` + r4 copy. Unrecognized ids
+ * still apply — print recognition (RGf) is a print/SDK stdin gate only.
+ */
+export function decideReplBridgeSetModel(
+  rawModel: string | undefined | null,
+  previousActive: string | undefined,
+): PrintSetModelDecision {
+  const isDefault =
+    rawModel == null || rawModel.trim().toLowerCase() === 'default'
+  const requestedArg = typeof rawModel === 'string' ? rawModel : 'default'
+  // densable `qi=po?CE():$o` — default/null uses CE(); otherwise the raw id.
+  const candidate: string = isDefault
+    ? getDefaultMainLoopModel()
+    : (rawModel as string)
+
+  const needsAllowCheck =
+    !isDefault &&
+    !isDefaultEquivalentModel(candidate) &&
+    !isModelAllowed(candidate)
+
+  let resolved = candidate
+  let steppedDown = false
+  if (needsAllowCheck) {
+    const stepped = stepFamilyAliasToAllowed(candidate)
+    if (stepped === null) {
+      const active =
+        previousActive !== undefined &&
+        (isDefaultEquivalentModel(previousActive) ||
+          isModelAllowed(previousActive))
+          ? parseUserSpecifiedModel(previousActive)
+          : getMainLoopModel()
+      return {
+        ok: false,
+        error: modelNotAllowedMessage(requestedArg, active),
+        analytics: 'not_allowed',
+      }
+    }
+    resolved = stepped
+    steppedDown = true
+  }
+
+  return {
+    ok: true,
+    requestedArg,
+    model: resolved,
+    steppedDown,
+    injectBreadcrumbs: false,
+  }
+}

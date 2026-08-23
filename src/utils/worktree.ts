@@ -43,6 +43,10 @@ import {
   gitExe,
 } from './git.js'
 import {
+  assertIsolationWorktreeAllowed,
+  liveLaunchDirs,
+} from './isolationWorktreePin.js'
+import {
   executeWorktreeCreateHook,
   executeWorktreeRemoveHook,
   hasWorktreeCreateHook,
@@ -328,6 +332,27 @@ export async function enterExistingWorktreeSession(
   sessionId: string,
 ): Promise<WorktreeSession> {
   const originalCwd = getCwd()
+  const preEnter = getCurrentWorktreeSession()?.originalCwd ?? originalCwd
+  let extraRoot: string | undefined =
+    findCanonicalGitRoot(worktreePath) ?? undefined
+  try {
+    const preRoot = findCanonicalGitRoot(preEnter)
+    if (preRoot !== null && extraRoot) {
+      const [preReal, extraReal] = await Promise.all([
+        realpath(preRoot),
+        realpath(extraRoot),
+      ])
+      if (preReal === extraReal) extraRoot = undefined
+    }
+  } catch {
+    // keep extraRoot
+  }
+  // densable 2.1.238 ODt before session bind
+  await assertIsolationWorktreeAllowed(
+    worktreePath,
+    [],
+    liveLaunchDirs(preEnter, extraRoot),
+  )
   const { stdout: branchOut } = await execFileNoThrowWithCwd(
     gitExe(),
     ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -599,6 +624,12 @@ async function getOrCreateWorktree(
   if (existingHead) {
     // densable 2.1.216 #9: refuse leftover worktree from another repository
     await assertWorktreeNotForeignRepo(repoRoot, worktreePath)
+    // densable 2.1.238 ODt: refuse core.worktree redirect / checkout-above
+    await assertIsolationWorktreeAllowed(
+      worktreePath,
+      [],
+      liveLaunchDirs(getCwd(), repoRoot),
+    )
     return {
       worktreePath,
       worktreeBranch,
@@ -1256,14 +1287,18 @@ export async function createWorktreeForSession(
 
   const originalCwd = getCwd()
 
-  // Try hook-based worktree creation first (allows user-configured VCS)
+  // Assemble locally first. SEA EZn: ODt(s.worktreePath) then rwe(s).
+  // Do not assign the process-global session before the pin check — a
+  // refuse must leave getCurrentWorktreeSession() unchanged. Disk orphan
+  // on ODt fail is also SEA; do not invent cleanup.
+  let session: WorktreeSession
   if (hasWorktreeCreateHook()) {
     const hookResult = await executeWorktreeCreateHook(slug)
     logForDebugging(
       `Created hook-based worktree at: ${hookResult.worktreePath}`,
     )
 
-    currentWorktreeSession = {
+    session = {
       originalCwd,
       worktreePath: hookResult.worktreePath,
       worktreeName: slug,
@@ -1298,7 +1333,7 @@ export async function createWorktreeForSession(
       creationDurationMs = Date.now() - createStart
     }
 
-    currentWorktreeSession = {
+    session = {
       originalCwd,
       worktreePath,
       worktreeName: slug,
@@ -1313,13 +1348,19 @@ export async function createWorktreeForSession(
     }
   }
 
-  // Save to project config for persistence
+  await assertIsolationWorktreeAllowed(
+    session.worktreePath,
+    [],
+    liveLaunchDirs(originalCwd, findCanonicalGitRoot(originalCwd)),
+  )
+
+  currentWorktreeSession = session
   saveCurrentProjectConfig(current => ({
     ...current,
-    activeWorktreeSession: currentWorktreeSession ?? undefined,
+    activeWorktreeSession: session,
   }))
 
-  return currentWorktreeSession
+  return session
 }
 
 export async function keepWorktree(): Promise<void> {
@@ -1463,11 +1504,18 @@ export async function createAgentWorktree(slug: string): Promise<{
 }> {
   validateWorktreeSlug(slug)
 
+  const fromCwd = getCwd()
+
   // Try hook-based worktree creation first (allows user-configured VCS)
   if (hasWorktreeCreateHook()) {
     const hookResult = await executeWorktreeCreateHook(slug)
     logForDebugging(
       `Created hook-based agent worktree at: ${hookResult.worktreePath}`,
+    )
+    await assertIsolationWorktreeAllowed(
+      hookResult.worktreePath,
+      [],
+      liveLaunchDirs(fromCwd),
     )
 
     return { worktreePath: hookResult.worktreePath, hookBased: true }
@@ -1502,6 +1550,12 @@ export async function createAgentWorktree(slug: string): Promise<{
     await utimes(worktreePath, now, now)
     logForDebugging(`Resuming existing agent worktree at: ${worktreePath}`)
   }
+
+  await assertIsolationWorktreeAllowed(
+    worktreePath,
+    [],
+    liveLaunchDirs(fromCwd, gitRoot),
+  )
 
   return { worktreePath, worktreeBranch, headCommit, gitRoot }
 }
@@ -1828,6 +1882,18 @@ export async function execIntoTmuxWorktree(args: string[]): Promise<{
       }
     }
     repoName = basename(findCanonicalGitRoot(getCwd()) ?? getCwd())
+    try {
+      await assertIsolationWorktreeAllowed(
+        worktreeDir,
+        [],
+        liveLaunchDirs(getCwd(), findCanonicalGitRoot(getCwd())),
+      )
+    } catch (error) {
+      return {
+        handled: false,
+        error: `Error: ${errorMessage(error)}`,
+      }
+    }
     console.log(`Using worktree via hook: ${worktreeDir}`)
   } else {
     // Get main git repo root (resolves through worktrees)
@@ -1855,6 +1921,11 @@ export async function execIntoTmuxWorktree(args: string[]): Promise<{
         )
         await performPostCreationSetup(repoRoot, worktreeDir)
       }
+      await assertIsolationWorktreeAllowed(
+        worktreeDir,
+        [],
+        liveLaunchDirs(getCwd(), repoRoot),
+      )
     } catch (error) {
       return {
         handled: false,

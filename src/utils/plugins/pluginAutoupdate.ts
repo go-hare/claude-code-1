@@ -123,6 +123,10 @@ async function updatePlugin(
         logForDebugging(
           `Plugin autoupdate: updated ${pluginId} from ${result.oldVersion} to ${result.newVersion}`,
         )
+      } else if (result.skipReason === 'entry_helper_deferred') {
+        logForDebugging(
+          `Plugin autoupdate: skipped ${pluginId}: ${result.message}`,
+        )
       } else if (!result.alreadyUpToDate) {
         logForDebugging(
           `Plugin autoupdate: failed to update ${pluginId}: ${result.message}`,

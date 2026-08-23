@@ -185,7 +185,7 @@ WebSearch 工具支持直接抓取 Bing 搜索结果页面，也支持通过 Bra
 | `/api/oauth/organizations/{id}/referral/*` | 推荐活动 | `src/services/api/referral.ts` |
 | `/api/oauth/organizations/{id}/overage_credit_grant` | 超额信用 | `src/services/api/overageCreditGrant.ts` |
 | `/api/oauth/organizations/{id}/admin_requests` | 管理请求 | `src/services/api/adminRequests.ts` |
-| `/api/web/domain_info?domain={}` | 域名安全检查 | `src/tools/WebFetchTool/utils.ts` |
+| `/api/web/domain_info?domain={}` | 域名安全检查 | `packages/builtin-tools/src/tools/WebFetchTool/utils.ts` |
 | `/api/claude_code/settings` | 设置同步 | `src/services/settingsSync/index.ts` |
 | `/api/claude_code/managed_settings` | 企业托管设置 (1h 轮询) | `src/services/remoteManagedSettings/index.ts` |
 | `/api/claude_code/team_memory?repo={}` | 团队记忆同步 | `src/services/teamMemorySync/index.ts` |
@@ -194,7 +194,7 @@ WebSearch 工具支持直接抓取 Bing 搜索结果页面，也支持通过 Bra
 | `/mcp-registry/v0/servers` | MCP 服务器注册表 | `src/services/mcp/officialRegistry.ts` |
 | `/v1/files` | 文件上传/下载 | `src/services/api/filesApi.ts` |
 | `/v1/sessions/{id}/events` | 会话历史 | `src/assistant/sessionHistory.ts` |
-| `/v1/code/triggers` | 远程触发器 | `src/tools/RemoteTriggerTool/RemoteTriggerTool.ts` |
+| `/v1/code/triggers` | 远程触发器 | `packages/builtin-tools/src/tools/RemoteTriggerTool/RemoteTriggerTool.ts` |
 | `/v1/organizations/{id}/mcp_servers` | 组织 MCP 配置 | `src/services/mcp/claudeai.ts` |
 
 ## 非 Anthropic 远程域名汇总

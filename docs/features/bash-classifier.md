@@ -24,7 +24,7 @@ BASH_CLASSIFIER 使用 LLM 对 bash 命令进行意图分类（允许/拒绝/询
 | Bash 分类器 | `src/utils/permissions/bashClassifier.ts` | **Stub** | 所有函数返回空操作。注释："ANT-ONLY" |
 | YOLO 分类器 | `src/utils/permissions/yoloClassifier.ts` | **完整** | 1496 行，两阶段 XML 分类器 |
 | 审批信号 | `src/utils/classifierApprovals.ts` | **完整** | Map + 信号管理分类器决策 |
-| 权限 UI | `src/components/permissions/BashPermissionRequest.tsx` | **布线** | 分类器状态显示、审核选项 |
+| 权限 UI | `src/components/permissions/BashPermissionRequest/BashPermissionRequest.tsx` | **布线** | 分类器状态显示、审核选项 |
 | 权限管道 | `src/hooks/toolPermission/handlers/*.ts` | **布线** | 分类器结果路由到决策 |
 | API beta 标头 | `src/services/api/withRetry.ts` | **布线** | 启用时发送 `bash_classifier` beta |
 

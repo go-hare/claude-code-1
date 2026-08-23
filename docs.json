@@ -20,7 +20,8 @@
               "docs/introduction/why-this-whitepaper",
               "docs/introduction/architecture-overview"
             ]
-          }
+          },
+          "docs/features/all-features-guide"
         ]
       },
       {
@@ -55,13 +56,15 @@
         "pages": [
           "docs/agent/sub-agents",
           "docs/agent/worktree-isolation",
-          "docs/agent/coordinator-and-swarm"
+          "docs/agent/coordinator-and-swarm",
+          "docs/features/background-agent-selector"
         ]
       },
       {
         "group": "可扩展性",
         "pages": [
           "docs/extensibility/mcp-protocol",
+          "docs/extensibility/mcp-configuration",
           "docs/extensibility/hooks",
           "docs/extensibility/skills",
           "docs/extensibility/custom-agents"
@@ -90,7 +93,8 @@
           "docs/internals/ant-only-world",
           "docs/internals/session-transcript-persistence",
           "docs/features/debug-mode",
-          "docs/features/buddy"
+          "docs/features/buddy",
+          "docs/features/langfuse-monitoring"
         ]
       },
       {
@@ -112,8 +116,24 @@
               "docs/features/voice-mode",
               "docs/features/bridge-mode",
               "docs/features/remote-control-self-hosting",
+              "docs/features/ssh-remote",
               "docs/features/proactive",
+              "docs/features/status-line",
               "docs/features/ultraplan"
+            ]
+          },
+          {
+            "group": "ACP 协议接入",
+            "pages": ["docs/features/acp-link", "docs/features/acp-zed"]
+          },
+          {
+            "group": "本机与局域网协作",
+            "pages": [
+              "docs/features/uds-inbox",
+              "docs/features/pipes-and-lan",
+              "docs/features/lan-pipes",
+              "docs/features/lan-pipes-implementation",
+              "docs/features/channels"
             ]
           },
           {
@@ -123,6 +143,9 @@
               "docs/features/tree-sitter-bash",
               "docs/features/bash-classifier",
               "docs/features/web-browser-tool",
+              "docs/features/web-search-tool",
+              "docs/features/claude-in-chrome-mcp",
+              "docs/features/computer-use-tools-reference",
               "docs/features/experimental-skill-search"
             ]
           },
@@ -135,7 +158,23 @@
               "docs/features/auto-dream"
             ]
           },
+          {
+            "group": "桌面 Host 集成",
+            "pages": [
+              "docs/features/effort-ultracode-host-feature",
+              "docs/features/desktop-host-effort-ultracode",
+              "docs/features/host-tasks-permissions-residuals"
+            ]
+          },
           "docs/features/tier3-stubs"
+        ]
+      },
+      {
+        "group": "工程体系",
+        "pages": [
+          "docs/internals/build-system",
+          "docs/internals/model-providers",
+          "docs/internals/upstream-alignment"
         ]
       },
       {

@@ -1,10 +1,10 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
+import { getMainThreadAgentId } from 'src/bootstrap/state.js'
 import {
-  getMainThreadAgentId,
-  isReplBridgeActive,
-} from 'src/bootstrap/state.js'
-import { getReplBridgeHandle } from 'src/bridge/replBridgeHandle.js'
+  formatRemoteControlSendBlock,
+  getRemoteControlSendBlockReason,
+} from 'src/bridge/remoteControlSendGate.js'
 import type { Tool, ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { findTeammateTaskByAgentId } from 'src/tasks/InProcessTeammateTask/InProcessTeammateTask.js'
@@ -1384,15 +1384,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             errorCode: 9,
           }
         }
-        // postInterClaudeMessage derives from= via getReplBridgeHandle() —
-        // check handle directly for the init-timing window. Also check
-        // isReplBridgeActive() to reject outbound-only (CCR mirror) mode
-        // where the bridge is write-only and peer messaging is unsupported.
-        if (!getReplBridgeHandle() || !isReplBridgeActive()) {
+        // densable 2.1.238 #27 Aom — live handle OR CLAUDE_CODE_REMOTE with
+        // a reply address is OK; only local non-RC without live handle is
+        // rc-disconnected. Do not invent Desktop handoff.
+        const rcBlock = getRemoteControlSendBlockReason()
+        if (rcBlock) {
+          const reason = formatRemoteControlSendBlock(rcBlock)
           return {
             result: false,
             message:
-              'Remote Control is not connected — cannot send to a bridge: target. Reconnect with /remote-control first.',
+              rcBlock === 'rc-disconnected'
+                ? `${reason} — cannot send to a bridge: target. Reconnect with /remote-control first.`
+                : `${reason} — cannot send to a bridge: target.`,
             errorCode: 9,
           }
         }
@@ -1675,15 +1678,16 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         // Explicit uds:/bridge:/tcp: schemes only here.
         // densable gIn bare-name / name [ref] peer resolve runs AFTER local_agent.
         if (addr.scheme === 'bridge') {
-          // Re-check handle — checkPermissions blocks on user approval (can be
-          // minutes). validateInput's check is stale if the bridge dropped
-          // during the prompt wait; without this, from="unknown" ships.
-          // Also re-check isReplBridgeActive for outbound-only mode.
-          if (!getReplBridgeHandle() || !isReplBridgeActive()) {
+          // densable 2.1.238 #27 — re-check Aom after permission wait.
+          const rcBlock = getRemoteControlSendBlockReason()
+          if (rcBlock) {
             return {
               data: {
                 success: false,
-                message: `Remote Control disconnected before send — cannot deliver to ${input.to}`,
+                message:
+                  rcBlock === 'rc-disconnected'
+                    ? `Remote Control disconnected before send — cannot deliver to ${input.to}`
+                    : `${formatRemoteControlSendBlock(rcBlock)} — cannot deliver to ${input.to}`,
               },
             }
           }
@@ -2007,11 +2011,15 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           const cand = resolved.candidate
           const preview = input.summary || truncate(input.message, 50)
           if (cand.kind === 'bridge-session') {
-            if (!getReplBridgeHandle() || !isReplBridgeActive()) {
+            const rcBlock = getRemoteControlSendBlockReason()
+            if (rcBlock) {
               return {
                 data: {
                   success: false,
-                  message: `Remote Control disconnected before send — cannot deliver to ${cand.name}`,
+                  message:
+                    rcBlock === 'rc-disconnected'
+                      ? `Remote Control disconnected before send — cannot deliver to ${cand.name}`
+                      : `${formatRemoteControlSendBlock(rcBlock)} — cannot deliver to ${cand.name}`,
                 },
               }
             }

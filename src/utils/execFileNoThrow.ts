@@ -52,6 +52,11 @@ type ExecFileWithCwdOptions = {
   maxBuffer?: number
   cwd?: string
   env?: NodeJS.ProcessEnv
+  /**
+   * densable 2.1.238 marketplace/catalog headersHelper (`m5n`): when false,
+   * do not merge process.env — `env` is the full child environment.
+   */
+  extendEnv?: boolean
   shell?: boolean | string | undefined
   stdin?: 'ignore' | 'inherit' | 'pipe'
   input?: string
@@ -97,6 +102,7 @@ export function execFileNoThrowWithCwd(
     preserveOutputOnError: finalPreserveOutput = true,
     cwd: finalCwd,
     env: finalEnv,
+    extendEnv,
     maxBuffer,
     shell,
     stdin: finalStdin,
@@ -115,6 +121,7 @@ export function execFileNoThrowWithCwd(
       timeout: finalTimeout,
       cwd: finalCwd,
       env: finalEnv,
+      ...(extendEnv === false ? { extendEnv: false } : {}),
       shell,
       stdin: finalStdin,
       input: finalInput,

@@ -39,6 +39,7 @@ import {
   getMarketplace,
   getPluginById,
   loadKnownMarketplacesConfig,
+  loadKnownMarketplacesConfigSafe,
   logScopedInstallRefreshOutcome,
   tryRefreshMarketplaceBeforeScopedInstall,
 } from '../../utils/plugins/marketplaceManager.js'
@@ -56,6 +57,20 @@ import {
   pluginIdEquals,
   scopeToSettingSource,
 } from '../../utils/plugins/pluginIdentifier.js'
+import {
+  compareConsentedEntryHelper,
+  ENTRY_HELPER_UPDATE_ABORT_MESSAGE,
+  formatEntryHelperCliUnconfirmedMessage,
+  formatEntryHelperDisclosure,
+  formatHeadersHelperPaneMismatch,
+  getShownArchiveHeadersHelperFromOverlay,
+  lookupTrustedSettingsEntryAuth,
+  marketplaceSourceFromKnown,
+  overlayTrustedSettingsEntryAuth,
+  planArchiveEntryHelperUpdate,
+  resolveCliUnconfirmedArchiveHelper,
+  type HeadersHelperPaneShown,
+} from '../../utils/plugins/marketplaceHeadersHelper.js'
 import {
   formatResolutionError,
   installResolvedPlugin,
@@ -174,6 +189,8 @@ export type PluginUpdateResult = {
   oldVersion?: string
   alreadyUpToDate?: boolean
   scope?: PluginScope
+  /** SEA `ggw` — autoupdate treats this as skip, not fail. */
+  skipReason?: 'entry_helper_deferred'
 }
 
 // ============================================================================
@@ -371,6 +388,11 @@ export async function installPluginOp(
      * installed_plugins.
      */
     shownSourceCommand?: string
+    /**
+     * SEA zgh `shownEntryHelper` — snapshot from Vgh/CLI announce. After
+     * refresh, missing shown + present helper throws CLI unconfirmed copy.
+     */
+    shownEntryHelper?: HeadersHelperPaneShown
   },
 ): Promise<PluginOperationResult> {
   assertInstallableScope(scope)
@@ -482,12 +504,33 @@ export async function installPluginOp(
     )
   }
 
+  // SEA zgh/bin: if(n!==void 0) y=n; else g5n(DNt); overlay sve/YLa → null.
+  let consentedEntryHelper: HeadersHelperPaneShown | undefined
+  if (options?.shownEntryHelper !== undefined) {
+    consentedEntryHelper = options.shownEntryHelper
+  } else {
+    const known = await loadKnownMarketplacesConfigSafe()
+    const helper = resolveCliUnconfirmedArchiveHelper({
+      entry,
+      marketplaceName: foundMarketplace,
+      marketplaceSource: known[foundMarketplace]?.source,
+    })
+    if (helper) {
+      return {
+        success: false,
+        message: formatEntryHelperCliUnconfirmedMessage(helper),
+      }
+    }
+  }
+
   const result = await installResolvedPlugin({
     pluginId,
     entry,
     scope,
     marketplaceInstallLocation,
     commandSourceConsent,
+    runEntryHelper: true,
+    consentedEntryHelper,
   })
 
   if (!result.ok) {
@@ -1011,6 +1054,22 @@ export type PluginUpdateCommandSourceOptions = {
     acceptedCommand: string | undefined,
   ) => Promise<string | undefined>
   skipCommandSources?: boolean
+  /**
+   * SEA `ggw` `explicit` — CLI / `/plugin` pane set true; autoupdate leaves
+   * false so archive headersHelper defers (`entry_helper_deferred`).
+   */
+  explicit?: boolean
+  /**
+   * SEA `onEntryHelperDisclosure` — CLI wires BXi + f3l. Pane already gated.
+   */
+  onEntryHelperDisclosure?: (
+    disclosure: string,
+  ) => Promise<'accepted' | 'declined' | 'unconfirmed'>
+  /**
+   * SEA pane `_in(..., {consentedEntryHelper: pinned()})`. CLI update uses
+   * onEntryHelperDisclosure instead.
+   */
+  consentedEntryHelper?: HeadersHelperPaneShown | null
 }
 
 /**
@@ -1202,13 +1261,118 @@ async function performPluginUpdate({
     // densable archive auth: same-origin url-source headers as install path
     // (cacheAndRegisterPlugin / loadPluginFromMarketplaceEntry).
     // densable R0v: pass commandSourceConsent into Pkr/cachePlugin.
+    // densable 2.1.238 ggw: full entry + runEntryHelper:explicit + marketplaceSource.
+    const known = await loadKnownMarketplacesConfigSafe()
+    const { marketplaceName, marketplaceSource } = marketplaceSourceFromKnown(
+      pluginId,
+      known,
+    )
+    const explicit = options?.explicit === true
+    const trustedSettingsEntryAuth = lookupTrustedSettingsEntryAuth(
+      marketplaceName,
+      entry.name,
+    )
+    const plan = planArchiveEntryHelperUpdate({
+      pluginId,
+      pluginName,
+      entry,
+      installedVersion: oldVersion,
+      explicit,
+      marketplaceSource,
+      marketplaceName,
+      trustedSettingsEntryAuth,
+    })
+    if (plan.kind === 'fail') {
+      return {
+        success: false,
+        message: plan.message,
+        pluginId,
+        scope,
+      }
+    }
+    if (plan.kind === 'up_to_date') {
+      return {
+        success: true,
+        message: `${pluginName} is already at the latest version (${plan.version}).`,
+        pluginId,
+        newVersion: plan.version,
+        oldVersion,
+        alreadyUpToDate: true,
+        scope,
+      }
+    }
+    if (plan.kind === 'skip') {
+      return {
+        success: false,
+        message: plan.message,
+        pluginId,
+        oldVersion,
+        scope,
+        skipReason: plan.skipReason,
+      }
+    }
+
+    if (
+      explicit &&
+      typeof entry.source === 'object' &&
+      entry.source.source === 'archive'
+    ) {
+      const helper = getShownArchiveHeadersHelperFromOverlay(
+        overlayTrustedSettingsEntryAuth({
+          entry,
+          archiveUrl: entry.source.url,
+          marketplaceSource,
+          trustedSettingsEntryAuth,
+        }),
+        entry.source.url,
+      )
+      if (helper) {
+        if (options?.onEntryHelperDisclosure) {
+          const verdict = await options.onEntryHelperDisclosure(
+            formatEntryHelperDisclosure(helper),
+          )
+          if (verdict !== 'accepted') {
+            return {
+              success: false,
+              message: ENTRY_HELPER_UPDATE_ABORT_MESSAGE,
+              pluginId,
+              scope,
+            }
+          }
+        } else {
+          // SEA pane qhi(consented, helper) — always compare, even if
+          // getMarketplace threw in the caller (pinned() may be null).
+          const qhi = compareConsentedEntryHelper({
+            consented: options?.consentedEntryHelper,
+            helper,
+            pluginName,
+            kind: 'update',
+          })
+          if (!qhi.ok) {
+            return {
+              success: false,
+              message: formatHeadersHelperPaneMismatch(qhi),
+              pluginId,
+              scope,
+            }
+          }
+        }
+      }
+    }
+
     const { marketplaceHeaders, marketplaceUrl } =
       await resolveMarketplaceArchiveAuth(pluginId)
     const cacheResult = await cachePlugin(entry.source, {
-      manifest: { name: entry.name },
+      manifest: entry,
       marketplaceHeaders,
       marketplaceUrl,
       commandSourceConsent,
+      runEntryHelper: explicit,
+      pluginName: entry.name,
+      marketplaceName,
+      marketplaceSource,
+      operatorAuthored: trustedSettingsEntryAuth?.origin === 'settings',
+      trustedSettingsEntryAuth,
     })
     sourcePath = cacheResult.path
     shouldCleanupSource = true

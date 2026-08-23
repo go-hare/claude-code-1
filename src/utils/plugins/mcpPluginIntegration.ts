@@ -347,6 +347,7 @@ export function addPluginScopeToServers(
   servers: Record<string, McpServerConfig>,
   pluginName: string,
   pluginSource: string,
+  pluginPath?: string,
 ): Record<string, ScopedMcpServerConfig> {
   const scopedServers: Record<string, ScopedMcpServerConfig> = {}
 
@@ -357,6 +358,7 @@ export function addPluginScopeToServers(
       ...config,
       scope: 'dynamic', // Use dynamic scope for plugin servers
       pluginSource,
+      ...(pluginPath !== undefined ? { pluginPath } : {}),
     }
     scopedServers[scopedName] = scoped
   }
@@ -420,6 +422,7 @@ export async function extractMcpServersFromPlugins(
         resolvedServers,
         plugin.name,
         plugin.source,
+        plugin.path,
       )
     }),
   )
@@ -678,5 +681,10 @@ export async function getPluginMcpServers(
   }
 
   // Add plugin scope
-  return addPluginScopeToServers(resolvedServers, plugin.name, plugin.source)
+  return addPluginScopeToServers(
+    resolvedServers,
+    plugin.name,
+    plugin.source,
+    plugin.path,
+  )
 }

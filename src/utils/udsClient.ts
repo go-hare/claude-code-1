@@ -7,6 +7,7 @@
  * its socket accepts a ping/pong round-trip.
  */
 
+import { randomUUID } from 'crypto'
 import { createConnection, type Socket } from 'net'
 import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
@@ -46,6 +47,8 @@ export type PeerSession = {
   messagingSocketPath?: string
   entrypoint?: string
   bridgeSessionId?: string | null
+  /** densable 2.1.238 #28 — pre-warm spare hidden until claimed. */
+  spare?: boolean
   alive: boolean
 }
 
@@ -151,6 +154,7 @@ export async function listAllLiveSessions(): Promise<PeerSession[]> {
         messagingSocketPath: data.messagingSocketPath as string | undefined,
         entrypoint: data.entrypoint as string | undefined,
         bridgeSessionId: data.bridgeSessionId as string | null | undefined,
+        ...(data.spare === true ? { spare: true } : {}),
         alive: true,
       })
     } catch {
@@ -167,7 +171,10 @@ export async function listAllLiveSessions(): Promise<PeerSession[]> {
  */
 export async function listPeers(): Promise<PeerSession[]> {
   const all = await listAllLiveSessions()
-  return all.filter(s => s.pid !== process.pid && s.messagingSocketPath != null)
+  // densable hya — hide unclaimed pre-warm spare workers from ListAgents.
+  return all.filter(
+    s => s.pid !== process.pid && s.messagingSocketPath != null && !s.spare,
+  )
 }
 
 async function findAuthTokenForSocketPath(
@@ -339,13 +346,16 @@ export async function sendToUdsSocket(
     ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
   })
 
+  const msgId = randomUUID()
   const udsMsg: UdsMessage = {
     type: 'text',
     data,
     ts: new Date().toISOString(),
     from: ownSocket,
+    msg_id: msgId,
     meta: {
       authToken,
+      msg_id: msgId,
       ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
       ...(opts.selfSent === true ? { selfSent: true } : {}),
     },
@@ -373,6 +383,15 @@ export async function sendToUdsSocket(
       `[uds-client] paced: not sending to ${targetSocketPath} — ${reservation.sentInBurst} sent this burst; its inbox rate limit would drop more`,
     )
     throw createUdsOutboundPacedError(reservation.sentInBurst)
+  }
+
+  // densable fXd — correlate outbound UDS text with peer_message_status receipts.
+  const destAddr = `uds:${target.socketPath}`
+  try {
+    const { noteOutstandingSend } = await import('./peerReceipts.js')
+    noteOutstandingSend(msgId, destAddr)
+  } catch {
+    // optional
   }
 
   // densable $id — track outbound peer as rename-notice correspondent.
@@ -433,6 +452,12 @@ export async function sendToUdsSocket(
       })
     })
   } catch (err) {
+    try {
+      const { forgetOutstandingSend } = await import('./peerReceipts.js')
+      forgetOutstandingSend(msgId)
+    } catch {
+      // optional
+    }
     // densable QHr — connect-fail refunds the reserved token.
     if (isUdsConnectFailError(err)) {
       reservation.refund()

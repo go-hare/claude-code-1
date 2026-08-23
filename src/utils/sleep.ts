@@ -82,3 +82,32 @@ export function withTimeout<T>(
     if (timer !== undefined) clearTimeout(timer)
   })
 }
+
+/**
+ * densable `jg` / `XYy` — race a promise against a deadline. Resolves
+ * `undefined` if the timer fires first (does **not** reject). Optional
+ * `createTimer` matches SEA `XYy` (`setTimeout` + `clearTimeout`, no unref).
+ *
+ * Distinct from {@link withTimeout}, which rejects. Fast-path keychain
+ * prefetch (`LDn(Uoa)`) needs the resolve-undefined contract so a hung
+ * `security` spawn cannot stall `claude remote-control` / daemon / `--bg`.
+ */
+export type DeadlineTimer = (callback: () => void, ms: number) => () => void
+
+const defaultDeadlineTimer: DeadlineTimer = (callback, ms) => {
+  // eslint-disable-next-line no-restricted-syntax -- densable XYy: deadline timer, not a sleep
+  const timer = setTimeout(callback, ms)
+  return () => clearTimeout(timer)
+}
+
+export function withDeadline<T>(
+  promise: Promise<T>,
+  ms: number,
+  createTimer: DeadlineTimer = defaultDeadlineTimer,
+): Promise<T | undefined> {
+  let cancel = (): void => {}
+  const deadline = new Promise<undefined>(resolve => {
+    cancel = createTimer(() => resolve(undefined), ms)
+  })
+  return Promise.race([promise, deadline]).finally(cancel)
+}

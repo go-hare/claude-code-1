@@ -7,6 +7,21 @@ export function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+/** densable `cYb` — leftover C0/C1/LS/PS after `&<>` escape */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: densable cYb C0/C1
+const OUTPUT_STYLE_NAME_CTRL_RE = /[\x00-\x1f\x7f-\x9f\u2028\u2029]/g
+
+/**
+ * densable `pze`/`ktp` — HTML-escape an output-style name for the per-turn
+ * reminder. Control chars become `&#N;` numeric references.
+ */
+export function escapeOutputStyleName(s: string): string {
+  return escapeXml(s).replace(
+    OUTPUT_STYLE_NAME_CTRL_RE,
+    ch => `&#${ch.charCodeAt(0)};`,
+  )
+}
+
 /**
  * densable oX(C7_/Fud) — display-side unescape for `&amp;|&lt;|&gt;` only.
  * Inverse of escapeXml / Ua for UI render of local-command / bash stdout·stderr

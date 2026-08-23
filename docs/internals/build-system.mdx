@@ -1,0 +1,175 @@
+---
+title: "构建与发布体系"
+description: "两条流水线、为什么必须代码分割、MACRO defines、平台包发布"
+---
+
+Claude Code 跑在 **Bun** 上而不是 Node。但构建产物是 **Node 兼容**的——`build.ts` 会后处理
+`import.meta.require`，所以 `bun dist/cli.js` 和 `node dist/cli.js` 都能跑。
+
+## 两条流水线
+
+<CardGroup cols={2}>
+  <Card title="主线：Bun.build" icon="bolt">
+    `bun run build` → `build.ts`
+  </Card>
+  <Card title="备选：Vite" icon="layer-group">
+    `bun run build:vite` → `vite.config.ts` + `scripts/post-build.ts`
+  </Card>
+</CardGroup>
+
+主线流程（`build.ts`）：
+
+```
+bun run build
+  → rmSync(dist/)
+  → 收集 FEATURE_* 环境变量，与 DEFAULT_BUILD_FEATURES 取并集
+  → Bun.build({
+      entrypoints: ['src/entrypoints/cli.tsx'],
+      outdir: 'dist',
+      target: 'bun',
+      splitting: true,          ← 关键，见下节
+      define: getMacroDefines(),
+      features,
+    })
+  → 后处理每个 .js：import.meta.require → Node shim
+                     globalThis.Bun 解构 patch
+  → 复制 vendor：
+      vendor/audio-capture        → dist/vendor/audio-capture
+      src/utils/vendor/ripgrep    → dist/vendor/ripgrep
+      vendor/clipboard-image      → dist/vendor/clipboard-image
+```
+
+Vite 那条走 SSR rollup，chunk 落在 `dist/chunks/`，由 `scripts/post-build.ts` 做同样的
+`globalThis.Bun` 解构 patch 和 vendor 复制。两条流水线的 feature 死代码消除分别由 Bun 的
+`features` 选项和 `scripts/vite-plugin-feature-flags.ts` 负责。
+
+## 为什么 `splitting` 不能关
+
+这是全项目最反直觉的一条约束，而且踩了就是灾难性的：
+
+Bun/JSC 会**全量解析**单个大 JS 文件的 bytecode 并 JIT。单文件 17MB 产物会让 RSS 飙到约
+**1GB**。Node/V8 是懒解析，同样的产物只要约 220MB——所以这个问题只在 Bun 上出现。
+
+切成 600+ 个小 chunk 之后 Bun 按需加载：
+
+| 场景 | 单文件产物 | 代码分割后 |
+|------|-----------|-----------|
+| `--version` | 966 MB | **35 MB** |
+| 完整加载 | 1 GB+ | **~500 MB** |
+
+<Warning>
+**不要关掉 `splitting`，也不要为了「少几个文件」去合并 chunk。** 这不是构建洁癖问题，
+而是 `--version` 这种最轻量的调用会不会吃掉一个 G 内存的问题。
+</Warning>
+
+顺带一提：`--version` 之所以只要 35MB，还因为 `cli.tsx` 把它做成了**零模块加载**的 fast
+path——直接打印构建时内联的 `MACRO.VERSION` 就退出，一个业务模块都不 import。
+
+## 产物根目录定位
+
+构建后 chunk 可能在 `dist/` 也可能在 `dist/chunks/`，而 vendor 二进制固定在 `dist/vendor/`。
+`src/utils/distRoot.ts` 导出的 `distRoot` 统一解决这个定位问题：从 `import.meta.url` 里取
+`lastIndexOf('dist')` 或 `lastIndexOf('src')`。
+
+`ripgrep.ts`、`computerUse/setup.ts`、`claudeInChrome/setup.ts`、`updateCCB.ts` 都用
+`distRoot`，**不要再内联写 `import.meta.url` 的路径推算**。（`packages/audio-capture-napi`
+有一份独立但等价的实现。）
+
+## MACRO defines
+
+全部集中在 `scripts/defines.ts` 的 `getMacroDefines()`：
+
+- `MACRO.VERSION` — **从 `package.json` 读**，避免版本漂移
+- `MACRO.BUILD_TIME`、`MACRO.GIT_SHA`
+- `MACRO.PACKAGE_URL` / `MACRO.NATIVE_PACKAGE_URL` — 本 fork 是 `@go-hare/claude-code`
+- `MACRO.VERSION_CHANGELOG`
+
+注入方式按场景分三路：
+
+| 场景 | 注入方式 |
+|------|---------|
+| dev | `scripts/dev.ts` 通过 Bun `-d` flag |
+| build | `Bun.build({ define })` |
+| 裸跑 `cli.tsx` | `cli.tsx` 顶部的 `globalThis.MACRO` fallback 分支从环境变量读 |
+
+<Note>
+**改版本号只改 `package.json`。** `defines.ts` 会跟着走。`cli.tsx` fallback 分支里那个
+硬编码的 `'2.1.888'` 只在完全没有 defines 注入时生效，它本身已经过期，不代表当前版本。
+</Note>
+
+## Feature flag 与构建的关系
+
+`DEFAULT_BUILD_FEATURES` 也在 `scripts/defines.ts`。当前**启用 42 个**，另有 7 个被注释掉：
+
+```
+ULTRAPLAN          densable 2.1.222 #21 产品拆除，残留模块留作 FEATURE_ULTRAPLAN=1 复活
+TREE_SITTER_BASH
+HISTORY_SNIP       stub 风险会抑制 proactive autoCompact
+CONTEXT_COLLAPSE   同上
+FORK_SUBAGENT
+REVIEW_ARTIFACT
+SKILL_LEARNING
+```
+
+注释掉的那几个**不要随手加回来**——每条上面的注释都写了原因，`ULTRAPLAN` 那条还明确要求
+不得重新加入。
+
+代码里统一用 `import { feature } from 'bun:bundle'`。这是 Bun 内置模块，由构建器把
+`feature('X')` 内联成常量来做死代码消除，所以有个硬限制：
+
+<Warning>
+`feature()` **只能**直接写在 `if` 语句或三元表达式的**条件位置**。不能赋给变量、不能放进
+箭头函数体、不能当 `&&` 链的一环。
+
+正确：`if (feature('X')) {}` / `feature('X') ? a : b`
+</Warning>
+
+## 发布链路
+
+```
+scripts/publish.ts
+  → bun build --compile 每平台原生二进制 → dist/claude
+  → 拷进 packages/@go-hare/claude-code-<platform>/
+  → 附带该平台的 vendor（ripgrep、clipboard-image）
+  → 发布平台包 +（可选）主包 @go-hare/claude-code
+```
+
+主包本身只含 `bin/claude.exe`（stub）、`install.cjs`、`cli-wrapper.cjs`，靠
+`optionalDependencies` 拉对应平台包，postinstall 时把原生二进制硬链接或拷贝到
+`bin/claude.exe`。
+
+monorepo 根的 `prepublishOnly` 会**主动拒绝** `npm publish`（检测到 `workspaces` 字段就
+报错退出），必须走 `scripts/publish.ts`。
+
+## 常用命令
+
+```bash
+bun install
+bun run dev                  # 全 feature 开启，跑 cli.tsx
+bun run dev:inspect          # BUN_INSPECT=9229 调试
+echo "hi" | bun run src/entrypoints/cli.tsx -p    # pipe 模式
+
+bun run build                # 主构建（Bun.build）
+bun run build:vite           # 备选构建（Vite）
+bun run build:compile        # 只编译原生二进制
+
+bun run precheck             # ★ typecheck + biome check:fix + bun test
+bun run typecheck
+bun test path/to/file.test.ts
+
+bun run check:bundle         # 产物完整性
+bun run check:unused         # knip
+bun run rcs                  # 自托管 Remote Control Server
+bun run docs:dev             # 本文档站（mintlify dev）
+```
+
+<Warning>
+`package.json` 里有两个脚本指向**不存在的文件**，跑了会直接失败：
+
+- `bun run health` → `scripts/health-check.ts` 缺失
+- `bun run test:production`（及 `:offline` / `:verbose` / `:bun` 变体）→ `scripts/production-test.ts` 缺失
+
+要么补上脚本，要么把这些条目从 `package.json` 删掉。
+</Warning>
+
+**任务完成前必须 `bun run precheck` 零错误**——它串了 typecheck、Biome 自动修复和全量测试。

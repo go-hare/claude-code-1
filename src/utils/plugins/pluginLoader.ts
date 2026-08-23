@@ -123,10 +123,11 @@ import {
   PluginHooksSchema,
   PluginIdSchema,
   PluginManifestSchema,
+  type MarketplaceSource,
   type PluginMarketplaceEntry,
   type PluginSource,
 } from './schemas.js'
-import { installFromArchive } from './pluginArchive.js'
+import { installFromArchive, isSameOrigin } from './pluginArchive.js'
 import {
   convertDirectoryToZipInPlace,
   extractZipToDirectory,
@@ -942,6 +943,18 @@ export async function cachePlugin(
      * the command is not run.
      */
     commandSourceConsent?: CommandSourceConsent
+    /**
+     * densable 2.1.238 — when true, catalog entry headersHelper may run
+     * (install/update only). Browse/load paths leave this unset/false.
+     */
+    runEntryHelper?: boolean
+    /** Plugin id name (before @) for entry helper env / errors. */
+    pluginName?: string
+    marketplaceName?: string
+    marketplaceSource?: import('./schemas.js').MarketplaceSource
+    operatorAuthored?: boolean
+    /** SEA `P5r` `trustedSettingsEntryAuth` from `Ryt`. */
+    trustedSettingsEntryAuth?: import('./marketplaceHeadersHelper.js').TrustedSettingsEntryAuth
   },
 ): Promise<{
   path: string
@@ -993,18 +1006,109 @@ export async function cachePlugin(
             source.sha,
           )
           break
-        case 'archive':
+        case 'archive': {
           // densable Sny — contentSha256 occupies the gitCommitSha slot so
           // calculatePluginVersion can form the 12-char archive version id.
-          // Same-origin marketplace headers (schemas: url-source auth) are
-          // forwarded by installFromArchive when marketplaceUrl matches.
+          // SEA P5r: DNt overlay → J8p on overlay entry → same-origin `_5n` → G4S.
+          let archiveHeaders = options?.marketplaceHeaders
+          // densable mqS n.url: marketplace-only bags compare against marketplace
+          // origin; P5r bags stamp the archive URL so entry headers survive
+          // when marketplaceUrl is undefined (github / non-url source).
+          let headerOriginUrl = options?.marketplaceUrl
+          const entryManifest = options?.manifest as
+            | PluginMarketplaceEntry
+            | undefined
+          const archiveUrl = source.url
+          const marketplaceSource = options?.marketplaceSource
+          const marketplaceUrl = options?.marketplaceUrl
+          const helperMod = await import('./marketplaceHeadersHelper.js')
+          const pluginName =
+            options?.pluginName ??
+            (typeof entryManifest?.name === 'string'
+              ? entryManifest.name
+              : 'plugin')
+          const overlay = helperMod.overlayTrustedSettingsEntryAuth({
+            entry: entryManifest ?? {
+              headers: undefined,
+              headersHelper: undefined,
+              source,
+            },
+            archiveUrl,
+            marketplaceSource,
+            trustedSettingsEntryAuth:
+              options?.trustedSettingsEntryAuth !== undefined
+                ? options.trustedSettingsEntryAuth
+                : helperMod.lookupTrustedSettingsEntryAuth(
+                    options?.marketplaceName,
+                    pluginName,
+                  ),
+          })
+          const overlayHasHelper = helperMod.entryDeclaresHeadersHelper(
+            overlay.entry,
+          )
+          const overlayHasStaticOrHelper = Boolean(
+            overlay.entry.headers || overlay.entry.headersHelper,
+          )
+          const marketplaceIsUrl =
+            marketplaceSource !== undefined &&
+            marketplaceSource.source === 'url'
+          const needsP5rMint =
+            marketplaceIsUrl &&
+            typeof marketplaceUrl === 'string' &&
+            isSameOrigin(marketplaceUrl, archiveUrl)
+
+          if (overlayHasHelper || needsP5rMint || overlayHasStaticOrHelper) {
+            if (overlayHasHelper) {
+              helperMod.assertEntryHeadersHelperMayRun(overlay.entry, {
+                pluginName,
+                runEntryHelper: options?.runEntryHelper === true,
+                requireInlinedManifest: overlay.requireInlinedManifest,
+                marketplaceSource,
+                marketplaceName: options?.marketplaceName,
+              })
+            }
+
+            let mintedMarketplace: Record<string, string> | undefined
+            if (needsP5rMint && marketplaceSource?.source === 'url') {
+              mintedMarketplace = await helperMod.resolveUrlMarketplaceHeaders(
+                marketplaceSource,
+                { marketplaceName: options?.marketplaceName },
+              )
+            }
+
+            if (overlayHasStaticOrHelper) {
+              archiveHeaders = await helperMod.resolvePluginArchiveHeaders(
+                overlay.entry,
+                {
+                  pluginName,
+                  archiveUrl,
+                  runEntryHelper: options?.runEntryHelper === true,
+                  operatorAuthored: overlay.operatorAuthored,
+                  requireInlinedManifest: overlay.requireInlinedManifest,
+                  marketplaceSource,
+                  marketplaceName: options?.marketplaceName,
+                  marketplaceHeaders:
+                    mintedMarketplace ?? options?.marketplaceHeaders,
+                  marketplaceUrl,
+                },
+              )
+              headerOriginUrl = archiveUrl
+            } else if (
+              mintedMarketplace &&
+              Object.keys(mintedMarketplace).length > 0
+            ) {
+              archiveHeaders = mintedMarketplace
+              headerOriginUrl = archiveUrl
+            }
+          }
           gitCommitSha = await installFromArchive(
             { url: source.url, sha256: source.sha256 },
             tempPath,
-            options?.marketplaceHeaders,
-            options?.marketplaceUrl,
+            archiveHeaders,
+            headerOriginUrl,
           )
           break
+        }
         case 'command': {
           // densable 2.1.229 #4 Oxd — run marketplace command → copy/link into
           // temp cache. contentSha256 occupies gitCommitSha like archive.
@@ -2151,6 +2255,8 @@ async function loadPluginsFromMarketplaces({
             installEntry?.version,
             marketplaceHeaders,
             marketplaceUrl,
+            mktSource,
+            marketplaceName,
           )
     }),
   )
@@ -2283,6 +2389,8 @@ async function loadPluginFromMarketplaceEntry(
   installedVersion?: string,
   marketplaceHeaders?: Record<string, string>,
   marketplaceUrl?: string,
+  marketplaceSource?: MarketplaceSource,
+  marketplaceName?: string,
 ): Promise<LoadedPlugin | null> {
   logForDebugging(
     `Loading plugin ${entry.name} from source: ${jsonStringify(entry.source)}`,
@@ -2419,9 +2527,12 @@ async function loadPluginFromMarketplaceEntry(
           // Download to temp location, then copy to versioned cache.
           // densable archive: forward same-origin marketplace headers.
           const cached = await cachePlugin(entry.source, {
-            manifest: { name: entry.name },
+            manifest: entry,
             marketplaceHeaders,
             marketplaceUrl,
+            pluginName: entry.name,
+            marketplaceName,
+            marketplaceSource,
           })
 
           // If the pre-clone version was deterministic (source.sha /

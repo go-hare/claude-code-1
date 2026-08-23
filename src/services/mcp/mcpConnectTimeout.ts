@@ -9,6 +9,7 @@
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../utils/errors.js'
 
 /** densable y0 default when MCP_TIMEOUT unset / non-positive. */
@@ -142,10 +143,178 @@ export function createMcpConnectionTimeoutError(
 }
 
 /**
- * densable `k5a` (timeout surface only) — resolve negotiation mode + probe budget.
+ * densable `ocv` — transports that may auto-probe when env
+ * `MCP_PROTOCOL_NEGOTIATION=auto`. 238 dropped the stdio GB flag
+ * (`tengu_mcp_protocol_negotiation_stdio` 0 hits); stdio stays legacy
+ * unless the env forces auto. Do **not** wrap stdio with N_f (claudeai-proxy
+ * send-intercept only).
+ */
+const MCP_ERA_AUTO_CAPABLE = new Set([
+  'http',
+  'claudeai-proxy',
+  'ccr-proxy',
+  'stdio',
+])
+
+/**
+ * densable `Gia` — CCR/session-ingress MCP path markers for `Cke`.
+ * Dedup `unwrapCcrProxyUrl` uses a subset; negotiation kind needs the full list.
+ */
+export const MCP_CCR_PROXY_PATH_MARKERS = [
+  '/v2/session_ingress/shttp/mcp/',
+  '/v2/session_ingress/mcp/ws/',
+  '/v2/ccr-sessions/',
+  '/v1/code/',
+] as const
+
+/**
+ * densable `qxd`/`zxd` — capture ingress origin at module init
+ * (`SESSION_INGRESS_URL ?? ANTHROPIC_BASE_URL`). `reset()` recaptures.
+ */
+let capturedCcrIngressBase =
+  process.env.SESSION_INGRESS_URL ?? process.env.ANTHROPIC_BASE_URL
+
+/** densable `qxd.reset` — tests only. */
+export function resetMcpCcrIngressCapture(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  capturedCcrIngressBase = env.SESSION_INGRESS_URL ?? env.ANTHROPIC_BASE_URL
+}
+
+function originForCcrCompare(url: URL): string {
+  if (url.protocol === 'wss:') return `https://${url.host}`
+  if (url.protocol === 'ws:') return `http://${url.host}`
+  return url.origin
+}
+
+/**
+ * densable `Cke` — URL is CCR/session-ingress iff same origin as captured
+ * ingress base and pathname contains a `Gia` marker.
+ */
+export function isMcpCcrProxyUrl(url: string): boolean {
+  const base = capturedCcrIngressBase
+  if (!base) return false
+  let parsed: URL
+  let ingress: URL
+  try {
+    parsed = new URL(url)
+    ingress = new URL(base)
+  } catch {
+    return false
+  }
+  if (originForCcrCompare(parsed) !== ingress.origin) return false
+  return MCP_CCR_PROXY_PATH_MARKERS.some(marker =>
+    parsed.pathname.includes(marker),
+  )
+}
+
+/**
+ * densable `pMn` URL arm: `"url"in e && typeof e.url==="string" && Cke(e.url)`.
+ * SEA `vbe` (`cliOwnedConfigs` WeakSet) has no local equivalent — **do not invent**.
+ */
+export function isMcpCcrProxyServerConfig(
+  serverConfig: object | undefined,
+): boolean {
+  if (
+    serverConfig !== undefined &&
+    'url' in serverConfig &&
+    typeof serverConfig.url === 'string' &&
+    isMcpCcrProxyUrl(serverConfig.url)
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * densable `n_f(e, {inProcess, ccrProxy})` — Pwi transport kind.
+ * `http` + ccrProxy → `ccr-proxy` (GB `tengu_mcp_protocol_negotiation_ccr`).
+ */
+export function resolveMcpNegotiationTransportKind(
+  serverType: string | undefined,
+  opts: { inProcess?: boolean; ccrProxy?: boolean } = {},
+): string | undefined {
+  if (opts.inProcess) return 'in-process'
+  switch (serverType) {
+    case 'http':
+      return opts.ccrProxy ? 'ccr-proxy' : 'http'
+    case 'sse':
+      return 'sse'
+    case 'ws':
+      return 'ws'
+    case 'sse-ide':
+    case 'ws-ide':
+      return 'ide'
+    case 'claudeai-proxy':
+      return 'claudeai-proxy'
+    case 'sdk':
+      return 'sdk-control'
+    case 'stdio':
+    case undefined:
+      return 'stdio'
+  }
+  return undefined
+}
+
+/**
+ * densable `xwi`/`Pwi` `t` — full MCP server config. Only `url` is read
+ * when present; stdio (no url) is a valid denylist target (`*` / url-less).
+ */
+export type McpDenylistServerConfig = object
+
+/**
+ * densable `xwi` body after `it(e,[])`: empty/non-array → false; `"*"` → true;
+ * else hostname exact or subdomain-suffix match.
+ */
+export function matchMcpServerDenylist(
+  entries: unknown,
+  serverConfig: McpDenylistServerConfig | undefined,
+): boolean {
+  if (!Array.isArray(entries) || entries.length === 0) return false
+  if (entries.includes('*')) return true
+  if (
+    serverConfig === undefined ||
+    !('url' in serverConfig) ||
+    typeof serverConfig.url !== 'string'
+  ) {
+    return false
+  }
+  try {
+    const hostname = new URL(serverConfig.url).hostname.toLowerCase()
+    return entries.some(entry => {
+      if (typeof entry !== 'string' || entry === '') return false
+      const needle = entry.toLowerCase()
+      return hostname === needle || hostname.endsWith(`.${needle}`)
+    })
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable `LGa` — `xwi("tengu_mcp_negotiation_server_denylist", server)`.
+ */
+export function isMcpNegotiationServerDenylisted(
+  serverConfig: McpDenylistServerConfig | undefined,
+  readFeature: (key: string, def: unknown[]) => unknown = (key, def) =>
+    getFeatureValue_CACHED_MAY_BE_STALE(key, def),
+): boolean {
+  if (serverConfig === undefined) return false
+  return matchMcpServerDenylist(
+    readFeature('tengu_mcp_negotiation_server_denylist', []),
+    serverConfig,
+  )
+}
+
+/**
+ * densable `Pwi` / k5a — resolve negotiation mode + probe budget.
  * Full auto probe/retry transport is not implemented; callers use `mode` to
  * choose initialize timeout (y0 vs IiS). GB keys default false → legacy unless
  * env MCP_PROTOCOL_NEGOTIATION=auto (and transport is auto-capable).
+ *
+ * densable `Pwi(e,t,r)`: invalid env warns then falls through; env auto
+ * early-returns (no denylist); GB-derived auto + `t!==void 0` + `(r??LGa(t))`
+ * forces legacy. Do **not** wrap stdio with N_f.
  */
 export function resolveMcpProtocolNegotiationPlan(
   transportKind: string | undefined,
@@ -154,13 +323,20 @@ export function resolveMcpProtocolNegotiationPlan(
     key,
     def,
   ) => getFeatureValue_CACHED_MAY_BE_STALE(key, def),
+  serverConfig?: McpDenylistServerConfig,
+  precomputedDenylist?: boolean,
 ): McpProtocolNegotiationPlan {
   const raw = env.MCP_PROTOCOL_NEGOTIATION
   const envMode =
     raw === 'legacy' || raw === 'auto'
       ? (raw as McpProtocolNegotiationMode)
       : undefined
-  // densable warns on invalid; we ignore silently (no log dependency here).
+  if (raw !== undefined && envMode === undefined) {
+    logForDebugging(
+      `MCP_PROTOCOL_NEGOTIATION=${raw} is invalid; expected 'legacy' or 'auto' — ignoring`,
+      { level: 'warn' },
+    )
+  }
 
   if (envMode === 'legacy') return { mode: 'legacy' }
 
@@ -176,33 +352,61 @@ export function resolveMcpProtocolNegotiationPlan(
   )
 
   if (envMode === 'auto') {
-    // densable HiS.has(e) — only http/stdio/claudeai-proxy auto-capable; else legacy.
-    if (kind === 'stdio') {
-      return { mode: 'auto', probe: { timeoutMs: stdioProbe } }
+    // densable ocv.has(e) — http/claudeai-proxy/ccr-proxy/stdio; else legacy.
+    // Env auto early-returns — denylist is GB-path only (`s` after the switch).
+    if (!MCP_ERA_AUTO_CAPABLE.has(kind)) return { mode: 'legacy' }
+    return {
+      mode: 'auto',
+      probe: { timeoutMs: kind === 'stdio' ? stdioProbe : httpProbe },
     }
-    if (kind === 'http' || kind === 'claudeai-proxy') {
-      return { mode: 'auto', probe: { timeoutMs: httpProbe } }
-    }
-    return { mode: 'legacy' }
   }
 
+  let plan: McpProtocolNegotiationPlan
   switch (kind) {
     case 'http':
-      return isFeatureEnabled('tengu_mcp_protocol_negotiation_http', false)
+      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_http', false)
         ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
+      break
     case 'claudeai-proxy':
-      return isFeatureEnabled('tengu_mcp_protocol_negotiation_claudeai', false)
+      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_claudeai', false)
         ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
+      break
     case 'stdio':
-      return isFeatureEnabled('tengu_mcp_protocol_negotiation_stdio', false)
-        ? { mode: 'auto', probe: { timeoutMs: stdioProbe } }
+      // densable 2.1.238: `case"stdio":return{mode:"legacy"}` — no GB.
+      plan = { mode: 'legacy' }
+      break
+    case 'ccr-proxy':
+      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_ccr', false)
+        ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
+      break
     default:
-      // sse / ws / ide / in-process / sdk-control / ccr-proxy → legacy
-      return { mode: 'legacy' }
+      // sse / ws / ide / in-process / sdk-control → legacy
+      plan = { mode: 'legacy' }
+      break
   }
+
+  if (
+    plan.mode === 'auto' &&
+    serverConfig !== undefined &&
+    (precomputedDenylist ?? isMcpNegotiationServerDenylisted(serverConfig))
+  ) {
+    let label = "a url-less server (the '*' entry)"
+    if ('url' in serverConfig && typeof serverConfig.url === 'string') {
+      try {
+        label = new URL(serverConfig.url).hostname
+      } catch {
+        label = 'a server with an unparseable url'
+      }
+    }
+    logForDebugging(
+      `MCP era negotiation denylist matched ${label}; the legacy handshake applies`,
+    )
+    return { mode: 'legacy' }
+  }
+  return plan
 }
 
 function readErrorCode(error: unknown): string | number | undefined {

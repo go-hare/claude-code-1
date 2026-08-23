@@ -1,5 +1,5 @@
-import React, { type ReactNode, useCallback, useMemo, useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import React, { type ReactNode, type Ref, useCallback, useMemo, useState } from 'react';
+import { Box, type DOMElement, Text } from '@anthropic/ink';
 import type { KeybindingAction } from '../../keybindings/types.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
@@ -32,6 +32,8 @@ export type PermissionPromptProps<T extends string> = {
   onCancel?: () => void;
   question?: string | ReactNode;
   toolAnalyticsContext?: ToolAnalyticsContext;
+  /** densable sVc `SYg` — measure the Select container for DAA maxLabelWidth. */
+  selectRef?: Ref<DOMElement>;
 };
 
 const DEFAULT_PLACEHOLDERS: Record<FeedbackType, string> = {
@@ -55,6 +57,7 @@ export function PermissionPrompt<T extends string>({
   onCancel,
   question = 'Do you want to proceed?',
   toolAnalyticsContext,
+  selectRef,
 }: PermissionPromptProps<T>): React.ReactNode {
   const setAppState = useSetAppState();
   const [acceptFeedback, setAcceptFeedback] = useState('');
@@ -220,27 +223,37 @@ export function PermissionPrompt<T extends string>({
     onCancel?.();
   }, [onCancel, setAppState]);
 
+  const select = (
+    <Select
+      options={selectOptions}
+      inlineDescriptions
+      onChange={handleSelect}
+      onCancel={handleCancel}
+      onFocus={value => {
+        // Reset input mode when navigating away, but only if no text typed
+        const newOption = options.find(opt => opt.value === value);
+        if (newOption?.feedbackConfig?.type !== 'accept' && acceptInputMode && !acceptFeedback.trim()) {
+          setAcceptInputMode(false);
+        }
+        if (newOption?.feedbackConfig?.type !== 'reject' && rejectInputMode && !rejectFeedback.trim()) {
+          setRejectInputMode(false);
+        }
+        setFocusedValue(value);
+      }}
+      onInputModeToggle={handleInputModeToggle}
+    />
+  );
+
   return (
     <Box flexDirection="column">
       {typeof question === 'string' ? <Text>{question}</Text> : question}
-      <Select
-        options={selectOptions}
-        inlineDescriptions
-        onChange={handleSelect}
-        onCancel={handleCancel}
-        onFocus={value => {
-          // Reset input mode when navigating away, but only if no text typed
-          const newOption = options.find(opt => opt.value === value);
-          if (newOption?.feedbackConfig?.type !== 'accept' && acceptInputMode && !acceptFeedback.trim()) {
-            setAcceptInputMode(false);
-          }
-          if (newOption?.feedbackConfig?.type !== 'reject' && rejectInputMode && !rejectFeedback.trim()) {
-            setRejectInputMode(false);
-          }
-          setFocusedValue(value);
-        }}
-        onInputModeToggle={handleInputModeToggle}
-      />
+      {selectRef ? (
+        <Box ref={selectRef} width="100%">
+          {select}
+        </Box>
+      ) : (
+        select
+      )}
       <Box marginTop={1}>
         <Text dimColor>Esc to cancel{showTabHint && ' · Tab to amend'}</Text>
       </Box>

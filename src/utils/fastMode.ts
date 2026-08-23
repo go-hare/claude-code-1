@@ -21,6 +21,11 @@ import { getGlobalConfig, saveGlobalConfig } from './config.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 import {
+  DRAWS_FROM_USAGE_CREDITS_SUFFIX,
+  drawsFromUsageCredits,
+  type DrawsFromUsageCreditsEnv,
+} from './extraUsage.js'
+import {
   getDefaultMainLoopModelSetting,
   isOpus1mMergeEnabled,
   type ModelSetting,
@@ -304,41 +309,77 @@ export type FormatModelSwitchFastModeOptions = {
   /** densable `announceKeptOn` — also emit ON when fast stayed on. */
   announceKeptOn?: boolean
   /**
-   * When provided, used for the billing suffix instead of computing.
-   * densable `aFs` maps to local `isBilledAsExtraUsage` at call sites.
+   * densable `KSl(r, t, l3())` override. When omitted, computed from `model`.
+   * Gold copy is ` · Draws from usage credits` (not the older local
+   * `Billed as extra usage` string).
    */
   billedAsExtraUsage?: boolean
+  /** densable `r` — model passed to KSl / ASm. */
+  model?: ModelSetting
+  /** Optional KSl test/override bag. */
+  ksl?: DrawsFromUsageCreditsEnv
+}
+
+function resolveDrawsFromUsageCredits(
+  nextFastMode: boolean,
+  opts?: FormatModelSwitchFastModeOptions,
+): boolean {
+  if (opts?.billedAsExtraUsage !== undefined) return opts.billedAsExtraUsage
+  const model = opts?.model ?? null
+  return drawsFromUsageCredits(
+    model,
+    nextFastMode,
+    isOpus1mMergeEnabled(),
+    opts?.ksl,
+  )
 }
 
 /**
- * densable `Rft(prevFast, nextFast, model, opts?)` — announcement suffixes for
- * model-switch feedback (` · Fast mode ON/OFF` + optional billing).
- *
- * Order (densable): ON → billing → OFF.
+ * densable `qjt(e,t,r,n)` / `Rft` — announcement suffixes for model-switch
+ * feedback. Order: ON → ` · Draws from usage credits` → OFF.
  */
 export function formatModelSwitchFastModeSuffix(
   prevFastMode: boolean,
   nextFastMode: boolean,
   opts?: FormatModelSwitchFastModeOptions,
 ): string {
+  const billed = resolveDrawsFromUsageCredits(nextFastMode, opts)
   if (!isFastModeEnabled()) {
-    // Still allow billing-only suffix when caller passes it.
-    return opts?.billedAsExtraUsage ? ' · Billed as extra usage' : ''
+    return billed ? DRAWS_FROM_USAGE_CREDITS_SUFFIX : ''
   }
   const announceOn =
     !!nextFastMode && (!prevFastMode || opts?.announceKeptOn === true)
   const announceOff = !!prevFastMode && !nextFastMode
   let out = ''
   if (announceOn) out += ' · Fast mode ON'
-  if (opts?.billedAsExtraUsage) out += ' · Billed as extra usage'
+  if (billed) out += DRAWS_FROM_USAGE_CREDITS_SUFFIX
   if (announceOff) out += ' · Fast mode OFF'
   return out
 }
 
 /**
- * Apply densable model-switch fast-mode transition to AppState fields.
- * Returns `{ nextFastMode, suffix }` for the caller to append to UI text.
+ * densable `ASm(e,t,r)` — REPL bridge toast body.
+ * `!!e===t` → null; ON branch appends KSl(r, true, l3()) suffix; OFF is plain.
  */
+export function formatBridgeFastModeToast(
+  prevFastMode: boolean,
+  nextFastMode: boolean,
+  model?: ModelSetting,
+  ksl?: DrawsFromUsageCreditsEnv,
+): string | null {
+  if (!!prevFastMode === nextFastMode) return null
+  if (!nextFastMode) return 'Fast mode OFF'
+  const billed = drawsFromUsageCredits(
+    model ?? null,
+    true,
+    isOpus1mMergeEnabled(),
+    ksl,
+  )
+  return billed
+    ? `Fast mode ON${DRAWS_FROM_USAGE_CREDITS_SUFFIX}`
+    : 'Fast mode ON'
+}
+
 export function applyFastModeOnModelSwitch(
   model: ModelSetting,
   prevFastMode: boolean | undefined,
@@ -346,6 +387,7 @@ export function applyFastModeOnModelSwitch(
     remoteSession?: boolean
     announceKeptOn?: boolean
     billedAsExtraUsage?: boolean
+    ksl?: DrawsFromUsageCreditsEnv
   },
 ): { nextFastMode: boolean; suffix: string; changed: boolean } {
   const prev = !!prevFastMode
@@ -356,6 +398,8 @@ export function applyFastModeOnModelSwitch(
   const suffix = formatModelSwitchFastModeSuffix(prev, next, {
     announceKeptOn: opts?.announceKeptOn,
     billedAsExtraUsage: opts?.billedAsExtraUsage,
+    model,
+    ksl: opts?.ksl,
   })
   return { nextFastMode: next, suffix, changed: prev !== next }
 }

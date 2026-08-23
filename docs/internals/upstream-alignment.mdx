@@ -1,0 +1,118 @@
+---
+title: "densable 上游对齐工作流"
+description: "本仓库最独特的持续流程：逐版本 1:1 复刻官方 SEA 二进制的行为"
+---
+
+<Note>
+**理解这个流程比理解任何单个模块都重要。** 它解释了本仓库里大量看起来像 bug、像坏味道、
+像该重构的东西——它们都是刻意的。
+</Note>
+
+## 是什么
+
+"densable" 是团队对**官方 Claude Code SEA 二进制**的代号。持续做的事情是：把官方每个新版本的
+改动，**逐条行为地 1:1 复刻**到本仓库。
+
+不是"参考官方实现思路"，而是连边角行为、错误文案、判定顺序都要对上。
+
+## 目录结构
+
+`docs/upstream-extraction/` 下按版本分 pack，目前有 **25 个**：
+
+```
+v2.1.187  v2.1.212  v2.1.214 … v2.1.229
+v2.1.231 … v2.1.233  v2.1.235 … v2.1.238
+```
+
+每个 pack 的结构：
+
+```
+docs/upstream-extraction/v2.1.NNN/
+├── boards/alignment-NNN.md      # 活页看板：HAVE / PARTIAL / GAP 计数与逐条状态
+├── official-NNN-checklist.md    # 编号对齐条目（#1、#2、…）
+├── changelog-2.1.NNN.md         # 官方 changelog 切片
+├── artifacts/                   # 进度 HTML / MD
+└── snippets/                    # 从二进制提取的 gold 片段 + Python 提取器
+```
+
+另有跨 pack 的 `docs/upstream-extraction/cross-pack-residuals.md`，记录横跨多个版本没结清的残留。
+
+<Tip>
+**想知道某个版本的当前对齐状态，永远去读该 pack 的 `boards/alignment-NNN.md`**，不要相信
+任何别处（包括本页）抄下来的计数——看板是活页，计数天天变。
+</Tip>
+
+## 五步流程
+
+<Steps>
+  <Step title="提取">
+    用 `scripts/upstream-extract/extract.mjs`（还有 `extract-one.mjs`、
+    `extract-readable.mjs`）从官方 `claude` 二进制里提取字符串及上下文。SEA 解包后的路径
+    形如 `/tmp/official-238/plat/package/claude`。
+  </Step>
+  <Step title="映射">
+    把上游 minified 符号（`Y8p`、`qWT`、`LDn`、`joa`、`F4y`…）映射到本地符号，逐条分类为
+    **HAVE**（已复刻）/ **PARTIAL**（部分）/ **GAP**（缺失）。
+  </Step>
+  <Step title="实现">
+    遵守 **invent-ban**——见下节，这是整个流程里最重要的一条纪律。
+  </Step>
+  <Step title="测试">
+    加 `*.NNN.test.ts` 命名的回归测试，`NNN` 是版本号。例如
+    `hasReleasedTerminal.238.test.ts`、`autoUpdaterFailureHint.235.test.ts`。
+    目前全仓库有约 **450 个**这类对齐回归测试。
+  </Step>
+  <Step title="更新看板">
+    回填 `boards/alignment-NNN.md` 的计数和逐条状态。
+  </Step>
+</Steps>
+
+## invent-ban（禁止臆造）
+
+**官方没做的事，我们也不做——即使看起来"更合理"。**
+
+这意味着一些反直觉的结果：
+
+- 官方某处的错误文案很别扭，我们照抄别扭的版本
+- 官方某个判定顺序不是最优的，我们照抄那个顺序
+- 官方缺了某个显然应该有的入口，我们也不补
+
+被 invent-ban 卡住的条目会标成 **PARTIAL** 而不是 GAP——含义是"不是没做，是补齐就得臆造，
+或者缺 live E2E 证据无法确认官方行为"。这两类叫 gold-soft。
+
+`CLAUDE.md` 里有个现成的例子，讲 effort launch pin 的 `N9`（`unpinAllEffortLaunchPins()`）
+入口：上游有两条我们**故意不补**的路径（slash skill 的 `getEffort` 展开、remote 下发
+`effortLevel`），因为本地根本没有对应的产品能力，造一个假入口就是臆造。文档明确写着
+"以后若真正接上……在**写入 session effort 的那一刻**补，不要为了 checklist 写死代码"。
+
+## 对接手人的四条实际含义
+
+<AccordionGroup>
+  <Accordion title="不要重命名那些奇怪的短变量名">
+    `Y8p`、`qWT`、`LDn`、`joa`、`F4y` 这类名字**是对齐锚点**。它们让人能在本地代码和官方
+    二进制的提取片段之间对照。重命名成"有意义的名字"会直接摧毁下一轮对齐的可追溯性。
+  </Accordion>
+  <Accordion title="改行为前先查 alignment board">
+    很多"看起来是 bug"的行为是刻意 1:1 复刻的。动手之前，在对应 pack 的看板和
+    `official-NNN-checklist.md` 里搜一下相关符号，确认这不是一条已经对齐的条目。
+  </Accordion>
+  <Accordion title="不要顺手改好">
+    看到一处明显可以改进的地方，先问：官方是这样吗？如果官方就是这样，那它不是缺陷，
+    是规格。改了会在下一轮对齐里被判成 regression。
+  </Accordion>
+  <Accordion title="`*.NNN.test.ts` 删不得">
+    这些是对齐回归测试。它们锁的是"官方在 2.1.NNN 版本的行为"，看起来测的东西可能很琐碎
+    （某个字符串、某个调用顺序），但那正是它们的价值。
+  </Accordion>
+</AccordionGroup>
+
+## 相关文档
+
+| 文件 | 用途 |
+|------|------|
+| `CHANGELOG.md` | 面向用户的发布说明 |
+| `DEV-LOG.md` | 重大功能恢复的开发日志 |
+| `progress.md` | code review / design review 进度 |
+| `spec/` | 功能规格（tool-search、fork-agent-redesign 等） |
+| `CLAUDE.md` | AI agent 与工程师的行为指令，含多条对齐约定 |
+| `.impeccable.md` | 设计系统（Claude Orange `#D77757`）。设计任何 Web UI 前必读 |

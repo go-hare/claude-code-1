@@ -391,6 +391,7 @@ export function buildSpareHostEnv(opts?: {
   }
   Object.assign(env, {
     CLAUDE_CODE_SESSION_KIND: 'bg',
+    CLAUDE_BG_SOURCE: 'spare',
     CLAUDE_BG_BACKEND: 'daemon',
     CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
     FORCE_COLOR: '3',

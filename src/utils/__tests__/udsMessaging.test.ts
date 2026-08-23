@@ -206,7 +206,15 @@ describe('UDS inbox retention', () => {
     expect(data).toMatch(
       /^<cross-session-message\b[^>]*from="uds:[^"]+"[^>]*>\nhello from client\n<\/cross-session-message>$/,
     )
-    expect(drained[0]?.message.meta).toBeUndefined()
+    // densable 2.1.238 #29 — sendToUdsSocket stamps msg_id for peer receipts.
+    // Auth token is stripped on enqueue; remaining meta is the receipt id.
+    const meta = drained[0]?.message.meta
+    expect(meta?.authToken).toBeUndefined()
+    expect(typeof meta?.msg_id).toBe('string')
+    expect(meta?.msg_id).toBe(drained[0]?.message.msg_id)
+    expect(meta?.msg_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
   })
 
   test('udsClient peer probe fails closed on oversized pong frames', async () => {

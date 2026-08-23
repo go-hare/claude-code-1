@@ -182,12 +182,20 @@ export function processStartIdentityEquals(
   )
 }
 
+/** densable `YId` / `OMn` — memoized own process start identity. */
+let ownProcStartToken: string | undefined
+
 /** Test seam: reset lazy FFI + optional force-disable (densable GWg). */
 export function _resetWin32ProcTimesForTesting(opts?: {
   disableFfi?: boolean
 }): void {
   kernel32Symbols = undefined
   win32ProcTimesFfiDisabled = opts?.disableFfi === true
+}
+
+/** Test seam: reset densable `OMn` own-procStart memo. */
+export function _resetOwnProcStartForTesting(): void {
+  ownProcStartToken = undefined
 }
 
 /**
@@ -309,6 +317,20 @@ export async function processLstartMatches(
   if (expectedLstart === undefined) return true
   const current = await getProcessLstartString(pid)
   return processStartIdentityEquals(expectedLstart, current)
+}
+
+/** densable `n$` — alias used by bridge-pointer occupancy / crash-reuse. */
+export const isSameProcessAsync = processLstartMatches
+
+/**
+ * densable `ife` — own process start identity, memoized (`OMn.token??OMn.set`).
+ * `undefined` is not cached (`??` retries) so a transient `ps` miss can recover.
+ */
+export async function ownProcStartAsync(): Promise<string | undefined> {
+  return (
+    ownProcStartToken ??
+    (ownProcStartToken = await getProcessLstartString(process.pid))
+  )
 }
 
 /**

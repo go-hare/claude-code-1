@@ -106,12 +106,14 @@ export async function installPlugin(
   scope: InstallableScope = 'user',
   configEntries?: readonly string[],
   shownSourceCommand?: string,
+  shownEntryHelper?: { command: string; archiveUrl: string },
 ): Promise<void> {
   try {
     console.log(`Installing plugin "${plugin}"...`)
 
     const result = await installPluginOp(plugin, scope, {
       shownSourceCommand,
+      shownEntryHelper,
     })
 
     if (!result.success) {
@@ -324,7 +326,17 @@ export async function updatePluginCli(
       '../../utils/plugins/pluginCommandSource.js'
     )
 
+    const { promptEntryHeadersHelperConfirm } = await import(
+      '../../utils/plugins/marketplaceHeadersHelper.js'
+    )
+
     const result = await updatePluginOp(plugin, scope, {
+      // SEA nyh: explicit:!0 + onEntryHelperDisclosure → bl + f3l
+      explicit: true,
+      onEntryHelperDisclosure: async disclosure => {
+        writeToStdout(`${disclosure}\n`)
+        return promptEntryHeadersHelperConfirm({ yes: options.yes === true })
+      },
       // densable R0v announceCommandSource → ptm; declined aborts
       announceCommandSource: async (pluginId, entry, acceptedCommand) => {
         const consent = await promptCommandSourceConsent(pluginId, entry, {

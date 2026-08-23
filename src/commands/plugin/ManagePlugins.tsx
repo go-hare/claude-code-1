@@ -47,7 +47,15 @@ import { errorMessage, toError } from '../../utils/errors.js';
 import { logError } from '../../utils/log.js';
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
 import { loadInstalledPluginsV2 } from '../../utils/plugins/installedPluginsManager.js';
-import { getMarketplace } from '../../utils/plugins/marketplaceManager.js';
+import { getMarketplace, loadKnownMarketplacesConfig } from '../../utils/plugins/marketplaceManager.js';
+import { resolveShownArchiveHeadersHelper } from '../../utils/plugins/marketplaceHeadersHelper.js';
+import type { HeadersHelperPaneShown } from '../../utils/plugins/marketplaceHeadersHelper.js';
+import type { MarketplaceSource, PluginMarketplaceEntry } from '../../utils/plugins/schemas.js';
+import {
+  gateHeadersHelperPaneForAction,
+  PluginHeadersHelperDisclosure,
+  useHeadersHelperPaneConsent,
+} from './pluginDetailsHelpers.js';
 import {
   isMcpbSource,
   loadMcpbFile,
@@ -203,6 +211,65 @@ async function getSkillDirNames(dirPath: string): Promise<string[]> {
     // Return empty array to allow graceful degradation - plugin details can still be shown
     return [];
   }
+}
+
+/**
+ * densable 2.1.238 — load marketplace entry and show headersHelper on manage details.
+ */
+function ManagedPluginHeadersHelperDisclosure({
+  pluginId,
+  marketplaceName,
+  pluginName,
+  onHelper,
+}: {
+  pluginId: string;
+  marketplaceName: string;
+  pluginName: string;
+  onHelper: (helper: HeadersHelperPaneShown | null) => void;
+}): React.ReactNode {
+  const [entry, setEntry] = useState<PluginMarketplaceEntry | null>(null);
+  const [marketplaceSource, setMarketplaceSource] = useState<MarketplaceSource | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [mkt, known] = await Promise.all([getMarketplace(marketplaceName), loadKnownMarketplacesConfig()]);
+        if (cancelled) return;
+        const next = mkt.plugins.find(p => p.name === pluginName) ?? null;
+        const source = known[marketplaceName]?.source;
+        setEntry(next);
+        setMarketplaceSource(source);
+        onHelper(
+          next
+            ? resolveShownArchiveHeadersHelper({
+                entry: next,
+                marketplaceName,
+                marketplaceSource: source,
+                catchOverlayRefusal: true,
+              })
+            : null,
+        );
+      } catch {
+        if (!cancelled) {
+          setEntry(null);
+          setMarketplaceSource(undefined);
+          onHelper(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [marketplaceName, pluginName, onHelper]);
+  if (!entry) return null;
+  return (
+    <PluginHeadersHelperDisclosure
+      pluginId={pluginId}
+      entry={entry}
+      marketplaceName={marketplaceName}
+      marketplaceSource={marketplaceSource}
+    />
+  );
 }
 
 // Component to display installed plugin components
@@ -536,9 +603,11 @@ export function ManagePlugins({
       setViewState('plugin-list');
       setSelectedPlugin(null);
       setProcessError(null);
+      setPresentedHeadersHelper(null);
     } else if (typeof viewState === 'object' && viewState.type === 'failed-plugin-details') {
       setViewState('plugin-list');
       setProcessError(null);
+      setPresentedHeadersHelper(null);
     } else if (viewState === 'configuring') {
       setViewState('plugin-details');
       setConfigNeeded(null);
@@ -889,6 +958,23 @@ export function ManagePlugins({
   const [detailsMenuIndex, setDetailsMenuIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
+  // densable 2.1.238 — when update is blocked for headersHelper, show the
+  // command on this pane (SEA "now shown") before the user retries.
+  const [presentedHeadersHelper, setPresentedHeadersHelper] = useState<{
+    command: string;
+    archiveUrl: string;
+  } | null>(null);
+  const [manageHeadersHelper, setManageHeadersHelper] = useState<HeadersHelperPaneShown | null>(null);
+  const selectedPluginKey = selectedPlugin ? `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}` : '';
+  useEffect(() => {
+    setManageHeadersHelper(null);
+  }, [selectedPluginKey]);
+  // SEA dwo — pin only while details are showing (list identity is empty → unshown).
+  const detailsHeadersHelper = viewState === 'plugin-details' ? manageHeadersHelper : null;
+  const headersHelperPane = useHeadersHelperPaneConsent(detailsHeadersHelper);
+  useEffect(() => {
+    if (detailsHeadersHelper) headersHelperPane.record(detailsHeadersHelper);
+  }, [detailsHeadersHelper, headersHelperPane]);
 
   // Configuration state
   const [configNeeded, setConfigNeeded] = useState<McpbNeedsConfigResult | null>(null);
@@ -1101,6 +1187,9 @@ export function ManagePlugins({
 
     setIsProcessing(true);
     setProcessError(null);
+    if (operation !== 'update') {
+      setPresentedHeadersHelper(null);
+    }
 
     try {
       const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
@@ -1162,7 +1251,43 @@ export function ManagePlugins({
         }
         case 'update': {
           if (isBuiltin) break; // guarded above; narrows pluginScope
-          const result = await updatePluginOp(pluginId, pluginScope);
+          // densable 2.1.238 — SEA `_in(..., {explicit:!0, consentedEntryHelper: pinned()})`
+          // always; do not skip the gate when getMarketplace throws.
+          let marketplaceEntry: Awaited<ReturnType<typeof getMarketplace>>['plugins'][number] | undefined;
+          let marketplaceSource: MarketplaceSource | undefined;
+          try {
+            const [mkt, known] = await Promise.all([
+              getMarketplace(selectedPlugin.marketplace),
+              loadKnownMarketplacesConfig(),
+            ]);
+            marketplaceEntry = mkt.plugins.find(p => p.name === selectedPlugin.plugin.name);
+            marketplaceSource = known[selectedPlugin.marketplace]?.source;
+          } catch {
+            marketplaceEntry = undefined;
+            marketplaceSource = undefined;
+          }
+          if (marketplaceEntry) {
+            const paneBlock = gateHeadersHelperPaneForAction({
+              pluginId,
+              entry: marketplaceEntry,
+              kind: 'update',
+              marketplaceName: selectedPlugin.marketplace,
+              marketplaceSource,
+              consented: headersHelperPane.pinned(),
+              onPresentHelper: helper => {
+                setPresentedHeadersHelper(helper);
+                headersHelperPane.record(helper);
+              },
+            });
+            if (paneBlock) {
+              throw new Error(paneBlock);
+            }
+            setPresentedHeadersHelper(null);
+          }
+          const result = await updatePluginOp(pluginId, pluginScope, {
+            explicit: true,
+            consentedEntryHelper: headersHelperPane.pinned(),
+          });
           if (!result.success) {
             throw new Error(result.message);
           }
@@ -2075,6 +2200,13 @@ export function ManagePlugins({
         {/* Installed components */}
         <PluginComponentsDisplay plugin={selectedPlugin.plugin} marketplace={selectedPlugin.marketplace} />
 
+        <ManagedPluginHeadersHelperDisclosure
+          pluginId={pluginId}
+          marketplaceName={selectedPlugin.marketplace}
+          pluginName={selectedPlugin.plugin.name}
+          onHelper={setManageHeadersHelper}
+        />
+
         {/* Plugin errors */}
         {pluginErrorsSection}
 
@@ -2108,6 +2240,18 @@ export function ManagePlugins({
         {isProcessing && (
           <Box marginTop={1}>
             <Text>Processing…</Text>
+          </Box>
+        )}
+
+        {/* densable 2.1.238 — SEA update "now shown": render helper after a block */}
+        {presentedHeadersHelper && (
+          <Box marginTop={1} flexDirection="column">
+            <Text bold>headersHelper</Text>
+            <Text dimColor>
+              Fetching this plugin&apos;s archive sends helper-minted headers; the local command it runs (headersHelper)
+              is:
+            </Text>
+            <Text>{presentedHeadersHelper.command}</Text>
           </Box>
         )}
 

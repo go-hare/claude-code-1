@@ -78,7 +78,7 @@ export class WebSocketTransport implements Transport {
   protected url: URL
   protected state: WebSocketTransportState = 'idle'
   protected onData?: (data: string) => void
-  private onCloseCallback?: (closeCode?: number) => void
+  private onCloseCallback?: (closeCode?: number, cause?: string) => void
   private onConnectCallback?: () => void
   private headers: Record<string, string>
   private sessionId?: string
@@ -657,7 +657,7 @@ export class WebSocketTransport implements Transport {
     this.onConnectCallback = callback
   }
 
-  setOnClose(callback: (closeCode?: number) => void): void {
+  setOnClose(callback: (closeCode?: number, cause?: string) => void): void {
     this.onCloseCallback = callback
   }
 

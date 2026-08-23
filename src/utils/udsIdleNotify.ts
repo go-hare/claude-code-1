@@ -989,6 +989,20 @@ export function handleUdsIdleControlMessage(
     return true
   }
 
+  // densable 2.1.238 #29/#30 — peer_message_status (lazy: no cycle with peerReceipts).
+  if (action.action === 'peer_message_status') {
+    try {
+      const { handlePeerMessageStatusFrame } =
+        require('./peerReceipts.js') as typeof import('./peerReceipts.js')
+      return handlePeerMessageStatusFrame(action)
+    } catch (err) {
+      logForDebugging(
+        `[uds-messaging] peer_message_status handler failed: ${errorMessage(err)}`,
+      )
+      return true
+    }
+  }
+
   return false
 }
 

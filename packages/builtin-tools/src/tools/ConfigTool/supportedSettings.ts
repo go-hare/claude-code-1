@@ -56,6 +56,12 @@ export const SUPPORTED_SETTINGS: Record<string, SettingConfig> = {
     type: 'boolean',
     description: 'Auto-compact when context is full',
   },
+  autoScrollEnabled: {
+    source: 'global',
+    type: 'boolean',
+    description:
+      'Auto-scroll the conversation view to bottom (fullscreen mode only)',
+  },
   autoMemoryEnabled: {
     source: 'settings',
     type: 'boolean',

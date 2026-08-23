@@ -8,6 +8,8 @@ type AppCallbacks = {
   isMouseClicksDisabled?: () => boolean;
   logError?: (error: unknown) => void;
   logForDebugging?: (message: string, opts?: { level?: string }) => void;
+  /** densable `Ym` / `Fkd.committed` — gracefulShutdown has committed. */
+  isShutdownCommitted?: () => boolean;
 };
 
 /** Default no-op / safe-default implementations */
@@ -17,6 +19,7 @@ const defaultCallbacks: Required<AppCallbacks> = {
   isMouseClicksDisabled: () => false,
   logError: (error: unknown) => console.error(error),
   logForDebugging: (_message: string, _opts?: { level?: string }) => {},
+  isShutdownCommitted: () => false,
 };
 
 /**
@@ -194,6 +197,21 @@ export default class App extends PureComponent<Props, State> {
     error: undefined,
   };
 
+  /** densable `appUnmounted` — set first in componentWillUnmount. */
+  appUnmounted = false;
+
+  /**
+   * densable `hasReleasedTerminal` — skip SIGCONT raw-mode restore after
+   * unmount / shutdown commit / Ink unmount (kill-while-suspended).
+   */
+  get hasReleasedTerminal(): boolean {
+    return (
+      this.appUnmounted ||
+      defaultCallbacks.isShutdownCommitted() ||
+      instances.get(this.props.stdout)?.hasUnmounted === true
+    );
+  }
+
   // Count how many components enabled raw mode to avoid disabling
   // raw mode until all components don't need it anymore
   rawModeEnabledCount = 0;
@@ -303,6 +321,7 @@ export default class App extends PureComponent<Props, State> {
   }
 
   override componentWillUnmount() {
+    this.appUnmounted = true;
     if (this.props.stdout.isTTY) {
       this.props.stdout.write(SHOW_CURSOR);
     }
@@ -667,6 +686,12 @@ export default class App extends PureComponent<Props, State> {
 
     // Set up resume handler
     const resumeHandler = () => {
+      process.removeListener('SIGCONT', resumeHandler);
+      // densable: if(this.hasReleasedTerminal)return — kill-while-suspended
+      // must not re-enable raw mode / hide cursor after shutdown cleanup.
+      if (this.hasReleasedTerminal) {
+        return;
+      }
       // Restore raw mode to exact previous state
       for (let i = 0; i < rawModeCountBeforeSuspend; i++) {
         if (this.isRawModeSupported()) {
@@ -685,12 +710,11 @@ export default class App extends PureComponent<Props, State> {
 
       // Emit resume event for Claude Code to handle
       this.internal_eventEmitter.emit('resume');
-
-      process.removeListener('SIGCONT', resumeHandler);
     };
 
     process.on('SIGCONT', resumeHandler);
-    process.kill(process.pid, 'SIGSTOP');
+    // densable: process.kill(0, "SIGTSTP") — group TSTP, not SIGSTOP on pid.
+    process.kill(0, 'SIGTSTP');
   };
 }
 

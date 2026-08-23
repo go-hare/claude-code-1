@@ -2,7 +2,7 @@ import { feature } from 'bun:bundle';
 import chalk from 'chalk';
 import * as path from 'path';
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useNotifications } from 'src/context/notifications.js';
 import { useCommandQueue } from 'src/hooks/useCommandQueue.js';
 import { type IDEAtMentioned, useIdeAtMentioned } from 'src/hooks/useIdeAtMentioned.js';
@@ -50,9 +50,11 @@ import {
   type Key,
   type KeyboardEvent,
   color,
+  instances,
   stringWidth,
   Text,
   useInput,
+  useProbeExternalClear,
 } from '@anthropic/ink';
 import { useOptionalKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js';
@@ -77,6 +79,7 @@ import type { Message } from '../../types/message.js';
 import type { BaseTextInputProps, PromptInputMode, VimMode } from '../../types/textInputTypes.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { count } from '../../utils/array.js';
+import { isFullscreenActive } from '../../utils/fullscreen.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import {
   clampNormalModeCursorOffset,
@@ -342,6 +345,17 @@ function PromptInput({
   // system, so treat them as a modal overlay here to stop navigation keys from
   // leaking into TextInput/footer handlers and stacking a second dialog.
   const isModalOverlayActive = useIsModalOverlayActive() || isLocalJSXCommandActive;
+  // densable 2.1.238 #36 dT: ctrl+l / cmd+k bump → useLayoutEffect forceRedraw.
+  const [clearScreenTick, setClearScreenTick] = useState(0);
+  useLayoutEffect(() => {
+    if (clearScreenTick === 0) return;
+    instances.get(process.stdout)?.forceRedraw();
+  }, [clearScreenTick]);
+  // densable Wzg — iTerm/Apple DECXCPR poll; probe itself forceRedraws (no extra onDetected).
+  useProbeExternalClear(isFullscreenActive());
+  const handleClearScreen = useCallback(() => {
+    setClearScreenTick(n => n + 1);
+  }, []);
   const [isAutoUpdating, setIsAutoUpdating] = useState(false);
   const [exitMessage, setExitMessage] = useState<{
     show: boolean;
@@ -2022,8 +2036,10 @@ function PromptInput({
     () => ({
       'chat:undo': handleUndo,
       'chat:newline': handleNewline,
+      'chat:clearScreen': handleClearScreen,
       'chat:externalEditor': handleExternalEditor,
       'chat:stash': handleStash,
+      'chat:clearInput': handleClearScreen,
       'chat:modelPicker': handleModelPicker,
       'chat:thinkingToggle': handleThinkingToggle,
       'chat:cycleMode': handleCycleMode,
@@ -2032,6 +2048,7 @@ function PromptInput({
     [
       handleUndo,
       handleNewline,
+      handleClearScreen,
       handleExternalEditor,
       handleStash,
       handleModelPicker,

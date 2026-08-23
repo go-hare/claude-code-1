@@ -59,6 +59,9 @@ export const CONCISE_TURN_REMINDER =
 
 export const DEFAULT_OUTPUT_STYLE_NAME = 'default'
 
+/** densable `gFn` — suppress per-turn reminder when the style name is longer */
+export const OUTPUT_STYLE_NAME_MAX = 256
+
 export const OUTPUT_STYLE_CONFIG: OutputStyles = {
   [DEFAULT_OUTPUT_STYLE_NAME]: null,
   // SEA order: default → (Proactive invent-ban) → Concise → Explanatory → Learning

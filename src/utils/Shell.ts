@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'child_process'
-import { constants as fsConstants, readFileSync, unlinkSync } from 'fs'
+import { constants as fsConstants, readFileSync } from 'fs'
 import { type FileHandle, mkdir, open, realpath } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { tmpdir } from 'os'
@@ -53,6 +53,37 @@ import { subprocessEnv } from './subprocessEnv.js'
 import { posixPathToWindowsPath } from './windowsPaths.js'
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000 // 30 minutes
+
+/**
+ * densable `$0f` — async unlink of `/tmp/claude-*-cwd`. ENOENT is silent;
+ * anything else warns. Call immediately if the child already exited, else
+ * `once('exit')` so kill/timeout/interrupt still clean up.
+ */
+async function unlinkCwdTrackingFile(path: string): Promise<void> {
+  try {
+    await getFsImplementation().unlink(path)
+  } catch (e) {
+    if (!isENOENT(e)) {
+      logForDebugging(
+        `Failed to remove shell cwd-tracking file: ${errorMessage(e)}`,
+        { level: 'warn' },
+      )
+    }
+  }
+}
+
+/** densable `$0f` gate: defer unlink until the child actually exits. */
+export function shouldDeferCwdTrackingUnlink(child: {
+  pid?: number
+  exitCode: number | null
+  signalCode: NodeJS.Signals | null
+}): boolean {
+  return (
+    child.pid !== undefined &&
+    child.exitCode === null &&
+    child.signalCode === null
+  )
+}
 
 export type ShellConfig = {
   provider: ShellProvider
@@ -516,11 +547,9 @@ export async function exec(
     }
 
     // Attach cleanup to the command result
-    // NOTE: readFileSync/unlinkSync are intentional here — these must complete
-    // synchronously within the .then() microtask so that callers who
-    // `await shellCommand.result` see the updated cwd immediately after.
-    // Using async readFile would introduce a microtask boundary, causing
-    // a race where cwd hasn't been updated yet when the caller continues.
+    // NOTE: readFileSync is intentional here — cwd must be visible in the
+    // same microtask to callers who `await shellCommand.result`. densable
+    // `$0f` unlinks asynchronously (and may wait for child `exit`).
 
     // On Windows, cwdFilePath is a POSIX path (for bash's `pwd -P >| $path`),
     // but Node.js needs a native Windows path for readFileSync/unlinkSync.
@@ -560,11 +589,14 @@ export async function exec(
           logEvent('tengu_shell_set_cwd', { success: false })
         }
       }
-      // Clean up the temp file used for cwd tracking
-      try {
-        unlinkSync(nativeCwdFilePath)
-      } catch {
-        // File may not exist if command failed before pwd -P ran
+      // densable `$0f`: if the child is still running, unlink on exit so
+      // kill/timeout/interrupt still remove `/tmp/claude-*-cwd`.
+      if (shouldDeferCwdTrackingUnlink(childProcess)) {
+        childProcess.once('exit', () => {
+          void unlinkCwdTrackingFile(nativeCwdFilePath)
+        })
+      } else {
+        await unlinkCwdTrackingFile(nativeCwdFilePath)
       }
     })
 

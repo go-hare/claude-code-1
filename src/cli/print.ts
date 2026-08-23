@@ -343,7 +343,10 @@ import {
   parseUserSpecifiedModel,
 } from 'src/utils/model/model.js'
 import { getModelOptions } from 'src/utils/model/modelOptions.js'
-import { decidePrintSetModel } from 'src/utils/model/printSetModel.js'
+import {
+  decidePrintSetModel,
+  decideReplBridgeSetModel,
+} from 'src/utils/model/printSetModel.js'
 import {
   modelSupportsEffort,
   modelSupportsMaxEffort,
@@ -3688,7 +3691,9 @@ function runHeadlessStreaming(
             ...(fromMode !== undefined ? { fromMode } : {}),
             ...(typeof meta?.msg_id === 'string'
               ? { msg_id: meta.msg_id }
-              : {}),
+              : typeof entry.message.msg_id === 'string'
+                ? { msg_id: entry.message.msg_id }
+                : {}),
           },
           skipSlashCommands: true,
           isMeta: true,
@@ -5622,9 +5627,10 @@ function runHeadlessStreaming(
                       abortController?.abort()
                     },
                     onSetModel(model) {
-                      // densable bridge onSetModel → same Ye/HS/session triple as
-                      // print set_model success path (mid-session next turn).
-                      const decision = decidePrintSetModel(
+                      // densable 2.1.238 SDK onSetModel — allowlist/step-down only
+                      // (no print RGf). Restricted → `{ok:false}` so Zkd emits
+                      // error control_response. Unrecognized ids still apply.
+                      const decision = decideReplBridgeSetModel(
                         model,
                         activeUserSpecifiedModel,
                       )
@@ -5632,7 +5638,7 @@ function runHeadlessStreaming(
                         logForDebugging(
                           `[bridge:sdk] onSetModel rejected: ${decision.error}`,
                         )
-                        return
+                        return { ok: false as const, error: decision.error }
                       }
                       activeUserSpecifiedModel = decision.model
                       setMainLoopModelOverride(decision.model)

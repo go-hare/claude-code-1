@@ -26,9 +26,9 @@ CONTEXT_COLLAPSE 让模型内省上下文窗口使用情况，并智能压缩旧
 | 折叠操作 | `src/services/contextCollapse/operations.ts` | **Stub** — `projectView` 为恒等函数 |
 | 折叠持久化 | `src/services/contextCollapse/persist.ts` | **Stub** — `restoreFromEntries` 为空操作 |
 | CtxInspectTool | `packages/builtin-tools/src/tools/CtxInspectTool/CtxInspectTool.ts` | **实现** — 上下文内省工具 |
-| SnipTool 提示 | `src/tools/SnipTool/prompt.ts` | **Stub** — 空工具名 |
-| SnipTool 实现 | `src/tools/SnipTool/SnipTool.ts` | **缺失** |
-| force-snip 命令 | `src/commands/force-snip.js` | **缺失** |
+| SnipTool 提示 | `packages/builtin-tools/src/tools/SnipTool/prompt.ts` | **Stub** — 空工具名 |
+| SnipTool 实现 | `packages/builtin-tools/src/tools/SnipTool/SnipTool.ts` | **缺失** |
+| force-snip 命令 | `src/commands/force-snip.ts` | **缺失** |
 | 折叠读取搜索 | `src/utils/collapseReadSearch.ts` | **完整** — Snip 作为静默吸收操作 |
 | QueryEngine 集成 | `src/QueryEngine.ts` | **布线** — 导入并使用 snip 投影 |
 | Token 警告 UI | `src/components/TokenWarning.tsx` | **布线** — 折叠进度标签 |

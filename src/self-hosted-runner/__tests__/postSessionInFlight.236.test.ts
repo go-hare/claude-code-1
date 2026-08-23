@@ -135,7 +135,7 @@ describe('densable 2.1.236 #17 post-session inFlight (Bxy/Uxy/etu)', () => {
       "Forced shutdown with ${still} post-session hook(s) still running — they continue in their own process group, but their output is no longer captured and the runner's timeout budget no longer applies.",
     )
     expect(src).toContain(
-      "${running} post-session hook(s) still running — waiting for them within the budget above. A second SIGTERM force-exits the runner immediately; make sure your supervisor's stop timeout covers the full budget so hooks are not cut short.",
+      "${running} post-session hook(s) still running — waiting for them within the budget above. Another SIGTERM force-exits the runner immediately; make sure your supervisor's stop timeout covers the full budget so hooks are not cut short.",
     )
     expect(src).toContain(
       'released after post-session hook — parked server-side',

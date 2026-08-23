@@ -8,6 +8,7 @@ import {
 } from 'src/bootstrap/state.js'
 import {
   decidePrintSetModel,
+  decideReplBridgeSetModel,
   modelNotAllowedMessage,
   recognizePrintModel,
   sanitizeModelIdForError,
@@ -128,5 +129,38 @@ describe('densable #45 print set_model (printSetModel)', () => {
     if (!second.ok) return
     // densable: xi()!==Wn || oi(Zn)!==oi($s??Wn) — same model → no Ge
     expect(second.injectBreadcrumbs).toBe(false)
+  })
+})
+
+describe('densable 2.1.238 #24 decideReplBridgeSetModel', () => {
+  test('null/undefined/default resolve to a concrete default model', () => {
+    for (const raw of [
+      null,
+      undefined,
+      'default',
+      'DEFAULT',
+      ' Default ',
+    ] as const) {
+      const d = decideReplBridgeSetModel(raw, undefined)
+      expect(d.ok).toBe(true)
+      if (!d.ok) return
+      expect(typeof d.model).toBe('string')
+      expect(d.model.length).toBeGreaterThan(0)
+      expect(d.model.toLowerCase()).not.toBe('default')
+    }
+  })
+
+  test('unrecognized ids still apply (RGf is print-only)', () => {
+    const d = decideReplBridgeSetModel('not-a-real-model-xyz', undefined)
+    expect(d.ok).toBe(true)
+    if (!d.ok) return
+    expect(d.model).toBe('not-a-real-model-xyz')
+  })
+
+  test('known alias sonnet succeeds', () => {
+    const d = decideReplBridgeSetModel('sonnet', undefined)
+    expect(d.ok).toBe(true)
+    if (!d.ok) return
+    expect(d.model.toLowerCase()).toContain('sonnet')
   })
 })

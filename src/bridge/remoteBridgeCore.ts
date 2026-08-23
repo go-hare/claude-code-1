@@ -55,7 +55,12 @@ import {
   isRecoverableCloseCode,
   noteHealthyAuthBeat,
   noteRecoverySuccess,
+  CLAUDE_AI_LOGIN_EXPIRED_RESTORE_DETAIL,
+  CLAUDE_AI_LOGIN_EXPIRED_THEN_REMOTE_CONTROL_DETAIL,
+  CLAUDE_AI_LOGIN_REJECTED_DETAIL,
+  JWT_REFRESH_NO_OAUTH_DETAIL,
   OAUTH_REAUTH_REQUIRED_DETAIL,
+  OAUTH_TOKEN_UNAVAILABLE_RESTORE_DETAIL,
   oauthAdoptBackoffMs,
   type RecoveryBudgetCounters,
   REMINT_EXHAUSTED_DETAIL,
@@ -97,6 +102,19 @@ import {
 import { logBridgeSkip } from './debugUtils.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
+import {
+  classifyMissingOAuthToken,
+  formatSignedOutStoppingLog,
+  SIGNED_OUT_CLI_HINT,
+  teardownReasonForMissingOAuth,
+} from './hostSignedOut.js'
+import {
+  formatNonOrigin403RecoverLog,
+  recovered403EventName,
+  takeFirstInEpisodeFlag,
+  type FirstInEpisodeLatch,
+  type NonOrigin403Streak,
+} from '../cli/transports/nonOrigin403.js'
 import { isInProtectedNamespace } from '../utils/envUtils.js'
 import { errorMessage } from '../utils/errors.js'
 import { sleep } from '../utils/sleep.js'
@@ -175,7 +193,10 @@ export type EnvLessBridgeParams = {
   onUserMessage?: (text: string, sessionId: string) => boolean
   onPermissionResponse?: (response: SDKControlResponse) => void
   onInterrupt?: () => void
-  onSetModel?: (model: string | undefined) => void
+  onStopTask?: (taskId: string) => Promise<unknown>
+  onSetModel?: (
+    model: string | undefined,
+  ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   onSetPermissionMode?: (
     mode: PermissionMode,
@@ -248,6 +269,7 @@ export async function initEnvLessBridgeCore(
     onUserMessage,
     onPermissionResponse,
     onInterrupt,
+    onStopTask,
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
@@ -263,6 +285,28 @@ export async function initEnvLessBridgeCore(
   } = params
 
   const cfg = await getEnvLessBridgeConfig()
+
+  const etherealMistEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_ethereal_mist',
+    true,
+  )
+
+  // densable zs: first recover/fail in the episode reports 1, later 0.
+  const nonOrigin403Episode: FirstInEpisodeLatch = { seen: false }
+  function onNonOrigin403Recover(streak: NonOrigin403Streak): void {
+    logForDebugging(formatNonOrigin403RecoverLog(streak))
+    const streakS = Math.round((streak.lastAtMs - streak.startedAtMs) / 1000)
+    logEvent(recovered403EventName(streak.source), {
+      attempts: streak.attempts,
+      streak_s: streakS,
+      first_in_episode: takeFirstInEpisodeFlag(nonOrigin403Episode),
+    })
+  }
+
+  const nonOrigin403 = {
+    enabled: etherealMistEnabled,
+    onRecover: onNonOrigin403Recover,
+  }
 
   // ── 1. Create or reattach session ───────────────────────────────────────
   const initialAccessToken = getAccessToken()
@@ -286,7 +330,7 @@ export async function initEnvLessBridgeCore(
   let sessionTitle = title
   let sessionId: string
 
-  async function mintFreshSession(): Promise<string | null> {
+  async function mintFreshSession(): Promise<CodeSessionCreateResult> {
     const created = await withRetry(
       () =>
         createCodeSession(
@@ -301,11 +345,28 @@ export async function initEnvLessBridgeCore(
       'createCodeSession',
       cfg,
     )
-    if (created) {
+    if (typeof created === 'string') {
       logForDebugging(`[remote-bridge] Created session ${created}`)
       logForDiagnosticsNoPII('info', 'bridge_repl_v2_session_created')
     }
     return created
+  }
+
+  /** densable Ot — 401 soe → kt; else mr(PAi). 2-arg onStateChange only. */
+  function reportSessionCreateFailure(created: CodeSessionCreateResult): void {
+    if (created !== null && isNonTerminalBridgeFailure(created)) {
+      onStateChange?.('failed', CLAUDE_AI_LOGIN_REJECTED_DETAIL)
+      logBridgeSkip('v2_session_create_oauth_rejected', undefined, true)
+      return
+    }
+    onStateChange?.(
+      'failed',
+      formatCodeSessionCreateFailure(
+        isTerminalBridgeFailure(created) ? created : null,
+        { groupingId: sessionGroupingId },
+      ),
+    )
+    logBridgeSkip('v2_session_create_failed', undefined, true)
   }
 
   if (reattachSessionId) {
@@ -341,9 +402,8 @@ export async function initEnvLessBridgeCore(
       sessionTitle =
         neutralFallbackTitle ?? `remote-control-${generateShortWordSlug()}`
       const minted = await mintFreshSession()
-      if (!minted) {
-        onStateChange?.('failed', 'Session creation failed — see debug log')
-        logBridgeSkip('v2_session_create_failed', undefined, true)
+      if (typeof minted !== 'string') {
+        reportSessionCreateFailure(minted)
         return null
       }
       sessionId = minted
@@ -353,9 +413,8 @@ export async function initEnvLessBridgeCore(
     // /bridge — server may accept without unarchive (409 already-active).
   } else {
     const minted = await mintFreshSession()
-    if (!minted) {
-      onStateChange?.('failed', 'Session creation failed — see debug log')
-      logBridgeSkip('v2_session_create_failed', undefined, true)
+    if (typeof minted !== 'string') {
+      reportSessionCreateFailure(minted)
       return null
     }
     sessionId = minted
@@ -420,13 +479,19 @@ export async function initEnvLessBridgeCore(
       logBridgeSkip('v2_remote_creds_reattach_transient', undefined, true)
       return null
     }
-    const failDetail = isTerminalBridgeFailure(credentialsResult)
-      ? `Remote credentials rejected (${credentialsResult.reason})`
-      : isNonTerminalBridgeFailure(credentialsResult)
-        ? OAUTH_REAUTH_REQUIRED_DETAIL
+    const failDetail = isNonTerminalBridgeFailure(credentialsResult)
+      ? CLAUDE_AI_LOGIN_EXPIRED_THEN_REMOTE_CONTROL_DETAIL
+      : isTerminalBridgeFailure(credentialsResult)
+        ? `Remote credentials rejected (${credentialsResult.reason})`
         : 'Remote credentials fetch failed — see debug log'
     onStateChange?.('failed', failDetail)
-    logBridgeSkip('v2_remote_creds_failed', undefined, true)
+    logBridgeSkip(
+      isNonTerminalBridgeFailure(credentialsResult)
+        ? 'v2_remote_creds_oauth_rejected'
+        : 'v2_remote_creds_failed',
+      undefined,
+      true,
+    )
     clearAbandonedBridgeSessionId()
     void archiveSession(
       sessionId,
@@ -465,6 +530,7 @@ export async function initEnvLessBridgeCore(
       // rebuilt on refresh (rebuildTransport below).
       getAuthToken: () => credentials.worker_jwt,
       outboundOnly,
+      nonOrigin403,
     })
   } catch (err) {
     logForDebugging(
@@ -604,6 +670,14 @@ export async function initEnvLessBridgeCore(
   // JWT is opaque — do not decode.
   const refresh = createTokenRefreshScheduler({
     refreshBufferMs: cfg.token_refresh_buffer_ms,
+    onExhausted: sid => {
+      if (tornDown) return
+      logForDebugging(
+        `[remote-bridge] Token refresh chain exhausted for ${sid} — surfacing auth failure`,
+        { level: 'error' },
+      )
+      onStateChange?.('failed', OAUTH_TOKEN_UNAVAILABLE_RESTORE_DETAIL)
+    },
     getAccessToken: async () => {
       // Unconditionally refresh OAuth before calling /bridge — getAccessToken()
       // returns expired tokens as non-null strings (doesn't check expiresAt),
@@ -639,8 +713,12 @@ export async function initEnvLessBridgeCore(
             cfg,
           )
           if (tornDown) return
-          // densable: only rebuild on real creds; null/Hde/mdt skip (timer will retry)
-          if (!isRemoteCredentials(result)) return
+          // densable: WNe(mdt) skip; null/soe → yr (timer may still retry)
+          if (isTerminalBridgeFailure(result)) return
+          if (!isRemoteCredentials(result)) {
+            onStateChange?.('failed', CLAUDE_AI_LOGIN_EXPIRED_RESTORE_DETAIL)
+            return
+          }
           const rebuilt = await rebuildTransport(result, 'proactive_refresh')
           if (rebuilt === 'suppressed_teleported') {
             if (!tornDown) {
@@ -745,6 +823,7 @@ export async function initEnvLessBridgeCore(
             transport,
             sessionId,
             onInterrupt,
+            onStopTask,
             onSetModel,
             onSetMaxThinkingTokens,
             onSetPermissionMode,
@@ -936,6 +1015,7 @@ export async function initEnvLessBridgeCore(
         initialSequenceNum: seq,
         getAuthToken: () => fresh.worker_jwt,
         outboundOnly,
+        nonOrigin403,
       })
       if (tornDown) {
         // Teardown fired during the async createV2ReplTransport window.
@@ -1043,12 +1123,25 @@ export async function initEnvLessBridgeCore(
 
       let oauthToken = getAccessToken() ?? staleBefore
       if (!oauthToken) {
+        // densable 2.1.238 #26 — missing Claude.ai OAuth → signed_out, not remint.
+        const classified = classifyMissingOAuthToken()
+        if (classified === 'signed_out') {
+          const reason = teardownReasonForMissingOAuth(classified)
+          const envKind = process.env.CLAUDE_CODE_ENVIRONMENT_KIND ?? 'unknown'
+          logForDebugging(formatSignedOutStoppingLog(envKind, reason))
+          logForDiagnosticsNoPII('info', 'bridge_repl_v2_signed_out')
+          if (!tornDown) {
+            void teardown({ reason })
+            onStateChange?.('failed', SIGNED_OUT_CLI_HINT)
+          }
+          return
+        }
         logForDiagnosticsNoPII('error', 'bridge_repl_v2_remint_loop_no_oauth')
         if (!tornDown) {
           onStateChange?.(
             'failed',
             policy.needsOAuthRefresh
-              ? 'JWT refresh failed: no OAuth token'
+              ? JWT_REFRESH_NO_OAUTH_DETAIL
               : 'Remote credentials fetch failed: no OAuth token',
           )
         }
@@ -1851,10 +1944,12 @@ export {
 import {
   createCodeSession,
   fetchRemoteCredentials as fetchRemoteCredentialsRaw,
+  formatCodeSessionCreateFailure,
   isNonTerminalBridgeFailure,
   isRemoteCredentials,
   isTerminalBridgeFailure,
   type BridgeCredentialResult,
+  type CodeSessionCreateResult,
   type RemoteCredentials,
   unarchiveCodeSession,
 } from './codeSessionApi.js'

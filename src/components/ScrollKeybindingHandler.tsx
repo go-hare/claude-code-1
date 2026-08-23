@@ -16,6 +16,7 @@ import {
 } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logForDebugging } from '../utils/debug.js';
+import { getAutoScrollEnabled } from '../utils/config.js';
 import { getPlatform } from '../utils/platform.js';
 import { resolveScrollSpeedBase } from '../utils/residualUiEnvGates.js';
 import {
@@ -1106,7 +1107,10 @@ export function jumpBy(s: ScrollBoxHandle, delta: number, trackTelemetry = false
     // that ran translateSelectionForJump already shifted; scrollToBottom()
     // alone would double-shift via the render-phase sticky follow.
     s.scrollTo(max);
-    s.scrollToBottom();
+    // densable OJh on the max branch: autoScroll off clamps without sticky.
+    if (getAutoScrollEnabled()) {
+      s.scrollToBottom();
+    }
     return true;
   }
   if (target <= 0 && trackTelemetry) {
@@ -1127,7 +1131,12 @@ function scrollDown(s: ScrollBoxHandle, amount: number): boolean {
   // re-enables sticky scroll.
   const effectiveTop = s.getScrollTop() + s.getPendingDelta();
   if (effectiveTop + amount >= max) {
-    s.scrollToBottom();
+    // densable OJh: autoScroll on → sticky pin; off → clamp to max without sticky.
+    if (getAutoScrollEnabled()) {
+      s.scrollToBottom();
+    } else {
+      s.scrollTo(max);
+    }
     return true;
   }
   s.scrollBy(amount);

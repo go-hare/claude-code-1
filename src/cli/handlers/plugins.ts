@@ -678,6 +678,25 @@ export async function pluginInstallHandler(
     process.exit(1)
   }
 
+  // densable 2.1.238 #3 — catalog entry headersHelper confirm before install
+  const {
+    announceEntryHeadersHelperForInstall,
+    ENTRY_HELPER_INSTALL_ABORT_MESSAGE,
+  } = await import('../../utils/plugins/marketplaceHeadersHelper.js')
+  const headersHelperConsent = await announceEntryHeadersHelperForInstall(
+    plugin,
+    { yes: options.yes === true },
+  )
+  // SEA Oyw: Vgh declined|unconfirmed → abort copy (not command-source
+  // `Aborted.`). Se("cli_plugin_install", entry_helper_*) is not ported.
+  if (
+    headersHelperConsent?.kind === 'declined' ||
+    headersHelperConsent?.kind === 'unconfirmed'
+  ) {
+    console.log(ENTRY_HELPER_INSTALL_ABORT_MESSAGE)
+    process.exit(1)
+  }
+
   const configEntries = Array.isArray(options.config)
     ? options.config
     : undefined
@@ -686,6 +705,12 @@ export async function pluginInstallHandler(
     scope as 'user' | 'project' | 'local',
     configEntries,
     consent?.kind === 'accepted' ? consent.grantKey : undefined,
+    headersHelperConsent?.kind === 'accepted'
+      ? {
+          command: headersHelperConsent.command,
+          archiveUrl: headersHelperConsent.archiveUrl,
+        }
+      : undefined,
   )
 }
 
@@ -864,5 +889,7 @@ export async function pluginUpdateHandler(
     cliError('--cowork can only be used with user scope')
   }
 
+  // densable 2.1.238 nyh — disclosure+confirm lives on updatePluginCli
+  // (explicit:!0 + onEntryHelperDisclosure). Do not pre-prompt here.
   await updatePluginCli(plugin, scope, { yes: options.yes === true })
 }

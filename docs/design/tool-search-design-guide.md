@@ -196,7 +196,7 @@ Delta attachment 扫描历史消息中的 `deferred_tools_delta` 类型 attachme
 - 实现预取管道和 UI 组件
 
 **关键文件**：
-- `src/services/toolSearch/toolIndex.ts` → 后续重命名为 `searchExtraTools/toolIndex.ts`
+- `src/services/searchExtraTools/toolIndex.ts` → 后续重命名为 `searchExtraTools/toolIndex.ts`
 - `packages/builtin-tools/src/tools/ExecuteTool/` — 执行入口
 - `src/constants/tools.ts` — CORE_TOOLS 定义
 

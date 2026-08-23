@@ -54,6 +54,9 @@ import { safeParseJSON } from '../../utils/json.js';
 import { getPlatform } from '../../utils/platform.js';
 import { cliError, cliOk } from '../exit.js';
 import { createInterface } from 'readline';
+import { MCP_DISABLED_STATUS, mcpDisabledHealthResult } from './mcpDisabledStatus.js';
+
+export { MCP_DISABLED_STATUS };
 
 // Official 2.1.196: never spawn unapproved project (.mcp.json) servers from list/get.
 const PENDING_APPROVAL_STATUS = '⏸ Pending approval (run `claude` to approve)';
@@ -79,6 +82,11 @@ async function checkMcpServerHealth(
   }
   if (options?.projectStatus === 'rejected') {
     return { status: REJECTED_STATUS };
+  }
+  // densable 2.1.238: hm(name)?wah — disabled → glyph, never connect
+  const disabled = mcpDisabledHealthResult(isMcpServerDisabled(name));
+  if (disabled) {
+    return disabled;
   }
   // Defense in depth: project-scope servers that are not settings-approved
   // must not be connected from CLI list/get (RCE via self-approved .mcp.json).

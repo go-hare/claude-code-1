@@ -48,6 +48,7 @@ import { isRemoteManagedSettingsEligible, resetSyncCache } from './syncCache.js'
 import {
   getRemoteManagedSettingsSyncFromCache,
   getSettingsPath,
+  markSessionCacheConsented,
   setSessionCache,
 } from './syncCacheState.js'
 import {
@@ -490,6 +491,7 @@ async function fetchAndLoadRemoteManagedSettings(
 
     if (!result.success) {
       // On fetch failure, use stale file if available (graceful degradation)
+      // densable RMr(r) — sessionCache only; do not mark verified.
       if (cachedSettings) {
         logForDebugging(
           'Remote settings: Using stale cache after fetch failure',
@@ -502,9 +504,10 @@ async function fetchAndLoadRemoteManagedSettings(
     }
 
     // Handle 304 Not Modified - cached settings are still valid
+    // densable RMr(r, {verified:true}) — consentedPayload stays (no W8s).
     if (result.settings === null && cachedSettings) {
       logForDebugging('Remote settings: Cache still valid (304 Not Modified)')
-      setSessionCache(cachedSettings)
+      setSessionCache(cachedSettings, { verified: true })
       return cachedSettings
     }
 
@@ -536,7 +539,8 @@ async function fetchAndLoadRemoteManagedSettings(
       }
 
       // Always apply for this process.
-      setSessionCache(newSettings)
+      // densable RMr(a, {verified:true}); W8s only on approved / no_check_needed.
+      setSessionCache(newSettings, { verified: true })
 
       // Official 2.1.207: non-interactive runs must not permanently record
       // consent (disk cache) for dangerous settings that never showed a dialog.
@@ -553,6 +557,7 @@ async function fetchAndLoadRemoteManagedSettings(
         securityResult === 'no_check_needed'
       ) {
         await recordOrgConsent(getConsentIdentity(), newSettings)
+        markSessionCacheConsented(newSettings)
       }
 
       await saveSettings(newSettings)
@@ -562,7 +567,9 @@ async function fetchAndLoadRemoteManagedSettings(
 
     // Empty settings (404 response) - delete cached file if it exists
     // This ensures stale settings don't persist when a user's remote settings are removed
-    setSessionCache(newSettings)
+    // densable RMr(empty, {verified:true}) + W8s(empty)
+    setSessionCache(newSettings, { verified: true })
+    markSessionCacheConsented(newSettings)
     try {
       const path = getSettingsPath()
       await unlink(path)

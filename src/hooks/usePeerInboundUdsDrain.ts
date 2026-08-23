@@ -288,7 +288,9 @@ export function usePeerInboundUdsDrain(
             ...(fromMode !== undefined ? { fromMode } : {}),
             ...(typeof meta?.msg_id === 'string'
               ? { msg_id: meta.msg_id }
-              : {}),
+              : typeof entry.message.msg_id === 'string'
+                ? { msg_id: entry.message.msg_id }
+                : {}),
           },
           skipSlashCommands: true,
           isMeta: true,

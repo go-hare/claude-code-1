@@ -1534,27 +1534,19 @@ export async function runBridgeLoop(
     await Promise.allSettled([...pendingCleanups])
   }
 
-  // In single-session mode with a known session, leave the session and
-  // environment alive so `claude remote-control --session-id=<id>` can resume.
+  // densable `preserveOnShutdown && !fatal`: leave env+session alive so the
+  // next `claude remote-control` (pointer reuse) or `--session-id` can resume.
   // The backend GCs stale environments via a 4h TTL (BRIDGE_LAST_POLL_TTL).
-  // Archiving the session or deregistering the environment would make the
-  // printed resume command a lie — deregister deletes Firestore + Redis stream.
-  // Skip when the loop exited fatally (env expired, auth failed, give-up) —
-  // resume is impossible in those cases and the message would contradict the
-  // error already printed.
-  // feature('KAIROS') gate: --session-id is ant-only; without the gate,
-  // revert to the pre-PR behavior (archive + deregister on every shutdown).
-  if (
-    feature('KAIROS') &&
-    config.spawnMode === 'single-session' &&
-    initialSessionId &&
-    !fatalExit
-  ) {
+  // Archiving or deregistering would make resume a lie. Skip on fatal exit
+  // (env expired, auth failed, give-up).
+  if (config.preserveOnShutdown && !fatalExit) {
     logger.logStatus(
-      `Resume this session by running \`claude remote-control --continue\``,
+      config.spawnMode === 'single-session' && initialSessionId
+        ? `Resume this session by running \`claude remote-control ${config.ownsPointer ? '--continue' : `--session-id ${initialSessionId}`}\``
+        : 'Environment preserved. Restart `claude remote-control` to reconnect existing sessions.',
     )
     logForDebugging(
-      `[bridge:shutdown] Skipping archive+deregister to allow resume of session ${initialSessionId}`,
+      `[bridge:shutdown] Skipping archive+deregister to allow resume (env ${environmentId}, spawnMode ${config.spawnMode})`,
     )
     return
   }
@@ -1592,11 +1584,12 @@ export async function runBridgeLoop(
     logger.logVerbose(`Failed to deregister environment: ${errorMessage(err)}`)
   }
 
-  // Clear the crash-recovery pointer — the env is gone, pointer would be
-  // stale. The early return above (resumable SIGINT shutdown) skips this,
-  // leaving the pointer as a backup for the printed --session-id hint.
-  const { clearBridgePointer } = await import('./bridgePointer.js')
-  await clearBridgePointer(config.dir)
+  // densable `ownsPointer`: only the writer clears the file. A deferred
+  // (occupying) process must not steal the live writer's pointer.
+  if (config.ownsPointer) {
+    const { clearBridgePointer } = await import('./bridgePointer.js')
+    await clearBridgePointer(config.dir)
+  }
 
   logger.logVerbose('Environment offline.')
 }
@@ -2327,16 +2320,34 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // fresh creation on env-mismatch fallback).
   const preCreateSession = parsedCreateSessionInDir ?? true
 
-  // Without --continue: a leftover pointer means the previous run didn't
-  // shut down cleanly (crash, kill -9, terminal closed). Clear it so the
-  // stale env doesn't linger past its relevance. Runs in all modes
-  // (clearBridgePointer is a no-op when no file exists) — covers the
-  // gate-transition case where a user crashed in single-session mode then
-  // starts fresh in worktree mode. Only single-session mode writes new
-  // pointers.
-  if (!resumeSessionId) {
-    const { clearBridgePointer } = await import('./bridgePointer.js')
-    await clearBridgePointer(dir)
+  // densable `!S&&fe`: leftover standalone pointer is reused on the next
+  // `claude remote-control` (no --session-id) so the next message reconnects.
+  // Live writer pid → defer the write (fresh env, no split-brain). Do NOT
+  // clear the leftover pointer — that was the opposite of crash-reuse.
+  let leftoverReuseEnvironmentId: string | undefined
+  let leftoverSessionId: string | undefined
+  let deferPointerWrite = false
+  let occupyingPointer: Awaited<
+    ReturnType<typeof import('./bridgePointer.js').readBridgePointer>
+  > = null
+  if (!resumeSessionId && preCreateSession) {
+    const { readBridgePointer, decideStandalonePointerReuse } = await import(
+      './bridgePointer.js'
+    )
+    const prior = await readBridgePointer(dir)
+    const decision = await decideStandalonePointerReuse(prior)
+    if (decision.kind === 'defer') {
+      deferPointerWrite = true
+      logForDebugging(
+        `[bridge:init] Pointer writer pid ${decision.pid} still running; registering a fresh env and deferring pointer write`,
+      )
+    } else if (decision.kind === 'reuse') {
+      leftoverReuseEnvironmentId = decision.environmentId
+      leftoverSessionId = decision.sessionId
+      logForDebugging(
+        `[bridge:init] Found prior environment ${leftoverReuseEnvironmentId} in pointer (ageMs=${decision.ageMs}); requesting reuse on registration`,
+      )
+    }
   }
 
   // Worktree mode requires either git or WorktreeCreate/WorktreeRemove hooks.
@@ -2369,11 +2380,41 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // environment_id and reuse that for registration (idempotent on the
   // backend). Left undefined otherwise — the backend rejects
   // client-generated UUIDs and will allocate a fresh environment.
+  // Leftover standalone pointer (no --session-id) also sets this so the
+  // next `claude remote-control` reuses the crashed env.
   // feature('KAIROS') gate: --session-id is ant-only; parseArgs already
   // rejects the flag when the gate is off, so resumeSessionId is always
   // undefined here in external builds — this guard is for tree-shaking.
-  let reuseEnvironmentId: string | undefined
+  let reuseEnvironmentId: string | undefined = leftoverReuseEnvironmentId
   if (feature('KAIROS') && resumeSessionId) {
+    // Occupancy: another live remote-control already serving this session
+    // or its environment → exit rather than split-brain. densable reads
+    // with noClear so a stale file is not deleted mid-check.
+    {
+      const { readBridgePointer } = await import('./bridgePointer.js')
+      const occupyDir = resumePointerDir ?? dir
+      const candidate = await readBridgePointer(occupyDir, { noClear: true })
+      occupyingPointer = null
+      if (candidate?.pid !== undefined && candidate.pid !== process.pid) {
+        const { isProcessRunning, isSameProcessAsync } = await import(
+          '../utils/genericProcessUtils.js'
+        )
+        if (
+          isProcessRunning(candidate.pid) &&
+          (await isSameProcessAsync(candidate.pid, candidate.procStart))
+        ) {
+          occupyingPointer = candidate
+          if (sameSessionId(candidate.sessionId, resumeSessionId)) {
+            console.error(
+              `Error: Session ${resumeSessionId} is already being served by another \`claude remote-control\` instance (pid ${candidate.pid}) in ${occupyDir}. Use that terminal, or stop it first.`,
+            )
+            // eslint-disable-next-line custom-rules/no-process-exit
+            process.exit(1)
+          }
+          deferPointerWrite = true
+        }
+      }
+    }
     try {
       validateBridgeId(resumeSessionId, 'sessionId')
     } catch {
@@ -2388,22 +2429,29 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     // token would otherwise produce a misleading "not found" error.
     await checkAndRefreshOAuthTokenIfNeeded()
     clearOAuthTokenCache()
-    const { getBridgeSession } = await import('./createSession.js')
-    const session = await getBridgeSession(resumeSessionId, {
-      baseUrl,
-      getAccessToken: getBridgeAccessToken,
-    })
+    // densable getBridgeSessionOrStatus is not invented — local
+    // getBridgeSessionWithNotFound already returns {session, notFound}.
+    const { getBridgeSessionWithNotFound } = await import('./createSession.js')
+    const { session, notFound } = await getBridgeSessionWithNotFound(
+      resumeSessionId,
+      {
+        baseUrl,
+        getAccessToken: getBridgeAccessToken,
+      },
+    )
     if (!session) {
       // Session gone on server → pointer is stale. Clear it so the user
       // isn't re-prompted next launch. (Explicit --session-id leaves the
       // pointer alone — it's an independent file they may not even have.)
       // resumePointerDir may be a worktree sibling — clear THAT file.
-      if (resumePointerDir) {
+      if (notFound && resumePointerDir) {
         const { clearBridgePointer } = await import('./bridgePointer.js')
         await clearBridgePointer(resumePointerDir)
       }
       console.error(
-        `Error: Session ${resumeSessionId} not found. It may have been archived or expired, or your login may have lapsed (run \`claude /login\`).`,
+        notFound
+          ? `Error: Session ${resumeSessionId} not found. It may have been archived or expired.`
+          : `Error: Could not reach the server to look up session ${resumeSessionId}. Check your network or run \`claude /login\`, then try again.`,
       )
       // eslint-disable-next-line custom-rules/no-process-exit
       process.exit(1)
@@ -2420,6 +2468,19 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
       process.exit(1)
     }
     reuseEnvironmentId = session.environment_id
+    if (
+      occupyingPointer &&
+      occupyingPointer.pid !== undefined &&
+      occupyingPointer.pid !== process.pid &&
+      reuseEnvironmentId === occupyingPointer.environmentId
+    ) {
+      const occupyDir = resumePointerDir ?? dir
+      console.error(
+        `Error: Environment ${reuseEnvironmentId} is already being served by another \`claude remote-control\` instance (pid ${occupyingPointer.pid}) in ${occupyDir}. Use that terminal, or stop it first.`,
+      )
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(1)
+    }
     logForDebugging(
       `[bridge:init] Resuming session ${resumeSessionId} on environment ${reuseEnvironmentId}`,
     )
@@ -2479,6 +2540,91 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // Used below to skip fresh session creation and seed initialSessionId.
   // Cleared on env mismatch so we gracefully fall back to a new session.
   let effectiveResumeSessionId: string | undefined
+  // densable `pe` — leftover standalone session adopted after env reuse
+  // (no --session-id). Transient reconnect keeps the pointer; all-fatal
+  // Hoe drops the adopted session and falls through to a fresh create.
+  let adoptedSessionId: string | undefined
+  if (leftoverReuseEnvironmentId) {
+    if (environmentId !== leftoverReuseEnvironmentId) {
+      logForDebugging(
+        `Bridge env reuse mismatch: requested ${leftoverReuseEnvironmentId}, backend returned ${environmentId}.`,
+        { level: 'warn' },
+      )
+      console.warn(
+        'Warning: Could not reuse the previous environment. Existing claude.ai/code sessions from the previous run will not reconnect.',
+      )
+      const { clearBridgePointer } = await import('./bridgePointer.js')
+      await clearBridgePointer(dir)
+    } else {
+      const { writeBridgePointer, readBridgePointer } = await import(
+        './bridgePointer.js'
+      )
+      const { ownProcStartAsync } = await import(
+        '../utils/genericProcessUtils.js'
+      )
+      const wrote = await writeBridgePointer(dir, {
+        sessionId: leftoverSessionId ?? '',
+        environmentId,
+        source: 'standalone',
+        pid: process.pid,
+        procStart: await ownProcStartAsync(),
+      })
+      config.preserveOnShutdown = wrote
+      config.ownsPointer = wrote
+      if (wrote) {
+        const raced = await readBridgePointer(dir, { noClear: true })
+        if (raced && raced.pid !== undefined && raced.pid !== process.pid) {
+          logForDebugging(
+            `[bridge:init] Lost pointer write race to pid ${raced.pid}; backing off`,
+            { level: 'error' },
+          )
+          console.error(
+            `Error: Another \`claude remote-control\` instance (pid ${raced.pid}) is already running in this directory. Exiting to avoid a split-brain conflict.`,
+          )
+          // eslint-disable-next-line custom-rules/no-process-exit
+          process.exit(1)
+        }
+      }
+      adoptedSessionId = leftoverSessionId
+      if (adoptedSessionId) {
+        const infraAdoptId = toInfraSessionId(adoptedSessionId)
+        const adoptCandidates =
+          infraAdoptId === adoptedSessionId
+            ? [adoptedSessionId]
+            : [adoptedSessionId, infraAdoptId]
+        let adopted = false
+        const adoptErrors: unknown[] = []
+        for (const candidateId of adoptCandidates) {
+          try {
+            await api.reconnectSession(environmentId, candidateId)
+            logForDebugging(
+              `[bridge:init] Adopted session ${candidateId} re-queued via bridge/reconnect`,
+            )
+            adopted = true
+            break
+          } catch (err) {
+            adoptErrors.push(err)
+            logForDebugging(
+              `[bridge:init] reconnectSession(${candidateId}) failed: ${errorMessage(err)}`,
+            )
+          }
+        }
+        if (!adopted) {
+          if (
+            adoptErrors.length > 0 &&
+            adoptErrors.every(err => err instanceof BridgeFatalError)
+          ) {
+            adoptedSessionId = undefined
+          } else {
+            logForDebugging(
+              '[bridge:init] reconnectSession transient failure; session will be picked up passively once its lease expires',
+              { level: 'warn' },
+            )
+          }
+        }
+      }
+    }
+  }
   if (feature('KAIROS') && resumeSessionId) {
     if (reuseEnvironmentId && environmentId !== reuseEnvironmentId) {
       // Backend returned a different environment_id — the original env
@@ -2518,6 +2664,11 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
           )
           effectiveResumeSessionId = resumeSessionId
           reconnected = true
+          // --session-id resume preserves the env but does not claim the
+          // pointer unless the later write (gated by !deferPointerWrite)
+          // succeeds — a live occupying writer keeps ownsPointer=false.
+          config.preserveOnShutdown = true
+          config.ownsPointer = false
           break
         } catch (err) {
           lastReconnectErr = err
@@ -2669,16 +2820,15 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // Auto-create an empty session so the user has somewhere to type
   // immediately (matching /remote-control behavior). Controlled by
   // preCreateSession: on by default; --no-create-session-in-dir opts out.
-  // When a --session-id resume succeeded, skip creation entirely — the
-  // session already exists and bridge/reconnect has re-queued it.
-  // When resume was requested but failed on env mismatch, effectiveResumeSessionId
-  // is undefined, so we fall through to fresh session creation (honoring the
-  // "Creating a fresh session instead" warning printed above).
+  // densable `fe&&!xt&&!pe`: skip when --session-id resume or leftover
+  // adopt succeeded. Env-mismatch fallback still creates a fresh session.
   let initialSessionId: string | null =
-    feature('KAIROS') && effectiveResumeSessionId
+    (feature('KAIROS') && effectiveResumeSessionId
       ? effectiveResumeSessionId
-      : null
-  if (preCreateSession && !(feature('KAIROS') && effectiveResumeSessionId)) {
+      : null) ??
+    adoptedSessionId ??
+    null
+  if (preCreateSession && !effectiveResumeSessionId && !adoptedSessionId) {
     const { createBridgeSession } = await import('./createSession.js')
     try {
       initialSessionId = await createBridgeSession({
@@ -2704,35 +2854,47 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     }
   }
 
-  // Crash-recovery pointer: write immediately so kill -9 at any point
-  // after this leaves a recoverable trail. Covers both fresh sessions and
-  // resumed ones (so a second crash after resume is still recoverable).
-  // Cleared when runBridgeLoop falls through to archive+deregister; left in
-  // place on the SIGINT resumable-shutdown return (backup for when the user
-  // closes the terminal before copying the printed --session-id hint).
-  // Refreshed hourly so a 5h+ session that crashes still has a fresh
-  // pointer (staleness checks file mtime, backend TTL is rolling-from-poll).
+  // densable `Vt!==null&&!ge`: write pid+procStart unless a live writer
+  // owns the file. Hourly refresh restamps procStart. Write success claims
+  // preserveOnShutdown + ownsPointer so clean shutdown skips archive.
   let pointerRefreshTimer: ReturnType<typeof setInterval> | null = null
-  // Single-session only: --continue forces single-session mode on resume,
-  // so a pointer written in multi-session mode would contradict the user's
-  // config when they try to resume. The resumable-shutdown path is also
-  // gated to single-session (line ~1254) so the pointer would be orphaned.
-  if (initialSessionId && spawnMode === 'single-session') {
+  const pointerSessionId =
+    initialSessionId ??
+    (config.preserveOnShutdown ? (leftoverSessionId ?? '') : null)
+  if (pointerSessionId !== null && !deferPointerWrite) {
     const { writeBridgePointer } = await import('./bridgePointer.js')
+    const { ownProcStartAsync } = await import(
+      '../utils/genericProcessUtils.js'
+    )
     const pointerPayload = {
-      sessionId: initialSessionId,
+      sessionId: pointerSessionId,
       environmentId,
       source: 'standalone' as const,
+      pid: process.pid,
+      procStart: await ownProcStartAsync(),
     }
-    await writeBridgePointer(config.dir, pointerPayload)
-    pointerRefreshTimer = setInterval(
-      writeBridgePointer,
-      60 * 60 * 1000,
-      config.dir,
-      pointerPayload,
-    )
-    // Don't let the interval keep the process alive on its own.
-    pointerRefreshTimer.unref?.()
+    if (await writeBridgePointer(config.dir, pointerPayload)) {
+      config.preserveOnShutdown = true
+      config.ownsPointer = true
+      pointerRefreshTimer = setInterval(
+        (
+          write: typeof writeBridgePointer,
+          ownStart: typeof ownProcStartAsync,
+          pointerDir: string,
+          payload: typeof pointerPayload,
+        ) => {
+          void ownStart().then(procStart =>
+            write(pointerDir, { ...payload, procStart }),
+          )
+        },
+        60 * 60 * 1000,
+        writeBridgePointer,
+        ownProcStartAsync,
+        config.dir,
+        pointerPayload,
+      )
+      pointerRefreshTimer.unref?.()
+    }
   }
 
   try {

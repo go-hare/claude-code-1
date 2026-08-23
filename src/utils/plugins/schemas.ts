@@ -10,6 +10,32 @@ import {
 export { ARCHIVE_URL_POLICY_MESSAGE }
 
 /**
+ * densable 2.1.238 SEA `cZt` — headersHelper / command consent UI max length.
+ */
+export const HEADERS_HELPER_MAX_LENGTH = 500
+
+/**
+ * densable 2.1.238 SEA `L$u` — reject non-printable ASCII or runs of 4+ spaces.
+ */
+const HEADERS_HELPER_PRINTABLE_ASCII = /[^\x20-\x7E]| {4,}/
+
+/**
+ * densable 2.1.238 SEA `m8s` — shared headersHelper command string schema.
+ */
+export const HeadersHelperCommandSchema = lazySchema(() =>
+  z
+    .string()
+    .max(HEADERS_HELPER_MAX_LENGTH, {
+      message:
+        'headersHelper must not be longer than the install consent UI can display',
+    })
+    .refine(value => !HEADERS_HELPER_PRINTABLE_ASCII.test(value), {
+      message:
+        'headersHelper must be printable ASCII (letters, digits, punctuation, single spaces) with no runs of 4 or more spaces',
+    }),
+)
+
+/**
  * First-layer defense against official marketplace impersonation.
  *
  * This validation blocks direct impersonation attempts like "anthropic-official",
@@ -934,6 +960,12 @@ export const MarketplaceSourceSchema = lazySchema(() =>
         .record(z.string(), z.string())
         .optional()
         .describe('Custom HTTP headers (e.g., for authentication)'),
+      // densable 2.1.238 — marketplace headersHelper (≠ MCP headersHelper)
+      headersHelper: HeadersHelperCommandSchema()
+        .optional()
+        .describe(
+          "Command that prints a JSON object of HTTP headers (e.g. a short-lived auth token). Its output overrides `headers` and, like `headers`, is inherited by same-origin archive downloads from this marketplace. Runs from a fixed directory (the Claude config home, never the session's), so give a bare command found via PATH or an absolute path; it is re-run on later refreshes of this marketplace.",
+        ),
     }),
     z.object({
       source: z.literal('github'),
@@ -1300,6 +1332,18 @@ const SettingsMarketplacePluginSchema = lazySchema(() =>
       description: z.string().optional(),
       version: z.string().optional(),
       strict: z.boolean().optional(),
+      // densable 2.1.238 — settings-sourced entry headers / headersHelper
+      headers: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          "HTTP headers sent when downloading this entry's `archive` source.",
+        ),
+      headersHelper: HeadersHelperCommandSchema()
+        .optional()
+        .describe(
+          "Command that prints a JSON object of HTTP headers for downloading this entry's `archive` source. Runs only when a user explicitly installs or updates this plugin. Unlike a catalog entry, an entry written here does not need `strict: false`: it is declared in a settings file, which has no manifest fields to inline. A declaration in project settings is not operator-authored, so request-routing and client-identity header names are still filtered there. Use an absolute path.",
+        ),
     })
     .refine(p => typeof p.source !== 'string', {
       message:
@@ -1429,6 +1473,18 @@ export const PluginMarketplaceEntrySchema = lazySchema(() =>
         })
         .describe('Unique identifier matching the plugin name'),
       source: PluginSourceSchema().describe('Where to fetch the plugin from'),
+      // densable 2.1.238 — catalog entry headers / headersHelper (archive install/update only)
+      headers: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          "HTTP headers for fetching this plugin's archive; overrides the marketplace's",
+        ),
+      headersHelper: HeadersHelperCommandSchema()
+        .optional()
+        .describe(
+          "Command that prints a JSON object of HTTP headers for fetching this plugin's archive (e.g. a short-lived auth token); overrides this entry's `headers` and the marketplace's. Runs only when the user installs or updates this plugin, never during catalog browse. An entry that sets it must be `strict: false` with its manifest inlined here, so consent is informed from the entry alone before the command runs.",
+        ),
       category: z
         .string()
         .optional()

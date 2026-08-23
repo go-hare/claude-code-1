@@ -41,6 +41,14 @@ export type ConnectionErrorDetails = {
 export const SOCKET_CONNECTION_CLOSED_PREFIX =
   'The socket connection was closed unexpectedly'
 
+/** densable T9r `zff` — unwrap to inner cause when the wrapper is generic. */
+const AWS_CREDENTIALS_CHAIN_FAILED =
+  'Failed to resolve AWS credentials from the credential provider chain.'
+
+/** densable T9r `Wvi` */
+const GCP_OAUTH_CREDENTIALS_FAILED =
+  'Failed to acquire Google OAuth credentials.'
+
 /**
  * densable T2 — extract connection error details from the error cause chain.
  * The Anthropic SDK wraps underlying errors in the `cause` property.
@@ -190,12 +198,75 @@ function extractNestedErrorMessage(error: APIError): string | null {
   return null
 }
 
+/**
+ * densable T9r `EJt` — walk `start` (typically `error.cause`) up to `maxDepth`.
+ */
+function findCauseError(
+  start: unknown,
+  pred: (err: Error) => boolean,
+  maxDepth = 5,
+): Error | undefined {
+  let current = start
+  for (let i = 0; i < maxDepth; i++) {
+    if (!(current instanceof Error)) return undefined
+    if (pred(current)) return current
+    current = 'cause' in current ? current.cause : undefined
+  }
+  return undefined
+}
+
+/**
+ * densable T9r named copy for `message === "Connection error."` + errno.
+ * Includes `ERR_PROXY_TUNNEL` → `Couldn't connect through your proxy`.
+ * Display-only — does not change STREAM_NETWORK_DOWN_CODES / F4y.
+ */
+function formatNamedConnectionError(code: string): string {
+  switch (code) {
+    case 'ECONNRESET':
+    case 'EPIPE':
+    case 'ECONNABORTED':
+    case 'ConnectionClosed':
+    case 'ERR_SOCKET_CLOSED':
+    case 'UND_ERR_SOCKET':
+      return `Connection dropped (${code})`
+    case 'ECONNREFUSED':
+    case 'ConnectionRefused':
+      return (
+        `Connection refused — a firewall or proxy may be blocking it ` +
+        `(${code})`
+      )
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+    case 'FailedToOpenSocket':
+      return (
+        `Can't reach the API server — check your internet or DNS ` + `(${code})`
+      )
+    case 'ENETUNREACH':
+    case 'ENETDOWN':
+    case 'EHOSTUNREACH':
+    case 'EHOSTDOWN':
+      return `No internet route — check your connection or VPN (${code})`
+    case 'ERR_PROXY_TUNNEL':
+      return `Couldn't connect through your proxy (${code})`
+    default:
+      return `Unable to connect to API (${code})`
+  }
+}
+
 export function formatAPIError(error: APIError): string {
   // Extract connection error details from the cause chain
   const connectionDetails = extractConnectionErrorDetails(error)
 
   if (connectionDetails) {
     const { code, isSSLError } = connectionDetails
+
+    // densable T9r order: StreamSuspended → Bedrock → ETIMEDOUT → SSL
+    if (code === 'StreamSuspended') {
+      return 'Connection lost while your computer was asleep'
+    }
+    if (code === 'BedrockUnexpectedContentType') {
+      return connectionDetails.message
+    }
 
     // Handle timeout errors
     if (code === 'ETIMEDOUT') {
@@ -227,12 +298,30 @@ export function formatAPIError(error: APIError): string {
     }
   }
 
-  if (error.message === 'Connection error.') {
-    // If we have a code but it's not SSL, include it for debugging
-    if (connectionDetails?.code) {
-      return `Unable to connect to API (${connectionDetails.code})`
+  // densable T9r: generic cloud-cred wrappers unwrap a useful inner message
+  if (
+    error.message === AWS_CREDENTIALS_CHAIN_FAILED ||
+    error.message === GCP_OAUTH_CREDENTIALS_FAILED
+  ) {
+    const inner = findCauseError(
+      error.cause,
+      err =>
+        err.message.trim().length > 0 &&
+        err.message !== AWS_CREDENTIALS_CHAIN_FAILED &&
+        err.message !== GCP_OAUTH_CREDENTIALS_FAILED,
+    )
+    if (inner) {
+      const sanitized = sanitizeMessageHTML(inner.message.trim())
+      if (sanitized.length > 0) return sanitized
     }
-    return 'Unable to connect to API. Check your internet connection'
+  }
+
+  if (error.message === 'Connection error.') {
+    const n = connectionDetails?.code
+    if (n === undefined) {
+      return 'Unable to connect to API. Check your internet connection'
+    }
+    return formatNamedConnectionError(n)
   }
 
   // Guard: when deserialized from JSONL (e.g. --resume), the error object may
@@ -242,6 +331,14 @@ export function formatAPIError(error: APIError): string {
       extractNestedErrorMessage(error) ??
       `API error (status ${error.status ?? 'unknown'})`
     )
+  }
+
+  // densable T9r: nested JSON body often leaks as `{"type":...}` in message
+  if (error.message.includes('{"')) {
+    const nested = extractNestedErrorMessage(error)
+    if (nested) {
+      return error.status ? `${error.status} ${nested}` : nested
+    }
   }
 
   const sanitizedMessage = sanitizeAPIError(error)

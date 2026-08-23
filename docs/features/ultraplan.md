@@ -1,8 +1,21 @@
-# ULTRAPLAN — 增强规划
+# ULTRAPLAN — 增强规划（已从产品面拆除）
 
 > Feature Flag: `FEATURE_ULTRAPLAN=1`
-> 实现状态：关键字检测完整，命令处理完整，CCR 远程会话完整
-> 引用数：10
+> 实现状态：代码完整（关键字检测 / 命令处理 / CCR 远程会话 / REPL 对话框全部存在）
+> 引用数：约 35 个非测试文件
+
+<Warning>
+**上游 densable 在 2.1.222（#21）已移除 ultraplan，产品默认 OFF。** 本仓库遵循上游对齐，
+`ULTRAPLAN` 已从 `scripts/defines.ts` 的 `DEFAULT_BUILD_FEATURES` 中注释掉——所以 dev 和
+build **都不会**默认启用它。
+
+残留模块（`src/commands/ultraplan.tsx`、`src/components/ultraplan/`、`ccrSession.ts`、
+`ULTRAPLAN_TAG` / `isUltraplan` / teleport）是**刻意保留**的：一是留作历史记录，二是允许用
+`FEATURE_ULTRAPLAN=1` 复活。`defines.ts` 里有明确注释要求 **不要**把它加回
+`DEFAULT_BUILD_FEATURES`。
+
+因此本文描述的是一条**需要显式开启才存在**的路径，不是默认行为。
+</Warning>
 
 ## 一、功能概述
 
@@ -22,11 +35,14 @@ ULTRAPLAN 在用户输入中检测 "ultraplan" 关键字时，自动进入增强
 
 | 模块 | 文件 | 行数 | 状态 |
 |------|------|------|------|
-| 命令处理器 | `src/commands/ultraplan.tsx` | 525 | **完整** |
+| 命令处理器 | `src/commands/ultraplan.tsx` | 502 | **完整** |
 | CCR 会话 | `src/utils/ultraplan/ccrSession.ts` | 349 | **完整** |
-| 关键字检测 | `src/utils/ultraplan/keyword.ts` | 127 | **完整** |
-| 嵌入式提示 | `src/utils/ultraplan/prompt.txt` | 1 | **完整** |
-| REPL 对话框 | `src/screens/REPL.tsx` | — | **布线** |
+| 关键字检测 | `src/utils/ultraplan/keyword.ts` | 136 | **完整** |
+| 提示词构建 | `src/utils/ultraplan/prompt.ts` | 66 | **完整** |
+| 提示词模板 | `src/utils/ultraplan/prompts/` | 3 个 txt | `simple_plan` / `three_subagents_with_critique` / `visual_plan` |
+| 选择对话框 | `src/components/ultraplan/UltraplanChoiceDialog.tsx` | — | **完整** |
+| 启动对话框 | `src/components/ultraplan/UltraplanLaunchDialog.tsx` | — | **完整** |
+| REPL 挂载 | `src/screens/REPL.tsx` | — | **布线**（两个对话框在 L7861 / L7876 挂载） |
 | 关键字高亮 | `src/components/PromptInput/PromptInput.tsx` | — | **布线** |
 
 ### 2.2 关键字检测
@@ -70,12 +86,16 @@ processUserInput 检测 "ultraplan"
          用户在远程审批 → 本地收到结果
 ```
 
-## 三、需要补全的内容
+## 三、实现完整性
 
-| 模块 | 说明 |
+早期版本的本文列出了两项「需要补全」，现已全部落地或证伪：
+
+| 早先记录 | 现状 |
 |------|------|
-| `src/screens/REPL.tsx` 中的 UltraplanChoiceDialog / UltraplanLaunchDialog | 用户选择本地/远程执行的对话框组件 |
-| `src/commands/ultraplan/` | 空目录，可能是未合并的子命令结构 |
+| `UltraplanChoiceDialog` / `UltraplanLaunchDialog` 缺失 | 已实现于 `src/components/ultraplan/`，REPL 已挂载 |
+| `src/commands/ultraplan/` 空目录 | 该目录不存在；命令是单文件 `src/commands/ultraplan.tsx` |
+
+代码层面没有已知缺口。真正的「不可用」原因是 feature flag 默认关闭（见文首警告）。
 
 ## 四、关键设计决策
 
@@ -99,9 +119,12 @@ FEATURE_ULTRAPLAN=1 bun run dev
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `src/commands/ultraplan.tsx` | 525 | 斜杠命令处理器 |
+| `src/commands/ultraplan.tsx` | 502 | 斜杠命令处理器 |
 | `src/utils/ultraplan/ccrSession.ts` | 349 | CCR 远程会话管理 |
-| `src/utils/ultraplan/keyword.ts` | 127 | 关键字检测和替换 |
-| `src/utils/ultraplan/prompt.txt` | 1 | 嵌入式提示 |
+| `src/utils/ultraplan/keyword.ts` | 136 | 关键字检测和替换 |
+| `src/utils/ultraplan/prompt.ts` | 66 | 提示词组装 |
+| `src/utils/ultraplan/prompts/*.txt` | 3 个 | 规划模板 |
+| `src/components/ultraplan/UltraplanChoiceDialog.tsx` | — | 本地/远程选择 |
+| `src/components/ultraplan/UltraplanLaunchDialog.tsx` | — | 启动确认 |
 | `src/utils/processUserInput/processUserInput.ts:468` | — | 关键字重定向 |
 | `src/components/PromptInput/PromptInput.tsx` | — | 彩虹高亮 |

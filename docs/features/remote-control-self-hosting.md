@@ -220,10 +220,10 @@ acp-link ◄──ACP relay──► RCS ◄──Web UI WS──► 浏览器
 
 | 文件 | 职责 |
 |------|------|
-| `src/routes/acp/index.ts` | ACP REST 路由：agents 列表、channel groups、relay |
-| `src/transport/acp-ws-handler.ts` | ACP WebSocket 处理：agent 注册、心跳、消息转发 |
-| `src/transport/acp-relay-handler.ts` | 前端 WS → acp-link 透传 + EventBus inbound 转发 |
-| `src/transport/acp-sse-writer.ts` | SSE event stream 供外部消费者订阅 |
+| `packages/remote-control-server/src/routes/acp/index.ts` | ACP REST 路由：agents 列表、channel groups、relay |
+| `packages/remote-control-server/src/transport/acp-ws-handler.ts` | ACP WebSocket 处理：agent 注册、心跳、消息转发 |
+| `packages/remote-control-server/src/transport/acp-relay-handler.ts` | 前端 WS → acp-link 透传 + EventBus inbound 转发 |
+| `packages/remote-control-server/src/transport/acp-sse-writer.ts` | SSE event stream 供外部消费者订阅 |
 
 ACP 的 agents、channel groups、relay 和 channel-group SSE 端点都要求有效
 API key。浏览器 `EventSource` 不能发送 `Authorization` header，外部订阅

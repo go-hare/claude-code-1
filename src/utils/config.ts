@@ -249,6 +249,7 @@ export type GlobalConfig = {
   bypassPermissionsModeAccepted?: boolean
   hasUsedBackslashReturn?: boolean
   autoCompactEnabled: boolean // Controls whether auto-compact is enabled
+  autoScrollEnabled: boolean // Auto-scroll the conversation view to bottom (fullscreen mode only)
   showTurnDuration: boolean // Controls whether to show turn duration message (e.g., "Cooked for 1m 6s")
   /**
    * @deprecated Use settings.env instead.
@@ -772,6 +773,7 @@ function createDefaultGlobalConfig(): GlobalConfig {
     verbose: false,
     editorMode: 'normal',
     autoCompactEnabled: true,
+    autoScrollEnabled: true,
     showTurnDuration: true,
     hasSeenTasksHint: false,
     hasUsedStash: false,
@@ -823,6 +825,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'editorMode',
   'hasUsedBackslashReturn',
   'autoCompactEnabled',
+  'autoScrollEnabled',
   'showTurnDuration',
   'diffTool',
   'env',
@@ -1281,6 +1284,35 @@ function startGlobalConfigFreshnessWatcher(): void {
 function writeThroughGlobalConfigCache(config: GlobalConfig): void {
   globalConfigCache = { config, mtime: Date.now() }
   lastReadFileStats = null
+}
+
+/**
+ * densable `sp("autoScrollEnabled", !0)` merge: settings ?? global ?? true.
+ * Dual-written from Config UI (settings + GlobalConfig).
+ */
+export function resolveAutoScrollEnabled(
+  fromSettings: boolean | undefined,
+  fromGlobal: boolean | undefined,
+): boolean {
+  if (fromSettings === false) return false
+  if (fromSettings === true) return true
+  return fromGlobal ?? true
+}
+
+export function getAutoScrollEnabled(): boolean {
+  let fromSettings: boolean | undefined
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    fromSettings = getInitialSettings().autoScrollEnabled
+  } catch {
+    // settings unavailable (startup / cycle) — fall through to global
+  }
+  return resolveAutoScrollEnabled(
+    fromSettings,
+    getGlobalConfig().autoScrollEnabled,
+  )
 }
 
 export function getGlobalConfig(): GlobalConfig {

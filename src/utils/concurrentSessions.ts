@@ -1,5 +1,13 @@
 import { feature } from 'bun:bundle'
-import { chmod, mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  unlink,
+  writeFile,
+} from 'fs/promises'
 import { join } from 'path'
 import {
   getAttacherCaps,
@@ -25,6 +33,35 @@ export type SessionStatus = 'busy' | 'idle' | 'waiting'
 
 /** densable session-registry capability voucher for idle notices (tqo). */
 export const SESSION_FEATURE_NOTIFY_IDLE = 'notify_idle'
+
+/**
+ * densable 2.1.238 #28 — `bornSpare && !claimed`.
+ * Claimed = CLAUDE_JOB_DIR/state.json exists (LPd). No storageV5 poll.
+ */
+export function computeSpareFlag(opts: {
+  kind: SessionKind
+  bgSource?: string
+  claimed: boolean
+}): true | undefined {
+  const born = opts.kind === 'bg' && opts.bgSource === 'spare'
+  return born && !opts.claimed ? true : undefined
+}
+
+/** densable LPd — claimed iff jobDir/state.json is present. */
+export async function isSpareJobClaimed(
+  jobDir: string | undefined = process.env.CLAUDE_JOB_DIR,
+): Promise<boolean> {
+  if (!jobDir) return false
+  try {
+    await lstat(join(jobDir, 'state.json'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** densable bornSpare — in-process stamp so first busy can clear spare. */
+let sessionBornSpare = false
 
 function getSessionsDir(): string {
   return join(getClaudeConfigHomeDir(), 'sessions')
@@ -131,6 +168,15 @@ export async function registerSession(): Promise<boolean> {
         `[concurrentSessions] procStart stamp failed: ${errorMessage(e)}`,
       )
     }
+    // densable 2.1.238 #28 — bornSpare in-process; spare:true only while unclaimed.
+    sessionBornSpare = kind === 'bg' && process.env.CLAUDE_BG_SOURCE === 'spare'
+    const spare = sessionBornSpare
+      ? computeSpareFlag({
+          kind,
+          bgSource: process.env.CLAUDE_BG_SOURCE,
+          claimed: await isSpareJobClaimed(),
+        })
+      : undefined
     await writeFile(
       pidFile,
       jsonStringify({
@@ -156,6 +202,7 @@ export async function registerSession(): Promise<boolean> {
               agent: process.env.CLAUDE_CODE_AGENT,
             }
           : {}),
+        ...(spare ? { spare: true } : {}),
       }),
     )
     // --resume / /resume mutates getSessionId() via switchSession. Without
@@ -183,7 +230,12 @@ async function updatePidFile(patch: Record<string, unknown>): Promise<void> {
       string,
       unknown
     >
-    await writeFile(pidFile, jsonStringify({ ...data, ...patch }))
+    const next: Record<string, unknown> = { ...data, ...patch }
+    // densable zMn — first busy clears spare (JSON omit).
+    if (Object.hasOwn(patch, 'spare') && patch.spare === undefined) {
+      delete next.spare
+    }
+    await writeFile(pidFile, jsonStringify(next))
   } catch (e) {
     logForDebugging(
       `[concurrentSessions] updatePidFile failed: ${errorMessage(e)}`,
@@ -273,7 +325,13 @@ export async function updateSessionActivity(patch: {
   lastMessage?: string
 }): Promise<void> {
   if (!feature('BG_SESSIONS')) return
-  await updatePidFile({ ...patch, updatedAt: Date.now() })
+  // densable zMn — first busy of a bornSpare worker clears spare:true.
+  const clearSpare = sessionBornSpare && patch.status === 'busy'
+  await updatePidFile({
+    ...patch,
+    updatedAt: Date.now(),
+    ...(clearSpare ? { spare: undefined } : {}),
+  })
 }
 
 /**
@@ -314,6 +372,8 @@ export type LiveSessionRecord = {
    * Idle subscribe treats a present record that lacks `notify_idle` as peer-unsupported.
    */
   features?: string[]
+  /** densable 2.1.238 #28 — unclaimed pre-warm spare. */
+  spare?: boolean
 }
 
 export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
@@ -391,6 +451,7 @@ export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
         kind,
         messagingSocketPath,
         features,
+        ...(data.spare === true ? { spare: true } : {}),
       })
     } catch (e) {
       logForDebugging(

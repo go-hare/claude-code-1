@@ -14,7 +14,14 @@ import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js'
 import { asAgentId, toAgentId } from 'src/types/ids.js'
 import { MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js'
 import { runWithAgentContext } from 'src/utils/agentContext.js'
-import { runWithCwdOverride } from 'src/utils/cwd.js'
+import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js'
+import {
+  isHardIsolationPinRefuse,
+  liveLaunchDirs,
+  probeIsolationWorktreePin,
+  processLaunchCwd,
+  uniqueLiveRoots,
+} from 'src/utils/isolationWorktreePin.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { extractTextContent } from 'src/utils/messages.js'
 import { truncateCodeUnitsSafe } from 'src/utils/stringUtils.js'
@@ -484,6 +491,37 @@ async function resumeAgentBackgroundAfterClaim({
       )
     : undefined
   if (resumedWorktreePath) {
+    // densable 2.1.238 ODt parked-agent resume (both self-owning flags)
+    const launchCwd = getCwd()
+    const launchReal = await fsp.realpath(launchCwd).catch(() => launchCwd)
+    const processCwd = processLaunchCwd()
+    const pin = await probeIsolationWorktreePin(
+      resumedWorktreePath,
+      liveLaunchDirs(launchCwd),
+      uniqueLiveRoots([launchReal, processCwd, ...liveLaunchDirs(processCwd)]),
+      {
+        requireWitnessForSelfOwningPins: true,
+        declineSelfOwningPinUnderLiveRoot: true,
+      },
+    )
+    if (!pin.ok) {
+      if (isHardIsolationPinRefuse(pin.reason)) {
+        logEvent('git_worktree_create_root_rejected', {})
+        logForDebugging(
+          `[worktree] refusing to resume parked agent into ${resumedWorktreePath} (${pin.reason}): ${pin.message}`,
+          { level: 'error' },
+        )
+        throw new Error(
+          `This agent cannot be resumed: its worktree was refused (${pin.reason}). ${pin.message}`,
+        )
+      }
+      logForDebugging(
+        `[worktree] could not verify parked agent worktree ${resumedWorktreePath} this attempt; the resume will retry: ${pin.message}`,
+      )
+      throw new Error(
+        `Cannot resume this agent right now: its worktree could not be verified (${pin.reason}). Re-run once git can answer.`,
+      )
+    }
     // Bump mtime so stale-worktree cleanup doesn't delete a just-resumed worktree (#22355)
     const now = new Date()
     await fsp.utimes(resumedWorktreePath, now, now)

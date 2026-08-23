@@ -38,6 +38,7 @@ import {
   formatSingleInstallActivateSuffix,
   type PluginInstallAutoActivateOutcome,
 } from '../../utils/plugins/activateAfterInstall.js';
+import { resolveShownArchiveHeadersHelper } from '../../utils/plugins/marketplaceHeadersHelper.js';
 import { installPluginFromMarketplace } from '../../utils/plugins/pluginInstallationHelpers.js';
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js';
 import { plural } from '../../utils/stringUtils.js';
@@ -46,7 +47,14 @@ import { useAppStateStore, useSetAppState } from '../../state/AppState.js';
 import { getMainLoopModel } from '../../utils/model/model.js';
 import { findPluginOptionsTarget, PluginOptionsFlow } from './PluginOptionsFlow.js';
 import { PluginTrustWarning } from './PluginTrustWarning.js';
-import { buildPluginDetailsMenuOptions, extractGitHubRepo, type InstallablePlugin } from './pluginDetailsHelpers.js';
+import {
+  buildPluginDetailsMenuOptions,
+  extractGitHubRepo,
+  gateHeadersHelperPaneForAction,
+  type InstallablePlugin,
+  PluginHeadersHelperDisclosure,
+  useHeadersHelperPaneConsent,
+} from './pluginDetailsHelpers.js';
 import type { ViewState as ParentViewState } from './types.js';
 import { usePagination } from './usePagination.js';
 
@@ -105,6 +113,21 @@ export function DiscoverPlugins({
   // View state
   const [viewState, setViewState] = useState<ViewState>('plugin-list');
   const [selectedPlugin, setSelectedPlugin] = useState<InstallablePlugin | null>(null);
+
+  // SEA dwo — per-view pin; list (no details) identity is empty → unshown.
+  const detailsHelper =
+    viewState === 'plugin-details' && selectedPlugin
+      ? (resolveShownArchiveHeadersHelper({
+          entry: selectedPlugin.entry,
+          marketplaceName: selectedPlugin.marketplaceName,
+          marketplaceSource: selectedPlugin.marketplaceSource,
+          catchOverlayRefusal: true,
+        }) ?? undefined)
+      : undefined;
+  const headersHelperPane = useHeadersHelperPaneConsent(detailsHelper);
+  React.useEffect(() => {
+    if (detailsHelper) headersHelperPane.record(detailsHelper);
+  }, [detailsHelper?.command, detailsHelper?.archiveUrl, headersHelperPane]);
 
   // Data state
   const [availablePlugins, setAvailablePlugins] = useState<InstallablePlugin[]>([]);
@@ -196,6 +219,7 @@ export function DiscoverPlugins({
                 // Project/local-scope installs don't block — user may want to
                 // promote to user scope so it's available everywhere (gh-29997).
                 isInstalled: isPluginGloballyInstalled(pluginId),
+                marketplaceSource: config[name]?.source,
               });
             }
           }
@@ -271,6 +295,7 @@ export function DiscoverPlugins({
                     marketplaceName: name,
                     pluginId,
                     isInstalled: isPluginGloballyInstalled(pluginId),
+                    marketplaceSource: config[name]?.source,
                   };
                   // Surface newly found plugin in the list when not installed
                   if (!foundPlugin.isInstalled) {
@@ -324,11 +349,28 @@ export function DiscoverPlugins({
     const installedIds: string[] = [];
 
     for (const plugin of pluginsToInstall) {
+      const paneBlock = gateHeadersHelperPaneForAction({
+        pluginId: plugin.pluginId,
+        entry: plugin.entry,
+        kind: 'install',
+        marketplaceName: plugin.marketplaceName,
+        marketplaceSource: plugin.marketplaceSource,
+        consented: headersHelperPane.pinned(),
+      });
+      if (paneBlock) {
+        failureCount++;
+        newFailedPlugins.push({
+          name: plugin.entry.name,
+          reason: paneBlock,
+        });
+        continue;
+      }
       const result = await installPluginFromMarketplace({
         pluginId: plugin.pluginId,
         entry: plugin.entry,
         marketplaceName: plugin.marketplaceName,
         scope: 'user',
+        consentedEntryHelper: headersHelperPane.pinned(),
       });
 
       if (result.success) {
@@ -382,11 +424,26 @@ export function DiscoverPlugins({
     setIsInstalling(true);
     setInstallError(null);
 
+    const paneBlock = gateHeadersHelperPaneForAction({
+      pluginId: plugin.pluginId,
+      entry: plugin.entry,
+      kind: 'install',
+      marketplaceName: plugin.marketplaceName,
+      marketplaceSource: plugin.marketplaceSource,
+      consented: headersHelperPane.pinned(),
+    });
+    if (paneBlock) {
+      setIsInstalling(false);
+      setInstallError(paneBlock);
+      return;
+    }
+
     const result = await installPluginFromMarketplace({
       pluginId: plugin.pluginId,
       entry: plugin.entry,
       marketplaceName: plugin.marketplaceName,
       scope,
+      consentedEntryHelper: headersHelperPane.pinned(),
     });
 
     if (result.success) {
@@ -663,6 +720,13 @@ export function DiscoverPlugins({
             </Box>
           )}
         </Box>
+
+        <PluginHeadersHelperDisclosure
+          pluginId={selectedPlugin.pluginId}
+          entry={selectedPlugin.entry}
+          marketplaceName={selectedPlugin.marketplaceName}
+          marketplaceSource={selectedPlugin.marketplaceSource}
+        />
 
         <PluginTrustWarning />
 

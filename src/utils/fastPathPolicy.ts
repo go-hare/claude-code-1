@@ -9,24 +9,27 @@
 
 import { enableConfigs } from './config.js'
 import { applySafeConfigEnvironmentVariables } from './managedEnv.js'
-import { ensureKeychainPrefetchCompleted } from './secureStorage/keychainPrefetch.js'
+import {
+  KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS,
+  ensureKeychainPrefetchCompleted,
+} from './secureStorage/keychainPrefetch.js'
 import { ensureMdmSettingsLoaded } from './settings/mdm/settings.js'
 
 let settingsLoaded = false
 let policyCached: { error: string | null } | null = null
 
 /**
- * Official V64 — enable configs, await MDM/keychain prefetch, apply safe env.
+ * densable `Ftn` — enable configs, await MDM, then keychain prefetch with
+ * `LDn(Uoa)` (250ms deadline). Hung `security` must not stall remote-control
+ * / daemon / `--bg`. REPL `preAction` still awaits unbounded `LDn()`.
  * Idempotent.
  */
 export async function ensureFastPathSettingsLoaded(): Promise<void> {
   if (settingsLoaded) return
   settingsLoaded = true
   enableConfigs()
-  await Promise.all([
-    ensureMdmSettingsLoaded(),
-    ensureKeychainPrefetchCompleted(),
-  ])
+  await ensureMdmSettingsLoaded()
+  await ensureKeychainPrefetchCompleted(KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS)
   applySafeConfigEnvironmentVariables()
 }
 

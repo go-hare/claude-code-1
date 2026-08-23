@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { sleep, withTimeout } from '../sleep'
+import { sleep, withDeadline, withTimeout } from '../sleep'
 import { sequential } from '../sequential'
 
 // ─── sleep ─────────────────────────────────────────────────────────────
@@ -77,6 +77,50 @@ describe('withTimeout', () => {
     await expect(
       withTimeout(Promise.reject(new Error('inner')), 1000, 'timeout'),
     ).rejects.toThrow('inner')
+  })
+})
+
+// ─── withDeadline (densable jg) ──────────────────────────────────────────
+
+describe('withDeadline', () => {
+  test('resolves the promise value when it settles first', async () => {
+    const result = await withDeadline(Promise.resolve(42), 1000)
+    expect(result).toBe(42)
+  })
+
+  test('resolves undefined when the deadline fires first', async () => {
+    const slow = new Promise<number>(resolve =>
+      setTimeout(() => resolve(1), 5000),
+    )
+    const result = await withDeadline(slow, 30)
+    expect(result).toBeUndefined()
+  })
+
+  test('does not reject the inner promise on deadline', async () => {
+    let settled = false
+    const inner = new Promise<string>(resolve => {
+      setTimeout(() => {
+        settled = true
+        resolve('late')
+      }, 40)
+    })
+    const raced = await withDeadline(inner, 10)
+    expect(raced).toBeUndefined()
+    await inner
+    expect(settled).toBe(true)
+  })
+
+  test('createTimer cancel runs in finally', async () => {
+    let cancelled = false
+    const createTimer = (cb: () => void, ms: number) => {
+      const t = setTimeout(cb, ms)
+      return () => {
+        cancelled = true
+        clearTimeout(t)
+      }
+    }
+    await withDeadline(Promise.resolve('ok'), 1000, createTimer)
+    expect(cancelled).toBe(true)
   })
 })
 

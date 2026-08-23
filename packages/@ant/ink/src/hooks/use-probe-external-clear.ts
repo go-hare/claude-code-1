@@ -1,45 +1,32 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import instances from '../core/instances.js'
 import useStdin from './use-stdin.js'
 
 /**
- * densable QPf — poll DECXCPR every 200ms on iTerm.app / Apple_Terminal
+ * densable Wzg / QPf — poll DECXCPR every 200ms on iTerm.app / Apple_Terminal
  * fullscreen sessions to detect external alt-buffer wipes (Cmd+K).
- * When wipe detected, forceRedraw and invoke onDetected (e.g. clear-screen
- * toast / keybinding re-arm).
+ * probeExternalClear itself forceRedraws; gold Wzg does NOT also invoke
+ * onDetected (that double-redrawed after wipe).
  *
- * densable:
- *   function QPf(e){
- *     let t=useRef(e); t.current=e
- *     let {internal_querier:r}=useStdin()
- *     let n=useSyncExternalStore(..., ()=>PE()?.terminal??Z.terminal)
+ * densable Wzg (PromptInput, 2.1.238):
+ *   function Wzg(){
+ *     let {internal_querier:e}=Q8()
+ *     let t=useSyncExternalStore(..., ()=>n0()?.terminal??V.terminal)
  *     useEffect(()=>{
- *       if(!ns()||!r)return
- *       if(n!=="iTerm.app"&&n!=="Apple_Terminal")return
- *       let o=bd.get(process.stdout); if(!o)return
- *       let i=new AbortController
- *       ;(async()=>{
- *         while(!i.signal.aborted){
- *           let s=await o.probeExternalClear(r)
- *           if(i.signal.aborted)return
- *           if(s)t.current()
- *           await Er(200,i.signal,{unref:!0})
- *         }
- *       })()
- *       return()=>i.abort()
- *     },[r,n])
+ *       if(!Ws()||!e)return
+ *       if(t!=="iTerm.app"&&t!=="Apple_Terminal")return
+ *       let r=ef.get(process.stdout); if(!r)return
+ *       let n=new AbortController
+ *       return (async()=>{
+ *         while(!n.signal.aborted) await r.probeExternalClear(e), await Pr(200,n.signal,{unref:!0})
+ *       })(), ()=>n.abort()
+ *     },[e,t])
  *   }
  *
- * Local: terminal identity from TERM_PROGRAM (same strings densable uses).
- * `enabled` is the densable `ns()` fullscreen gate — caller passes
- * isFullscreenActive() (or true when already inside fullscreen UI).
+ * `enabled` is the densable `Ws()`/`ns()` fullscreen gate — caller passes
+ * isFullscreenActive().
  */
-export function useProbeExternalClear(
-  onDetected: () => void,
-  enabled = true,
-): void {
-  const onDetectedRef = useRef(onDetected)
-  onDetectedRef.current = onDetected
+export function useProbeExternalClear(enabled = true): void {
   const { internal_querier: querier } = useStdin()
   const termProgram = useSyncExternalStore(
     subscribeTermProgram,
@@ -56,9 +43,7 @@ export function useProbeExternalClear(
     const ac = new AbortController()
     ;(async () => {
       while (!ac.signal.aborted) {
-        const wiped = await ink.probeExternalClear(querier)
-        if (ac.signal.aborted) return
-        if (wiped) onDetectedRef.current()
+        await ink.probeExternalClear(querier)
         await sleepMs(200, ac.signal)
       }
     })()

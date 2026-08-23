@@ -10,7 +10,6 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { growthbookMock } from '../../../tests/mocks/growthbook'
 import {
   createSettingsMock,
   restoreSettingsMockWith,
@@ -18,19 +17,57 @@ import {
 } from '../../../tests/mocks/settings.js'
 import * as realSettings from 'src/utils/settings/settings.js'
 import * as realProviders from 'src/utils/model/providers.js'
+import * as realAuth from 'src/utils/auth.js'
 import * as realResidualFinalEnvGates from '../residualFinalEnvGates.js'
+import * as realBundledMode from '../bundledMode.js'
+import * as realGrowthbook from 'src/services/analytics/growthbook.js'
+import * as realAnalytics from 'src/services/analytics/index.js'
 
-const logEventMock = mock(() => {})
 const settingsSnap = snapshotModuleExports(realSettings)
 const providersSnap = snapshotModuleExports(realProviders)
+const authSnap = snapshotModuleExports(realAuth)
+const bundledModeSnap = snapshotModuleExports(realBundledMode)
+// Snapshot BEFORE mock.module — live namespace after mock re-points into the mock.
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: logEventMock,
-}))
+const analyticsEvents: Array<{
+  name: string
+  meta: Record<string, unknown>
+}> = []
+const analyticsMock = () => ({
+  ...analyticsSnap,
+  logEvent(
+    name: string,
+    metadata: Record<string, boolean | number | undefined>,
+  ) {
+    analyticsEvents.push({
+      name,
+      meta: metadata as Record<string, unknown>,
+    })
+  },
+  async logEventAsync(
+    name: string,
+    metadata: Record<string, boolean | number | undefined>,
+  ) {
+    analyticsEvents.push({
+      name,
+      meta: metadata as Record<string, unknown>,
+    })
+  },
+})
 
-// Spread shared mock — incomplete growthbook mocks poison co-running suites.
+// Capture logEvent via mock.module (scrollTelemetry pattern) so dU still
+// records when a sibling suite stubbed analytics/index to a no-op logEvent.
+// Spread the snapshot so attachAnalyticsSink / _resetForTesting stay present
+// for co-running promptCacheBreakDetection.238 tests.
+mock.module('../../services/analytics/index.ts', analyticsMock)
+mock.module('../../services/analytics/index.js', analyticsMock)
+mock.module('src/services/analytics/index.ts', analyticsMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
+
 mock.module('src/services/analytics/growthbook.js', () => ({
-  ...growthbookMock(),
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: () => null,
 }))
 
@@ -40,11 +77,17 @@ mock.module('src/services/analytics/growthbook.js', () => ({
 // isRemoteModelSwitchSession() uses real state defaults (false/false).
 // Tests pass remoteSession via opts when remote branch is needed.
 
+// Spread real auth — incomplete strip drops isClaudeAISubscriber /
+// getSubscriptionType / getRateLimitTier that extraUsage KSl now imports.
 mock.module('src/utils/auth.js', () => ({
+  ...authSnap,
   getAnthropicApiKey: () => 'test-key',
   getClaudeAIOAuthTokens: () => null,
   handleOAuth401Error: () => {},
   hasProfileScope: () => false,
+  isClaudeAISubscriber: () => false,
+  getSubscriptionType: () => null,
+  getRateLimitTier: () => null,
 }))
 
 mock.module(
@@ -69,6 +112,7 @@ mock.module('src/utils/model/providers.js', () => ({
 }))
 
 mock.module('src/utils/bundledMode.js', () => ({
+  ...bundledModeSnap,
   isInBundledMode: () => true,
 }))
 
@@ -96,11 +140,9 @@ mock.module('src/utils/residualFinalEnvGates.js', () => ({
   isFastModeDisabled: () => false,
 }))
 
-const realGrowthbook = await import('src/services/analytics/growthbook.js')
-const growthbookSnap = snapshotModuleExports(realGrowthbook)
-
 afterAll(() => {
   restoreSettingsMockWith(mock.module, settingsSnap)
+  mock.module('src/utils/auth.js', () => ({ ...authSnap }))
   mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
   mock.module('src/utils/residualFinalEnvGates.js', () => ({
     ...realResidualFinalEnvGates,
@@ -112,20 +154,31 @@ afterAll(() => {
   mock.module('src/services/analytics/growthbook.js', () => ({
     ...growthbookSnap,
   }))
+  mock.module('src/utils/bundledMode.js', () => ({ ...bundledModeSnap }))
+  const restoreAnalytics = () => ({ ...analyticsSnap })
+  mock.module('../../services/analytics/index.ts', restoreAnalytics)
+  mock.module('../../services/analytics/index.js', restoreAnalytics)
+  mock.module('src/services/analytics/index.ts', restoreAnalytics)
+  mock.module('src/services/analytics/index.js', restoreAnalytics)
 })
 
 import {
+  formatBridgeFastModeToast,
   formatModelSwitchFastModeSuffix,
   resolveFastModeAfterModelSwitch,
   applyFastModeOnModelSwitch,
 } from '../fastMode.js'
 
 beforeEach(() => {
-  logEventMock.mockClear()
+  mock.module('../../services/analytics/index.ts', analyticsMock)
+  mock.module('../../services/analytics/index.js', analyticsMock)
+  mock.module('src/services/analytics/index.ts', analyticsMock)
+  mock.module('src/services/analytics/index.js', analyticsMock)
+  analyticsEvents.length = 0
 })
 
 afterEach(() => {
-  logEventMock.mockClear()
+  analyticsEvents.length = 0
 })
 
 describe('densable 2.1.218 #31 Rft/uU', () => {
@@ -184,13 +237,13 @@ describe('densable 2.1.218 #31 Rft/uU', () => {
       billedAsExtraUsage: true,
     })
     expect(onBill.indexOf('Fast mode ON')).toBeLessThan(
-      onBill.indexOf('Billed as extra usage'),
+      onBill.indexOf('Draws from usage credits'),
     )
     // billing + OFF (no ON)
     const offBill = formatModelSwitchFastModeSuffix(true, false, {
       billedAsExtraUsage: true,
     })
-    expect(offBill.indexOf('Billed as extra usage')).toBeLessThan(
+    expect(offBill.indexOf('Draws from usage credits')).toBeLessThan(
       offBill.indexOf('Fast mode OFF'),
     )
   })
@@ -200,12 +253,8 @@ describe('densable 2.1.218 #31 Rft/uU', () => {
     expect(r.nextFastMode).toBe(false)
     expect(r.changed).toBe(true)
     expect(r.suffix).toContain('Fast mode OFF')
-    expect(logEventMock).toHaveBeenCalled()
-    const calls = logEventMock.mock.calls as unknown as Array<
-      [string, Record<string, unknown>?]
-    >
-    const call = calls.find(c => c[0] === 'tengu_fast_mode_toggled')
-    expect(call?.[1]).toMatchObject({
+    const call = analyticsEvents.find(e => e.name === 'tengu_fast_mode_toggled')
+    expect(call?.meta).toMatchObject({
       enabled: false,
       source: 'model_switch_downgrade',
     })
@@ -213,10 +262,37 @@ describe('densable 2.1.218 #31 Rft/uU', () => {
 
   test('dU: no log when unchanged', () => {
     applyFastModeOnModelSwitch('sonnet', false)
-    const calls = logEventMock.mock.calls as unknown as Array<
-      [string, Record<string, unknown>?]
-    >
-    const call = calls.find(c => c[0] === 'tengu_fast_mode_toggled')
+    const call = analyticsEvents.find(e => e.name === 'tengu_fast_mode_toggled')
     expect(call).toBeUndefined()
+  })
+})
+
+describe('densable 2.1.238 ASm formatBridgeFastModeToast', () => {
+  test('same prev/next returns null', () => {
+    expect(formatBridgeFastModeToast(true, true)).toBeNull()
+    expect(formatBridgeFastModeToast(false, false)).toBeNull()
+  })
+
+  test('toggle emits Fast mode ON / OFF; subscriber-off has no KSl suffix', () => {
+    expect(formatBridgeFastModeToast(false, true)).toBe('Fast mode ON')
+    expect(formatBridgeFastModeToast(true, false)).toBe('Fast mode OFF')
+  })
+
+  test('ASm ON appends KSl suffix when env bag bills', () => {
+    expect(
+      formatBridgeFastModeToast(false, true, 'claude-opus-5', {
+        subscriber: true,
+        fastModeSupported: true,
+      }),
+    ).toBe('Fast mode ON · Draws from usage credits')
+  })
+
+  test('ASm OFF never appends KSl (gold ASm t-false branch)', () => {
+    expect(
+      formatBridgeFastModeToast(true, false, 'claude-opus-5', {
+        subscriber: true,
+        fastModeSupported: true,
+      }),
+    ).toBe('Fast mode OFF')
   })
 })
