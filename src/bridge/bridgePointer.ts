@@ -69,6 +69,10 @@ export function getBridgePointerPath(dir: string): string {
 /**
  * densable `JKT` — write the pointer. Returns boolean (false on I/O failure).
  * Best-effort — a crash-recovery file must never itself cause a crash.
+ *
+ * Not atomic (plain writeFile). Concurrent writers can interleave; leftover
+ * reuse then re-reads and exits if `raced.pid !== process.pid` (lose-race →
+ * exit). Accepted densable TOCTOU — do not invent storageV5 to “fix”.
  */
 export async function writeBridgePointer(
   dir: string,

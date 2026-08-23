@@ -15,7 +15,7 @@
       "!!docs/reference",
       "!!docs/upstream-extraction",
       "!!tmp",
-      "!!tmp"
+      "!!.tmp-probe"
     ]
   },
   "formatter": {

@@ -1,6 +1,10 @@
 /**
  * densable 2.1.238 #26 — signed_out RC copy (ipl / spl / wr / sd / _u).
+ * classifyMissingOAuthToken remains signed_out-only (identity_changed stub).
  */
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'bun:test'
 import {
   formatSignedOutStoppingLog,
@@ -43,6 +47,21 @@ describe('hostSignedOut densable 2.1.238', () => {
   test('stopping log matches SEA substring', () => {
     expect(formatSignedOutStoppingLog('bridge', 'host_signed_out')).toBe(
       '[remote-bridge] Signed out on this machine under bridge (host_signed_out) — stopping',
+    )
+  })
+
+  test('classifier body only emits signed_out (identity_changed soft stub)', () => {
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../hostSignedOut.ts'),
+      'utf8',
+    )
+    const fn = src.indexOf('export function classifyMissingOAuthToken')
+    expect(fn).toBeGreaterThan(0)
+    const body = src.slice(fn, src.indexOf('\nexport function', fn + 1))
+    expect(body).toContain("'signed_out'")
+    expect(body).not.toContain("return 'identity_changed'")
+    expect(src).toContain(
+      "MissingOAuthClassification = 'signed_out' | 'identity_changed'",
     )
   })
 })

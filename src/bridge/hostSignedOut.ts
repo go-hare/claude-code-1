@@ -40,6 +40,10 @@ export function hostHintForTeardownReason(reason: string): string {
  * densable remint classifier: missing Claude.ai OAuth tokens → signed_out.
  * Tokens present but getAccessToken() empty is a different failure (leave
  * the existing "no OAuth token" remint copy).
+ *
+ * `identity_changed` remains on the type / sd/_u copy surface for SEA host
+ * account-switch, but this classifier does **not** emit it yet (no portable
+ * host identity check). Do not invent leftover #3 marketplace owner-pin here.
  */
 export function classifyMissingOAuthToken():
   | MissingOAuthClassification

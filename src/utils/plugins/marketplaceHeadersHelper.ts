@@ -1437,27 +1437,11 @@ export function formatHeadersHelperPaneMismatch(
 }
 
 /**
- * Resolve archive headersHelper fields for pane display / consent checks.
- */
-export function getArchiveHeadersHelperForPane(
-  entry: Pick<PluginMarketplaceEntry, 'headersHelper' | 'source'>,
-): { command: string; archiveUrl: string } | undefined {
-  if (!entryHasArchiveHeadersHelper(entry)) return undefined
-  if (
-    typeof entry.source !== 'object' ||
-    entry.source === null ||
-    entry.source.source !== 'archive'
-  ) {
-    return undefined
-  }
-  return {
-    command: entry.headersHelper!,
-    archiveUrl: entry.source.url,
-  }
-}
-
-/**
  * SEA `w0` / `U2a` — `claude <subcommand> <pluginId>` when the id is safe.
+ *
+ * Pane / CLI disclosure must use `resolveShownArchiveHeadersHelper` (Ryt →
+ * DNt → g5n). Do not reintroduce a raw entry.headersHelper reader — that
+ * bypasses settings-source strip / mismatch clear / policy O3n.
  */
 export function formatClaudePluginCliInvocation(
   subcommand: string,

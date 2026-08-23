@@ -1,8 +1,8 @@
 # densable 2.1.238 · alignment board
 
-> Living board · 2026-08-23 · **no auto commit** · SEA `/tmp/official-238/plat/package/claude` · **HAVE 内金标修** Y8p/K8p + Y_e/PN_/vBu + KQe + Fme（本轮）· `DNt`/`Ryt`/`vBa` overlay + `_5n`/`ret` · PCr/Oyw/Zxv · **#31 HAVE** · leftover #1+#2 · **#24 KSl** · 计数 HAVE **34** / PARTIAL **5** / UNKNOWN **0**  
+> Living board · 2026-08-23 · SEA `/tmp/official-238/plat/package/claude` · **HAVE 内金标修** Y8p/K8p + Y_e/PN_/vBu + KQe + Fme · `DNt`/`Ryt`/`vBa` + `_5n`/`ret` · PCr/Oyw/Zxv · **#31 HAVE** · leftover #1+#2 · **#24 KSl** · 计数 HAVE **34** / PARTIAL **5** / UNKNOWN **0**  
 > Scope: checklist **#1–#39** · concurrency **3** · invent-ban intact  
-> tip baseline：`1fcb0818`（237）+ `f5987063`（236 #25 invent）· npm **2.7.45** · 本 pack **未提交**
+> tip：`a22e3c88` + hygiene（删死 API / !psr 测硬）· baseline `1fcb0818`（237）+ `f5987063`（236 #25 invent）· npm **2.7.45** · **#2 psr soft residual** 记（keep null→true；拒 R3 / 完整 sIn）
 
 ## Status
 
@@ -25,7 +25,7 @@
 | # | key |
 | - | --- |
 | 1 | keybindingFlavor-readline |
-| 2 | marketplace-headersHelper（含 Qxn/psr 三指针 + q8s alias 表面；**leftover ggw/ayi/P5r + qhi/dwo/zgh**；**`_5n`/`ret` 不从 known_marketplaces state mint**；**`DNt`/`Ryt`/`vBa` extraKnown overlay**；**Y8p/K8p catalog beforeRedirect + jhi=5MiB**；**Y_e ManagedSettings extraKnown disclosure**；**KQe 空串**；**Fme split**；pane 必传 `marketplaceSource`；无 backendView） |
+| 2 | marketplace-headersHelper（含 Qxn/psr 三指针 + q8s alias 表面；**leftover ggw/ayi/P5r + qhi/dwo/zgh**；**`_5n`/`ret` 不从 known_marketplaces state mint**；**`DNt`/`Ryt`/`vBa` extraKnown overlay**；**Y8p/K8p catalog beforeRedirect + jhi=5MiB**；**Y_e ManagedSettings extraKnown disclosure**；**KQe 空串**；**Fme split**；pane 必传 `marketplaceSource`；无 backendView；**psr soft：** tip `sessionCache===null→true` 近似 `Z_e()!=="remote"`，完整 sIn/MDM invent-ban，拒 R3 null→false） |
 | 3 | catalog-headersHelper-confirm（同 Qxn `remote_policy_unconsented`；CLI `shownEntryHelper` 绑 zgh；LSP `explicitInstall:!1`；pane dwo 非 Map；**Oyw** declined\|unconfirmed → `Aborted — the command was not run.`） |
 | 5 | runner-proxy-authorization（N4y + F4y VtC/ZtC/erC/trC/H4y/$4y；close 不 restore process.env；禁止 CCR upstreamproxy / session proxyAuthHelper） |
 | 6 | subagent-tool-result-gc（qWT→HWT after normalization_end；midConv `e8\|\|fZ`；oOl throw；不 invent display-window GC / c8m） |

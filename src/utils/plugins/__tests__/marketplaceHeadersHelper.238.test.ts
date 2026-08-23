@@ -104,10 +104,16 @@ import {
   headersHelperPolicyRefusal,
   isHeadersHelperDisabledByPolicy,
 } from '../pluginPolicy.js'
+import {
+  resetSyncCache,
+  setSessionCache,
+} from '../../../services/remoteManagedSettings/syncCacheState.js'
+import type { SettingsJson } from '../../../utils/settings/types.js'
 
 describe('marketplace headersHelper mint (densable 2.1.238 m5n)', () => {
   beforeEach(() => {
     clearMarketplaceHeadersHelperMemo()
+    resetSyncCache()
     execMock.mockClear()
     execMock.mockImplementation(async () => ({
       stdout: '{"Authorization":"Bearer minted"}',
@@ -118,6 +124,7 @@ describe('marketplace headersHelper mint (densable 2.1.238 m5n)', () => {
 
   afterEach(() => {
     clearMarketplaceHeadersHelperMemo()
+    resetSyncCache()
   })
 
   test('mintHeadersFromHelper parses JSON string headers', async () => {
@@ -275,16 +282,20 @@ describe('marketplace headersHelper mint (densable 2.1.238 m5n)', () => {
   })
 
   test('policySettings trusted helper throws when remote policy is unconsented', async () => {
-    const { isRemoteManagedPolicyConsented } = await import(
-      '../../../services/remoteManagedSettings/syncCacheState.js'
-    )
-    if (isRemoteManagedPolicyConsented()) {
-      // sessionCache is null in unit tests → psr true; gold throw is the copy.
-      expect(ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED).toContain(
-        'remotely managed settings',
-      )
-      return
+    // Drive tip psr false without inventing Z_e/sIn: populated sessionCache
+    // that is not Qxn (verified+consented) → !isRemoteManagedPolicyConsented.
+    const remote: SettingsJson = {
+      extraKnownMarketplaces: {
+        demo: {
+          source: {
+            source: 'url',
+            url: 'https://example.com/marketplace.json',
+          },
+        },
+      },
     }
+    setSessionCache(remote)
+    execMock.mockClear()
     await expect(
       resolveUrlMarketplaceHeaders(
         {
@@ -676,6 +687,14 @@ describe('P5r/mqS archive header origin (densable 2.1.238)', () => {
 })
 
 describe('DNt/Ryt/vBa settings-source overlay (densable 2.1.238)', () => {
+  beforeEach(() => {
+    resetSyncCache()
+    execMock.mockClear()
+  })
+  afterEach(() => {
+    resetSyncCache()
+  })
+
   const archiveUrl = 'https://cdn.example.com/demo.zip'
   const catalogEntry = {
     name: 'demo',
@@ -715,6 +734,17 @@ describe('DNt/Ryt/vBa settings-source overlay (densable 2.1.238)', () => {
   })
 
   test('overlay policySettings helper throws O3n before q9 when !psr', () => {
+    const remote: SettingsJson = {
+      extraKnownMarketplaces: {
+        ops: {
+          source: {
+            source: 'url',
+            url: 'https://cdn.example.com/marketplace.json',
+          },
+        },
+      },
+    }
+    setSessionCache(remote)
     const options = {
       entry: catalogEntry,
       archiveUrl,
@@ -726,21 +756,17 @@ describe('DNt/Ryt/vBa settings-source overlay (densable 2.1.238)', () => {
         headersHelper: '/bin/policy-mint',
       },
     }
+    expect(() => overlayTrustedSettingsEntryAuth(options)).toThrow(
+      `This plugin's headersHelper was not run: ${ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED}.`,
+    )
     try {
       overlayTrustedSettingsEntryAuth(options)
     } catch (error) {
-      expect((error as Error).message).toBe(
-        `This plugin's headersHelper was not run: ${ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED}.`,
-      )
       expect((error as Error).message).not.toContain(
         'The marketplace was not fetched.',
       )
-      return
     }
-    // sessionCache is null in unit tests → psr true; gold throw is the copy.
-    expect(ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED).toContain(
-      'remotely managed settings',
-    )
+    expect(execMock).not.toHaveBeenCalled()
   })
 
   test('overlay addDir strips helper', () => {
@@ -884,6 +910,31 @@ describe('DNt/Ryt/vBa settings-source overlay (densable 2.1.238)', () => {
       command: '/bin/overlay-mint',
       archiveUrl,
     })
+  })
+
+  test('no raw getArchiveHeadersHelperForPane bypass of DNt/g5n', () => {
+    const src = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../marketplaceHeadersHelper.ts',
+      ),
+      'utf8',
+    )
+    expect(src).not.toContain('function getArchiveHeadersHelperForPane')
+    expect(src).toContain('export function resolveShownArchiveHeadersHelper')
+    for (const rel of [
+      '../../../commands/plugin/BrowseMarketplace.tsx',
+      '../../../commands/plugin/DiscoverPlugins.tsx',
+      '../../../commands/plugin/ManagePlugins.tsx',
+      '../../../commands/plugin/pluginDetailsHelpers.tsx',
+    ]) {
+      const pane = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), rel),
+        'utf8',
+      )
+      expect(pane).toContain('resolveShownArchiveHeadersHelper')
+      expect(pane).not.toContain('getArchiveHeadersHelperForPane')
+    }
   })
 
   test('Ryt never reads known_marketplaces.json', () => {
