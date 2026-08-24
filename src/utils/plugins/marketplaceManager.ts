@@ -1747,6 +1747,11 @@ async function parseFileWithSchema<T>(
 async function loadAndCacheMarketplace(
   source: MarketplaceSource,
   onProgress?: MarketplaceProgressCallback,
+  /**
+   * densable 2.1.238 SEA `ABa(..., n)` — marketplace name for `_5n`/`ret`
+   * trustedDeclaration lookup on cold/cache-miss/bulk paths.
+   */
+  marketplaceName?: string,
 ): Promise<LoadedPluginMarketplace> {
   const fs = getFsImplementation()
   const cacheDir = getMarketplacesCacheDir()
@@ -1773,6 +1778,7 @@ async function loadAndCacheMarketplace(
           source.headers,
           onProgress,
           source,
+          marketplaceName,
         )
         marketplacePath = temporaryCachePath
         break
@@ -2510,7 +2516,12 @@ export const getMarketplace = memoize(
     // Cache doesn't exist or is invalid, fetch from source
     let marketplace: PluginMarketplace
     try {
-      ;({ marketplace } = await loadAndCacheMarketplace(entry.source))
+      // SEA ABa(..., e) — pass known marketplace name for `_5n`/`ret`
+      ;({ marketplace } = await loadAndCacheMarketplace(
+        entry.source,
+        undefined,
+        name,
+      ))
     } catch (error) {
       throw new Error(
         `Failed to load marketplace "${name}" from source (${entry.source.source}): ${errorMessage(error)}`,
@@ -2693,7 +2704,12 @@ export async function refreshAllMarketplaces(): Promise<void> {
       // fall through to git
     }
     try {
-      const { cachePath } = await loadAndCacheMarketplace(entry.source)
+      // SEA ABa(..., s) — bulk refresh passes known marketplace name
+      const { cachePath } = await loadAndCacheMarketplace(
+        entry.source,
+        undefined,
+        name,
+      )
       updates[name] = {
         lastUpdated: new Date().toISOString(),
         installLocation: cachePath,

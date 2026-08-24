@@ -52,6 +52,12 @@
 - [x] **#20** `V.X`=`Un()`/`isEnvTruthy`；`"0"`/`"false"` **仍 repair**（纠正上一轮 raw env FAIL）
 - [x] **#6** oOl 缺 `source` throw
 
+## Parked→aligned（HAVE 内，计数不变 · 2026-08-23）
+
+- [x] **TrustDialog HH disclosure** SEA `BSy`/`aRs`/`sRs` + copy；`repoHelperSources` 含 marketplace + `.mcp.json` / local MCP HH；**不** invent ManagedSettings / allow/addDirs disclosure。测：`marketplaceHelperSources.238.test.ts`
+- [x] **cold marketplaceName** `loadAndCacheMarketplace(..., marketplaceName?)`；cache-miss/bulk 传 name（SEA `ABa`）；named refresh 仍传。测：`marketplaceColdName.238.test.ts`
+- 计数仍 **HAVE 34 / PARTIAL 5 / GAP 0 / UNKNOWN 0**。**no commit** until「提交」。
+
 ## Review-2（HAVE 内金标修，计数不变）
 
 - [x] **#33** f8r `u2t`/`qnv` `req_…`；UUID 非 origin；无 `x-request-id`；空 `cf-ray` → other

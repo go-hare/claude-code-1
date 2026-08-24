@@ -32,6 +32,14 @@ export const ACCESSING_CAPABILITY =
 export const ACCESSING_CONFIRM_LABEL = 'Yes, I trust this folder'
 export const ACCESSING_CANCEL_LABEL = 'No, exit'
 
+/**
+ * densable 2.1.238 SEA TrustDialog headersHelper disclosure (repoHelperSources).
+ */
+export const ACCESSING_HEADERS_HELPER_PREFIX =
+  'This folder runs commands to mint HTTP headers (headersHelper), declared in '
+export const ACCESSING_HEADERS_HELPER_TRUST_NOTE =
+  'These will apply without asking. Only proceed if you trust this configuration.'
+
 /** densable CdTrustPrompt (Moving to a new directory) repo-root sentence parts */
 export const CD_TRUST_REPO_PREFIX =
   'This directory is part of the repository at'

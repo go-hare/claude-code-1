@@ -25,7 +25,7 @@
 | # | key |
 | - | --- |
 | 1 | keybindingFlavor-readline |
-| 2 | marketplace-headersHelper（含 Qxn/psr 三指针 + q8s alias 表面；**leftover ggw/ayi/P5r + qhi/dwo/zgh**；**`_5n`/`ret` 不从 known_marketplaces state mint**；**`DNt`/`Ryt`/`vBa` extraKnown overlay**；**Y8p/K8p catalog beforeRedirect + jhi=5MiB**；**Y_e ManagedSettings extraKnown disclosure**；**KQe 空串**；**Fme split**；pane 必传 `marketplaceSource`；无 backendView；**psr soft：** tip `sessionCache===null→true` 近似 `Z_e()!=="remote"`，完整 sIn/MDM invent-ban，拒 R3 null→false） |
+| 2 | marketplace-headersHelper（含 Qxn/psr 三指针 + q8s alias 表面；**leftover ggw/ayi/P5r + qhi/dwo/zgh**；**`_5n`/`ret` 不从 known_marketplaces state mint**；**`DNt`/`Ryt`/`vBa` extraKnown overlay**；**Y8p/K8p catalog beforeRedirect + jhi=5MiB**；**Y_e ManagedSettings extraKnown disclosure**；**TrustDialog `BSy`/`aRs`/`sRs` HH disclosure**（repoHelperSources；**不** invent ManagedSettings non-remote）；**cold `ABa` marketplaceName**（cache-miss/bulk）；**KQe 空串**；**Fme split**；pane 必传 `marketplaceSource`；无 backendView；**psr soft：** tip `sessionCache===null→true` 近似 `Z_e()!=="remote"`，完整 sIn/MDM invent-ban，拒 R3 null→false） |
 | 3 | catalog-headersHelper-confirm（同 Qxn `remote_policy_unconsented`；CLI `shownEntryHelper` 绑 zgh；LSP `explicitInstall:!1`；pane dwo 非 Map；**Oyw** declined\|unconfirmed → `Aborted — the command was not run.`） |
 | 5 | runner-proxy-authorization（N4y + F4y VtC/ZtC/erC/trC/H4y/$4y；close 不 restore process.env；禁止 CCR upstreamproxy / session proxyAuthHelper） |
 | 6 | subagent-tool-result-gc（qWT→HWT after normalization_end；midConv `e8\|\|fZ`；oOl throw；不 invent display-window GC / c8m） |
@@ -86,6 +86,14 @@ Proactive · VSCode host/screen-reader · storageV5 `backendView` · Desktop·cl
 Grok **4.5** 读图弱 / **4.6** OK；tip 转换无分叉 → memory only。
 
 **typedIntoEmpty 白闪（extra，非 #40）**：SEA `Hi` latch + `uT` + `autoScrollEnabled` dual-write HAVE。不改 238 counts。无 3s 窗口。ScrollBox `alreadySticky` 本轮保留。
+
+## Parked→aligned（HAVE 内，计数不变 · 2026-08-23）
+
+用户 **「对齐」** 落地先前 parked 两项（计数仍 **34/5/0/0**；**no commit** until「提交」）：
+
+- **TrustDialog HH**：SEA `BSy`/`aRs`/`sRs` + copy `This folder runs commands to mint HTTP headers (headersHelper), declared in` + trust note；UI 用 `repoHelperSources`（marketplace + `.mcp.json` / local MCP）；telemetry `hasMarketplaceHeadersHelper`/`hasRepoHeadersHelpers`。**不** invent ManagedSettings / allowRules / addDirs disclosure。
+- **cold marketplaceName**：`loadAndCacheMarketplace(..., marketplaceName?)`；cache-miss/bulk 传 known name（SEA `ABa`）；named refresh 仍传。
+- 测：`marketplaceHelperSources.238.test.ts` + `marketplaceColdName.238.test.ts`。
 
 ## Review-2（HAVE 内金标修，计数不变）
 

@@ -19,6 +19,8 @@ import {
   ACCESSING_CANCEL_LABEL,
   ACCESSING_CAPABILITY,
   ACCESSING_CONFIRM_LABEL,
+  ACCESSING_HEADERS_HELPER_PREFIX,
+  ACCESSING_HEADERS_HELPER_TRUST_NOTE,
   ACCESSING_QUICK_SAFETY_CHECK,
   ACCESSING_WORKSPACE_TITLE,
   CD_TRUST_REPO_PREFIX,
@@ -26,13 +28,16 @@ import {
   resolveTrustRootNote,
 } from './trustDialogCopy.js';
 import {
+  formatEnglishSourceList,
   getApiKeyHelperSources,
   getAwsCommandsSources,
   getBashPermissionSources,
   getDangerousEnvVarsSources,
   getGcpCommandsSources,
   getHooksSources,
+  getMarketplaceHelperSources,
   getOtelHeadersHelperSources,
+  getRepoHeadersHelperSources,
 } from './utils.js';
 
 type Props = {
@@ -69,6 +74,11 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   // Check for dangerous environment variables (not in SAFE_ENV_VARS)
   const dangerousEnvVarsSources = getDangerousEnvVarsSources();
   const hasDangerousEnvVars = dangerousEnvVarsSources.length > 0;
+  // densable 2.1.238 SEA aRs/sRs — marketplace + MCP headersHelper disclosure
+  const marketplaceHelperSources = getMarketplaceHelperSources();
+  const repoHelperSources = getRepoHeadersHelperSources(marketplaceHelperSources);
+  const hasMarketplaceHeadersHelper = marketplaceHelperSources.length > 0;
+  const hasRepoHeadersHelpers = repoHelperSources.length > 0;
 
   const hasSlashCommandBash =
     commands?.some(
@@ -118,6 +128,8 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
       hasAwsCommands,
       hasGcpCommands,
       hasOtelHeadersHelper,
+      hasMarketplaceHeadersHelper,
+      hasRepoHeadersHelpers,
       hasDangerousEnvVars,
     });
   }, [
@@ -128,6 +140,8 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
     hasAwsCommands,
     hasGcpCommands,
     hasOtelHeadersHelper,
+    hasMarketplaceHeadersHelper,
+    hasRepoHeadersHelpers,
     hasDangerousEnvVars,
   ]);
 
@@ -153,6 +167,8 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
       hasAwsCommands,
       hasGcpCommands,
       hasOtelHeadersHelper,
+      hasMarketplaceHeadersHelper,
+      hasRepoHeadersHelpers,
       hasDangerousEnvVars,
     });
 
@@ -225,6 +241,16 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
 
         <Text>{ACCESSING_QUICK_SAFETY_CHECK}</Text>
         <Text>{ACCESSING_CAPABILITY}</Text>
+
+        {hasRepoHeadersHelpers ? (
+          <Box flexDirection="column">
+            <Text bold color="warning">
+              {ACCESSING_HEADERS_HELPER_PREFIX}
+              {formatEnglishSourceList(repoHelperSources)}
+            </Text>
+            <Text dimColor>{ACCESSING_HEADERS_HELPER_TRUST_NOTE}</Text>
+          </Box>
+        ) : null}
 
         <Text dimColor>
           <Link url="https://code.claude.com/docs/en/security">Security guide</Link>
