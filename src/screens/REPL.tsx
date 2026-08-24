@@ -234,6 +234,8 @@ import {
   applyPermissionUpdates,
   persistPermissionUpdate,
 } from '../utils/permissions/PermissionUpdate.js';
+import { createAppStatePermissionContextSetters } from '../utils/permissions/permissionContextSetters.js';
+import { onPermissionRecheck } from '../utils/permissions/permissionRecheck.js';
 import { buildPermissionUpdates } from '../components/permissions/ExitPlanModePermissionRequest/ExitPlanModePermissionRequest.js';
 import { stripDangerousPermissionsForAutoMode } from '../utils/permissions/permissionSetup.js';
 import { getScratchpadDir, isScratchpadEnabled } from '../utils/permissions/filesystem.js';
@@ -293,6 +295,7 @@ import type {
 import { query } from '../query.js';
 import type { QueryParams } from '../query.js';
 import type { Terminal as QueryTerminal } from '../query/transitions.js';
+import { clearGoalOnUnrecoverableError } from '../services/goal/goalUnrecoverableClear.js';
 import { createHostEngine, type HostEngine } from '../engine/hostEngine.js';
 import { runHostEngineTurn } from '../engine/hostEngineTurn.js';
 import { Stream } from '../utils/stream.js';
@@ -475,7 +478,13 @@ import {
   checkAndDisableAutoModeIfNeeded,
   useKickOffCheckAndDisableAutoModeIfNeeded,
 } from 'src/utils/permissions/bypassPermissionsKillswitch.js';
-import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
+import { SandboxManager, normalizeSandboxSessionHost } from 'src/utils/sandbox/sandbox-adapter.js';
+import {
+  SandboxNetworkVerdictCache,
+  classifySandboxNetworkAccess,
+  resolveSandboxNetworkAskDecision,
+  sandboxNetworkTranscriptWatermark,
+} from 'src/utils/sandbox/sandboxNetworkDecision.js';
 import { SANDBOX_NETWORK_ACCESS_TOOL_NAME } from 'src/cli/structuredIO.js';
 import { useFileHistorySnapshotInit } from 'src/hooks/useFileHistorySnapshotInit.js';
 import { SandboxPermissionRequest } from 'src/components/permissions/SandboxPermissionRequest.js';
@@ -502,6 +511,7 @@ import { performStartupChecks } from 'src/utils/plugins/performStartupChecks.js'
 import { UserTextMessage } from 'src/components/messages/UserTextMessage.js';
 import { AwsAuthStatusBox } from '../components/AwsAuthStatusBox.js';
 import { useRateLimitWarningNotification } from 'src/hooks/notifs/useRateLimitWarningNotification.js';
+import { useQuotaAutoResume } from 'src/hooks/notifs/useQuotaAutoResume.js';
 import { useDeprecationWarningNotification } from 'src/hooks/notifs/useDeprecationWarningNotification.js';
 import { useNpmDeprecationNotification } from 'src/hooks/notifs/useNpmDeprecationNotification.js';
 import { useOauthExpiryNotification } from 'src/hooks/notifs/useOauthExpiryNotification.js';
@@ -537,6 +547,7 @@ import { REMOTE_SAFE_COMMANDS } from '../commands.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, mouseTrackingProp } from '../utils/fullscreen.js';
+import { isCommandImmediate } from '../utils/immediateCommand.js';
 import { AlternateScreen } from '@anthropic/ink';
 import { ScrollKeybindingHandler } from '../components/ScrollKeybindingHandler.js';
 import {
@@ -1032,6 +1043,15 @@ export function REPL({
         } catch (err) {
           thrown = err;
         }
+        // densable Ebe finally: yield* pXp(activeGoal, toolUseContext, querySource, terminal)
+        const clearTerminal =
+          terminal ?? (thrown !== undefined ? ({ reason: 'api_error', error: thrown } as QueryTerminal) : undefined);
+        yield* clearGoalOnUnrecoverableError(
+          toolUseContext.getAppState().activeGoal,
+          toolUseContext,
+          prepared.querySource,
+          clearTerminal,
+        );
         // densable HWf breaks on type:"result" — always emit terminal envelope.
         const reason = terminal?.reason ?? (thrown !== undefined ? 'api_error' : 'completed');
         yield {
@@ -1374,6 +1394,15 @@ export function REPL({
   });
 
   const mergedTools = useMergedTools(combinedInitialTools, mcp.tools, toolPermissionContext);
+  // densable sn.current — tools snapshot for sandbox network classifier (lVr)
+  const mergedToolsRef = useRef(mergedTools);
+  mergedToolsRef.current = mergedTools;
+  // densable Fm / Jvr — per-host:port classifier verdict cache
+  const sandboxNetworkVerdictCacheRef = useRef(new SandboxNetworkVerdictCache());
+  // densable inbox clears Jvr on toolPermissionContext change; mirror for REPL cache
+  useEffect(() => {
+    sandboxNetworkVerdictCacheRef.current.clear();
+  }, [toolPermissionContext.mode, toolPermissionContext.isBypassPermissionsModeAvailable]);
 
   // Apply agent tool restrictions if mainThreadAgentDefinition is set
   const { tools, allowedAgentTypes } = useMemo(() => {
@@ -2192,6 +2221,8 @@ export function REPL({
   if (feature('AWAY_SUMMARY')) {
     useAwaySummary(messages, setMessages, isLoading);
   }
+  // densable 2.1.234 oTl — quota auto-resume wait notice + 30s tick
+  useQuotaAutoResume({ isLoading, setMessages });
   const [cursor, setCursor] = useState<MessageActionsState | null>(null);
   const cursorNavRef = useRef<MessageActionsNav | null>(null);
   // Memoized so Messages' React.memo holds.
@@ -3636,7 +3667,10 @@ export function REPL({
     const result = popAllEditable(inputValue, 0);
     if (!result) return;
     setInputValue(result.text);
-    setInputMode('prompt');
+    // densable 2.1.234 #19: restore bash when every popped cmd was bash
+    setInputMode(result.mode);
+    // densable #20: clear queueEditIndex after pop-to-edit
+    setAppState(prev => (prev.queueEditIndex === null ? prev : { ...prev, queueEditIndex: null }));
 
     // Restore images from queued commands to pastedContents
     if (result.images.length > 0) {
@@ -3648,7 +3682,7 @@ export function REPL({
         return newContents;
       });
     }
-  }, [setInputValue, setInputMode, inputValue, setPastedContents]);
+  }, [setInputValue, setInputMode, inputValue, setPastedContents, setAppState]);
 
   // CancelRequestHandler props - rendered inside KeybindingSetup
   const cancelRequestProps = {
@@ -3684,6 +3718,36 @@ export function REPL({
 
   const sandboxAskCallback: SandboxAskCallback = useCallback(
     async (hostPattern: NetworkHostPattern) => {
+      // densable OVt / wkr — mode decides allow/deny/classify before UI ask
+      const appStateNow = store.getState();
+      const { mode, isBypassPermissionsModeAvailable } = appStateNow.toolPermissionContext;
+      switch (resolveSandboxNetworkAskDecision(mode, isBypassPermissionsModeAvailable)) {
+        case 'allow':
+          return true;
+        case 'deny':
+          return false;
+        case 'classify': {
+          // densable Fm.getOrClassify → lVr(SandboxNetworkAccess)
+          const messagesNow = messagesRef.current;
+          return sandboxNetworkVerdictCacheRef.current.getOrClassify(
+            hostPattern.host,
+            hostPattern.port,
+            sandboxNetworkTranscriptWatermark(messagesNow),
+            () =>
+              classifySandboxNetworkAccess(
+                hostPattern.host,
+                hostPattern.port,
+                messagesNow,
+                mergedToolsRef.current,
+                store.getState().toolPermissionContext,
+                new AbortController().signal,
+              ),
+          );
+        }
+        case 'ask':
+          break;
+      }
+
       // If running as a swarm worker, forward the request to the leader via mailbox
       if (isAgentSwarmsEnabled() && isSwarmWorker()) {
         const requestId = generateSandboxRequestId();
@@ -3759,6 +3823,8 @@ export function REPL({
             const unsubscribe = bridgeCallbacks.onResponse(bridgeRequestId, response => {
               unsubscribe();
               const allow = response.behavior === 'allow';
+              // densable: remote allow also seeds sessionAllowedHosts
+              if (allow) SandboxManager.addSessionAllowedHost(hostPattern.host);
               // Resolve ALL pending requests for the same host, not just
               // this one — mirrors the local dialog handler pattern.
               setSandboxPermissionRequestQueue(queue => {
@@ -3840,6 +3906,14 @@ export function REPL({
     });
   }
 
+  // densable y8r(setAppState) — both ToolUseContext setters share this writer.
+  const { setSessionToolPermissionContext } = useMemo(
+    () => createAppStatePermissionContextSetters(setAppState),
+    [setAppState],
+  );
+
+  // UI / leader-bridge setter: absolute context write + optional preserveMode.
+  // Not densable ToolUseContext functional setter — that is y8r above.
   const setToolPermissionContext = useCallback(
     (context: ToolPermissionContext, options?: { preserveMode?: boolean }) => {
       setAppState(prev => ({
@@ -3873,13 +3947,25 @@ export function REPL({
     [setAppState, setToolUseConfirmQueue],
   );
 
+  // densable n3e → permissionRecheck: session persist path emits; recheck queue.
+  useEffect(() => {
+    return onPermissionRecheck(() => {
+      setToolUseConfirmQueue(currentQueue => {
+        currentQueue.forEach(item => {
+          void item.recheckPermission();
+        });
+        return currentQueue;
+      });
+    });
+  }, [setToolUseConfirmQueue]);
+
   // Register the leader's setToolPermissionContext for in-process teammates
   useEffect(() => {
     registerLeaderSetToolPermissionContext(setToolPermissionContext);
     return () => unregisterLeaderSetToolPermissionContext();
   }, [setToolPermissionContext]);
 
-  const canUseTool = useCanUseTool(setToolUseConfirmQueue, setToolPermissionContext);
+  const canUseTool = useCanUseTool(setToolUseConfirmQueue);
 
   const requestPrompt = useCallback(
     (title: string, toolInputSummary?: string | null) =>
@@ -3941,6 +4027,9 @@ export function REPL({
         },
         getAppState: () => store.getState(),
         setAppState,
+        // densable y8r: main session both setters write toolPermissionContext
+        setToolPermissionContext: setSessionToolPermissionContext,
+        setSessionToolPermissionContext,
         messages,
         setMessages,
         updateFileHistoryState(updater: (prev: FileHistoryState) => FileHistoryState) {
@@ -4066,6 +4155,7 @@ export function REPL({
       allowedAgentTypes,
       store,
       setAppState,
+      setSessionToolPermissionContext,
       reverify,
       addNotification,
       setMessages,
@@ -4497,8 +4587,20 @@ export function REPL({
             }
           },
           onActiveGoal: value => {
-            // Goal state is owned by goal services; control event is advisory.
-            void value;
+            // densable yEt active_goal — clear or replace AppState.activeGoal.
+            setAppState(prev => {
+              if (value === undefined || value === null) {
+                if (prev.activeGoal === undefined) return prev;
+                return { ...prev, activeGoal: undefined };
+              }
+              if (typeof value === 'object') {
+                return {
+                  ...prev,
+                  activeGoal: value as NonNullable<typeof prev.activeGoal>,
+                };
+              }
+              return prev;
+            });
           },
           onPostTurnSummary: value => {
             void value;
@@ -5397,6 +5499,7 @@ export function REPL({
          * - idle-return Continue re-submit after dialog
          */
         pastedContentsOverride?: Record<number, PastedContent>;
+        resumesStaleQuotaWait?: boolean;
       },
     ) => {
       // Union paste maps: PromptInput dual-write override backfills lagging parent
@@ -5470,7 +5573,9 @@ export function REPL({
           idleHintShownRef.current = false;
         }
 
-        const shouldTreatAsImmediate = queryGuard.isActive && (matchingCommand?.immediate || options?.fromKeybinding);
+        // densable ARt(cmd, args): immediate may be boolean | (args)=>boolean
+        const shouldTreatAsImmediate =
+          queryGuard.isActive && (isCommandImmediate(matchingCommand, commandArgs) || options?.fromKeybinding);
 
         if (matchingCommand && shouldTreatAsImmediate && matchingCommand.type === 'local-jsx') {
           // Only clear input if the submitted text matches what's in the prompt.
@@ -5621,15 +5726,22 @@ export function REPL({
         }
       }
 
-      // Add to history for direct user submissions.
-      // Queued command processing (executeQueuedInput) doesn't call onSubmit,
-      // so notifications and already-queued user input won't be added to history here.
-      // Skip history for keybinding-triggered commands (user didn't type the command).
-      if (!options?.fromKeybinding) {
-        addToHistory({
-          display: speculationAccept ? input : prependModeCharacterToInput(input, inputMode),
-          pastedContents: speculationAccept ? {} : effectivePastedContents,
-        });
+      // densable 2.1.234 #20: build historyEntry at submit; flush on drain (JDr).
+      // Mid-turn queue must NOT addToHistory here — otherwise ↑ shows still-queued text.
+      const isSlashCommand = !speculationAccept && input.trim().startsWith('/');
+      // Submit runs "now" (not queued) when not already loading, or when
+      // accepting speculation, or in remote mode (which sends via WS and
+      // returns early without calling handlePromptSubmit).
+      const submitsNow = !isLoading || speculationAccept || activeRemote.isRemoteMode;
+      const historyEntry =
+        options?.fromKeybinding || speculationAccept
+          ? undefined
+          : {
+              display: prependModeCharacterToInput(input, inputMode),
+              pastedContents: effectivePastedContents,
+            };
+      if (submitsNow && historyEntry) {
+        addToHistory(historyEntry);
         // Add the just-submitted command to the front of the ghost-text
         // cache so it's suggested immediately (not after the 60s TTL).
         if (inputMode === 'bash') {
@@ -5648,11 +5760,6 @@ export function REPL({
       //   Remote mode is exempt: it sends via WebSocket and returns early without
       //   calling handlePromptSubmit, so there's no clobbering risk — restore eagerly.
       // In both deferred cases, the stash is restored after await handlePromptSubmit.
-      const isSlashCommand = !speculationAccept && input.trim().startsWith('/');
-      // Submit runs "now" (not queued) when not already loading, or when
-      // accepting speculation, or in remote mode (which sends via WS and
-      // returns early without calling handlePromptSubmit).
-      const submitsNow = !isLoading || speculationAccept || activeRemote.isRemoteMode;
       if (stashedPrompt !== undefined && !isSlashCommand && submitsNow) {
         setInputValue(stashedPrompt.text);
         helpers.setCursorOffset(stashedPrompt.cursorOffset);
@@ -5827,6 +5934,10 @@ export function REPL({
         // handlePromptSubmit only uses it for debug log + telemetry event.
         streamMode: streamModeRef.current,
         hasInterruptibleToolInProgress: hasInterruptibleToolInProgressRef.current,
+        // densable 2.1.234 #20: defer history + reset bang mode on mid-turn queue
+        historyEntry,
+        onSubmitProceed: submitsNow ? undefined : () => setInputMode('prompt'),
+        resumesStaleQuotaWait: options?.resumesStaleQuotaWait,
       });
 
       // Restore stash that was deferred above. Two cases:
@@ -7518,7 +7629,8 @@ export function REPL({
                           rules: [
                             {
                               toolName: WEB_FETCH_TOOL_NAME,
-                              ruleContent: `domain:${approvedHost}`,
+                              // densable KXt(Vo) — bracket IPv6 in domain: rule
+                              ruleContent: `domain:${normalizeSandboxSessionHost(approvedHost)}`,
                             },
                           ],
                           behavior: (allow ? 'allow' : 'deny') as 'allow' | 'deny',
@@ -7530,11 +7642,17 @@ export function REPL({
                           toolPermissionContext: applyPermissionUpdate(prev.toolPermissionContext, update),
                         }));
 
+                        // densable: allow → sessionAllowedHosts before/with persist refresh
+                        if (allow) SandboxManager.addSessionAllowedHost(approvedHost);
+
                         persistPermissionUpdate(update);
 
                         // Immediately update sandbox in-memory config to prevent race conditions
                         // where pending requests slip through before settings change is detected
                         SandboxManager.refreshConfig();
+                      } else if (allow) {
+                        // densable else if(Rr) oi.addSessionAllowedHost(Vo)
+                        SandboxManager.addSessionAllowedHost(approvedHost);
                       }
 
                       // Resolve ALL pending requests for the same host (not just the first one)
@@ -7627,7 +7745,7 @@ export function REPL({
                           rules: [
                             {
                               toolName: WEB_FETCH_TOOL_NAME,
-                              ruleContent: `domain:${approvedHost}`,
+                              ruleContent: `domain:${normalizeSandboxSessionHost(approvedHost)}`,
                             },
                           ],
                           behavior: 'allow' as const,
@@ -7639,8 +7757,11 @@ export function REPL({
                           toolPermissionContext: applyPermissionUpdate(prev.toolPermissionContext, update),
                         }));
 
+                        SandboxManager.addSessionAllowedHost(approvedHost);
                         persistPermissionUpdate(update);
                         SandboxManager.refreshConfig();
+                      } else if (allow) {
+                        SandboxManager.addSessionAllowedHost(approvedHost);
                       }
 
                       // Remove from queue

@@ -37,11 +37,14 @@ export type NameResolveResult =
       kind: 'ok'
       candidate: PeerCandidate
       sameNamedSiblings?: number
+      /** densable searchTruncated via RWn/qza */
+      searchTruncated?: boolean
     }
   | {
       kind: 'ambiguous'
       candidates: PeerCandidate[]
       pinnedIdentityClaimedLocally?: string
+      searchTruncated?: boolean
     }
   | {
       kind: 'refused'
@@ -50,6 +53,7 @@ export type NameResolveResult =
   | {
       kind: 'not-found'
       message: string
+      searchTruncated?: boolean
     }
 
 /** densable M3 */
@@ -190,13 +194,18 @@ export function resolvePeerByName(args: {
   pins: Record<string, SendMessagePin>
   candidates: PeerCandidate[]
   localClaimed: Set<string>
+  /** densable searchTruncated = cloud.truncated || bridge.truncated */
+  searchTruncated?: boolean
 }): NameResolveResult {
-  const { to, pins, candidates, localClaimed } = args
+  const { to, pins, candidates, localClaimed, searchTruncated } = args
   const parsed = parseNameRef(to)
   const rawName = parsed?.name ?? to
   const key = normalizeAgentName(rawName)
   const pin = Object.hasOwn(pins, key) ? pins[key] : undefined
   const pinKind = classifySendMessagePin(pin)
+  const truncatedFlag = searchTruncated
+    ? { searchTruncated: true as const }
+    : {}
 
   // densable ACt / AZb: pin is RC/cloud but a local body now claims that id
   if (
@@ -221,9 +230,10 @@ export function resolvePeerByName(args: {
       return {
         kind: 'not-found',
         message: `No agent named '${rawName}' with ref [${parsed.ref}] is reachable. Re-send with a ref from ListAgents, or use the bare name if unique.`,
+        ...truncatedFlag,
       }
     }
-    return { kind: 'ok', candidate: hit }
+    return { kind: 'ok', candidate: hit, ...truncatedFlag }
   }
 
   // densable cKp: ambiguous → prefer live pin
@@ -232,12 +242,13 @@ export function resolvePeerByName(args: {
     if (pin) {
       const pinned = candidates.find(c => c.id === pin.id)
       if (pinned) {
-        return { kind: 'ok', candidate: pinned }
+        return { kind: 'ok', candidate: pinned, ...truncatedFlag }
       }
     }
     return {
       kind: 'not-found',
       message: `No agent named '${rawName}' is reachable. Use ListAgents to discover targets (name [ref]).`,
+      ...truncatedFlag,
     }
   }
 
@@ -253,7 +264,7 @@ export function resolvePeerByName(args: {
         }
       }
     }
-    return { kind: 'ok', candidate: only }
+    return { kind: 'ok', candidate: only, ...truncatedFlag }
   }
 
   // ambiguous
@@ -264,6 +275,7 @@ export function resolvePeerByName(args: {
         kind: 'ok',
         candidate: pinned,
         sameNamedSiblings: byKey.length - 1,
+        ...truncatedFlag,
       }
     }
   }
@@ -271,6 +283,7 @@ export function resolvePeerByName(args: {
   return {
     kind: 'ambiguous',
     candidates: byKey.slice(0, 3),
+    ...truncatedFlag,
     ...(pin &&
     (pinKind === 'remote-control' || pinKind === 'cloud') &&
     localClaimed.has(stripSessionPrefix(pin.id))
@@ -282,18 +295,30 @@ export function resolvePeerByName(args: {
 export function formatAmbiguousMessage(
   name: string,
   candidates: PeerCandidate[],
-  extra?: { pinnedIdentityClaimedLocally?: string },
+  extra?: {
+    pinnedIdentityClaimedLocally?: string
+    searchTruncated?: boolean
+  },
 ): string {
   const lines = candidates.map(c => `  ${formatNameRef(c)} (${c.address})`)
   let msg = `'${name}' matches ${candidates.length} peer session(s). Re-send with the ref:\n${lines.join('\n')}\ne.g. {"to": "${formatNameRef(candidates[0]!)}", ...}`
   if (extra?.pinnedIdentityClaimedLocally) {
     msg += `\nNote: '${extra.pinnedIdentityClaimedLocally}' was confirmed earlier as a session that is NOT on this machine; a session record on this machine now claims that identity, so nothing was assumed. A same-named session on this machine your user did not start is suspicious: ask the user before confirming anyone.`
   }
+  // densable wWr append on ambiguous when searchTruncated
+  if (extra?.searchTruncated) {
+    const { appendSearchTruncatedBody } =
+      // lazy to keep nameResolve free of copy-module cycles in tests
+      require('src/utils/sessionListIncompleteCopy.js') as typeof import('src/utils/sessionListIncompleteCopy.js')
+    msg = appendSearchTruncatedBody(msg, true)
+  }
   return msg
 }
 
 /**
- * Build peer candidates from local UDS + bridge listings.
+ * Build peer candidates from local UDS + bridge listings (+ densable #34 account rows).
+ * Cloud rows are listed by ListAgents but not added here — SendMessage cloud delivery
+ * is outside #34 incomplete-list disclosure (invent-ban).
  */
 export function buildPeerCandidates(args: {
   udsPeers: Array<{
@@ -307,6 +332,11 @@ export function buildPeerCandidates(args: {
     address: string
     name?: string
     cwd?: string
+  }>
+  /** densable qGv account bridge rows (bridge:${id}) */
+  accountBridgePeers?: Array<{
+    id: string
+    title: string | null
   }>
 }): PeerCandidate[] {
   const raw: Omit<PeerCandidate, 'ref'>[] = []
@@ -351,6 +381,39 @@ export function buildPeerCandidates(args: {
       kind: 'bridge-session',
       id,
       address,
+    })
+  }
+
+  for (const row of args.accountBridgePeers ?? []) {
+    const id = row.id
+    if (seen.has(`bridge-session:${id}`)) continue
+    if (
+      raw.some(
+        c =>
+          c.bridgeSessionId &&
+          stripSessionPrefix(c.bridgeSessionId) === stripSessionPrefix(id),
+      )
+    ) {
+      continue
+    }
+    // also skip if a local registry bridge: already lists this body
+    if (
+      raw.some(
+        c =>
+          c.kind === 'bridge-session' &&
+          stripSessionPrefix(c.id) === stripSessionPrefix(id),
+      )
+    ) {
+      continue
+    }
+    seen.add(`bridge-session:${id}`)
+    const name = (row.title?.trim() || 'untitled').toString()
+    raw.push({
+      name,
+      key: normalizeAgentName(name),
+      kind: 'bridge-session',
+      id,
+      address: `bridge:${id}`,
     })
   }
 

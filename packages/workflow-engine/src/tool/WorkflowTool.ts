@@ -5,7 +5,11 @@ import { WORKFLOW_DIR_NAME, WORKFLOW_TOOL_NAME } from '../constants.js'
 import { resolveNamedWorkflow } from '../engine/namedWorkflows.js'
 import { runWorkflow } from '../engine/runWorkflow.js'
 import { parseScript } from '../engine/script.js'
-import { containsPath, sanitizeWorkflowName } from '../engine/paths.js'
+import {
+  containsPath,
+  isForbiddenWorkflowScriptPath,
+  sanitizeWorkflowName,
+} from '../engine/paths.js'
 import type { WorkflowPorts } from '../ports.js'
 import type { WorkflowRunResult } from '../types.js'
 import { workflowInputSchema, type WorkflowInput } from './schema.js'
@@ -217,6 +221,15 @@ async function resolveScriptSource(
 ): Promise<{ script: string; workflowFile?: string }> {
   if (input.script) return { script: input.script }
   if (input.scriptPath) {
+    // densable s7t: su(e)||Jw(e)||bu(e)||bu(resolved) before read
+    if (
+      isForbiddenWorkflowScriptPath(input.scriptPath) ||
+      isForbiddenWorkflowScriptPath(resolve(cwd, input.scriptPath))
+    ) {
+      throw new Error(
+        `Network (UNC, NT-namespace, or automount) paths are not allowed for workflow scriptPath: ${input.scriptPath}`,
+      )
+    }
     const resolved = resolve(cwd, input.scriptPath)
     if (!containsPath(cwd, resolved)) {
       throw new Error(

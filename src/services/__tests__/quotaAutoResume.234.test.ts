@@ -148,9 +148,11 @@ const {
   onQuotaAutoResumeHumanSubmit,
   onQuotaRejectedForAutoResume,
   getWaitThenContinueOption,
+  getStaleQuotaWaitPrompt,
   isAutoContinueAtUsageLimitEffective,
   isAutoContinueAtUsageLimitToggleable,
   isQuotaRejectedForAutoContinue,
+  isQuotaWaitStale,
   offerArmQuotaAutoResume,
   refreshAutoContinueKeyPresence,
   resetQuotaAutoResumeForTests,
@@ -346,6 +348,71 @@ describe('quotaAutoResume densable 2.1.234', () => {
     expect(hasPendingQuotaContinuationInQueue()).toBe(true)
     onQuotaAutoResumeHumanSubmit()
     expect(hasPendingQuotaContinuationInQueue()).toBe(false)
+  })
+
+  test('qXa tick does not setting_off a dialog-armed wait', () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600
+    offerArmQuotaAutoResume(
+      {
+        status: 'rejected',
+        resetsAt,
+        unifiedRateLimitFallbackAvailable: false,
+        isUsingOverage: false,
+      },
+      Date.now(),
+      'dialog',
+    )
+    expect(getQuotaAutoResumeState().phase).toBe('armed')
+    getSettingsForSourceMock.mockImplementation((source?: string) =>
+      source === 'userSettings'
+        ? { autoContinueAtUsageLimit: false }
+        : undefined,
+    )
+    refreshAutoContinueKeyPresence()
+    expect(isAutoContinueAtUsageLimitEffective()).toBe(false)
+    expect(tickQuotaAutoResume(Date.now(), false)).toBe('pending')
+    expect(getQuotaAutoResumeState().phase).toBe('armed')
+  })
+
+  test('qXa tick setting_off only auto-origin armed wait', () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600
+    offerArmQuotaAutoResume(
+      {
+        status: 'rejected',
+        resetsAt,
+        unifiedRateLimitFallbackAvailable: false,
+        isUsingOverage: false,
+      },
+      Date.now(),
+      'auto',
+    )
+    expect(getQuotaAutoResumeState().phase).toBe('armed')
+    getSettingsForSourceMock.mockImplementation((source?: string) =>
+      source === 'userSettings'
+        ? { autoContinueAtUsageLimit: false }
+        : undefined,
+    )
+    refreshAutoContinueKeyPresence()
+    expect(tickQuotaAutoResume(Date.now(), false)).toBe('idle')
+    expect(getQuotaAutoResumeState().phase).toBe('idle')
+  })
+
+  test('hSl/qvm: slept-through fire is stale Enter prompt', () => {
+    armQuotaAutoResume(
+      Math.floor(Date.now() / 1000) - 10,
+      Date.now() - 120_000,
+      'dialog',
+    )
+    const armed = getQuotaAutoResumeState()
+    expect(armed.phase).toBe('armed')
+    const result = tickQuotaAutoResume(
+      (armed as { fireAtMs: number }).fireAtMs + 31 * 60 * 1000,
+      false,
+    )
+    expect(result).toBe('stale')
+    expect(getQuotaAutoResumeState().phase).toBe('stale')
+    expect(isQuotaWaitStale()).toBe(true)
+    expect(getStaleQuotaWaitPrompt()).toBe(CONTINUATION_PROMPT)
   })
 
   test('Axi cancel setting_off via setAutoContinueAtUsageLimitSetting(false)', () => {

@@ -178,10 +178,22 @@ describe('probeIsolationWorktreePin densable ODt (2.1.238)', () => {
     const result = await probeIsolationWorktreePin(pin, [], [])
     expect(result.ok).toBe(false)
     if (result.ok) return
+    const topLevel = execFileSync(
+      'git',
+      [
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'core.fsmonitor=',
+        'rev-parse',
+        '--show-toplevel',
+      ],
+      { cwd: pin, encoding: 'utf8' },
+    ).trim()
     expect(result.reason).toBe('work-tree-elsewhere')
     expect(result.message).toContain('Remove the redirect')
     expect(result.message).toContain(pin)
-    expect(result.message).toContain(repo)
+    expect(result.message).toContain(topLevel)
   })
 })
 

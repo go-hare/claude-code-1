@@ -28,6 +28,7 @@ import type {
   ResourceLink,
 } from './types.js'
 import { extractMcpConnectionErrorCode } from './mcpConnectionIssue.js'
+import { readClientProtocolEra } from './channelPermissions.js'
 import {
   classifyMcpAutoProbeFallback,
   createMcpConnectionTimeoutError,
@@ -180,7 +181,11 @@ import {
   createMcpTransportErrorState,
   shouldAbortForTransportDrop,
 } from './transportErrorState.js'
-import { getAllMcpConfigs, isMcpServerDisabled } from './config.js'
+import {
+  getAllMcpConfigs,
+  getMcpServerUrlOrigin,
+  isMcpServerDisabled,
+} from './config.js'
 import { getMcpServerHeaders } from './headersHelper.js'
 import { SdkControlClientTransport } from './SdkControlTransport.js'
 import type {
@@ -2077,6 +2082,8 @@ export const connectToServer = memoize(
         config: serverRef,
         cleanup: wrappedCleanup,
         transportErrorState,
+        // densable M.protocolEra — i3r/Yrf era gate. Unset is not modern.
+        protocolEra: readClientProtocolEra(client),
       }
     } catch (error) {
       const connectionDurationMs = Date.now() - connectStartTime
@@ -2113,11 +2120,9 @@ export const connectToServer = memoize(
         hasSessionId: false,
       })
       if (errorCode === 'ENDPOINT_NOT_FOUND' && 'url' in serverRef) {
-        const url =
-          typeof serverRef.url === 'string'
-            ? serverRef.url
-            : '(unparseable url)'
-        errorText = `MCP endpoint not found at ${url}. Check the URL in your MCP config.`
+        // densable 2.1.234 #13 cHr — connection-failure details show only origin
+        const origin = getMcpServerUrlOrigin(serverRef) ?? '(unparseable url)'
+        errorText = `MCP endpoint not found at ${origin}. Check the URL in your MCP config.`
       }
       return {
         name,
@@ -4341,6 +4346,7 @@ export async function setupSdkMcpClients(
           cleanup: async () => {
             await client.close()
           },
+          protocolEra: readClientProtocolEra(client),
         }
 
         // Fetch tools if the server has them

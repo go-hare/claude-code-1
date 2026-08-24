@@ -442,6 +442,14 @@ export function createSubagentContext(
     setAppState: overrides?.shareSetAppState
       ? parentContext.setAppState
       : () => {},
+    // densable createSubagentContext: setToolPermissionContext noop when
+    // !shareSetAppState; setSessionToolPermissionContext ALWAYS inherited so
+    // bg subagent permission answers (incl. session deny rules) persist.
+    setToolPermissionContext: overrides?.shareSetAppState
+      ? parentContext.setToolPermissionContext
+      : () => {},
+    setSessionToolPermissionContext:
+      parentContext.setSessionToolPermissionContext,
     // Task registration/kill must always reach the root store, even when
     // setAppState is a no-op — otherwise async agents' background bash tasks
     // are never registered and never killed (PPID=1 zombie).

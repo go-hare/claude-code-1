@@ -234,7 +234,13 @@ export type CommandBase = {
     | 'mcp'
     | 'syncedSkills' // densable 2.1.228 #12 — claude.ai synced skills
   kind?: 'workflow' // Distinguishes workflow-backed commands (badged in autocomplete)
-  immediate?: boolean // If true, command executes immediately without waiting for a stop point (bypasses queue)
+  /**
+   * densable 2.1.234 ARt — if true (or `(args)=>true`), command executes
+   * immediately without waiting for a stop point (bypasses queue). May be a
+   * predicate of the invocation args (e.g. /add-dir path always, dialog only
+   * when fullscreen; /config empty-args needs RVr).
+   */
+  immediate?: boolean | ((args: string) => boolean)
   isSensitive?: boolean // If true, args are redacted from the conversation history
   /** Defaults to `name`. Only override when the displayed name differs (e.g. plugin prefix stripping). */
   userFacingName?: () => string

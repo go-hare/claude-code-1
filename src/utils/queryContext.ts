@@ -22,6 +22,7 @@ import type { FileStateCache } from './fileStateCache.js'
 import type { CacheSafeParams } from './forkedAgent.js'
 import { getMainLoopModel } from './model/model.js'
 import { resolveChromeAppendSystemPrompt } from './claudeInChrome/prompt.js'
+import { createAppStatePermissionContextSetters } from './permissions/permissionContextSetters.js'
 import { asSystemPrompt } from './systemPromptType.js'
 import {
   shouldEnableThinkingByDefault,
@@ -165,6 +166,8 @@ export async function buildSideQuestionFallbackParams({
     readFileState,
     getAppState,
     setAppState,
+    // densable y8r(setAppState) for side-question / cache-safe ToolUseContext
+    ...createAppStatePermissionContextSetters(setAppState),
     messages: forkContextMessages,
     setInProgressToolUseIDs: () => {},
     setResponseLength: () => {},

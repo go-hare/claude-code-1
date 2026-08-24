@@ -22,6 +22,12 @@ let forkReplayLaunchConfig: ForkReplayLaunchConfig = {}
 let forkRestrictedLaunchConfig = false
 /** densable `Dt.replConfigArgv` — flat argv flags replayed into keepParent child. */
 let replConfigArgv: string[] = []
+/**
+ * densable `Dt.settingsEffortAtStartup` / M_s — settings-derived effort at
+ * launch (O_s). Used by nMr/kXs so /tui only carries `--effort` when it
+ * differs from this baseline or CLI `--effort` was present.
+ */
+let settingsEffortAtStartup: string | undefined
 
 /** densable `Iei(e)` — store launch config for later keepParent forks. */
 export function setForkReplayLaunchConfig(
@@ -57,11 +63,23 @@ export function getReplConfigArgv(): readonly string[] {
   return [...replConfigArgv]
 }
 
+/** densable `O_s(e)` — store settings effort baseline for nMr/kXs. */
+export function setSettingsEffortAtStartup(effort: string | undefined): void {
+  settingsEffortAtStartup =
+    typeof effort === 'string' && effort !== '' ? effort : undefined
+}
+
+/** densable `M_s()` — settings effort at startup for /tui effort carry. */
+export function getSettingsEffortAtStartup(): string | undefined {
+  return settingsEffortAtStartup
+}
+
 /** Test helper — clear between cases. */
 export function resetForkReplayLaunchConfig(): void {
   forkReplayLaunchConfig = {}
   forkRestrictedLaunchConfig = false
   replConfigArgv = []
+  settingsEffortAtStartup = undefined
 }
 
 /**

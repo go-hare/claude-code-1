@@ -4,6 +4,7 @@ import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 
 import {
   claimQuotaAutoResumeTurn,
   filterPendingQuotaContinuationIfRevoked,
+  isQuotaWaitStale,
   onQuotaAutoResumeHumanSubmit,
   releaseQuotaAutoResumeTurnClaim,
   type QuotaTurnClaim,
@@ -158,6 +159,11 @@ export type HandlePromptSubmitParams = BaseExecutionParams & {
    * bang (`!`) mode resets to prompt (#20 stickiness).
    */
   onSubmitProceed?: () => void
+  /**
+   * densable resumesStaleQuotaWait — empty Enter substituted A4f in PromptInput.
+   * Mid-turn / idle submit no-ops when the wait is no longer stale (hSl).
+   */
+  resumesStaleQuotaWait?: boolean
 }
 
 export async function handlePromptSubmit(
@@ -188,6 +194,9 @@ export async function handlePromptSubmit(
     historyEntry,
     onSubmitProceed,
   } = params
+  // densable Z = resumesStaleQuotaWait===true && !hSl
+  const staleResumeGone = (): boolean =>
+    params.resumesStaleQuotaWait === true && !isQuotaWaitStale()
 
   const { setCursorOffset, clearBuffer, resetHistory } = helpers
 
@@ -389,6 +398,7 @@ export async function handlePromptSubmit(
     if (mode !== 'prompt' && mode !== 'bash') {
       return
     }
+    if (staleResumeGone()) return
 
     // Interrupt the current turn when all executing tools have
     // interruptBehavior 'cancel' (e.g. SleepTool).
@@ -433,6 +443,11 @@ export async function handlePromptSubmit(
     setPastedContents({})
     resetHistory()
     clearBuffer()
+    return
+  }
+
+  if (staleResumeGone()) {
+    setUserInputOnProcessing(undefined)
     return
   }
 

@@ -7,7 +7,7 @@ import { STATUS_TAG, SUMMARY_TAG, TASK_NOTIFICATION_TAG } from '../../constants/
 import { QueuedMessageProvider } from '../../context/QueuedMessageContext.js';
 import { useCommandQueue } from '../../hooks/useCommandQueue.js';
 import type { QueuedCommand } from '../../types/textInputTypes.js';
-import { isQueuedCommandVisible } from '../../utils/messageQueueManager.js';
+import { isQueuedCommandEditable, isQueuedCommandVisible } from '../../utils/messageQueueManager.js';
 import { createUserMessage, EMPTY_LOOKUPS, normalizeMessages } from '../../utils/messages.js';
 import { jsonParse } from '../../utils/slowOperations.js';
 import { Message } from '../Message.js';
@@ -75,6 +75,7 @@ function processQueuedCommands(queuedCommands: QueuedCommand[]): QueuedCommand[]
 
 function PromptInputQueuedCommandsImpl(): React.ReactNode {
   const queuedCommands = useCommandQueue();
+  const queueEditIndex = useAppState(s => s.queueEditIndex);
   const viewingAgent = useAppState(s => !!s.viewingAgentTaskId);
   // Brief layout: dim queue items + skip the paddingX (brief messages
   // already indent themselves). Gate mirrors the brief-spinner/message
@@ -85,7 +86,9 @@ function PromptInputQueuedCommandsImpl(): React.ReactNode {
 
   // createUserMessage mints a fresh UUID per call; without memoization, streaming
   // re-renders defeat Message's areMessagePropsEqual (compares uuid) → flicker.
-  const messages = useMemo(() => {
+  // densable Vag: keep processedCommands so queueEditIndex (lJ index) maps to
+  // the visible row via identity (indexOf), not display-list order.
+  const prepared = useMemo(() => {
     if (queuedCommands.length === 0) return null;
     // task-notification is shown via useInboxNotification; most isMeta commands
     // (scheduled tasks, proactive ticks) are system-generated and hidden.
@@ -96,28 +99,42 @@ function PromptInputQueuedCommandsImpl(): React.ReactNode {
     const visibleCommands = queuedCommands.filter(cmd => isQueuedCommandVisible(cmd));
     if (visibleCommands.length === 0) return null;
     const processedCommands = processQueuedCommands(visibleCommands);
-    return normalizeMessages(
-      processedCommands.map(cmd => {
-        let content = cmd.value;
-        if (cmd.mode === 'bash' && typeof content === 'string') {
-          content = `<bash-input>${content}</bash-input>`;
-        }
-        // [Image #N] placeholders are inline in the text value (inserted at
-        // paste time), so the queue preview shows them without stub blocks.
-        return createUserMessage({ content });
-      }),
-    );
+    return {
+      messages: normalizeMessages(
+        processedCommands.map(cmd => {
+          let content = cmd.value;
+          if (cmd.mode === 'bash' && typeof content === 'string') {
+            content = `<bash-input>${content}</bash-input>`;
+          }
+          // [Image #N] placeholders are inline in the text value (inserted at
+          // paste time), so the queue preview shows them without stub blocks.
+          return createUserMessage({ content });
+        }),
+      ),
+      processedCommands,
+    };
   }, [queuedCommands]);
 
   // Don't show leader's queued commands when viewing any agent's transcript
-  if (viewingAgent || messages === null) {
+  if (viewingAgent || prepared === null) {
     return null;
   }
 
+  // densable Vag: YZw=Dln.filter(lJ)[MEc]; yho=processedCommands.indexOf(YZw)
+  const selectedCmd =
+    queueEditIndex === null ? undefined : queuedCommands.filter(isQueuedCommandEditable)[queueEditIndex];
+  const highlightRow = selectedCmd ? prepared.processedCommands.indexOf(selectedCmd) : -1;
+  const selecting = highlightRow !== -1;
+
   return (
     <Box marginTop={1} flexDirection="column">
-      {messages.map((message, i) => (
-        <QueuedMessageProvider key={i} isFirst={i === 0} useBriefLayout={useBriefLayout}>
+      {prepared.messages.map((message, i) => (
+        <QueuedMessageProvider
+          key={i}
+          isFirst={i === 0}
+          useBriefLayout={useBriefLayout}
+          selectionHighlight={selecting ? (i === highlightRow ? 'on' : 'off') : undefined}
+        >
           <Message
             message={message}
             lookups={EMPTY_LOOKUPS}

@@ -13,7 +13,16 @@ import {
 import { type AppState, useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
 import type { FooterItem } from 'src/state/AppStateStore.js';
 import { getCwd } from 'src/utils/cwd.js';
-import { isQueuedCommandEditable, popAllEditable } from 'src/utils/messageQueueManager.js';
+import {
+  clampQueueEditIndex,
+  isPoppableEditableCommand,
+  isQueuedCommandEditable,
+  popAllEditable,
+  popEditableAt,
+  queueEditIndexAfterHistoryDown,
+  queueEditIndexAfterHistoryUp,
+} from 'src/utils/messageQueueManager.js';
+import { isKbCohesionFixesEnabled } from 'src/utils/systemPromptArms.js';
 import stripAnsi from 'strip-ansi';
 import { companionReservedColumns } from '../../buddy/CompanionSprite.js';
 import { isBuddyEnabled } from '../../buddy/enabled.js';
@@ -62,6 +71,7 @@ import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.j
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { abortPromptSuggestion, logSuggestionSuppressed } from '../../services/PromptSuggestion/promptSuggestion.js';
 import { type ActiveSpeculationState, abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
+import { getStaleQuotaWaitPrompt } from '../../services/quotaAutoResume.js';
 import { getActiveAgentForInput, getViewedTeammateTask } from '../../state/selectors.js';
 import { enterTeammateView, exitTeammateView, stopOrDismissAgent } from '../../state/teammateViewHelpers.js';
 import type { ToolPermissionContext } from '../../Tool.js';
@@ -252,6 +262,8 @@ type Props = {
        * filtered out in handlePromptSubmit (text-only / swallow).
        */
       pastedContentsOverride?: Record<number, PastedContent>;
+      /** densable resumesStaleQuotaWait — empty Enter substituted A4f. */
+      resumesStaleQuotaWait?: boolean;
     },
   ) => Promise<void>;
   onAgentSubmit?: (
@@ -487,6 +499,25 @@ function PromptInput({
   const bagelFooterVisible = useAppState(_s => false);
   const teamContext = useAppState(s => s.teamContext);
   const queuedCommands = useCommandQueue();
+  const queueEditIndex = useAppState(s => s.queueEditIndex);
+  const setQueueEditIndex = useCallback(
+    (index: number | null) => {
+      setAppState(prev => (prev.queueEditIndex === index ? prev : { ...prev, queueEditIndex: index }));
+    },
+    [setAppState],
+  );
+  const prevInputForQueueEditRef = useRef(input);
+  useEffect(() => {
+    if (prevInputForQueueEditRef.current === input) return;
+    prevInputForQueueEditRef.current = input;
+    if (store.getState().queueEditIndex !== null) setQueueEditIndex(null);
+  }, [input, setQueueEditIndex, store]);
+  useEffect(() => {
+    const current = store.getState().queueEditIndex;
+    if (current === null) return;
+    const next = clampQueueEditIndex(current, queuedCommands.filter(isQueuedCommandEditable).length);
+    if (next !== current) setQueueEditIndex(next);
+  }, [queuedCommands, queueEditIndex, setQueueEditIndex, store]);
   const promptSuggestionState = useAppState(s => s.promptSuggestion);
   const speculation = useAppState(s => s.speculation);
   const speculationSessionTimeSavedMs = useAppState(s => s.speculationSessionTimeSavedMs);
@@ -1300,11 +1331,19 @@ function PromptInput({
       return;
     }
 
-    // If there's an editable queued command, move it to the input for editing when UP is pressed
-    const hasEditableCommand = queuedCommands.some(isQueuedCommandEditable);
-    if (hasEditableCommand) {
-      void popAllCommandsFromQueue();
-      return;
+    // densable LI: lte() walks queueEditIndex; else Phe() popAll or block via cu()
+    const editableCount = queuedCommands.filter(isQueuedCommandEditable).length;
+    if (isKbCohesionFixesEnabled()) {
+      const next = queueEditIndexAfterHistoryUp(store.getState().queueEditIndex, editableCount);
+      setQueueEditIndex(next.queueEditIndex);
+      if (!next.historyUp) return;
+    } else if (editableCount > 0) {
+      if (
+        popAllCommandsFromQueue() ||
+        !(queuedCommands.some(isQueuedCommandEditable) && liveInputRef.current === input)
+      ) {
+        return;
+      }
     }
 
     onHistoryUp();
@@ -1320,6 +1359,17 @@ function PromptInput({
     // and only trigger navigation when at the bottom of the input.
     if (!isCursorOnLastLine) {
       return;
+    }
+
+    if (isKbCohesionFixesEnabled()) {
+      const next = queueEditIndexAfterHistoryDown(
+        store.getState().queueEditIndex,
+        queuedCommands.filter(isQueuedCommandEditable).length,
+      );
+      if (next.consumed) {
+        setQueueEditIndex(next.queueEditIndex);
+        return;
+      }
     }
 
     // At bottom of history → enter footer at first visible pill
@@ -1351,6 +1401,54 @@ function PromptInput({
     [],
   );
 
+  // densable Io / HFn=popEditableAt — Enter while queueEditIndex is set
+  const popSelectedCommandFromQueue = useCallback((): boolean => {
+    const index = store.getState().queueEditIndex;
+    if (index === null) return false;
+    const live = liveInputRef.current;
+    const selected = queuedCommands.filter(isQueuedCommandEditable)[index];
+    if (selected && !isPoppableEditableCommand(selected, live === '')) {
+      addNotification({
+        key: 'queue-pull-needs-empty-input',
+        text: 'Clear the input to edit this queued shell command',
+        priority: 'immediate',
+        timeoutMs: 2000,
+      });
+      setQueueEditIndex(null);
+      logEvent('tengu_feature_sad', {
+        feature_name: 'input_queue_pop_to_edit' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code: 'bash_needs_empty_draft' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      return true;
+    }
+    const result = popEditableAt(index, live, cursorOffsetRef.current);
+    setQueueEditIndex(null);
+    if (!result) {
+      logEvent('tengu_feature_sad', {
+        feature_name: 'input_queue_pop_to_edit' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code: 'stale_index' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      return true;
+    }
+    trackAndSetInput(result.text);
+    onModeChange(result.mode);
+    setCursorOffset(result.cursorOffset);
+    if (result.images.length > 0) {
+      setPastedContents(prev => {
+        const newContents = { ...prev };
+        for (const image of result.images) {
+          newContents[image.id] = image;
+        }
+        pastedContentsRef.current = newContents;
+        return newContents;
+      });
+    }
+    logEvent('tengu_feature_ok', {
+      feature_name: 'input_queue_pop_to_edit' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    return true;
+  }, [addNotification, onModeChange, queuedCommands, setPastedContents, setQueueEditIndex, store, trackAndSetInput]);
+
   const onSubmit = useCallback(
     async (inputParam: string, isSubmittingSlashCommand = false) => {
       // densable N1 / live dual-write: paste insert updates liveInputRef same tick;
@@ -1374,6 +1472,10 @@ function PromptInput({
       // would early-return forever. If there is a draft/images, clear footer and
       // submit instead of treating Enter as openSelected only.
       const state = store.getState();
+      // densable Is: lte() && queueEditIndex !== null && Io() → consume Enter
+      if (isKbCohesionFixesEnabled() && state.queueEditIndex !== null && popSelectedCommandFromQueue()) {
+        return;
+      }
       if (state.footerSelection && footerItems.includes(state.footerSelection)) {
         const hasDraft = inputParam.trim() !== '' || hasImages;
         if (!hasDraft) {
@@ -1468,6 +1570,18 @@ function PromptInput({
         }
       }
 
+      // densable qvm/j4f — empty Enter on leader prompt substitutes A4f
+      // and submits as a real prompt with resumesStaleQuotaWait.
+      const isLeaderPrompt = mode === 'prompt' && getActiveAgentForInput(store.getState()).type === 'leader';
+      let resumesStaleQuotaWait = false;
+      if (inputParam.trim() === '' && !hasImages && isLeaderPrompt) {
+        const stalePrompt = getStaleQuotaWaitPrompt();
+        if (stalePrompt !== null) {
+          inputParam = stalePrompt;
+          resumesStaleQuotaWait = true;
+        }
+      }
+
       // Allow submission if there are images attached, even without text
       if (inputParam.trim() === '' && !hasImages) {
         return;
@@ -1514,7 +1628,10 @@ function PromptInput({
           resetHistory,
         },
         undefined,
-        { pastedContentsOverride: livePastedContents },
+        {
+          pastedContentsOverride: livePastedContents,
+          ...(resumesStaleQuotaWait ? { resumesStaleQuotaWait: true } : {}),
+        },
       );
     },
     [
@@ -1533,6 +1650,7 @@ function PromptInput({
       setAppState,
       markAccepted,
       removeNotification,
+      popSelectedCommandFromQueue,
     ],
   );
 
@@ -1735,16 +1853,19 @@ function PromptInput({
     () => onShowMessageSelector(),
   );
 
-  // Function to get the queued command for editing. Returns true if commands were popped.
+  // densable Phe: fii(h6(), Xe, S) — live draft, not the render snapshot.
   const popAllCommandsFromQueue = useCallback((): boolean => {
-    const result = popAllEditable(input, cursorOffset);
+    const result = popAllEditable(liveInputRef.current, cursorOffsetRef.current);
     if (!result) {
       return false;
     }
 
     trackAndSetInput(result.text);
-    onModeChange('prompt'); // Always prompt mode for queued commands
+    // densable 2.1.234 #19: restore bash when popAllEditable returns mode bash
+    onModeChange(result.mode);
     setCursorOffset(result.cursorOffset);
+    // densable #20: clear queueEditIndex after pop-to-edit
+    setAppState(prev => (prev.queueEditIndex === null ? prev : { ...prev, queueEditIndex: null }));
 
     // Restore images from queued commands to pastedContents (+ dual-write).
     if (result.images.length > 0) {
@@ -1758,8 +1879,11 @@ function PromptInput({
       });
     }
 
+    logEvent('tengu_feature_ok', {
+      feature_name: 'input_queue_pop_to_edit' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
     return true;
-  }, [trackAndSetInput, onModeChange, input, cursorOffset, setPastedContents]);
+  }, [trackAndSetInput, onModeChange, setPastedContents, setAppState]);
 
   // Insert the at-mentioned reference (the file and, optionally, a line range) when
   // we receive an at-mentioned notification the IDE.
@@ -2345,6 +2469,14 @@ function PromptInput({
       return;
     }
 
+    // densable SQw: backspace/delete/ctrl+u|w|k clears queueEditIndex
+    if (
+      store.getState().queueEditIndex !== null &&
+      (key.backspace || key.delete || (key.ctrl && (char === 'u' || char === 'w' || char === 'k')))
+    ) {
+      setQueueEditIndex(null);
+    }
+
     // Detect failed Alt shortcuts on macOS (Option key produces special characters)
     if (getPlatform() === 'macos' && isMacosOptionChar(char)) {
       const shortcut = MACOS_OPTION_SPECIAL_CHARS[char];
@@ -2379,8 +2511,11 @@ function PromptInput({
       return;
     }
 
-    // Exit special modes when backspace/escape/delete/ctrl+u is pressed at cursor position 0
-    if (cursorOffset === 0 && (key.escape || key.backspace || key.delete || (key.ctrl && char === 'u'))) {
+    // densable Ys: (Xe===0 || (lte() && escape)) && (escape || VEc || ctrl+u)
+    if (
+      (cursorOffset === 0 || (isKbCohesionFixesEnabled() && key.escape)) &&
+      (key.escape || key.backspace || key.delete || (key.ctrl && char === 'u'))
+    ) {
       onModeChange('prompt');
       setHelpOpen(false);
     }
@@ -2410,6 +2545,13 @@ function PromptInput({
         return;
       }
 
+      // densable $l: Esc while selecting a queued row clears index first
+      // (before help-close) so highlight does not survive an extra Esc.
+      if (store.getState().queueEditIndex !== null) {
+        setQueueEditIndex(null);
+        return;
+      }
+
       // Close help menu if open
       if (helpOpen) {
         setHelpOpen(false);
@@ -2423,11 +2565,16 @@ function PromptInput({
         return;
       }
 
-      // If there's an editable queued command, move it to the input for editing when ESC is pressed
-      const hasEditableCommand = queuedCommands.some(isQueuedCommandEditable);
-      if (hasEditableCommand) {
-        void popAllCommandsFromQueue();
-        return;
+      // densable: if(!lte()){ if(Be.some(lJ)&&(Phe()||!cu())) return }
+      if (!isKbCohesionFixesEnabled()) {
+        const hasEditable = queuedCommands.some(isQueuedCommandEditable);
+        if (
+          hasEditable &&
+          (popAllCommandsFromQueue() ||
+            !(queuedCommands.some(isQueuedCommandEditable) && liveInputRef.current === input))
+        ) {
+          return;
+        }
       }
 
       if (messages.length > 0 && !input && !isLoading) {

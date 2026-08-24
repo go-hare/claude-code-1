@@ -143,6 +143,9 @@ export async function startMCPServer(
         },
         getAppState: () => getDefaultAppState(),
         setAppState: () => {},
+        // densable y8r no-ops for MCP-exported tool path (no session UI)
+        setToolPermissionContext: () => {},
+        setSessionToolPermissionContext: () => {},
         messages: [],
         readFileState: readFileStateCache,
         setInProgressToolUseIDs: () => {},

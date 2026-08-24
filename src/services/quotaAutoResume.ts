@@ -956,6 +956,19 @@ export function fireQuotaAutoResumeContinuation(
 }
 
 /**
+ * densable hSl / KXa — stale wait that is not Jqn-revoked.
+ * `_ro` side-effects cancel when killswitch/auto-setting is off.
+ */
+export function isQuotaWaitStale(): boolean {
+  return episode.state.phase === 'stale' && !isQuotaContinuationRevoked()
+}
+
+/** densable qvm / j4f — empty-Enter substitute text, or null. */
+export function getStaleQuotaWaitPrompt(): string | null {
+  return isQuotaWaitStale() ? CONTINUATION_PROMPT : null
+}
+
+/**
  * densable qXa — clock tick while armed.
  * Returns pending | fired | stale | idle.
  */
@@ -964,16 +977,8 @@ export function tickQuotaAutoResume(
   stillRejected = false,
 ): 'pending' | 'fired' | 'stale' | 'idle' {
   if (episode.state.phase !== 'armed') return 'idle'
-  if (!isQuotaAutoResumeKillswitchEnabled()) {
-    cancelQuotaAutoResume('killswitch')
-    episode.events.emit('disabled')
-    return 'idle'
-  }
-  if (!isAutoContinueAtUsageLimitEffective()) {
-    cancelQuotaAutoResume('setting_off')
-    episode.events.emit('disabled')
-    return 'idle'
-  }
+  // densable qXa: phase!==armed || Jqn — dialog-armed wait survives setting_off
+  if (isQuotaContinuationRevoked()) return 'idle'
   const armed = episode.state
   const last = episode.lastObservedMs ?? armed.fireAtMs
   const gap = nowMs - last

@@ -54,6 +54,7 @@ import {
 } from '../forkedSkillBackground.js';
 import { getFsImplementation } from '../fsOperations.js';
 import { isFullscreenEnvEnabled } from '../fullscreen.js';
+import { isCommandImmediate } from '../immediateCommand.js';
 import { toArray } from '../generators.js';
 import { registerSkillHooks } from '../hooks/registerSkillHooks.js';
 import { logError } from '../log.js';
@@ -1005,7 +1006,8 @@ async function getMessagesForSlashCommand(
                 shouldHidePromptInput: true,
                 showSpinner: false,
                 isLocalJSXCommand: true,
-                isImmediate: command.immediate === true,
+                // densable ARt — resolve function-form immediate with args
+                isImmediate: isCommandImmediate(command, argsForDispatch),
               });
             })
             .catch(e => {

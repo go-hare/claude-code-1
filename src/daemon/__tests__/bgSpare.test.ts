@@ -203,6 +203,11 @@ describe('getSpareBinaryArgv (official TmO)', () => {
 
 describe('claimSpare (local product: await sendClaim before register)', () => {
   test('sendClaim failure throws — no BgWorker handle registered', async () => {
+    if (process.platform === 'win32') {
+      // createConnection(missing path) hangs on Windows AF_UNIX; sendClaim's
+      // 5s budget only runs between attempts, so this path never times out.
+      return
+    }
     // Missing claim sock → sendClaim times out / ENOENT → throw.
     // Critical invariant: must NOT return a worker (register happens only after
     // claimSpare resolves in bgManager). Ghost left-arrow jobs came from the
@@ -237,6 +242,7 @@ describe('sendClaim (official KmO/OmO)', () => {
   test('delivers JSON line to listening claim sock', async () => {
     if (process.platform === 'win32') {
       // Named pipes differ; AF_UNIX skip on some hosts
+      return
     }
     const dir = await mkdtemp(join(tmpdir(), 'bg-spare-send-'))
     const sock = join(dir, 'claim.sock')

@@ -6,6 +6,8 @@ type QueuedMessageContextValue = {
   isFirst: boolean;
   /** Width reduction for container padding (e.g., 4 for paddingX={2}) */
   paddingWidth: number;
+  /** densable F3i `selectionHighlight` — ↑↓ still-queued edit (#20). */
+  selectionHighlight?: 'on' | 'off';
 };
 
 const QueuedMessageContext = React.createContext<QueuedMessageContextValue | undefined>(undefined);
@@ -19,14 +21,24 @@ const PADDING_X = 2;
 type Props = {
   isFirst: boolean;
   useBriefLayout?: boolean;
+  /** densable F3i — only set while queueEditIndex maps onto this row. */
+  selectionHighlight?: 'on' | 'off';
   children: React.ReactNode;
 };
 
-export function QueuedMessageProvider({ isFirst, useBriefLayout, children }: Props): React.ReactNode {
+export function QueuedMessageProvider({
+  isFirst,
+  useBriefLayout,
+  selectionHighlight,
+  children,
+}: Props): React.ReactNode {
   // Brief mode already indents via paddingLeft in HighlightedThinkingText /
   // BriefTool UI — adding paddingX here would double-indent the queue.
   const padding = useBriefLayout ? 0 : PADDING_X;
-  const value = React.useMemo(() => ({ isQueued: true, isFirst, paddingWidth: padding * 2 }), [isFirst, padding]);
+  const value = React.useMemo(
+    () => ({ isQueued: true, isFirst, paddingWidth: padding * 2, selectionHighlight }),
+    [isFirst, padding, selectionHighlight],
+  );
 
   return (
     <QueuedMessageContext.Provider value={value}>

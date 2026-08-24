@@ -305,6 +305,12 @@ import {
 } from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
 import {
+  isAnthropicMessageShape,
+  type OriginatingStreamFailure,
+  parseAnthropicRequestId,
+  UnexpectedApiResponseError,
+} from './unexpectedApiResponse.js'
+import {
   EMPTY_USAGE,
   type GlobalCacheStrategy,
   logAPIError,
@@ -1054,10 +1060,11 @@ export async function* executeNonStreamingRequest(
   onAttempt: (attempt: number, start: number, maxOutputTokens: number) => void,
   captureRequest: (params: BetaMessageStreamParams) => void,
   /**
-   * Request ID of the failed streaming attempt this fallback is recovering
-   * from. Emitted in tengu_nonstreaming_fallback_error for funnel correlation.
+   * densable 2.1.234 #37 — originating stream-failure diagnostics (requestId /
+   * cause / errorName / connectionCode / stall) for UnexpectedApiResponseError.
+   * Also used as originating_request_id in tengu_nonstreaming_fallback_error.
    */
-  originatingRequestId?: string | null,
+  originating?: OriginatingStreamFailure | null,
 ): AsyncGenerator<SystemAPIErrorMessage, BetaMessage> {
   const fallbackTimeoutMs = getNonstreamingFallbackTimeoutMs()
   const generator = withRetry(
@@ -1080,16 +1087,28 @@ export async function* executeNonStreamingRequest(
       )
 
       try {
-        return await anthropic.beta.messages.create(
-          {
-            ...adjustedParams,
-            model: normalizeModelStringForAPI(adjustedParams.model),
-          },
-          {
-            signal: retryOptions.signal,
-            timeout: fallbackTimeoutMs,
-          },
-        )
+        // densable Cym: .withResponse() + OUf shape gate → Pai on malformed body
+        const withResp = await anthropic.beta.messages
+          .create(
+            {
+              ...adjustedParams,
+              model: normalizeModelStringForAPI(adjustedParams.model),
+            },
+            {
+              signal: retryOptions.signal,
+              timeout: fallbackTimeoutMs,
+            },
+          )
+          .withResponse()
+        if (!isAnthropicMessageShape(withResp.data)) {
+          throw new UnexpectedApiResponseError({
+            data: withResp.data,
+            status: withResp.response?.status ?? null,
+            headers: withResp.response?.headers ?? null,
+            originating,
+          })
+        }
+        return withResp.data as BetaMessage
       } catch (err) {
         // User aborts are not errors — re-throw immediately without logging
         if (err instanceof APIUserAbortError) throw err
@@ -1107,7 +1126,7 @@ export async function* executeNonStreamingRequest(
               : ('unknown' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS),
           attempt,
           timeout_ms: fallbackTimeoutMs,
-          request_id: (originatingRequestId ??
+          request_id: (originating?.requestId ??
             'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
         throw err
@@ -2632,10 +2651,13 @@ async function* queryModel(
 
         // Official $Qn("api_call", HOn(agentContext) ?? (isBackgroundAgent ? agentId))
         startSessionActivity('api_call', sessionActivityAgentId)
+        // densable ts/Cl/Mc — hoist outside try so catch can build Pai stall block
+        let lastEventTime: number | null = null
+        let streamEventsReceived = 0
+        let msToFirstEvent: number | null = null
         try {
           // stream in and accumulate state
           let isFirstChunk = true
-          let lastEventTime: number | null = null // Set after first chunk to avoid measuring TTFB as a stall
           const STALL_THRESHOLD_MS = 30_000 // 30 seconds
           let totalStallTime = 0
           let stallCount = 0
@@ -2656,6 +2678,11 @@ async function* queryModel(
               continue
             }
             const part = partOrPing
+            // densable: Cl++; Mc??=Math.round(performance.now()-ve)
+            streamEventsReceived++
+            msToFirstEvent ??= Math.round(
+              performance.now() - streamLoopStartedAt,
+            )
             const now = Date.now()
 
             // Detect and log streaming stalls (only after first event to avoid counting TTFB)
@@ -3054,6 +3081,10 @@ async function* queryModel(
                       [contentBlock] as BetaContentBlock[],
                       tools,
                       options.agentId,
+                      {
+                        requestId: streamRequestId ?? undefined,
+                        messageId: partialMessage.id,
+                      },
                     ) as MessageContent,
                   },
                   requestId: streamRequestId ?? undefined,
@@ -4040,6 +4071,27 @@ async function* queryModel(
               ? 'watchdog'
               : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           })
+          // densable od + originating for Pai / UnexpectedApiResponseError
+          const streamStallSnapshot = {
+            events_received: streamEventsReceived,
+            ms_to_first_event: msToFirstEvent,
+            ms_since_last_event:
+              lastEventTime === null ? null : Date.now() - lastEventTime,
+          }
+          const streamConnDetails =
+            extractConnectionErrorDetails(streamingError)
+          const originatingFailure: OriginatingStreamFailure = {
+            requestId: parseAnthropicRequestId(streamRequestId),
+            cause: streamIdleAborted
+              ? 'watchdog'
+              : newMessages.length > 0
+                ? 'partial_yield'
+                : 'other',
+            errorName:
+              streamingError instanceof Error ? streamingError.message : null,
+            connectionCode: streamConnDetails?.code ?? null,
+            stall: streamStallSnapshot,
+          }
           const result = yield* executeNonStreamingRequest(
             { model: options.model, source: options.querySource },
             {
@@ -4057,7 +4109,7 @@ async function* queryModel(
               maxOutputTokens = tokens
             },
             params => captureAPIRequest(params, options.querySource),
-            streamRequestId,
+            originatingFailure,
           )
 
           // densable fa — materialize non-streaming fallback content blocks
@@ -4157,6 +4209,10 @@ async function* queryModel(
                 nonStreamContent as typeof result.content,
                 tools,
                 options.agentId,
+                {
+                  requestId: streamRequestId ?? undefined,
+                  messageId: result.id,
+                },
               ) as MessageContent,
             },
             requestId: streamRequestId ?? undefined,
@@ -4264,6 +4320,14 @@ async function* queryModel(
 
           try {
             // Fall back to non-streaming mode
+            // densable 404 path: cause=404_stream_creation, no stall block
+            const originating404: OriginatingStreamFailure = {
+              requestId: parseAnthropicRequestId(failedRequestId),
+              cause: '404_stream_creation',
+              errorName: null,
+              connectionCode: null,
+              stall: null,
+            }
             const result = yield* executeNonStreamingRequest(
               { model: options.model, source: options.querySource },
               {
@@ -4279,7 +4343,7 @@ async function* queryModel(
                 maxOutputTokens = tokens
               },
               params => captureAPIRequest(params, options.querySource),
-              failedRequestId,
+              originating404,
             )
 
             // densable fa + wa on 404 non-streaming path (same as idle fallback)
@@ -4371,6 +4435,10 @@ async function* queryModel(
                   nonStreamContent404 as typeof result.content,
                   tools,
                   options.agentId,
+                  {
+                    requestId: streamRequestId ?? undefined,
+                    messageId: result.id,
+                  },
                 ) as MessageContent,
               },
               requestId: streamRequestId ?? undefined,

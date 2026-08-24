@@ -9,6 +9,8 @@ mock.module('src/services/analytics/growthbook.js', () => ({
 
 const {
   filterPermissionRelayClients,
+  hasExperimentalCapability,
+  readClientProtocolEra,
   shortRequestId,
   truncateForPreview,
   PERMISSION_REPLY_RE,
@@ -178,9 +180,52 @@ describe('createChannelPermissionCallbacks', () => {
     expect(cb.resolve('abc', 'deny', 'server')).toBe(true)
     expect(received?.behavior).toBe('deny')
   })
+
+  test('default isServerRegistered is false', () => {
+    const cb = createChannelPermissionCallbacks()
+    expect(cb.isServerRegistered('plugin:telegram:telegram')).toBe(false)
+  })
+
+  test('isServerRegistered uses the registered-set predicate', () => {
+    const admitted = new Set(['plugin:telegram:telegram'])
+    const cb = createChannelPermissionCallbacks(name => admitted.has(name))
+    expect(cb.isServerRegistered('plugin:telegram:telegram')).toBe(true)
+    expect(cb.isServerRegistered('plugin:slack:slack')).toBe(false)
+  })
+})
+
+describe('hasExperimentalCapability', () => {
+  test('treats explicit false as opt-out', () => {
+    expect(
+      hasExperimentalCapability(
+        { experimental: { 'claude/channel/permission': false } },
+        'claude/channel/permission',
+      ),
+    ).toBe(false)
+  })
+
+  test('treats empty object as present', () => {
+    expect(
+      hasExperimentalCapability(
+        { experimental: { 'claude/channel': {} } },
+        'claude/channel',
+      ),
+    ).toBe(true)
+  })
 })
 
 describe('filterPermissionRelayClients', () => {
+  const telegram = {
+    type: 'connected' as const,
+    name: 'plugin:telegram:telegram',
+    capabilities: {
+      experimental: {
+        'claude/channel': {},
+        'claude/channel/permission': {},
+      },
+    },
+  }
+
   test('requires truthy permission capability', () => {
     const clients = [
       {
@@ -193,22 +238,61 @@ describe('filterPermissionRelayClients', () => {
           },
         },
       },
-      {
-        type: 'connected',
-        name: 'plugin:telegram:telegram',
-        capabilities: {
-          experimental: {
-            'claude/channel': {},
-            'claude/channel/permission': {},
-          },
-        },
-      },
+      telegram,
     ]
 
     expect(
-      filterPermissionRelayClients(clients, () => true).map(
-        client => client.name,
-      ),
+      filterPermissionRelayClients(
+        clients,
+        () => true,
+        () => true,
+      ).map(client => client.name),
     ).toEqual(['plugin:telegram:telegram'])
+  })
+
+  test('requires inbound-registered set, not merely --channels', () => {
+    expect(
+      filterPermissionRelayClients(
+        [telegram],
+        () => true,
+        () => false,
+      ),
+    ).toEqual([])
+    expect(
+      filterPermissionRelayClients(
+        [telegram],
+        () => true,
+        name => name === telegram.name,
+      ).map(c => c.name),
+    ).toEqual([telegram.name])
+  })
+
+  test('excludes modern protocolEra', () => {
+    expect(
+      filterPermissionRelayClients(
+        [{ ...telegram, protocolEra: 'modern' }],
+        () => true,
+        () => true,
+      ),
+    ).toEqual([])
+  })
+})
+
+describe('readClientProtocolEra', () => {
+  test('stamps getProtocolEra() for i3r/Yrf connect objects', () => {
+    expect(readClientProtocolEra({ getProtocolEra: () => 'modern' })).toBe(
+      'modern',
+    )
+    expect(readClientProtocolEra({ getProtocolEra: () => 'legacy' })).toBe(
+      'legacy',
+    )
+  })
+
+  test('missing method or unset era is not modern', () => {
+    expect(readClientProtocolEra({})).toBeUndefined()
+    expect(readClientProtocolEra(undefined)).toBeUndefined()
+    expect(
+      readClientProtocolEra({ getProtocolEra: () => undefined }),
+    ).toBeUndefined()
   })
 })

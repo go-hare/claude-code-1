@@ -1,14 +1,39 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type MutableRefObject } from 'react'
 import { useTheme } from '@anthropic/ink'
 import type { useSelection } from '@anthropic/ink'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import { getGlobalConfig } from '../utils/config.js'
 import { getTheme } from '../utils/theme.js'
 
 type Selection = ReturnType<typeof useSelection>
 
+/** densable y8i branch classifier — pure, unit-tested. */
+export type CopyOnSelectSettle =
+  | { kind: 'reset' }
+  | { kind: 'spurious' }
+  | { kind: 'skip' }
+  | { kind: 'whitespace' }
+  | { kind: 'copy'; text: string }
+
+export function classifyCopyOnSelectSettle(input: {
+  isDragging: boolean
+  hasSelection: boolean
+  alreadyCopied: boolean
+  copyOnSelect: boolean
+  text: string
+}): CopyOnSelectSettle {
+  if (input.isDragging || !input.hasSelection) return { kind: 'reset' }
+  if (input.alreadyCopied) return { kind: 'spurious' }
+  if (!input.copyOnSelect) return { kind: 'skip' }
+  if (!input.text || !input.text.trim()) return { kind: 'whitespace' }
+  return { kind: 'copy', text: input.text }
+}
+
 /**
- * Auto-copy the selection to the clipboard when the user finishes dragging
- * (mouse-up with a non-empty selection) or multi-clicks to select a word/line.
+ * densable 2.1.234 `y8i` — auto-copy selection on mouse-up / multi-click.
  * Mirrors iTerm2's "Copy to pasteboard on selection" — the highlight is left
  * intact so the user can see what was copied. Only fires in alt-screen mode
  * (selection state is ink-instance-owned; outside alt-screen, the native
@@ -22,11 +47,17 @@ type Selection = ReturnType<typeof useSelection>
  * onCopied is optional — when omitted, copy is silent (clipboard is written
  * but no toast/notification fires). FleetView uses this silent mode; the
  * fullscreen REPL passes showCopiedToast for user feedback.
+ *
+ * lastCopiedRef (densable 4th arg `n`) caches the last auto-copied text so
+ * ctrl+c can clear+toast without re-copying (and without losing chars when
+ * the selection screen buffer has already moved). Cleared on drag/clear/
+ * already-copied spurious notify, matching SEA `y8i`.
  */
 export function useCopyOnSelect(
   selection: Selection,
   isActive: boolean,
   onCopied?: (text: string) => void,
+  lastCopiedRef?: MutableRefObject<string | null>,
 ): void {
   // Tracks whether the *previous* notification had a visible selection with
   // isDragging=false (i.e., we already auto-copied it). Without this, the
@@ -35,6 +66,7 @@ export function useCopyOnSelect(
   const copiedRef = useRef(false)
   // onCopied is a fresh closure each render; read through a ref so the
   // effect doesn't re-subscribe (which would reset copiedRef via unmount).
+  // densable: i=Dhr.useEffectEvent((s)=>r?.(s))
   const onCopiedRef = useRef(onCopied)
   onCopiedRef.current = onCopied
 
@@ -42,44 +74,49 @@ export function useCopyOnSelect(
     if (!isActive) return
 
     const unsubscribe = selection.subscribe(() => {
-      const sel = selection.getState()
-      const has = selection.hasSelection()
-      // Drag in progress — wait for finish. Reset copied flag so a new drag
-      // that ends on the same range still triggers a fresh copy.
-      if (sel?.isDragging) {
-        copiedRef.current = false
-        return
-      }
-      // No selection (cleared, or click-without-drag) — reset.
-      if (!has) {
-        copiedRef.current = false
-        return
-      }
-      // Selection settled (drag finished OR multi-click). Already copied
-      // this one — the only way to get here again without going through
-      // isDragging or !has is a spurious notify (shouldn't happen, but safe).
-      if (copiedRef.current) return
-
-      // Default true: macOS users expect cmd+c to work. It can't — the
-      // terminal's Edit > Copy intercepts it before the pty sees it, and
-      // finds no native selection (mouse tracking disabled it). Auto-copy
-      // on mouse-up makes cmd+c a no-op that leaves the clipboard intact
-      // with the right content, so paste works as expected.
       const enabled = getGlobalConfig().copyOnSelect ?? true
+      // Only extract text when we might copy — densable calls copySelectionNoClear
+      // after the early gates; for classifier we need text only past alreadyCopied.
+      const isDragging = Boolean(selection.getState()?.isDragging)
+      const has = selection.hasSelection()
+      const alreadyCopied = copiedRef.current
+      // densable early gates before copySelectionNoClear
+      if (isDragging || !has) {
+        copiedRef.current = false
+        if (lastCopiedRef) lastCopiedRef.current = null
+        return
+      }
+      if (alreadyCopied) {
+        if (lastCopiedRef) lastCopiedRef.current = null
+        return
+      }
       if (!enabled) return
 
       const text = selection.copySelectionNoClear()
-      // Whitespace-only (e.g., blank-line multi-click) — not worth a
-      // clipboard write or toast. Still set copiedRef so we don't retry.
-      if (!text || !text.trim()) {
+      const settle = classifyCopyOnSelectSettle({
+        isDragging: false,
+        hasSelection: true,
+        alreadyCopied: false,
+        copyOnSelect: true,
+        text,
+      })
+      if (settle.kind === 'whitespace') {
         copiedRef.current = true
         return
       }
+      if (settle.kind !== 'copy') return
+
       copiedRef.current = true
-      onCopiedRef.current?.(text)
+      if (lastCopiedRef) lastCopiedRef.current = settle.text
+      // densable `_e("clipboard_write")` → tengu_feature_ok
+      logEvent('tengu_feature_ok', {
+        feature_name:
+          'clipboard_write' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      onCopiedRef.current?.(settle.text)
     })
     return unsubscribe
-  }, [isActive, selection])
+  }, [isActive, selection, lastCopiedRef])
 }
 
 /**

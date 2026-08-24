@@ -52,6 +52,19 @@ export function isChannelsEnabled(): boolean {
 }
 
 /**
+ * Existing product: builtin weixin is always an approved channel plugin.
+ * Gold SEA has no weixin special-case; keep this so weixin@builtin still
+ * passes the allowlist gate without a ledger/org entry.
+ */
+export function isBuiltinWeixinChannel(
+  pluginSource: string | undefined,
+): boolean {
+  if (!pluginSource) return false
+  const { name, marketplace } = parsePluginIdentifier(pluginSource)
+  return marketplace === BUILTIN_MARKETPLACE_NAME && name === 'weixin'
+}
+
+/**
  * Pure allowlist check keyed off the connection's pluginSource — for UI
  * pre-filtering so the IDE only shows "Enable channel?" for servers that will
  * actually pass the gate. Not a security boundary: channel_enable still runs
@@ -67,11 +80,9 @@ export function isChannelAllowlisted(
   pluginSource: string | undefined,
 ): boolean {
   if (!pluginSource) return false
+  if (isBuiltinWeixinChannel(pluginSource)) return true
   const { name, marketplace } = parsePluginIdentifier(pluginSource)
   if (!marketplace) return false
-  if (marketplace === BUILTIN_MARKETPLACE_NAME && name === 'weixin') {
-    return true
-  }
   return getChannelAllowlist().some(
     e => e.plugin === name && e.marketplace === marketplace,
   )

@@ -12,7 +12,8 @@ import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growt
 import { refreshPolicyLimits } from '../../services/policyLimits/index.js';
 import { refreshRemoteManagedSettings } from '../../services/remoteManagedSettings/index.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { stripSignatureBlocks } from '../../utils/messages.js';
+import { createSystemMessage, stripSignatureBlocks } from '../../utils/messages.js';
+import type { Message } from '../../types/message.js';
 import {
   checkAndDisableAutoModeIfNeeded,
   resetAutoModeGateCheck,
@@ -28,11 +29,17 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
   const authStatus = getAuthStatus();
   // densable 2.1.229 #27 o9m — snapshot env token BEFORE login so success
   // note (i9m) still fires after installOAuthTokens may clear/replace env.
-  const { getOauthTokenEnvStartingMessage, formatLoginDoneMessage, isOauthTokenEnvSetAtStart } = await import(
-    './oauthTokenEnvWarning.js'
-  );
+  const {
+    getOauthTokenEnvStartingMessage,
+    formatLoginDoneMessage,
+    isOauthTokenEnvSetAtStart,
+    lastMessageRequestsAuthRetry,
+    resolveOauthTokenEnvWarningPlacement,
+    getOauthTokenEnvSuccessNote,
+  } = await import('./oauthTokenEnvWarning.js');
   const envTokenWasSet = isOauthTokenEnvSetAtStart();
   const startingMessage = getOauthTokenEnvStartingMessage();
+  const envWarningOnce = { delivered: false };
 
   return (
     <Login
@@ -80,11 +87,29 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
         } catch {
           gatewayActive = false;
         }
+        let messages: Message[] = [];
+        context.setMessages(prev => {
+          messages = prev;
+          return prev;
+        });
+        const willAutoQuery = Boolean(success && lastMessageRequestsAuthRetry(messages));
+        const placement = resolveOauthTokenEnvWarningPlacement({
+          envTokenWasSet,
+          gatewayActive,
+          willAutoQuery,
+        });
+        if (placement === 'out-of-band' && !envWarningOnce.delivered) {
+          envWarningOnce.delivered = true;
+          const notice = createSystemMessage(getOauthTokenEnvSuccessNote(), 'info');
+          context.setMessages(prev => [...prev, notice]);
+        }
         onDone(
           formatLoginDoneMessage(success, {
             envTokenWasSet,
             gatewayActive,
+            includeEnvTokenWarning: placement === 'inline',
           }),
+          willAutoQuery ? { display: 'system', shouldQuery: true } : undefined,
         );
       }}
     />

@@ -31,14 +31,17 @@ export type BundledSkillDefinition = {
   /**
    * Additional reference files to extract to disk on first invocation.
    * Keys are relative paths (forward slashes, no `..`), values are content.
+   * A function is resolved lazily on first invoke (gold Kwd).
    * When set, the skill prompt is prefixed with a "Base directory for this
    * skill: <dir>" line so the model can Read/Grep them on demand —
-   * same contract as disk-based skills.
+   * same contract as disk-based skills. The resolved dir (or null on
+   * extract failure) is passed as the third argument to getPromptForCommand.
    */
-  files?: Record<string, string>
+  files?: Record<string, string> | (() => Promise<Record<string, string>>)
   getPromptForCommand: (
     args: string,
     context: ToolUseContext,
+    extractedDir?: string | null,
   ) => Promise<ContentBlockParam[]>
 }
 
@@ -58,7 +61,9 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
   let skillRoot: string | undefined
   let getPromptForCommand = definition.getPromptForCommand
 
-  if (files && Object.keys(files).length > 0) {
+  // Gold Kwd: wrap when files is a function, or a non-empty object.
+  const filesIsFn = typeof files === 'function'
+  if (files && (filesIsFn || Object.keys(files).length > 0)) {
     skillRoot = getBundledSkillExtractDir(definition.name)
     // Closure-local memoization: extract once per process.
     // Memoize the promise (not the result) so concurrent callers await
@@ -66,10 +71,25 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     let extractionPromise: Promise<string | null> | undefined
     const inner = definition.getPromptForCommand
     getPromptForCommand = async (args, ctx) => {
-      extractionPromise ??= extractBundledSkillFiles(definition.name, files)
-      const extractedDir = await extractionPromise
-      const blocks = await inner(args, ctx)
-      if (extractedDir === null) return blocks
+      const inflight = (extractionPromise ??= (async () => {
+        const resolved = filesIsFn ? await files() : files
+        return extractBundledSkillFiles(definition.name, resolved)
+      })())
+      let extractedDir: string | null
+      try {
+        extractedDir = await inflight
+      } catch (e) {
+        // Gold Kwd: reset memo so a later invoke can retry.
+        if (extractionPromise === inflight) extractionPromise = undefined
+        throw e
+      }
+      const blocks = await inner(args, ctx, extractedDir)
+      if (extractedDir === null) {
+        // Gold Kwd retries extract next invoke (clears the promise). Local
+        // O_EXCL cannot re-write a successful extract, so only reset on fail.
+        if (extractionPromise === inflight) extractionPromise = undefined
+        return blocks
+      }
       return prependBaseDir(blocks, extractedDir)
     }
   }

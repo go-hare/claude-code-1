@@ -1,6 +1,11 @@
 import { type StructuredPatchHunk, structuredPatch } from 'diff'
 import { logError } from 'src/utils/log.js'
-import { expandPath } from 'src/utils/path.js'
+import {
+  expandPath,
+  isNtObjectNamespacePath,
+  isUncOrNtObjectPath,
+  isWslUncPath,
+} from 'src/utils/path.js'
 import { countCharInString } from 'src/utils/stringUtils.js'
 import {
   DIFF_TIMEOUT_MS,
@@ -423,6 +428,17 @@ export function normalizeFileEditInput({
 
   try {
     const fullPath = expandPath(file_path)
+
+    // densable edit_guard: (su(e)||su(n))&&!(db(e)||db(n))||Jw(e)||Jw(n)||bu
+    // (`bu` stub false). WSL UNC must remain allowed — do NOT OR s7t's su||Jw.
+    const isUnsafeNetwork =
+      ((isUncOrNtObjectPath(file_path) || isUncOrNtObjectPath(fullPath)) &&
+        !(isWslUncPath(file_path) || isWslUncPath(fullPath))) ||
+      isNtObjectNamespacePath(file_path) ||
+      isNtObjectNamespacePath(fullPath)
+    if (isUnsafeNetwork) {
+      return { file_path, edits }
+    }
 
     // Use cached file read to avoid redundant I/O operations.
     // If the file doesn't exist, readFileSyncCached throws ENOENT which the

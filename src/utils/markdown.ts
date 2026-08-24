@@ -1,5 +1,5 @@
 import chalk from 'chalk'
-import { marked, type Token, type Tokens } from 'marked'
+import { marked, Tokenizer, type Token, type Tokens } from 'marked'
 import stripAnsi from 'strip-ansi'
 import { color } from '@anthropic/ink'
 import { BLOCKQUOTE_BAR } from '../constants/figures.js'
@@ -37,6 +37,130 @@ export const LIST_COLUMN_SAFETY_MARGIN = 4
 export const LIST_INK_MAX_NODES = 300
 export const LIST_INK_MAX_DEPTH = 64
 
+/**
+ * densable `uq` — invisible / control code points stripped from markdown
+ * href display (`d0l`) and OSC8 post-process paths.
+ */
+export function isMarkdownInvisibleCodePoint(cp: number): boolean {
+  return (
+    cp <= 31 ||
+    (cp >= 127 && cp <= 159) ||
+    cp === 173 ||
+    cp === 1564 ||
+    (cp >= 8203 && cp <= 8207) ||
+    cp === 8232 ||
+    cp === 8233 ||
+    (cp >= 8234 && cp <= 8238) ||
+    (cp >= 8288 && cp <= 8297) ||
+    (cp >= 65024 && cp <= 65039) ||
+    cp === 65279 ||
+    (cp >= 65529 && cp <= 65531) ||
+    (cp >= 917504 && cp <= 917999)
+  )
+}
+
+/**
+ * densable `d0l` — strip invisibles + U+29C9 from href text shown beside /
+ * as OSC8 targets so unusual Unicode in URLs cannot bloat layout.
+ */
+export function stripMarkdownHrefInvisibles(href: string): string {
+  return Array.from(href)
+    .filter(ch => {
+      const cp = ch.codePointAt(0) ?? 0
+      return cp !== 10697 && !isMarkdownInvisibleCodePoint(cp)
+    })
+    .join('')
+}
+
+/**
+ * densable `PPE` — escape unescaped `|` inside matching backtick spans so
+ * GFM table tokenization does not treat code-cell pipes as column separators
+ * (SEA CXr / j6m.table; changelog 2.1.234 #10).
+ */
+export function escapePipesInInlineCode(line: string): string {
+  if (!line.includes('`') || !line.includes('|')) return line
+  let out = ''
+  let i = 0
+  while (i < line.length) {
+    if (line[i] !== '`') {
+      out += line[i++]
+      continue
+    }
+    let tickLen = 0
+    while (line[i + tickLen] === '`') tickLen++
+    const open = line.slice(i, i + tickLen)
+    let scan = i + tickLen
+    let closeAt = -1
+    while (scan < line.length) {
+      if (line[scan] !== '`') {
+        scan++
+        continue
+      }
+      let closeLen = 0
+      while (line[scan + closeLen] === '`') closeLen++
+      if (closeLen === tickLen) {
+        closeAt = scan
+        break
+      }
+      scan += closeLen
+    }
+    if (closeAt === -1) {
+      out += open
+      i += tickLen
+      continue
+    }
+    out += open
+    for (let j = i + tickLen; j < closeAt; j++) {
+      const ch = line[j]!
+      if (ch !== '|') {
+        out += ch
+        continue
+      }
+      let backslashes = 0
+      while (line[j - 1 - backslashes] === '\\') backslashes++
+      out += backslashes % 2 === 0 ? '\\|' : '|'
+    }
+    out += open
+    i = closeAt + tickLen
+  }
+  return out
+}
+
+/** densable `MPE` — split a table row on unescaped pipes. */
+function splitMarkdownTableRow(line: string): string[] {
+  const cells = line
+    .replace(/\|/g, (pipe, index, whole) => {
+      let escaped = false
+      let k = index
+      while (--k >= 0 && whole[k] === '\\') escaped = !escaped
+      return escaped ? '|' : ' |'
+    })
+    .split(/ \|/)
+  if (!cells[0]?.trim()) cells.shift()
+  if (cells.length > 0 && !cells.at(-1)?.trim()) cells.pop()
+  return cells
+}
+
+/**
+ * densable `DPE` — true when any body row (from line index 2) has more
+ * non-empty cells beyond the header width after PPE.
+ */
+export function markdownTableHasExtraColumns(
+  ppeLines: string[],
+  headerLen: number,
+): boolean {
+  for (let r = 2; r < ppeLines.length; r++) {
+    const cells = splitMarkdownTableRow(ppeLines[r]!)
+    for (let c = headerLen; c < cells.length; c++) {
+      if (cells[c]!.trim()) return true
+    }
+  }
+  return false
+}
+
+// densable `N6m` — stock marked Tokenizer.table before j6m override.
+const stockMarkdownTable = Tokenizer.prototype.table
+
 let markedConfigured = false
 
 export type FormatTokenOptions = {
@@ -54,15 +178,43 @@ export function configureMarked(): void {
   // the model often uses ~ for "approximate" (e.g., ~100). When support (or
   // FORCE_STRIKETHROUGH) is on, keep official del tokenization so ~~text~~
   // can render via chalk.strikethrough.
-  if (!supportsStrikethrough()) {
-    marked.use({
-      tokenizer: {
-        del() {
-          return undefined
-        },
+  // densable ifr() → LE.use(j6m): custom del (when strikethrough works),
+  // disable ref `def`, wrap table with PPE/DPE for pipe-in-code + reject
+  // rows that still expand past the header (2.1.234 #10).
+  marked.use({
+    tokenizer: {
+      ...(supportsStrikethrough()
+        ? {}
+        : {
+            del() {
+              return undefined
+            },
+          }),
+      def() {
+        return undefined
       },
-    })
-  }
+      table(this: Tokenizer, src: string) {
+        const match = this.rules.block.table.exec(src)
+        if (!match) return undefined
+        const raw = match[0]
+        const ppeLines = raw.split('\n').map(escapePipesInInlineCode)
+        const escaped = ppeLines.join('\n')
+        const token =
+          escaped === raw
+            ? stockMarkdownTable.call(this, src)
+            : stockMarkdownTable.call(this, escaped + src.slice(raw.length))
+        if (token) {
+          if (markdownTableHasExtraColumns(ppeLines, token.header.length)) {
+            return undefined
+          }
+          if (escaped !== raw) {
+            token.raw = raw
+          }
+        }
+        return token
+      },
+    },
+  })
 }
 
 export function applyMarkdown(
@@ -85,12 +237,14 @@ export function formatToken(
   orderedListNumber: number | null = null,
   parent: Token | null = null,
   highlight: CliHighlight | null = null,
-  options: FormatTokenOptions = {},
+  options: FormatTokenOptions | boolean = {},
 ): string {
-  const listIndent = options.listIndent ?? ''
-  const glueProse = options.glueProse ?? false
-  const screenReader = options.screenReader ?? false
-  const promptMode = options.promptMode ?? false
+  const resolved =
+    typeof options === 'boolean' ? { promptMode: options } : options
+  const listIndent = resolved.listIndent ?? ''
+  const glueProse = resolved.glueProse ?? false
+  const screenReader = resolved.screenReader ?? false
+  const promptMode = resolved.promptMode ?? false
   const childOpts = (
     overrides: FormatTokenOptions = {},
   ): FormatTokenOptions => ({
@@ -192,7 +346,9 @@ export function formatToken(
           )
       }
     case 'hr':
-      return '---'
+      // densable 2.1.234 #16 / SEA `jG` case"hr": `"---"+AY` (AY=`\n`) so the
+      // rule does not run into the next line. Heading already appends AY+AY.
+      return '---' + EOL
     case 'image':
       return token.href
     case 'link': {
@@ -202,6 +358,8 @@ export function formatToken(
         const email = token.href.replace(/^mailto:/, '')
         return email
       }
+      // densable jG link: `d0l(href)` for display / OSC8 target sanitization
+      const href = stripMarkdownHrefInvisibles(token.href)
       // Extract display text from the link's child tokens
       const linkText = (token.tokens ?? [])
         .map(_ => formatToken(_, theme, 0, null, token, highlight, childOpts()))
@@ -210,11 +368,15 @@ export function formatToken(
       // If the link has meaningful display text (different from the URL),
       // show it as a clickable hyperlink. In terminals that support OSC 8,
       // users see the text and can hover/click to see the URL.
-      if (plainLinkText && plainLinkText !== token.href) {
-        return createHyperlink(token.href, linkText)
+      if (
+        plainLinkText &&
+        plainLinkText !== token.href &&
+        plainLinkText !== href
+      ) {
+        return createHyperlink(href, linkText)
       }
       // When the display text matches the URL (or is empty), just show the URL
-      return createHyperlink(token.href)
+      return createHyperlink(href)
     }
     case 'list': {
       return token.items

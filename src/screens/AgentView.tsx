@@ -15,7 +15,7 @@
  * - Repo grouping labels
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
 import {
@@ -23,11 +23,21 @@ import {
   Box,
   Text,
   useInput,
+  useSelection,
   AlternateScreen,
   ThemeProvider,
   enterAltScreenSequence,
   supportsExtendedKeys,
 } from '@anthropic/ink';
+import { AppStateProvider } from '../state/AppState.js';
+import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
+import { useNotifications } from '../context/notifications.js';
+import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
+import {
+  useSelectionClearKeybinding,
+  notifySelectionCopied,
+  createSelectionClearKeyDownCapture,
+} from '../components/ScrollKeybindingHandler.js';
 import type { Root } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
@@ -37,7 +47,6 @@ import { submitDispatch } from '../daemon/bgManager.js';
 import { listAllJobs, patchBgJobState, type BgJobState } from '../daemon/jobState.js';
 import { deleteJob, formatKeptWorktreeReason, type DeleteJobResult } from '../daemon/deleteJob.js';
 import { killJobConfirmed } from '../daemon/xyrRespawn.js';
-import { VoiceProvider } from '../context/voice.js';
 import { getPlatform } from '../utils/platform.js';
 import {
   deriveBand,
@@ -466,6 +475,20 @@ function SessionRow({
       {isRenaming && <Text>{' \u2588'}</Text>}
     </Box>
   );
+}
+
+/**
+ * densable 2.1.234 FleetView selection chrome — y8i + _8i + h8i (+ toast via g8i).
+ * `vvh` onKeyDownCapture is wired on AgentViewApp root Box (SEA E7=vvh(...)).
+ * Must mount under AppStateProvider + KeybindingSetup (createRoot path).
+ */
+function AgentsSelectionChrome(): null {
+  const selection = useSelection();
+  const { addNotification } = useNotifications();
+  useCopyOnSelect(selection, true, text => notifySelectionCopied(addNotification, text));
+  useSelectionBgColor(selection);
+  useSelectionClearKeybinding(selection, true);
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -2514,6 +2537,14 @@ function AgentViewApp({
   });
 
   // -------------------------------------------------------------------------
+  // densable FleetView: let E7=vvh(yC,or().copyOnSelect??!0); onKeyDownCapture:E7
+  const selectionForClear = useSelection();
+  const copyOnSelect = getGlobalConfig().copyOnSelect ?? true;
+  const selectionKeyDownCapture = useMemo(
+    () => createSelectionClearKeyDownCapture(selectionForClear, copyOnSelect),
+    [selectionForClear, copyOnSelect],
+  );
+
   // Render
   // -------------------------------------------------------------------------
 
@@ -2530,7 +2561,7 @@ function AgentViewApp({
         }
       })()}
     >
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1} onKeyDownCapture={selectionKeyDownCapture}>
         {/* Top: scrollable list area */}
         <Box flexDirection="column" flexGrow={1} paddingTop={1}>
           {/* Header — densable Od_/WB exact (2.1.211):
@@ -3123,17 +3154,20 @@ export async function renderAgentView(options?: {
           initialState={getGlobalConfig().theme}
           onThemeSave={setting => saveGlobalConfig(current => ({ ...current, theme: setting }))}
         >
-          <VoiceProvider>
-            <AgentViewApp
-              enteredViaLeftArrow={enteredViaLeftArrow}
-              dispatchExtraArgs={options?.dispatchExtraArgs}
-              cwdFilter={options?.cwdFilter}
-              currentSessionId={options?.currentSessionId}
-              restoreSessionId={lastSelectedSessionId}
-              initialError={remountError}
-              onAction={resolve}
-            />
-          </VoiceProvider>
+          <AppStateProvider>
+            <KeybindingSetup>
+              <AgentsSelectionChrome />
+              <AgentViewApp
+                enteredViaLeftArrow={enteredViaLeftArrow}
+                dispatchExtraArgs={options?.dispatchExtraArgs}
+                cwdFilter={options?.cwdFilter}
+                currentSessionId={options?.currentSessionId}
+                restoreSessionId={lastSelectedSessionId}
+                initialError={remountError}
+                onAction={resolve}
+              />
+            </KeybindingSetup>
+          </AppStateProvider>
         </ThemeProvider>,
       );
     });

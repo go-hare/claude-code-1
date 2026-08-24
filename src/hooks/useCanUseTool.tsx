@@ -9,7 +9,7 @@ import {
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js';
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js';
 import { Text } from '@anthropic/ink';
-import type { ToolPermissionContext, Tool as ToolType, ToolUseContext } from '../Tool.js';
+import type { Tool as ToolType, ToolUseContext } from '../Tool.js';
 import {
   consumeSpeculativeClassifierCheck,
   peekSpeculativeClassifierCheck,
@@ -32,7 +32,11 @@ import { truncateCodeUnitsSafe } from '../utils/stringUtils.js';
 import { handleCoordinatorPermission } from './toolPermission/handlers/coordinatorHandler.js';
 import { handleInteractivePermission } from './toolPermission/handlers/interactiveHandler.js';
 import { handleSwarmWorkerPermission } from './toolPermission/handlers/swarmWorkerHandler.js';
-import { createPermissionContext, createPermissionQueueOps } from './toolPermission/PermissionContext.js';
+import {
+  createPermissionContext,
+  createPermissionQueueOps,
+  isPermissionHookReprompt,
+} from './toolPermission/PermissionContext.js';
 import { logPermissionDecision } from './toolPermission/permissionLogging.js';
 
 export type CanUseToolFn<Input extends Record<string, unknown> = Record<string, unknown>> = (
@@ -44,20 +48,19 @@ export type CanUseToolFn<Input extends Record<string, unknown> = Record<string, 
   forceDecision?: PermissionDecision<Input>,
 ) => Promise<PermissionDecision<Input>>;
 
-function useCanUseTool(
-  setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>,
-  setToolPermissionContext: (context: ToolPermissionContext) => void,
-): CanUseToolFn {
+function useCanUseTool(setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>): CanUseToolFn {
   return useCallback<CanUseToolFn>(
     async (tool, input, toolUseContext, assistantMessage, toolUseID, forceDecision) => {
       return new Promise(resolve => {
+        // densable m4n(...): no permissionContextSetter override on REPL path —
+        // persistPermissions uses toolUseContext.setSessionToolPermissionContext.
         const ctx = createPermissionContext(
           tool,
           input,
           toolUseContext,
           assistantMessage,
           toolUseID,
-          setToolPermissionContext,
+          undefined,
           createPermissionQueueOps(setToolUseConfirmQueue),
         );
 
@@ -183,12 +186,23 @@ function useCanUseTool(
                     suggestions: result.suggestions,
                     permissionMode: appState.toolPermissionContext.mode,
                   });
-                  if (coordinatorDecision) {
+                  if (isPermissionHookReprompt(coordinatorDecision)) {
+                    result = {
+                      ...result,
+                      ...coordinatorDecision.reprompted,
+                      updatedInput: coordinatorDecision.finalInput,
+                    };
+                  } else if (coordinatorDecision) {
                     resolve(coordinatorDecision);
                     return;
                   }
-                  // null means neither automated check resolved -- fall through to dialog below.
-                  // Hooks already ran, classifier already consumed.
+                  // null / hook-reprompt: fall through to dialog. Hooks already
+                  // ran; classifier already consumed. Reprompt carries rewritten input.
+                }
+
+                if (result.behavior !== 'ask') {
+                  resolve(result);
+                  return;
                 }
 
                 // After awaiting automated checks, verify the request wasn't aborted
@@ -305,7 +319,7 @@ function useCanUseTool(
           });
       });
     },
-    [setToolUseConfirmQueue, setToolPermissionContext],
+    [setToolUseConfirmQueue],
   );
 }
 

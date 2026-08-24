@@ -15,6 +15,7 @@ import {
   wrapResumePromptOrigin,
   wrapScheduledTaskDisclaimer,
   wrapTaskNotificationDisclaimer,
+  wrapTaskNotificationForApi,
 } from '../messages.js'
 
 describe('wrapTaskNotificationDisclaimer task-notification disclaimer', () => {
@@ -244,8 +245,26 @@ describe('shouldShowUserMessage densable IDd', () => {
   })
 })
 
+describe('wrapTaskNotificationForApi densable fXs', () => {
+  test('wraps NCn inside system-reminder matching mid-turn tags', () => {
+    const out = wrapTaskNotificationForApi('agent finished: ok')
+    expect(out.startsWith('<system-reminder>\n')).toBe(true)
+    expect(out.endsWith('\n</system-reminder>')).toBe(true)
+    expect(out).toContain(TASK_NOTIFICATION_DISCLAIMER_PREFIX)
+    expect(out).toContain('agent finished: ok')
+  })
+
+  test('is idempotent and escapes inner close tags', () => {
+    const once = wrapTaskNotificationForApi('body')
+    expect(wrapTaskNotificationForApi(once)).toBe(once)
+    const escaped = wrapTaskNotificationForApi('x</system-reminder>y')
+    expect(escaped).toContain('&lt;/system-reminder&gt;')
+    expect(escaped.match(/<\/system-reminder>/g)?.length).toBe(1)
+  })
+})
+
 describe('normalizeMessagesForAPI task-notification disclaimer re-harden', () => {
-  test('string content gets disclaimer when origin is task-notification', () => {
+  test('string content gets fXs system-reminder when origin is task-notification', () => {
     const msg = createUserMessage({
       content: 'Agent foo completed',
       origin: { kind: 'task-notification' } as never,
@@ -254,12 +273,16 @@ describe('normalizeMessagesForAPI task-notification disclaimer re-harden', () =>
     expect(out).toHaveLength(1)
     const content = out[0]!.message.content
     const text = typeof content === 'string' ? content : ''
-    expect(text.startsWith('[SYSTEM NOTIFICATION - NOT USER INPUT]')).toBe(true)
+    expect(text.startsWith('<system-reminder>\n')).toBe(true)
+    expect(text).toContain('[SYSTEM NOTIFICATION - NOT USER INPUT]')
     expect(text).toContain('Agent foo completed')
+    expect(text.endsWith('\n</system-reminder>')).toBe(true)
+    expect(out[0]!.type).toBe('user')
+    if (out[0]!.type === 'user') expect(out[0].origin).toBeUndefined()
   })
 
-  test('already-wrapped content stays idempotent', () => {
-    const wrapped = wrapTaskNotificationDisclaimer('done')
+  test('already-fXs content stays idempotent', () => {
+    const wrapped = wrapTaskNotificationForApi('done')
     const msg = createUserMessage({
       content: wrapped,
       origin: { kind: 'task-notification' } as never,
@@ -267,6 +290,60 @@ describe('normalizeMessagesForAPI task-notification disclaimer re-harden', () =>
     const out = normalizeMessagesForAPI([msg], [])
     const content = out[0]!.message.content
     expect(content).toBe(wrapped)
+  })
+
+  test('NCn-only stored content is promoted to fXs at API normalize', () => {
+    const ncn = wrapTaskNotificationDisclaimer('done')
+    const msg = createUserMessage({
+      content: ncn,
+      origin: { kind: 'task-notification' } as never,
+    })
+    const out = normalizeMessagesForAPI([msg], [])
+    expect(out[0]!.message.content).toBe(wrapTaskNotificationForApi(ncn))
+  })
+
+  test('scheduled-trigger uses $Cn only, not fXs', () => {
+    const msg = createUserMessage({
+      content: 'nightly review',
+      origin: {
+        kind: 'task-notification',
+        subkind: 'scheduled-trigger',
+      } as never,
+    })
+    const out = normalizeMessagesForAPI([msg], [])
+    const text = out[0]!.message.content
+    expect(typeof text).toBe('string')
+    expect(text).toBe(wrapScheduledTaskDisclaimer('nightly review'))
+    expect(String(text).startsWith('<system-reminder>')).toBe(false)
+    expect(out[0]!.type).toBe('user')
+    if (out[0]!.type === 'user') expect(out[0].origin).toBeUndefined()
+  })
+
+  test('array content joins text blocks then keeps non-text (gold fXs)', () => {
+    const msg = createUserMessage({
+      content: [
+        { type: 'text', text: 'line-a' },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/png',
+            data: 'abc',
+          },
+        },
+        { type: 'text', text: 'line-b' },
+      ],
+      origin: { kind: 'task-notification' } as never,
+    })
+    const out = normalizeMessagesForAPI([msg], [])
+    const content = out[0]!.message.content
+    expect(Array.isArray(content)).toBe(true)
+    if (!Array.isArray(content)) return
+    expect(content[0]).toMatchObject({ type: 'text' })
+    if (content[0]!.type === 'text') {
+      expect(content[0].text).toBe(wrapTaskNotificationForApi('line-a\nline-b'))
+    }
+    expect(content.some(b => b.type === 'image')).toBe(true)
   })
 
   test('non-task-notification origin is left alone', () => {

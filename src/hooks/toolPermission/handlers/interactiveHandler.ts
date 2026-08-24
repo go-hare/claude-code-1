@@ -18,6 +18,10 @@ import {
   shortRequestId,
   truncateForPreview,
 } from '../../../services/mcp/channelPermissions.js'
+import {
+  redactSecrets,
+  redactSecretsForDisplay,
+} from '../../../services/teamMemorySync/secretScanner.js'
 import { executeAsyncClassifierCheck } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import {
@@ -36,7 +40,10 @@ import type { PermissionDecision } from '../../../utils/permissions/PermissionRe
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
 import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.js'
 import type { PermissionContext } from '../PermissionContext.js'
-import { createResolveOnce } from '../PermissionContext.js'
+import {
+  createResolveOnce,
+  isPermissionHookReprompt,
+} from '../PermissionContext.js'
 
 type InteractivePermissionParams = {
   ctx: PermissionContext
@@ -401,12 +408,13 @@ function handleInteractivePermission(
   // `selected`, AskUserQuestion `answers`) tolerate the field being missing
   // so generic remote approval degrades gracefully instead of throwing.
   if (bridgeCallbacks && bridgeRequestId) {
+    // densable: bridge summary uses full-strength `pp` (redactSecrets).
     bridgeCallbacks.sendRequest(
       bridgeRequestId,
       ctx.tool.name,
       displayInput,
       ctx.toolUseID,
-      description,
+      redactSecrets(description),
       result.suggestions,
       result.blockedPath,
     )
@@ -485,6 +493,7 @@ function handleInteractivePermission(
     const channelClients = filterPermissionRelayClients(
       ctx.toolUseContext.getAppState().mcp.clients,
       name => findChannelEntry(name, allowedChannels) !== undefined,
+      name => channelCallbacks.isServerRegistered(name),
     )
 
     if (channelClients.length > 0) {
@@ -496,7 +505,8 @@ function handleInteractivePermission(
       const params: ChannelPermissionRequestParams = {
         request_id: channelRequestId,
         tool_name: ctx.tool.name,
-        description,
+        // densable: channel description uses display redact `tAt`.
+        description: redactSecretsForDisplay(description),
         input_preview: truncateForPreview(displayInput),
       }
       const channelContext = getLatestChannelContextHint(
@@ -585,8 +595,9 @@ function handleInteractivePermission(
 
   // Skip hooks if they were already awaited in the coordinator branch above
   if (!awaitAutomatedChecksBeforeDialog) {
-    // Execute PermissionRequest hooks asynchronously
-    // If hook returns a decision before user responds, apply it
+    // Execute PermissionRequest hooks asynchronously.
+    // densable tnf/L4n: allow+updatedInput that still asks → reprompt
+    // (close IDE tab via remount + claim gate); do NOT claim/resolve.
     void (async () => {
       if (isResolved()) return
       const currentAppState = ctx.toolUseContext.getAppState()
@@ -596,7 +607,28 @@ function handleInteractivePermission(
         result.updatedInput,
         permissionPromptStartTimeMs,
       )
-      if (!hookDecision || !claim()) return
+      if (!hookDecision) return
+      if (isPermissionHookReprompt(hookDecision)) {
+        // Abort external racers and rebuild dialog input. Do not claim —
+        // user/IDE must answer the new prompt.
+        if (isResolved()) return
+        forgetPipePermission(
+          'Permission request was rewritten by hook; re-prompting.',
+        )
+        if (bridgeCallbacks && bridgeRequestId) {
+          bridgeCallbacks.cancelRequest(bridgeRequestId)
+        }
+        channelUnsubscribe?.()
+        clearClassifierChecking(ctx.toolUseID)
+        clearClassifierIndicator()
+        ctx.updateQueueItem({
+          input: hookDecision.finalInput,
+          permissionResult: hookDecision.reprompted,
+          description: hookDecision.reprompted.message || description,
+        })
+        return
+      }
+      if (!claim()) return
       forgetPipePermission(
         'Permission request was resolved by hook before pipe response.',
       )

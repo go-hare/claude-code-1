@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { getMcpConfigsByScope } from 'src/services/mcp/config.js';
+import { getMcpConfigsByScope, getMcpScopeConflicts } from 'src/services/mcp/config.js';
 import type { ConfigScope } from 'src/services/mcp/types.js';
 import { describeMcpConfigFilePath, getScopeLabel } from 'src/services/mcp/utils.js';
 import type { ValidationError } from 'src/utils/settings/validation.js';
@@ -77,22 +77,36 @@ function McpConfigErrorSection({
 export function McpParsingWarnings(): React.ReactNode {
   // Config files don't change during dialog lifetime; read once on mount
   // to avoid blocking file IO on every re-render.
-  const scopes = useMemo(
-    () =>
-      [
-        { scope: 'user', config: getMcpConfigsByScope('user') },
-        { scope: 'project', config: getMcpConfigsByScope('project') },
-        { scope: 'local', config: getMcpConfigsByScope('local') },
-        { scope: 'enterprise', config: getMcpConfigsByScope('enterprise') },
-      ] satisfies Array<{
+  // densable McE/Gpi: conflicts use expandVars:false displayServers so `${VAR}` stays configured.
+  const { scopes, conflicts } = useMemo(() => {
+    const loaded = [
+      { scope: 'user' as const, config: getMcpConfigsByScope('user') },
+      { scope: 'project' as const, config: getMcpConfigsByScope('project') },
+      { scope: 'local' as const, config: getMcpConfigsByScope('local') },
+      { scope: 'enterprise' as const, config: getMcpConfigsByScope('enterprise') },
+    ];
+    // densable DcE: enterprise excluded from scope-conflict scan
+    const conflictInputs = loaded
+      .filter(entry => entry.scope !== 'enterprise')
+      .map(entry => ({
+        scope: entry.scope,
+        servers: entry.config.servers,
+        displayServers: getMcpConfigsByScope(entry.scope, {
+          expandVars: false,
+        }).servers,
+      }));
+    return {
+      scopes: loaded satisfies Array<{
         scope: ConfigScope;
-        config: { errors: ValidationError[] };
+        config: { errors: ValidationError[]; servers: unknown };
       }>,
-    [],
-  );
+      conflicts: getMcpScopeConflicts(conflictInputs),
+    };
+  }, []);
 
   const hasParsingErrors = scopes.some(({ config }) => filterErrors(config.errors, 'fatal').length > 0);
-  const hasWarnings = scopes.some(({ config }) => filterErrors(config.errors, 'warning').length > 0);
+  const hasWarnings =
+    scopes.some(({ config }) => filterErrors(config.errors, 'warning').length > 0) || conflicts.length > 0;
 
   if (!hasParsingErrors && !hasWarnings) {
     return null;
@@ -115,13 +129,35 @@ export function McpParsingWarnings(): React.ReactNode {
           warnings={filterErrors(config.errors, 'warning')}
         />
       ))}
-      {/* TODO: Add additional diagnostic sections:
-       * - Duplicate Server Names (check for servers with same name across scopes)
-       * This section should include:
-       * - File paths where each server is defined
-       * - More detailed location info for user/local scopes
-       * - Approved / disabled status of servers
-       */}
+      {conflicts.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="warning">[Scope conflicts]</Text>
+          <Box marginLeft={1} flexDirection="column">
+            {conflicts.map((warning, i) => {
+              const serverName = warning.mcpErrorMetadata?.serverName;
+              return (
+                <Box key={`conflict-${i}`} flexDirection="column">
+                  <Text>
+                    <Text dimColor>└ </Text>
+                    <Text color="warning">[Warning]</Text>
+                    <Text dimColor>
+                      {' '}
+                      {serverName && `[${serverName}] `}
+                      {warning.message}
+                    </Text>
+                  </Text>
+                  {warning.suggestion && (
+                    <Text dimColor>
+                      {'  '}
+                      {warning.suggestion}
+                    </Text>
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }

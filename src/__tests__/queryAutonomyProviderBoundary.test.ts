@@ -220,7 +220,8 @@ describe('query autonomy/provider boundary', () => {
       const finalFlow = await getAutonomyFlowById(flow!.flowId, tempDir)
       const run = await getAutonomyRunById(command!.autonomy!.runId, tempDir)
 
-      expect(next.value.reason).toBe('model_error')
+      // densable 2.1.234: isApiErrorMessage terminal → reason api_error (not model_error)
+      expect(next.value.reason).toBe('api_error')
       expect(callCount).toBe(2)
       expect(
         emitted.some(

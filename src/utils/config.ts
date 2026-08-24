@@ -21,7 +21,11 @@ import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { ConfigParseError, getErrnoCode } from './errors.js'
 import { writeFileSyncAndFlush_DEPRECATED } from './file.js'
 import { getFsImplementation } from './fsOperations.js'
-import { findCanonicalGitRoot, findGitRoot } from './git.js'
+import {
+  findCanonicalGitRoot,
+  findCanonicalGitRootUncached,
+  findGitRootUncached,
+} from './git.js'
 import { safeParseJSON } from './json.js'
 import { stripBOM } from './jsonRead.js'
 import * as lockfile from './lockfile.js'
@@ -626,10 +630,8 @@ export type GlobalConfig = {
 
   // Teammate spawn mode: 'auto' | 'tmux' | 'windows-terminal' | 'in-process'
   teammateMode?: 'auto' | 'tmux' | 'windows-terminal' | 'in-process' // How to spawn teammates (default: 'auto')
-  // Model for new teammates when the tool call doesn't pass one.
-  // undefined/null = follow leader, then mainLoopModel / ANTHROPIC_MODEL; string = alias/ID.
-  // Hardcoded Opus is last-resort only when leader + mainLoop cannot be resolved.
-  // (Storage may still distinguish unset vs explicit null; resolution treats them the same.)
+  // densable 2.1.234 #47: removed from /config. Legacy values may still exist
+  // on disk but are unread — teammates follow the leader unless spawn names a model.
   teammateDefaultModel?: string | null
 
   // PR status footer configuration (feature-flagged via GrowthBook)
@@ -935,7 +937,8 @@ export function walkHasTrustDialogAccepted(
   const startKey = normalizePathForConfigKey(resolved)
   let gitRootKey: string | null = null
   if (!options?.advisoryNoFsProbe) {
-    const root = findGitRoot(resolved)
+    // densable wgd uses rHo (uncached), not Yc — same #23 negative-cache fix
+    const root = findGitRootUncached(resolved)
     if (root) {
       gitRootKey = normalizePathForConfigKey(resolve(root))
     }
@@ -993,10 +996,10 @@ export function isPathTrusted(
   options?: { advisoryNoFsProbe?: boolean },
 ): boolean {
   const config = getGlobalConfig()
-  // densable: exact project key first when not advisory
+  // densable aKe/W9/RYt: exact project key via I8e (uncached), then wgd
   if (!options?.advisoryNoFsProbe) {
     const key = normalizePathForConfigKey(
-      findCanonicalGitRoot(dir) ?? resolve(dir),
+      findCanonicalGitRootUncached(dir) ?? resolve(dir),
     )
     if (config.projects?.[key]?.hasTrustDialogAccepted) {
       return true

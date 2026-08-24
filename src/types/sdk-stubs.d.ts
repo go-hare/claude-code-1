@@ -141,12 +141,15 @@ declare module '*/sdk/coreTypes.generated.js' {
   }
   export type SDKAssistantMessageError =
     | 'authentication_failed'
+    | 'oauth_org_not_allowed'
     | 'billing_error'
     | 'rate_limit'
     | 'invalid_request'
     | 'server_error'
     | 'unknown'
     | 'max_output_tokens'
+    | 'model_not_found'
+    | 'overloaded'
   export type SDKPartialAssistantMessage = {
     type: 'partial_assistant'
     [key: string]: unknown

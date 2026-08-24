@@ -442,6 +442,39 @@ export type DisabledFsDiagnosticLists = {
 
 let disabledFsDiagnostic: DisabledFsDiagnosticLists | null = null
 
+/**
+ * densable `CFd.sessionAllowedHosts` / `zvb` — hosts allowed for this session
+ * (UI/SDK allow) merged into runtime allowedDomains so the package skips
+ * re-asking after compact clears classifier maps.
+ */
+const sessionAllowedHosts = new Set<string>()
+
+/** densable `KXt` — bracket bare IPv6 for domain list / rule content. */
+export function normalizeSandboxSessionHost(host: string): string {
+  return isIP(host) === 6 ? `[${host}]` : host
+}
+
+/**
+ * densable `zvb` / `addSessionAllowedHost` — add host and refreshConfig so
+ * convert merges it into allowedDomains.
+ */
+export function addSessionAllowedHost(host: string): void {
+  const normalized = normalizeSandboxSessionHost(host)
+  if (sessionAllowedHosts.has(normalized)) return
+  sessionAllowedHosts.add(normalized)
+  refreshConfig()
+}
+
+/** Test helper — densable session bag contents. */
+export function getSessionAllowedHosts(): ReadonlySet<string> {
+  return sessionAllowedHosts
+}
+
+/** Test helper — clear densable session host bag without full reset. */
+export function clearSessionAllowedHostsForTests(): void {
+  sessionAllowedHosts.clear()
+}
+
 /** Test/diagnostic access to last convert dual-facade stash. */
 export function getDisabledFsDiagnosticLists(): DisabledFsDiagnosticLists | null {
   return disabledFsDiagnostic
@@ -646,6 +679,11 @@ export function convertToSandboxRuntimeConfig(
       ) {
         allowedDomains.push(rule.ruleContent.substring('domain:'.length))
       }
+    }
+    // densable LOr: for (let Be of t.sessionAllowedHosts) s.push(Be)
+    // Only outside allowManagedDomainsOnly — policy path ignores session bag.
+    for (const host of sessionAllowedHosts) {
+      allowedDomains.push(host)
     }
   }
 
@@ -1829,6 +1867,8 @@ async function reset(): Promise<void> {
   settingsSubscriptionCleanup = undefined
   worktreeMainRepoPath = undefined
   bareGitRepoScrubPaths.length = 0
+  // densable mSb drops whole CFd (sessionAllowedHosts with it)
+  sessionAllowedHosts.clear()
 
   // Clear memoized caches
   checkDependencies.cache.clear?.()
@@ -1944,6 +1984,8 @@ export interface ISandboxManager {
   /** densable ruu — whether mask warning path may fire */
   canMaskCredentialWarningFire(): boolean
   refreshConfig(): void
+  /** densable zvb — session-scoped host allow → allowedDomains via refreshConfig */
+  addSessionAllowedHost(host: string): void
   reset(): Promise<void>
 }
 
@@ -2040,6 +2082,7 @@ export const SandboxManager: ISandboxManager = {
   getExcludedCommands,
   wrapWithSandbox,
   refreshConfig,
+  addSessionAllowedHost,
   reset,
   checkDependencies,
 

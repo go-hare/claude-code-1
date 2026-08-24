@@ -14,6 +14,11 @@ import {
   type PrAction,
 } from '@claude-code/builtin-tools/tools/shared/gitOperationTracking.js'
 import { SEARCH_EXTRA_TOOLS_TOOL_NAME } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
+import { TASK_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskCreateTool/constants.js'
+import { TASK_GET_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskGetTool/constants.js'
+import { TASK_LIST_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskListTool/constants.js'
+import { TASK_UPDATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskUpdateTool/constants.js'
+import { TODO_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TodoWriteTool/constants.js'
 import type {
   CollapsedReadSearchGroup,
   CollapsibleMessage,
@@ -23,6 +28,27 @@ import type {
   StopHookInfo,
   SystemStopHookSummaryMessage,
 } from '../types/message.js'
+
+/**
+ * densable Qoi — TodoWrite + Task* absorbed into collapse groups without
+ * contributing counts, so interleaved todo/task updates don't split
+ * fullscreen "Ran N bash commands" rows (changelog #17).
+ * popsOutOnError: error tool_results eject the absorb from the group.
+ */
+const QOI_SILENT_ABSORB_TOOLS: readonly string[] = [
+  TODO_WRITE_TOOL_NAME,
+  TASK_CREATE_TOOL_NAME,
+  TASK_GET_TOOL_NAME,
+  TASK_UPDATE_TOOL_NAME,
+  TASK_LIST_TOOL_NAME,
+]
+
+type WorkshopEditMarker = {
+  count: number
+  added: number
+  removed: number
+  spent: boolean
+}
 
 /**
  * Safely get the first content item from a MessageContent value.
@@ -80,10 +106,16 @@ export type SearchOrReadResult = {
   isMemoryWrite: boolean
   /**
    * True for meta-operations that should be absorbed into a collapse group
-   * without incrementing any count (Snip, SearchExtraTools). They remain visible
-   * in verbose mode via the groupMessages iteration.
+   * without incrementing any count (Snip, SearchExtraTools, densable Qoi
+   * TodoWrite/Task*). They remain visible in verbose mode via the
+   * groupMessages iteration.
    */
   isAbsorbedSilently: boolean
+  /**
+   * densable popsOutOnError — Qoi tools register a zero-count workshop marker
+   * so an error tool_result can eject the absorb from the group (edv).
+   */
+  popsOutOnError?: boolean
   /** MCP server name when this is an MCP tool */
   mcpServerName?: string
   /** Bash command that is NOT a search/read (under fullscreen mode) */
@@ -195,10 +227,12 @@ export function getSearchExtraToolsOrReadInfo(
     }
   }
 
-  // Meta-operations absorbed silently: Snip (context cleanup) and SearchExtraTools
-  // (lazy tool schema loading). Neither should break a collapse group or
-  // contribute to its count, but both stay visible in verbose mode.
+  // densable Yrr: Qoi (TodoWrite/Task*) always absorbed silently with
+  // popsOutOnError; SearchExtraTools absorbed under fullscreen (Ns&&e===s0).
+  // Snip stays absorbed when HISTORY_SNIP is on (local residual).
+  const popsOutOnError = QOI_SILENT_ABSORB_TOOLS.includes(toolName)
   if (
+    popsOutOnError ||
     (feature('HISTORY_SNIP') && toolName === SNIP_TOOL_NAME) ||
     (isFullscreenEnvEnabled() && toolName === SEARCH_EXTRA_TOOLS_TOOL_NAME)
   ) {
@@ -210,6 +244,7 @@ export function getSearchExtraToolsOrReadInfo(
       isREPL: false,
       isMemoryWrite: false,
       isAbsorbedSilently: true,
+      popsOutOnError,
     }
   }
 
@@ -280,6 +315,7 @@ export function getSearchOrReadFromContent(
   isREPL: boolean
   isMemoryWrite: boolean
   isAbsorbedSilently: boolean
+  popsOutOnError?: boolean
   mcpServerName?: string
   isBash?: boolean
 } | null {
@@ -297,6 +333,7 @@ export function getSearchOrReadFromContent(
         isREPL: info.isREPL,
         isMemoryWrite: info.isMemoryWrite,
         isAbsorbedSilently: info.isAbsorbedSilently,
+        popsOutOnError: info.popsOutOnError,
         mcpServerName: info.mcpServerName,
         isBash: info.isBash,
       }
@@ -332,6 +369,7 @@ function getCollapsibleToolInfo(
   isREPL: boolean
   isMemoryWrite: boolean
   isAbsorbedSilently: boolean
+  popsOutOnError?: boolean
   mcpServerName?: string
   isBash?: boolean
 } | null {
@@ -658,6 +696,45 @@ function scanBashResultForGitOps(
   }
 }
 
+/**
+ * densable edv — on error tool_result, spend workshopEditsByToolUseId markers
+ * (real workshop writes reverse their counts; Qoi zero-count markers just mark
+ * spent so the caller can eject the absorb from the collapse group).
+ */
+function applyWorkshopEditsOnError(
+  msg: RenderableMessage,
+  group: GroupAccumulator,
+): boolean {
+  if (msg.type !== 'user' || !group.workshopEditsByToolUseId) return false
+  let spent = false
+  for (const c of getContentItems(msg.message?.content)) {
+    if (c.type !== 'tool_result') continue
+    const toolResult = c as {
+      type: 'tool_result'
+      tool_use_id: string
+      is_error?: boolean
+    }
+    if (!toolResult.is_error) continue
+    const marker = group.workshopEditsByToolUseId.get(toolResult.tool_use_id)
+    if (!marker || marker.spent) continue
+    marker.spent = true
+    group.workshopWriteCount = Math.max(
+      0,
+      (group.workshopWriteCount ?? 0) - marker.count,
+    )
+    group.workshopLinesAdded = Math.max(
+      0,
+      (group.workshopLinesAdded ?? 0) - marker.added,
+    )
+    group.workshopLinesRemoved = Math.max(
+      0,
+      (group.workshopLinesRemoved ?? 0) - marker.removed,
+    )
+    spent = true
+  }
+  return spent
+}
+
 type GroupAccumulator = {
   messages: CollapsibleMessage[]
   searchCount: number
@@ -700,6 +777,14 @@ type GroupAccumulator = {
   // memories, not explicit Read calls). Paths mirrored into readFilePaths +
   // memoryReadFilePaths so the inline "recalled N memories" text is accurate.
   relevantMemories?: { path: string; content: string; mtimeMs: number }[]
+  /**
+   * densable workshopEditsByToolUseId — workshop writes stash real line deltas;
+   * Qoi popsOutOnError tools stash zero-count markers so edv can eject on error.
+   */
+  workshopEditsByToolUseId?: Map<string, WorkshopEditMarker>
+  workshopWriteCount?: number
+  workshopLinesAdded?: number
+  workshopLinesRemoved?: number
 }
 
 function createEmptyGroup(): GroupAccumulator {
@@ -877,9 +962,23 @@ export function collapseReadSearchGroups(
           currentGroup.memoryWriteCount += count
         }
       } else if (toolInfo.isAbsorbedSilently) {
-        // Snip/SearchExtraTools absorbed silently — no count, no summary text.
+        // Snip/SearchExtraTools/Qoi absorbed silently — no count, no summary text.
         // Hidden from the default view but still shown in verbose mode
         // (Ctrl+O) via the groupMessages iteration in CollapsedReadSearchContent.
+        // densable: popsOutOnError Qoi tools register zero-count workshop markers
+        // so an error tool_result can eject them from the group (edv).
+        if (toolInfo.popsOutOnError) {
+          const marker: WorkshopEditMarker = {
+            count: 0,
+            added: 0,
+            removed: 0,
+            spent: false,
+          }
+          currentGroup.workshopEditsByToolUseId ??= new Map()
+          for (const id of getToolUseIdsFromMessage(msg)) {
+            currentGroup.workshopEditsByToolUseId.set(id, marker)
+          }
+        }
       } else if (toolInfo.mcpServerName) {
         // MCP search/read — counted separately so the summary says
         // "Queried slack N times" instead of "Read N files".
@@ -968,6 +1067,53 @@ export function collapseReadSearchGroups(
       }
 
       currentGroup.messages.push(msg)
+    } else if (
+      isCollapsibleToolResult(msg, currentGroup.toolUseIds) &&
+      applyWorkshopEditsOnError(msg, currentGroup)
+    ) {
+      // densable: error tool_result for popsOutOnError absorb (or workshop write)
+      // — if the last group message's tool_use_ids are all errored and the group
+      // has no hooks/memories yet, eject that absorb out of the collapsed group.
+      const last = currentGroup.messages.at(-1)
+      const lastIds = last ? getToolUseIdsFromMessage(last) : []
+      // CollapsibleMessage predicate excludes `user` at the type level even though
+      // isCollapsibleToolResult only returns true for user tool_results — read via
+      // RenderableMessage to keep densable edv eject logic typed.
+      const resultMsg = msg as RenderableMessage
+      const erroredIds = new Set(
+        resultMsg.type === 'user'
+          ? getContentItems(resultMsg.message?.content).flatMap(c =>
+              c.type === 'tool_result' && (c as { is_error?: boolean }).is_error
+                ? [(c as { tool_use_id: string }).tool_use_id]
+                : [],
+            )
+          : [],
+      )
+      if (
+        !(
+          currentGroup.hookCount > 0 ||
+          (currentGroup.relevantMemories?.length ?? 0) > 0
+        ) &&
+        lastIds.length > 0 &&
+        lastIds.every(id => erroredIds.has(id))
+      ) {
+        currentGroup.messages.pop()
+        for (const id of lastIds) currentGroup.toolUseIds.delete(id)
+        if (currentGroup.messages.length > 0) {
+          flushGroup()
+          if (last) result.push(last)
+        } else {
+          if (last) result.push(last)
+          for (const deferred of deferredSkippable) {
+            result.push(deferred)
+          }
+          deferredSkippable = []
+          currentGroup = createEmptyGroup()
+        }
+      } else {
+        flushGroup()
+      }
+      result.push(msg)
     } else if (isCollapsibleToolResult(msg, currentGroup.toolUseIds)) {
       currentGroup.messages.push(msg)
       // Scan bash results for commit SHAs / PR URLs to surface in the summary

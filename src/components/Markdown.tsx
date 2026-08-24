@@ -1,8 +1,8 @@
-import { marked, type Token, type Tokens } from 'marked';
+import { Marked, marked, type Token, type Tokens } from 'marked';
 import React, { Suspense, use, useMemo, useRef, type ReactNode } from 'react';
 import { LRUCache } from 'lru-cache';
 import { useSettings } from '../hooks/useSettings.js';
-import { Ansi, Box, useTheme } from '@anthropic/ink';
+import { Ansi, Box, Text, useTheme, type Theme } from '@anthropic/ink';
 import { type CliHighlight, getCliHighlightPromise } from '../utils/cliHighlight.js';
 import { hashContent } from '../utils/hash.js';
 import { configureMarked, formatToken, shouldUseInkListLayout } from '../utils/markdown.js';
@@ -15,6 +15,21 @@ type Props = {
   children: string;
   /** When true, render all text content as dim */
   dimColor?: boolean;
+  /**
+   * densable w0l `color` — wrap flushed ANSI in Ink Text with theme color
+   * (user-prompt markdown inherits `text` / brief colors).
+   */
+  color?: keyof Theme;
+  /**
+   * densable jh `promptMode` — user-prompt markdown: lean lexer (no tables /
+   * blockquotes / links), skip stripPromptTags + issue-ref linkify, raw
+   * fallback when lexer yields nothing.
+   */
+  promptMode?: boolean;
+  /**
+   * densable w0l `stripPromptTags` — default true; forced off under promptMode.
+   */
+  stripPromptTags?: boolean;
   /**
    * Official 2.1.207: streaming freezes push intermediate source through
    * Markdown without polluting the immutable history token cache.
@@ -52,7 +67,52 @@ function hasMarkdownSyntax(s: string): boolean {
   return MD_SYNTAX_RE.test(s.length > 500 ? s.slice(0, 500) : s);
 }
 
-function lexMarkdown(content: string, useCache: boolean): Token[] {
+/**
+ * densable z6m — lean Marked for user-prompt mode: keep code/lists/emphasis,
+ * disable tables/blockquotes/hr/links/autolinks (and related) so prompts don't
+ * grow reply-style chrome.
+ */
+const promptModeMarked = new Marked({
+  tokenizer: {
+    // densable: only allow underscore emStrong; `*...*` stays literal-ish.
+    emStrong(src) {
+      return src.startsWith('_') ? undefined : false;
+    },
+    // densable j6m.def — disable reference definitions
+    def() {
+      return undefined;
+    },
+    table() {
+      return undefined;
+    },
+    blockquote() {
+      return undefined;
+    },
+    hr() {
+      return undefined;
+    },
+    lheading() {
+      return undefined;
+    },
+    link() {
+      return undefined;
+    },
+    autolink() {
+      return undefined;
+    },
+    url() {
+      return undefined;
+    },
+    escape() {
+      return undefined;
+    },
+    br() {
+      return undefined;
+    },
+  },
+});
+
+function lexMarkdown(content: string, useCache: boolean, promptMode = false): Token[] {
   // Fast path: plain text with no markdown syntax → single paragraph token.
   if (!hasMarkdownSyntax(content)) {
     return [
@@ -64,13 +124,15 @@ function lexMarkdown(content: string, useCache: boolean): Token[] {
       } as Token,
     ];
   }
+  const lexer = promptMode ? promptModeMarked : marked;
   if (!useCache) {
-    return marked.lexer(content);
+    return lexer.lexer(content);
   }
-  const key = hashContent(content);
+  // densable _8m: cache key prefixes "_" for promptMode so lexers don't collide.
+  const key = `${promptMode ? '_' : ''}${content.length}:${hashContent(content)}`;
   const hit = tokenCache.get(key);
   if (hit) return hit;
-  const tokens = marked.lexer(content);
+  const tokens = lexer.lexer(content);
   tokenCache.set(key, tokens);
   return tokens;
 }
@@ -101,28 +163,45 @@ function MarkdownWithHighlight(props: Props): React.ReactNode {
 
 function MarkdownBody({
   children,
+  color,
   dimColor,
+  promptMode = false,
+  stripPromptTags,
   skipTokenCache,
   tailWrap,
   highlight,
 }: Props & { highlight: CliHighlight | null }): React.ReactNode {
   const [theme] = useTheme();
   configureMarked();
+  // densable w0l: stripPromptTags defaults true, but promptMode skips stripping.
+  const shouldStrip = (stripPromptTags ?? true) && !promptMode;
 
   const elements = useMemo(() => {
-    const tokens = lexMarkdown(stripPromptXMLTags(children), skipTokenCache !== true);
+    const source = shouldStrip ? stripPromptXMLTags(children) : children;
+    const tokens = lexMarkdown(source, skipTokenCache !== true, promptMode);
     const elements: React.ReactNode[] = [];
     let nonTableContent = '';
 
     // densable Sh: only the final non-table flush gets tailWrap
     function flushNonTableContent(wrap?: Props['tailWrap']): void {
       if (nonTableContent) {
-        elements.push(
-          <Ansi key={elements.length} dimColor={dimColor} wrap={wrap}>
-            {nonTableContent.trim()}
-          </Ansi>,
-        );
+        const trimmed = nonTableContent.replace(/^\n+/, '').trimEnd();
         nonTableContent = '';
+        if (!trimmed) return;
+        const ansi = (
+          <Ansi key={elements.length} dimColor={dimColor} wrap={wrap}>
+            {trimmed}
+          </Ansi>
+        );
+        elements.push(
+          color ? (
+            <Text key={elements.length} color={color} wrap={wrap}>
+              {ansi}
+            </Text>
+          ) : (
+            ansi
+          ),
+        );
       }
     }
 
@@ -147,13 +226,18 @@ function MarkdownBody({
           />,
         );
       } else {
-        nonTableContent += formatToken(token, theme, 0, null, null, highlight);
+        nonTableContent += formatToken(token, theme, 0, null, null, highlight, promptMode);
       }
     }
 
     flushNonTableContent(tailWrap);
+    // densable w0l: promptMode empty-render fallback → raw source
+    if (promptMode && elements.length === 0 && source.trim()) {
+      nonTableContent = source;
+      flushNonTableContent(tailWrap);
+    }
     return elements;
-  }, [children, dimColor, highlight, theme, skipTokenCache, tailWrap]);
+  }, [children, color, dimColor, highlight, theme, skipTokenCache, tailWrap, promptMode, shouldStrip]);
 
   return (
     <Box flexDirection="column" gap={1}>

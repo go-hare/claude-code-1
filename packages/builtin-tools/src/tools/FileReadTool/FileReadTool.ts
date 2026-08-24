@@ -56,7 +56,7 @@ import {
   mapNotebookCellsToToolResult,
   readNotebook,
 } from 'src/utils/notebook.js'
-import { expandPath } from 'src/utils/path.js'
+import { expandPath, isNtObjectNamespacePath } from 'src/utils/path.js'
 import { extractPDFPages, getPDFPageCount, readPDF } from 'src/utils/pdf.js'
 import {
   isPDFExtension,
@@ -470,6 +470,18 @@ export const FileReadTool = buildTool({
 
     // Path expansion + deny rule check (no I/O)
     const fullFilePath = expandPath(file_path)
+
+    // densable gno/read_file: Jw(e)||Jw(_s(e)) — NT-namespace rejected before FS
+    if (
+      isNtObjectNamespacePath(file_path.trim()) ||
+      isNtObjectNamespacePath(fullFilePath)
+    ) {
+      return {
+        result: false,
+        message: `read denied: ${file_path}`,
+        errorCode: 11,
+      }
+    }
 
     const appState = toolUseContext.getAppState()
     const denyRule = matchingRuleForInput(

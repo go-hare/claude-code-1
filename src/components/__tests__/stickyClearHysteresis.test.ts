@@ -1,72 +1,38 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  isSameStickyPrompt,
-  shouldClearStickyOnMiss,
-  STICKY_CLEAR_HYSTERESIS_FRAMES,
-} from '../VirtualMessageList.js'
 
-describe('shouldClearStickyOnMiss (React #185 sticky thrash guard)', () => {
-  test('force always clears', () => {
-    expect(shouldClearStickyOnMiss(0, true, true)).toBe(true)
-    expect(shouldClearStickyOnMiss(0, false, true)).toBe(true)
-    expect(shouldClearStickyOnMiss(0, true, true, 5)).toBe(true)
+/**
+ * densable 2.1.234 StickyTracker (SEA jpw) gate — pure mirror of:
+ *   if (!force && lastIdx === idx) return
+ *   lastIdx = idx
+ *   if (text == null) set(null); else set({text,...})
+ *
+ * Official has NO miss hysteresis / mid-list hold / isSameStickyPrompt.
+ * Stability comes from idx early-return (including lastIdx===-1 while
+ * already clear at bottom).
+ */
+function shouldApplyStickyUpdate(
+  force: boolean,
+  lastIdx: number,
+  idx: number,
+): boolean {
+  if (!force && lastIdx === idx) return false
+  return true
+}
+
+describe('densable StickyTracker idx dedup (2.1.234 jpw)', () => {
+  test('same idx without force skips setState (including already-clear -1)', () => {
+    expect(shouldApplyStickyUpdate(false, 3, 3)).toBe(false)
+    expect(shouldApplyStickyUpdate(false, -1, -1)).toBe(false)
   })
 
-  test('without sticky held, miss does not clear (no-op path)', () => {
-    expect(shouldClearStickyOnMiss(0, false, false)).toBe(false)
-    expect(shouldClearStickyOnMiss(99, false, false)).toBe(false)
-    expect(shouldClearStickyOnMiss(99, false, false, 0)).toBe(false)
+  test('idx change applies (bottom clear -1, or new prompt)', () => {
+    expect(shouldApplyStickyUpdate(false, 3, -1)).toBe(true)
+    expect(shouldApplyStickyUpdate(false, -1, 2)).toBe(true)
+    expect(shouldApplyStickyUpdate(false, 2, 5)).toBe(true)
   })
 
-  test('single-frame miss at list top keeps sticky (padCollapsed flicker)', () => {
-    expect(shouldClearStickyOnMiss(1, true, false, 0)).toBe(false)
-  })
-
-  test('hysteresis frames at list top clears sticky', () => {
-    expect(
-      shouldClearStickyOnMiss(STICKY_CLEAR_HYSTERESIS_FRAMES, true, false, 0),
-    ).toBe(true)
-    expect(
-      shouldClearStickyOnMiss(
-        STICKY_CLEAR_HYSTERESIS_FRAMES + 1,
-        true,
-        false,
-        0,
-      ),
-    ).toBe(true)
-  })
-
-  test('mid-list miss never clears (header/pad thrash, any streak)', () => {
-    expect(shouldClearStickyOnMiss(1, true, false, 3)).toBe(false)
-    expect(shouldClearStickyOnMiss(99, true, false, 1)).toBe(false)
-    expect(
-      shouldClearStickyOnMiss(
-        STICKY_CLEAR_HYSTERESIS_FRAMES + 10,
-        true,
-        false,
-        12,
-      ),
-    ).toBe(false)
-  })
-})
-
-describe('isSameStickyPrompt (setState identity guard)', () => {
-  test('null and clicked identity', () => {
-    expect(isSameStickyPrompt(null, null)).toBe(true)
-    expect(isSameStickyPrompt('clicked', 'clicked')).toBe(true)
-    expect(isSameStickyPrompt(null, 'clicked')).toBe(false)
-    expect(isSameStickyPrompt('clicked', null)).toBe(false)
-  })
-
-  test('same text different object is same', () => {
-    const a = { text: 'hello', scrollTo: () => {} }
-    const b = { text: 'hello', scrollTo: () => {} }
-    expect(isSameStickyPrompt(a, b)).toBe(true)
-  })
-
-  test('different text is not same', () => {
-    const a = { text: 'hello', scrollTo: () => {} }
-    const b = { text: 'world', scrollTo: () => {} }
-    expect(isSameStickyPrompt(a, b)).toBe(false)
+  test('force reapplies even when idx unchanged (post-clicked suppress)', () => {
+    expect(shouldApplyStickyUpdate(true, 3, 3)).toBe(true)
+    expect(shouldApplyStickyUpdate(true, -1, -1)).toBe(true)
   })
 })

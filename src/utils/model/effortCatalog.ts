@@ -563,6 +563,19 @@ export function isEffortLaunchPinned(model: string): boolean {
   return false
 }
 
+/**
+ * densable pGo — all three unpin* launch pins are true (user has released
+ * launch defaults). /tui nMr only carries `--effort` when this is true.
+ */
+export function areAllEffortLaunchPinsUnpinned(): boolean {
+  const flags = readLaunchPinFlags()
+  return (
+    flags.unpinOpus47LaunchEffort &&
+    flags.unpinOpus48LaunchEffort &&
+    flags.unpinFable5LaunchEffort
+  )
+}
+
 /** densable N9 — user changed effort; unpin all launch defaults (persisted). */
 export function unpinAllEffortLaunchPins(): void {
   try {

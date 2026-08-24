@@ -1740,6 +1740,7 @@ async function run(): Promise<CommanderCommand> {
           setForkReplayLaunchConfig,
           setForkRestrictedLaunchConfig,
           setReplConfigArgv,
+          setSettingsEffortAtStartup,
           isForkRestrictedLaunchOptions,
           buildReplConfigArgv,
         } =
@@ -1782,6 +1783,9 @@ async function run(): Promise<CommanderCommand> {
             channels: (options as { channels?: string | string[] }).channels,
           }),
         );
+        // densable O_s(M_s) — settings effort baseline for /tui nMr/kXs carry
+        const settingsEffort = getInitialEffortSetting();
+        setSettingsEffortAtStartup(typeof settingsEffort === 'string' ? settingsEffort : undefined);
       } catch {
         /* optional at launch */
       }
@@ -5699,10 +5703,11 @@ async function run(): Promise<CommanderCommand> {
     });
   // END ANT-ONLY
 
-  // Setup token command
+  // Setup token command — densable 2.1.234 #44 allowExcessArguments(false)
   program
     .command('setup-token')
     .description('Set up a long-lived authentication token (requires Claude subscription)')
+    .allowExcessArguments(false)
     .action(async () => {
       const [{ setupTokenHandler }, { createRoot }] = await Promise.all([
         import('./cli/handlers/util.js'),

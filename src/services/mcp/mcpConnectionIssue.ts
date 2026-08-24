@@ -82,16 +82,23 @@ export function formatFailedMcpIssue(failed: FailedIssueFields): string {
 }
 
 /**
- * densable `Ujo` — reconnect failure detail (uses URL when errorCode present).
+ * densable `Ujo` / 2.1.234 #13 — reconnect failure detail uses URL **origin** only
+ * (cHr), never full URL with path/query/userinfo secrets.
  */
 export function formatFailedMcpReconnectIssue(
   failed: FailedIssueFields & { config?: unknown },
 ): string {
-  let url: string | null = null
+  let origin: string | null = null
   const cfg = failed.config
   if (cfg && typeof cfg === 'object' && 'url' in cfg) {
     const u = (cfg as { url?: unknown }).url
-    if (typeof u === 'string') url = u
+    if (typeof u === 'string') {
+      try {
+        origin = new URL(u).origin
+      } catch {
+        origin = null
+      }
+    }
   }
   const code = failed.errorCode
   if (code !== undefined && HIDDEN_MCP_ERROR_CODES.has(code)) {
@@ -99,7 +106,7 @@ export function formatFailedMcpReconnectIssue(
   }
   if (code) {
     const label = formatMcpErrorCode(code)
-    return url ? `${label} at ${url}` : label
+    return origin ? `${label} at ${origin}` : label
   }
   return failed.error ?? ''
 }

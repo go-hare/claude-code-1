@@ -36,6 +36,10 @@ import {
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { isENOENT } from './errors.js'
+import {
+  RENAME_INPLACE_FALLBACK_CODES,
+  renameWithRetry as renameWithRetryShared,
+} from './renameRetry.js'
 
 /** densable Fle */
 export class SymlinkWriteRefusedError extends Error {
@@ -64,7 +68,8 @@ const O_CREAT = fsConstants.O_CREAT
 const O_EXCL = fsConstants.O_EXCL
 const O_TRUNC = fsConstants.O_TRUNC
 
-const RENAME_RETRY_CODES = new Set(['EXDEV', 'EPERM', 'EEXIST', 'EBUSY'])
+/** densable CQ — in-place fallback after rename fails (not the retry loop set) */
+const RENAME_RETRY_CODES = RENAME_INPLACE_FALLBACK_CODES
 const UNSUPPORTED_FS_CODES = new Set(['EINVAL', 'ENOTSUP', 'EPERM', 'ENOSYS'])
 
 function errnoCode(err: unknown): string | undefined {
@@ -187,20 +192,9 @@ function resolveAtomicTempPath(
   return join(stagingDir, `${basename(targetPath)}${tempSuffix}`)
 }
 
+/** densable cw/vVy via shared renameRetry (#51 RO fail-fast) */
 async function renameWithRetry(from: string, to: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await rename(from, to)
-      return
-    } catch (err) {
-      const code = errnoCode(err)
-      if (code && RENAME_RETRY_CODES.has(code) && attempt < 12) {
-        await new Promise(r => setTimeout(r, 5 + attempt * 2))
-        continue
-      }
-      throw err
-    }
-  }
+  await renameWithRetryShared(from, to, rename)
 }
 
 export type WriteFileAndFlushOpts = {

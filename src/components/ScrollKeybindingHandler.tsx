@@ -15,6 +15,8 @@ import {
   useStdin,
 } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
+import { getSessionsSinceLastShown, recordTipShown } from '../services/tips/tipHistory.js';
+import { getGlobalConfig } from '../utils/config.js';
 import { logForDebugging } from '../utils/debug.js';
 import { getAutoScrollEnabled } from '../utils/config.js';
 import { getPlatform } from '../utils/platform.js';
@@ -25,6 +27,13 @@ import {
   recordScroll,
   recordStickyState,
 } from '../utils/scrollTelemetry.js';
+
+/** densable `Cvh` — tip id for first-run auto-copy config hint. */
+const AUTO_COPY_CONFIG_TIP_ID = 'auto-copy-config-hint';
+/** densable `wtw` — min startups since tip before re-show eligibility. */
+const AUTO_COPY_TIP_MIN_SESSIONS = 10;
+/** densable `Rvh` — max shows per session once eligible. */
+const AUTO_COPY_TIP_MAX_PER_SESSION = 5;
 
 /**
  * densable Gsn() — hold-key hint when OSC 52 copy may not reach the system clipboard.
@@ -133,27 +142,173 @@ const WHEEL_JB_BURST_WEIGHT = 0.4; // RP_
 const WHEEL_JB_MULT_CAP = 4; // DP_
 
 /**
- * Whether a keypress should clear the virtual text selection. Mimics
- * native terminal selection: any keystroke clears, EXCEPT modified nav
- * keys (shift/opt/cmd + arrow/home/end/page*). In native macOS contexts,
- * shift+nav extends selection, and cmd/opt+nav are often intercepted by
- * the terminal emulator for scrollback nav — neither disturbs selection.
- * Bare arrows DO clear (user's cursor moves, native deselects). Wheel is
- * excluded — scroll:lineUp/Down already clears via the keybinding path.
+ * densable 2.1.234 `bvh` (Key / useInput path) — 1:1 with SEA sibling `Jew`
+ * (named keystroke path used by `vvh`). Native-terminal selection: any
+ * keystroke clears EXCEPT:
+ *   - wheel (scroll:line* owns those)
+ *   - Escape (interrupt/dismiss must keep selection — changelog #45)
+ *   - pageup / pagedown (scroll page bindings keep selection)
+ *   - ctrl+home / ctrl+end (scroll top/bottom keep selection)
+ *   - shift/meta/super + arrow/home/end (extend / emulator scrollback)
+ * Bare arrows DO clear. SEA: function bvh(e){...} / function Jew(e){...}.
  */
 export function shouldClearSelectionOnKey(key: Key): boolean {
-  if (key.wheelUp || key.wheelDown) return false;
-  const isNav =
-    key.leftArrow ||
-    key.rightArrow ||
-    key.upArrow ||
-    key.downArrow ||
-    key.home ||
-    key.end ||
-    key.pageUp ||
-    key.pageDown;
-  if (isNav && (key.shift || key.meta || key.super)) return false;
+  // densable bvh:
+  // if(e.wheelUp||e.wheelDown||e.escape)return!1;
+  // if(e.pageUp||e.pageDown)return!1;
+  // if((e.home||e.end)&&e.ctrl)return!1;
+  // if((e.leftArrow||e.rightArrow||e.upArrow||e.downArrow||e.home||e.end)&&(e.shift||e.meta||e.super))return!1;
+  // return!0
+  if (key.wheelUp || key.wheelDown || key.escape) return false;
+  if (key.pageUp || key.pageDown) return false;
+  if ((key.home || key.end) && key.ctrl) return false;
+  if (
+    (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow || key.home || key.end) &&
+    (key.shift || key.meta || key.super)
+  ) {
+    return false;
+  }
   return true;
+}
+
+/**
+ * densable 2.1.234 `Jew` — named KeyboardEvent path used by FleetView `vvh`.
+ * Same exemptions as `bvh`, keyed off `event.name` + `superKey`.
+ */
+export function shouldClearSelectionOnNamedKey(event: {
+  name: string;
+  ctrl: boolean;
+  shift: boolean;
+  meta: boolean;
+  superKey: boolean;
+}): boolean {
+  // densable Jew:
+  // if(e.name==="escape"||e.name==="pageup"||e.name==="pagedown")return!1;
+  // if((e.name==="home"||e.name==="end")&&e.ctrl)return!1;
+  // if((e.name==="left"||e.name==="right"||e.name==="up"||e.name==="down"||e.name==="home"||e.name==="end")&&(e.shift||e.meta||e.superKey))return!1;
+  // return!0
+  if (event.name === 'escape' || event.name === 'pageup' || event.name === 'pagedown') {
+    return false;
+  }
+  if ((event.name === 'home' || event.name === 'end') && event.ctrl) return false;
+  if (
+    (event.name === 'left' ||
+      event.name === 'right' ||
+      event.name === 'up' ||
+      event.name === 'down' ||
+      event.name === 'home' ||
+      event.name === 'end') &&
+    (event.shift || event.meta || event.superKey)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * densable 2.1.234 `vvh` — onKeyDownCapture handler for agents/FleetView.
+ * When copyOnSelect is on, ctrl+c only clears (clipboard already written);
+ * when off, ctrl+c copies. Other keys clear via Jew (Esc does not).
+ */
+export function createSelectionClearKeyDownCapture(
+  selection: {
+    hasSelection: () => boolean;
+    clearSelection: () => void;
+    copySelection: () => string;
+  },
+  copyOnSelect: boolean,
+): (event: {
+  key: string;
+  name: string;
+  ctrl: boolean;
+  shift: boolean;
+  meta: boolean;
+  superKey: boolean;
+  stopImmediatePropagation: () => void;
+  preventDefault: () => void;
+}) => void {
+  // densable vvh:
+  // return(r)=>{if(!e.hasSelection())return;if(r.ctrl&&!r.shift&&!r.meta&&r.key==="c"){if(t)e.clearSelection();else e.copySelection();r.consume();return}if(Jew(r))e.clearSelection()}
+  return event => {
+    if (!selection.hasSelection()) return;
+    if (event.ctrl && !event.shift && !event.meta && event.key === 'c') {
+      if (copyOnSelect) selection.clearSelection();
+      else selection.copySelection();
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      return;
+    }
+    if (shouldClearSelectionOnNamedKey(event)) {
+      selection.clearSelection();
+    }
+  };
+}
+
+/**
+ * densable 2.1.234 `h8i` — bindable `selection:clear` in Scroll context.
+ * Returns false when no selection so other handlers can still receive the key.
+ * Used by fullscreen ScrollKeybindingHandler and agents/FleetView.
+ */
+export function useSelectionClearKeybinding(
+  selection: {
+    hasSelection: () => boolean;
+    clearSelection: () => void;
+  },
+  isActive = true,
+): void {
+  useKeybindings(
+    {
+      'selection:clear': () => {
+        if (!selection.hasSelection()) return false;
+        selection.clearSelection();
+      },
+    },
+    { context: 'Scroll', isActive },
+  );
+}
+
+type SelectionCopiedNotification = {
+  key: string;
+  text: string;
+  color: 'suggestion';
+  priority: 'immediate';
+  timeoutMs: number;
+};
+
+/**
+ * densable `g8i` — selection-copied toast payload (Scroll + agents view).
+ */
+export function buildSelectionCopiedNotification(text: string): SelectionCopiedNotification {
+  const path = getClipboardPath();
+  const n = text.length;
+  const unit = n === 1 ? 'char' : 'chars';
+  let msg: string;
+  switch (path) {
+    case 'native':
+      msg = `copied ${n} ${unit} to clipboard`;
+      break;
+    case 'tmux-buffer':
+      msg = `copied ${n} ${unit} to tmux buffer · paste with prefix + ]`;
+      break;
+    case 'osc52':
+      msg = `sent ${n} ${unit} via OSC 52 · if paste fails, hold ${getNativeSelectionHoldKey()} while selecting for native copy`;
+      break;
+    default:
+      msg = `copied ${n} ${unit}`;
+      break;
+  }
+  return {
+    key: 'selection-copied',
+    text: msg,
+    color: 'suggestion',
+    priority: 'immediate',
+    timeoutMs: path === 'native' ? 2000 : 4000,
+  };
+}
+
+/** densable `g8i` apply helper — agents FleetView + Scroll. */
+export function notifySelectionCopied(addNotification: (n: SelectionCopiedNotification) => void, text: string): void {
+  addNotification(buildSelectionCopiedNotification(text));
 }
 
 /**
@@ -501,6 +656,12 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
   const selection = useSelection();
   const { addNotification } = useNotifications();
   const { internal_eventEmitter } = useStdin();
+  // densable `f` / `p` — last auto-copied text + per-session tip show count.
+  // lastCopiedRef lets ctrl+c clear+toast without re-reading the screen buffer
+  // (SEA #15: modal/fullscreen copy losing characters).
+  const lastCopiedRef = useRef<string | null>(null);
+  // -1 = not yet decided this session; 0..Rvh = shows so far; >=Rvh stops.
+  const autoCopyTipShowsRef = useRef(-1);
   // Lazy-inited on first wheel event so the XTVERSION probe (fired at
   // raw-mode-enable time) has resolved by then — initializing in useRef()
   // would read getWheelBase() before the probe reply arrives over SSH.
@@ -595,36 +756,37 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
     return wheelAccel.current;
   }
 
-  function showCopiedToast(text: string): void {
-    // getClipboardPath reads env synchronously — predicts what setClipboard
-    // did (native pbcopy / tmux load-buffer / raw OSC 52) so we can tell
-    // the user whether paste will Just Work or needs prefix+].
-    // densable toast: char/chars plural + Gsn() hold key on osc52.
-    const path = getClipboardPath();
-    const n = text.length;
-    const unit = n === 1 ? 'char' : 'chars';
-    let msg: string;
-    switch (path) {
-      case 'native':
-        msg = `copied ${n} ${unit} to clipboard`;
-        break;
-      case 'tmux-buffer':
-        msg = `copied ${n} ${unit} to tmux buffer · paste with prefix + ]`;
-        break;
-      case 'osc52':
-        msg = `sent ${n} ${unit} via OSC 52 · if paste fails, hold ${getNativeSelectionHoldKey()} while selecting for native copy`;
-        break;
+  /**
+   * densable `m(v,S=!1)` — toast via g8i; optional first-run auto-copy tip when
+   * S=true (from copy-on-select), clipboard path is native, and copyOnSelect
+   * is still the unset default.
+   */
+  function showCopiedToast(text: string, fromCopyOnSelect = false): void {
+    const payload = buildSelectionCopiedNotification(text);
+    if (fromCopyOnSelect && getClipboardPath() === 'native' && getGlobalConfig().copyOnSelect === undefined) {
+      if (autoCopyTipShowsRef.current === -1) {
+        if (getSessionsSinceLastShown(AUTO_COPY_CONFIG_TIP_ID) >= AUTO_COPY_TIP_MIN_SESSIONS) {
+          recordTipShown(AUTO_COPY_CONFIG_TIP_ID);
+          autoCopyTipShowsRef.current = 0;
+        } else {
+          autoCopyTipShowsRef.current = AUTO_COPY_TIP_MAX_PER_SESSION;
+        }
+      }
+      if (autoCopyTipShowsRef.current < AUTO_COPY_TIP_MAX_PER_SESSION) {
+        autoCopyTipShowsRef.current++;
+        addNotification({
+          ...payload,
+          text: `${payload.text} · disable auto-copy in /config`,
+          timeoutMs: Math.max(payload.timeoutMs, 4000),
+        });
+        return;
+      }
     }
-    addNotification({
-      key: 'selection-copied',
-      text: msg,
-      color: 'suggestion',
-      priority: 'immediate',
-      timeoutMs: path === 'native' ? 2000 : 4000,
-    });
+    addNotification(payload);
   }
 
   function copyAndToast(): void {
+    // densable `h` — explicit copy clears selection.
     const text = selection.copySelection();
     if (text) showCopiedToast(text);
   }
@@ -747,6 +909,9 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
     { context: 'Scroll', isActive },
   );
 
+  // densable 2.1.234 #2 / h8i — separate registration (also agents view).
+  useSelectionClearKeybinding(selection, isActive);
+
   // scroll:halfPage*/fullPage* have no default key bindings — ctrl+u/d/b/f
   // all have real owners in normal mode (kill-line/exit/task:background/
   // kill-agents). Transcript mode gets them via the isModal raw useInput
@@ -828,27 +993,29 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
     { isActive: isActive && isModal },
   );
 
-  // Esc clears selection; any other keystroke also clears it (matches
-  // native terminal behavior where selection disappears on input).
-  // Ctrl+C copies when a selection exists — needed on legacy terminals
-  // where ctrl+shift+c sends the same byte (\x03, shift is lost) and
-  // cmd+c never reaches the pty (terminal intercepts it for Edit > Copy).
-  // Handled via raw useInput so we can conditionally consume: Esc/Ctrl+C
-  // only stop propagation when a selection exists, letting them still work
-  // for cancel-request / interrupt otherwise. Other keys never stop
-  // propagation — they're observed to clear selection as a side-effect.
-  // The selection:copy keybinding (ctrl+shift+c / cmd+c) registers above
-  // via useKeybindings and consumes its event before reaching here.
+  // densable 2.1.234 #45 / vvh+Jew: Escape does NOT clear mouse selection
+  // (still propagates for interrupt/dismiss). Any other keystroke may clear
+  // (matches native terminal). Ctrl+C copies when a selection exists —
+  // needed on legacy terminals where ctrl+shift+c sends the same byte
+  // (\x03, shift is lost) and cmd+c never reaches the pty. Handled via raw
+  // useInput so we can conditionally consume Ctrl+C only when a selection
+  // exists. Other keys never stop propagation — observed to clear as a
+  // side-effect. selection:copy / selection:clear register above via
+  // useKeybindings and consume before reaching here.
   useInput(
     (input, key, event) => {
       if (!selection.hasSelection()) return;
-      if (key.escape) {
-        selection.clearSelection();
-        event.stopImmediatePropagation();
-        return;
-      }
+      // densable: if lastCopiedRef set (auto-copy already wrote clipboard),
+      // clear+toast from cache — avoid re-extracting from screen (modal/fullscreen
+      // can lose chars). Else fall through to explicit copySelection.
       if (key.ctrl && !key.shift && !key.meta && input === 'c') {
-        copyAndToast();
+        const cached = lastCopiedRef.current;
+        if (cached !== null) {
+          selection.clearSelection();
+          showCopiedToast(cached);
+        } else {
+          copyAndToast();
+        }
         event.stopImmediatePropagation();
         return;
       }
@@ -866,7 +1033,8 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
   );
 
   useDragToScroll(scrollRef, selection, isActive, notifyScroll);
-  useCopyOnSelect(selection, isActive, showCopiedToast);
+  // densable y8i(o,l,(v)=>m(v,!0),f) — fromCopyOnSelect=true for tip path.
+  useCopyOnSelect(selection, isActive, text => showCopiedToast(text, true), lastCopiedRef);
   useSelectionBgColor(selection);
 
   return null;

@@ -2,6 +2,7 @@
  * densable 2.1.221 #28 — Background Session finish policy (hIb / EGu).
  */
 import { afterEach, describe, expect, test } from 'bun:test'
+import { join } from 'path'
 import {
   getBackgroundSessionInstructions,
   getScratchpadInstructions,
@@ -61,7 +62,7 @@ describe('getBackgroundSessionInstructions densable 2.1.221', () => {
     expect(text!).toContain('commit before finishing')
     expect(text!).toContain('Open a draft PR when the task calls for one')
     expect(text!).toContain('Never push to main/master, force-push, or merge.')
-    expect(text!).toContain('/tmp/job-test-221/tmp')
+    expect(text!).toContain(join('/tmp/job-test-221', 'tmp'))
     expect(text!).toContain('EnterWorktree')
     expect(text!).toContain('don\'t refer to yourself as "a background agent."')
   })

@@ -73,7 +73,7 @@ import {
   type InstructionsMemoryType,
 } from './hooks.js'
 import type { MemoryType } from './memory/types.js'
-import { expandPath } from './path.js'
+import { expandPath, isUnsafeNetworkOrNtIncludePath } from './path.js'
 import { pathInWorkingPath } from './permissions/filesystem.js'
 import { isSettingSourceEnabled } from './settings/constants.js'
 import { getInitialSettings } from './settings/settings.js'
@@ -636,11 +636,21 @@ export async function processMemoryFile(
     return []
   }
 
+  // densable sTe/include_guard: su(e)&&!db(e)||bu(e)||Jw(e) → skip (bu stub false).
+  // WSL UNC must remain allowed — do NOT OR workflow s7t's su||Jw.
+  if (isUnsafeNetworkOrNtIncludePath(filePath)) {
+    return []
+  }
+
   // Resolve symlink path early for @import resolution
   const { resolvedPath, isSymlink } = safeResolvePath(
     getFsImplementation(),
     filePath,
   )
+
+  if (isUnsafeNetworkOrNtIncludePath(resolvedPath)) {
+    return []
+  }
 
   processedPaths.add(normalizedPath)
   if (isSymlink) {

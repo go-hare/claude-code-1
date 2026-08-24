@@ -27,6 +27,7 @@ import { getFsImplementation, safeResolvePath } from './fsOperations.js'
 import { logError } from './log.js'
 import { expandPath } from './path.js'
 import { getPlatform } from './platform.js'
+import { renameSyncWithRetry } from './renameRetry.js'
 
 export type File = {
   filename: string
@@ -441,10 +442,12 @@ export function writeFileSyncAndFlush_DEPRECATED(
       logForDebugging(`Applied original permissions to temp file`)
     }
 
-    // Atomic rename (on POSIX systems, this is atomic)
-    // On Windows, this will overwrite the destination if it exists
+    // densable 2.1.234 #51 / fIs — rename with transient retry + RO fail-fast
+    // (Windows RO ~/.claude.json must not stall on infinite EPERM retries)
     logForDebugging(`Renaming ${tempPath} to ${targetPath}`)
-    fs.renameSync(tempPath, targetPath)
+    renameSyncWithRetry(tempPath, targetPath, (from, to) =>
+      fs.renameSync(from, to),
+    )
     logForDebugging(`File ${targetPath} written atomically`)
   } catch (atomicError) {
     logForDebugging(`Failed to write file atomically: ${atomicError}`, {

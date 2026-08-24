@@ -79,6 +79,26 @@ describe('parseGitRemote', () => {
       name: 'cc.kurs.web',
     })
   })
+
+  // densable 2.1.234 #12 — SEA Aoe userinfo `(?:[^@/?#]*@)?` + host `[^/:?#@]+`
+  test('empty userinfo @host does not capture @ into hostname', () => {
+    expect(parseGitRemote('https://@github.com/owner/repo.git')).toEqual({
+      host: 'github.com',
+      owner: 'owner',
+      name: 'repo',
+    })
+  })
+
+  test('normal userinfo still strips to host', () => {
+    expect(
+      parseGitRemote('https://oauth2:token@github.com/owner/repo.git'),
+    ).toEqual({ host: 'github.com', owner: 'owner', name: 'repo' })
+  })
+
+  test('rejects invalid owner/name segments (densable fTt)', () => {
+    expect(parseGitRemote('https://github.com/-bad/repo.git')).toBeNull()
+    expect(parseGitRemote('https://github.com/owner/..')).toBeNull()
+  })
 })
 
 describe('parseGitHubRepository', () => {
@@ -118,5 +138,12 @@ describe('parseGitHubRepository', () => {
 
   test('handles plain owner/repo with .git suffix', () => {
     expect(parseGitHubRepository('owner/repo.git')).toBe('owner/repo')
+  })
+
+  // densable SEA `x8t` — plain owner/repo also gated by `fTt`
+  test('rejects plain owner/repo with invalid slug segments', () => {
+    expect(parseGitHubRepository('-bad/repo')).toBeNull()
+    expect(parseGitHubRepository('owner/..')).toBeNull()
+    expect(parseGitHubRepository('owner/.')).toBeNull()
   })
 })

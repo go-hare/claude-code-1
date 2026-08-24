@@ -26,6 +26,10 @@
 import { neutralizeChannelPreviewText } from '../../utils/channelPreviewSanitize.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import {
+  redactSecretsDeep,
+  redactSecretsForDisplay,
+} from '../teamMemorySync/secretScanner.js'
 
 /**
  * GrowthBook runtime gate — separate from the channels gate (tengu_harbor)
@@ -45,6 +49,13 @@ export type ChannelPermissionResponse = {
 }
 
 export type ChannelPermissionCallbacks = {
+  /**
+   * densable Xrf `isServerRegistered` — true only if inbound
+   * `gateChannelServer` actually registered this server (not merely
+   * `--channels` + capability). Preview send uses this as the third
+   * Yrf predicate.
+   */
+  isServerRegistered(serverName: string): boolean
   /** Register a resolver for a request ID. Returns unsubscribe. */
   onResponse(
     requestId: string,
@@ -160,10 +171,16 @@ export function shortRequestId(toolUseID: string): string {
  *
  * densable 2.1.211: neutralize bidi / zero-width / look-alike quotes so
  * tool inputs cannot visually alter the channel approval message.
+ *
+ * densable 2.1.234 #28/#29: walk through `redactSecretsForDisplay` (tAt)
+ * before stringify — high-confidence tokens mask even before shell
+ * delimiters; shell/path-looking captures stay visible so commands and
+ * destinations are not hidden by credential masking.
  */
 export function truncateForPreview(input: unknown): string {
   try {
-    const s = neutralizeChannelPreviewText(jsonStringify(input))
+    const redacted = redactSecretsDeep(input, redactSecretsForDisplay)
+    const s = neutralizeChannelPreviewText(jsonStringify(redacted))
     return s.length > 200 ? s.slice(0, 200) + '…' : s
   } catch {
     return '(unserializable)'
@@ -171,29 +188,55 @@ export function truncateForPreview(input: unknown): string {
 }
 
 /**
- * Filter MCP clients down to those that can relay permission prompts.
- * Three conditions, ALL required: connected + in the session's --channels
- * allowlist + declares BOTH capabilities. The second capability is the
- * server's explicit opt-in — a relay-only channel never becomes a
- * permission surface by accident (Kenneth's "users may be unpleasantly
- * surprised"). Centralized here so a future fourth condition lands once.
+ * densable `s3r` — truthy experimental capability. Explicit `false` is
+ * an opt-out (Kenneth: users may be unpleasantly surprised).
+ */
+export function hasExperimentalCapability(
+  capabilities: { experimental?: Record<string, unknown> } | undefined,
+  key: string,
+): boolean {
+  return !!capabilities?.experimental?.[key]
+}
+
+/**
+ * densable `M.protocolEra` producer. MCP v2 Client exposes
+ * `getProtocolEra()` at runtime; the published Client TS type may not.
+ * Unset / missing method is not `"modern"` — i3r/Yrf only skip the
+ * explicit modern era (no unsolicited notification path).
+ */
+export function readClientProtocolEra(
+  client: { getProtocolEra?: () => string | undefined } | null | undefined,
+): string | undefined {
+  return client?.getProtocolEra?.()
+}
+
+/**
+ * densable `Yrf`. ALL required: connected + session `--channels` + both
+ * experimental capabilities + inbound gate actually registered the
+ * handler (`isServerRegistered`) + `protocolEra !== "modern"`.
+ * A server can be on `--channels` and declare both caps but still fail
+ * era/provider/policy/allowlist — it must not receive permission_request.
  */
 export function filterPermissionRelayClients<
   T extends {
     type: string
     name: string
     capabilities?: { experimental?: Record<string, unknown> }
+    protocolEra?: string
   },
 >(
   clients: readonly T[],
   isInAllowlist: (name: string) => boolean,
+  isInboundAdmitted: (name: string) => boolean,
 ): (T & { type: 'connected' })[] {
   return clients.filter(
     (c): c is T & { type: 'connected' } =>
       c.type === 'connected' &&
       isInAllowlist(c.name) &&
-      Boolean(c.capabilities?.experimental?.['claude/channel']) &&
-      Boolean(c.capabilities?.experimental?.['claude/channel/permission']),
+      hasExperimentalCapability(c.capabilities, 'claude/channel') &&
+      hasExperimentalCapability(c.capabilities, 'claude/channel/permission') &&
+      isInboundAdmitted(c.name) &&
+      c.protocolEra !== 'modern',
   )
 }
 
@@ -210,13 +253,16 @@ export function filterPermissionRelayClients<
  * match against the pending map. No regex on CC's side — text in the
  * general channel can't accidentally approve anything.
  */
-export function createChannelPermissionCallbacks(): ChannelPermissionCallbacks {
+export function createChannelPermissionCallbacks(
+  isServerRegistered: (serverName: string) => boolean = () => false,
+): ChannelPermissionCallbacks {
   const pending = new Map<
     string,
     (response: ChannelPermissionResponse) => void
   >()
 
   return {
+    isServerRegistered,
     onResponse(requestId, handler) {
       // Lowercase here too — resolve() already does; asymmetry means a
       // future caller passing a mixed-case ID would silently never match.

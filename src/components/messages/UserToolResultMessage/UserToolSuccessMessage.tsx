@@ -3,8 +3,9 @@ import figures from 'figures';
 import * as React from 'react';
 import { SentryErrorBoundary } from 'src/components/SentryErrorBoundary.js';
 import { Box, Text, useTheme } from '@anthropic/ink';
+import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
 import { useAppState } from '../../../state/AppState.js';
-import { filterToolProgressMessages, type Tool, type Tools } from '../../../Tool.js';
+import { filterToolProgressMessages, toolMatchesName, type Tool, type Tools } from '../../../Tool.js';
 import type { NormalizedUserMessage, ProgressMessage } from '../../../types/message.js';
 import {
   deleteClassifierApproval,
@@ -119,7 +120,10 @@ export function UserToolSuccessMessage({
             )
           : null}
         {feature('TRANSCRIPT_CLASSIFIER')
-          ? yoloReason && (
+          ? // densable 2.1.234 #46: skip redundant line under Agent tool calls
+            // (SEA: Lrh && rrt.name !== di where di === Agent).
+            yoloReason &&
+            !toolMatchesName(tool, AGENT_TOOL_NAME) && (
               <MessageResponse height={1}>
                 <Text dimColor>Allowed by auto mode classifier</Text>
               </MessageResponse>

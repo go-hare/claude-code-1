@@ -1,14 +1,15 @@
 /**
  * densable 2.1.224 #7 — ListAgentsTool (wire name ListAgents; alias ListPeers).
+ * densable 2.1.234 #34 — incomplete session-list notes (CSf / cloud-failed / bridge incomplete).
  *
  * SEA: cy / qWu / IRs / f5b / m5b / yWp=10000 / toAutoClassifierInput "list agents"
- * Local discovery still uses UDS peer registry + bridge peers (listPeers path);
- * densable listAllPeers/formatForModel extras remain a future deepen if needed.
+ * Local discovery: UDS + local registry bridge + account bridge walk + cloud walk.
  */
 import { z } from 'zod/v4'
 import type { ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { listAgentsIncompleteNotes } from 'src/utils/sessionListIncompleteCopy.js'
 import {
   LIST_AGENTS_TOOL_NAME,
   LIST_PEERS_LEGACY_TOOL_NAME,
@@ -68,11 +69,25 @@ function resolvePeerStatusLabel(p: PeerInfo): string | undefined {
 /**
  * densable 2.1.225 listing — every row leads with `name [ref]`.
  * densable 2.1.229 — append offline/cloud when known.
+ * densable 2.1.234 #34 — append CSf / cloud-failed / account-incomplete notes.
  * Local peers still use address as the ref token when distinct from name.
  */
-function formatPeersListing(peers: PeerInfo[]): string {
+function formatPeersListing(
+  peers: PeerInfo[],
+  opts?: {
+    listTruncated?: boolean
+    cloudListFailed?: boolean
+    bridgeWalkIncomplete?: boolean
+  },
+): string {
+  const notes = listAgentsIncompleteNotes({
+    listTruncated: opts?.listTruncated,
+    cloudListFailed: opts?.cloudListFailed,
+    bridgeWalkIncomplete: opts?.bridgeWalkIncomplete,
+  })
   if (peers.length === 0) {
-    return 'No agents found.'
+    if (notes.length === 0) return 'No agents found.'
+    return `No agents found.\n${notes.map(n => `  ${n}`).join('\n')}`
   }
   const lines = peers.map(p => {
     const name = p.name?.trim() || p.address
@@ -84,10 +99,14 @@ function formatPeersListing(peers: PeerInfo[]): string {
     if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
     return bits.join(' ')
   })
-  return `Found ${lines.length} agent(s):\n${lines.join('\n')}`
+  let out = `Found ${lines.length} agent(s):\n${lines.join('\n')}`
+  if (notes.length > 0) {
+    out += `\n${notes.map(n => `  ${n}`).join('\n')}`
+  }
+  return out
 }
 
-/** @internal densable 2.1.229 tests */
+/** @internal densable 2.1.229 / 2.1.234 tests */
 export const __test = {
   formatPeersListing,
   resolvePeerStatusLabel,
@@ -159,9 +178,26 @@ export const ListAgentsTool = buildTool({
       require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
     const bridgePeers =
       require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
+    const cloudPeers =
+      require('src/utils/teleport/cloudPeerSessions.js') as typeof import('src/utils/teleport/cloudPeerSessions.js')
+    const { stripSessionPrefix } =
+      require('../SendMessageTool/nameResolve.js') as typeof import('../SendMessageTool/nameResolve.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
 
-    for (const peer of await udsClient.listPeers()) {
+    const accountStatus = { failed: false, truncated: false }
+    const [udsList, localBridge, accountBridge, cloudList] = await Promise.all([
+      udsClient.listPeers(),
+      bridgePeers.listBridgePeers(),
+      bridgePeers.listBridgePeerSessions(accountStatus).catch(() => {
+        accountStatus.failed = true
+        return [] as Awaited<
+          ReturnType<typeof bridgePeers.listBridgePeerSessions>
+        >
+      }),
+      cloudPeers.listCloudPeerSessions(),
+    ])
+
+    for (const peer of udsList) {
       if (!peer.messagingSocketPath) continue
       addPeer({
         address: udsMessaging.formatUdsAddress(peer.messagingSocketPath),
@@ -174,7 +210,7 @@ export const ListAgentsTool = buildTool({
       })
     }
 
-    for (const peer of await bridgePeers.listBridgePeers()) {
+    for (const peer of localBridge) {
       addPeer({
         address: peer.address,
         name: peer.name,
@@ -188,8 +224,51 @@ export const ListAgentsTool = buildTool({
       })
     }
 
+    // densable _Wa: account bridge rows (skip ones already mirrored locally)
+    const localBridgeBodies = new Set(
+      localBridge
+        .filter(p => p.address.startsWith('bridge:'))
+        .map(p => stripSessionPrefix(p.address.slice('bridge:'.length))),
+    )
+    for (const row of accountBridge) {
+      const body = stripSessionPrefix(row.id)
+      if (localBridgeBodies.has(body)) continue
+      addPeer({
+        address: `bridge:${row.id}`,
+        name: row.title?.trim() || undefined,
+        transport: 'bridge',
+        connected: row.connected,
+        status: row.connected === false ? 'offline' : row.status,
+      })
+    }
+
+    for (const row of cloudList.sessions) {
+      const body = stripSessionPrefix(row.id)
+      if (localBridgeBodies.has(body)) continue
+      if (seen.has(`bridge:${row.id}`) || seen.has(`cloud:${row.id}`)) continue
+      addPeer({
+        address: `cloud:${row.id}`,
+        name: row.title?.trim() || undefined,
+        transport: 'cloud',
+        connected: true,
+        status: 'cloud',
+      })
+    }
+
+    const listTruncated =
+      cloudList.truncated === true || accountStatus.truncated === true
+    const cloudListFailed = cloudPeers.isCloudListFailed(cloudList.unavailable)
+    const bridgeWalkIncomplete =
+      accountStatus.failed === true && accountBridge.length > 0
+
     return {
-      data: { listing: formatPeersListing(peers) },
+      data: {
+        listing: formatPeersListing(peers, {
+          listTruncated,
+          cloudListFailed,
+          bridgeWalkIncomplete,
+        }),
+      },
     }
   },
 })

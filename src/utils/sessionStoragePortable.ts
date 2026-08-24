@@ -372,8 +372,50 @@ export function getProjectsDir(): string {
   return join(getClaudeConfigHomeDir(), 'projects')
 }
 
+/** densable `nfy` — safe short project-dir override chars. */
+const PROJECT_DIR_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/
+/** densable `ofy` — Windows reserved device names. */
+const WIN_RESERVED_PROJECT_DIR_RE = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i
+
+/**
+ * densable `bws` — validate `CLAUDE_CODE_PROJECT_DIR_NAME` override.
+ * Empty / invalid / Windows-reserved → undefined (fall through to sanitizePath).
+ */
+export function sanitizeProjectDirNameOverride(
+  name: string | undefined | null,
+): string | undefined {
+  if (
+    !name ||
+    !PROJECT_DIR_NAME_RE.test(name) ||
+    WIN_RESERVED_PROJECT_DIR_RE.test(name)
+  ) {
+    return undefined
+  }
+  return name
+}
+
+/**
+ * densable `k6c` / `XLe` gate: only honor PROJECT_DIR_NAME when
+ * `CLAUDE_CONFIG_DIR` is set (hosts that already isolate config per session).
+ */
+export function getProjectDirNameOverride(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (!env.CLAUDE_CONFIG_DIR) return undefined
+  return sanitizeProjectDirNameOverride(env.CLAUDE_CODE_PROJECT_DIR_NAME)
+}
+
+/** densable `ify` — memoize key for project-dir override. */
+export function projectDirNameOverrideCacheKey(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return `${env.CLAUDE_CONFIG_DIR ?? ''}\0${env.CLAUDE_CODE_PROJECT_DIR_NAME ?? ''}`
+}
+
 export function getProjectDir(projectDir: string): string {
-  return join(getProjectsDir(), sanitizePath(projectDir))
+  // densable XLe: (CLAUDE_CONFIG_DIR ? bws(PROJECT_DIR_NAME) : void 0) ?? sanitize
+  const override = getProjectDirNameOverride()
+  return join(getProjectsDir(), override ?? sanitizePath(projectDir))
 }
 
 /**

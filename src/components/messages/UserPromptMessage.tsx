@@ -10,6 +10,7 @@ import { logError } from '../../utils/log.js';
 import { countCharInString } from '../../utils/stringUtils.js';
 import { MessageActionsSelectedContext } from '../messageActions.js';
 import { HighlightedThinkingText } from './HighlightedThinkingText.js';
+import { truncateUserPromptForDisplay } from './userPromptDisplay.js';
 
 type Props = {
   addMargin: boolean;
@@ -17,18 +18,6 @@ type Props = {
   isTranscriptMode?: boolean;
   timestamp?: string;
 };
-
-// Hard cap on displayed prompt text. Piping large files via stdin
-// (e.g. `cat 11k-line-file | claude`) creates a single user message whose
-// <Text> node the fullscreen Ink renderer must wrap/output on every frame,
-// causing 500ms+ keystroke latency. React.memo skips the React render but
-// the Ink output pass still iterates the full mounted text. Non-fullscreen
-// avoids this via <Static> (print-and-forget to terminal scrollback).
-// Head+tail because `{ cat file; echo prompt; } | claude` puts the user's
-// actual question at the end.
-const MAX_DISPLAY_CHARS = 10_000;
-const TRUNCATE_HEAD_CHARS = 2_500;
-const TRUNCATE_TAIL_CHARS = 2_500;
 
 export function UserPromptMessage({ addMargin, param: { text }, isTranscriptMode, timestamp }: Props): React.ReactNode {
   // REPL.tsx passes isBriefOnly={viewedTeammateTask ? false : isBriefOnly}
@@ -54,14 +43,8 @@ export function UserPromptMessage({ addMargin, param: { text }, isTranscriptMode
         !viewingAgentTaskIdState
       : false;
 
-  // Truncate before the early return so the hook order is stable.
-  const displayText = useMemo(() => {
-    if (text.length <= MAX_DISPLAY_CHARS) return text;
-    const head = text.slice(0, TRUNCATE_HEAD_CHARS);
-    const tail = text.slice(-TRUNCATE_TAIL_CHARS);
-    const hiddenLines = countCharInString(text, '\n', TRUNCATE_HEAD_CHARS) - countCharInString(tail, '\n');
-    return `${head}\n… +${hiddenLines} lines …\n${tail}`;
-  }, [text]);
+  // densable V3i: truncate to {head,hiddenLines,tail} (not string ellipsis).
+  const displayText = useMemo(() => truncateUserPromptForDisplay(text, countCharInString), [text]);
 
   const isSelected = useContext(MessageActionsSelectedContext);
 

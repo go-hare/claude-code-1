@@ -272,3 +272,61 @@ describe('isTuiModeEnabled', () => {
     expect(isTuiModeEnabled()).toBe(true)
   })
 })
+
+describe('densable 2.1.234 W4e/iyt refuse before persist', () => {
+  test('session deny rules refuse /tui on and leave marker absent', async () => {
+    const { callTui, getTuiMarkerPath } = await import('../index.js')
+    const { getEmptyToolPermissionContext } = await import('../../../Tool.js')
+    const carry = {
+      toolPermissionContext: {
+        ...getEmptyToolPermissionContext(),
+        alwaysDenyRules: { session: ['Bash'] },
+      },
+    }
+    const result = (await callTui('on', carry)) as {
+      type: string
+      value: string
+    }
+    expect(result.type).toBe('text')
+    expect(result.value).toContain('restrictions a restart')
+    expect(result.value).toContain('Nothing was changed')
+    expect(existsSync(getTuiMarkerPath())).toBe(false)
+  })
+
+  test('running local_agent refuse /tui on (iyt tasks)', async () => {
+    const { callTui, getTuiMarkerPath } = await import('../index.js')
+    const { getEmptyToolPermissionContext } = await import('../../../Tool.js')
+    const result = (await callTui('on', {
+      toolPermissionContext: getEmptyToolPermissionContext(),
+      tasks: {
+        t1: { type: 'local_agent', status: 'running' } as never,
+      },
+    })) as { type: string; value: string }
+    expect(result.type).toBe('text')
+    expect(result.value).toContain('work is running in the background')
+    expect(existsSync(getTuiMarkerPath())).toBe(false)
+  })
+
+  test('carryFromAppStore passes tasks + permission context', async () => {
+    const { carryFromAppStore } = await import(
+      '../../../components/FullscreenUpsellDialog.js'
+    )
+    const { getEmptyToolPermissionContext } = await import('../../../Tool.js')
+    const ctx = {
+      ...getEmptyToolPermissionContext(),
+      alwaysDenyRules: { session: ['Edit'] },
+    }
+    const carry = carryFromAppStore({
+      getState: () => ({
+        toolPermissionContext: ctx,
+        effortValue: 'high',
+        tasks: { a: { type: 'local_shell', status: 'running' } as never },
+      }),
+    })
+    expect(carry?.toolPermissionContext?.alwaysDenyRules.session).toEqual([
+      'Edit',
+    ])
+    expect(carry?.effort).toBe('high')
+    expect(carry?.tasks?.a).toBeTruthy()
+  })
+})

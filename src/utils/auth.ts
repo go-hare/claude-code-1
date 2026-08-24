@@ -325,6 +325,12 @@ export function getAnthropicApiKeyWithSource(
       !process.env.CLAUDE_CODE_OAUTH_TOKEN &&
       !process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR
     ) {
+      // densable: source-only probes (isAnthropicAuthEnabled / hasAnthropicApiKeyAuth
+      // pass skipRetrievingKeyFromApiKeyHelper) must not require CI keys —
+      // getUserContext #5 email injection calls getOauthAccountInfo soft-path.
+      if (opts.skipRetrievingKeyFromApiKeyHelper) {
+        return { key: null, source: 'none' }
+      }
       throw new Error(
         'ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN env var is required',
       )

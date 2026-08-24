@@ -27,7 +27,16 @@ import {
 import type { PaneBackendType } from '../utils/swarm/backends/types.js'
 import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js'
 import { getLeaderToolUseConfirmQueue } from '../utils/swarm/leaderPermissionBridge.js'
-import { sendPermissionResponseViaMailbox } from '../utils/swarm/permissionSync.js'
+import {
+  sendPermissionResponseViaMailbox,
+  sendSandboxPermissionResponseViaMailbox,
+} from '../utils/swarm/permissionSync.js'
+import {
+  SandboxNetworkVerdictCache,
+  classifySandboxNetworkAccess,
+  resolveSandboxNetworkAskDecision,
+  sandboxNetworkTranscriptWatermark,
+} from '../utils/sandbox/sandboxNetworkDecision.js'
 import {
   removeTeammateFromTeamFile,
   syncTeammateMode,
@@ -127,6 +136,11 @@ export function useInboxPoller({
   const setAppState = useSetAppState()
   const inboxMessageCount = useAppState(s => s.inbox.messages.length)
   const terminal = useTerminalNotification()
+  // densable `u.current` — Jvr cache for InboxPoller auto-mode classify
+  const sandboxNetworkVerdictCacheRef = useRef(new SandboxNetworkVerdictCache())
+  const lastSandboxPermissionContextRef = useRef(
+    store.getState().toolPermissionContext,
+  )
 
   const poll = useCallback(async () => {
     if (!enabled) return
@@ -135,6 +149,13 @@ export function useInboxPoller({
     const currentAppState = store.getState()
     const agentName = getAgentNameToPoll(currentAppState)
     if (!agentName) return
+
+    // densable: clear Jvr when permission context identity changes
+    const permissionCtx = currentAppState.toolPermissionContext
+    if (lastSandboxPermissionContextRef.current !== permissionCtx) {
+      sandboxNetworkVerdictCacheRef.current.clear()
+      lastSandboxPermissionContextRef.current = permissionCtx
+    }
 
     const unread = await readUnreadMessages(
       agentName,
@@ -408,7 +429,8 @@ export function useInboxPoller({
       }
     }
 
-    // Handle sandbox permission requests (leader side) - add to workerSandboxPermissions queue
+    // Handle sandbox permission requests (leader side).
+    // densable: wkr → allow/deny/classify auto-resolve; only queue when ask.
     if (
       sandboxPermissionRequests.length > 0 &&
       isTeamLead(currentAppState.teamContext)
@@ -416,6 +438,47 @@ export function useInboxPoller({
       logForDebugging(
         `[InboxPoller] Found ${sandboxPermissionRequests.length} sandbox permission request(s)`,
       )
+
+      const teamName = currentAppState.teamContext?.teamName
+      // densable Y(z): wkr/classify before queue; Tv0=bun([]) + EJ() tools
+      async function autoResolveSandboxHost(host: string): Promise<{
+        resolved: boolean | null
+        mode: string
+      }> {
+        const ctx = store.getState().toolPermissionContext
+        const decision = resolveSandboxNetworkAskDecision(
+          ctx.mode,
+          ctx.isBypassPermissionsModeAvailable,
+        )
+        const mode = ctx.mode
+        switch (decision) {
+          case 'allow':
+            return { resolved: true, mode }
+          case 'deny':
+            return { resolved: false, mode }
+          case 'classify': {
+            const emptyMessages: [] = []
+            const allow =
+              await sandboxNetworkVerdictCacheRef.current.getOrClassify(
+                host,
+                undefined,
+                sandboxNetworkTranscriptWatermark(emptyMessages),
+                () =>
+                  classifySandboxNetworkAccess(
+                    host,
+                    undefined,
+                    emptyMessages,
+                    getAllBaseTools(),
+                    ctx,
+                    new AbortController().signal,
+                  ),
+              )
+            return { resolved: allow, mode }
+          }
+          case 'ask':
+            return { resolved: null, mode }
+        }
+      }
 
       const newSandboxRequests: Array<{
         requestId: string
@@ -438,12 +501,28 @@ export function useInboxPoller({
           continue
         }
 
+        const host = parsed.hostPattern.host
+        const { resolved, mode } = await autoResolveSandboxHost(host)
+        if (resolved !== null) {
+          logForDebugging(
+            `[InboxPoller] Auto-resolving sandbox request ${parsed.requestId} (mode=${mode}, allow=${resolved})`,
+          )
+          void sendSandboxPermissionResponseViaMailbox(
+            parsed.workerName,
+            parsed.requestId,
+            host,
+            resolved,
+            teamName,
+          )
+          continue
+        }
+
         newSandboxRequests.push({
           requestId: parsed.requestId,
           workerId: parsed.workerId,
           workerName: parsed.workerName,
           workerColor: parsed.workerColor,
-          host: parsed.hostPattern.host,
+          host,
           createdAt: parsed.createdAt,
         })
       }

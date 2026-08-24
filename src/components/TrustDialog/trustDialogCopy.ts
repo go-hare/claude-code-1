@@ -91,6 +91,11 @@ export function formatCdRepoTrustNote(trustRoot: string): string {
 /**
  * Resolve whether to show a repository-root grant note for a workspace path.
  * Prefer canonical main-repo root (worktrees share project identity).
+ *
+ * densable 2.1.234 #23: callers must pass uncached probes
+ * (`findCanonicalGitRootUncached` / `findGitRootUncached` ≈ I8e / rHo).
+ * Injected cached `findGitRoot` / `findCanonicalGitRoot` (Yc / bd) can omit
+ * the note when the directory was first seen before `.git` existed.
  */
 export function resolveTrustRootNote(
   cwdPath: string,

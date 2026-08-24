@@ -653,9 +653,11 @@ export function registerCliHostCommands(
       },
     )
 
+  // densable 2.1.234 #44 — allowExcessArguments(false) rejects unexpected extras
   program
     .command('setup-token')
     .description(describe(['setup-token']))
+    .allowExcessArguments(false)
     .action(async () => {
       const [{ setupTokenHandler }, { createRoot }] = await Promise.all([
         import('../cli/handlers/util.js'),

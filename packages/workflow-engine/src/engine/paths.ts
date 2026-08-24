@@ -1,4 +1,39 @@
-import { resolve, sep } from 'node:path'
+import { resolve, sep, win32 } from 'node:path'
+
+/**
+ * densable `Jw` — NT object-manager `\??\` / `/??/`.
+ * Duplicated here: workflow-engine has zero core-layer runtime deps.
+ */
+export function isNtObjectNamespacePath(path: string): boolean {
+  return /^[\\/]\?\?[\\/]/.test(path)
+}
+
+/**
+ * densable `Dwe` — NT `\??\` including after win32.normalize when `??` remains.
+ */
+function isNtObjectNamespacePathNormalized(path: string): boolean {
+  if (isNtObjectNamespacePath(path)) return true
+  if (!path.includes('??')) return false
+  return isNtObjectNamespacePath(win32.normalize(path))
+}
+
+/**
+ * densable `su` — UNC-shaped or NT-object path.
+ */
+function isUncOrNtObjectPath(path: string): boolean {
+  return /^[\\/]{2}/.test(path) || isNtObjectNamespacePathNormalized(path)
+}
+
+/**
+ * densable workflow `s7t` gate: `su(e)||Jw(e)||bu(e)||bu(t)` (`bu` is densable stub false).
+ */
+export function isForbiddenWorkflowScriptPath(path: string): boolean {
+  return (
+    isUncOrNtObjectPath(path) ||
+    isNtObjectNamespacePath(path) ||
+    isNtObjectNamespacePathNormalized(path)
+  )
+}
 
 /**
  * Determine whether target, after resolution, is within base (including equal to base).

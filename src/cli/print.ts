@@ -908,11 +908,29 @@ export async function runHeadless(
         `  Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced.\n\n`,
     )
   } else if (SandboxManager.isSandboxingEnabled()) {
-    // Initialize sandbox with a callback that forwards network permission
-    // requests to the SDK host via the can_use_tool control_request protocol.
-    // This must happen after structuredIO is created so we can send requests.
+    // densable W4g(createSandboxAskCallback(...), getCtx, messagesRef, toolsRef)
+    // — mode allow/deny/classify before SDK ask; sessionAllowedHosts on allow.
     try {
-      await SandboxManager.initialize(structuredIO.createSandboxAskCallback())
+      const { wrapSandboxAskCallbackWithPermissionMode } = await import(
+        '../utils/sandbox/sandboxNetworkDecision.js'
+      )
+      const {
+        setSandboxNetworkHeadlessMessages,
+        setSandboxNetworkHeadlessTools,
+        getSandboxNetworkHeadlessMessages,
+        getSandboxNetworkHeadlessTools,
+      } = await import('../utils/sandbox/sandboxNetworkHeadlessRefs.js')
+      // densable T.current=[] / k.current=s before loadInitialMessages
+      setSandboxNetworkHeadlessMessages([])
+      setSandboxNetworkHeadlessTools(tools)
+      await SandboxManager.initialize(
+        wrapSandboxAskCallbackWithPermissionMode({
+          ask: structuredIO.createSandboxAskCallback(),
+          getPermissionContext: () => getAppState().toolPermissionContext,
+          getMessages: getSandboxNetworkHeadlessMessages,
+          getTools: getSandboxNetworkHeadlessTools,
+        }),
+      )
     } catch (err) {
       process.stderr.write(`\n❌ Sandbox Error: ${errorMessage(err)}\n`)
       gracefulShutdownSync(1, 'other')
@@ -1166,6 +1184,11 @@ export async function runHeadless(
       tool => !toolMatchesName(tool, options.permissionPromptToolName!),
     )
   }
+
+  // densable k.current=s after filteredTools final (W4g classify uses live tool pool)
+  void import('../utils/sandbox/sandboxNetworkHeadlessRefs.js').then(m => {
+    m.setSandboxNetworkHeadlessTools(filteredTools)
+  })
 
   // Install errors handlers to gracefully handle broken pipes (e.g., when parent process dies)
   registerProcessOutputErrorHandlers()
@@ -1570,6 +1593,11 @@ function runHeadlessStreaming(
   // include Assistant, User, Attachment, and Progress messages.
   // TODO: Clean up this code to avoid passing around a mutable array.
   const mutableMessages: Message[] = initialMessages
+
+  // densable T.current=P after loadInitialMessages — live array for W4g/lVr
+  void import('../utils/sandbox/sandboxNetworkHeadlessRefs.js').then(m => {
+    m.setSandboxNetworkHeadlessMessages(mutableMessages)
+  })
 
   // Seed the readFileState cache from the transcript (content the model saw,
   // with message timestamps) so getChangedFiles can detect external edits.
@@ -6571,6 +6599,7 @@ function handleChannelEnable(
     serverName,
     connection.capabilities,
     pluginSource,
+    connection.protocolEra,
   )
   if (gate.action === 'skip') {
     // Rollback — only remove the entry we appended.
@@ -6652,6 +6681,7 @@ function reregisterChannelHandlerAfterReconnect(
     connection.name,
     connection.capabilities,
     connection.config.pluginSource,
+    connection.protocolEra,
   )
   if (gate.action !== 'register') return
 

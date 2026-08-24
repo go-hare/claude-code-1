@@ -121,6 +121,7 @@ import { handleStopHooks } from './query/stopHooks.js'
 import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
+import { isTransientApiErrorMessage } from './services/goal/goalUnrecoverableClear.js'
 import { accumulateToolResultForMidTurn } from './query/accumulateToolResultForMidTurn.js'
 import { feature } from 'bun:bundle'
 import {
@@ -235,6 +236,8 @@ function getAutonomyTurnOutcome(params: {
       return { type: 'cancelled' }
     case 'model_error':
       return { type: 'failed', error: terminal.error }
+    case 'api_error':
+      return { type: 'failed', error: terminal.error ?? terminal.errorKind }
     default:
       return {
         type: 'failed',
@@ -2706,8 +2709,18 @@ async function* queryLoop(
       // error → hook blocking → retry → error → …
       if (lastMessage?.isApiErrorMessage) {
         void executeStopFailureHooks(lastMessage, toolUseContext)
+        // densable 2.1.234: {reason:"api_error",errorKind:Hr.error,isTransient:K1a(Hr)}
         return {
-          reason: 'model_error',
+          reason: 'api_error',
+          errorKind:
+            typeof lastMessage.error === 'string' ? lastMessage.error : null,
+          isTransient: isTransientApiErrorMessage({
+            apiErrorIsTransient: (
+              lastMessage as { apiErrorIsTransient?: boolean }
+            ).apiErrorIsTransient,
+            error:
+              typeof lastMessage.error === 'string' ? lastMessage.error : null,
+          }),
           error: lastMessage.error ?? lastMessage.apiError ?? 'api_error',
         }
       }

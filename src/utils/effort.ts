@@ -13,6 +13,7 @@ import {
   isChatGPTCodexReasoningModel,
 } from './model/chatgptModels.js'
 import {
+  areAllEffortLaunchPinsUnpinned,
   catalogHasEffort,
   catalogHasMaxEffort,
   catalogHasXhighEffort,
@@ -30,7 +31,11 @@ import {
 } from './model/effortCatalog.js'
 
 export type { EffortLevel }
-export { isEffortLaunchPinned, unpinAllEffortLaunchPins }
+export {
+  areAllEffortLaunchPinsUnpinned,
+  isEffortLaunchPinned,
+  unpinAllEffortLaunchPins,
+}
 
 // NOTE: 'ultracode' is NOT an effort level. It is a session-scoped multi-agent
 // orchestration opt-in injected by the harness (claude.ai/client) as a

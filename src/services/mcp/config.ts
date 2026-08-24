@@ -221,16 +221,155 @@ export function unwrapCcrProxyUrl(url: string): string {
  * and headers (same URL = same server regardless of auth).
  * Returns null only for configs with neither command nor url (sdk type).
  */
-export function getMcpServerSignature(config: McpServerConfig): string | null {
+/**
+ * densable WJe — signature for content-based MCP identity.
+ * Default ignores env (plugin CLAUDE_PLUGIN_ROOT noise). Pass
+ * `{ includeEnv: true }` only when env must distinguish two stdio servers.
+ */
+export function getMcpServerSignature(
+  config: McpServerConfig,
+  options?: { includeEnv?: boolean },
+): string | null {
+  if (
+    'configError' in config &&
+    (config as { configError?: unknown }).configError
+  ) {
+    return null
+  }
   const cmd = getServerCommandArray(config)
   if (cmd) {
-    return `stdio:${jsonStringify(cmd)}`
+    if (options?.includeEnv === false || options?.includeEnv === undefined) {
+      // densable WJe includeEnv!==true → command only
+      return `stdio:${jsonStringify(cmd)}`
+    }
+    const envEntries = Object.entries(
+      (config as McpStdioServerConfig).env ?? {},
+    )
+      .filter(
+        ([key]) => key !== 'CLAUDE_PLUGIN_ROOT' && key !== 'CLAUDE_PLUGIN_DATA',
+      )
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    const envSuffix =
+      envEntries.length > 0
+        ? `:${jsonStringify(Object.fromEntries(envEntries))}`
+        : ''
+    return `stdio:${jsonStringify(cmd)}${envSuffix}`
   }
   const url = getServerUrl(config)
   if (url) {
     return `url:${unwrapCcrProxyUrl(url)}`
   }
   return null
+}
+
+/**
+ * densable xLv — human endpoint label for diagnostics (url or `command args`).
+ */
+export function formatMcpServerEndpoint(config: McpServerConfig): string {
+  const url = getServerUrl(config)
+  if (url) return url
+  const cmd = getServerCommandArray(config)
+  if (cmd) return cmd.join(' ')
+  return config.type ?? 'unknown'
+}
+
+/**
+ * densable cHr — URL origin only (no path/query/userinfo) for connection-failure UI.
+ */
+export function getMcpServerUrlOrigin(
+  config: Pick<McpServerConfig, never> | { url?: unknown },
+): string | undefined {
+  if (!('url' in config) || typeof config.url !== 'string') return undefined
+  try {
+    return new URL(config.url).origin
+  } catch {
+    return undefined
+  }
+}
+
+/** densable CYs / K0 — safe `claude <cmd> <name> [args]` suggestion. */
+function formatClaudeCliSuggestion(
+  command: string,
+  serverName: string,
+  extraArgs?: string,
+): string | null {
+  if (!/^\w[\w.@-]*$/.test(serverName)) return null
+  return `claude ${command} ${serverName}${extraArgs ? ` ${extraArgs}` : ''}`
+}
+
+type McpScopeConflictInput = {
+  scope: ConfigScope
+  /** Usually expanded (runtime) servers — used for signature compare. */
+  servers: Record<string, McpServerConfig>
+  /**
+   * densable displayServers — unexpanded configs so warnings show `${VAR}`
+   * rather than resolved secrets.
+   */
+  displayServers: Record<string, McpServerConfig>
+}
+
+/**
+ * densable Gpi — same server name across scopes with different endpoints.
+ * Endpoint labels come from `displayServers` (expandVars:false).
+ */
+export function getMcpScopeConflicts(
+  scopes: McpScopeConflictInput[],
+): ValidationError[] {
+  const byName = new Map<
+    string,
+    Array<{ scope: ConfigScope; sig: string; endpoint: string }>
+  >()
+
+  for (const { scope, servers, displayServers } of scopes) {
+    for (const [name, config] of Object.entries(servers)) {
+      const sig = getMcpServerSignature(config, { includeEnv: false })
+      if (!sig) continue
+      let entries = byName.get(name)
+      if (!entries) {
+        entries = []
+        byName.set(name, entries)
+      }
+      const display = displayServers[name]
+      entries.push({
+        scope,
+        sig,
+        endpoint: display
+          ? formatMcpServerEndpoint(display)
+          : (config.type ?? 'unknown'),
+      })
+    }
+  }
+
+  const conflicts: ValidationError[] = []
+  for (const [name, entries] of byName) {
+    if (entries.length < 2) continue
+    if (new Set(entries.map(e => e.sig)).size < 2) continue
+
+    const suggestions = entries
+      .map(e => formatClaudeCliSuggestion('mcp remove', name, `-s ${e.scope}`))
+      .filter((s): s is string => s !== null)
+
+    conflicts.push({
+      path: `mcpServers.${name}`,
+      message: `Server "${name}" is defined in multiple scopes with different endpoints: ${entries
+        .map(e => `${e.scope} (${e.endpoint})`)
+        .join(
+          ', ',
+        )}. OAuth tokens are stored per endpoint, so authenticating in one context will not carry over.`,
+      suggestion:
+        suggestions.length > 0
+          ? `Keep the correct endpoint and remove the others: ${suggestions
+              .map(s => `\`${s}\``)
+              .join(' or ')}`
+          : 'Keep the correct endpoint and remove the others from the scopes listed above.',
+      mcpErrorMetadata: {
+        scope: entries[0]!.scope,
+        serverName: name,
+        severity: 'warning',
+      },
+    })
+  }
+  return conflicts
 }
 
 /**
@@ -963,16 +1102,18 @@ export function getProjectMcpConfigsFromCwd(): {
 }
 
 /**
- * Get all MCP configurations from a specific scope
- * @param scope The configuration scope
- * @returns Servers with scope information and any validation errors
+ * densable hP / SZp — MCP configs for one scope.
+ * Pass `{ expandVars: false }` for diagnostics that must show configured
+ * `${VAR}` forms (densable 2.1.234 #13 displayServers).
  */
 export function getMcpConfigsByScope(
   scope: 'project' | 'user' | 'local' | 'enterprise',
+  options?: { expandVars?: boolean },
 ): {
   servers: Record<string, ScopedMcpServerConfig>
   errors: ValidationError[]
 } {
+  const expandVars = options?.expandVars ?? true
   // Check if this source is enabled
   const sourceMap: Record<
     string,
@@ -1007,7 +1148,7 @@ export function getMcpConfigsByScope(
 
         const { config, errors } = parseMcpConfigFromFilePath({
           filePath: mcpJsonPath,
-          expandVars: true,
+          expandVars,
           scope: 'project',
         })
 
@@ -1049,7 +1190,7 @@ export function getMcpConfigsByScope(
 
       const { config, errors } = parseMcpConfig({
         configObject: { mcpServers },
-        expandVars: true,
+        expandVars,
         scope: 'user',
       })
 
@@ -1066,7 +1207,7 @@ export function getMcpConfigsByScope(
 
       const { config, errors } = parseMcpConfig({
         configObject: { mcpServers },
-        expandVars: true,
+        expandVars,
         scope: 'local',
       })
 
@@ -1080,7 +1221,7 @@ export function getMcpConfigsByScope(
 
       const { config, errors } = parseMcpConfigFromFilePath({
         filePath: enterpriseMcpPath,
-        expandVars: true,
+        expandVars,
         scope: 'enterprise',
       })
 

@@ -39,6 +39,11 @@ import { accessSync } from 'fs'
 import { onCwdChangedForHooks } from './hooks/fileChangedWatcher.js'
 import { getClaudeTempDirName } from './permissions/filesystem.js'
 import { getPlatform } from './platform.js'
+import {
+  hasPathDotSegment,
+  isNetworkUncPath,
+  isNtObjectNamespacePath,
+} from './path.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
 import { invalidateSessionEnvCache } from './sessionEnvironment.js'
 import { createBashShellProvider } from './shell/bashProvider.js'
@@ -577,10 +582,13 @@ export async function exec(
           if (getPlatform() === 'windows') {
             newCwd = posixPathToWindowsPath(newCwd)
           }
-          // cwd is NFC-normalized (setCwdState); newCwd from `pwd -P` may be
-          // NFD on macOS APFS. Normalize before comparing so Unicode paths
-          // don't false-positive as "changed" on every command.
-          if (newCwd.normalize('NFC') !== cwd) {
+          // densable lMp: reject unsafe shell cwd read-back before setCwd
+          if (!isSafeShellCwdReadBack(newCwd, cwd)) {
+            // already logged inside helper
+          } else if (newCwd.normalize('NFC') !== cwd) {
+            // cwd is NFC-normalized (setCwdState); newCwd from `pwd -P` may be
+            // NFD on macOS APFS. Normalize before comparing so Unicode paths
+            // don't false-positive as "changed" on every command.
             setCwd(newCwd, cwd)
             invalidateSessionEnvCache()
             void onCwdChangedForHooks(cwd, newCwd)
@@ -619,6 +627,50 @@ export async function exec(
       stderr: errorMessage(error),
     })
   }
+}
+
+/**
+ * densable `lMp` — validate shell cwd read-back before applying setCwd.
+ * Rejects NT-namespace / network UNC / dot-segment spellings (warn + ignore).
+ * densable also checks foreign automount (`Q8`) and network symlink (`C2`);
+ * local `bu`/`wwo` stubs make those no-ops — skip inventing them.
+ */
+export function isSafeShellCwdReadBack(
+  readBack: string,
+  previousCwd: string,
+): boolean {
+  void previousCwd
+  const candidates =
+    getPlatform() === 'windows' ? [readBack] : [readBack.replace(/^\/+/, '/')]
+  for (const candidate of candidates) {
+    if (hasPathDotSegment(candidate)) {
+      logForDebugging('shell cwd read-back contains a dot-segment; ignoring', {
+        level: 'warn',
+      })
+      return false
+    }
+    if (isNtObjectNamespacePath(candidate)) {
+      logForDebugging(
+        'shell cwd read-back is an NT-namespace device path; ignoring',
+        { level: 'warn' },
+      )
+      return false
+    }
+    // densable: o&&qh(i)&&wwr(i,r) — network path differing from prior host
+    if (getPlatform() === 'windows' && isNetworkUncPath(candidate)) {
+      logForDebugging('shell cwd read-back is a network path; ignoring', {
+        level: 'warn',
+      })
+      return false
+    }
+  }
+  if (!isAbsolute(readBack)) {
+    logForDebugging('shell cwd read-back is not an absolute path; ignoring', {
+      level: 'warn',
+    })
+    return false
+  }
+  return true
 }
 
 /**

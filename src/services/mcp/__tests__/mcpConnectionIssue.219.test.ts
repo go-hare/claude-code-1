@@ -89,11 +89,13 @@ describe('densable 2.1.219 mSp formatFailedMcpIssue', () => {
 })
 
 describe('densable 2.1.219 Ujo formatFailedMcpReconnectIssue', () => {
-  test('includes URL for non-hidden codes', () => {
+  test('includes URL origin only for non-hidden codes (densable #13 cHr)', () => {
     expect(
       formatFailedMcpReconnectIssue({
         errorCode: '503',
-        config: { url: 'https://mcp.example.com' },
+        config: {
+          url: 'https://user:secret@mcp.example.com/v1/mcp?token=abc',
+        },
       }),
     ).toBe('HTTP 503 at https://mcp.example.com')
   })

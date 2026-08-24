@@ -22,12 +22,17 @@ import { type ChannelEntry, getAllowedChannels } from '../../bootstrap/state.js'
 import { CHANNEL_TAG } from '../../constants/xml.js'
 import { getSubscriptionType } from '../../utils/auth.js'
 import { lazySchema } from '../../utils/lazySchema.js'
+import { getAPIProvider } from '../../utils/model/providers.js'
 import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
+import { getSettingsForSource } from '../../utils/settings/settings.js'
 import { escapeXmlAttr } from '../../utils/xml.js'
 import {
   type ChannelAllowlistEntry,
   getChannelAllowlist,
+  isBuiltinWeixinChannel,
+  isChannelsEnabled,
 } from './channelAllowlist.js'
+import { hasExperimentalCapability } from './channelPermissions.js'
 
 /** densable/v2: string method for setNotificationHandler first arg. */
 export const CHANNEL_MESSAGE_METHOD = 'notifications/claude/channel'
@@ -177,20 +182,107 @@ export function getEffectiveChannelAllowlist(
   return { entries: getChannelAllowlist(), source: 'ledger' }
 }
 
-export type ChannelGateResult =
-  | { action: 'register' }
-  | {
-      action: 'skip'
-      kind:
-        | 'capability'
-        | 'disabled'
-        | 'auth'
-        | 'policy'
-        | 'session'
-        | 'marketplace'
-        | 'allowlist'
-      reason: string
+export type ChannelGateKind =
+  | 'capability'
+  | 'era'
+  | 'provider'
+  | 'disabled'
+  | 'auth'
+  | 'policy'
+  | 'session'
+  | 'marketplace'
+  | 'allowlist'
+
+export type ChannelGateSkip = {
+  action: 'skip'
+  kind: ChannelGateKind
+  reason: string
+}
+
+/** densable i3r allowlist skip — kind is the literal, not the wide union. */
+export type ChannelAllowlistSkip = {
+  action: 'skip'
+  kind: 'allowlist'
+  reason: string
+}
+
+export type ChannelGateResult = { action: 'register' } | ChannelGateSkip
+
+/**
+ * densable `t2a` — only these skip kinds actually tear down handlers.
+ * Soft skips (policy/session/marketplace/allowlist/auth) preserve a
+ * previously registered inbound handler so a mid-session re-gate does
+ * not drop a still-trusted channel.
+ */
+export function isChannelGateHardRevocation(kind: ChannelGateKind): boolean {
+  return (
+    kind === 'provider' ||
+    kind === 'disabled' ||
+    kind === 'capability' ||
+    kind === 'era'
+  )
+}
+
+/**
+ * densable `Kir` team/enterprise branch only: managed orgs must set
+ * `channelsEnabled: true`. Gold also has a non-Yi residual
+ * (`policy !== null && channelsEnabled !== true`) that would block
+ * anyone with a policy file — do not port that.
+ */
+export function isChannelsPolicyBlocked(
+  policy: { channelsEnabled?: boolean } | null | undefined,
+  subscriptionType: ReturnType<typeof getSubscriptionType>,
+): boolean {
+  return (
+    (subscriptionType === 'team' || subscriptionType === 'enterprise') &&
+    policy?.channelsEnabled !== true
+  )
+}
+
+/**
+ * densable i3r allowlist half. `dev` entries bypass. Builtin weixin
+ * always passes (existing product, not gold). Org list replaces ledger
+ * only for team/enterprise when `allowedChannelPlugins` is set
+ * (`getEffectiveChannelAllowlist` — stricter than gold `g4n`).
+ */
+export function evaluateChannelAllowlistSkip(
+  entry: ChannelEntry,
+  pluginSource: string | undefined,
+  policy:
+    | { allowedChannelPlugins?: ChannelAllowlistEntry[] }
+    | null
+    | undefined,
+  subscriptionType: ReturnType<typeof getSubscriptionType>,
+): ChannelAllowlistSkip | null {
+  if (entry.dev) return null
+  if (entry.kind === 'plugin') {
+    if (isBuiltinWeixinChannel(pluginSource)) return null
+    const { entries, source } = getEffectiveChannelAllowlist(
+      subscriptionType,
+      policy?.allowedChannelPlugins,
+    )
+    if (
+      entries.some(
+        c => c.plugin === entry.name && c.marketplace === entry.marketplace,
+      )
+    ) {
+      return null
     }
+    return {
+      action: 'skip',
+      kind: 'allowlist',
+      reason:
+        source === 'org'
+          ? `plugin ${entry.name}@${entry.marketplace} is not on your org's approved channels list (set allowedChannelPlugins in managed settings)`
+          : `plugin ${entry.name}@${entry.marketplace} is not on the approved channels allowlist (use --dangerously-load-development-channels for local dev)`,
+    }
+  }
+  return {
+    action: 'skip',
+    kind: 'allowlist',
+    reason: `server ${entry.name} is not on the approved channels allowlist (use --dangerously-load-development-channels for local dev)`,
+  }
+}
 
 /**
  * Match a connected MCP server against the user's parsed --channels entries.
@@ -213,16 +305,14 @@ export function findChannelEntry(
 }
 
 /**
- * Gate an MCP server's channel-notification path. Caller checks
- * feature('KAIROS') || feature('KAIROS_CHANNELS') first (build-time
- * elimination). Gate order: capability → runtime gate (tengu_harbor) →
- * auth (OAuth only) → org policy → session --channels → allowlist.
- * API key users are blocked at the auth layer — channels requires
- * claude.ai auth; console orgs have no admin opt-in surface yet.
+ * densable `i3r`. Caller checks feature('KAIROS') || feature('KAIROS_CHANNELS')
+ * first. Order: capability → era → provider → tengu_harbor → org policy →
+ * session --channels → marketplace → allowlist.
  *
  *   skip      Not a channel server, or managed org hasn't opted in, or
- *             not in session --channels. Connection stays up; handler
- *             not registered.
+ *             not in session --channels / allowlist. Connection stays up;
+ *             handler not registered (unless a prior register is preserved
+ *             on a soft skip — see `isChannelGateHardRevocation`).
  *   register  Subscribe to notifications/claude/channel.
  *
  * Which servers can connect at all is governed by allowedMcpServers —
@@ -230,14 +320,15 @@ export function findChannelEntry(
  */
 export function gateChannelServer(
   serverName: string,
-  capabilities: ServerCapabilities | undefined,
+  capabilities:
+    | ServerCapabilities
+    | { experimental?: Record<string, unknown> }
+    | undefined,
   pluginSource: string | undefined,
+  protocolEra?: string,
 ): ChannelGateResult {
-  // Channel servers declare `experimental['claude/channel']: {}` (MCP's
-  // presence-signal idiom — same as `tools: {}`). Truthy covers `{}` and
-  // `true`; absent/undefined/explicit-`false` all fail. Key matches the
-  // notification method namespace (notifications/claude/channel).
-  if (!capabilities?.experimental?.['claude/channel']) {
+  // densable t3r / s3r — truthy covers `{}` and `true`; explicit false opts out.
+  if (!hasExperimentalCapability(capabilities, 'claude/channel')) {
     return {
       action: 'skip',
       kind: 'capability',
@@ -245,9 +336,41 @@ export function gateChannelServer(
     }
   }
 
-  // User-level session opt-in. A server must be explicitly listed in
-  // --channels to push inbound this session — protects against a trusted
-  // server surprise-adding the capability.
+  if (protocolEra === 'modern') {
+    return {
+      action: 'skip',
+      kind: 'era',
+      reason:
+        'connection negotiated a modern protocol revision with no unsolicited notification path',
+    }
+  }
+
+  if (getAPIProvider() !== 'firstParty') {
+    return {
+      action: 'skip',
+      kind: 'provider',
+      reason: 'channels are not available on third-party providers',
+    }
+  }
+
+  if (!isChannelsEnabled()) {
+    return {
+      action: 'skip',
+      kind: 'disabled',
+      reason: 'channels feature is not currently available',
+    }
+  }
+
+  const policy = getSettingsForSource('policySettings')
+  if (isChannelsPolicyBlocked(policy, getSubscriptionType())) {
+    return {
+      action: 'skip',
+      kind: 'policy',
+      reason:
+        'channels not enabled by org policy (set channelsEnabled: true in managed settings)',
+    }
+  }
+
   const entry = findChannelEntry(serverName, getAllowedChannels())
   if (!entry) {
     return {
@@ -261,10 +384,7 @@ export function gateChannelServer(
     // Marketplace verification: the tag is intent (plugin:slack@anthropic),
     // the runtime name is just plugin:slack:X — could be slack@anthropic or
     // slack@evil depending on what's installed. Verify they match before
-    // trusting the tag for the allowlist check below. Source is stashed on
-    // the config at addPluginScopeToServers — undefined (non-plugin server,
-    // shouldn't happen for plugin-kind entry) or @-less (builtin/inline)
-    // both fail the comparison.
+    // trusting the tag for the allowlist check below.
     const actual = pluginSource
       ? parsePluginIdentifier(pluginSource).marketplace
       : undefined
@@ -276,6 +396,14 @@ export function gateChannelServer(
       }
     }
   }
+
+  const allowlistSkip = evaluateChannelAllowlistSkip(
+    entry,
+    pluginSource,
+    policy,
+    getSubscriptionType(),
+  )
+  if (allowlistSkip) return allowlistSkip
 
   return { action: 'register' }
 }

@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
-import { dirname } from 'path'
+import { dirname, win32 as pathWin32 } from 'path'
 import {
   getMainLoopModelOverride,
   getSessionId,
@@ -38,6 +38,7 @@ import {
 } from './commitAttribution.js'
 import { updateSessionName } from './concurrentSessions.js'
 import { getCwd } from './cwd.js'
+import { isNetworkUncPath, isNtObjectNamespacePath } from './path.js'
 import { getErrnoCode } from './errors.js'
 import {
   isHardIsolationPinRefuse,
@@ -357,6 +358,47 @@ type ResumeLoadResult = {
 }
 
 /**
+ * densable `k0c` / GGc — transcript/worktree path is network UNC or
+ * NT-namespace → do not chdir (warn). Returns true when unsafe.
+ */
+export function isUnsafeSessionRestorePath(path: string): boolean {
+  if (
+    isNetworkUncPath(path) ||
+    isNtObjectNamespacePath(path) ||
+    isNtObjectNamespacePath(pathWin32.normalize(path))
+  ) {
+    logForDebugging(
+      '[sessionRestore] transcript path is a network/NT-namespace path — not chdir-ing',
+      { level: 'warn' },
+    )
+    return true
+  }
+  return false
+}
+
+/**
+ * densable `dvr` — refuse cross-host session home shape (UNC / NT-object).
+ */
+export function isCrossHostSessionHomeShape(path: string): boolean {
+  const resolved = pathWin32.resolve(path)
+  return (
+    isUncOrNtObjectLike(path) ||
+    isUncOrNtObjectLike(resolved) ||
+    isNtObjectNamespacePath(path) ||
+    isNtObjectNamespacePath(resolved) ||
+    isNtObjectNamespacePath(pathWin32.normalize(path))
+  )
+}
+
+function isUncOrNtObjectLike(path: string): boolean {
+  return (
+    /^[\\/]{2}/.test(path) ||
+    isNtObjectNamespacePath(path) ||
+    (path.includes('??') && isNtObjectNamespacePath(pathWin32.normalize(path)))
+  )
+}
+
+/**
  * Restore the worktree working directory on resume. The transcript records
  * the last worktree enter/exit; if the session crashed while inside a
  * worktree (last entry = session object, not null), cd back into it.
@@ -380,6 +422,12 @@ export function restoreWorktreeForResume(
     return
   }
   if (!worktreeSession) return
+
+  // densable k0c / GGc — refuse network/NT worktree paths before chdir
+  if (isUnsafeSessionRestorePath(worktreeSession.worktreePath)) {
+    saveWorktreeState(null)
+    return
+  }
 
   const launchCwd = processLaunchCwd()
   const pin = probeIsolationWorktreePinSync(
@@ -520,10 +568,23 @@ export async function processResumedConversation(
       // When resuming from a different project directory (git worktrees,
       // cross-project), transcriptPath points to the actual file; its dirname
       // is the project dir. Otherwise the session lives in the current project.
-      switchSession(
-        asSessionId(sid),
-        opts.transcriptPath ? dirname(opts.transcriptPath) : null,
-      )
+      // densable k0c/dvr: refuse network/NT session-home shapes
+      let projectDirOverride: string | null = opts.transcriptPath
+        ? dirname(opts.transcriptPath)
+        : null
+      if (
+        projectDirOverride !== null &&
+        (isUnsafeSessionRestorePath(projectDirOverride) ||
+          isCrossHostSessionHomeShape(projectDirOverride) ||
+          (opts.transcriptPath !== undefined &&
+            isUnsafeSessionRestorePath(opts.transcriptPath)))
+      ) {
+        logForDebugging(
+          `Resume: refusing cross-host session home shape "${projectDirOverride}"`,
+        )
+        projectDirOverride = null
+      }
+      switchSession(asSessionId(sid), projectDirOverride)
       // Rename asciicast recording to match the resumed session ID so
       // getSessionRecordingPaths() can discover it during /share
       await renameRecordingForSession()

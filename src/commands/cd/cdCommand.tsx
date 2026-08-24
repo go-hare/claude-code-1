@@ -14,7 +14,7 @@ import type { ToolPermissionContext } from '../../Tool.js';
 import { getGlobalConfig, isPathTrusted, saveGlobalConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
 import { logForDebugging } from '../../utils/debug.js';
-import { findCanonicalGitRoot, findGitRoot, getIsGit } from '../../utils/git.js';
+import { findCanonicalGitRootUncached, findGitRootUncached, getIsGit } from '../../utils/git.js';
 import { reanchorGitFileWatcher } from '../../utils/git/gitFilesystem.js';
 import { expandPath, normalizePathForConfigKey } from '../../utils/path.js';
 import { logEvent } from '../../services/analytics/index.js';
@@ -47,11 +47,13 @@ function meta(s: string): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEP
 
 /**
  * densable Frn / aq — project config key for trust latch.
- * `aMe(pu(dir) ?? resolve(dir))` where pu = findCanonicalGitRoot, aMe = path key normalize.
+ * `aMe(I8e(dir) ?? resolve(dir))` where I8e = findCanonicalGitRootUncached
+ * (densable RYt/W9). Uncached so a negative LRU from "dir first seen before
+ * repo existed" cannot pin the wrong (non-repo) trust key (2.1.234 #23).
  * No findGitRoot fallback (densable only uses canonical git root).
  */
 export function projectTrustConfigKey(directory: string): string {
-  return normalizePathForConfigKey(findCanonicalGitRoot(directory) ?? resolve(directory));
+  return normalizePathForConfigKey(findCanonicalGitRootUncached(directory) ?? resolve(directory));
 }
 
 /** densable Omt — persist hasTrustDialogAccepted under aq(directory). */
@@ -452,7 +454,12 @@ export async function handleSetCwdControlRequest(
 
   const directory = n.directory;
   if (!isDirectoryTrusted(directory)) {
-    const { trustRoot, showRepoRootNote } = resolveTrustRootNote(directory, findCanonicalGitRoot, findGitRoot);
+    // densable I8e via resolveTrustRootNote — uncached rHo/Ydu for trust_root
+    const { trustRoot, showRepoRootNote } = resolveTrustRootNote(
+      directory,
+      findCanonicalGitRootUncached,
+      findGitRootUncached,
+    );
     const rootForWire = showRepoRootNote && !hasUnsafePathChars(trustRoot) ? trustRoot : undefined;
     if (!trustAccepted) {
       return {
@@ -588,7 +595,12 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
     return null;
   }
 
-  const { trustRoot, showRepoRootNote } = resolveTrustRootNote(directory, findCanonicalGitRoot, findGitRoot);
+  // densable JqE: trustRoot = I8e(resolve(i)) when distinct — uncached
+  const { trustRoot, showRepoRootNote } = resolveTrustRootNote(
+    directory,
+    findCanonicalGitRootUncached,
+    findGitRootUncached,
+  );
 
   return (
     <CdTrustPrompt

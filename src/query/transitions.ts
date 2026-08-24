@@ -3,12 +3,24 @@ export type Terminal =
   | { reason: 'blocking_limit' }
   | { reason: 'image_error' }
   | { reason: 'model_error'; error?: unknown }
+  /** densable 2.1.234 — isApiErrorMessage terminal (LMv/pXp). */
+  | {
+      reason: 'api_error'
+      errorKind?: string | null
+      isTransient?: boolean
+      error?: unknown
+    }
   | { reason: 'aborted_streaming' }
   | { reason: 'aborted_tools' }
   | { reason: 'prompt_too_long' }
   | { reason: 'stop_hook_prevented' }
   | { reason: 'hook_stopped' }
   | { reason: 'max_turns'; turnCount: number }
+  /** densable terminal reasons referenced by LMv (may be returned by other paths). */
+  | { reason: 'malformed_tool_use_exhausted' }
+  | { reason: 'tool_deferred' }
+  | { reason: 'background_requested' }
+  | { reason: 'rapid_refill_breaker' }
 
 export type Continue =
   | { reason: 'collapse_drain_retry'; committed: number }

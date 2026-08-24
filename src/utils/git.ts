@@ -24,63 +24,72 @@ import { whichSync } from './which.js'
 
 const GIT_ROOT_NOT_FOUND = Symbol('git-root-not-found')
 
-const findGitRootImpl = memoizeWithLRU(
-  (startPath: string): string | typeof GIT_ROOT_NOT_FOUND => {
-    const startTime = Date.now()
-    logForDiagnosticsNoPII('info', 'find_git_root_started')
+/**
+ * densable `Kdu` — walk for `.git` without reading/writing the LRU.
+ * Cached path is `Yc`/`findGitRoot`; trust prompts use uncached `rHo`/`I8e`
+ * so a negative hit from "directory first seen before the repository existed"
+ * cannot omit the repository-wide scope warning (2.1.234 #23).
+ */
+function probeGitRoot(startPath: string): string | typeof GIT_ROOT_NOT_FOUND {
+  const startTime = Date.now()
+  logForDiagnosticsNoPII('info', 'find_git_root_started')
 
-    let current = resolve(startPath)
-    const root = current.substring(0, current.indexOf(sep) + 1) || sep
-    let statCount = 0
+  let current = resolve(startPath)
+  const root = current.substring(0, current.indexOf(sep) + 1) || sep
+  let statCount = 0
 
-    while (current !== root) {
-      try {
-        const gitPath = join(current, '.git')
-        statCount++
-        const stat = statSync(gitPath)
-        // .git can be a directory (regular repo) or file (worktree/submodule)
-        if (stat.isDirectory() || stat.isFile()) {
-          logForDiagnosticsNoPII('info', 'find_git_root_completed', {
-            duration_ms: Date.now() - startTime,
-            stat_count: statCount,
-            found: true,
-          })
-          return current.normalize('NFC')
-        }
-      } catch {
-        // .git doesn't exist at this level, continue up
-      }
-      const parent = dirname(current)
-      if (parent === current) {
-        break
-      }
-      current = parent
-    }
-
-    // Check root directory as well
+  while (current !== root) {
     try {
-      const gitPath = join(root, '.git')
+      const gitPath = join(current, '.git')
       statCount++
       const stat = statSync(gitPath)
+      // .git can be a directory (regular repo) or file (worktree/submodule)
       if (stat.isDirectory() || stat.isFile()) {
         logForDiagnosticsNoPII('info', 'find_git_root_completed', {
           duration_ms: Date.now() - startTime,
           stat_count: statCount,
           found: true,
         })
-        return root.normalize('NFC')
+        return current.normalize('NFC')
       }
     } catch {
-      // .git doesn't exist at root
+      // .git doesn't exist at this level, continue up
     }
+    const parent = dirname(current)
+    if (parent === current) {
+      break
+    }
+    current = parent
+  }
 
-    logForDiagnosticsNoPII('info', 'find_git_root_completed', {
-      duration_ms: Date.now() - startTime,
-      stat_count: statCount,
-      found: false,
-    })
-    return GIT_ROOT_NOT_FOUND
-  },
+  // Check root directory as well
+  try {
+    const gitPath = join(root, '.git')
+    statCount++
+    const stat = statSync(gitPath)
+    if (stat.isDirectory() || stat.isFile()) {
+      logForDiagnosticsNoPII('info', 'find_git_root_completed', {
+        duration_ms: Date.now() - startTime,
+        stat_count: statCount,
+        found: true,
+      })
+      return root.normalize('NFC')
+    }
+  } catch {
+    // .git doesn't exist at root
+  }
+
+  logForDiagnosticsNoPII('info', 'find_git_root_completed', {
+    duration_ms: Date.now() - startTime,
+    stat_count: statCount,
+    found: false,
+  })
+  return GIT_ROOT_NOT_FOUND
+}
+
+const findGitRootImpl = memoizeWithLRU(
+  (startPath: string): string | typeof GIT_ROOT_NOT_FOUND =>
+    probeGitRoot(startPath),
   path => path,
   50,
 )
@@ -93,6 +102,9 @@ const findGitRootImpl = memoizeWithLRU(
  * Memoized per startPath with an LRU cache (max 50 entries) to prevent
  * unbounded growth — gitDiff calls this with dirname(file), so editing many
  * files across different directories would otherwise accumulate entries forever.
+ *
+ * densable `Yc`. Trust prompts / trust keys use {@link findGitRootUncached}
+ * (`rHo`) so negative LRU hits cannot suppress a later-appeared repository.
  */
 export const findGitRoot = createFindGitRoot()
 
@@ -109,6 +121,27 @@ function createFindGitRoot(): {
 }
 
 /**
+ * densable `rHo` — uncached git-root walk (`Kdu` without `cTt`/`rootByPath`).
+ * Does not read or write the LRU. Used by trust surfaces (`I8e`).
+ */
+export function findGitRootUncached(startPath: string): string | null {
+  const result = probeGitRoot(startPath)
+  return result === GIT_ROOT_NOT_FOUND ? null : result
+}
+
+/**
+ * densable `Rat` — if the LRU holds a negative miss for `startPath`, drop it
+ * and re-probe via the cached path (`Yc`). Positive hits stay cached.
+ */
+export function refreshFindGitRoot(startPath: string): string | null {
+  const key = startPath
+  if (findGitRootImpl.cache.get(key) === GIT_ROOT_NOT_FOUND) {
+    findGitRootImpl.cache.delete(key)
+  }
+  return findGitRoot(startPath)
+}
+
+/**
  * Resolve a git root to the canonical main repository root.
  * For a regular repo this is a no-op. For a worktree, follows the
  * `.git` file → `gitdir:` → `commondir` chain to find the main repo's
@@ -117,67 +150,72 @@ function createFindGitRoot(): {
  * Submodules (`.git` is a file but no `commondir`) fall through to the
  * input root, which is correct since submodules are separate repos.
  *
- * Memoized with a small LRU to avoid repeated file reads on the hot
- * path (permission checks, prompt building).
+ * densable `Ydu` (uncached). Memoized wrapper is {@link resolveCanonicalRoot}.
  */
-const resolveCanonicalRoot = memoizeWithLRU(
-  (gitRoot: string): string => {
-    try {
-      // In a worktree, .git is a file containing: gitdir: <path>
-      // In a regular repo, .git is a directory (readFileSync throws EISDIR).
-      const gitContent = readFileSync(join(gitRoot, '.git'), 'utf-8').trim()
-      if (!gitContent.startsWith('gitdir:')) {
-        return gitRoot
-      }
-      const worktreeGitDir = resolve(
-        gitRoot,
-        gitContent.slice('gitdir:'.length).trim(),
-      )
-      // commondir points to the shared .git directory (relative to worktree gitdir).
-      // Submodules have no commondir (readFileSync throws ENOENT) → fall through.
-      const commonDir = resolve(
-        worktreeGitDir,
-        readFileSync(join(worktreeGitDir, 'commondir'), 'utf-8').trim(),
-      )
-      // SECURITY: The .git file and commondir are attacker-controlled in a
-      // cloned/downloaded repo. Without validation, a malicious repo can point
-      // commondir at any path the victim has trusted, bypassing the trust
-      // dialog and executing hooks from .claude/settings.json on startup.
-      //
-      // Validate the structure matches what `git worktree add` creates:
-      //   1. worktreeGitDir is a direct child of <commonDir>/worktrees/
-      //      → ensures the commondir file we read lives inside the resolved
-      //        common dir, not inside the attacker's repo
-      //   2. <worktreeGitDir>/gitdir points back to <gitRoot>/.git
-      //      → ensures an attacker can't borrow a victim's existing worktree
-      //        entry by guessing its path
-      // Both are required: (1) alone fails if victim has a worktree of the
-      // trusted repo; (2) alone fails because attacker controls worktreeGitDir.
-      if (resolve(dirname(worktreeGitDir)) !== join(commonDir, 'worktrees')) {
-        return gitRoot
-      }
-      // Git writes gitdir with strbuf_realpath() (symlinks resolved), but
-      // gitRoot from findGitRoot() is only lexically resolved. Realpath gitRoot
-      // so legitimate worktrees accessed via a symlinked path (e.g. macOS
-      // /tmp → /private/tmp) aren't rejected. Realpath the directory then join
-      // '.git' — realpathing the .git file itself would follow a symlinked .git
-      // and let an attacker borrow a victim's back-link.
-      const backlink = realpathSync(
-        readFileSync(join(worktreeGitDir, 'gitdir'), 'utf-8').trim(),
-      )
-      if (backlink !== join(realpathSync(gitRoot), '.git')) {
-        return gitRoot
-      }
-      // Bare-repo worktrees: the common dir isn't inside a working directory.
-      // Use the common dir itself as the stable identity (anthropics/claude-code#27994).
-      if (basename(commonDir) !== '.git') {
-        return commonDir.normalize('NFC')
-      }
-      return dirname(commonDir).normalize('NFC')
-    } catch {
+function resolveCanonicalRootImpl(gitRoot: string): string {
+  try {
+    // In a worktree, .git is a file containing: gitdir: <path>
+    // In a regular repo, .git is a directory (readFileSync throws EISDIR).
+    const gitContent = readFileSync(join(gitRoot, '.git'), 'utf-8').trim()
+    if (!gitContent.startsWith('gitdir:')) {
       return gitRoot
     }
-  },
+    const worktreeGitDir = resolve(
+      gitRoot,
+      gitContent.slice('gitdir:'.length).trim(),
+    )
+    // commondir points to the shared .git directory (relative to worktree gitdir).
+    // Submodules have no commondir (readFileSync throws ENOENT) → fall through.
+    const commonDir = resolve(
+      worktreeGitDir,
+      readFileSync(join(worktreeGitDir, 'commondir'), 'utf-8').trim(),
+    )
+    // SECURITY: The .git file and commondir are attacker-controlled in a
+    // cloned/downloaded repo. Without validation, a malicious repo can point
+    // commondir at any path the victim has trusted, bypassing the trust
+    // dialog and executing hooks from .claude/settings.json on startup.
+    //
+    // Validate the structure matches what `git worktree add` creates:
+    //   1. worktreeGitDir is a direct child of <commonDir>/worktrees/
+    //      → ensures the commondir file we read lives inside the resolved
+    //        common dir, not inside the attacker's repo
+    //   2. <worktreeGitDir>/gitdir points back to <gitRoot>/.git
+    //      → ensures an attacker can't borrow a victim's existing worktree
+    //        entry by guessing its path
+    // Both are required: (1) alone fails if victim has a worktree of the
+    // trusted repo; (2) alone fails because attacker controls worktreeGitDir.
+    if (resolve(dirname(worktreeGitDir)) !== join(commonDir, 'worktrees')) {
+      return gitRoot
+    }
+    // Git writes gitdir with strbuf_realpath() (symlinks resolved), but
+    // gitRoot from findGitRoot() is only lexically resolved. Realpath gitRoot
+    // so legitimate worktrees accessed via a symlinked path (e.g. macOS
+    // /tmp → /private/tmp) aren't rejected. Realpath the directory then join
+    // '.git' — realpathing the .git file itself would follow a symlinked .git
+    // and let an attacker borrow a victim's back-link.
+    const backlink = realpathSync(
+      readFileSync(join(worktreeGitDir, 'gitdir'), 'utf-8').trim(),
+    )
+    if (backlink !== join(realpathSync(gitRoot), '.git')) {
+      return gitRoot
+    }
+    // Bare-repo worktrees: the common dir isn't inside a working directory.
+    // Use the common dir itself as the stable identity (anthropics/claude-code#27994).
+    if (basename(commonDir) !== '.git') {
+      return commonDir.normalize('NFC')
+    }
+    return dirname(commonDir).normalize('NFC')
+  } catch {
+    return gitRoot
+  }
+}
+
+/**
+ * Memoized with a small LRU to avoid repeated file reads on the hot
+ * path (permission checks, prompt building). densable `bd` via `cTt`.
+ */
+const resolveCanonicalRoot = memoizeWithLRU(
+  resolveCanonicalRootImpl,
   root => root,
   50,
 )
@@ -191,6 +229,8 @@ const resolveCanonicalRoot = memoizeWithLRU(
  *
  * Use this instead of findGitRoot for project-scoped state (auto-memory,
  * project config, agent memory) so worktrees share state with the main repo.
+ *
+ * densable `bd` (cached). Trust prompts use {@link findCanonicalGitRootUncached}.
  */
 export const findCanonicalGitRoot = createFindCanonicalGitRoot()
 
@@ -207,6 +247,20 @@ function createFindCanonicalGitRoot(): {
   }
   wrapper.cache = resolveCanonicalRoot.cache
   return wrapper
+}
+
+/**
+ * densable `I8e` — uncached canonical git root for trust prompts / trust keys.
+ * `rHo(start) → Ydu(root)` with no LRU on either step. Fixes 2.1.234 #23:
+ * directory first seen before `.git` existed must still surface the
+ * repository-wide scope warning once the repo appears.
+ */
+export function findCanonicalGitRootUncached(startPath: string): string | null {
+  const root = findGitRootUncached(startPath)
+  if (!root) {
+    return null
+  }
+  return resolveCanonicalRootImpl(root)
 }
 
 export const gitExe = memoize((): string => {

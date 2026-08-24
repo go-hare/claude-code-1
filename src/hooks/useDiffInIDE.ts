@@ -29,6 +29,13 @@ import { WindowsToWSLConverter } from '../utils/idePathConversion.js'
 import { logError } from '../utils/log.js'
 import { getPlatform } from '../utils/platform.js'
 
+class IdeDiffClosedError extends Error {
+  constructor() {
+    super('IDE diff closed')
+    this.name = 'IdeDiffClosedError'
+  }
+}
+
 type Props = {
   onChange(
     option: PermissionOption,
@@ -56,13 +63,13 @@ export function useDiffInIDE({
   hasError: boolean
 } {
   const isUnmounted = useRef(false)
+  // Per show-session latch: never flip closed back to false on a shared
+  // ref — a late previous openDiff would then apply stale updatedInput.
+  const sessionRef = useRef<{ closed: boolean; tabName: string }>({
+    closed: false,
+    tabName: '',
+  })
   const [hasError, setHasError] = useState(false)
-
-  const sha = useMemo(() => randomUUID().slice(0, 6), [])
-  const tabName = useMemo(
-    () => `✻ [Claude Code] ${basename(filePath)} (${sha}) ⧉`,
-    [filePath, sha],
-  )
 
   const shouldShowDiffInIDE =
     hasAccessToIDEExtensionDiffFeature(toolUseContext.options.mcpClients) &&
@@ -74,7 +81,11 @@ export function useDiffInIDE({
   const ideName =
     getConnectedIdeName(toolUseContext.options.mcpClients) ?? 'IDE'
 
-  async function showDiff(): Promise<void> {
+  async function showDiff(session: {
+    closed: boolean
+    tabName: string
+  }): Promise<void> {
+    const sessionTabName = session.tabName
     if (!shouldShowDiffInIDE) {
       return
     }
@@ -86,14 +97,13 @@ export function useDiffInIDE({
         filePath,
         edits,
         toolUseContext,
-        tabName,
+        sessionTabName,
+        () => session.closed,
       )
-      // Skip if component has been unmounted
-      if (isUnmounted.current) {
+      // Tab already closed / unmounted / permission claimed elsewhere.
+      if (isUnmounted.current || session.closed) {
         return
       }
-
-      logEvent('tengu_ext_diff_accepted', {})
 
       const newEdits = computeEditsFromContents(
         filePath,
@@ -104,6 +114,10 @@ export function useDiffInIDE({
 
       if (newEdits.length === 0) {
         // No changes -- edit was rejected (eg. reverted)
+        if (session.closed || isUnmounted.current) {
+          return
+        }
+        session.closed = true
         logEvent('tengu_ext_diff_rejected', {})
         // We close the tab here because 'no' no longer auto-closes
         const ideClient = getConnectedIdeClient(
@@ -111,7 +125,7 @@ export function useDiffInIDE({
         )
         if (ideClient) {
           // Close the tab in the IDE
-          await closeTabInIDE(tabName, ideClient)
+          await closeTabInIDE(sessionTabName, ideClient)
         }
         onChange(
           { type: 'reject' },
@@ -123,6 +137,11 @@ export function useDiffInIDE({
         return
       }
 
+      if (session.closed || isUnmounted.current) {
+        return
+      }
+      session.closed = true
+      logEvent('tengu_ext_diff_accepted', {})
       // File was modified - edit was accepted
       onChange(
         { type: 'accept-once' },
@@ -132,30 +151,53 @@ export function useDiffInIDE({
         },
       )
     } catch (error) {
+      if (session.closed || isUnmounted.current) {
+        return
+      }
       logError(error as Error)
       setHasError(true)
     }
   }
 
-  useEffect(() => {
-    void showDiff()
+  // densable L4n onReprompt teardown+rebuild: when hook rewrites input,
+  // filePath/edits change → close previous tab (`y`) and open a fresh diff
+  // so the prior IDE accept cannot answer the new prompt (#24).
+  const editsKey = useMemo(() => JSON.stringify(edits), [edits])
 
-    // Set flag on unmount
+  useEffect(() => {
+    isUnmounted.current = false
+    const session = {
+      closed: false,
+      tabName: `✻ [Claude Code] ${basename(filePath)} (${randomUUID().slice(0, 6)}) ⧉`,
+    }
+    sessionRef.current = session
+    void showDiff(session)
+
     return () => {
       isUnmounted.current = true
+      session.closed = true
+      const ideClient = getConnectedIdeClient(toolUseContext.options.mcpClients)
+      if (ideClient && shouldShowDiffInIDE) {
+        void closeTabInIDE(session.tabName, ideClient)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [filePath, editsKey, editMode])
 
   return {
     closeTabInIDE() {
+      const session = sessionRef.current
+      if (session.closed) {
+        return Promise.resolve()
+      }
+      session.closed = true
       const ideClient = getConnectedIdeClient(toolUseContext.options.mcpClients)
 
       if (!ideClient) {
         return Promise.resolve()
       }
 
-      return closeTabInIDE(tabName, ideClient)
+      return closeTabInIDE(session.tabName, ideClient)
     },
     showingDiffInIDE: shouldShowDiffInIDE && !hasError,
     ideName: ideName,
@@ -218,6 +260,8 @@ async function showDiffInIDE(
   edits: FileEdit[],
   toolUseContext: ToolUseContext,
   tabName: string,
+  // densable Rrf `o`: () => y — throw/bail when closeTab already ran
+  isClosed: () => boolean = () => false,
 ): Promise<{ oldContent: string; newContent: string }> {
   let isCleanedUp = false
 
@@ -230,6 +274,13 @@ async function showDiffInIDE(
       throw e
     }
   }
+
+  function assertNotClosed(): void {
+    if (toolUseContext.abortController.signal.aborted || isClosed()) {
+      throw new IdeDiffClosedError()
+    }
+  }
+  assertNotClosed()
 
   async function cleanup() {
     // Careful to avoid race conditions, since this
@@ -279,6 +330,7 @@ async function showDiffInIDE(
     ) {
       const converter = new WindowsToWSLConverter(process.env.WSL_DISTRO_NAME)
       ideOldPath = converter.toIDEPath(oldFilePath)
+      assertNotClosed()
     }
 
     const rpcResult = await callIdeRpc(
@@ -291,6 +343,7 @@ async function showDiffInIDE(
       },
       ideClient,
     )
+    assertNotClosed()
 
     // Convert the raw RPC result to a ToolCallResponse format
     const data = Array.isArray(rpcResult) ? rpcResult : [rpcResult]
@@ -320,7 +373,9 @@ async function showDiffInIDE(
     // results. Did the user close the IDE?
     throw new Error('Not accepted')
   } catch (error) {
-    logError(error as Error)
+    if (!(error instanceof IdeDiffClosedError)) {
+      logError(error as Error)
+    }
     void cleanup()
     throw error
   }

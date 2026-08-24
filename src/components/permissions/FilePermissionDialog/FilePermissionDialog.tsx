@@ -171,6 +171,8 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
         editMode: 'single' as const,
       };
 
+  // densable L4n: useDiffInIDE effect deps on filePath/editsKey close prior
+  // IDE tab (Mrf y) when hook re-prompts with rewritten input (#24).
   const { closeTabInIDE, showingDiffInIDE, ideName } = useDiffInIDE(diffParams);
 
   const onChange = (option: PermissionOption, feedback?: string) => {

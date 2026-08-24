@@ -160,50 +160,6 @@ export type StickyPrompt =
  *  2 rows via overflow:hidden — this just bounds the React prop size. */
 const STICKY_TEXT_CAP = 500;
 
-/**
- * Frames of consecutive "no sticky candidate" needed before clearing the
- * header when firstVisible is already at the list top. padCollapsed /
- * sticky-header mount shifts the viewport by ~1 row; firstVisible can miss
- * for a frame and would otherwise thrash setStickyPrompt null↔object
- * (React minified #185 / Maximum update depth under MessagesBoundary).
- */
-export const STICKY_CLEAR_HYSTERESIS_FRAMES = 2;
-
-/**
- * Whether StickyTracker should clear sticky after a miss frame.
- * @param missStreak consecutive frames with text===null while not at bottom
- * @param hadSticky whether we currently hold a sticky idx/text
- * @param force after header click ('clicked' suppress path)
- * @param firstVisible first message index at-or-below the viewport top.
- *   Mid-list misses (firstVisible > 0) are layout thrash from header/pad —
- *   never clear; only clear when the list top is visible or force/isSticky.
- */
-export function shouldClearStickyOnMiss(
-  missStreak: number,
-  hadSticky: boolean,
-  force: boolean,
-  firstVisible = 0,
-): boolean {
-  if (force) return true;
-  if (!hadSticky) return false;
-  // Content still exists above the viewport — keep last sticky text. Header
-  // mount/unmount and paddingTop 1↔0 routinely produce multi-frame misses
-  // here; hysteresis alone was not enough under long streaming sessions.
-  if (firstVisible > 0) return false;
-  return missStreak >= STICKY_CLEAR_HYSTERESIS_FRAMES;
-}
-
-/**
- * Whether two sticky setter payloads are equivalent (skip setState).
- * New {text,scrollTo} objects with the same text must not re-render chrome.
- */
-export function isSameStickyPrompt(prev: StickyPrompt | null, next: StickyPrompt | null): boolean {
-  if (prev === next) return true;
-  if (prev == null || next == null) return false;
-  if (prev === 'clicked' || next === 'clicked') return prev === next;
-  return prev.text === next.text;
-}
-
 /** Imperative handle for transcript navigation. Methods compute matches
  *  HERE (renderableMessages indices are only valid inside this component —
  *  Messages.tsx filters and reorders, REPL can't compute externally). */
@@ -1093,29 +1049,17 @@ function StickyTracker({
   // -1/-2/-3 which overlapped with real indices — too clever.
   type Suppress = 'none' | 'armed' | 'force';
   const suppress = useRef<Suppress>('none');
-  // Dedup on idx only — estimate derives from firstVisibleTop which shifts
-  // every scroll tick, so including it in the key made the guard dead
-  // (setStickyPrompt fired a fresh {text,scrollTo} per-frame). The scrollTo
-  // closure still captures the current estimate; it just doesn't need to
-  // re-fire when only estimate moved.
+  // densable jpw StickyTracker: dedup on idx only (`v.current===f`).
+  // estimate shifts every scroll tick — must NOT be in the dedup key.
   const lastIdx = useRef(-1);
-  // padCollapsed (FullscreenLayout paddingTop 1↔0) + sticky header mount
-  // shifts viewport by ~1 row. firstVisible/idx can flicker -1↔N for a
-  // single frame and drive setStickyPrompt null↔object → React #185
-  // (Maximum update depth) under MessagesBoundary. Require two consecutive
-  // "no sticky" frames before clearing; clear immediately when sticky-scroll
-  // (at bottom). Also bail setState when text is unchanged (stable ref).
-  const clearStickyStreak = useRef(0);
-  const lastStickyText = useRef<string | null>(null);
 
-  // setStickyPrompt effect FIRST — must see pending.idx before the
-  // correction effect below clears it. On the estimate-fallback path, the
-  // render that mounts the item is ALSO the render where correction clears
-  // pending; if this ran second, the pending gate would be dead and
-  // setStickyPrompt(prevPrompt) would fire mid-jump, re-mounting the
-  // header over 'clicked'.
+  // densable 2.1.234 gold (SEA gold-layout-js-0 / jpw):
+  //   if (pending) return; armed→force return; force flag;
+  //   if (!force && lastIdx===idx) return; lastIdx=idx;
+  //   if (text==null) set(null); else set({text,scrollTo→clicked+armed})
+  // No miss hysteresis / mid-list hold / lastStickyText — official stays
+  // stable via idx early-return even when pad is coupled to sticky!=null.
   useEffect(() => {
-    // Hold while two-phase correction is in flight.
     if (pending.current.idx >= 0) return;
     if (suppress.current === 'armed') {
       suppress.current = 'force';
@@ -1123,41 +1067,11 @@ function StickyTracker({
     }
     const force = suppress.current === 'force';
     suppress.current = 'none';
-
-    const clearSticky = (): void => {
-      clearStickyStreak.current = 0;
-      lastIdx.current = -1;
-      lastStickyText.current = null;
-      // Context setter is not React.Dispatch — always null; outer guards
-      // avoid redundant calls when already clear.
-      setStickyPrompt(null);
-    };
-
-    // At bottom: never show sticky; clear without hysteresis.
-    if (isSticky) {
-      if (force || lastIdx.current !== -1 || lastStickyText.current !== null) {
-        clearSticky();
-      }
-      return;
-    }
+    if (!force && lastIdx.current === idx) return;
+    lastIdx.current = idx;
 
     if (text === null || idx < 0) {
-      // Layout thrash (padCollapsed / sticky header mount) can miss for
-      // many frames mid-list. Hold sticky while firstVisible > 0; only
-      // clear at list top (or force / isSticky above).
-      const hadSticky = lastIdx.current >= 0 || lastStickyText.current !== null;
-      if (hadSticky && !force && firstVisible > 0) {
-        // Stable hold — do not accumulate streak; miss is not real.
-        clearStickyStreak.current = 0;
-        return;
-      }
-      if (hadSticky && !force) {
-        clearStickyStreak.current += 1;
-      }
-      if (!shouldClearStickyOnMiss(clearStickyStreak.current, hadSticky, force, firstVisible)) {
-        return;
-      }
-      clearSticky();
+      setStickyPrompt(null);
       return;
     }
 
@@ -1172,48 +1086,28 @@ function StickyTracker({
       .replace(/\s+/g, ' ')
       .trim();
     if (collapsed === '') {
-      if (!force && lastIdx.current === -1 && lastStickyText.current === null) {
-        return;
-      }
-      clearSticky();
+      setStickyPrompt(null);
       return;
     }
 
-    clearStickyStreak.current = 0;
-    if (!force && lastIdx.current === idx && lastStickyText.current === collapsed) {
-      return;
-    }
-    lastIdx.current = idx;
-    lastStickyText.current = collapsed;
     const capturedIdx = idx;
     const capturedEstimate = estimate;
     setStickyPrompt({
       text: collapsed,
       scrollTo: () => {
-        // Hide header, keep padding collapsed — FullscreenLayout's
-        // 'clicked' sentinel → scrollBox_y=0 + pad=0 → viewportTop=0.
+        // densable: a("clicked"); b="armed"; scrollToElement / estimate
         setStickyPrompt('clicked');
         suppress.current = 'armed';
-        // scrollToElement anchors by DOMElement ref, not a number:
-        // render-node-to-output reads el.yogaNode.getComputedTop() at
-        // paint time (same Yoga pass as scrollHeight). No staleness from
-        // the throttled render — the ref is stable, the position read is
-        // deferred. offset=1 = UserPromptMessage marginTop.
         const el = getItemElement(capturedIdx);
         if (el) {
           scrollRef.current?.scrollToElement(el, 1);
         } else {
-          // Not mounted (scrolled far past — in topSpacer). Jump to
-          // estimate to mount it; correction effect re-anchors once it
-          // appears. Estimate is DEFAULT_ESTIMATE-based — lands short.
           scrollRef.current?.scrollTo(capturedEstimate);
           pending.current = { idx: capturedIdx, tries: 0 };
         }
       },
     });
-    // No deps — must run every render. Suppression state lives in a ref
-    // (not idx/estimate), so a deps-gated effect would never see it tick.
-    // Body's own guards short-circuit when nothing changed.
+    // No deps — densable jpw runs every render; idx/suppress refs gate work.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   });
 

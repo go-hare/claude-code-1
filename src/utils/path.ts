@@ -216,6 +216,91 @@ export function containsPathTraversal(path: string): boolean {
   return /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(path)
 }
 
+/**
+ * densable `yR` — raw `.` / `..` path segments (cwd read-back / containment).
+ * Broader than {@link containsPathTraversal}: also matches single `.` segments.
+ */
+export function hasPathDotSegment(path: string): boolean {
+  return /(^|[\\/])\.{1,2}([\\/]|$)/.test(path)
+}
+
+/**
+ * densable `Jw` — NT object-manager device prefix `\??\` / `/??/`.
+ * Distinct from classic `\\?\` / `\\.\` (see {@link isWindowsDeviceNamespacePath}).
+ */
+export function isNtObjectNamespacePath(path: string): boolean {
+  return /^[\\/]\?\?[\\/]/.test(path)
+}
+
+/**
+ * densable `Dwe` — NT `\??\` spelling, including after win32.normalize when `??` remains.
+ */
+export function isNtObjectNamespacePathNormalized(path: string): boolean {
+  if (isNtObjectNamespacePath(path)) return true
+  if (!path.includes('??')) return false
+  return isNtObjectNamespacePath(
+    getPlatform() === 'windows' ? win32.normalize(path) : path,
+  )
+}
+
+/**
+ * densable `Yhe` — Windows device-namespace `\\?\` / `\\.\` / `//?/` / `//./`.
+ */
+export function isWindowsDeviceNamespacePath(path: string): boolean {
+  return /^[\\/]{2}[?.][\\/]/.test(path)
+}
+
+/**
+ * densable `su` — UNC-shaped (`//` / `\\`) or NT-object `\??\` (via Dwe).
+ */
+export function isUncOrNtObjectPath(path: string): boolean {
+  return /^[\\/]{2}/.test(path) || isNtObjectNamespacePathNormalized(path)
+}
+
+/**
+ * densable `db` / hooks `isWslUncPath` — WSL UNC treated as local-ish.
+ */
+export function isWslUncPath(path: string): boolean {
+  return /^[\\/]{2}wsl(\$|\.localhost)[\\/]/i.test(path)
+}
+
+/**
+ * densable `qh` — network UNC (UNC-shaped and not WSL).
+ */
+export function isNetworkUncPath(path: string): boolean {
+  return isUncOrNtObjectPath(path) && !isWslUncPath(path)
+}
+
+/**
+ * densable workflow `s7t` only: `su(e) || Jw(e)` (`bu` stub false).
+ * Do NOT reuse for include/edit — those are `su&&!db||Jw` and must keep WSL.
+ */
+export function isNetworkNtOrAutomountPath(path: string): boolean {
+  return (
+    isUncOrNtObjectPath(path) ||
+    isNtObjectNamespacePath(path) ||
+    isNtObjectNamespacePathNormalized(path)
+  )
+}
+
+/**
+ * densable include `sTe` / single-path form of edit_guard:
+ * `(su && !db) || Jw` (`bu` stub false). WSL UNC is kept.
+ */
+export function isUnsafeNetworkOrNtIncludePath(path: string): boolean {
+  return (
+    (isUncOrNtObjectPath(path) && !isWslUncPath(path)) ||
+    isNtObjectNamespacePath(path)
+  )
+}
+
+/**
+ * densable publish gate: `Yhe(y) || Jw(y)` — device- or NT-namespace spellings.
+ */
+export function isDeviceOrNtNamespacePath(path: string): boolean {
+  return isWindowsDeviceNamespacePath(path) || isNtObjectNamespacePath(path)
+}
+
 // Re-export from the shared zero-dep source.
 export { sanitizePath } from './sessionStoragePortable.js'
 

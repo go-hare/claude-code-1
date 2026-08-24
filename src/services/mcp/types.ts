@@ -364,6 +364,12 @@ export type ConnectedMCPServer = {
    * CLAUDEAI_BEARER_REJECTED which stays connected + /login hint).
    */
   discoveryAuthFailure?: boolean
+  /**
+   * densable `protocolEra`. `"modern"` has no unsolicited notification
+   * path — i3r skips with kind `era` and Yrf excludes from preview send.
+   * Optional: unset is not modern.
+   */
+  protocolEra?: string
 }
 
 export type FailedMCPServer = {

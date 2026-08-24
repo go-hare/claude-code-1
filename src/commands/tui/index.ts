@@ -133,13 +133,106 @@ export function isTuiBounceToDefault(
   return target === 'default' && isTuiJustSwitchedFromFullscreen()
 }
 
+/** densable 2.1.234 Cmt+Rmt / W4e / iyt inputs from AppState when available. */
+export type TuiRelaunchCarryInput = {
+  toolPermissionContext?: import('../../types/permissions.js').ToolPermissionContext
+  effort?: unknown
+  /** densable `t.taskRegistry.all()` — AppState.tasks for iyt. */
+  tasks?: Record<string, import('../../tasks/types.js').TaskState>
+}
+
+function logTuiRefused(
+  meta: Record<string, boolean | number | undefined>,
+): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { logEvent } =
+      require('../../services/analytics/index.js') as typeof import('../../services/analytics/index.js')
+    logEvent('tengu_tui_refused', meta)
+  } catch {
+    // analytics optional
+  }
+}
+
+/**
+ * densable W4e + iyt gate (p) — UYh / active-task refuse + tengu_tui_refused.
+ * `deferred` marks the post-xve second check (analytics only).
+ * Returns refuse message or null when carryable.
+ */
+export function getTuiRelaunchRefuseMessage(
+  target: 'fullscreen' | 'default',
+  carry?: TuiRelaunchCarryInput,
+  opts: { deferred?: boolean } = {},
+): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getTuiUncarriableReasons, formatTuiUncarriableRefuseMessage } =
+      require('../../utils/tuiRelaunchCarry.js') as typeof import('../../utils/tuiRelaunchCarry.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getForkRestrictedLaunchConfig } =
+      require('../../utils/forkReplayLaunchConfig.js') as typeof import('../../utils/forkReplayLaunchConfig.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getEmptyToolPermissionContext } =
+      require('../../Tool.js') as typeof import('../../Tool.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getTuiRelaunchBlocker, formatTuiActiveTaskRefuseMessage } =
+      require('../../utils/tuiRelaunchBlocker.js') as typeof import('../../utils/tuiRelaunchBlocker.js')
+    const ctx = carry?.toolPermissionContext ?? getEmptyToolPermissionContext()
+    const reasons = getTuiUncarriableReasons(
+      ctx,
+      getForkRestrictedLaunchConfig(),
+    )
+    if (reasons.length > 0) {
+      logTuiRefused({ uncarriable: true })
+      return formatTuiUncarriableRefuseMessage(target, reasons)
+    }
+    const blocker = getTuiRelaunchBlocker(carry?.tasks ?? {})
+    if (blocker !== undefined) {
+      logTuiRefused({
+        active_tasks: blocker.activeTasks,
+        comment_monitor: blocker.kind === 'comment_monitor',
+        ...(opts.deferred ? { deferred: true } : {}),
+      })
+      return formatTuiActiveTaskRefuseMessage(blocker)
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable Zpc — preference already saved; iyt blocks restart → nfo copy.
+ */
+export function getTuiRelaunchSavedBlockerMessage(
+  target: 'fullscreen' | 'default',
+  carry?: TuiRelaunchCarryInput,
+): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getTuiRelaunchBlocker, formatTuiActiveTaskSavedMessage } =
+      require('../../utils/tuiRelaunchBlocker.js') as typeof import('../../utils/tuiRelaunchBlocker.js')
+    const blocker = getTuiRelaunchBlocker(carry?.tasks ?? {})
+    if (blocker === undefined) return null
+    logTuiRefused({
+      active_tasks: blocker.activeTasks,
+      comment_monitor: blocker.kind === 'comment_monitor',
+      deferred: true,
+    })
+    return formatTuiActiveTaskSavedMessage(target, blocker.kind)
+  } catch {
+    return null
+  }
+}
+
 /**
  * densable bsr/OVe residual after /tui setting save — inject TUI_JUST_SWITCHED
- * and (when SPAWN_TUI_RELAUNCH) process-relaunch with Bxa `--model` pin so a
- * prior /model override is not lost.
+ * and (when SPAWN_TUI_RELAUNCH) process-relaunch with Cmt+Rmt carry argv
+ * (permission mode / tools / model / effort / agent flags).
  */
 async function applyTuiRelaunchAfterSwitch(
   target: 'fullscreen' | 'default',
+  carry?: TuiRelaunchCarryInput,
 ): Promise<void> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -157,6 +250,8 @@ async function applyTuiRelaunchAfterSwitch(
       sessionId: getSessionId(),
       hasNonEmptyTranscript,
       screenReaderEnv: {},
+      toolPermissionContext: carry?.toolPermissionContext,
+      effort: carry?.effort,
     })
     if (result.mode === 'spawned' && result.spawn.ok) {
       process.exit(result.spawn.status ?? 0)
@@ -166,7 +261,31 @@ async function applyTuiRelaunchAfterSwitch(
   }
 }
 
-async function enableTui(): Promise<LocalCommandResult> {
+async function refuseBeforeTuiPersist(
+  target: 'fullscreen' | 'default',
+  carry?: TuiRelaunchCarryInput,
+): Promise<string | null> {
+  let refuse = getTuiRelaunchRefuseMessage(target, carry)
+  if (refuse) return refuse
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { flushBeforeTuiRelaunchCheck } =
+      require('../../utils/tuiRelaunchBlocker.js') as typeof import('../../utils/tuiRelaunchBlocker.js')
+    await flushBeforeTuiRelaunchCheck()
+  } catch {
+    // densable xve catches via xe
+  }
+  refuse = getTuiRelaunchRefuseMessage(target, carry, { deferred: true })
+  return refuse
+}
+
+async function enableTui(
+  carry?: TuiRelaunchCarryInput,
+): Promise<LocalCommandResult> {
+  const refuse = await refuseBeforeTuiPersist('fullscreen', carry)
+  if (refuse) {
+    return { type: 'text', value: refuse }
+  }
   const markerPath = getTuiMarkerPath()
   mkdirSync(getClaudeConfigHomeDir(), { recursive: true })
   writeFileSync(markerPath, new Date().toISOString(), 'utf8')
@@ -182,7 +301,11 @@ async function enableTui(): Promise<LocalCommandResult> {
   }
   // Densable residual: mark intended renderer for next process (official injects on relaunch).
   Object.assign(process.env, buildTuiJustSwitchedEnv('fullscreen'))
-  await applyTuiRelaunchAfterSwitch('fullscreen')
+  const savedBlock = getTuiRelaunchSavedBlockerMessage('fullscreen', carry)
+  if (savedBlock) {
+    return { type: 'text', value: savedBlock }
+  }
+  await applyTuiRelaunchAfterSwitch('fullscreen', carry)
   return {
     type: 'text',
     value: [
@@ -206,26 +329,36 @@ async function enableTui(): Promise<LocalCommandResult> {
   }
 }
 
-async function disableTui(): Promise<LocalCommandResult> {
+async function disableTui(
+  carry?: TuiRelaunchCarryInput,
+): Promise<LocalCommandResult> {
   const markerPath = getTuiMarkerPath()
   const hadMarker = existsSync(markerPath)
   const hadOptOut = isTuiOptedOut()
+  if (!hadMarker && hadOptOut) {
+    return {
+      type: 'text',
+      value: 'TUI mode was not active.',
+    }
+  }
+  const refuse = await refuseBeforeTuiPersist('default', carry)
+  if (refuse) {
+    return { type: 'text', value: refuse }
+  }
   if (hadMarker) {
     unlinkSync(markerPath)
   }
   // Always persist settings.tui=default — under official default-on fullscreen,
   // removing the marker alone does not opt out (isFullscreenEnvEnabled → true).
   const settingsResult = persistTuiSettings('default')
-  if (!hadMarker && hadOptOut && !settingsResult.error) {
-    return {
-      type: 'text',
-      value: 'TUI mode was not active.',
-    }
-  }
   // Official bounce: env was fullscreen and target is default.
   const bounce = isTuiBounceToDefault('default')
   Object.assign(process.env, buildTuiJustSwitchedEnv('default'))
-  await applyTuiRelaunchAfterSwitch('default')
+  const savedBlock = getTuiRelaunchSavedBlockerMessage('default', carry)
+  if (savedBlock) {
+    return { type: 'text', value: savedBlock }
+  }
+  await applyTuiRelaunchAfterSwitch('default', carry)
   return {
     type: 'text',
     value: [
@@ -252,7 +385,10 @@ async function disableTui(): Promise<LocalCommandResult> {
   }
 }
 
-export async function callTui(args: string): Promise<LocalCommandResult> {
+export async function callTui(
+  args: string,
+  carry?: TuiRelaunchCarryInput,
+): Promise<LocalCommandResult> {
   const sub = args.trim().toLowerCase()
 
   // ── status ──────────────────────────────────────────────────────────
@@ -322,12 +458,12 @@ export async function callTui(args: string): Promise<LocalCommandResult> {
 
   // ── on / fullscreen ──────────────────────────────────────────────────
   if (sub === 'on' || sub === 'fullscreen') {
-    return await enableTui()
+    return await enableTui(carry)
   }
 
   // ── off / default ────────────────────────────────────────────────────
   if (sub === 'off' || sub === 'default') {
-    return await disableTui()
+    return await disableTui(carry)
   }
 
   // ── toggle ───────────────────────────────────────────────────────────
@@ -335,13 +471,13 @@ export async function callTui(args: string): Promise<LocalCommandResult> {
   // user has opted in; toggle on when settings.tui=default.
   if (sub === '' || sub === 'toggle') {
     if (isTuiOptedOut()) {
-      return await enableTui()
+      return await enableTui(carry)
     }
     // Opted in via marker/settings, or default-on with no preference → off.
     if (isTuiOptedIn() || isFullscreenEnvEnabled()) {
-      return await disableTui()
+      return await disableTui(carry)
     }
-    return await enableTui()
+    return await enableTui(carry)
   }
 
   // ── unknown subcommand ───────────────────────────────────────────────
@@ -377,7 +513,22 @@ export const tuiNonInteractive: Command = {
   supportsNonInteractive: true,
   bridgeSafe: true,
   load: async () => ({
-    call: callTui,
+    call: async (args, context) => {
+      let carry: TuiRelaunchCarryInput | undefined
+      try {
+        const state = context.getAppState?.()
+        if (state?.toolPermissionContext || state?.tasks) {
+          carry = {
+            toolPermissionContext: state.toolPermissionContext,
+            effort: state.effortValue,
+            tasks: state.tasks,
+          }
+        }
+      } catch {
+        carry = undefined
+      }
+      return callTui(args, carry)
+    },
   }),
 }
 

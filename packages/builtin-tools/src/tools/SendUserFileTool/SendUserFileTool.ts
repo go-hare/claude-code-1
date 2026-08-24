@@ -4,6 +4,7 @@ import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { SEND_USER_FILE_TOOL_NAME } from './prompt.js'
 import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
+import { expandPath, isDeviceOrNtNamespacePath } from 'src/utils/path.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -79,6 +80,22 @@ Guidelines:
   async call(input: SendUserFileInput, context) {
     const { file_path } = input
     const { stat } = await import('fs/promises')
+
+    // densable publish: Yhe(y)||Jw(y) before filesystem access
+    const expanded = expandPath(file_path)
+    if (
+      isDeviceOrNtNamespacePath(expanded) ||
+      isDeviceOrNtNamespacePath(file_path)
+    ) {
+      return {
+        data: {
+          sent: false,
+          file_path,
+          error:
+            'file_path: device- or NT-namespace paths cannot be published — spell the path plainly',
+        },
+      }
+    }
 
     // Verify file exists and is readable
     let fileSize: number

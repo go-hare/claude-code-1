@@ -221,8 +221,10 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // cmd+c only fires on terminals using the kitty keyboard
       // protocol (kitty/WezTerm/ghostty/iTerm2) where the super
       // modifier actually reaches the pty — inert elsewhere.
-      // Esc-to-clear and contextual ctrl+c are handled via raw
-      // useInput so they can conditionally propagate.
+      // densable 2.1.234 #2 / h8i: selection:clear is a bindable action
+      // (no default key — Esc no longer clears; see #45).
+      // Contextual ctrl+c is handled via raw useInput so it can
+      // conditionally propagate.
       'ctrl+shift+c': 'selection:copy',
       'cmd+c': 'selection:copy',
     },

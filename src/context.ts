@@ -15,6 +15,7 @@ import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
 import { execFileNoThrow } from './utils/execFileNoThrow.js'
 import { getBranch, getDefaultBranch, getIsGit, gitExe } from './utils/git.js'
 import { shouldIncludeGitInstructions } from './utils/gitSettings.js'
+import { getOauthAccountInfo } from './utils/auth.js'
 import { logError } from './utils/log.js'
 import {
   getPerforceModePromptAddendum,
@@ -216,14 +217,24 @@ export const getUserContext = memoize(
     // cycle through permissions/filesystem → permissions → yoloClassifier).
     setCachedClaudeMdContent(claudeMd || null)
 
+    // densable 2.1.234 #5 / SEA UPb: account email only when not on
+    // ANTHROPIC_UNIX_SOCKET; instruct model to identify-only, never exfiltrate.
+    const userEmail = process.env.ANTHROPIC_UNIX_SOCKET
+      ? undefined
+      : getOauthAccountInfo()?.emailAddress
+
     logForDiagnosticsNoPII('info', 'user_context_completed', {
       duration_ms: Date.now() - startTime,
       claudemd_length: claudeMd?.length ?? 0,
       claudemd_disabled: Boolean(shouldDisableClaudeMd),
+      has_user_email: Boolean(userEmail),
     })
 
     return {
       ...(claudeMd && { claudeMd }),
+      ...(userEmail && {
+        userEmail: `The user's email address is ${userEmail}. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.`,
+      }),
       currentDate: `Today's date is ${getLocalISODate()}.`,
     }
   },

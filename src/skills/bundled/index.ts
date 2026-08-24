@@ -99,9 +99,13 @@ export function initBundledSkills(): void {
     /* eslint-enable @typescript-eslint/no-require-imports */
     registerScheduleRemoteAgentsSkill()
   }
-  if (feature('BUILDING_CLAUDE_APPS')) {
+  // Gold zas / Oy0 — always register; CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL
+  // gates isEnabled (not feature('BUILDING_CLAUDE_APPS')).
+  {
     /* eslint-disable @typescript-eslint/no-require-imports */
-    const { registerClaudeApiSkill } = require('./claudeApi.js')
+    const { registerClaudeApiSkill } = require('./claudeApi.js') as {
+      registerClaudeApiSkill: (opts?: { disabled?: boolean }) => void
+    }
     /* eslint-enable @typescript-eslint/no-require-imports */
     registerClaudeApiSkill()
   }

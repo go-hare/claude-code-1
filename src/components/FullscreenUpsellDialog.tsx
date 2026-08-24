@@ -2,10 +2,15 @@
  * Official densable fullscreen TUI upsell dialog (Npf accept path).
  * Pure gate: utils/fullscreenUpsellGate.ts.
  * Accept → enable /tui marker + mark fully seen; decline → mark fully seen.
+ *
+ * densable 2.1.234: accept must pass live AppState into `/tui on` so W4e refuse
+ * and Cmt+Rmt carry see `un(t)` (toolPermissionContext + effort), same as the
+ * slash-command panel path — never callTui('on') with empty carry.
  */
 import { Box, Dialog, Text } from '@anthropic/ink';
 import React from 'react';
-import { callTui } from '../commands/tui/index.js';
+import { callTui, type TuiRelaunchCarryInput } from '../commands/tui/index.js';
+import { useAppStateStore } from '../state/AppState.js';
 import { saveGlobalConfig } from '../utils/config.js';
 import { markFullscreenUpsellFullySeen } from '../utils/fullscreenUpsellGate.js';
 import { Select } from './CustomSelect/index.js';
@@ -16,41 +21,41 @@ export type FullscreenUpsellDialogProps = {
 
 type Choice = 'accept' | 'decline';
 
+/** densable un(t) + taskRegistry snapshot for /tui relaunch from upsell accept. */
+export function carryFromAppStore(store: {
+  getState: () => {
+    toolPermissionContext?: TuiRelaunchCarryInput['toolPermissionContext'];
+    effortValue?: unknown;
+    tasks?: TuiRelaunchCarryInput['tasks'];
+  };
+}): TuiRelaunchCarryInput | undefined {
+  try {
+    const state = store.getState();
+    if (!state.toolPermissionContext && !state.tasks) return undefined;
+    return {
+      toolPermissionContext: state.toolPermissionContext,
+      effort: state.effortValue,
+      tasks: state.tasks,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export function FullscreenUpsellDialog({ onDone }: FullscreenUpsellDialogProps): React.ReactNode {
+  const store = useAppStateStore();
+
   function handleSelect(value: Choice): void {
     if (value === 'accept') {
-      void callTui('on');
-      saveGlobalConfig(prev => ({
-        ...prev,
-        ...markFullscreenUpsellFullySeen(prev),
-      }));
-      // Official OLt densable accept: inject env; optional spawnSync when
-      // CLAUDE_CODE_SPAWN_TUI_RELAUNCH=1 (process replacement densable).
-      // densable 2.1.227: freshIfNoTranscript via d2p/transcriptHasBytes — do not
-      // hardcode hasNonEmptyTranscript:true (rewound-before-first-message resume bug).
+      // densable 2.1.234: /tui on path owns W4e refuse + Cmt/Rmt carry + OLt
+      // relaunch (callTui → enableTui → acceptTuiRelaunch). Do not double-call
+      // acceptTuiRelaunch here.
       void (async () => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { acceptTuiRelaunch } = require('../utils/cliRelaunch.js') as typeof import('../utils/cliRelaunch.js');
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { getSessionId } = require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { transcriptHasBytes } =
-            require('../utils/sessionStorage.js') as typeof import('../utils/sessionStorage.js');
-          const hasNonEmptyTranscript = await transcriptHasBytes();
-          const result = acceptTuiRelaunch({
-            target: 'fullscreen',
-            sessionId: getSessionId(),
-            hasNonEmptyTranscript,
-            screenReaderEnv: {},
-          });
-          if (result.mode === 'spawned' && result.spawn.ok) {
-            // Child inherited session; parent exits like official PNe consumer.
-            process.exit(result.spawn.status ?? 0);
-          }
-        } catch {
-          // densable optional
-        }
+        await callTui('on', carryFromAppStore(store));
+        saveGlobalConfig(prev => ({
+          ...prev,
+          ...markFullscreenUpsellFullySeen(prev),
+        }));
         onDone('accepted');
       })();
       return;

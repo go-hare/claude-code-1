@@ -30,8 +30,16 @@ import {
   SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX,
   withMemoryCorrectionHint,
 } from '../../utils/messages.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
-import { stripWholeToolGrantsForAsk } from '../../utils/permissions/permissions.js'
+import type {
+  PermissionAskDecision,
+  PermissionDecision,
+} from '../../utils/permissions/PermissionResult.js'
+import {
+  hasPermissionsToUseTool,
+  stripWholeToolGrantsForAsk,
+} from '../../utils/permissions/permissions.js'
+import { emitPermissionRecheck } from '../../utils/permissions/permissionRecheck.js'
+import { restoreDangerousPermissions } from '../../utils/permissions/permissionSetup.js'
 import {
   applyPermissionUpdates,
   persistPermissionUpdates,
@@ -52,6 +60,19 @@ type PermissionRejectionSource =
   | { type: 'hook' }
   | { type: 'user_abort' }
   | { type: 'user_reject'; hasFeedback: boolean }
+
+/** Hook rewrote input but recheck still asks — rebuild dialog, do not resolve. */
+export type PermissionHookReprompt = {
+  type: 'reprompt'
+  reprompted: PermissionAskDecision
+  finalInput: Record<string, unknown>
+}
+
+export function isPermissionHookReprompt(
+  value: PermissionDecision | PermissionHookReprompt | null,
+): value is PermissionHookReprompt {
+  return value !== null && 'type' in value && value.type === 'reprompt'
+}
 
 // Generic interface for permission queue operations, decoupled from React.
 // In the REPL, these are backed by React state.
@@ -100,7 +121,15 @@ function createPermissionContext(
   toolUseContext: ToolUseContext,
   assistantMessage: AssistantMessage,
   toolUseID: string,
-  setToolPermissionContext: (context: ToolPermissionContext) => void,
+  /**
+   * densable m4n 7th arg `permissionContextSetter` — teammate/mailbox override.
+   * When set, persist uses this instead of setSessionToolPermissionContext
+   * (and skips the session recheck emit path used by the default writer).
+   */
+  permissionContextSetter?: (
+    context: ToolPermissionContext,
+    options?: { preserveMode?: boolean },
+  ) => void,
   queueOps?: PermissionQueueOps,
 ) {
   const messageId = assistantMessage.message.id!
@@ -137,13 +166,26 @@ function createPermissionContext(
         toolName: sanitizeToolNameForAnalytics(tool.name),
       })
     },
-    async persistPermissions(updates: PermissionUpdate[]) {
+    persistPermissions(updates: PermissionUpdate[]) {
       if (updates.length === 0) return false
       persistPermissionUpdates(updates)
-      const appState = toolUseContext.getAppState()
-      setToolPermissionContext(
-        applyPermissionUpdates(appState.toolPermissionContext, updates),
-      )
+      if (permissionContextSetter !== undefined) {
+        const appState = toolUseContext.getAppState()
+        permissionContextSetter(
+          applyPermissionUpdates(
+            restoreDangerousPermissions(appState.toolPermissionContext),
+            updates,
+          ),
+        )
+      } else {
+        toolUseContext.setSessionToolPermissionContext(prev =>
+          applyPermissionUpdates(prev, updates),
+        )
+        // densable setImmediate(() => n3e.emit())
+        setImmediate(() => {
+          emitPermissionRecheck()
+        })
+      }
       return updates.some(update => supportsPersistence(update.destination))
     },
     resolveIfAborted(resolve: (decision: PermissionDecision) => void) {
@@ -214,12 +256,17 @@ function createPermissionContext(
           },
         }
       : {}),
+    /**
+     * Hook allow+updatedInput is rechecked; still-ask returns a tagged
+     * reprompt so callers rebuild the dialog instead of treating rewrite
+     * as a final allow (stale IDE/terminal answers).
+     */
     async runHooks(
       permissionMode: string | undefined,
       suggestions: PermissionUpdate[] | undefined,
       updatedInput?: Record<string, unknown>,
       permissionPromptStartTimeMs?: number,
-    ): Promise<PermissionDecision | null> {
+    ): Promise<PermissionDecision | PermissionHookReprompt | null> {
       for await (const hookResult of executePermissionRequestHooks(
         tool.name,
         toolUseID,
@@ -233,6 +280,37 @@ function createPermissionContext(
           const decision = hookResult.permissionRequestResult
           if (decision.behavior === 'allow') {
             const finalInput = decision.updatedInput ?? updatedInput ?? input
+            // densable: bare allow without updatedInput cannot satisfy
+            // requiresUserInteraction tools — leave the dialog racing.
+            if (!decision.updatedInput && tool.requiresUserInteraction?.()) {
+              return null
+            }
+            if (decision.updatedInput) {
+              const recheck = await hasPermissionsToUseTool(
+                tool,
+                finalInput,
+                toolUseContext,
+                assistantMessage,
+                toolUseID,
+              )
+              if (recheck.behavior === 'deny') {
+                this.logDecision(
+                  { decision: 'reject', source: 'config' },
+                  {
+                    input: finalInput,
+                    permissionPromptStartTimeMs,
+                  },
+                )
+                return recheck
+              }
+              if (recheck.behavior === 'ask') {
+                return {
+                  type: 'reprompt',
+                  reprompted: recheck,
+                  finalInput,
+                }
+              }
+            }
             return await this.handleHookAllow(
               finalInput,
               (decision.updatedPermissions ??

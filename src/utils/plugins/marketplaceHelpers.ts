@@ -81,6 +81,158 @@ export function normalizeGithubRepoPath(repo: string): string {
 const GITHUB_COM = 'github.com'
 const SSH_GITHUB_COM = 'ssh.github.com'
 
+/** densable u8y — schemes whose authority is slash-delimited (pTt backslash check). */
+const URL_SCHEMES_WITH_AUTHORITY = new Set([
+  'http',
+  'https',
+  'ws',
+  'wss',
+  'ftp',
+])
+
+/** densable c8y — chars that mean the hostname string is not a plain DNS label. */
+const HOSTNAME_META_CHARS = /[:/\\?#@\s]/
+
+/**
+ * densable Ldu — hostname contains % / C0 / DEL / non-ASCII (unverifiable).
+ */
+function hostnameHasUnsafeChars(hostname: string): boolean {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable Ldu C0/DEL scan
+  return /[%\x00-\x1f\x7f-\u{10FFFF}]/u.test(hostname)
+}
+
+/**
+ * densable Ndu — strip trailing DNS absolute dots.
+ */
+function stripTrailingDnsDots(hostname: string): string {
+  let end = hostname.length
+  while (end > 0 && hostname[end - 1] === '.') end--
+  return end === hostname.length ? hostname : hostname.slice(0, end)
+}
+
+/**
+ * densable H8e — lowercase / strip controls / trailing dots; if the string is a
+ * clean hostname, re-parse via `https://` to normalize IDNA / empty userinfo.
+ */
+function normalizeHostnameForHostPattern(hostname: string): string {
+  const cleaned = stripTrailingDnsDots(
+    hostname.replace(/[\t\n\r]/g, '').toLowerCase(),
+  )
+  if (cleaned === '' || HOSTNAME_META_CHARS.test(cleaned)) {
+    return cleaned
+  }
+  try {
+    const parsed = new URL(`https://${cleaned}`)
+    if (
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      parsed.port !== '' ||
+      parsed.pathname !== '/' ||
+      parsed.search !== '' ||
+      parsed.hash !== ''
+    ) {
+      return cleaned
+    }
+    return stripTrailingDnsDots(parsed.hostname)
+  } catch {
+    return cleaned
+  }
+}
+
+/**
+ * densable NPs / om — true when hostname is github.com after H8e + www strip.
+ * Note: does **not** fold ssh.github.com (WAd blocklistDirection handles that).
+ */
+function isGithubComHostForPattern(hostname: string): boolean {
+  let h = normalizeHostnameForHostPattern(hostname)
+  while (h.startsWith('www.')) {
+    h = h.slice(4)
+  }
+  return h === GITHUB_COM
+}
+
+/**
+ * densable SCn — H8e then map plain github.com (+www) → `github.com`.
+ * Leaves `ssh.github.com` intact for allowlist hostPattern; blocklist WAd dual-tests.
+ */
+export function canonicalizeHostForHostPattern(hostname: string): string {
+  const normalized = normalizeHostnameForHostPattern(hostname)
+  return isGithubComHostForPattern(normalized) ? GITHUB_COM : normalized
+}
+
+/**
+ * densable pTt / x5o (`isGitUrlHostAmbiguous`) — URL authority contains `\`
+ * (or scheme-relative `\\`), so WHATWG host ≠ what some git clients resolve.
+ */
+export function isGitUrlHostAmbiguous(url: string): boolean {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable pTt trim C0/space
+  const trimmed = url.replace(/^[\x00-\x20]+/, '')
+  const schemeSep = trimmed.indexOf('://')
+  if (schemeSep === -1) return false
+  let authorityAndPath = trimmed.slice(schemeSep + 3)
+  const scheme = trimmed.slice(0, schemeSep).toLowerCase()
+  if (URL_SCHEMES_WITH_AUTHORITY.has(scheme)) {
+    const leadingSlashes = authorityAndPath.match(/^[/\\]+/)?.[0] ?? ''
+    if (leadingSlashes.includes('\\')) return true
+    authorityAndPath = authorityAndPath.slice(leadingSlashes.length)
+  }
+  const end = authorityAndPath.search(/[/?#]/)
+  const authority =
+    end === -1 ? authorityAndPath : authorityAndPath.slice(0, end)
+  return authority.includes('\\')
+}
+
+/**
+ * densable I8s — strict SCP `user@host:path` (no `@`/`:`/`/`/`[`/`]` in user/host).
+ * Returns null when the naive `[^@]+@([^:]+):` extractor would accept a
+ * host that git would not connect to under SCP rules.
+ */
+export function parseScpGitUrl(
+  url: string,
+): { user: string; host: string; path: string } | null {
+  const match = /^([^@:/[\]]+)@([^@:/[\]]+):(.*)$/s.exec(url)
+  if (!match) return null
+  return { user: match[1]!, host: match[2]!, path: match[3]! }
+}
+
+/**
+ * densable BAd — marketplace.json `path` must be relative, no drive/UNC, no `..`.
+ */
+export function isSafeRelativeMarketplacePath(path: string): boolean {
+  if (
+    path.startsWith('/') ||
+    path.startsWith('\\') ||
+    /^[A-Za-z]:/.test(path)
+  ) {
+    return false
+  }
+  return !path.split(/[\\/]/).some(seg => seg === '..')
+}
+
+/**
+ * densable Obn — git URL is unverifiable for allowlist matching (ambiguous
+ * authority, non-http(s) with unsafe host chars, or `:` before `@` in SCP form).
+ */
+export function isUnverifiableGitMarketplaceUrl(url: string): boolean {
+  if (url.includes('://')) {
+    if (isGitUrlHostAmbiguous(url)) return true
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return false
+      }
+      return hostnameHasUnsafeChars(parsed.hostname)
+    } catch {
+      return true
+    }
+  }
+  const colon = url.indexOf(':')
+  const at = url.indexOf('@')
+  if (colon >= 0 && at > colon) return true
+  const host = url.match(/^(?:[^@]+@)?([^:]+):/)?.[1]
+  return host ? hostnameHasUnsafeChars(host) : false
+}
+
 /**
  * densable gEt + LWo + $Od — hostname for marketplace policy URL compare.
  * Lowercase / strip www; map github hosts (incl. ssh.github.com) to github.com.
@@ -414,15 +566,8 @@ export function isMarketplaceSourceDeclaredInManagedSettings(
   const strict = policy.strictKnownMarketplaces
   if (!strict || strict.length === 0) return false
 
-  return strict.some(allowed => {
-    if (allowed.source === 'hostPattern') {
-      return doesSourceMatchHostPattern(source, allowed)
-    }
-    if (allowed.source === 'pathPattern') {
-      return doesSourceMatchPathPattern(source, allowed)
-    }
-    return areSourcesEqual(source, allowed as MarketplaceSource)
-  })
+  // densable vCn → JAd allowlist match (same gates as isSourceAllowedByPolicy)
+  return strict.some(allowed => doesSourceMatchAllowlistEntry(source, allowed))
 }
 
 /**
@@ -487,35 +632,26 @@ function areSourcesEqual(a: MarketplaceSource, b: MarketplaceSource): boolean {
 }
 
 /**
- * Extract the host/domain from a marketplace source.
- * Used for hostPattern matching in strictKnownMarketplaces.
- *
- * Currently only supports github, git, and url sources.
- * npm, file, and directory sources are not supported for hostPattern matching.
- *
- * @param source - The marketplace source to extract host from
- * @returns The hostname string, or null if extraction fails or source type not supported
+ * densable Utb — raw host extraction before SCn canonicalize.
+ * Git SCP form still uses the naive `[^@]+@([^:]+):` capture (blocklist O7t);
+ * allowlist uses {@link extractHostFromSourceForAllowlist} / I8s instead.
  */
-export function extractHostFromSource(
-  source: MarketplaceSource,
-): string | null {
+function extractRawHostFromSource(source: MarketplaceSource): string | null {
   switch (source.source) {
     case 'github':
-      // GitHub shorthand always means github.com
-      return 'github.com'
+      return GITHUB_COM
 
     case 'git': {
-      // SSH format: user@HOST:path (e.g., git@github.com:owner/repo.git)
-      const sshMatch = source.url.match(/^[^@]+@([^:]+):/)
-      if (sshMatch?.[1]) {
-        return sshMatch[1]
+      if (source.url.includes('://')) {
+        if (isGitUrlHostAmbiguous(source.url)) return null
+        try {
+          return new URL(source.url).hostname || null
+        } catch {
+          return null
+        }
       }
-      // HTTPS format: extract hostname from URL
-      try {
-        return new URL(source.url).hostname
-      } catch {
-        return null
-      }
+      // densable Utb naive SCP (intentionally NOT I8s — that is allowlist-only)
+      return source.url.match(/^[^@]+@([^:]+):/)?.[1] ?? null
     }
 
     case 'url':
@@ -525,63 +661,158 @@ export function extractHostFromSource(
         return null
       }
 
-    // npm, file, directory, hostPattern, pathPattern sources are not supported for hostPattern matching
     default:
       return null
   }
 }
 
 /**
- * Check if a source matches a hostPattern entry.
- * Extracts the host from the source and tests it against the regex pattern.
- *
- * @param source - The marketplace source to check
- * @param pattern - The hostPattern entry from strictKnownMarketplaces
- * @returns true if the source's host matches the pattern
+ * densable O7t — host for blocklist hostPattern (Utb → SCn).
+ * Also the shared fallback for non-SCP sources on the allowlist path.
  */
-function doesSourceMatchHostPattern(
+export function extractHostFromSource(
+  source: MarketplaceSource,
+): string | null {
+  const raw = extractRawHostFromSource(source)
+  return raw === null ? null : canonicalizeHostForHostPattern(raw)
+}
+
+/**
+ * densable zAd — host for allowlist hostPattern.
+ * SCP-without-`://` must parse via I8s; ambiguous / non-SCP forms fail closed.
+ */
+export function extractHostFromSourceForAllowlist(
+  source: MarketplaceSource,
+): string | null {
+  if (source.source === 'git' && !source.url.includes('://')) {
+    const scp = parseScpGitUrl(source.url)
+    return scp ? canonicalizeHostForHostPattern(scp.host) : null
+  }
+  return extractHostFromSource(source)
+}
+
+/**
+ * densable WAd — hostPattern match.
+ * Allowlist uses zAd; blocklistDirection uses O7t and dual-tests ssh.github.com
+ * against github.com (q7s → i_).
+ */
+export function doesSourceMatchHostPattern(
   source: MarketplaceSource,
   pattern: MarketplaceSource & { source: 'hostPattern' },
+  options?: { blocklistDirection?: boolean },
 ): boolean {
-  const host = extractHostFromSource(source)
+  const host = options?.blocklistDirection
+    ? extractHostFromSource(source)
+    : extractHostFromSourceForAllowlist(source)
   if (!host) {
     return false
   }
 
+  const hostsToTest =
+    options?.blocklistDirection && host === SSH_GITHUB_COM
+      ? [host, GITHUB_COM]
+      : [host]
+
   try {
     const regex = new RegExp(pattern.hostPattern)
-    return regex.test(host)
+    return hostsToTest.some(candidate => regex.test(candidate))
   } catch {
-    // Invalid regex - log and return false
-    logError(new Error(`Invalid hostPattern regex: ${pattern.hostPattern}`))
+    logForDebugging(
+      `Invalid hostPattern regex in policy settings: ${pattern.hostPattern}`,
+      { level: 'error' },
+    )
     return false
   }
 }
 
 /**
- * Check if a source matches a pathPattern entry.
- * Tests the source's .path (file and directory sources only) against the regex pattern.
- *
- * @param source - The marketplace source to check
- * @param pattern - The pathPattern entry from strictKnownMarketplaces
- * @returns true if the source's path matches the pattern
+ * densable GAd — pathPattern match (file / directory `.path` only).
  */
 function doesSourceMatchPathPattern(
   source: MarketplaceSource,
   pattern: MarketplaceSource & { source: 'pathPattern' },
 ): boolean {
-  // Only file and directory sources have a .path to match against
   if (source.source !== 'file' && source.source !== 'directory') {
     return false
   }
 
   try {
-    const regex = new RegExp(pattern.pathPattern)
-    return regex.test(source.path)
+    return new RegExp(pattern.pathPattern).test(source.path)
   } catch {
-    logError(new Error(`Invalid pathPattern regex: ${pattern.pathPattern}`))
+    logForDebugging(
+      `Invalid pathPattern regex in policy settings strictKnownMarketplaces: ${pattern.pathPattern}`,
+      { level: 'error' },
+    )
     return false
   }
+}
+
+/**
+ * densable JAd — does `source` match one allowlist entry?
+ * Fail-closed on unverifiable git URLs; hostPattern rejects unsafe relative paths.
+ * Exported for unit tests; production uses `isSourceAllowedByPolicy`.
+ */
+export function doesSourceMatchAllowlistEntry(
+  source: MarketplaceSource,
+  allowed: MarketplaceSource,
+): boolean {
+  if (source.source === 'git' && isUnverifiableGitMarketplaceUrl(source.url)) {
+    return false
+  }
+
+  if (allowed.source === 'hostPattern') {
+    if (
+      (source.source === 'github' || source.source === 'git') &&
+      source.path &&
+      !isSafeRelativeMarketplacePath(source.path)
+    ) {
+      return false
+    }
+    return doesSourceMatchHostPattern(source, allowed)
+  }
+
+  if (allowed.source === 'pathPattern') {
+    return doesSourceMatchPathPattern(source, allowed)
+  }
+
+  // densable JAd github+github owner/* branch (ztb case-sensitive; path absent → BAd).
+  if (source.source === 'github' && allowed.source === 'github') {
+    const owner = parseOwnerWildcardRepo(allowed.repo)
+    if (owner === null && allowed.repo.includes('*')) {
+      logForDebugging(
+        `Invalid owner-wildcard repo in policy settings strictKnownMarketplaces: ${allowed.repo} (only "<owner>/*" is supported); entry only matches a literally identical repo string`,
+        { level: 'error' },
+      )
+    }
+    if (owner !== null) {
+      const segs = source.repo.split('/')
+      if (segs.length !== 2) return false
+      const [srcOwner, srcName] = segs
+      if (
+        srcOwner === undefined ||
+        srcName === undefined ||
+        !isValidGithubNameSegment(srcOwner) ||
+        !isValidGithubNameSegment(srcName)
+      ) {
+        return false
+      }
+      // densable ztb — case-sensitive owner equality (not githubRepoPolicyMatches)
+      if (srcOwner !== owner) return false
+      if ((allowed.ref || undefined) !== (source.ref || undefined)) return false
+      if (allowed.path) {
+        return allowed.path === (source.path || undefined)
+      }
+      return !source.path || isSafeRelativeMarketplacePath(source.path)
+    }
+  }
+
+  // densable skills-dir allowlist entries never match network marketplace sources.
+  // Local MarketplaceSourceSchema may not yet include skills-dir; compare as string.
+  if ((allowed as { source: string }).source === 'skills-dir') {
+    return false
+  }
+
+  return areSourcesEqual(source, allowed)
 }
 
 /**
@@ -777,50 +1008,53 @@ export function areSourcesEquivalentForBlocklist(
  * This also catches attempts to bypass a github blocklist entry by using
  * git URLs (e.g., git@github.com:owner/repo.git or https://github.com/owner/repo.git).
  */
+/**
+ * densable jDr — blocklist match (hostPattern via WAd blocklistDirection).
+ */
 export function isSourceInBlocklist(source: MarketplaceSource): boolean {
   const blocklist = getBlockedMarketplaces()
   if (blocklist === null) {
     return false
   }
-  return blocklist.some(blocked =>
-    areSourcesEquivalentForBlocklist(source, blocked),
-  )
+  return blocklist.some(blocked => {
+    if (blocked.source === 'hostPattern') {
+      return doesSourceMatchHostPattern(source, blocked, {
+        blocklistDirection: true,
+      })
+    }
+    if (blocked.source === 'pathPattern') {
+      return doesSourceMatchPathPattern(source, blocked)
+    }
+    return areSourcesEquivalentForBlocklist(source, blocked)
+  })
 }
 
 /**
- * Check if a marketplace source is allowed by enterprise policy.
- * Returns true if allowed (or no policy), false if blocked.
- * This check happens BEFORE downloading, so blocked sources never touch the filesystem.
+ * densable pL — enterprise policy allow check.
+ * Ambiguous git URLs (`x5o`/`pTt`) fail closed before allowlist matching.
  *
  * Policy precedence:
  * 1. blockedMarketplaces (blocklist) - if source matches, it's blocked
  * 2. strictKnownMarketplaces (allowlist) - if set, source must be in the list
  */
 export function isSourceAllowedByPolicy(source: MarketplaceSource): boolean {
-  // Check blocklist first (takes precedence)
+  // densable pL: git + x5o → deny before blocklist/allowlist
+  if (source.source === 'git' && isGitUrlHostAmbiguous(source.url)) {
+    return false
+  }
+
   if (isSourceInBlocklist(source)) {
     return false
   }
 
-  // Then check allowlist
   const allowlist = getStrictKnownMarketplaces()
   if (allowlist === null) {
-    return true // No restrictions
+    return true
   }
 
-  // Check each entry in the allowlist
-  return allowlist.some(allowed => {
-    // Handle hostPattern entries - match by extracted host
-    if (allowed.source === 'hostPattern') {
-      return doesSourceMatchHostPattern(source, allowed)
-    }
-    // Handle pathPattern entries - match file/directory .path by regex
-    if (allowed.source === 'pathPattern') {
-      return doesSourceMatchPathPattern(source, allowed)
-    }
-    // Handle regular source entries - exact match
-    return areSourcesEqual(source, allowed)
-  })
+  return allowlist.some(allowed =>
+    doesSourceMatchAllowlistEntry(source, allowed),
+  )
 }
 
 /**

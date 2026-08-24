@@ -86,9 +86,27 @@ export function getCachedRepository(): string | null {
   return `${parsed.owner}/${parsed.name}`
 }
 
+/** densable SEA `f8y` / `fTt` — owner/repo path segment. */
+const REPO_SLUG_SEGMENT_RE = /^[A-Za-z0-9._-]+$/
+
+function isValidRepoSlugSegment(segment: string): boolean {
+  return (
+    REPO_SLUG_SEGMENT_RE.test(segment) &&
+    !segment.startsWith('-') &&
+    segment !== '.' &&
+    segment !== '..'
+  )
+}
+
 /**
  * Parses a git remote URL into host, owner, and name components.
  * Accepts any host (github.com, GHE instances, etc.).
+ *
+ * densable 2.1.234 #12 / SEA `Aoe`:
+ * - SSH host class `[^:/@]+` (no `@`/`/` in host)
+ * - URL userinfo `[^@/?#]*@` + host `[^/:?#@]+` so unusual userinfo cannot
+ *   leak into the host capture
+ * - `fTt` owner/name validation
  *
  * Supports:
  *   https://host/owner/repo.git
@@ -102,10 +120,16 @@ export function getCachedRepository(): string | null {
 export function parseGitRemote(input: string): ParsedRepository | null {
   const trimmed = input.trim()
 
-  // SSH format: git@host:owner/repo.git
-  const sshMatch = trimmed.match(/^git@([^:]+):([^/]+)\/([^/]+?)(?:\.git)?$/)
+  // SSH format: git@host:owner/repo.git — densable `[^:/@]+` host
+  const sshMatch = trimmed.match(/^git@([^:/@]+):([^/]+)\/([^/]+?)(?:\.git)?$/)
   if (sshMatch?.[1] && sshMatch[2] && sshMatch[3]) {
     if (!looksLikeRealHostname(sshMatch[1])) return null
+    if (
+      !isValidRepoSlugSegment(sshMatch[2]) ||
+      !isValidRepoSlugSegment(sshMatch[3])
+    ) {
+      return null
+    }
     return {
       host: sshMatch[1],
       owner: sshMatch[2],
@@ -113,15 +137,21 @@ export function parseGitRemote(input: string): ParsedRepository | null {
     }
   }
 
-  // URL format: https://host/owner/repo.git, ssh://git@host/owner/repo, git://host/owner/repo
+  // URL format — densable userinfo `(?:[^@/?#]*@)?` + host `[^/:?#@]+(?::\d+)?`
   const urlMatch = trimmed.match(
-    /^(https?|ssh|git):\/\/(?:[^@]+@)?([^/:]+(?::\d+)?)\/([^/]+)\/([^/]+?)(?:\.git)?$/,
+    /^(https?|ssh|git):\/\/(?:[^@/?#]*@)?([^/:?#@]+(?::\d+)?)\/([^/]+)\/([^/]+?)(?:\.git)?$/,
   )
   if (urlMatch?.[1] && urlMatch[2] && urlMatch[3] && urlMatch[4]) {
     const protocol = urlMatch[1]
     const hostWithPort = urlMatch[2]
     const hostWithoutPort = hostWithPort.split(':')[0] ?? ''
     if (!looksLikeRealHostname(hostWithoutPort)) return null
+    if (
+      !isValidRepoSlugSegment(urlMatch[3]) ||
+      !isValidRepoSlugSegment(urlMatch[4])
+    ) {
+      return null
+    }
     // Only preserve port for HTTPS — SSH/git ports are not usable for constructing
     // web URLs (e.g. ssh://git@ghe.corp.com:2222 → port 2222 is SSH, not HTTPS).
     const host =
@@ -157,7 +187,8 @@ export function parseGitHubRepository(input: string): string | null {
     return `${parsed.owner}/${parsed.name}`
   }
 
-  // If no URL pattern matched, check if it's already in owner/repo format
+  // If no URL pattern matched, check if it's already in owner/repo format.
+  // densable SEA `x8t`: plain path also requires `fTt` on both segments.
   if (
     !trimmed.includes('://') &&
     !trimmed.includes('@') &&
@@ -167,6 +198,9 @@ export function parseGitHubRepository(input: string): string | null {
     if (parts.length === 2 && parts[0] && parts[1]) {
       // Remove .git extension if present
       const repo = parts[1].replace(/\.git$/, '')
+      if (!isValidRepoSlugSegment(parts[0]) || !isValidRepoSlugSegment(repo)) {
+        return null
+      }
       return `${parts[0]}/${repo}`
     }
   }
@@ -176,18 +210,19 @@ export function parseGitHubRepository(input: string): string | null {
 }
 
 /**
- * Checks whether a hostname looks like a real domain name rather than an
- * SSH config alias. A simple dot-check is not enough because aliases like
- * "github.com-work" still contain a dot. We additionally require that the
- * last segment (the TLD) is purely alphabetic — real TLDs (com, org, io, net)
- * never contain hyphens or digits.
+ * densable SEA `Fdu` — real hostname (not SSH config alias).
+ * Requires `[A-Za-z0-9.-]+`, no leading `-`, contains `.`, alphabetic TLD.
+ * Aliases like `github.com-work` fail the TLD check (`com-work`).
  */
 function looksLikeRealHostname(host: string): boolean {
-  if (!host.includes('.')) return false
+  if (
+    !/^[A-Za-z0-9.-]+$/.test(host) ||
+    host.startsWith('-') ||
+    !host.includes('.')
+  ) {
+    return false
+  }
   const lastSegment = host.split('.').pop()
   if (!lastSegment) return false
-  // Real TLDs are purely alphabetic (e.g., "com", "org", "io").
-  // SSH aliases like "github.com-work" have a last segment "com-work" which
-  // contains a hyphen.
   return /^[a-zA-Z]+$/.test(lastSegment)
 }

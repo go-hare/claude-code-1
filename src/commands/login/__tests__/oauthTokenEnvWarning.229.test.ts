@@ -9,6 +9,8 @@ import {
   getOauthTokenEnvStartingMessage,
   getOauthTokenEnvSuccessNote,
   isOauthTokenEnvSetAtStart,
+  lastMessageRequestsAuthRetry,
+  resolveOauthTokenEnvWarningPlacement,
 } from '../oauthTokenEnvWarning.js'
 
 describe('densable 2.1.229 #27 o9m getOauthTokenEnvStartingMessage', () => {
@@ -84,6 +86,86 @@ describe('densable 2.1.229 #27 s9m formatLoginDoneMessage', () => {
         gatewayActive: true,
       }),
     ).toBe('Login successful')
+  })
+
+  test('includeEnvTokenWarning false keeps env note out of stdout (TRh out-of-band)', () => {
+    expect(
+      formatLoginDoneMessage(true, {
+        envTokenWasSet: true,
+        includeEnvTokenWarning: false,
+      }),
+    ).toBe('Login successful')
+  })
+})
+
+describe('densable 2.1.234 #26 TRh/ERh oauth warning placement', () => {
+  test('TRh none when env unset or gateway', () => {
+    expect(
+      resolveOauthTokenEnvWarningPlacement({
+        envTokenWasSet: false,
+        gatewayActive: false,
+        willAutoQuery: true,
+      }),
+    ).toBe('none')
+    expect(
+      resolveOauthTokenEnvWarningPlacement({
+        envTokenWasSet: true,
+        gatewayActive: true,
+        willAutoQuery: false,
+      }),
+    ).toBe('none')
+  })
+
+  test('TRh out-of-band when auto-query so note is not model-visible stdout', () => {
+    expect(
+      resolveOauthTokenEnvWarningPlacement({
+        envTokenWasSet: true,
+        gatewayActive: false,
+        willAutoQuery: true,
+      }),
+    ).toBe('out-of-band')
+  })
+
+  test('TRh inline when no auto-query', () => {
+    expect(
+      resolveOauthTokenEnvWarningPlacement({
+        envTokenWasSet: true,
+        gatewayActive: false,
+        willAutoQuery: false,
+      }),
+    ).toBe('inline')
+  })
+
+  test('ERh only last assistant authentication_failed triggers auto-query', () => {
+    expect(lastMessageRequestsAuthRetry([])).toBe(false)
+    expect(
+      lastMessageRequestsAuthRetry([
+        {
+          type: 'assistant',
+          isApiErrorMessage: true,
+          error: 'authentication_failed',
+        },
+      ]),
+    ).toBe(true)
+    expect(
+      lastMessageRequestsAuthRetry([
+        {
+          type: 'assistant',
+          isApiErrorMessage: true,
+          error: 'authentication_failed',
+        },
+        { type: 'user' },
+      ]),
+    ).toBe(false)
+    expect(
+      lastMessageRequestsAuthRetry([
+        {
+          type: 'assistant',
+          isApiErrorMessage: true,
+          error: 'invalid_request',
+        },
+      ]),
+    ).toBe(false)
   })
 })
 

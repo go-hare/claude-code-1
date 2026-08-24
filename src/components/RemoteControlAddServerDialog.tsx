@@ -26,7 +26,7 @@ import {
   resolveTrustRootNote,
 } from './TrustDialog/trustDialogCopy.js';
 import { acceptTrustForDirectory, isDirectoryTrusted } from '../commands/cd/cdCommand.js';
-import { findCanonicalGitRoot, findGitRoot } from '../utils/git.js';
+import { findCanonicalGitRootUncached, findGitRootUncached } from '../utils/git.js';
 import { addRemoteControlServer, type RemoteControlServerEntry } from '../bridge/remoteControlServers.js';
 import { getOriginalCwd } from '../bootstrap/state.js';
 import TextInput from './TextInput.js';
@@ -73,7 +73,12 @@ export function RemoteControlAddServerDialog({ onDone, initialDir }: Props): Rea
 
   const trustBody = useMemo(() => {
     const path = pendingDir ?? resolvedDir;
-    const { trustRoot, showRepoRootNote } = resolveTrustRootNote(path, findCanonicalGitRoot, findGitRoot);
+    // densable I8e/rHo — uncached; sticky negative LRU must not omit repo note (#23)
+    const { trustRoot, showRepoRootNote } = resolveTrustRootNote(
+      path,
+      findCanonicalGitRootUncached,
+      findGitRootUncached,
+    );
     const note = showRepoRootNote ? formatSpawnRepoTrustNote(trustRoot) : '';
     return formatRcAddServerTrustBody(path, note);
   }, [pendingDir, resolvedDir]);

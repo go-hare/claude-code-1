@@ -4,6 +4,7 @@ import type { ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { isArtifactToolDisabled } from 'src/utils/artifactGates.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { expandPath, isDeviceOrNtNamespacePath } from 'src/utils/path.js'
 import {
   ARTIFACT_TOOL_NAME,
   describeArtifactTool,
@@ -153,6 +154,23 @@ export const ArtifactTool = buildTool({
 
   async call(input: ArtifactInput) {
     const { file_path, hash, ttl } = input
+
+    // densable publish: Yhe(y)||Jw(y) before filesystem access
+    const expanded = expandPath(file_path)
+    if (
+      isDeviceOrNtNamespacePath(expanded) ||
+      isDeviceOrNtNamespacePath(file_path)
+    ) {
+      return {
+        data: {
+          id: '',
+          url: '',
+          expiresAt: '',
+          error:
+            'file_path: device- or NT-namespace paths cannot be published — spell the path plainly',
+        },
+      }
+    }
 
     let size: number
     try {

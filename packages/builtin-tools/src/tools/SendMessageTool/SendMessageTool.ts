@@ -61,6 +61,9 @@ import {
 } from '../AgentTool/resumeAgent.js'
 import {
   SEND_MESSAGE_SUMMARY_MAX_CHARS,
+  SEND_MESSAGE_TO_MAX_CHARS,
+  SEND_MESSAGE_TO_MAX_RE,
+  SEND_MESSAGE_TO_SINGLE_LINE_RE,
   SEND_MESSAGE_TOOL_NAME,
 } from './constants.js'
 import {
@@ -169,7 +172,18 @@ const SEND_MESSAGE_NOTIFY_WHEN_IDLE_FIELD = feature('UDS_INBOX')
 
 const inputSchema = lazySchema(() =>
   z.object({
-    to: z.string().describe(SEND_MESSAGE_TO_DESC),
+    // densable 2.1.234 #11 / SEA kgf: b4a single-line + bVv unicode max Agf=300
+    to: z
+      .string()
+      .regex(
+        SEND_MESSAGE_TO_SINGLE_LINE_RE,
+        'must be a single-line recipient name or address',
+      )
+      .regex(
+        SEND_MESSAGE_TO_MAX_RE,
+        `recipient longer than any listed name or address (max ${SEND_MESSAGE_TO_MAX_CHARS} characters)`,
+      )
+      .describe(SEND_MESSAGE_TO_DESC),
     // densable SRp: summary.max(Cpr) + soft-truncate describe (Cpr=200).
     summary: z
       .string()
@@ -1960,8 +1974,9 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
       }
 
-      // densable 2.1.225 gIn/rKp — after in-process agents, resolve bare name /
-      // name [ref] against local UDS + RC peers with pin guard.
+      // densable 2.1.225 gIn/rKp + 2.1.234 #34 searchTruncated —
+      // after in-process agents, resolve bare name / name [ref] against local
+      // UDS + RC peers (incl. account bridge walk) with pin guard.
       // densable 2.1.236 C1: require non-empty text (pure idle handled earlier).
       if (
         feature('UDS_INBOX') &&
@@ -1976,15 +1991,31 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
         const bridgePeers =
           require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
+        const cloudPeers =
+          require('src/utils/teleport/cloudPeerSessions.js') as typeof import('src/utils/teleport/cloudPeerSessions.js')
+        const {
+          appendSearchTruncatedSuccessSuffix,
+          appendSearchTruncatedBody,
+          searchTruncatedDisplayNote,
+        } =
+          require('src/utils/sessionListIncompleteCopy.js') as typeof import('src/utils/sessionListIncompleteCopy.js')
         /* eslint-enable @typescript-eslint/no-require-imports */
-        const [udsPeers, bridgeList, allLive] = await Promise.all([
-          udsClient.listPeers(),
-          bridgePeers.listBridgePeers(),
-          udsClient.listAllLiveSessions(),
-        ])
+        const accountStatus = { failed: false, truncated: false }
+        const [udsPeers, bridgeList, accountBridge, cloudList, allLive] =
+          await Promise.all([
+            udsClient.listPeers(),
+            bridgePeers.listBridgePeers(),
+            bridgePeers.listBridgePeerSessions(accountStatus),
+            cloudPeers.listCloudPeerSessions(),
+            udsClient.listAllLiveSessions(),
+          ])
+        // densable Mhf / g(): searchTruncated = cloud.truncated || bridge.truncated
+        const searchTruncated =
+          cloudList.truncated === true || accountStatus.truncated === true
         const candidates = buildPeerCandidates({
           udsPeers,
           bridgePeers: bridgeList,
+          accountBridgePeers: accountBridge,
         })
         const pins = context.getAppState().sendMessagePins ?? {}
         const resolved = resolvePeerByName({
@@ -1992,6 +2023,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           pins,
           candidates,
           localClaimed: localClaimedRemoteBodies(allLive),
+          searchTruncated,
         })
         if (resolved.kind === 'refused') {
           return { data: { success: false, message: resolved.message } }
@@ -2003,6 +2035,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               message: formatAmbiguousMessage(input.to, resolved.candidates, {
                 pinnedIdentityClaimedLocally:
                   resolved.pinnedIdentityClaimedLocally,
+                searchTruncated: resolved.searchTruncated,
               }),
             },
           }
@@ -2046,7 +2079,10 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               resolved.sameNamedSiblings && resolved.sameNamedSiblings > 0
                 ? `\nNote: ${resolved.sameNamedSiblings} other agent${resolved.sameNamedSiblings === 1 ? ' is' : 's are'} also named '${cand.name}'. This went to the one this conversation confirmed; to switch, re-send with that agent's 'name [ref]' (ListAgents lists them).`
                 : ''
-            let message = `“${preview}” → ${cand.name} (a Claude session on another machine, over Remote Control)${siblingNote}`
+            let message = appendSearchTruncatedSuccessSuffix(
+              `“${preview}” → ${cand.name} (a Claude session on another machine, over Remote Control)${siblingNote}`,
+              resolved.searchTruncated,
+            )
             // I7 — bare→bridge message+notify: deliver, refuse subscribe.
             if (notifyIdle) {
               /* eslint-disable @typescript-eslint/no-require-imports */
@@ -2087,6 +2123,10 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               resolved.sameNamedSiblings && resolved.sameNamedSiblings > 0
                 ? `\nNote: ${resolved.sameNamedSiblings} other live session${resolved.sameNamedSiblings === 1 ? ' is' : 's are'} also named '${cand.name}'. This went to the one this conversation confirmed; to switch, re-send with that session's 'name [ref]' (ListAgents lists them).`
                 : ''
+            const message = appendSearchTruncatedSuccessSuffix(
+              `“${preview}” → ${cand.name} (another Claude session on this machine)${siblingNote}`,
+              resolved.searchTruncated,
+            )
             if (notifyIdle) {
               if (isNotifyWhenIdlePrincipalRefused(context)) {
                 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -2096,7 +2136,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 return {
                   data: {
                     success: true,
-                    message: `“${preview}” → ${cand.name} (another Claude session on this machine)${siblingNote}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_MAIN_ONLY}`,
+                    message: `${message}\nNothing was subscribed either: ${idle.NOTIFY_WHEN_IDLE_MAIN_ONLY}`,
                   },
                 }
               }
@@ -2110,7 +2150,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               return {
                 data: {
                   success: true,
-                  message: `“${preview}” → ${cand.name} (another Claude session on this machine)${siblingNote}\n${sub.modelLine}`,
+                  message: `${message}\n${sub.modelLine}`,
                   ...(sub.errorClass ? { errorClass: sub.errorClass } : {}),
                   ...(sub.degradedClass
                     ? { degradedClass: sub.degradedClass }
@@ -2121,7 +2161,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             return {
               data: {
                 success: true,
-                message: `“${preview}” → ${cand.name} (another Claude session on this machine)${siblingNote}`,
+                message,
               },
             }
           } catch (e) {
@@ -2135,6 +2175,15 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                   : {}),
               },
             }
+          }
+        }
+        if (resolved.kind === 'not-found' && searchTruncated) {
+          return {
+            data: {
+              success: false,
+              message: appendSearchTruncatedBody(resolved.message, true),
+              display: `Not sent — no agent named '${input.to}' is reachable.${searchTruncatedDisplayNote(true)}`,
+            },
           }
         }
         // not-found among peers → mailbox fallthrough

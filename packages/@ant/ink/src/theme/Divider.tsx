@@ -38,6 +38,12 @@ type DividerProps = {
    * <Divider title="Title" />
    */
   title?: string;
+
+  /**
+   * densable H_ `titleAlign` — `"center"` (default) or `"start"`
+   * (left dashes capped at 4, matching user-prompt truncation gutter).
+   */
+  titleAlign?: 'center' | 'start';
 };
 
 /**
@@ -63,14 +69,22 @@ type DividerProps = {
  * // With centered title
  * <Divider title="3 new messages" />
  */
-export function Divider({ width, color, char = '─', padding = 0, title }: DividerProps): React.ReactNode {
+export function Divider({
+  width,
+  color,
+  char = '─',
+  padding = 0,
+  title,
+  titleAlign = 'center',
+}: DividerProps): React.ReactNode {
   const { columns: terminalWidth } = useTerminalSize();
   const effectiveWidth = Math.max(0, (width ?? terminalWidth) - padding);
 
   if (title) {
     const titleWidth = stringWidth(title) + 2; // +2 for spaces around title
     const sideWidth = Math.max(0, effectiveWidth - titleWidth);
-    const leftWidth = Math.floor(sideWidth / 2);
+    // densable H_: start → min(4, remaining); else center split
+    const leftWidth = titleAlign === 'start' ? Math.min(4, sideWidth) : Math.floor(sideWidth / 2);
     const rightWidth = sideWidth - leftWidth;
     return (
       <Text color={color} dimColor={!color}>

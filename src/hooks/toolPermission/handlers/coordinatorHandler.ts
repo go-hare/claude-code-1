@@ -3,7 +3,10 @@ import type { PendingClassifierCheck } from '../../../types/permissions.js'
 import { logError } from '../../../utils/log.js'
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js'
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
-import type { PermissionContext } from '../PermissionContext.js'
+import type {
+  PermissionContext,
+  PermissionHookReprompt,
+} from '../PermissionContext.js'
 
 type CoordinatorPermissionParams = {
   ctx: PermissionContext
@@ -25,7 +28,7 @@ type CoordinatorPermissionParams = {
  */
 async function handleCoordinatorPermission(
   params: CoordinatorPermissionParams,
-): Promise<PermissionDecision | null> {
+): Promise<PermissionDecision | PermissionHookReprompt | null> {
   const { ctx, updatedInput, suggestions, permissionMode } = params
 
   try {
@@ -35,7 +38,11 @@ async function handleCoordinatorPermission(
       suggestions,
       updatedInput,
     )
-    if (hookResult) return hookResult
+    // Still-ask after hook rewrite is not a final decision — fall through
+    // so the interactive dialog rebuilds with finalInput.
+    if (hookResult) {
+      return hookResult
+    }
 
     // 2. Try classifier (slow, inference -- bash only)
     const classifierResult = feature('BASH_CLASSIFIER')

@@ -1241,23 +1241,40 @@ export class StructuredIO {
     host: string
     port?: number
   }) => Promise<boolean> {
-    return async (hostPattern): Promise<boolean> => {
+    // densable: dedupe concurrent same-host asks; on allow → addSessionAllowedHost
+    const inFlight = new Map<string, Promise<boolean>>()
+    const askOne = async (host: string): Promise<boolean> => {
       try {
         const result = await this.sendRequest<PermissionToolOutput>(
           {
             subtype: 'can_use_tool',
             tool_name: SANDBOX_NETWORK_ACCESS_TOOL_NAME,
-            input: { host: hostPattern.host },
+            input: { host },
             tool_use_id: randomUUID(),
-            description: `Allow network connection to ${hostPattern.host}?`,
+            description: `Allow network connection to ${host}?`,
           },
           permissionToolOutputSchema(),
         )
-        return result.behavior === 'allow'
+        if (result.behavior !== 'allow') return false
+        const { SandboxManager } = await import(
+          '../utils/sandbox/sandbox-adapter.js'
+        )
+        SandboxManager.addSessionAllowedHost(host)
+        return true
       } catch {
         // If the request fails (stream closed, abort, etc.), deny the connection
         return false
       }
+    }
+    return (hostPattern): Promise<boolean> => {
+      const host = hostPattern.host
+      const existing = inFlight.get(host)
+      if (existing) return existing
+      const promise = askOne(host).finally(() => {
+        inFlight.delete(host)
+      })
+      inFlight.set(host, promise)
+      return promise
     }
   }
 

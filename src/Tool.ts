@@ -237,6 +237,26 @@ export type ToolUseContext = {
   getAppState(): AppState
   setAppState(f: (prev: AppState) => AppState): void
   /**
+   * densable `setToolPermissionContext` — UI / mode writes. Async subagents
+   * get a noop when `!shareSetAppState` (createSubagentContext).
+   */
+  setToolPermissionContext: (
+    update:
+      | ToolPermissionContext
+      | ((prev: ToolPermissionContext) => ToolPermissionContext),
+  ) => void
+  /**
+   * densable `setSessionToolPermissionContext` — session-scoped permission
+   * rule writes from permission prompts. Always inherited by subagents so
+   * background-agent allow/deny answers are not dropped (#8 / 2.1.234).
+   * Main session: same writer as setToolPermissionContext (densable `y8r`).
+   */
+  setSessionToolPermissionContext: (
+    update:
+      | ToolPermissionContext
+      | ((prev: ToolPermissionContext) => ToolPermissionContext),
+  ) => void
+  /**
    * Always-shared setAppState for session-scoped infrastructure (background
    * tasks, session hooks). Unlike setAppState, which is no-op for async agents
    * (see createSubagentContext), this always reaches the root store so agents

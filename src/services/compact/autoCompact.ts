@@ -37,21 +37,32 @@ export function getEffectiveContextWindowSize(model: string): number {
   )
   let contextWindow = getContextWindowForModel(model, getSdkBetas())
 
-  // Official AUTO_COMPACT_WINDOW densable pure parse.
+  // densable 2.1.234 Nq: env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then
+  // settings.autoCompactWindow, else model max (already in contextWindow).
   try {
-    const { resolveAutoCompactWindowOverride } =
+    const { resolveAutoCompactWindow } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-    const parsed = resolveAutoCompactWindowOverride()
-    if (parsed !== null) {
-      contextWindow = Math.min(contextWindow, parsed)
+      require('../../utils/autoCompactWindow.js') as typeof import('../../utils/autoCompactWindow.js')
+    const resolved = resolveAutoCompactWindow(model)
+    if (resolved.source === 'env' || resolved.source === 'settings') {
+      contextWindow = Math.min(contextWindow, resolved.window)
     }
   } catch {
-    const autoCompactWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
-    if (autoCompactWindow) {
-      const parsed = parseInt(autoCompactWindow, 10)
-      if (!isNaN(parsed) && parsed > 0) {
+    try {
+      const { resolveAutoCompactWindowOverride } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+      const parsed = resolveAutoCompactWindowOverride()
+      if (parsed !== null) {
         contextWindow = Math.min(contextWindow, parsed)
+      }
+    } catch {
+      const autoCompactWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
+      if (autoCompactWindow) {
+        const parsed = parseInt(autoCompactWindow, 10)
+        if (!isNaN(parsed) && parsed > 0) {
+          contextWindow = Math.min(contextWindow, parsed)
+        }
       }
     }
   }

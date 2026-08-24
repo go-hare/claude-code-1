@@ -106,8 +106,10 @@ import {
   extractJsonStringField,
   extractLastJsonStringField,
   extractTypedJsonlField,
+  getProjectDirNameOverride,
   LITE_READ_BUF_SIZE,
   MAX_SANITIZED_LENGTH,
+  projectDirNameOverrideCacheKey,
   readHeadAndTail,
   readTranscriptForLoad,
   sanitizePathRaw,
@@ -800,9 +802,15 @@ export function isCustomTitleEnabled(): boolean {
 // string; homedir/env/regex are all session-invariant so the result is
 // stable for a given input. Worktree switches just change the key — no
 // cache clear needed.
-export const getProjectDir = memoize((projectDir: string): string => {
-  return join(getProjectsDir(), sanitizePath(projectDir))
-})
+// densable 2.1.234 #1 / XLe: honor CLAUDE_CODE_PROJECT_DIR_NAME when
+// CLAUDE_CONFIG_DIR is set. Memo key includes both env vars (densable ify).
+export const getProjectDir = memoize(
+  (projectDir: string): string => {
+    const override = getProjectDirNameOverride()
+    return join(getProjectsDir(), override ?? sanitizePath(projectDir))
+  },
+  (projectDir: string) => `${projectDir}\0${projectDirNameOverrideCacheKey()}`,
+)
 
 let project: Project | null = null
 let cleanupRegistered = false

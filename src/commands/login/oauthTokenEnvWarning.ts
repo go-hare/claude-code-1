@@ -47,10 +47,51 @@ export type LoginDoneFlags = {
    * is suppressed even if envTokenWasSet.
    */
   gatewayActive?: boolean
+  /**
+   * densable kRh includeEnvTokenWarning. When set, overrides the
+   * envTokenWasSet && !gatewayActive default (TRh "inline" vs "out-of-band").
+   */
+  includeEnvTokenWarning?: boolean
+}
+
+/** densable TRh return */
+export type OauthTokenEnvWarningPlacement = 'none' | 'inline' | 'out-of-band'
+
+/**
+ * densable TRh — env-token success note must not ride the auto-query
+ * login stdout into the model turn. willAutoQuery → out-of-band notice.
+ */
+export function resolveOauthTokenEnvWarningPlacement(opts: {
+  envTokenWasSet: boolean
+  gatewayActive: boolean
+  willAutoQuery: boolean
+}): OauthTokenEnvWarningPlacement {
+  if (!opts.envTokenWasSet || opts.gatewayActive) return 'none'
+  return opts.willAutoQuery ? 'out-of-band' : 'inline'
 }
 
 /**
- * densable s9m(success, flags) — final /login onDone message.
+ * densable ERh — last assistant auth-fail is the only auto-query trigger.
+ * accountSwitched / relaunching / gatewayLoginError are gold cloud paths
+ * (not ported).
+ */
+export function lastMessageRequestsAuthRetry(
+  messages: ReadonlyArray<{
+    type?: string
+    isApiErrorMessage?: boolean
+    error?: string
+  }>,
+): boolean {
+  const last = messages[messages.length - 1]
+  return (
+    last?.type === 'assistant' &&
+    last.isApiErrorMessage === true &&
+    last.error === 'authentication_failed'
+  )
+}
+
+/**
+ * densable kRh / s9m — final /login onDone message.
  */
 export function formatLoginDoneMessage(
   success: boolean,
@@ -60,7 +101,10 @@ export function formatLoginDoneMessage(
   const base = flags.bridgeDisconnected
     ? `Login successful. ${REMOTE_CONTROL_DISCONNECTED_NOTE}`
     : 'Login successful'
-  if (flags.envTokenWasSet && !flags.gatewayActive) {
+  const includeEnvTokenWarning =
+    flags.includeEnvTokenWarning ??
+    Boolean(flags.envTokenWasSet && !flags.gatewayActive)
+  if (includeEnvTokenWarning) {
     return `${base}\n\n${getOauthTokenEnvSuccessNote()}`
   }
   return base

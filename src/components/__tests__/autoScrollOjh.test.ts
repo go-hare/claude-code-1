@@ -1,4 +1,11 @@
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'bun:test'
+
+const HANDLER = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  '../ScrollKeybindingHandler.tsx',
+)
 
 /**
  * densable OJh: wheel-down / jump past max → scrollToBottom iff autoScrollEnabled,
@@ -6,9 +13,7 @@ import { describe, expect, test } from 'bun:test'
  */
 describe('ScrollKeybindingHandler OJh (autoScrollEnabled)', () => {
   test('source: scrollDown past max uses getAutoScrollEnabled / OJh', async () => {
-    const src = await Bun.file(
-      new URL('../ScrollKeybindingHandler.tsx', import.meta.url).pathname,
-    ).text()
+    const src = await Bun.file(HANDLER).text()
     const idx = src.indexOf('function scrollDown')
     expect(idx).toBeGreaterThan(0)
     const slice = src.slice(idx, idx + 900)
@@ -18,9 +23,7 @@ describe('ScrollKeybindingHandler OJh (autoScrollEnabled)', () => {
   })
 
   test('source: jumpBy max branch uses OJh; case bottom always scrollToBottom', async () => {
-    const src = await Bun.file(
-      new URL('../ScrollKeybindingHandler.tsx', import.meta.url).pathname,
-    ).text()
+    const src = await Bun.file(HANDLER).text()
     const jumpIdx = src.indexOf('export function jumpBy')
     expect(jumpIdx).toBeGreaterThan(0)
     const jumpSlice = src.slice(jumpIdx, jumpIdx + 900)

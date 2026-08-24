@@ -79,6 +79,23 @@ export function canUserConfigureAdvisor(): boolean {
   return isAdvisorEnabled() && (getAdvisorConfig().canUserConfigure ?? false)
 }
 
+/**
+ * densable A5b / Zer — aliases offered by `/advisor` Select dialog.
+ * Filtered to those that resolve to a valid advisor model (or Fable credits path).
+ */
+export const ADVISOR_COMMAND_ALIASES = ['fable', 'opus', 'sonnet'] as const
+
+export function getAdvisorCommandAliases(): string[] {
+  return ADVISOR_COMMAND_ALIASES.filter(alias => {
+    // Lazy import avoids circular deps with model.js in some test graphs.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseUserSpecifiedModel, normalizeModelStringForAPI } =
+      require('./model/model.js') as typeof import('./model/model.js')
+    const resolved = normalizeModelStringForAPI(parseUserSpecifiedModel(alias))
+    return isValidAdvisorModel(resolved) || isFableAdvisorFamily(resolved)
+  })
+}
+
 export function getExperimentAdvisorModels():
   | { baseModel: string; advisorModel: string }
   | undefined {

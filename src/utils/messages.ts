@@ -2572,61 +2572,11 @@ export function normalizeMessagesForAPI(
           // multiple user messages in a row; 1P API does and merges them
           // into a single user turn
 
-          // origin.kind==="task-notification": re-harden disclaimer even if an older
-          // path stored bare content (idempotent startsWith guard).
-          let hardenedForTaskNotification = message
-          if (
-            (message.origin as { kind?: string } | undefined)?.kind ===
-            'task-notification'
-          ) {
-            const content = message.message.content
-            if (typeof content === 'string') {
-              const next = wrapTaskNotificationDisclaimer(content)
-              if (next !== content) {
-                hardenedForTaskNotification = {
-                  ...message,
-                  message: { ...message.message, content: next },
-                }
-              }
-            } else if (Array.isArray(content)) {
-              const first = content[0]
-              if (
-                first &&
-                typeof first === 'object' &&
-                'type' in first &&
-                first.type === 'text' &&
-                'text' in first &&
-                typeof first.text === 'string'
-              ) {
-                const next = wrapTaskNotificationDisclaimer(first.text)
-                if (next !== first.text) {
-                  hardenedForTaskNotification = {
-                    ...message,
-                    message: {
-                      ...message.message,
-                      content: [{ ...first, text: next }, ...content.slice(1)],
-                    },
-                  }
-                }
-              } else {
-                // prepend disclaimer text block when content is a non-empty array
-                // without a leading text block.
-                hardenedForTaskNotification = {
-                  ...message,
-                  message: {
-                    ...message.message,
-                    content: [
-                      {
-                        type: 'text' as const,
-                        text: wrapTaskNotificationDisclaimer(''),
-                      },
-                      ...content,
-                    ],
-                  },
-                }
-              }
-            }
-          }
+          // densable fXs / $Cn — between-turn API wrap matches mid-turn
+          // queued_command tags (system-reminder + NCn). scheduled-trigger
+          // stays $Cn only. origin cleared on the API copy (gold `origin:void 0`).
+          const hardenedForTaskNotification =
+            hardenTaskNotificationForApi(message)
 
           // When tool search is NOT enabled, strip all tool_reference blocks from
           // tool_result content, as these are only valid with the tool search beta.
@@ -3259,17 +3209,32 @@ export function mergeUserContentBlocks(
   return [...a.slice(0, -1), smooshed, ...toolResults]
 }
 
+/**
+ * densable 2.1.234 #9 / SEA `KKn` — heal malformed content blocks from
+ * non-streaming fallback (and stream materialization) so missing `text` /
+ * `thinking`/`signature` from third-party gateways cannot crash the turn.
+ */
+export type NormalizeContentFromAPIMeta = {
+  requestId?: string
+  messageId?: string
+}
+
 // Sometimes the API returns empty messages (eg. "\n\n"). We need to filter these out,
 // otherwise they will give an API error when we send them to the API next time we call query().
 export function normalizeContentFromAPI(
   contentBlocks: BetaMessage['content'],
   tools: Tools,
   agentId?: AgentId,
+  meta?: NormalizeContentFromAPIMeta,
 ): BetaMessage['content'] {
   if (!contentBlocks) {
     return []
   }
-  return contentBlocks.map(contentBlock => {
+  const requestIdUnknown = (meta?.requestId ??
+    'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  const messageIdUnknown = (meta?.messageId ??
+    'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  return contentBlocks.flatMap((contentBlock): BetaMessage['content'] => {
     switch (contentBlock.type) {
       case 'tool_use': {
         if (
@@ -3288,14 +3253,21 @@ export function normalizeContentFromAPI(
         let normalizedInput: unknown
         if (typeof contentBlock.input === 'string') {
           const parsed = safeParseJSON(contentBlock.input)
-          if (parsed === null && contentBlock.input.length > 0) {
+          if (
+            parsed === null &&
+            contentBlock.input.trim() !== 'null' &&
+            contentBlock.input.length > 0
+          ) {
             // TET/FC-v3 diagnostic: the streamed tool input JSON failed to
             // parse. We fall back to {} which means downstream validation
             // sees empty input. The raw prefix goes to debug log only — no
             // PII-tagged proto column exists for it yet.
+            // densable KKn also attaches request_id/messageID when available.
             logEvent('tengu_tool_input_json_parse_fail', {
               toolName: sanitizeToolNameForAnalytics(contentBlock.name),
               inputLen: contentBlock.input.length,
+              request_id: requestIdUnknown,
+              messageID: messageIdUnknown,
             })
             if (process.env.USER_TYPE === 'ant') {
               logForDebugging(
@@ -3326,45 +3298,93 @@ export function normalizeContentFromAPI(
                 agentId,
               )
             } catch (error) {
-              logError(new Error('Error normalizing tool input: ' + error))
+              logError(
+                new Error(
+                  `Error normalizing tool input (requestId=${meta?.requestId ?? 'unknown'}, messageId=${meta?.messageId ?? 'unknown'}): ${error}`,
+                ),
+              )
               // Keep the original input if normalization fails
             }
           }
         }
 
-        return {
-          ...contentBlock,
-          input: normalizedInput,
-        }
+        return [
+          {
+            ...contentBlock,
+            input: normalizedInput,
+          },
+        ]
       }
       case 'text':
+        // densable KKn: drop non-string text (third-party gateways) instead of crashing
+        if (typeof contentBlock.text !== 'string') {
+          logEvent('tengu_content_block_healed', {
+            blockType:
+              'text' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            action:
+              'dropped' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            missingText: true,
+            request_id: requestIdUnknown,
+            messageID: messageIdUnknown,
+          })
+          return []
+        }
         if (contentBlock.text.trim().length === 0) {
           logEvent('tengu_model_whitespace_response', {
             length: contentBlock.text.length,
+            request_id: requestIdUnknown,
+            messageID: messageIdUnknown,
           })
         }
         // Return the block as-is to preserve exact content for prompt caching.
         // Empty text blocks are handled at the display layer and must not be
         // altered here.
-        return contentBlock
+        return [contentBlock]
+      case 'thinking': {
+        // densable KKn: heal missing thinking/signature rather than throw later
+        const hasThinking = typeof contentBlock.thinking === 'string'
+        const hasSignature = typeof contentBlock.signature === 'string'
+        if (hasThinking && hasSignature) {
+          return [contentBlock]
+        }
+        logEvent('tengu_content_block_healed', {
+          blockType:
+            'thinking' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          action:
+            'healed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          missingThinking: !hasThinking,
+          missingSignature: !hasSignature,
+          request_id: requestIdUnknown,
+          messageID: messageIdUnknown,
+        })
+        return [
+          {
+            ...contentBlock,
+            thinking: hasThinking ? contentBlock.thinking : '',
+            signature: hasSignature ? contentBlock.signature : '',
+          },
+        ]
+      }
       case 'code_execution_tool_result':
       case 'mcp_tool_use':
       case 'mcp_tool_result':
       case 'container_upload':
         // Beta-specific content blocks - pass through as-is
-        return contentBlock
+        return [contentBlock]
       case 'server_tool_use':
         if (typeof contentBlock.input === 'string') {
-          return {
-            ...contentBlock,
-            input: (safeParseJSON(contentBlock.input) ?? {}) as {
-              [key: string]: unknown
+          return [
+            {
+              ...contentBlock,
+              input: (safeParseJSON(contentBlock.input) ?? {}) as {
+                [key: string]: unknown
+              },
             },
-          }
+          ]
         }
-        return contentBlock
+        return [contentBlock]
       default:
-        return contentBlock
+        return [contentBlock]
     }
   })
 }
@@ -6833,6 +6853,94 @@ export function wrapTaskNotificationDisclaimer(raw: string): string {
   // Also idempotent if only the header line was already applied
   if (raw.startsWith('[SYSTEM NOTIFICATION - NOT USER INPUT]')) return raw
   return `${TASK_NOTIFICATION_DISCLAIMER_PREFIX}${raw}`
+}
+
+/** densable Erb — `<system-reminder>` + NCn prefix. */
+const TASK_NOTIFICATION_API_OPEN = `<system-reminder>\n${TASK_NOTIFICATION_DISCLAIMER_PREFIX}`
+/** densable ekd */
+const TASK_NOTIFICATION_API_CLOSE = '\n</system-reminder>'
+
+/**
+ * densable `fXs` — between-turn API normalize. Same tags as mid-turn
+ * `wrapMessagesInSystemReminder(wrapCommandText(..., task-notification))`.
+ * Escapes inner `</system-reminder>` so the wrapper cannot be closed early.
+ */
+export function wrapTaskNotificationForApi(raw: string): string {
+  if (
+    raw.startsWith(TASK_NOTIFICATION_API_OPEN) &&
+    raw.endsWith(TASK_NOTIFICATION_API_CLOSE)
+  ) {
+    return raw
+  }
+  const escaped = raw.replaceAll(
+    /<\s*\/\s*system-reminder\s*>/gi,
+    '&lt;/system-reminder&gt;',
+  )
+  return `<system-reminder>\n${wrapTaskNotificationDisclaimer(escaped)}${TASK_NOTIFICATION_API_CLOSE}`
+}
+
+/**
+ * densable normalize user-branch for `origin.kind==="task-notification"`:
+ * scheduled-trigger → `$Cn`; else `fXs`; then `origin:void 0`.
+ */
+export function hardenTaskNotificationForApi(
+  message: UserMessage,
+): UserMessage {
+  const origin = message.origin as
+    | { kind?: string; subkind?: string; trigger?: string }
+    | undefined
+  if (origin?.kind !== 'task-notification') return message
+
+  const content = message.message.content
+  const scheduled = isScheduledTaskOrigin(origin)
+
+  let nextContent: typeof content
+  if (scheduled) {
+    if (typeof content === 'string') {
+      nextContent = wrapScheduledTaskDisclaimer(content)
+    } else if (Array.isArray(content)) {
+      const first = content[0]
+      if (
+        first &&
+        typeof first === 'object' &&
+        'type' in first &&
+        first.type === 'text' &&
+        'text' in first &&
+        typeof first.text === 'string'
+      ) {
+        nextContent = [
+          { ...first, text: wrapScheduledTaskDisclaimer(first.text) },
+          ...content.slice(1),
+        ]
+      } else {
+        nextContent = [
+          { type: 'text' as const, text: wrapScheduledTaskDisclaimer('') },
+          ...content,
+        ]
+      }
+    } else {
+      return { ...message, origin: undefined }
+    }
+  } else if (typeof content === 'string') {
+    nextContent = wrapTaskNotificationForApi(content)
+  } else if (Array.isArray(content)) {
+    const texts = content
+      .filter((block): block is TextBlockParam => block.type === 'text')
+      .map(block => block.text)
+      .join('\n')
+    nextContent = [
+      { type: 'text' as const, text: wrapTaskNotificationForApi(texts) },
+      ...content.filter(block => block.type !== 'text'),
+    ]
+  } else {
+    return { ...message, origin: undefined }
+  }
+
+  return {
+    ...message,
+    origin: undefined,
+    message: { ...message.message, content: nextContent },
+  }
 }
 
 /**

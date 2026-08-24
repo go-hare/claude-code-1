@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Box, Dialog, Text, useInput } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { callTui } from './index.js';
+import { callTui, type TuiRelaunchCarryInput } from './index.js';
 
 type TuiAction = {
   label: string;
@@ -11,14 +11,45 @@ type TuiAction = {
 
 const ACTION_LABEL_COLUMN_WIDTH = 24;
 
-async function runTuiAction(subcommand: string, onDone: LocalJSXCommandOnDone): Promise<void> {
-  const result = await callTui(subcommand);
+function carryFromContext(context: unknown): TuiRelaunchCarryInput | undefined {
+  try {
+    const ctx = context as {
+      getAppState?: () => {
+        toolPermissionContext?: TuiRelaunchCarryInput['toolPermissionContext'];
+        effortValue?: unknown;
+        tasks?: TuiRelaunchCarryInput['tasks'];
+      };
+    };
+    const state = ctx.getAppState?.();
+    if (!state?.toolPermissionContext && !state?.tasks) return undefined;
+    return {
+      toolPermissionContext: state.toolPermissionContext,
+      effort: state.effortValue,
+      tasks: state.tasks,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function runTuiAction(
+  subcommand: string,
+  onDone: LocalJSXCommandOnDone,
+  carry?: TuiRelaunchCarryInput,
+): Promise<void> {
+  const result = await callTui(subcommand, carry);
   if (result.type === 'text') {
     onDone(result.value, { display: 'system' });
   }
 }
 
-function TuiPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.ReactNode {
+function TuiPanel({
+  onDone,
+  carry,
+}: {
+  onDone: LocalJSXCommandOnDone;
+  carry?: TuiRelaunchCarryInput;
+}): React.ReactNode {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const actions = useMemo<TuiAction[]>(
@@ -26,25 +57,25 @@ function TuiPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.ReactNod
       {
         label: 'Status',
         description: 'Show marker and environment override state',
-        run: () => void runTuiAction('status', onDone),
+        run: () => void runTuiAction('status', onDone, carry),
       },
       {
         label: 'Toggle',
         description: 'Flip persisted TUI mode for the next session',
-        run: () => void runTuiAction('toggle', onDone),
+        run: () => void runTuiAction('toggle', onDone, carry),
       },
       {
         label: 'On',
         description: 'Enable flicker-free alternate-screen mode',
-        run: () => void runTuiAction('on', onDone),
+        run: () => void runTuiAction('on', onDone, carry),
       },
       {
         label: 'Off',
         description: 'Disable flicker-free alternate-screen mode',
-        run: () => void runTuiAction('off', onDone),
+        run: () => void runTuiAction('off', onDone, carry),
       },
     ],
-    [onDone],
+    [onDone, carry],
   );
 
   const selectCurrent = () => {
@@ -90,11 +121,12 @@ function TuiPanel({ onDone }: { onDone: LocalJSXCommandOnDone }): React.ReactNod
   );
 }
 
-export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, args?: string): Promise<React.ReactNode> {
+export async function call(onDone: LocalJSXCommandOnDone, context: unknown, args?: string): Promise<React.ReactNode> {
+  const carry = carryFromContext(context);
   const trimmed = args?.trim() ?? '';
   if (trimmed) {
-    await runTuiAction(trimmed, onDone);
+    await runTuiAction(trimmed, onDone, carry);
     return null;
   }
-  return <TuiPanel onDone={onDone} />;
+  return <TuiPanel onDone={onDone} carry={carry} />;
 }

@@ -11,7 +11,7 @@ import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolNa
 import { checkHasTrustDialogAccepted, saveCurrentProjectConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
 import { getFsImplementation } from '../../utils/fsOperations.js';
-import { findCanonicalGitRoot, findGitRoot } from '../../utils/git.js';
+import { findCanonicalGitRootUncached, findGitRootUncached } from '../../utils/git.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
 import { Select } from '../CustomSelect/index.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
@@ -225,8 +225,14 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   // check + Claude Code'll…). Repo-root sentence is densable CdTrustPrompt copy
   // (#28); densable Accessing itself does not include it — we show it when cwd
   // is under a git root so the grant names the repository root.
+  // 2.1.234 #23: probe via I8e/rHo (uncached) so a negative LRU from "dir
+  // first seen before the repository existed" cannot omit the warning.
   const cwdPath = getFsImplementation().cwd();
-  const { trustRoot, showRepoRootNote } = resolveTrustRootNote(cwdPath, findCanonicalGitRoot, findGitRoot);
+  const { trustRoot, showRepoRootNote } = resolveTrustRootNote(
+    cwdPath,
+    findCanonicalGitRootUncached,
+    findGitRootUncached,
+  );
 
   return (
     <PermissionDialog color="warning" titleColor="warning" title={ACCESSING_WORKSPACE_TITLE}>

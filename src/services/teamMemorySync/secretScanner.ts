@@ -27,6 +27,12 @@ type SecretRule = {
   source: string
   /** Optional JS regex flags (most rules are case-sensitive by default) */
   flags?: string
+  /**
+   * densable `WKc.confidence`. Display redaction (`redactForDisplay` / `tAt`)
+   * only applies `high`. Full redaction (`redactSecrets` / `pp`) applies all.
+   * Default `high` for curated gitleaks prefixes.
+   */
+  confidence?: 'high' | 'low'
 }
 
 export type SecretMatch = {
@@ -45,7 +51,46 @@ export type SecretMatch = {
 // join() is not constant-folded by the minifier.
 const ANT_KEY_PFX = ['sk', 'ant', 'api'].join('-')
 
+/** densable `UKc` — trailing boundary used by many high-confidence sources. */
+const TRAILING_BOUNDARY = `(?:[\\x60'"\\s;]|\\\\[nr]|$)`
+/** densable `BKc` — display boundary: allow shell delimiters after the token (#29). */
+const DISPLAY_BOUNDARY = '(?=[^a-zA-Z0-9_\\-+=]|$)'
+/** densable `Nhy` — display leading boundary. */
+const DISPLAY_LEADING = '(?<![a-zA-Z0-9_\\-])'
+/** densable `Mhy` — min chars between BEGIN/END private-key markers. */
+const PRIVATE_KEY_MIN_GAP = 64
+
 const SECRET_RULES: SecretRule[] = [
+  // — densable low-confidence (full redact only; not used by scanForSecrets high path) —
+  {
+    id: 'url-userinfo',
+    source: ':\\/\\/([^/@\\s]+)@',
+    confidence: 'low',
+  },
+  {
+    id: 'gcp-service-account',
+    source: '\\b([a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com)\\b',
+    flags: 'i',
+    confidence: 'low',
+  },
+  {
+    id: 'loose-anthropic-key',
+    source: '\\b(sk-ant-?[\\w-]{10,})',
+    confidence: 'low',
+  },
+  {
+    id: 'http-auth-scheme',
+    source: '\\b(?:Bearer|Basic)\\s+([A-Za-z0-9+/=._~-]{20,})',
+    flags: 'i',
+    confidence: 'low',
+  },
+  {
+    id: 'loose-jwt',
+    source:
+      '\\b(eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})',
+    confidence: 'low',
+  },
+
   // — Cloud providers —
   {
     id: 'aws-access-token',
@@ -53,7 +98,12 @@ const SECRET_RULES: SecretRule[] = [
   },
   {
     id: 'gcp-api-key',
-    source: '\\b(AIza[\\w-]{35})(?:[\\x60\'"\\s;]|\\\\[nr]|$)',
+    // densable 2.1.234: lookahead boundary (not UKc) so shell delimiters still match (#29)
+    source: '\\b(AIza[\\w-]{35})(?![\\w-])',
+  },
+  {
+    id: 'google-oauth-client-secret',
+    source: '\\bGOCSPX-[\\w-]{28}(?![\\w-])',
   },
   {
     id: 'azure-ad-client-secret',
@@ -80,14 +130,30 @@ const SECRET_RULES: SecretRule[] = [
       '\\b(sk-ant-admin01-[a-zA-Z0-9_\\-]{93}AA)(?:[\\x60\'"\\s;]|\\\\[nr]|$)',
   },
   {
+    id: 'anthropic-oauth-token',
+    source: `\\b(sk-ant-(?:oat|ort)\\d{2}-[\\w-]{20,})(?:[\\x60'"\\s;]|\\\\[nr]|$)`,
+  },
+  {
     id: 'openai-api-key',
-    source:
-      '\\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})(?:[\\x60\'"\\s;]|\\\\[nr]|$)',
+    // densable WKc split: modern openai-api-key + openai-legacy-api-key
+    source: 'sk-[A-Za-z0-9_-]{8,200}T3BlbkFJ[A-Za-z0-9_-]{8,200}',
+  },
+  {
+    id: 'openai-legacy-api-key',
+    source: '\\bsk-[a-zA-Z0-9]{48}(?![a-zA-Z0-9])',
   },
   {
     id: 'huggingface-access-token',
     // gitleaks: hf_(?i:[a-z]{34}) → JS: hf_[a-zA-Z]{34}
     source: '\\b(hf_[a-zA-Z]{34})(?:[\\x60\'"\\s;]|\\\\[nr]|$)',
+  },
+  {
+    id: 'supabase-secret-key',
+    source: '\\bsb_secret_[A-Za-z0-9_-]{20,}',
+  },
+  {
+    id: 'supabase-access-token',
+    source: '\\bsbp_[a-z0-9]{40,}',
   },
 
   // — Version control —
@@ -166,11 +232,25 @@ const SECRET_RULES: SecretRule[] = [
   },
   {
     id: 'slack-user-token',
-    source: 'xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}',
+    source: 'xox[a-z](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}',
+  },
+  {
+    id: 'slack-rotation-token',
+    source: 'xoxe(?:\\.xox[a-z])?-[0-9]-[A-Za-z0-9-]{28,}',
   },
   {
     id: 'slack-app-token',
     source: 'xapp-\\d-[A-Z0-9]+-\\d+-[a-z0-9]+',
+    flags: 'i',
+  },
+  {
+    id: 'slack-workflow-token',
+    source: '\\bxwfp-[a-zA-Z0-9-]{20,}',
+  },
+  {
+    id: 'slack-webhook-url',
+    source:
+      '(?:https?://)?hooks\\.slack\\.com/(?:services|workflows|triggers)/[A-Za-z0-9+/_-]{40,}',
     flags: 'i',
   },
   {
@@ -254,25 +334,155 @@ const SECRET_RULES: SecretRule[] = [
   },
 
   // — Crypto —
-  {
-    id: 'private-key',
-    source:
-      '-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[\\s\\S-]{64,}?-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----',
-    flags: 'i',
-  },
+  // densable: PEM blocks are handled by Lhy (BEGIN/END pair find), not a
+  // single regex rule, so oversized / truncated PEMs still redact under
+  // full-strength `redactSecrets` (#28). Kept out of SECRET_RULES.
 ]
 
-// Lazily compiled pattern cache — compile once on first scan.
-let compiledRules: Array<{ id: string; re: RegExp }> | null = null
+// densable `$Kc` / `FKc`
+const PRIVATE_KEY_BEGIN =
+  /-----BEGIN[ A-Z0-9_-]{0,100}?PRIVATE KEY(?: BLOCK)?-----/gi
+const PRIVATE_KEY_END =
+  /-----END[ A-Z0-9_-]{0,100}?PRIVATE KEY(?: BLOCK)?-----/gi
 
-function getCompiledRules(): Array<{ id: string; re: RegExp }> {
-  if (compiledRules === null) {
-    compiledRules = SECRET_RULES.map(r => ({
+// densable `Bhy` / `jhy` — if the matched token looks like a command/path/dest,
+// display redaction must keep it (#28).
+const DISPLAY_SHELL_CHARS = /[$`|;&<>()\s]/
+const DISPLAY_PATH_CHARS = /[/.@:~*?\\]/
+
+type CompiledRule = {
+  id: string
+  confidence: 'high' | 'low'
+  re: RegExp
+}
+
+// Lazily compiled pattern caches — densable `jKc` / `$hy`.
+let scanRules: CompiledRule[] | null = null
+let fullRedactRules: CompiledRule[] | null = null
+let displayRedactRules: CompiledRule[] | null = null
+const redactResultCache = new Map<string, string>()
+const REDACT_CACHE_MAX = 512
+const REDACT_CACHE_VALUE_MAX = 512
+
+function flagsWithGlobal(
+  flags: string | undefined,
+  forceGlobal: boolean,
+): string {
+  const base = (flags ?? '').replaceAll('g', '')
+  return forceGlobal ? `${base}g` : base
+}
+
+function compileRules(forRedact: boolean): CompiledRule[] {
+  return SECRET_RULES.map(r => ({
+    id: r.id,
+    confidence: r.confidence ?? 'high',
+    re: new RegExp(r.source, flagsWithGlobal(r.flags, forRedact)),
+  }))
+}
+
+/** densable `$hy` — high-confidence display rules with shell-delimiter-safe boundaries. */
+function compileDisplayRules(): CompiledRule[] {
+  return SECRET_RULES.map(r => {
+    const confidence = r.confidence ?? 'high'
+    let source = r.source
+    if (confidence === 'high') {
+      if (source.endsWith(TRAILING_BOUNDARY)) {
+        source =
+          DISPLAY_LEADING +
+          source.slice(0, -TRAILING_BOUNDARY.length) +
+          DISPLAY_BOUNDARY
+      } else {
+        source = DISPLAY_LEADING + source + DISPLAY_BOUNDARY
+      }
+    }
+    return {
       id: r.id,
-      re: new RegExp(r.source, r.flags),
-    }))
+      confidence,
+      re: new RegExp(source, flagsWithGlobal(r.flags, true)),
+    }
+  })
+}
+
+function getScanRules(): CompiledRule[] {
+  scanRules ??= compileRules(false)
+  return scanRules
+}
+
+function getFullRedactRules(): CompiledRule[] {
+  fullRedactRules ??= compileRules(true)
+  return fullRedactRules
+}
+
+function getDisplayRedactRules(): CompiledRule[] {
+  displayRedactRules ??= compileDisplayRules()
+  return displayRedactRules
+}
+
+/**
+ * densable `RAs` — find next BEGIN…END private-key block starting at `from`.
+ * Requires ≥ Mhy (64) chars between markers.
+ */
+function findPrivateKeyBlock(
+  text: string,
+  from: number,
+): { start: number; end: number } | null {
+  PRIVATE_KEY_BEGIN.lastIndex = from
+  const begin = PRIVATE_KEY_BEGIN.exec(text)
+  if (!begin) return null
+  PRIVATE_KEY_END.lastIndex =
+    begin.index + begin[0].length + PRIVATE_KEY_MIN_GAP
+  const end = PRIVATE_KEY_END.exec(text)
+  if (!end) return null
+  return { start: begin.index, end: end.index + end[0].length }
+}
+
+function hasPrivateKeyBlock(text: string): boolean {
+  return findPrivateKeyBlock(text, 0) !== null
+}
+
+/** densable `Lhy` — replace every PEM private-key block with `[REDACTED]`. */
+function redactPrivateKeyBlocks(text: string): string {
+  let block = findPrivateKeyBlock(text, 0)
+  if (!block) return text
+  let out = ''
+  let cursor = 0
+  while (block) {
+    out += text.slice(cursor, block.start) + '[REDACTED]'
+    cursor = block.end
+    block = findPrivateKeyBlock(text, cursor)
   }
-  return compiledRules
+  return out + text.slice(cursor)
+}
+
+/**
+ * densable `GKc` — replace the capture (or full match) with `[REDACTED]`,
+ * preserving surrounding quotes when the capture itself is quoted.
+ * `String.replace` may pass offset as 2nd arg when there is no capture group.
+ */
+function replaceMatchWithRedacted(full: string, capture: unknown): string {
+  if (typeof capture !== 'string') return '[REDACTED]'
+  const quote =
+    capture.length >= 2 &&
+    (capture[0] === '"' || capture[0] === "'") &&
+    capture.at(-1) === capture[0]
+      ? capture[0]
+      : ''
+  const idx = full.lastIndexOf(capture)
+  if (idx < 0) return '[REDACTED]'
+  return `${full.slice(0, idx)}${quote}[REDACTED]${quote}${full.slice(idx + capture.length)}`
+}
+
+/**
+ * densable `zhy` — display replace callback: skip redaction when the matched
+ * token contains shell/path characters so commands/paths/destinations stay
+ * visible (#28).
+ */
+function displayRedactReplacer(full: string, capture: unknown): string {
+  const token = typeof capture === 'string' ? capture : full
+  if (DISPLAY_SHELL_CHARS.test(token) || DISPLAY_PATH_CHARS.test(token)) {
+    return full
+  }
+  return replaceMatchWithRedacted(full, capture)
 }
 
 /**
@@ -292,6 +502,8 @@ function ruleIdToLabel(ruleId: string): string {
     npm: 'NPM',
     pypi: 'PyPI',
     jwt: 'JWT',
+    ci: 'CI',
+    scim: 'SCIM',
     github: 'GitHub',
     gitlab: 'GitLab',
     openai: 'OpenAI',
@@ -309,18 +521,17 @@ function ruleIdToLabel(ruleId: string): string {
 /**
  * Scan a string for potential secrets.
  *
- * Returns one match per rule that fired (deduplicated by rule ID). The
- * actual matched text is intentionally NOT returned — we never log or
- * display secret values.
+ * densable `VKc.scan` / `p6t`: only high-confidence rules + private-key
+ * block presence. Returns one match per rule that fired (deduplicated by
+ * rule ID). The actual matched text is intentionally NOT returned.
  */
 export function scanForSecrets(content: string): SecretMatch[] {
   const matches: SecretMatch[] = []
   const seen = new Set<string>()
 
-  for (const rule of getCompiledRules()) {
-    if (seen.has(rule.id)) {
-      continue
-    }
+  for (const rule of getScanRules()) {
+    if (rule.confidence !== 'high') continue
+    if (seen.has(rule.id)) continue
     if (rule.re.test(content)) {
       seen.add(rule.id)
       matches.push({
@@ -330,7 +541,88 @@ export function scanForSecrets(content: string): SecretMatch[] {
     }
   }
 
+  if (hasPrivateKeyBlock(content) && !seen.has('private-key')) {
+    matches.push({
+      ruleId: 'private-key',
+      label: 'Private Key',
+    })
+  }
+
   return matches
+}
+
+/**
+ * densable `pp` / `VKc.redact` — full-strength redaction (logs, bridge
+ * summaries). Applies all rules + PEM block redaction (Lhy). Oversized /
+ * truncated private keys still redact when BEGIN+END markers are found.
+ */
+export function redactSecrets(content: string): string {
+  const cacheable = content.length <= REDACT_CACHE_VALUE_MAX
+  if (cacheable) {
+    const hit = redactResultCache.get(content)
+    if (hit !== undefined) return hit
+  }
+
+  let out = redactPrivateKeyBlocks(content)
+  for (const rule of getFullRedactRules()) {
+    out = out.replace(rule.re, replaceMatchWithRedacted)
+  }
+
+  if (cacheable) {
+    if (redactResultCache.size >= REDACT_CACHE_MAX) {
+      const first = redactResultCache.keys().next().value
+      if (first !== undefined) redactResultCache.delete(first)
+    }
+    redactResultCache.set(content, out)
+  }
+  return out
+}
+
+/**
+ * densable `tAt` / `VKc.redactForDisplay` — permission-preview redaction.
+ * High-confidence only; shell/path-looking captures are kept (#28);
+ * display boundaries allow tokens followed by shell delimiters (#29).
+ * Does NOT run Lhy PEM full-block redact (preview path uses SHe+tAt on
+ * field values; oversized PEMs go through full `redactSecrets` elsewhere).
+ */
+export function redactSecretsForDisplay(content: string): string {
+  let out = content
+  for (const rule of getDisplayRedactRules()) {
+    if (rule.confidence !== 'high') continue
+    out = out.replace(rule.re, displayRedactReplacer)
+  }
+  return out
+}
+
+/**
+ * densable `SHe` — deep-walk strings through a redactor (default full
+ * `redactSecrets`). For object string fields, prefers `${key}: ${value}`
+ * so assignment-style rules can fire, then strips the key prefix back.
+ */
+export function redactSecretsDeep(
+  value: unknown,
+  redactor: (s: string) => string = redactSecrets,
+): unknown {
+  if (typeof value === 'string') return redactor(value)
+  if (Array.isArray(value)) {
+    return value.map(v => redactSecretsDeep(v, redactor))
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = Object.create(null)
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof v === 'string') {
+        const prefix = `${k}: `
+        const redacted = redactor(prefix + v)
+        out[k] = redacted.startsWith(prefix)
+          ? redacted.slice(prefix.length)
+          : redactor(v)
+      } else {
+        out[k] = redactSecretsDeep(v, redactor)
+      }
+    }
+    return out
+  }
+  return value
 }
 
 /**

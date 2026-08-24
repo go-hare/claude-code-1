@@ -102,6 +102,15 @@ export function resolveRelaunchModelArg(
   const resolved = parseModel(override)
   if (isDeprecatedResolved(resolved)) return undefined
   if (getLatchFallbackModel() === override) return undefined
+  // densable QOa: Bxa + EOe — skip pin when value cannot be a standalone argv token.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isSafeArgvValue } =
+      require('./tuiRelaunchCarry.js') as typeof import('./tuiRelaunchCarry.js')
+    if (!isSafeArgvValue(override)) return undefined
+  } catch {
+    // densable optional during early bootstrap
+  }
   return override
 }
 
@@ -202,6 +211,10 @@ export function buildRelaunchProcessEnv(input: {
 
 /**
  * Official OLt densable plan — env + drop list + freshIfNoTranscript for TUI.
+ *
+ * densable 2.1.234: when `toolPermissionContext` is provided, extraArgs are
+ * composed as Cmt+Rmt (permission mode / allow-deny / add-dir / model /
+ * effort / agent flags) instead of model-only merge.
  */
 export function buildTuiRelaunchPlan(input: {
   target: TuiRelaunchTarget
@@ -211,6 +224,13 @@ export function buildTuiRelaunchPlan(input: {
   screenReaderEnv?: Readonly<Record<string, string>>
   /** Optional stdout size inject for child (default: current stdout). */
   terminalSize?: { columns?: number; rows?: number }
+  /**
+   * densable Cmt+Rmt input — when set, builds full carry argv (overrides
+   * bare mergeRelaunchModelArgs unless caller also passes extraArgs which
+   * are then ignored in favor of the densable compose).
+   */
+  toolPermissionContext?: import('../types/permissions.js').ToolPermissionContext
+  effort?: unknown
 }): {
   args: string[]
   env: NodeJS.ProcessEnv
@@ -231,9 +251,38 @@ export function buildTuiRelaunchPlan(input: {
     // densable optional
   }
   const dropEnv = TUI_RELAUNCH_DROP_ENV
-  // densable 2.1.228 Bxa: pin live mainLoopModelOverride as --model so /tui
-  // relaunch does not revert to an earlier model after /model.
-  const extraArgs = mergeRelaunchModelArgs(input.extraArgs)
+  let extraArgs: string[]
+  if (input.toolPermissionContext) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { buildTuiRelaunchExtraArgs } =
+        require('./tuiRelaunchCarry.js') as typeof import('./tuiRelaunchCarry.js')
+      let settingsEffort: string | undefined
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        settingsEffort = (
+          require('./forkReplayLaunchConfig.js') as typeof import('./forkReplayLaunchConfig.js')
+        ).getSettingsEffortAtStartup()
+      } catch {
+        settingsEffort = undefined
+      }
+      extraArgs = buildTuiRelaunchExtraArgs({
+        toolPermissionContext: input.toolPermissionContext,
+        effort: input.effort,
+        settingsEffortAtStartup: settingsEffort,
+      })
+      // Caller-supplied extraArgs append after densable compose (rare).
+      if (input.extraArgs?.length) {
+        extraArgs = [...extraArgs, ...input.extraArgs]
+      }
+    } catch {
+      extraArgs = mergeRelaunchModelArgs(input.extraArgs)
+    }
+  } else {
+    // densable 2.1.228 Bxa: pin live mainLoopModelOverride as --model so /tui
+    // relaunch does not revert to an earlier model after /model.
+    extraArgs = mergeRelaunchModelArgs(input.extraArgs)
+  }
   const args = resolveRelaunchCliArgs({
     extraArgs,
     sessionId: input.sessionId,
@@ -393,6 +442,9 @@ export function acceptTuiRelaunch(input: {
   spawn?: boolean
   /** Skip stream flush (tests). Default flushes when spawned ok. */
   skipFlush?: boolean
+  /** densable Cmt+Rmt — when set, compose full carry argv. */
+  toolPermissionContext?: import('../types/permissions.js').ToolPermissionContext
+  effort?: unknown
 }): AcceptTuiRelaunchResult {
   const plan = buildTuiRelaunchPlan(input)
   applyTuiRelaunchPlanToProcessEnv(plan, input.env ?? process.env)
