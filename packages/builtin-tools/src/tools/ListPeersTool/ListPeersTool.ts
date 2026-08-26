@@ -14,6 +14,7 @@ import {
   LIST_AGENTS_TOOL_NAME,
   LIST_PEERS_LEGACY_TOOL_NAME,
 } from './constants.js'
+import { CLOUD_PEER_UNREACHABLE_FROM_HERE } from 'src/utils/teleport/cloudPeerSessions.js'
 import { getListAgentsPrompt } from './prompt.js'
 import {
   callerIsSubagentFromContext,
@@ -61,6 +62,8 @@ type PeerInfo = {
   connected?: boolean
   transport?: 'uds' | 'bridge' | 'cloud' | 'did'
   status?: string
+  /** Official D5v / xSf — cloud session cannot reach this elevated RC peer. */
+  unreachableFromHere?: boolean
 }
 
 /** densable m5b — model-facing listing string. */
@@ -127,6 +130,9 @@ function formatPeersListing(
       if (status) bits.push(status)
       if (p.cwd) bits.push(`@ ${p.cwd}`)
       if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
+      if (p.unreachableFromHere) {
+        bits.push(CLOUD_PEER_UNREACHABLE_FROM_HERE)
+      }
       return bits.join(' ')
     })
     peerBody = `Found ${lines.length} agent(s):\n${lines.join('\n')}`
@@ -291,6 +297,7 @@ export const ListAgentsTool = buildTool({
         transport: 'cloud',
         connected: true,
         status: 'cloud',
+        ...(row.unreachableFromHere ? { unreachableFromHere: true } : {}),
       })
     }
 

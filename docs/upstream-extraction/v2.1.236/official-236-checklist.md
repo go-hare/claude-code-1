@@ -4,14 +4,14 @@
 > SEA：`/tmp/official-236/plat/package/claude` · `2.1.236 (Claude Code)` · size **317044624** · sha256 `6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848`。  
 > 基线：本地 tip densable **2.1.235** + npm **2.7.45**。**本 pack 只对齐 2.1.236**（勿折入 237）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A**  
-> 更新：2026-08-26 — `#6` `LFh`/`sgM` 1:1（HAVE 20 / PARTIAL 12）。Batch A/B/C **落地**；gold-weak `#18/#24/#31/#32` → **PARTIAL**；GAP **0**。口径：**加强升档 + 其余与 SEA 1:1**。**无 auto commit/bump**。
+> 更新：2026-08-26 — `#7` vMi slipped-summary 1:1（HAVE 21 / PARTIAL 11）。Batch A/B/C **落地**；gold-weak `#18/#24/#31/#32` → **PARTIAL**；GAP **0**。口径：**加强升档 + 其余与 SEA 1:1**。**无 auto commit/bump**。
 
 ## Summary
 
 | 状态 | 计数 | 备注 |
 | ---- | ---- | ---- |
-| **HAVE** | **20** | Batch A/B/C + `#25` Bqn + `#6` sgM |
-| **PARTIAL** | **12** | 含 gold-weak `#18/#24/#31/#32` |
+| **HAVE** | **21** | Batch A/B/C + `#25` Bqn + `#6` sgM + `#7` vMi |
+| **PARTIAL** | **11** | 含 gold-weak `#18/#24/#31/#32` |
 | **GAP** | **0** | — |
 | **N/A** | **1** | #33 VSCode host a11y（invent-ban） |
 | **UNKNOWN** | **0** | — |
@@ -26,7 +26,7 @@
 | 4 | cwd-removed | Fixed clipboard/bg housekeeping/bg sessions/local MCP logs after switched-into dir removed | **PARTIAL** | tip Shell cwd recovery + `mcp-logs-*` cleanup 在；236 全套路径未逐条锁死 |
 | 5 | fullscreen-fallback | Fullscreen renderer: single failed start → fall back to classic instead of permanent exit | **HAVE** | tip `fullscreenBootPending`/`crashAutoOff`/canary FSM + `/tui` FJi + `replLauncher` `$Ji`（Batch B；`fullscreenBootCanary.236` 绿） |
 | 6 | model-picker-height | `/model` picker taller-than-terminal: show only fitting rows + scroll | **HAVE** | SEA `LFh=14` 是 chrome 预留，不是 max visible。`sgM=Math.max(2,Math.min(10,Math.floor((tgM-LFh-ngM-ogM-igM)/2)))`；`ngM` search 4 / `ogM` `r7l` 3 / `igM` session 2。tip `computeModelPickerVisibleSlots` + `isModelPickerFastModeNoticeChrome`（`Iu()&&(_do\|\|xz()&&!cje())`）。**无** XKl search host → `ngM=0`。测：`modelPickerVisible.236.test.ts`。 |
-| 7 | sendmessage-malformed-tag | SendMessage rejected when malformed closing tag left text in summary | **PARTIAL** | tip summary coerce/truncate（Cpr=200）+ slipped-summary 测试；SEA「malformed closing tag」短语弱 |
+| 7 | sendmessage-malformed-tag | SendMessage rejected when malformed closing tag left text in summary | **HAVE** | 239 SEA：`vMi`/`U4f`/`bMi`/`QTl` + `x0m`/`C0m`/`GTl`。coerce 拆 slipped-summary；`x0m` 读 vMi 后 `{message,notify_when_idle}`；`C0m` 空执行+原正文或 GRi；`GTl` 空 UDS：handler_rewrite→QRw/eIw/R0m，否则 empty_message/u3i。fWt=`LPi`。dump：`gold-vmi-239.txt` / `gold-gtl-239.txt`。测：`sendMessageSlippedSummary.236.test.ts` / `sendMessageBlankCall.236.test.ts`。 |
 | 8 | subprocess-unhandled | Unhandled rejection when subprocess fails to start (e.g. powershell on WSL) | **HAVE** | tip Ink/exec 已吞 spawn fail；SEA powershell/WSL + unhandledRejection 面匹配 |
 | 9 | fullscreen-resize-message | Fullscreen: newly sent message missing until next update after resize | **PARTIAL** | **金标基准 = densable 2.1.239 SEA**（changelog 出 236；类以 239 peel）。官方 `Qvt`→`xxc`→**`Axc`**：`nativeHistory`（滚出行，帽 `uyn=1e4`）+ `handleResize`/`resume`→`replayPending`+`pumpCursor` + **`tickPump`**（批 `q$0=100`）+ 泵中 `syncViewport` 早退；`frameSink` 回 `"tick"`。236→239 = mangle + `onWrite`，合同同构。tip = `Ink.handleResize`→`resetFramesForAltScreen`+React；**无** `Axc`/`tickPump`/`nativeHistory`/`frameSink`。tip-equiv = VML **`columns`** 重测高 + **`layoutEpoch`**（仅 expand/collapse bump，**不**在 resize 上宣称 #9）。**invent-ban**：未 peel 完整 `Axc`+`xxc`+`frameSink`+`Qvt` 臂前禁止伪泵；真 1:1 = **Project C**。 |
 | 10 | fullscreen-blank-band | Fullscreen: blank band after clearing multi-line prompt; panes not repainting | **PARTIAL** | tip fullscreen/ink repaint 面在；SEA latin1 金标弱 |

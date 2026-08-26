@@ -28,6 +28,7 @@ import { getAgentContext } from 'src/utils/agentContext.js'
 import { generateRequestId } from 'src/utils/agentId.js'
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { isObserverTaskId } from 'src/utils/observerAgents.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { readAgentMetadata } from 'src/utils/sessionStorage.js'
 import { errorMessage } from 'src/utils/errors.js'
@@ -75,6 +76,7 @@ import {
 } from './cloudHop.js'
 import { validateSendMessageTo } from './validateTo.js'
 import {
+  SEND_MESSAGE_PARAM_SET,
   SEND_MESSAGE_SUMMARY_MAX_CHARS,
   SEND_MESSAGE_TO_MAX_CHARS,
   SEND_MESSAGE_TO_MAX_RE,
@@ -292,10 +294,11 @@ function refuseOwnOrImpersonatedSocket(
 }
 
 /**
- * densable `na` — character truncate with high-surrogate safety (not display width).
- * Used by SendMessage summary coerce: `na(t, Cpr-1)+"…"`.
+ * densable `na` / `So` — character truncate with high-surrogate safety (not display width).
+ * Used by SendMessage summary coerce: `So(n, VGr-1)+"…"`.
  */
 function truncateSummaryChars(text: string, maxChars: number): string {
+  if (maxChars <= 0) return ''
   if (text.length <= maxChars) return text
   let slice = text.slice(0, maxChars)
   const last = slice.charCodeAt(maxChars - 1)
@@ -306,29 +309,173 @@ function truncateSummaryChars(text: string, maxChars: number): string {
   return slice
 }
 
+const SLIPPED_SUMMARY_CLOSE = '</summary>'
+const SLIPPED_MESSAGE_OPENER_BARE = '<parameter name="message">'
+const SLIPPED_MESSAGE_OPENER_NS = '<antml:parameter name="message">'
+const SLIPPED_UNREPAIRED_MARKUP_RE =
+  /<(?:antml:)?parameter\b|<\/(?:antml:)?(?:parameter|invoke|function_calls|message)>/
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** densable `fp`/`Cs` — first line, or the whole string if no `\n`. */
+function firstLineOf(text: string): string {
+  const nl = text.indexOf('\n')
+  return nl === -1 ? text : text.slice(0, nl)
+}
+
+/** densable `fqS` — extracted message looks like a JSON object/array. */
+function isSlippedJsonPayload(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    return typeof parsed === 'object' && parsed !== null
+  } catch {
+    return false
+  }
+}
+
+type SlippedOpenerForm = 'bare' | 'namespaced'
+type SlippedUnrepaired = 'markup' | 'json'
+
+type SlippedSummaryDetection = {
+  split: { summary: string; message: string; openerForm: SlippedOpenerForm }
+  unrepaired: SlippedUnrepaired | undefined
+}
+
 /**
- * densable OIp — coerceInput: when summary exceeds Cpr, soft-truncate + ellipsis
- * rather than rejecting schema max(Cpr).
+ * densable U4f — detect a message that slipped past a `</summary>` closer
+ * into the summary field (`message` absent/null; keys ⊆ dqS).
+ */
+function detectSlippedSummary(
+  raw: unknown,
+): SlippedSummaryDetection | undefined {
+  if (!isPlainObject(raw)) return
+  const { message, summary } = raw
+  if (
+    typeof raw.to !== 'string' ||
+    (message !== undefined && message !== null) ||
+    typeof summary !== 'string' ||
+    !Object.keys(raw).every(key => SEND_MESSAGE_PARAM_SET.has(key))
+  ) {
+    return
+  }
+  let closer = summary.indexOf(SLIPPED_SUMMARY_CLOSE)
+  while (closer !== -1) {
+    let cursor = closer + SLIPPED_SUMMARY_CLOSE.length
+    while (cursor < summary.length && /\s/.test(summary.charAt(cursor))) {
+      cursor++
+    }
+    const openerForm: SlippedOpenerForm | undefined = summary.startsWith(
+      SLIPPED_MESSAGE_OPENER_NS,
+      cursor,
+    )
+      ? 'namespaced'
+      : summary.startsWith(SLIPPED_MESSAGE_OPENER_BARE, cursor)
+        ? 'bare'
+        : undefined
+    if (openerForm !== undefined) {
+      const opener =
+        openerForm === 'namespaced'
+          ? SLIPPED_MESSAGE_OPENER_NS
+          : SLIPPED_MESSAGE_OPENER_BARE
+      const slipped = summary.slice(cursor + opener.length).trimEnd()
+      if (slipped.trim().length === 0) return
+      return {
+        split: {
+          summary: summary.slice(0, closer).trim(),
+          message: slipped,
+          openerForm,
+        },
+        unrepaired: SLIPPED_UNREPAIRED_MARKUP_RE.test(slipped)
+          ? 'markup'
+          : isSlippedJsonPayload(slipped)
+            ? 'json'
+            : undefined,
+      }
+    }
+    closer = summary.indexOf(
+      SLIPPED_SUMMARY_CLOSE,
+      closer + SLIPPED_SUMMARY_CLOSE.length,
+    )
+  }
+  return
+}
+
+/**
+ * densable bMi — repaired slipped split only (`unrepaired === undefined`).
+ * backfillObservableInput returns early when this is defined.
+ */
+export function getRepairedSlippedSummarySplit(
+  raw: unknown,
+):
+  | { summary: string; message: string; openerForm: SlippedOpenerForm }
+  | undefined {
+  const detected = detectSlippedSummary(raw)
+  return detected !== undefined && detected.unrepaired === undefined
+    ? detected.split
+    : undefined
+}
+
+/** densable QTl — `isSlippedSummarySplitEnabled` / `tengu_deep_feather` default true. */
+export function isSlippedSummarySplitEnabled(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_deep_feather', true)
+}
+
+/**
+ * densable vMi (236: yEi) — coerceInput.
+ * applySplit default true (official `t=!0`); tool wires `QTl()`.
  */
 export function coerceSendMessageInput(
   raw: unknown,
-): { input: Input; shapeClass: 'truncate_summary' } | null {
-  if (raw === null || typeof raw !== 'object') return null
-  const record = raw as Record<string, unknown>
-  const summary = record.summary
-  if (
-    typeof summary !== 'string' ||
-    summary.length <= SEND_MESSAGE_SUMMARY_MAX_CHARS
-  ) {
-    return null
+  { applySplit = true }: { applySplit?: boolean } = {},
+): { input: Input; shapeClass: string } | null {
+  if (!isPlainObject(raw)) return null
+  let message = raw.message
+  let summary = raw.summary
+  const ops: string[] = []
+  const detected = detectSlippedSummary(raw)
+  const split = detected?.unrepaired === undefined ? detected?.split : undefined
+  if (split !== undefined && applySplit) {
+    message = split.message
+    summary = split.summary
+    ops.push(`split_slipped_summary_${split.openerForm}`)
   }
+  if (
+    typeof message === 'string' &&
+    (typeof summary !== 'string' || summary.trim().length === 0)
+  ) {
+    const derived = firstLineOf(message.trim()).trim()
+    if (derived.length > 0) {
+      summary = derived
+      ops.push('derive_summary')
+    }
+  }
+  if (
+    typeof summary === 'string' &&
+    summary.length > SEND_MESSAGE_SUMMARY_MAX_CHARS
+  ) {
+    summary =
+      truncateSummaryChars(summary, SEND_MESSAGE_SUMMARY_MAX_CHARS - 1) + '…'
+    ops.push('truncate_summary')
+  }
+  const firstOp = ops[0]
+  const shapeClass =
+    detected?.unrepaired !== undefined
+      ? `split_slipped_summary_${detected.split.openerForm}_unrepaired_${detected.unrepaired}`
+      : split !== undefined && !applySplit
+        ? `split_slipped_summary_${split.openerForm}_detect_only`
+        : firstOp
+  if (shapeClass === undefined) return null
   return {
     input: {
-      ...(record as Input),
-      summary:
-        truncateSummaryChars(summary, SEND_MESSAGE_SUMMARY_MAX_CHARS - 1) + '…',
+      ...(raw as Input),
+      ...(message !== undefined && { message: message as Input['message'] }),
+      summary: summary as Input['summary'],
     },
-    shapeClass: 'truncate_summary',
+    shapeClass,
   }
 }
 
@@ -529,11 +676,205 @@ function hasInlineUdsToken(to: string): boolean {
   return addr.scheme === 'uds' && addr.target.includes(UDS_INLINE_TOKEN_MARKER)
 }
 
-/** densable S$t — notify_when_idle truthy on input. */
+/** densable LPi — `"true"`/`"false"` literals, otherwise the value as-is. */
+function lpi(value: unknown): unknown {
+  return value === 'true' ? true : value === 'false' ? false : value
+}
+
+/** densable fWt / S$t — notify_when_idle present and LPi-true. */
 function wantsNotifyWhenIdle(input: unknown): boolean {
-  // Input is a feature()-gated schema union under tsc; read the field safely.
   if (typeof input !== 'object' || input === null) return false
-  return (input as { notify_when_idle?: unknown }).notify_when_idle === true
+  if (!('notify_when_idle' in input)) return false
+  return (
+    lpi((input as { notify_when_idle?: unknown }).notify_when_idle) === true
+  )
+}
+
+export type OriginalSendMessageToolUseFields = {
+  message: unknown
+  notify_when_idle: unknown
+}
+
+/**
+ * Official x0m / i$f — raw tool_use fields after vMi
+ * (`o=vMi(n,{applySplit:QTl()}); i=o!==null&&jo(o.input)?o.input:n`).
+ */
+export function readOriginalSendMessageToolUse(
+  assistantMessage: { message?: { content?: unknown } } | undefined,
+  toolUseId: string | undefined,
+): OriginalSendMessageToolUseFields | undefined {
+  if (toolUseId === undefined) return
+  const content = assistantMessage?.message?.content
+  if (!Array.isArray(content)) return
+  const block = content.find(
+    (item): item is { type: string; id: string; input?: unknown } =>
+      typeof item === 'object' &&
+      item !== null &&
+      (item as { type?: unknown }).type === 'tool_use' &&
+      (item as { id?: unknown }).id === toolUseId,
+  )
+  if (block === undefined || block.type !== 'tool_use') return
+  const raw = block.input
+  if (typeof raw !== 'object' || raw === null) return
+  const coerced = coerceSendMessageInput(raw, {
+    applySplit: isSlippedSummarySplitEnabled(),
+  })
+  const source =
+    coerced !== null && isPlainObject(coerced.input) ? coerced.input : raw
+  if (!isPlainObject(source)) return
+  return {
+    message: 'message' in source ? source.message : undefined,
+    notify_when_idle:
+      'notify_when_idle' in source ? source.notify_when_idle : undefined,
+  }
+}
+
+/** Official c3i / GRi. */
+export function isNotifyWhenIdleStrippedByHandler(
+  input: unknown,
+  assistantMessage: { message?: { content?: unknown } } | undefined,
+  toolUseId: string | undefined,
+): boolean {
+  return (
+    !wantsNotifyWhenIdle(input) &&
+    lpi(
+      readOriginalSendMessageToolUse(assistantMessage, toolUseId)
+        ?.notify_when_idle,
+    ) === true
+  )
+}
+
+/** Official C0m / blankCallCausedByHandler. */
+export function blankCallCausedByHandler(
+  input: unknown,
+  assistantMessage: { message?: { content?: unknown } } | undefined,
+  toolUseId: string | undefined,
+): boolean {
+  if (
+    typeof input === 'object' &&
+    input !== null &&
+    typeof (input as { message?: unknown }).message === 'string' &&
+    (input as { message: string }).message.trim().length > 0
+  ) {
+    return false
+  }
+  const original = readOriginalSendMessageToolUse(assistantMessage, toolUseId)
+  return (
+    (typeof original?.message === 'string' &&
+      original.message.trim().length > 0) ||
+    isNotifyWhenIdleStrippedByHandler(input, assistantMessage, toolUseId)
+  )
+}
+
+/** Official QRw */
+export const HANDLER_EMPTIED_MESSAGE_NO_REINTERPRET =
+  'A permission handler emptied this message; nothing was sent, and no idle subscription was made (a blanked delivery is never reinterpreted as a pure subscription — send notify_when_idle without a message if that is what you want).'
+
+/** Official eIw */
+export const HANDLER_EMPTIED_MESSAGE =
+  'A permission handler emptied this message; nothing was sent, and no idle subscription was made.'
+
+/** Official R0m */
+export const HANDLER_REWROTE_NOTHING_LEFT =
+  'A permission handler rewrote this call so that nothing was left to send or subscribe; nothing was sent.'
+
+const MESSAGE_MUST_NOT_BE_EMPTY = 'message must not be empty'
+
+type UdsBlankGateResult = { data: { success: false; message: string } }
+
+/**
+ * Official GTl / udsBlankMessageGate.
+ * `notify` is UTl.notify (wanted and not principal-refused).
+ */
+export function udsBlankMessageGate(args: {
+  input: unknown
+  plainMessage: string
+  notify: boolean
+  refusedForPrincipal: boolean
+  assistantMessage: { message?: { content?: unknown } } | undefined
+  toolUseId: string | undefined
+  emit: (route: 'uds', errorClass: string) => void
+}): UdsBlankGateResult | undefined {
+  if (args.plainMessage.trim().length > 0) return
+  if (
+    blankCallCausedByHandler(args.input, args.assistantMessage, args.toolUseId)
+  ) {
+    args.emit('uds', 'handler_rewrite')
+    if (wantsNotifyWhenIdle(args.input)) {
+      return {
+        data: {
+          success: false,
+          message: args.refusedForPrincipal
+            ? HANDLER_EMPTIED_MESSAGE
+            : HANDLER_EMPTIED_MESSAGE_NO_REINTERPRET,
+        },
+      }
+    }
+    return { data: { success: false, message: HANDLER_REWROTE_NOTHING_LEFT } }
+  }
+  if (!args.notify) {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const idle =
+      require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    if (args.refusedForPrincipal) {
+      idle.noteSubscribeRefusedPrincipal()
+    }
+    args.emit(
+      'uds',
+      args.refusedForPrincipal ? 'permission_denied' : 'empty_message',
+    )
+    return {
+      data: {
+        success: false,
+        message: args.refusedForPrincipal
+          ? idle.NOTIFY_WHEN_IDLE_MAIN_ONLY
+          : MESSAGE_MUST_NOT_BE_EMPTY,
+      },
+    }
+  }
+  return
+}
+
+function emitUdsBlankGate(route: 'uds', errorClass: string): void {
+  logForDebugging(`[send_message_delivery] ${route} ${errorClass}`)
+}
+
+function classifyUdsIdleFlags(
+  input: unknown,
+  context: ToolUseContext,
+): { notify: boolean; refusedForPrincipal: boolean } {
+  const wanted = wantsNotifyWhenIdle(input)
+  const refusedForPrincipal =
+    wanted && isNotifyWhenIdlePrincipalRefused(context)
+  return { notify: wanted && !refusedForPrincipal, refusedForPrincipal }
+}
+
+function applyUdsBlankMessageGate(
+  input: unknown,
+  plainMessage: string,
+  context: ToolUseContext,
+  assistantMessage: { message?: { content?: unknown } } | undefined,
+): UdsBlankGateResult | undefined {
+  const flags = classifyUdsIdleFlags(input, context)
+  return udsBlankMessageGate({
+    input,
+    plainMessage,
+    notify: flags.notify,
+    refusedForPrincipal: flags.refusedForPrincipal,
+    assistantMessage,
+    toolUseId: context.toolUseId,
+    emit: emitUdsBlankGate,
+  })
+}
+
+function appendHandlerStrippedIdleNote(message: string): string {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const idle =
+    require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  idle.noteSubscribeStrippedByHandler()
+  return `${message}\n${idle.NO_IDLE_SUB_HANDLER_STRIPPED_EITHER}`
 }
 
 /** densable VRi — main conversation only (not subagent / teammate). */
@@ -1502,8 +1843,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       return typeof input.message === 'string'
     },
 
-    // densable OIp — soft-truncate summary > Cpr before schema max(Cpr) rejects.
-    coerceInput: coerceSendMessageInput,
+    // densable vMi — coerceInput:(e)=>vMi(e,{applySplit:QTl()})
+    coerceInput: input =>
+      coerceSendMessageInput(input, {
+        applySplit: isSlippedSummarySplitEnabled(),
+      }),
 
     // densable xKg.backfillObservableInput: content/reason/feedback via Bs(…, 50)
     // so telemetry / observable clones never carry the full message body.
@@ -1512,6 +1856,9 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       redactObservableInlineUdsToken(input as { to: string })
       if ('type' in input) return
+      // densable bMi: skip observable backfill on a repaired slipped summary
+      // (message still empty; type=message would preview the unsplit blob).
+      if (getRepairedSlippedSummarySplit(input) !== undefined) return
 
       if (input.to === '*') {
         input.type = 'broadcast'
@@ -1900,7 +2247,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             },
           }
         }
-        if (isNotifyWhenIdlePrincipalRefused(context) && pureIdleSubscribe) {
+        if (
+          isNotifyWhenIdlePrincipalRefused(context) &&
+          pureIdleSubscribe &&
+          addr.scheme !== 'uds'
+        ) {
           /* eslint-disable @typescript-eslint/no-require-imports */
           const idle =
             require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
@@ -1913,8 +2264,15 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             },
           }
         }
-        // Pure subscribe on explicit uds: — no text send.
+        // Pure subscribe on explicit uds: — GTl first (QRw/eIw/R0m vs genuine subscribe).
         if (pureIdleSubscribe && addr.scheme === 'uds') {
+          const gated = applyUdsBlankMessageGate(
+            input,
+            typeof input.message === 'string' ? input.message : '',
+            context,
+            assistantMessage,
+          )
+          if (gated !== undefined) return gated
           const sub = await maybeSubscribePeerIdle({
             to: input.to,
             socketPath: addr.target,
@@ -2016,6 +2374,13 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 },
               }
             }
+            const gated = applyUdsBlankMessageGate(
+              input,
+              typeof input.message === 'string' ? input.message : '',
+              context,
+              assistantMessage,
+            )
+            if (gated !== undefined) return gated
             const sub = await maybeSubscribePeerIdle({
               to: cand.name,
               socketPath: cand.id,
@@ -2135,6 +2500,15 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           }
         }
         if (addr.scheme === 'uds') {
+          if (typeof input.message === 'string') {
+            const gated = applyUdsBlankMessageGate(
+              input,
+              input.message,
+              context,
+              assistantMessage,
+            )
+            if (gated !== undefined) return gated
+          }
           const ownOrFake = refuseOwnOrImpersonatedSocket(
             input.to,
             addr.target,
@@ -2206,10 +2580,20 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 },
               }
             }
+            let delivered = `”${preview}” → ${recipient}`
+            if (
+              isNotifyWhenIdleStrippedByHandler(
+                input,
+                assistantMessage,
+                context.toolUseId,
+              )
+            ) {
+              delivered = appendHandlerStrippedIdleNote(delivered)
+            }
             return {
               data: {
                 success: true,
-                message: `”${preview}” → ${recipient}`,
+                message: delivered,
               },
             }
           } catch (e) {
@@ -2569,6 +2953,15 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               },
             }
           }
+          if (typeof input.message === 'string') {
+            const gated = applyUdsBlankMessageGate(
+              input,
+              input.message,
+              context,
+              assistantMessage,
+            )
+            if (gated !== undefined) return gated
+          }
           try {
             const perm = context.getAppState().toolPermissionContext
             const fromMode = shouldHonorPeerFromMode()
@@ -2627,10 +3020,20 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 },
               }
             }
+            let delivered = message
+            if (
+              isNotifyWhenIdleStrippedByHandler(
+                input,
+                assistantMessage,
+                context.toolUseId,
+              )
+            ) {
+              delivered = appendHandlerStrippedIdleNote(delivered)
+            }
             return {
               data: {
                 success: true,
-                message,
+                message: delivered,
               },
             }
           } catch (e) {

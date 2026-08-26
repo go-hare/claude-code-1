@@ -57,6 +57,14 @@ export const NO_IDLE_SUB_MAIN_ONLY =
 export const NO_IDLE_SUB_HANDLER_STRIPPED =
   'No idle subscription was made (a permission handler removed it from the call).'
 
+/** Official JZa — appended after a delivered message when GRi. */
+export const NO_IDLE_SUB_HANDLER_STRIPPED_EITHER =
+  'Nothing was subscribed either: a permission handler removed notify_when_idle from this call.'
+
+/** Official PCv / oIw — model line when GRi after delivery. */
+export const NO_IDLE_SUB_HANDLER_STRIPPED_DELIVERED =
+  'The message was delivered, but no idle subscription was made: a permission handler removed notify_when_idle from this call.'
+
 const NOTIFY_IDLE_FEATURE = 'notify_idle'
 
 // ---------------------------------------------------------------------------
@@ -443,6 +451,10 @@ function fail(reason: IdleSubscribeReason): IdleSubscribeResult {
 }
 
 /** densable ve/pe — reason tags for cross_session_notify_idle drops. */
+export function noteSubscribeStrippedByHandler(): void {
+  noteNotifyIdle('subscribe_stripped_by_handler')
+}
+
 function noteNotifyIdle(
   reason:
     | 'malformed_frame'
@@ -453,9 +465,16 @@ function noteNotifyIdle(
     | 'subscribe_internal_error'
     | 'subscribe_peer_gone'
     | 'subscribe_send_failed'
-    | 'subscribe_send_uncertain',
+    | 'subscribe_send_uncertain'
+    | 'subscribe_stripped_by_handler'
+    | 'subscribe_refused_principal',
 ): void {
   logForDebugging(`[cross_session_notify_idle] ${reason}`)
+}
+
+/** densable VTl — `be("cross_session_notify_idle","subscribe_refused_principal")`. */
+export function noteSubscribeRefusedPrincipal(): void {
+  noteNotifyIdle('subscribe_refused_principal')
 }
 
 function newMsgId(): string {

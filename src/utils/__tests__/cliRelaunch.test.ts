@@ -60,6 +60,10 @@ describe('cliRelaunch densables', () => {
         CLAUDE_CODE_TUI_JUST_SWITCHED: 'old',
         CLAUDE_CODE_NO_FLICKER: '1',
         CLAUDE_BRIDGE_REATTACH_SESSION: 'x',
+        CLAUDE_CODE_TUI_TRIAL: '1',
+        CLAUDE_BRIDGE_REATTACH_OWNER_ACCT: 'acct',
+        CLAUDE_BRIDGE_REATTACH_OWNER_ORG: 'org',
+        CLAUDE_BRIDGE_REATTACH_NO_BACKFILL: '1',
       },
       injectEnv: { CLAUDE_CODE_TUI_JUST_SWITCHED: 'fullscreen' },
       dropEnv: ['CLAUDE_CODE_NO_FLICKER'],
@@ -68,7 +72,15 @@ describe('cliRelaunch densables', () => {
     expect(env.CLAUDE_CODE_TUI_JUST_SWITCHED).toBe('fullscreen')
     expect(env.CLAUDE_CODE_NO_FLICKER).toBeUndefined()
     expect(env.CLAUDE_BRIDGE_REATTACH_SESSION).toBeUndefined()
+    expect(env.CLAUDE_CODE_TUI_TRIAL).toBeUndefined()
+    expect(env.CLAUDE_BRIDGE_REATTACH_OWNER_ACCT).toBeUndefined()
+    expect(env.CLAUDE_BRIDGE_REATTACH_OWNER_ORG).toBeUndefined()
+    expect(env.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL).toBeUndefined()
     expect(RELAUNCH_ALWAYS_DROP_ENV).toContain('CLAUDE_CODE_TUI_JUST_SWITCHED')
+    expect(RELAUNCH_ALWAYS_DROP_ENV).toContain('CLAUDE_CODE_TUI_TRIAL')
+    expect(RELAUNCH_ALWAYS_DROP_ENV).toContain(
+      'CLAUDE_BRIDGE_REATTACH_OWNER_ACCT',
+    )
     expect(TUI_RELAUNCH_DROP_ENV).toContain('CLAUDE_CODE_NO_FLICKER')
   })
 

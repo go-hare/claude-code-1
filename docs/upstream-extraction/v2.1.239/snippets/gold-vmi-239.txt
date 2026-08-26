@@ -1,0 +1,76 @@
+# densable 2.1.239 SendMessage coerce — vMi / U4f / QTl
+# SEA: %TEMP%\official-239\package\claude.exe
+# 236 named this yEi; 239 renamed to vMi. Same slipped-summary contract.
+# Gate: QTl / isSlippedSummarySplitEnabled = it("tengu_deep_feather", true)
+
+function jo(e){return typeof e==="object"&&e!==null&&!Array.isArray(e)}
+
+function Cs(e,t){let r=e.indexOf(t);return r===-1?e:e.slice(0,r)}
+function fp(e){return Cs(e,`\n`)}
+
+function So(e,t){if(t<=0)return"";if(e.length<=t)return e;let r=e.slice(0,t),n=r.charCodeAt(t-1);return rOu(n>=55296&&n<=56319?r.slice(0,-1):r)}
+
+var Jm="SendMessage",VGr=200
+var dqS,bll="antml:",_Mi="</summary>",$4f='<parameter name="message">',F4f,pqS
+F4f=`<${bll}parameter name="message">`
+pqS=new RegExp(`<(?:${bll})?parameter\\b|</(?:${bll})?(?:parameter|invoke|function_calls|message)>`)
+dqS=new Set(["to","summary","message","notify_when_idle"])
+
+function bMi(e){let t=U4f(e);return t!==void 0&&t.unrepaired===void 0?t.split:void 0}
+
+function U4f(e){
+  if(!jo(e))return;
+  let{message:t,summary:r}=e;
+  if(typeof e.to!=="string"||t!==void 0&&t!==null||typeof r!=="string"||!Object.keys(e).every((o)=>dqS.has(o)))return;
+  let n=r.indexOf(_Mi);
+  while(n!==-1){
+    let o=n+_Mi.length;
+    while(o<r.length&&/\s/.test(r.charAt(o)))o++;
+    let i=r.startsWith(F4f,o)?"namespaced":r.startsWith($4f,o)?"bare":void 0;
+    if(i!==void 0){
+      let s=i==="namespaced"?F4f:$4f,a=r.slice(o+s.length).trimEnd();
+      if(a.trim().length===0)return;
+      return{
+        split:{summary:r.slice(0,n).trim(),message:a,openerForm:i},
+        unrepaired:pqS.test(a)?"markup":fqS(a)?"json":void 0
+      }
+    }
+    n=r.indexOf(_Mi,n+_Mi.length)
+  }
+  return
+}
+
+function vMi(e,{applySplit:t=!0}={}){
+  if(!jo(e))return null;
+  let{message:r,summary:n}=e,o=[],i=U4f(e),s=i?.unrepaired===void 0?i?.split:void 0;
+  if(s!==void 0&&t)r=s.message,n=s.summary,o.push(`split_slipped_summary_${s.openerForm}`);
+  if(typeof r==="string"&&(typeof n!=="string"||n.trim().length===0)){
+    let c=fp(r.trim()).trim();
+    if(c.length>0)n=c,o.push("derive_summary")
+  }
+  if(typeof n==="string"&&n.length>VGr)n=So(n,VGr-1)+"\u2026",o.push("truncate_summary");
+  let[a]=o,
+      l=i?.unrepaired!==void 0
+        ?`split_slipped_summary_${i.split.openerForm}_unrepaired_${i.unrepaired}`
+        :s!==void 0&&!t
+          ?`split_slipped_summary_${s.openerForm}_detect_only`
+          :a;
+  if(l===void 0)return null;
+  return{input:{...e,...r!==void 0&&{message:r},summary:n},shapeClass:l}
+}
+
+function fqS(e){
+  let t=e.trim();
+  if(!t.startsWith("{")&&!t.startsWith("["))return!1;
+  try{let r=er(t);return typeof r==="object"&&r!==null}catch{return!1}
+}
+
+function QTl(){return it("tengu_deep_feather",!0)}
+# export: isSlippedSummarySplitEnabled:()=>QTl
+
+# tool:
+#   coerceInput:(e)=>vMi(e,{applySplit:QTl()})
+#   backfillObservableInput: if(bMi(e)!==void 0)return
+# i$f / GRi raw tool_use:
+#   o=vMi(n,{applySplit:QTl()}); i=o!==null&&jo(o.input)?o.input:n
+#   return {message, notify_when_idle} from i

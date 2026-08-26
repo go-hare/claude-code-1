@@ -375,6 +375,31 @@ export function formatProcessWrapperRelaunchRefuseMessage(
 }
 
 /**
+ * Official Qdo densable — user-visible refusal when gRr/tAt cannot relaunch
+ * because the process wrapper is set but not runnable. Session is left running.
+ */
+export function formatProcessWrapperQdoRefuseMessage(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (isProcessWrapperRunnable(env)) return null
+  const err = getProcessWrapperError(env)
+  if (err) return err
+  const launcher = getProcessWrapperArgv(env)[0]
+  if (!launcher) return `${PROCESS_WRAPPER_ENV_KEY} launcher is not runnable`
+  return `${PROCESS_WRAPPER_ENV_KEY}: launcher \`${launcher}\` was deleted or is not executable — restore it (or fix the setting), then retry; this session was left running`
+}
+
+/** Official Qdo: throw before spawnSync when the wrapper launcher is unusable. */
+export function assertProcessWrapperRunnableForRelaunch(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const refuse = formatProcessWrapperQdoRefuseMessage(env)
+  if (!refuse) return
+  logForDebugging('[agent_launcher] relaunch_launcher_not_runnable')
+  throw new Error(refuse)
+}
+
+/**
  * Official daemon/status densable lines for PROCESS_WRAPPER.
  *
  * When misconfigured: single refuse line.

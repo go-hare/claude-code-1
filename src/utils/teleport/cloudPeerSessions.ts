@@ -5,6 +5,8 @@
  * Gate: hasCloudPeerAccess (R5v). Memo is intentionally process-local & short.
  */
 
+import { isRemoteControlPeerUnreachableFromHere } from '../../bridge/trustedDevice.js'
+import { stripSessionPrefix } from '@claude-code/builtin-tools/tools/SendMessageTool/nameResolve.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { hasCloudPeerAccess } from './cloudPeerAccess.js'
@@ -12,6 +14,10 @@ import {
   walkCcrSessionList,
   type CcrSessionListRow,
 } from './walkCcrSessionList.js'
+
+/** Official xSf — ListAgents suffix when H9b && environment_kind==="bridge". */
+export const CLOUD_PEER_UNREACHABLE_FROM_HERE =
+  'not reachable from this cloud session'
 
 /** densable Bff */
 const CLOUD_PEER_LIST_SOFT_TIMEOUT_MS = 5000
@@ -24,6 +30,8 @@ export type CloudPeerSession = {
   lastActive?: number
   workerStatus?: 'running' | 'idle' | 'requires_action'
   remoteControl?: boolean
+  /** Official D5v: set on bridge rows when H9b from a cloud session. */
+  unreachableFromHere?: boolean
 }
 
 export type CloudPeerListResult = {
@@ -41,9 +49,28 @@ type Memo = {
 let memo: Memo | undefined
 let inFlight: Promise<CloudPeerListResult> | undefined
 
-function mapRow(row: CcrSessionListRow): CloudPeerSession {
+/** Official D5v row map + self-session filter. */
+export function mapD5vCloudPeerSessions(
+  rows: CcrSessionListRow[],
+  input: {
+    selfSessionId: string
+    unreachableFromHere: boolean
+  },
+): CloudPeerSession[] {
+  const filtered =
+    input.selfSessionId === ''
+      ? rows
+      : rows.filter(row => stripSessionPrefix(row.id) !== input.selfSessionId)
+  return filtered.map(row => mapRow(row, input.unreachableFromHere))
+}
+
+function mapRow(
+  row: CcrSessionListRow,
+  unreachableFromHere: boolean,
+): CloudPeerSession {
   const last = Date.parse(row.last_event_at ?? row.created_at ?? '')
   const ws = row.worker_status
+  const remoteControl = row.environment_kind === 'bridge'
   return {
     id: row.id,
     title: row.title ?? null,
@@ -52,20 +79,35 @@ function mapRow(row: CcrSessionListRow): CloudPeerSession {
       ws === 'running' || ws === 'idle' || ws === 'requires_action'
         ? ws
         : undefined,
-    remoteControl: row.environment_kind === 'bridge',
+    remoteControl,
+    ...(unreachableFromHere && remoteControl
+      ? { unreachableFromHere: true }
+      : {}),
   }
 }
 
 async function fetchCloudPeerSessionsFresh(): Promise<CloudPeerListResult> {
   const status = { truncated: false }
+  // Official D5v: r = CLAUDE_CODE_REMOTE===true
+  const remote = process.env.CLAUDE_CODE_REMOTE === 'true'
+  const selfId = remote
+    ? stripSessionPrefix(process.env.CLAUDE_CODE_REMOTE_SESSION_ID ?? '')
+    : ''
   try {
     const rows = await walkCcrSessionList({
       status,
       throwOnError: true,
       exhaustive: true,
-      includeBridgeKind: false,
+      includeBridgeKind: remote,
     })
-    const sessions = rows.map(mapRow)
+    let unreachable = false
+    if (remote) {
+      unreachable = isRemoteControlPeerUnreachableFromHere()
+    }
+    const sessions = mapD5vCloudPeerSessions(rows, {
+      selfSessionId: selfId,
+      unreachableFromHere: unreachable,
+    })
     memo = {
       at: Date.now(),
       sessions,
@@ -77,7 +119,11 @@ async function fetchCloudPeerSessionsFresh(): Promise<CloudPeerListResult> {
       ...(status.truncated ? { truncated: true } : {}),
     }
   } catch (err) {
-    logForDebugging(`[agents:cloud] session list threw: ${errorMessage(err)}`)
+    const malformed =
+      err instanceof TypeError ? 'malformed session-list response — ' : ''
+    logForDebugging(
+      `[agents:cloud] session list threw: ${malformed}${errorMessage(err)}`,
+    )
     return { sessions: [], unavailable: 'fetch_failed' }
   }
 }

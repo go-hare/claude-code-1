@@ -1,0 +1,37 @@
+
+## function jo near record
+--- offset=301957505
+r J4e=A(()=>{kHt();Zea();lOe();jI=rZ_});function jo(e){return typeof e==="object"&&e!==null&&!Array.isArray(e)}function Z4e(e,t){if(!jo(e))return[];let r=[];for(let{alias:n,canonical:o}of RMn){if(!(n in e))continue;if(o in e&&e[o]!==null)r.push({file:t,path:n,message:`"${n}" is an alias for "${o}" and this file sets both; the "${n}" value was ignored. Use only "${o}".`,severity:"warning",alias:n,canonical:o});else e[o]=e[n];delete e[n]}
+
+--- offset=330583534
+(t)}normalize(t){return lt(t.sort(Fo))}}function jo(t,e,i){let s,n,o,a,r=0,l=t.length-1;i?(e>=t[r].pos&&e<=t[l].pos&&({lo:r,hi:l}=it(t,"pos",e)),({pos:s,time:o}=t[r]),({pos:n,time:a}=t[l])):(e>=t[r].time&&e<=t[l].time&&({lo:r,hi:l}=it(t,"time",e)),({time:s,pos:o}=t[r]),({time:n,pos:a}=t[l]));const h=n-s;return h?o+(a-o)*(e-s)/h:o}var $o=Object.freeze({__proto__:null,CategoryScale:class extends tn{static id="category";static defaults={ti
+
+
+## function fp(
+--- offset=301052040
+indexOf(t);return r===-1?e:e.slice(0,r)}function fp(e){return Cs(e,`
+`)}function Pd(e,t,r=0){let n=0,o=e.indexOf(t,r);while(o!==-1)n++,o=e.indexOf(t,o+1);return n}function Mre(e){return e.replace(/[\uFF10-\uFF19]/g,(t)=>String.fromCharCode(t.charCodeAt(0)-65248))}function Wke(e){return e.replaceAll("\u3000"," ")}function Uzo(e,t=",",r=oOu){let o="";for(let i of e){let s=o?t:"",a=s+i;if(o.length+a.length<=r)o+=a;else{let l=r-o.length-s.length-14;if(l>0)o+=s+i.slice(0,l)+"...[truncated]";else o+="...[truncated]";return o}}return o}class dHn{maxSize;content="";isTruncated=!1;totalBytesReceived=0;constructor(e=oOu){this.maxSize=e}append(e){let t=typeof e==="string"?e:e.toString();if(this.totalBytesReceived+=t.length,this.isTruncated&&this.content.length>=this.maxSize)return;if(this.content.length+t.length>this.maxSize){let r=this.ma
+
+
+## isSlippedSummarySplitEnabled js
+--- offset=106662320
+ttemptedNote............	.......idleSubscriptionSkippedNotes............	.......isSlippedSummarySplitEnabled............	.......udsBlankMessageGate.............	.7.....emitPeerFileReceiveTelemetry..............7.....injectPeerFilePrefix............	.......materializeLocalPeerFiles...............	.......peerFileCountCapNote............	.7.....peerFileFailureNote.............	.......peerTransferSpoolDir............I.......peerUploadsDir..........I.......readPeerFileBounded.....
+
+--- offset=313663346
+ndler:()=>C0m,idleNotAttemptedNote:()=>KTl,idleSubscriptionSkippedNotes:()=>qTl,isSlippedSummarySplitEnabled:()=>QTl,udsBlankMessageGate:()=>GTl});function S0m(e){return new RegExp(`^[\\s\\S]{0,${e}}$`,"u")}function WTl(e){return[e.to,e.message]}function Eso({toolUseId:e,toolState:t},r,n){if(!e)return;t.get(a3i).set(e,WTl(r),n)}function l0m(){return Es([JTl(),KRw()])}function JTl(){return L().describe("Plain text message content")}function E0m(e){return _e({to:L().regex(zTl,"
+
+
+## applySplit:QTl
+--- offset=313666368
+e.message.content))return;let r=e.message.content.find((s)=>s.type==="tool_use"&&s.id===t);if(r===void 0||r.type!=="tool_use")return;let n=r.input;if(typeof n!=="object"||n===null)return;let o=vMi(n,{applySplit:QTl()}),i=o!==null&&jo(o.input)?o.input:n;return{message:"message"in i?i.message:void 0,notify_when_idle:"notify_when_idle"in i?i.notify_when_idle:void 0}}function ZRw(e){return{data:{success:!1,message:e?u3i:k0m}}}function fWt(e){if(!("notify_when_idle"in e))return!1;return LPi(e.notify_when_idle)===!0}function d0m(e,t){if(typeof e==="string"&&e.trim().length>0)return;return t(),R0m}fu
+
+--- offset=313678676
+PreconditionError"}};YTl=os({name:Jm,searchHint:"send messages to agent teammates",maxResultSizeChars:1e5,userFacingName(){return"SendMessage"},get inputSchema(){return FTl()},coerceInput:(e)=>vMi(e,{applySplit:QTl()}),shouldDefer:!0,isReadOnly(e){return typeof e.message==="string"},backfillObservableInput(e){if("type"in e)return;if(typeof e.to!=="string")return;if(bMi(e)!==void 0)return;let t=e.message??"";if(typeof t==="string")e.type="message",e.recipient=e.to,e.content=Wl(t,50);else if(typeof e.message==="object"&&e.message!==null){let r=e.message;if(e.type=r.type,e.recipient=e.to,r.reques
+
+
+## applySplit:tQa
+
+## function So( truncate
+--- offset=301050245
+th>=t)break;r.push(n)}return r.join("")}function So(e,t){if(t<=0)return"";if(e.length<=t)return e;let r=e.slice(0,t),n=r.charCodeAt(t-1);return rOu(n>=55296&&n<=56319?r.slice(0,-1):r)}function zY(e,t){if(t<=0)return"";if(e.length<=t)return e;let r=e.slice(-t),n=r.charCodeAt(0);return rOu(n>=56320&&n<=57343?r.slice(1):r)}function Fzo(e,t,r,n){if(e.length<=t+r)return e;let o=t>0?So(e,t):"",i=r>0?zY(e,r):"";return`${o}${n(e.length-o.length
+

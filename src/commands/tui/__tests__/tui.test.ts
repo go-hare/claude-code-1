@@ -57,7 +57,9 @@ beforeEach(() => {
   ).cache?.clear?.()
   // Save env vars we may mutate
   origEnv.CLAUDE_CODE_NO_FLICKER = process.env.CLAUDE_CODE_NO_FLICKER
+  origEnv.CLAUDE_AX_SCREEN_READER = process.env.CLAUDE_AX_SCREEN_READER
   delete process.env.CLAUDE_CODE_NO_FLICKER
+  delete process.env.CLAUDE_AX_SCREEN_READER
 })
 
 afterEach(() => {
@@ -71,6 +73,11 @@ afterEach(() => {
     delete process.env.CLAUDE_CODE_NO_FLICKER
   } else {
     process.env.CLAUDE_CODE_NO_FLICKER = origEnv.CLAUDE_CODE_NO_FLICKER
+  }
+  if (origEnv.CLAUDE_AX_SCREEN_READER === undefined) {
+    delete process.env.CLAUDE_AX_SCREEN_READER
+  } else {
+    process.env.CLAUDE_AX_SCREEN_READER = origEnv.CLAUDE_AX_SCREEN_READER
   }
 })
 
@@ -245,6 +252,25 @@ describe('tui toggle subcommand', () => {
     expect(result.value).toContain('enabled')
     expect(existsSync(getTuiMarkerPath())).toBe(true)
     expect(readPersistedTuiSetting()).toBe('fullscreen')
+  })
+})
+
+describe('densable CU() screen-reader refuse', () => {
+  test('/tui on refuses without persisting when screen-reader mode is on', async () => {
+    const { resetScreenReaderModeCache } = await import(
+      '../../../utils/screenReaderGate.js'
+    )
+    const { getTuiMarkerPath, SCREEN_READER_TUI_NO_EFFECT } = await import(
+      '../index.js'
+    )
+    process.env.CLAUDE_AX_SCREEN_READER = '1'
+    resetScreenReaderModeCache()
+    const result = await invokeCmd('on')
+    expect(result.type).toBe('text')
+    expect(result.value).toBe(SCREEN_READER_TUI_NO_EFFECT)
+    expect(existsSync(getTuiMarkerPath())).toBe(false)
+    delete process.env.CLAUDE_AX_SCREEN_READER
+    resetScreenReaderModeCache()
   })
 })
 

@@ -7,6 +7,7 @@ import {
   CLOUD_SESSION_LIST_FAILED_LISTING_NOTE,
   SESSION_LIST_TRUNCATED_LISTING_NOTE,
 } from 'src/utils/sessionListIncompleteCopy.js'
+import { CLOUD_PEER_UNREACHABLE_FROM_HERE } from 'src/utils/teleport/cloudPeerSessions.js'
 import { __test } from '../ListPeersTool.js'
 
 describe('densable 2.1.234 #34 ListAgents incomplete notes', () => {
@@ -30,6 +31,20 @@ describe('densable 2.1.234 #34 ListAgents incomplete notes', () => {
     expect(listing).toContain(ACCOUNT_SESSION_LIST_INCOMPLETE_LISTING_NOTE)
     expect(listing).toContain(CLOUD_SESSION_LIST_FAILED_LISTING_NOTE)
     expect(listing).toContain(SESSION_LIST_TRUNCATED_LISTING_NOTE)
+  })
+
+  test('cloud row appends official xSf when unreachableFromHere', () => {
+    const listing = __test.formatPeersListing([
+      {
+        address: 'cloud:session_bridge',
+        name: 'rc',
+        transport: 'cloud',
+        connected: true,
+        status: 'cloud',
+        unreachableFromHere: true,
+      },
+    ])
+    expect(listing).toContain(CLOUD_PEER_UNREACHABLE_FROM_HERE)
   })
 
   test('empty peers still surface truncated notes', () => {

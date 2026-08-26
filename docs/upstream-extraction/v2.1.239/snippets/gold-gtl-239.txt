@@ -1,0 +1,48 @@
+# densable 2.1.239 x0m / C0m / GTl / fWt / LPi
+# SEA: %TEMP%\official-239\package\claude.exe
+
+function LPi(e){return e==="true"?!0:e==="false"?!1:e}
+function fWt(e){if(!("notify_when_idle"in e))return!1;return LPi(e.notify_when_idle)===!0}
+
+function x0m(e,t){
+  if(t===void 0||!Array.isArray(e.message.content))return;
+  let r=e.message.content.find((s)=>s.type==="tool_use"&&s.id===t);
+  if(r===void 0||r.type!=="tool_use")return;
+  let n=r.input;
+  if(typeof n!=="object"||n===null)return;
+  let o=vMi(n,{applySplit:QTl()}),i=o!==null&&jo(o.input)?o.input:n;
+  return{message:"message"in i?i.message:void 0,notify_when_idle:"notify_when_idle"in i?i.notify_when_idle:void 0}
+}
+
+function C0m(e,t,r){
+  if(typeof e.message==="string"&&e.message.trim().length>0)return!1;
+  let n=x0m(t,r)?.message;
+  return typeof n==="string"&&n.trim().length>0||c3i(e,t,r)
+}
+function c3i(e,t,r){return!fWt(e)&&LPi(x0m(t,r)?.notify_when_idle)===!0}
+
+function UTl(e,t){
+  let r=fWt(e),n=r&&(t.agentId!==void 0||t.teammateContext!==void 0||Qb());
+  return{notify:r&&!n,refusedForPrincipal:n}
+}
+
+function GTl({input:e,plainMessage:t,notify:r,refusedForPrincipal:n,assistantMessage:o,toolUseId:i,emit:s}){
+  if(t.trim().length>0)return;
+  if(C0m(e,o,i))return s("uds","handler_rewrite"),fWt(e)?n?eIw:QRw:R0m;
+  if(!r){
+    if(n)VTl();
+    return s("uds",n?"permission_denied":"empty_message"),ZRw(n)
+  }
+  return
+}
+
+QRw={data:{success:!1,message:"A permission handler emptied this message; nothing was sent, and no idle subscription was made (a blanked delivery is never reinterpreted as a pure subscription — send notify_when_idle without a message if that is what you want)."}}
+eIw={data:{success:!1,message:"A permission handler emptied this message; nothing was sent, and no idle subscription was made."}}
+R0m={data:{success:!1,message:"A permission handler rewrote this call so that nothing was left to send or subscribe; nothing was sent."}}
+ZRw(e)={data:{success:!1,message:e?u3i:k0m}}
+k0m="message must not be empty"
+u3i="notify_when_idle is only available from the main conversation of this session (not from a subagent or teammate)."
+VTl(){be("cross_session_notify_idle","subscribe_refused_principal")}
+
+# export: blankCallCausedByHandler:()=>C0m, udsBlankMessageGate:()=>GTl
+# call() UDS: {notify,refusedForPrincipal}=UTl; GTl(...); if defined return

@@ -4,6 +4,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import {
   applyProcessWrapperToLaunch,
+  assertProcessWrapperRunnableForRelaunch,
+  formatProcessWrapperQdoRefuseMessage,
   formatProcessWrapperRelaunchRefuseMessage,
   formatProcessWrapperStatusLines,
   parseProcessWrapperValue,
@@ -162,5 +164,21 @@ describe('formatProcessWrapperStatusLines / relaunch refuse', () => {
     expect(lines[0]).toContain('Self-exec:')
     expect(lines[0]).toContain(PROCESS_WRAPPER_ENV_KEY)
     expect(formatProcessWrapperRelaunchRefuseMessage(env)).toBeNull()
+    expect(formatProcessWrapperQdoRefuseMessage(env)).toBeNull()
+  })
+
+  test('Qdo refuse uses official retry / session-left-running copy', () => {
+    // Official Hsg: PROCESS_WRAPPER is ignored on win32 — Qdo is a no-op there.
+    if (process.platform === 'win32') return
+    const missing = join(tmpdir(), 'no-such-claude-wrapper-qdo')
+    const env = {
+      [PROCESS_WRAPPER_ENV_KEY]: missing,
+    } as NodeJS.ProcessEnv
+    const msg = formatProcessWrapperQdoRefuseMessage(env)
+    expect(msg).toContain('then retry')
+    expect(msg).toContain('this session was left running')
+    expect(() => assertProcessWrapperRunnableForRelaunch(env)).toThrow(
+      'then retry',
+    )
   })
 })

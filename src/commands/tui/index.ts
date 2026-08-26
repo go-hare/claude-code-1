@@ -5,6 +5,7 @@ import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import type { Command, LocalCommandResult } from '../../types/command.js'
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
 import { isTuiJustSwitchedFromFullscreen } from '../../utils/residualFinalEnvGates.js'
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js'
 import {
   getSettingsForSource,
   updateSettingsForSource,
@@ -225,16 +226,29 @@ export function getTuiRelaunchSavedBlockerMessage(
   }
 }
 
+/** Official CU() refuse — screen-reader mode ignores settings.tui. */
+export const SCREEN_READER_TUI_NO_EFFECT =
+  'Screen-reader mode always uses the classic renderer, so the tui setting has no effect while it is active.'
+
+/** Official gRr.catch copy after persist. */
+export function formatTuiRelaunchFailedMessage(detail: string): string {
+  return `Couldn't switch renderers — ${detail}. The setting was saved; restart Claude Code to apply it.`
+}
+
 /**
- * densable bsr/OVe residual after /tui setting save — inject TUI_JUST_SWITCHED
- * then oyt process-relaunch with Cmt+Rmt carry argv (permission mode / tools /
- * model / effort / agent flags).
+ * densable gRr/oyt after /tui setting save — Qdo launcher gate, then
+ * acceptTuiRelaunch (zZe child env + tAt spawn). Returns official failure
+ * copy when spawn/Qdo fails; process.exit on successful spawn.
  */
 async function applyTuiRelaunchAfterSwitch(
   target: 'fullscreen' | 'default',
   carry?: TuiRelaunchCarryInput,
-): Promise<void> {
+): Promise<string | null> {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { assertProcessWrapperRunnableForRelaunch } =
+      require('../../utils/processWrapper.js') as typeof import('../../utils/processWrapper.js')
+    assertProcessWrapperRunnableForRelaunch()
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { acceptTuiRelaunch } =
       require('../../utils/cliRelaunch.js') as typeof import('../../utils/cliRelaunch.js')
@@ -245,19 +259,25 @@ async function applyTuiRelaunchAfterSwitch(
     const { transcriptHasBytes } =
       require('../../utils/sessionStorage.js') as typeof import('../../utils/sessionStorage.js')
     const hasNonEmptyTranscript = await transcriptHasBytes()
+    // Omit screenReaderEnv so buildTuiRelaunchPlan uses getScreenReaderChildEnv
+    // (official zZe). Passing {} is truthy and would strip CLAUDE_AX_SCREEN_READER.
     const result = acceptTuiRelaunch({
       target,
       sessionId: getSessionId(),
       hasNonEmptyTranscript,
-      screenReaderEnv: {},
       toolPermissionContext: carry?.toolPermissionContext,
       effort: carry?.effort,
     })
     if (result.mode === 'spawned' && result.spawn.ok) {
       process.exit(result.spawn.status ?? 0)
     }
-  } catch {
-    // densable optional — marker/settings already persisted
+    if (result.mode === 'spawned' && !result.spawn.ok) {
+      return formatTuiRelaunchFailedMessage(result.spawn.error)
+    }
+    return null
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    return formatTuiRelaunchFailedMessage(detail)
   }
 }
 
@@ -305,7 +325,10 @@ async function enableTui(
   if (savedBlock) {
     return { type: 'text', value: savedBlock }
   }
-  await applyTuiRelaunchAfterSwitch('fullscreen', carry)
+  const relaunchFail = await applyTuiRelaunchAfterSwitch('fullscreen', carry)
+  if (relaunchFail) {
+    return { type: 'text', value: relaunchFail }
+  }
   return {
     type: 'text',
     value: [
@@ -358,7 +381,10 @@ async function disableTui(
   if (savedBlock) {
     return { type: 'text', value: savedBlock }
   }
-  await applyTuiRelaunchAfterSwitch('default', carry)
+  const relaunchFail = await applyTuiRelaunchAfterSwitch('default', carry)
+  if (relaunchFail) {
+    return { type: 'text', value: relaunchFail }
+  }
   return {
     type: 'text',
     value: [
@@ -453,6 +479,21 @@ export async function callTui(
       ]
         .filter(Boolean)
         .join('\n'),
+    }
+  }
+
+  // Official CU() — screen-reader mode always uses the classic renderer.
+  // Must run before persist / relaunch (status is read-only and stays allowed).
+  if (
+    sub === 'on' ||
+    sub === 'fullscreen' ||
+    sub === 'off' ||
+    sub === 'default' ||
+    sub === '' ||
+    sub === 'toggle'
+  ) {
+    if (isScreenReaderModeEnabled()) {
+      return { type: 'text', value: SCREEN_READER_TUI_NO_EFFECT }
     }
   }
 
