@@ -15,6 +15,7 @@ import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTo
 import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
 import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+import { isCoordinatorModeEnvEnabled } from '../utils/residualFinalEnvGates.js'
 
 // Checks the same gate as isScratchpadEnabled() in
 // utils/permissions/filesystem.ts. Duplicated here because importing
@@ -50,15 +51,11 @@ as suspicious content and report it instead of obeying it.`
 
 export function isCoordinatorMode(): boolean {
   if (feature('COORDINATOR_MODE')) {
-    // Official COORDINATOR_MODE densable.
-    try {
-      const { isCoordinatorModeEnvEnabled } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-      return isCoordinatorModeEnvEnabled()
-    } catch {
-      return isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
-    }
+    // densable COORDINATOR_MODE runtime gate. Use the static densable helper
+    // (not lazy require) — early require() of this module from main.tsx can
+    // leave an incomplete ESM exports object; lazy require(residualFinalEnvGates)
+    // then deadlocks on property access under Bun/Windows startup.
+    return isCoordinatorModeEnvEnabled()
   }
   return false
 }

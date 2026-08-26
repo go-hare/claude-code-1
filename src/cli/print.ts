@@ -486,9 +486,27 @@ import { isExtractModeActive } from '../memdir/paths.js'
 
 // Dead code elimination: conditional imports
 /* eslint-disable @typescript-eslint/no-require-imports */
-const coordinatorModeModule = feature('COORDINATOR_MODE')
-  ? (require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js'))
-  : null
+// Lazy accessor — top-level require() can yield an incomplete ESM namespace
+// under Bun (empty keys); calling `.isCoordinatorMode` then throws in REPL.
+type CoordinatorModeModule = typeof import('../coordinator/coordinatorMode.js')
+let coordinatorModeModuleCache: CoordinatorModeModule | null | undefined
+function getCoordinatorModeModule(): CoordinatorModeModule | null {
+  if (!feature('COORDINATOR_MODE')) return null
+  if (coordinatorModeModuleCache !== undefined) {
+    return coordinatorModeModuleCache
+  }
+  const mod =
+    require('../coordinator/coordinatorMode.js') as CoordinatorModeModule
+  // Incomplete circular-init namespace — do not cache; retry on later calls.
+  if (
+    typeof mod?.isCoordinatorMode !== 'function' ||
+    typeof mod?.matchSessionMode !== 'function'
+  ) {
+    return null
+  }
+  coordinatorModeModuleCache = mod
+  return mod
+}
 const proactiveModule =
   feature('PROACTIVE') || feature('KAIROS')
     ? (require('../proactive/index.js') as typeof import('../proactive/index.js'))
@@ -6910,8 +6928,10 @@ async function loadInitialMessages(
       )
       if (result) {
         // Match coordinator mode to the resumed session's mode
-        if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
-          const warning = coordinatorModeModule.matchSessionMode(result.mode)
+        if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
+          const warning = getCoordinatorModeModule()?.matchSessionMode(
+            result.mode,
+          )
           if (warning) {
             process.stderr.write(warning + '\n')
             // Refresh agent definitions to reflect the mode switch
@@ -6972,9 +6992,9 @@ async function loadInitialMessages(
         }
 
         // Write mode entry for the resumed session
-        if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
+        if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
           saveMode(
-            coordinatorModeModule.isCoordinatorMode()
+            getCoordinatorModeModule()?.isCoordinatorMode()
               ? 'coordinator'
               : 'normal',
           )
@@ -7250,8 +7270,10 @@ async function loadInitialMessages(
       }
 
       // Match coordinator mode to the resumed session's mode
-      if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
-        const warning = coordinatorModeModule.matchSessionMode(result.mode)
+      if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
+        const warning = getCoordinatorModeModule()?.matchSessionMode(
+          result.mode,
+        )
         if (warning) {
           process.stderr.write(warning + '\n')
           // Refresh agent definitions to reflect the mode switch
@@ -7313,9 +7335,11 @@ async function loadInitialMessages(
       }
 
       // Write mode entry for the resumed session
-      if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
+      if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
         saveMode(
-          coordinatorModeModule.isCoordinatorMode() ? 'coordinator' : 'normal',
+          getCoordinatorModeModule()?.isCoordinatorMode()
+            ? 'coordinator'
+            : 'normal',
         )
       }
 

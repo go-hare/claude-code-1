@@ -9,6 +9,7 @@ import {
   type Tools,
 } from '../Tool.js'
 import { getCoordinatorExtraTools } from './coordinatorEnv.js'
+import { isEnvTruthy } from './envUtils.js'
 
 // MCP tool name suffixes for PR activity subscription. These are lightweight
 // orchestration actions the coordinator calls directly rather than delegating
@@ -21,13 +22,6 @@ const PR_ACTIVITY_TOOL_SUFFIXES = [
 export function isPrActivitySubscriptionTool(name: string): boolean {
   return PR_ACTIVITY_TOOL_SUFFIXES.some(suffix => name.endsWith(suffix))
 }
-
-// Dead code elimination: conditional imports for feature-gated modules
-/* eslint-disable @typescript-eslint/no-require-imports */
-const coordinatorModeModule = feature('COORDINATOR_MODE')
-  ? (require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js'))
-  : null
-/* eslint-enable @typescript-eslint/no-require-imports */
 
 /**
  * Filters a tool array to the set allowed in coordinator mode.
@@ -77,10 +71,14 @@ export function mergeAndFilterTools(
   const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
   const tools = [...builtIn.sort(byName), ...mcp.sort(byName)]
 
-  if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
-    if (coordinatorModeModule.isCoordinatorMode()) {
-      return applyCoordinatorToolFilter(tools)
-    }
+  // densable COORDINATOR_MODE env gate. Do not top-level-require
+  // coordinatorMode.js here — Bun can return an incomplete ESM namespace
+  // during graph init; calling `.isCoordinatorMode` then throws in REPL.
+  if (
+    feature('COORDINATOR_MODE') &&
+    isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
+  ) {
+    return applyCoordinatorToolFilter(tools)
   }
 
   return tools

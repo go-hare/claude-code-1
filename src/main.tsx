@@ -129,12 +129,26 @@ const getTeammatePromptAddendum = () =>
 const getTeammateModeSnapshot = () =>
   require('./utils/swarm/backends/teammateModeSnapshot.js') as typeof import('./utils/swarm/backends/teammateModeSnapshot.js');
 /* eslint-enable @typescript-eslint/no-require-imports */
-// Dead code elimination: conditional import for COORDINATOR_MODE
-/* eslint-disable @typescript-eslint/no-require-imports */
-const coordinatorModeModule = feature('COORDINATOR_MODE')
-  ? (require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js'))
-  : null;
-/* eslint-enable @typescript-eslint/no-require-imports */
+// Dead code elimination: conditional import for COORDINATOR_MODE.
+// Do NOT top-level require() this module during main.tsx evaluation — Bun can
+// hand back an incomplete ESM exports object; reading `.isCoordinatorMode`
+// then deadlocks on Windows. Runtime gate is the densable env check; full
+// module is loaded lazily via import() when modeApi is needed.
+function isCoordinatorModeEnv(): boolean {
+  return feature('COORDINATOR_MODE') ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE) : false;
+}
+type CoordinatorModeModule = typeof import('./coordinator/coordinatorMode.js');
+let coordinatorModeModuleCache: CoordinatorModeModule | null | undefined;
+async function loadCoordinatorModeModule(): Promise<CoordinatorModeModule | null> {
+  if (!feature('COORDINATOR_MODE')) return null;
+  if (coordinatorModeModuleCache === undefined) {
+    const mod = await import('./coordinator/coordinatorMode.js');
+    // Reject incomplete circular-init namespaces (empty / missing API).
+    coordinatorModeModuleCache =
+      typeof mod.isCoordinatorMode === 'function' && typeof mod.matchSessionMode === 'function' ? mod : null;
+  }
+  return coordinatorModeModuleCache;
+}
 // Dead code elimination: conditional import for KAIROS (assistant mode)
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assistantModule = feature('KAIROS')
@@ -2739,7 +2753,7 @@ async function run(): Promise<CommanderCommand> {
       // Apply coordinator mode tool filtering for headless path
       // (mirrors useMergedTools.ts filtering for REPL/interactive path)
       // Official COORDINATOR_MODE densable (isCoordinatorMode reads same densable).
-      if (feature('COORDINATOR_MODE') && coordinatorModeModule?.isCoordinatorMode()) {
+      if (feature('COORDINATOR_MODE') && isCoordinatorModeEnv()) {
         const { applyCoordinatorToolFilter } = await import('./utils/toolPool.js');
         tools = applyCoordinatorToolFilter(tools);
       }
@@ -3139,7 +3153,7 @@ async function run(): Promise<CommanderCommand> {
       if (
         (feature('PROACTIVE') || feature('KAIROS')) &&
         ((options as { proactive?: boolean }).proactive || proactiveEnv) &&
-        !coordinatorModeModule?.isCoordinatorMode()
+        !isCoordinatorModeEnv()
       ) {
         /* eslint-disable @typescript-eslint/no-require-imports */
         const briefVisibility =
@@ -4191,6 +4205,7 @@ async function run(): Promise<CommanderCommand> {
       };
 
       // Shared context for processResumedConversation calls
+      const coordinatorModeModule = await loadCoordinatorModeModule();
       const resumeContext = {
         modeApi: coordinatorModeModule,
         mainThreadAgentDefinition,
@@ -4965,7 +4980,7 @@ async function run(): Promise<CommanderCommand> {
         maybeActivateBrief(options);
         // Persist the current mode for fresh sessions so future resumes know what mode was used
         if (feature('COORDINATOR_MODE')) {
-          saveMode(coordinatorModeModule?.isCoordinatorMode() ? 'coordinator' : 'normal');
+          saveMode(isCoordinatorModeEnv() ? 'coordinator' : 'normal');
         }
 
         // If launched via a deep link, show a provenance banner so the user
@@ -6230,7 +6245,7 @@ async function logTenguInit({
         appendSystemPromptFlag: appendSystemPromptFlag as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       }),
       is_simple: isBareMode() || undefined,
-      is_coordinator: feature('COORDINATOR_MODE') && coordinatorModeModule?.isCoordinatorMode() ? true : undefined,
+      is_coordinator: isCoordinatorModeEnv() ? true : undefined,
       ...(assistantActivationPath && {
         assistantActivationPath: assistantActivationPath as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       }),

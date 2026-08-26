@@ -1,11 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
-// Dead code elimination: conditional import for COORDINATOR_MODE
-/* eslint-disable @typescript-eslint/no-require-imports */
-const coordinatorModule = feature('COORDINATOR_MODE')
-  ? (require('../../coordinator/coordinatorMode.js') as typeof import('../../coordinator/coordinatorMode.js'))
-  : undefined;
-/* eslint-enable @typescript-eslint/no-require-imports */
 import { Box, Text, Link } from '@anthropic/ink';
 import * as React from 'react';
 import figures from 'figures';
@@ -38,6 +32,7 @@ import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTasksV2 } from '../../hooks/useTasksV2.js';
+import { isEnvTruthy } from '../../utils/envUtils.js';
 import { formatDuration, formatFileSize } from '../../utils/format.js';
 import { VoiceWarmupHint } from './VoiceIndicator.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
@@ -422,7 +417,9 @@ function ModeIndicator({
   const hasSelection = useHasSelection();
   const selGetState = useSelection().getState;
   const hasNextTick = nextTickAt !== null;
-  const isCoordinator = feature('COORDINATOR_MODE') ? coordinatorModule?.isCoordinatorMode() === true : false;
+  // densable COORDINATOR_MODE env gate — avoid top-level require of
+  // coordinatorMode.js (incomplete ESM namespace → not-a-function in REPL).
+  const isCoordinator = feature('COORDINATOR_MODE') ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE) : false;
   const runningTaskCount = useMemo(
     () =>
       count(

@@ -151,9 +151,12 @@ const WebBrowserTool = feature('WEB_BROWSER_TOOL')
   ? require('@claude-code/builtin-tools/tools/WebBrowserTool/WebBrowserTool.js')
       .WebBrowserTool
   : null
-const coordinatorModeModule = feature('COORDINATOR_MODE')
-  ? (require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js'))
-  : null
+/** densable COORDINATOR_MODE env gate — avoid `.isCoordinatorMode` on a possibly-incomplete require(). */
+function isCoordinatorModeActive(): boolean {
+  return feature('COORDINATOR_MODE')
+    ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
+    : false
+}
 const SnipTool = feature('HISTORY_SNIP')
   ? require('@claude-code/builtin-tools/tools/SnipTool/SnipTool.js').SnipTool
   : null
@@ -337,10 +340,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     // below which also hides REPL_ONLY_TOOLS when REPL is enabled.
     if (isReplModeEnabled() && REPLTool) {
       const replSimple: Tool[] = [REPLTool]
-      if (
-        feature('COORDINATOR_MODE') &&
-        coordinatorModeModule?.isCoordinatorMode()
-      ) {
+      if (feature('COORDINATOR_MODE') && isCoordinatorModeActive()) {
         replSimple.push(TaskStopTool, getSendMessageTool())
       }
       return filterToolsByDenyRules(replSimple, permissionContext)
@@ -349,10 +349,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     // When coordinator mode is also active, include AgentTool and TaskStopTool
     // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and
     // workers get Bash/Read/Edit (via filterToolsForAgent filtering).
-    if (
-      feature('COORDINATOR_MODE') &&
-      coordinatorModeModule?.isCoordinatorMode()
-    ) {
+    if (feature('COORDINATOR_MODE') && isCoordinatorModeActive()) {
       simpleTools.push(AgentTool, TaskStopTool, getSendMessageTool())
     }
     return filterToolsByDenyRules(simpleTools, permissionContext)
