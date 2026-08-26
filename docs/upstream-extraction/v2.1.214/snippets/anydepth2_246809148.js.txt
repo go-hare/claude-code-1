@@ -1,0 +1,211 @@
+lit(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)\r
+        : [v.replace(/^['"]|['"]$/g, '')];\r
+    }\r
+  }\r
+  // Drop noise that applies to .md and .mdx alike: HTML comments, raw\r
+  // <style>/<script> blocks, and VuePress/dumi-style \`:::tip \u2026 :::\`\r
+  // admonition fences (keep the content between the fences).\r
+  txt = txt\r
+    .replace(/<!--[\\s\\S]*?-->/g, '')\r
+    .replace(/<(style|script)\\b[^>]*>[\\s\\S]*?<\\/\\1>/gi, '')\r
+    .replace(/^:::.*$/gm, '');\r
+  if (/\\.mdx$/i.test(path)) {\r
+    const lines = txt.split('\\n');\r
+    // Drop the leading import block. A prettier-wrapped multi-line import\r
+    // (\`import {\\n  X,\\n} from '\u2026';\`) spans until the \`from '\u2026';\` line. A\r
+    // terminated single line (side-effect \`import './x';\` \u2014 no \`from\`) does\r
+    // NOT enter multi-line mode.\r
+    let i = 0, inImport = false;\r
+    while (i < lines.length) {\r
+      const l = lines[i];\r
+      if (inImport) { i++; if (/\\bfrom\\s+['"][^'"]+['"];?\\s*$/.test(l)) inImport = false; continue; }\r
+      if (/^\\s*import\\b/.test(l)) {\r
+        i++;\r
+        if (!/\\bfrom\\s+['"][^'"]+['"];?\\s*$/.test(l) && !/['"];?\\s*$/.test(l)) inImport = true;\r
+        continue;\r
+      }\r
+      if (/^\\s*$/.test(l)) { i++; continue; }\r
+      break;\r
+    }\r
+    // Drop JSX component blocks. Depth-track on PascalCase open/close tags so\r
+    // a multi-line <Canvas>\\n <Story \u2026/>\\n</Canvas> is dropped in full. Only\r
+    // count tags on block-level-JSX lines (or inside an open block) so inline\r
+    // \`\` \`<Button>\` \`\` mentions and fenced code don't poison depth.\r
+    const out = [];\r
+    let depth = 0, fenced = false;\r
+    for (const l of lines.slice(i)) {\r
+      if (/^\\s*\`\`\`/.test(l)) { fenced = !fenced; if (depth === 0) out.push(l); continue; }\r
+      if (fenced) { if (depth === 0) out.push(l); continue; }\r
+      const blk = /^\\s*<\\/?[A-Z]/.test(l);\r
+      const track = depth > 0 || blk;\r
+      const opens = track ? (l.match(/<[A-Z][\\w.]*[^>]*>/g) ?? []).filter((t) => !t.endsWith('/>')).length : 0;\r
+      const closes = track ? (l.match(/<\\/[A-Z][\\w.]*\\s*>/g) ?? []).length : 0;\r
+      if (depth === 0 && !blk) out.push(l);\r
+      depth = Math.max(0, depth + opens - closes);\r
+    }\r
+    txt = out.join('\\n');\r
+  }\r
+  let body = txt.trim();\r
+  if (body.length > DOC_BODY_CAP) {\r
+    const orig = body.length;\r
+    // Cut at a word boundary so the tail isn't a half-word; fall back to a\r
+    // hard cut when the nearest boundary is unreasonably far back.\r
+    const cut = body.slice(0, DOC_BODY_CAP).replace(/\\s+\\S*$/, '');\r
+    body = (cut.length > DOC_BODY_CAP - 500 ? cut : body.slice(0, DOC_BODY_CAP)) +\r
+      \`\\n\\n_(truncated \u2014 see \${basename(path)} for full)_\`;\r
+    console.error(\`  docs: \${basename(path)} truncated (\${orig} \u2192 \${body.length})\`);\r
+  }\r
+  return { body, category, keywords };\r
+}\r
+\r
+// Tiny glob: \`**\` \u2192 any depth, \`*\` \u2192 any chars in one segment. Anchored under\r
+// PKG_DIR. The walk base and any literal (no-wildcard) entry are bounded via\r
+// cfgPath; matched files whose realpath escapes workspaceRoot are dropped.\r
+function matchGlob(glob, { PKG_DIR, cfgPath, quiet }) {\r
+  if (!glob.includes('*')) {\r
+    if (!isDocExt(glob)) {\r
+      if (!quiet) console.error(\`  ! guidelinesGlob: \${glob} is not .md/.mdx \u2014 skipped\`);\r
+      return [];\r
+    }\r
+    const p = cfgPath(glob, 'guidelinesGlob');\r
+    return p ? [p] : [];\r
+  }\r
+  const parts = glob.split('/');\r
+  const i = parts.findIndex((p) => p.includes('*'));\r
+  // Bound the walk base too \u2014 \`../**/*.md\` would otherwise walk arbitrary\r
+  // directories. Falls back to PKG_DIR (always in-bounds) when i === 0.\r
+  // \`quiet\` (default globs the user never set) skips the not-found warning.\r
+  if (quiet && i > 0 && !existsSync(join(PKG_DIR, ...parts.slice(0, i)))) return [];\r
+  const base = i > 0 ? cfgPath(parts.slice(0, i).join('/'), 'guidelinesGlob') : PKG_DIR;\r
+  if (!base) return [];\r
+  // \`**/\` \u2192 zero-or-more directory segments (so \`docs/**/*.md\` matches both\r
+  // \`docs/x.md\` and \`docs/sub/x.md\`); \`**\` elsewhere \u2192 any depth; \`*\` \u2192\r
+  // any chars within a segment.\r
+  const rx = new RegExp('^' + glob.replace(/[.+^\${}()|[\\]\\\\]/g, '\\\\$&')\r
+    .replace(/\\*\\*\\//g, '\xA7\xA7/').replace(/\\*\\*/g, '\xA7\xA7').replace(/\\*/g, '[^/]*')\r
+    .replace(/\xA7\xA7\\//g, '(?:[^/]+/)*').replace(/\xA7\xA7/g, '.*') + '$');\r
+  return walk(base, () => true)\r
+    .filter((p) => isDocExt(p) && rx.test(relative(PKG_DIR, p).split(sep).join('/')));\r
+}\r
+\r
+// Copy matched guidelines into OUT/guidelines/ preserving relative subpath; emit\r
+// a small index.md listing them. No-op when nothing matches.\r
+export function emitGuidelines({ cfg, PKG_DIR, OUT, cfgPath, workspaceRoot }) {\r
+  const usingDefault = cfg.guidelinesGlob == null;\r
+  const globs = []\r
+    .concat(cfg.guidelinesGlob ?? ['docs/guides/**/*.md', 'docs/*.md', 'guides/**/*.md'])\r
+    .filter(Boolean);\r
+  const seen = new Set();\r
+  const dests = new Set();\r
+  const copied = [];\r
+  for (const g of globs) {\r
+    for (const p of matchGlob(g, { PKG_DIR, cfgPath, quiet: usingDefault })) {\r
+      if (seen.has(p)) continue;\r
+      seen.add(p);\r
+      if (usingDefault && GUIDELINE_EXCLUDE.test(basename(p))) {\r
+        console.error(\`  guidelines: skipping \${basename(p)} (repo-meta, default glob)\`);\r
+        continue;\r
+      }\r
+      // Belt-and-suspenders: drop any matched file whose realpath escapes the\r
+      // workspace root (a symlink under an in-bounds dir could otherwise point\r
+      // outside). cfgPath does the same realpath check for the walk base and\r
+      // literal entries.\r
+      let real;\r
+      try { real = realpathSync(p); } catch { continue; }\r
+      const wsRel = relative(workspaceRoot, real);\r
+      if (wsRel.startsWith('..') || isAbsolute(wsRel)) {\r
+        console.error(\`  ! guidelinesGlob: matched \${p} resolves outside the workspace root \u2014 skipped\`);\r
+        continue;\r
+      }\r
+      // Dest preserves PKG_DIR-relative subpath when the file is inside the\r
+      // package; otherwise (in-workspace but outside the package \u2014 e.g. a\r
+      // sibling docs package) collapses to basename so the dest can never\r
+      // escape OUT/guidelines/.\r
+      let rel = relative(PKG_DIR, p).split(sep).join('/');\r
+      if (rel.startsWith('../') || isAbsolute(rel)) rel = basename(p);\r
+      const dest = join(OUT, 'guidelines', rel);\r
+      if (dests.has(dest)) {\r
+        console.error(\`  ! guidelines: \${rel} would overwrite an earlier file with the same dest \u2014 skipped\`);\r
+        continue;\r
+      }\r
+      dests.add(dest);\r
+      mkdirSync(dirname(dest), { recursive: true });\r
+      cpSync(p, dest);\r
+      copied.push(rel);\r
+    }\r
+  }\r
+  if (copied.length) {\r
+    writeFileSync(\r
+      join(OUT, 'guidelines', 'index.md'),\r
+      \`# Guidelines\\n\\n\${copied.map((r) => \`- [\${basename(r, extname(r))}](./\${r})\`).join('\\n')}\\n\`,\r
+    );\r
+    console.error(\`  guidelines: \${copied.length} file(s) \u2192 guidelines/\`);\r
+  }\r
+  return copied;\r
+}\r
+\r
+// Read PascalCase named exports from a preview .tsx (either home \u2014 the caller\r
+// picks owned-first) as fenced JSX blocks for the synthesized ## Examples\r
+// section. Gracefully empty when the file/dir doesn't exist.\r
+export function previewExamples(previewPath) {\r
+  if (!existsSync(previewPath)) return [];\r
+  const src = readFileSync(previewPath, 'utf8');\r
+  const out = [];\r
+  for (const m of src.matchAll(/export\\s+const\\s+([A-Z][A-Za-z0-9_]*)\\s*=\\s*([\\s\\S]*?)(?=\\n\\s*export\\s+const\\s+[A-Z]|\\n*$)/g)) {\r
+    out.push(\`### \${m[1]}\\n\\n\\\`\\\`\\\`jsx\\n\${m[2].trim().replace(/;$/, '')}\\n\\\`\\\`\\\`\`);\r
+  }\r
+  return out;\r
+}\r
+`});var dPf=J(function(QNk,rtS){rtS.exports=`#!/usr/bin/env node\r
+// Targeted preview recompile \u2014 the fast inner loop for the compare/grading\r
+// workflow, and the ONLY rebuild parallel subagents may run. Recompiles\r
+// the component's preview .tsx (owned .design-sync/previews/ first, else\r
+// generated .design-sync/.cache/previews/) \u2192 <out>/_preview/<Name>.js and re-emits the\r
+// module-variant <Name>.html for just the named components. It does NOT touch\r
+// _ds_bundle.js, styles.css, .d.ts, .prompt.md, or any other component \u2014 and\r
+// it never wipes --out \u2014 so concurrent invocations over disjoint component\r
+// sets are safe (package-build.mjs rm -rf's the whole bundle and must stay\r
+// orchestrator-only).\r
+//\r
+// Reads resolved build facts (namespace, pkg, extraEntries, groups) from\r
+// <out>/.stories-map.json, written by package-build.mjs, so this script can't\r
+// drift from what the full build resolved. The .tsx ownership marker is NOT\r
+// consulted here \u2014 whatever is in the file is compiled verbatim (marker\r
+// handling only matters at generation time, in the full build).\r
+//\r
+// Usage:\r
+//   node lib/preview-rebuild.mjs --config .design-sync/config.json \\\r
+//     --node-modules <nm> --out ./ds-bundle --components Button,Tabs\r
+\r
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';\r
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';\r
+import { pathToFileURL } from 'node:url';\r
+import { KEY_RECIPE, configSlicesFor, renderHashFor, sourceKeyFor } from './sync-hashes.mjs';\r
+\r
+// Honor repo forks of the lib modules, same as package-build's loadLib \u2014 a\r
+// targeted rebuild must compile with identical import rules AND identical\r
+// build options, or full builds and rebuilds produce different\r
+// _preview/<Name>.js bytes (which also churns the compare gradeKey). That\r
+// parity is why emit/bundle also route through here even though forking\r
+// them is unsupported (app-contract surface): if a repo forks one anyway,\r
+// both build paths at least see the same code. sync-hashes stays a static\r
+// import \u2014 it is fork-banned outright.\r
+async function loadLib(name) {\r
+  const fork = resolve('.design-sync', 'overrides', \`\${name}.mjs\`);\r
+  if (existsSync(fork)) return import(pathToFileURL(fork).href);\r
+  return import(\`./\${name}.mjs\`);\r
+}\r
+\r
+const argv = process.argv.slice(2);\r
+const flag = (n, d) => { const i = argv.indexOf(\`--\${n}\`); return i < 0 ? d : argv[i + 1]; };\r
+\r
+const CONFIG_PATH = flag('config');\r
+let cfg = {};\r
+if (CONFIG_PATH) {\r
+  try { cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); }\r
+  catch (e) { console.error(\`[CONFIG] \${CONFIG_PATH}: \${e.message}\`); process.exit(1); }\r
+}\r
+const NODE_MODULES = flag('node-modules') && resolve(flag('node-modules'));\r
+const OUT = flag('out') && resolve(flag('out'));\r
+const NAMES = (flag('components') ?? '').split(',').map((s) => s.trim()).filter(Boolean);\r
+if (!NODE_MODULES || !OUT || !NAMES.len

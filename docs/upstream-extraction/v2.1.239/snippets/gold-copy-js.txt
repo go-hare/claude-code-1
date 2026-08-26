@@ -1,0 +1,49 @@
+
+## "until your limit resets at " hits=161832105,316485983
+
+--- @161832105 jsish=false ---
+...............�...............................................	... ...Continuing now at lower priority........	....... until your limit resets at ............	....... until your limit resets........	...b.... Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /..............	...	... to stop........................................���$�@ ����.�@�V�@.6�.��
+
+--- @316485983 jsish=true ---
+"},isMeta:!0,skipSlashCommands:!0}),"accepted"}function cpo(e){let t=w$(e);return`Continuing now at lower priority${t?` until your limit resets at ${t}`:" until your limit resets"}. Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /${Slr} to stop.`}function ymE(){let e=hUl();if(e.sessionSwitchSubscribed)return;e.sessionSwitchSubscribed=!0,oU((t,r)=>{if
+
+## "until your limit resets" hits=161832105,161832153,316485983,316486018
+
+--- @161832105 jsish=false ---
+...............�...............................................	... ...Continuing now at lower priority........	....... until your limit resets at ............	....... until your limit resets........	...b.... Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /..............	...	... to stop........................................���$�@ ����.�@�V�@.6�.��
+
+--- @161832153 jsish=false ---
+...............	... ...Continuing now at lower priority........	....... until your limit resets at ............	....... until your limit resets........	...b.... Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /..............	...	... to stop........................................���$�@ ����.�@�V�@.6�.���.�........$...3...6...�������.�������.��9������
+
+--- @316485983 jsish=true ---
+"},isMeta:!0,skipSlashCommands:!0}),"accepted"}function cpo(e){let t=w$(e);return`Continuing now at lower priority${t?` until your limit resets at ${t}`:" until your limit resets"}. Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /${Slr} to stop.`}function ymE(){let e=hUl();if(e.sessionSwitchSubscribed)return;e.sessionSwitchSubscribed=!0,oU((t,r)=>{if
+
+--- @316486018 jsish=true ---
+,"accepted"}function cpo(e){let t=w$(e);return`Continuing now at lower priority${t?` until your limit resets at ${t}`:" until your limit resets"}. Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /${Slr} to stop.`}function ymE(){let e=hUl();if(e.sessionSwitchSubscribed)return;e.sessionSwitchSubscribed=!0,oU((t,r)=>{if(RDl(r))ANe("conversation_reset")})
+
+## "Your weekly limit still applies" hits=161832194,316486045
+
+--- @161832194 jsish=false ---
+lower priority........	....... until your limit resets at ............	....... until your limit resets........	...b.... Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /..............	...	... to stop........................................���$�@ ����.�@�V�@.6�.���.�........$...3...6...�������.�������.��9������������.�������. U>�����@...�N......q.�...
+
+--- @316486045 jsish=true ---
+{let t=w$(e);return`Continuing now at lower priority${t?` until your limit resets at ${t}`:" until your limit resets"}. Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /${Slr} to stop.`}function ymE(){let e=hUl();if(e.sessionSwitchSubscribed)return;e.sessionSwitchSubscribed=!0,oU((t,r)=>{if(RDl(r))ANe("conversation_reset")})}var zth,mmE="You can conti
+
+## "Please restart Claude from an existing directory" hits=137614012,309978632
+
+--- @137614012 jsish=false ---
+ult interface is not an object............��........	.......Working directory ".............	...E..." no longer exists. Please restart Claude from an existing directory..........��........	...$...[worktree] blocked shell exec: cwd "............	...B..." is gone and recovery targets the shared checkout; agentWorktree=..............	......worktree_gone...........	...'...This agent is isolated in th
+
+--- @309978632 jsish=true ---
+())try{he=await xmr.realpath(Ie),fe=we;break}catch{}if(he===null)return ggt(`Working directory "${F}" no longer exists. Please restart Claude from an existing directory.`);if(g&&fe===0)return E(`[worktree] blocked shell exec: cwd "${F}" is gone and recovery targets the shared checkout; agentWorktree=${g}`,{level:"warn"}),N("tengu_agent_worktree_cwd_escape_blocked",{reason:xe("worktree_gone")}),ggt
+
+## "Working directory \"" hits=137613952,309978589,309979300
+
+--- @137613952 jsish=false ---
+..............��........����..��........	...+...Iterator result interface is not an object............��........	.......Working directory ".............	...E..." no longer exists. Please restart Claude from an existing directory..........��........	...$...[worktree] blocked shell exec: cwd "............	...B..." is gone and recovery targets the shared checkout; agentWorktree=..............	......
+
+--- @309978589 jsish=true ---
+],he=null,fe=-1;for(let[we,Ie]of ge.entries())try{he=await xmr.realpath(Ie),fe=we;break}catch{}if(he===null)return ggt(`Working directory "${F}" no longer exists. Please restart Claude from an existing directory.`);if(g&&fe===0)return E(`[worktree] blocked shell exec: cwd "${F}" is gone and recovery targets the shared checkout; agentWorktree=${g}`,{level:"warn"}),N("tengu_agent_worktree_cwd_escape
+
+--- @309979300 jsish=true ---
+ of retrying.`);if(E(`Shell CWD "${F}" no longer exists, recovering to "${he}"`),o?.setCwd(he),jZs(he),fe>0)return ggt(`Working directory "${F}" was deleted; shell cwd recovered to "${he}". Re-issue your command (it will run from the recovered directory).`);F=he}if(t.aborted)return X0a();let W,Q=y??g;if(Q){let ge=rFf(F,Q);if(ge)return E(`[worktree] blocked shell exec outside isolation worktree: cw

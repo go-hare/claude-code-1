@@ -220,19 +220,31 @@ function cacheCreationUSDCost(modelCosts: ModelCosts, usage: Usage): number {
   )
 }
 
+/** densable eWb — US-only-inference premium (data-residency). */
+export const US_ONLY_INFERENCE_PREMIUM = 1.1
+
 /**
- * densable Dji — USD cost from token usage + model cost configuration.
+ * densable tWb(e) — 1.1× when usage.inference_geo === "us", else 1.
+ */
+function usOnlyInferenceMultiplier(usage: Usage): number {
+  return usage.inference_geo === 'us' ? US_ONLY_INFERENCE_PREMIUM : 1
+}
+
+/**
+ * densable ima(e,t) — token USD * tWb(usage) + web search.
+ * Web search is not multiplied (official `r*tWb(t)+n`).
  */
 function tokensToUSDCost(modelCosts: ModelCosts, usage: Usage): number {
-  return (
+  const tokenCost =
     (usage.input_tokens / 1_000_000) * modelCosts.inputTokens +
     (usage.output_tokens / 1_000_000) * modelCosts.outputTokens +
     ((usage.cache_read_input_tokens ?? 0) / 1_000_000) *
       modelCosts.promptCacheReadTokens +
-    cacheCreationUSDCost(modelCosts, usage) +
+    cacheCreationUSDCost(modelCosts, usage)
+  const webSearch =
     (usage.server_tool_use?.web_search_requests ?? 0) *
-      modelCosts.webSearchRequests
-  )
+    modelCosts.webSearchRequests
+  return tokenCost * usOnlyInferenceMultiplier(usage) + webSearch
 }
 
 /**

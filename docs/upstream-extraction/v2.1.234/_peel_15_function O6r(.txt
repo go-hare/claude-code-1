@@ -1,0 +1,1 @@
+function O6r(e){let t=or().numStartups;tn((r)=>{let n=r.tipsHistory??{};if(n[e]===t)return r;let o=r.tipLifetimeShownCounts??{};return{...r,tipsHistory:{...n,[e]:t},tipLifetimeShownCounts:{...o,[e]:(o[e]??0)+1}}})}function Z$t(e){return or().tipLifetimeShownCounts?.[e]??0}function tnm(e){return or().pluginSuggestionShownCounts?.[e]??0}function ret(

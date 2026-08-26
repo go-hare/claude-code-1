@@ -394,6 +394,10 @@ export type GlobalConfig = {
   voiceLangHintLastLanguage?: string // Resolved STT language code when the hint was last shown — reset count when it changes
   voiceFooterHintSeenCount?: number // Number of sessions the "hold X to speak" footer hint has been shown
 
+  // densable 2.1.239 tengu_willow_crate REPL diff sidebar (not in GLOBAL_CONFIG_KEYS)
+  diffSidebarOpen?: boolean
+  diffSidebarBaseMode?: 'session' | 'uncommitted' | 'branch'
+
   // Opus 1M merge notice tracking
   opus1mMergeNoticeSeenCount?: number // Number of times the opus-1m-merge notice has been shown
 

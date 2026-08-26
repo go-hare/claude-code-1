@@ -1,0 +1,11 @@
+OFFSET=70330100
+
+ !0],
+        "[:print:]": ["\\p{C}", !0],
+        "[:punct:]": ["\\p{P}", !0],
+        "[:space:]": ["\\p{Z}\\t\\r\\n\\v\\f", !0],
+        "[:upper:]": ["\\p{Lu}", !0],
+        "[:word:]": ["\\p{L}\\p{Nl}\\p{Nd}\\p{Pc}", !0],
+        "[:xdigit:]": ["A-Fa-f0-9", !1]
+      }, braceEscape = (s) => s.replace(/[[\]\\-]/g, "\\$&"), regexpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&"), rangesToString = (ranges) => ranges.join(""), parseClass = (glob2, position) => {
+        let pos = po

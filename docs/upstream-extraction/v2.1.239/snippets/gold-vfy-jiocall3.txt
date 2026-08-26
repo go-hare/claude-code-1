@@ -1,0 +1,4 @@
+:"refused",reason:"recipient_gate_off",message:D}}}if(d.kind==="uds"&&Xen(d.sock))d={kind:"refused",reason:"self",message:qEt(o)};else if(d.kind==="uds"&&Jio(o,d.sock))d={kind:"refused",reason:"impers
+onation",message:Zio(o)};else if(d.kind==="uds"&&VEt(d.sock)||d.kind==="bridge"&&XFe(d.sessionId))d={kind:"refused",reason:"self",message:qEt(o)};if(d.kind==="refused")return N("tengu_send_file",{tran
+sport:xe("refused"),file_count:s.length,delivered_count:0,success:!1}),{data:{success:!1,message:d.message,files:[]}};let p=Tso(d.kind),f=(I)=>i?.trim()?i:`Sent you ${I.length} ${At(I.length,"file")}:
+ ${I.join(", ")}`,m=(I,M)=>{N("tengu_send_file",{transport:me(d.kind),file_count:s.length,delivered_

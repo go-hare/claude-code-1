@@ -1,0 +1,22 @@
+@106589974
+......filterMcpServersByPolicy........Ir0.....getAllMcpConfigs................getClaudeCodeMcpConfigs............."...getConnectablePluginMcpServerNames......................getEnterpriseMcpFilePath................getMcpConfigByName...............f......getMcpConfigsByScope....................getMcpScopeConflicts.............r0.....getMcpServerSignature...................isBuiltinInProcessMcpServer.....................isMcpServerAllowedByPolicy......................isMcpServerBlockedAtConnectTime.................isMcpServerDeniedk..............ID......isMcpServerDisabled.....................parseMcpConfig..................parseMcpConfigFromFilePath......................readRawMcpJsonServersFromCwd....................removeMcpConfig.................setMcpServerEnabled..............M.. ...sh
+---
+@297780220
+terpriseMcpConfigPresence:()=>wZp,filterDynamicMcpServersByPolicy:()=>e4r,filterMcpServersByPolicy:()=>ife,getAllMcpConfigs:()=>qK,getClaudeCodeMcpConfigs:()=>ofe,getConnectablePluginMcpServerNames:()=>ANa,getEnterpriseMcpFilePath:()=>Ujn,getMcpConfigByName:()=>nfe,getMcpConfigsByScope:()=>hP,getMcpScopeConflicts:()=>Gpi,getMcpServerSignature:()=>WJe,isBuiltinInProcessMcpServer:()=>jjn,isMcpServerAllowedByPolicy:()=>zJe,isMcpServerBlockedAtConnectTime:()=>m0,isMcpServerDenied:()=>ILt,isMcpServerDisabled:()=>wb,parseMcpConfig:()=>Jzr,parseMcpConfigFromFilePath:()=>Zzr,readRawMcpJsonServersFromCwd:()=>HLt,removeMcpConfig:()=>Vpi,setMcpServerEnabled:()=>yir,shouldAllowManagedMcpServersOnly:()=>AZp,shouldSkipClaudeAiFetchForEnterpriseLockdown:()=>t4r,suppressedConnectorsEqual:()=>Bjn,unwrapCcr
+---
+PAT b'\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}': HIT@69983661 b'${param}'
+PAT b'configured form': MISS
+PAT b'shows only': HIT@110965043 b'shows only'
+PAT b'server origin': MISS
+PAT b'connection-failure': MISS
+PAT b'connection failure': HIT@149439192 b'connection failure'
+PAT b'Failed to connect to MCP': HIT@137177714 b'Failed to connect to MCP'
+PAT b'MCP server at': MISS
+b'server name'@99285781: server name and resource URI...Parameters:.- server (required): The name of the MCP server from which to read the resource.- uri (required): The URI of the resource to read................................................................F......tool-re
+b'overrides'@87121376: overrides"overrideBun currently does not support patched package "overrides".Invalid override value for "..".Missing resolution package nameBun currently does not support nested "resolutions".Invalid package name "..".resolutionBun currently does not
+b'overridden by'@86310001: overridden by per-test { retry: N }Include tests that are marked with "test.todo()"Run only tests that are marked with "test.only()" or "describe.only()"Exit with code 0 when no tests are foundpass-with-no-testsTreat all tests as `test.concurrent()` 
+b'also defined'@89606228: also defined here.  [[ $_RG_COMPLETE_LIST_ARGS == (1|t*|y*) ]] && {.    print -rl - $args.    return 0.  }..  # Strip out argument groups where unsupported (see above).  [[ $ZSH_VERSION == (4|5.<0-3>)(.*)# ]] &&.  args=( ${(@)args:#(#i)(+|[a-z0-9][a-
+b'defined in both'@86041882: defined in both <math.h> and <complex.h> (7.22p4) */.#define acos(z) __tgmath_real(z, acos).#define asin(z) __tgmath_real(z, asin).#define atan(z) __tgmath_real(z, atan).#define acosh(z) __tgmath_real(z, acosh).#define asinh(z) __tgmath_real(z, asinh
+b'from scope'@136541801: from scope: .......................;....................@.l........8........@.4.@ ..E...@.U.@...ka....>.@...@ ........,.@.... 3+........@Q/.@`..i.Qf......>...%......!<.@.L.C...@.L.@...la....>....D....@..E.....................!<.@.L.C...@.L.@...ma....
+b'user scope'@136541701: user scope........................." in local scope....................%...Cannot remove MCP server from scope: .......................;....................@.l........8........@.4.@ ..E...@.U.@...ka....>.@...@ ........,.@.... 3+........@Q/.@`..i.Qf..
+b'project scope'@141322384: project scopes. Run /login with the standard "Claude account with subscription" flow to use Projects....................Could not save the refreshed claude.ai credentials (secure storage was unavailable), and the server has already consumed the store

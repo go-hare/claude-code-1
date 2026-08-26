@@ -1,0 +1,31 @@
+=== hP ===
+function hP(e,{expandVars:t=!0}
+
+=== CVS ===
+function CVS(e){try{return new URL(e).origin}catch{return}}
+
+=== McE ===
+function McE(Zxm){return{scope:Zxm.scope,servers:Zxm.config.servers,displayServers:hP(Zxm.scope,{expandVars:!1}).servers}}
+
+=== OcE ===
+function OcE(e9I){return RLt(e9I)==="approved"}
+
+=== IcE ===
+MISS IcE
+
+=== NcE ===
+function NcE(Ydr){let{config:r9I}=Ydr;return T2t(r9I.errors,"warning").length>0}
+
+expandVars@136550573: .....i...P...............H...............@...........................................................................E...Cannot destructure property 'expandVars' from null or undefined value...........................t.......................................,.............Pu.........@ ..@.<...K................,...F...u...................................................................He.............
+expandVars@136550904: ......................................................He..............................................`.8.............................................expandVars......P...3:...........u..............:............H..H.......................(...............................h........................................T;.......................................................................................
+expandVars@136554053: .....................................................................................................................E...Cannot destructure property 'expandVars' from null or undefined value...........................projectSettings.................userSettings....................localSettings............................mcp.json.......................t.......................project.............A..
+expandVars@297794425: l(t,!1));if(!r.success)throw Error(".mcp.json is malformed (not valid JSON, or mcpServers is not an object)");return r.data.mcpServers}function hP(e,{expandVars:t=!0}={}){if(sc())return{servers:dae(),errors:[]};return SZp(e,{expandVars:t})}function SZp(e,{expandVars:t=!0}={}){let r={project:"projectSettings",user:"userSettings",local:"localSettings"};if(e in r&&!Hg(r[e]))return{servers:dae(),error
+expandVars@297794500:  or mcpServers is not an object)");return r.data.mcpServers}function hP(e,{expandVars:t=!0}={}){if(sc())return{servers:dae(),errors:[]};return SZp(e,{expandVars:t})}function SZp(e,{expandVars:t=!0}={}){let r={project:"projectSettings",user:"userSettings",local:"localSettings"};if(e in r&&!Hg(r[e]))return{servers:dae(),errors:[]};switch(e){case"project":{let n=dae(),o=[],i=[],s=Sn();while(s!==GJe.p
+expandVars@297794531: )");return r.data.mcpServers}function hP(e,{expandVars:t=!0}={}){if(sc())return{servers:dae(),errors:[]};return SZp(e,{expandVars:t})}function SZp(e,{expandVars:t=!0}={}){let r={project:"projectSettings",user:"userSettings",local:"localSettings"};if(e in r&&!Hg(r[e]))return{servers:dae(),errors:[]};switch(e){case"project":{let n=dae(),o=[],i=[],s=Sn();while(s!==GJe.parse(s).root)i.push(s),s=GJe.di
+expandVars@297794882: ();while(s!==GJe.parse(s).root)i.push(s),s=GJe.dirname(s);for(let a of i.reverse()){let l=GJe.join(a,".mcp.json"),{config:c,errors:u}=Zzr({filePath:l,expandVars:t,scope:"project"});if(!c){let d=u.filter((p)=>!p.message.startsWith("MCP config file not found"));if(d.length>0)E(`MCP config errors for ${l}: ${Ie(d.map((p)=>p.message))}`,{level:"error"}),o.push(...d);continue}if(c.mcpServers)Object.ass
+expandVars@297795341: n{servers:n,errors:o}}case"user":{let n=or().mcpServers;if(!n)return{servers:dae(),errors:[]};let{config:o,errors:i}=Jzr({configObject:{mcpServers:n},expandVars:t,scope:"user"});return{servers:Npi(o?.mcpServers,e),errors:i}}case"local":{let n=nf().mcpServers;if(!n)return{servers:dae(),errors:[]};let{config:o,errors:i}=Jzr({configObject:{mcpServers:n},expandVars:t,scope:"local"});return{servers:Npi
+CVS_call@302943910: "user"[^}]*"content":"([^"]+)"/});var Ulm={};yt(Ulm,{default:()=>LVS});function CVS(e){try{return new URL(e).origin}catch{return}}async function RVS(e){try{let t=await Flm.readFile(TOi.join(e,".mcp.json"),"utf8"),r=Xt(t);if(r&&typeof r==="object"&&"mcpServers"in r&&r.mcpServers&&
+CVS_call@302944612: u,d])=>{let p=i[u];return{name:u,callCount:d,urlOrigin:typeof p?.url==="string"?CVS(p.url):void 0}}),a=(await ko("git",["config","user.name"],{cwd:t})).stdout.trim(),l=(await ko("git",["remote","get-url","origin"],{cwd:t})).stdout.trim();return{usageData:Ie({generatedBy:a||void 0
+b'kLv=new Set\\([^)]{0,400}\\)': kLv=new Set(fNa)
+b'kLv=new Set': kLv=new Set
+b'var kLv': MISS

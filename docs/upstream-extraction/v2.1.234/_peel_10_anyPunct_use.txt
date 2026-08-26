@@ -1,0 +1,3 @@
+OFFSET=293757094
+
+"",this.rules);return{type:"code",raw:r,lang:t[2]?t[2].trim().replace(this.rules.inline.anyPunctuation,"$1"):t[2],text:n}}}heading(e){let t=this.rules.block.heading.exec(e);if(t){let r=t[2].trim();if(this.rules.other.endingHash.test(r)){let n=QPn(r,"#");if(this.options.pedantic)r=n.trim();else if(!n||this.rules.other.endingSpaceChar.test(n))r=n.trim()}return{type:"heading",raw:

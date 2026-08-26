@@ -1,0 +1,33 @@
+=== xLv ===
+function xLv(e){let t=zpi(e);if(t)return t;let r=jpi(e);if(r)return r.join(" ");return e.type??"unknown"}
+
+=== jpi ===
+function jpi(e){if(e.type!==void 0&&e.type!=="stdio")return null;let t=e;return[t.command,...t.args??[]]}
+
+=== zpi ===
+function zpi(e){return"url"in e?e.url:null}
+
+=== Wpi ===
+function Wpi(e){if(!iWs.some((t)=>e.includes(t)))return e;try{return new URL(e).searchParams.get("mcp_url")||e}catch{return e}}
+
+=== kLv ===
+MISS kLv
+
+=== K0 ===
+function K0(Z,$,X,G){let Y=bZ($);if(Y.length===0)return`${G} {}`;let J=[];for(let W of Y)try{J.push(`${N(W)}: ${L(Z,$[W],X)}`)}catch(K){J.push(`${N(W)}: undefined`)}if(Z.sorted)J.sort();if(J.length===0)return`${G} {}`;if(J.join(", ").length<Z.breakLength)return`${G} { ${J.join(", ")} }`;return`${G} {
+  ${J.join(`,
+  `)}
+}`}
+
+displayServers@136491104: ........8.E......................[5.......................<.......................=.......................|.....................0.x.......................W.....................@.......................displayServers..................sig.....................mcpErrorMetadata(.......(...............................................=.......=....................D..H...............................................................................................@...........................................
+displayServers@297786727: ,n[s]=a}return{servers:n,suppressed:o}}function xLv(e){let t=zpi(e);if(t)return t;let r=jpi(e);if(r)return r.join(" ");return e.type??"unknown"}function Gpi(e){let t=new Map;for(let{scope:n,servers:o,displayServers:i}of e)for(let[s,a]of Object.entries(o)){let l=WJe(a,{includeEnv:!1});if(!l)continue;let c=t.get(s);if(!c)t.set(s,c=[]);let u=i[s];c.push({scope:n,sig:l,endpoint:u?xLv(u):a.type??"unknown"})}let r=[];for(let[n,o]of t){if(o.length<2)continue;if(new Set(o.map((s)=>s.sig)).size<2)continu
+displayServers@304444006: 0);O_=Object.assign(Gxm,{Node:Vxm,Group:qxm})});function PcE(X8I){return X8I.file}function DcE(Q8I){return Q8I.scope!=="enterprise"}function McE(Zxm){return{scope:Zxm.scope,servers:Zxm.config.servers,displayServers:hP(Zxm.scope,{expandVars:!1}).servers}}function OcE(e9I){return RLt(e9I)==="approved"}function LcE(Ydr){let{config:t9I}=Ydr;return T2t(t9I.errors,"fatal").length>0}function NcE(Ydr){let{config:r9I}=Ydr;return T2t(r9I.errors,"warning").length>0}function $cE(Ydr){let{scope:HcE,config:Ic
+Failed connect context:
+..] Connected to MCP server '.....................' with ................. tools..............#...] Failed to connect to MCP server '.....................': .................................................`............................@ ..J...@.4.. ..@@=.@@6.....@.<.E...@p4.E.....3.@P?.....@@..@04...K.@...G.....+.@0%.@...J...@.ec....@p.e....@.,.E...@p4...3...?......P,..0......PS<.B.5..P.......P,..@......@...@ 4.@ 4.E.3.@PU.@ 4.@.<.x.{+....@...@...J...@.e..Pf.@ .....cL...@..e....@.,.@ 4.E..A.....
+b'function \\w+\\(e\\)\\{try\\{return new URL\\(e\\)\\.origin': 1 hits
+function CVS(e){try{return new URL(e).origin
+b'function \\w+\\(e\\)\\{[^}]{0,200}\\.origin': 61 hits
+function e4y(e){var t=e.origin
+function t4y(e){var t=new Set(e.origin
+function r4y(e){var t=e.origin
+shows only: .....notify..................quiet...................off.....................Model-drafted feedback (the SendFeedback tool). "notify" (default) shows a one-line notice when a draft is queued; "quiet" shows only the footer counter; "off" disables the tool entirely so drafts are never queued...............#...Whether to show tips in the spinner.....................append..................replace................. ...............(...............................append..................replace........

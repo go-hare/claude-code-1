@@ -1,0 +1,4 @@
+OFFSET=296063495
+NEEDLE=b'updatedPermissionsDropped'
+
+rn}if(typeof e==="object"&&e!==null&&e.updatedPermissions!==void 0&&t.data.updatedPermissions===void 0)return{...t.data,updatedPermissionsDropped:!0};return t.data}function EBr(e,t,r){if(typeof e!=="string")return!1;if(e===t)return _e("bridge_permission_toolname_check"),!1;return E(`Ignoring can_use_tool control_response for request_id=${

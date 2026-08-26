@@ -1,0 +1,107 @@
+#### "function tWb" count=1 [303256269]
+--- 303256269 ---
+/1e6*e.promptCacheWriteTokens;return o/1e6*n+(r-o)/1e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTo
+#### "e.inference_geo==="us"" count=1 [303256292]
+--- 303256292 ---
+Tokens;return o/1e6*n+(r-o)/1e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.inputTokens,outp
+#### "inference_geo==="us"" count=1 [303256294]
+--- 303256294 ---
+kens;return o/1e6*n+(r-o)/1e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.inputTokens,output
+#### "var eWb" count=0 []
+#### "eWb=" count=1 [303257959]
+--- 303257959 ---
+;if(!i||!n)return;return hOt(n,i)+(t&&o?hOt(o,t):0)}var Y4b,uFd,cZo,ONn,X4b,uht,eWb=1.1;var HCe=A(()=>{jt();tt();Wn();st();pT();P9o();$B();nG();Li();Y4b={inputTokens:5,outputTokens:25,promptCacheWriteTokens:6.25,promptCacheWrite1hTokens:10,promptCacheReadTokens:0.5,webSearchRequests:0.01},uFd={inputTokens:30,outputTokens:150,promptCacheWriteTokens:37.5,promptCacheWrite1hTokens:60,promptCacheReadTokens:3,webSearchRequests:0.01},cZo={inputTokens:10,outputTokens:50,promptCacheWriteTokens:12.5,promptCacheWrite1hTokens:20,promptCacheReadTokens:1,webSearchRequests:0.01},ONn=Y4b;X4b=new Set(amd);uht={[O4(eOt.firstParty)]:cZo,[O4(hkd.firstParty)]:cZo,...Z4b()}});function uma(){if(!V.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY)return!1;if(ao()!=="firstParty")return!1;if(Vm())return!1;if(!V.ANTHROPIC_BASE_URL)return!1;return!0}function ama(){return cma.join(En(),"cache")}function dma(){return cma.join(ama(),"gateway-models.json")}function lma(){return Pn.cache("gateway-models","gateway-models.json")}function uZo(e){let t=oWb().safeParse(_l(e,!1));return t.success?t.data:null}function LNn(){return KR().gatewayModelsByCachePath}function _Fd(e,t=KR().gatewayModelsStorageV5){let r=LNn();if(r.has(e))return r.get(e)??null;if(t)return null;let n;try{let o=gFd.readFileSync(e,"utf-8");n=uZo(o)}catch{n=null}return r.set(e,n),n}async function bFd(e){if(!e||!uma())return;let t=dma();if(LNn().has(t))return;let r=await e.read([lma()]);if(!r.ok){E(`[gatewayDiscovery] prime read fai
+#### "function ima" count=1 [303256321]
+--- 303256321 ---
+e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.inputTokens,outputTokens:r.outputTokens-t.out
+#### "function Q4b" count=1 [303256014]
+--- 303256014 ---
+"model catalog id missing from CATALOG_MODEL_IDS");e[t.id]=pFd(t.id,r)}return e}function Q4b(e,t){let r=t.cache_creation_input_tokens??0,n=e.promptCacheWrite1hTokens,o=Math.min(t.cache_creation?.ephemeral_1h_input_tokens??0,r);if(n===void 0||o<=0)return r/1e6*e.promptCacheWriteTokens;return o/1e6*n+(r-o)/1e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${
+#### "function sma" count=2 [303256565,323989905]
+--- 303256565 ---
+.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.inputTokens,outputTokens:r.outputTokens-t.outputTokens,cacheReadInputTokens:r.cacheReadInputTokens-t.cacheReadInputTokens,cacheCreationInputTokens:r.cacheCreationInputTokens-t.cacheCreationInputTokens}:r;if(!i||!n)return;return hOt(n,i)+(t&&o?hOt(o,t):0)}var Y4b,uFd,cZo,ONn,X4b,uht,eWb=1.
+--- 323989905 ---
+nt', 'kind', 'appearance', 'tone', 'status', 'size', 'color', 'type'];\r
+export function smartDefaultProps(name, pb) {\r
+  const body = pb?.body ?? '';\r
+  const props = {};\r
+  let variants = null;\r
+  // Matches the 2-space indent emitBody writes \u2014 keep the two in sync.\r
+  // \`.+\` (not \`[^;]+\`) so object-param types with inner semicolons still match.\r
+  for (const m of body.matchAll(/^ {2}([a-zA-Z_$][\\w$]*)(\\??)\\s*:\\s*(.+);$/gm)) {\r
+    const [, prop, q, t] = m;\r
+    if (prop in props) continue;\r
+    const req = !q;\r
+    // Union of string literals, optionally with a \`string & {}\` escape-hatch\r
+    // member (the "autocomplete these, accept any string" TS pattern).\r
+    if (/^(?:(?:"[^"]*"|\\(?string\\s*&\\s*\\{\\}\\)?)\\s*\\|?\\s*)+$/.test(t)) {\r
+      const lits = [...t.matchAll(/"([^"]*)"/g)].map((l) => l[1]).filter(Boolean);\r
+      if (lits.length >= 2) {\r
+        const rank = VARIANT_RANK.indexOf(prop.toLowerCase());\r
+        // Displace on strictly better rank (prop names are unique, so no ties).\r
+        if (!variants || (rank >= 0 && (variants.rank < 0 || rank < variants.rank))) {\r
+          variants = { prop, values: lits.slice(0, 4), rank };\r
+        }\r
+        if (req) props[prop] = lits[0];\r
+        continue;\r
+      }\r
+    }\r
+    // Structural hints (/* @fn */, /* @arr */) from emitBody are authoritative\r
+    // over the text regexes \u2014 \`(() => void)[]\` has @arr, so the \`=>\` in the\r
+    // element 
+#### "US-only" count=2 [122714068,306231692]
+--- 122714068 ---
+Search the web. Returns result blocks with titles and URLs. US-only.
+
+- The current month is ................... ..  .u.s.e. .t.h.i.s. .w.h.e.n. .s.e.a.r.c.h.i.n.g. .f.o.r. .r.e.c.e.n.t. .i.n.f.o.r.m.a.t.i.o.n...
+.-. .`.a.l.l.o.w.e.d._.d.o.m.a.i.n.s.`. ./. .`.b.l.o.c.k.e.d._.d.o.m.a.i.n.s.`. .f.i.l.t.e.r. .r.e.s.u.l.t.s...
+.-. .A.f.t.e.r. .a.n.s.w.e.r.i.n.g. .f.r.o.m. .r.e.s.u.l.t.s.,. .e.n.d. .w.i.t.h. .a. .".S.o.u.r.c.e.s.:.". .l.i.s.t. .o.f. .t.h.e. .U.
+--- 306231692 ---
+Search the web. Returns result blocks with titles and URLs. US-only.
+
+- The current month is ${t} \u2014 use this when searching for recent information.
+- \`allowed_domains\` / \`blocked_domains\` filter results.
+- After answering from results, end with a "Sources:" list of the URLs you used as markdown links.`;return`
+- Allows Claude to search the web and use the results to inform responses
+- Provides up-to-date information for current events and recent d
+#### "us-only" count=0 []
+#### "data residency" count=2 [325383405,325667502]
+--- 325383405 ---
+A7 Deployment budgets |\r
+| Pin where model inference runs (data residency) | \`shared/managed-agents-core.md\` (\xA7 Pinning inference geography) \u2014 \`model.inference_geo\` on the agent, per-session override, roster uniformity |\r
+| Load skills from the codebase instead of uploading | \`shared/managed-agents-tools.md\` (\xA7 Skills from a GitHub repository) \u2014 root \`.claude/skills\` discovery at session start |\r
+| Give the session an advisor to 
+--- 325667502 ---
+u2705 | \u2705 | \u2705 | \u03B2 | |\r
+| \`inference_geo\` (data residency) | \u2705 | \u2705 | \u274C | \u274C | \u274C | |\r
+| **Server-side tools** | | | | | | |\r
+| &nbsp;&nbsp;Web search | \u2705 | \u2705 | \u274C | \u2705 | \u03B2 | Vertex: basic \`web_search_20250305\` only (no \`_20260209\` dynamic filtering) |\r
+| &nbsp;&nbsp;Web fetch | \u2705 | \u2705 | \u274C | \u274C | \u03B2 | |\r
+| &nbsp;&nbsp;Code execution | \u2705 | \u2705 | \u274C | \u27
+#### "inference geo" count=8 [325124772,325198906,325255784,325266434,325266890,325269788,325274414,325341170]
+--- 325124772 ---
+top-level; see `shared/managed-agents-core.md` \xA7 Pinning inference geography.) Supported on Opus 4.6 / Sonnet 4.6 and later; availability: `shared/platform-availability.md`. `response.usage.inference_geo` reports where inference ran.\n- **Fine-grained tool streaming is not a beta feature.** Set `eager_input_streaming: true` on the tool definition and call the regular `client.messages.stream(...)`. There is no beta header and no `client.beta.*` path.\n- 
+--- 325198906 ---
+-agents-core.md` \u2192 Effort on the agent model / Pinning inference geography. Note: `speed: \"fast\"` is supported on {{OPUS_NAME}} and Opus 4.8 \u2014 on the Claude API only, which includes Managed Agents but not Amazon Bedrock, Google Cloud, or Microsoft Foundry. Opus 4.7 fast mode has been removed; `speed: \"fast\"` on Opus 4.7 returns an error.\r\n\r\n---\r\n\r\n## Agents\r\n\r\n**Step one of every flow.** Sessions require a pre-created agent \u2014
+#### "residency premium" count=0 []
+#### "1.1×" count=0 []
+#### "1.1x premium" count=0 []
+#### "cost * 1.1" count=0 []
+#### "*eWb" count=0 []
+#### "tWb(" count=2 [303256278,303256556]
+--- 303256278 ---
+omptCacheWriteTokens;return o/1e6*n+(r-o)/1e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.in
+--- 303256556 ---
+e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.inputTokens,outputTokens:r.outputTokens-t.outputTokens,cacheReadInputTokens:r.cacheReadInputTokens-t.cacheReadInputTokens,cacheCreationInputTokens:r.cacheCreationInputTokens-t.cacheCreationInputTokens}:r;if(!i||!n)return;return hOt(n,i)+(t&&o?hOt(o,t):0)}var Y4b,uFd,cZo,ONn,X4b,u
+#### "updateCodeSession" count=4 [106545600,151779893,303530806,313435325]
+--- 106545600 ---
+............I.......unarchiveCodeSession............	.......updateCodeSession.3...............3.$...KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS............	.......clearLegacyApiKeyPrefetch...............	.......ensureKeychainPrefetchCompleted.........	.......getLastKnown............	.......getLegacyApiKeyPrefetchResult...........	.......isWindowsCredManagerAvailable...........	.......setLastKnown............	.......setWindowsCredManagerAvailable............3.....
+--- 151779893 ---
+.......................	...L...Cannot destructure property 'updateCodeSession' from null or undefined value....................	...T...Cannot destructure property 'isCcrV2SessionCrudEnabled' from null or undefined value............	.......i.......................	.......o...............	...%...[bridge] No access token for session ...........	....... update.........	.......failed..........	.......l.......................	...N...Cannot destructure property '
+#### "lastPatchedTitle" count=0 []
+#### "titleAtMs" count=0 []
+#### "TITLE_PATCH" count=0 []
+#### "titleThrottle" count=0 []
+#### "throttleTitle" count=0 []
+#### "dedupeTitle" count=0 []
+#### "same title" count=0 []

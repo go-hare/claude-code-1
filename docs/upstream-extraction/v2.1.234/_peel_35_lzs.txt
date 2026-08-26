@@ -1,0 +1,3 @@
+OFFSET=290667683
+
+n(Alt.join(e,"active_config"))?.trim()||"default"}function lzs(e,t){let r=vwn(Alt.join(e,"configs",`${t}.json`));if(r===null)return null;let n;try{n=JSON.parse(r)}catch{return null}let o=n?.authentication?.type??null;if(o==="user_oauth"){if(vwn(jYu(e,t,n))===null)return null}return o}function jYu(e,t,r){if(r===void 0){let n=vwn(Alt.join(e,"configs",`${t}.json`));if(n!==null)try{r=JSON.parse(n)}catch{}}return r?.authentication?.credentials_path??A

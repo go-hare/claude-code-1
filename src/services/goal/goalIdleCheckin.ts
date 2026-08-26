@@ -75,6 +75,9 @@ export function cancelPendingGoalIdleCheckin(): void {
 export function replacePendingGoalIdleCheckin(
   timer: ReturnType<typeof setTimeout> | undefined,
 ): void {
+  // densable hygiene: always clear the prior timer before replacing so callers
+  // cannot leak a deferred fire when they forget cancelPendingGoalIdleCheckin.
+  clearPendingTimerOnly()
   pendingGoalIdleCheckin = timer
 }
 

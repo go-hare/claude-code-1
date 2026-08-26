@@ -9,7 +9,7 @@
 import type { UUID } from 'crypto'
 import type { Dirent } from 'fs'
 import { open as fsOpen, readdir, realpath, stat } from 'fs/promises'
-import { join } from 'path'
+import { join, win32 } from 'path'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { getWorktreePathsPortable } from './getWorktreePathsPortable.js'
 import { djb2Hash } from './hash.js'
@@ -362,6 +362,205 @@ export function sanitizePath(name: string): string {
   const hash =
     typeof Bun !== 'undefined' ? Bun.hash(name).toString(36) : simpleHash(name)
   return `${sanitized.slice(0, MAX_SANITIZED_LENGTH)}-${hash}`
+}
+
+// ---------------------------------------------------------------------------
+// densable 2.1.239 #17 / #18 — resume slug collision + last-message mtime
+// ---------------------------------------------------------------------------
+
+/**
+ * densable `rtr` — slash-normalize (and optionally fold case) for cwd
+ * compare. Not NFC; official `xu` is identity.
+ */
+export function normalizePathForCwdCompare(
+  path: string,
+  foldCase: boolean,
+): string {
+  const normalized = path.replaceAll('\\', '/')
+  return foldCase ? normalized.toLowerCase() : normalized
+}
+
+const NT_OBJECT_RE = /^[\\/]\?\?[\\/]/
+const WSL_UNC_RE = /^[\\/]{2}wsl(\$|\.localhost)[\\/]/i
+const DEVICE_NS_RE = /^[\\/]{2}[?.][\\/]/
+const OBJECT_MANAGER_RE =
+  /^[\\/](GLOBAL\?\?|GLOBALROOT|DosDevices|Device)[\\/]/i
+
+/** densable `Eke` / `Dwe`. */
+function isNtObjectNamespaceNormalized(path: string): boolean {
+  if (NT_OBJECT_RE.test(path)) return true
+  if (!path.includes('??')) return false
+  return NT_OBJECT_RE.test(win32.normalize(path))
+}
+
+/** densable `Yc`. */
+function isUncOrNtObject(path: string): boolean {
+  return /^[\\/]{2}/.test(path) || isNtObjectNamespaceNormalized(path)
+}
+
+/** densable `hg` — UNC/NT and not WSL. */
+function isNetworkUncNotWsl(path: string): boolean {
+  return isUncOrNtObject(path) && !WSL_UNC_RE.test(path)
+}
+
+/** densable `Hg` / `HMr` — posix `/net/<host>/...` automount. */
+function isPosixNetAutomount(path: string): boolean {
+  if (!path.startsWith('/')) return false
+  const segs: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') {
+      segs.pop()
+      continue
+    }
+    segs.push(part)
+    if (segs.length === 2 && segs[0]!.toLowerCase() === 'net') return true
+  }
+  return false
+}
+
+/**
+ * densable `fxn` — network / device / NT / object-manager cwd that must
+ * not go through slug-collision realpath.
+ */
+export function isUnsafeCwdForSlugCollision(path: string): boolean {
+  return (
+    isNetworkUncNotWsl(path) ||
+    isPosixNetAutomount(path) ||
+    DEVICE_NS_RE.test(path) ||
+    isNtObjectNamespaceNormalized(path) ||
+    OBJECT_MANAGER_RE.test(path)
+  )
+}
+
+/**
+ * densable `iHn` without the `H8s` symlink-ancestor walker (invent-ban).
+ * `hg || Hg` only; walker true would skip a collision.
+ */
+export async function isSlugCollisionCollapsedCwd(
+  path: string,
+): Promise<boolean> {
+  return isNetworkUncNotWsl(path) || isPosixNetAutomount(path)
+}
+
+/**
+ * densable `QZs` — same sanitizePathRaw slug, different slash-normalized
+ * path (`_` / `-` / `.` only).
+ */
+export function recordedCwdCollidesWithProject(
+  recorded: string,
+  projectPath: string,
+  foldCase: boolean,
+): boolean {
+  const fold = (s: string): string => (foldCase ? s.toLowerCase() : s)
+  if (fold(sanitizePathRaw(recorded)) !== fold(sanitizePathRaw(projectPath))) {
+    return false
+  }
+  return (
+    normalizePathForCwdCompare(recorded, foldCase) !==
+    normalizePathForCwdCompare(projectPath, foldCase)
+  )
+}
+
+/** densable `BI` — realpath, else identity (`xu`). */
+async function realpathOrIdentity(path: string): Promise<string> {
+  try {
+    return await realpath(path)
+  } catch {
+    return path
+  }
+}
+
+/**
+ * densable `lNr` — QZs, then skip `fxn` / collapsed `n()`, then QZs again
+ * on realpath(recorded) vs BI(projectPath).
+ */
+export async function recordedCwdCollidesWithProjectResolved(
+  recorded: string,
+  projectPath: string,
+  foldCase: boolean,
+  isCollapsed: (path: string) => Promise<boolean>,
+): Promise<boolean> {
+  if (!recordedCwdCollidesWithProject(recorded, projectPath, foldCase)) {
+    return false
+  }
+  if (
+    isUnsafeCwdForSlugCollision(recorded) ||
+    isUnsafeCwdForSlugCollision(projectPath)
+  ) {
+    return false
+  }
+  if ((await isCollapsed(recorded)) || (await isCollapsed(projectPath))) {
+    return false
+  }
+  let resolvedRecorded: string
+  try {
+    resolvedRecorded = await realpath(recorded)
+  } catch {
+    return false
+  }
+  const resolvedProject = await realpathOrIdentity(projectPath)
+  return recordedCwdCollidesWithProject(
+    resolvedRecorded,
+    resolvedProject,
+    foldCase,
+  )
+}
+
+/**
+ * densable `cNr` — recorded cwd equals or is under a listed worktree.
+ * `ownWorktrees === undefined` → false (official).
+ */
+export function recordedCwdIsWithinOwnWorktrees(
+  recorded: string,
+  ownWorktrees: string[] | undefined,
+  foldCase: boolean,
+): boolean {
+  if (ownWorktrees === undefined) return false
+  const n = normalizePathForCwdCompare(recorded, foldCase)
+  return ownWorktrees.some(o => {
+    const i = normalizePathForCwdCompare(o, foldCase)
+    return n === i || n.startsWith(i.endsWith('/') ? i : `${i}/`)
+  })
+}
+
+/** densable `tmt` — slug collision always folds case. */
+export function slugCollisionGuardFoldsCase(): boolean {
+  return true
+}
+
+/**
+ * densable `Llh` — last user/assistant `timestamp` in a JSONL tail,
+ * walking lines backward. Progress / other types do not count.
+ */
+export function lastMessageAtMsFromTail(tail: string): number | undefined {
+  let t = tail.length
+  while (t > 0) {
+    const r = tail.lastIndexOf('\n', t - 1)
+    const n = tail.slice(r + 1, t)
+    t = r
+    if (
+      n.includes('"timestamp":') &&
+      (n.includes('"type":"user"') || n.includes('"type":"assistant"'))
+    ) {
+      try {
+        const o = JSON.parse(n) as {
+          type?: unknown
+          timestamp?: unknown
+        }
+        if (
+          (o.type === 'user' || o.type === 'assistant') &&
+          typeof o.timestamp === 'string'
+        ) {
+          const i = Date.parse(o.timestamp)
+          if (!Number.isNaN(i)) return i
+        }
+      } catch {
+        // skip malformed line
+      }
+    }
+    if (r < 0) break
+  }
 }
 
 // ---------------------------------------------------------------------------

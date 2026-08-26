@@ -19,6 +19,8 @@ import {
   isInProcessTeammateTask,
 } from '../tasks/InProcessTeammateTask/types.js'
 import { isBackgroundTask } from '../tasks/types.js'
+import { isVimModeEnabled } from '../components/PromptInput/utils.js'
+import { getPromptInputStoreVimMode } from '../utils/promptInputCursorStore.js'
 
 // Step teammate selection by delta, wrapping across leader(-1)..teammates(0..n-1)..hide(n).
 // First step from a collapsed tree expands it and parks on leader.
@@ -151,6 +153,11 @@ export function useBackgroundTaskNavigation(options?: {
     // - If teammate is running: abort current work only (stops current turn, teammate stays alive)
     // - If teammate is not running (completed/killed/failed): exit the view back to leader
     if (e.key === 'escape' && viewSelectionMode === 'viewing-agent') {
+      // Official mQc `isVimEditing`: Esc in INSERT stays with vim (NORMAL,
+      // keep text). Do not steal it to abort/exit the agent view.
+      if (isVimModeEnabled() && getPromptInputStoreVimMode() === 'INSERT') {
+        return
+      }
       e.preventDefault()
       const taskId = viewingAgentTaskId
       if (taskId) {

@@ -1,0 +1,7 @@
+ lti(e,t){return e.find((r)=>r.name===t)??e.find((r)=>ALe(r.name)===t)}function TLe(e){let t=ALe(e);return t!==null&&!iBr(t)&&ELe(t)?t:null}function MFn(e){let t=ALe(e);return t!==null&&__a(t)&&Vu(t)!
+==dL?t:null}function __a(e){return!iBr(e)&&ELe(e)&&!e.includes("@")&&e!=="*"}function iBr(e){let t=Vu(e);return xD(e).scheme!=="other"||xD(t).scheme!=="other"||g_a(e)||g_a(t)}function pYb(e){let t=e.m
+ap((s)=>iti(s.kind,s.id)),r=A8.CLAUDE_CODE_MESSAGING_SOCKET,n=r===void 0?[]:[iti("session",r)],o=Gn([...t,...n]).sort(),i=new Map;for(let s=0;s<o.length;s++){let a=o[s],l=Math.max(s>0?rWd(a,o[s-1]):0,
+s+1<o.length?rWd(a,o[s+1]):0);i.set(a,Math.min(a.length,Math.max(sti,l+1)))}return e.map((s,a)=>{let l=t[a];return{...s,ref:l.slice(0,i.get(l))}})}function rWd(e,t){let r=0;while(r<e.length&&r<t.lengt
+h&&e[r]===t[r])r++;return r}function iti(e,t){return String(iu(`${e}:${t}`))}function sBr(e,t){return iti(e,t).slice(0,sti)}function v_a(e,t,r){return e.length>=sti&&iti(t,r).startsWith(e)}function aB
+r(e){return new Set(e.flatMap((t)=>t.bridgeSessionId?[Mf(t.bridgeSessionId)]:[]))}function OFn(e,t){let r=Mf(t);return e.some((n)=>n.bridgeSessionId!==void 0&&Mf(n.bridgeSessionId)===r)}var nWd,sti=6,
+b_a=12,Xnr,uYb,dYb;var Qfe=A(()=>{tt();qk();mr();jCe();Rs();Zfe();fne();nWd=require("path");Xnr=`[0-9a-f]{${sti},${b_a}}`,uYb=new RegExp(`^(.*\\S)\\s*\\[(${Xnr})\\]$`);dYb=fle});function dn(e){if(e==n

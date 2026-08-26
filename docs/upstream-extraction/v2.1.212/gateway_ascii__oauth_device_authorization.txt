@@ -1,0 +1,20 @@
+offset=134119208 needle=b'/oauth/device_authorization'
+count=17
+
+connecting
+/.well-known/oauth-authorization-server
+/oauth/device_authorization
+/oauth/token
+Cannot destructure property 'hostname' from null or undefined value
+trust_prompt
+device_authorization_endpoint
+deviceAuthorizationEndpoint
+connecting
+application/x-www-form-urlencoded
+Cannot destructure property 'data' from null or undefined value
+gateway device authorization endpoint returned malformed response
+polling
+verification_uri_complete
+verification_uri
+user_code
+device_code

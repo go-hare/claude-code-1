@@ -127,6 +127,16 @@ export function restoreSessionStateFromLog(
     })
   }
 
+  // densable 2.1.239 OMo: restoreGoalFromTranscript after fileHistory.
+  // Official always calls (undefined messages → clear leftover activeGoal).
+  {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    ;(
+      require('../services/goal/restoreGoalFromTranscript.js') as typeof import('../services/goal/restoreGoalFromTranscript.js')
+    ).restoreGoalFromTranscript(result.messages, setAppState)
+    /* eslint-enable @typescript-eslint/no-require-imports */
+  }
+
   // Restore attribution state (ant-only feature)
   if (
     feature('COMMIT_ATTRIBUTION') &&

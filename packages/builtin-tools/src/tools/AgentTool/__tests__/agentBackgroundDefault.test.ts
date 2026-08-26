@@ -14,7 +14,7 @@ describe('Agent background-by-default (official 208)', () => {
   test('schema describe says background by default / set false for sync', () => {
     expect(agentToolSource).toContain('Agents run in the background by default')
     expect(agentToolSource).toContain(
-      'Set to false to run this agent synchronously',
+      'Set to false only when your very next action depends on this agent',
     )
     expect(agentToolSource).not.toContain(
       'Set to true to run this agent in the background',

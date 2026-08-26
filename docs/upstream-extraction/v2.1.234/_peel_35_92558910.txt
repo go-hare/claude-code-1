@@ -1,0 +1,10 @@
+OFFSET=92558910
+
+o reject specific -e PATTERN matches
+            with a counter pattern.  Note that longer patterns take precedence
+            over shorter patterns, i.e. a negative pattern must be of the same
+            length or longer to reject matching patterns.  Option -N cannot be
+            specified with -P.  This option may be repeated.
+    -n, --line-number
+            Each output line is preceded by its relative line number in the
+            file, starting at line 1.  The line number counter is r

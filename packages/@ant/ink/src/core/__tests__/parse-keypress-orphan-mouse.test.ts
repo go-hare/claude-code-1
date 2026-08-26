@@ -24,10 +24,9 @@ function sequences(items: ParsedInput[]): string[] {
  *   whole-token only:
  *     /^\[<\d+;\d+;\d+[Mm]$/
  *     /^\[M[\x60-\x7f][\x20-￿]{2}$/
- * No prefix peel, no pendingSgr, no absorbMm (SEA confirmed 228).
- * Incomplete CSI stays in tokenizer.buffer() until App NORMAL_TIMEOUT flush;
- * flush emits the incomplete body as a sequence → parseKeypress (often empty
- * ESC key via KeyboardEvent xM_).
+ * No prefix peel, no absorbMm (SEA confirmed 228).
+ * 239 droppedMousePrefix / Qpr holds ESC[< digits; prefixes — see
+ * droppedMousePrefix.239.test.ts. ESC-less orphan tails stay 228 whole-token.
  */
 describe('orphan SGR/X10 mouse tails (densable whole-token re-ESC)', () => {
   test('single orphaned wheel-down tail becomes wheeldown', () => {
@@ -89,22 +88,17 @@ describe('orphan SGR/X10 mouse tails (densable whole-token re-ESC)', () => {
     expect(names(items)).toEqual(['wheeldown', 'wheelup'])
   })
 
-  test('incomplete orphan SGR stays buffered (no pendingSgr invent)', () => {
-    // densable mbt holds incomplete CSI in buffer until flush.
+  test('incomplete ESC-less orphan SGR does not invent pendingSgr', () => {
+    // Without leading ESC this is text; 239 Qpr requires ESC[<.
     const [items, state] = parseMultipleKeypresses(INITIAL_STATE, '[<64;19;15')
-    // Without leading ESC this may be text or incomplete depending on tokenizer
-    // path; densable has no pendingSgrPrefix field.
     expect(state).not.toHaveProperty('pendingSgrPrefix')
-    // Late M alone is a typed key (densable loses the body on flush).
+    expect(state.droppedMousePrefix).toBe('')
     const [items2] = parseMultipleKeypresses(state, 'M')
-    // Not inventing hold→complete: may be wheel only if body was still in
-    // tokenizer incomplete with ESC. Prefer densable: lone M types.
     for (const item of items2) {
       if (item.kind === 'key' && item.name === 'm') {
         expect(item.sequence).toBe('M')
       }
     }
-    // Ensure we did not invent sticky absorb of pure M runs after incomplete.
     void items
   })
 

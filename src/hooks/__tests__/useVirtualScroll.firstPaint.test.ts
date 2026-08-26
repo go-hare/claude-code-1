@@ -1,4 +1,11 @@
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'bun:test'
+
+const HOOK = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  '../useVirtualScroll.ts',
+)
 
 /**
  * Structural gates for blank-until-scroll first-paint settle.
@@ -8,9 +15,7 @@ import { describe, expect, test } from 'bun:test'
  */
 describe('useVirtualScroll first-paint settle (blank-until-scroll)', () => {
   test('source: dual settle flags + viewport wake effect + height settle remeasure', async () => {
-    const src = await Bun.file(
-      new URL('../useVirtualScroll.ts', import.meta.url).pathname,
-    ).text()
+    const src = await Bun.file(HOOK).text()
 
     expect(src).toMatch(/needsViewportWakeRef\s*=\s*useRef\(true\)/)
     expect(src).toMatch(/needsHeightSettleRef\s*=\s*useRef\(true\)/)
@@ -48,9 +53,7 @@ describe('useVirtualScroll first-paint settle (blank-until-scroll)', () => {
   })
 
   test('source: subscribe retries when ScrollBox ref not yet attached', async () => {
-    const src = await Bun.file(
-      new URL('../useVirtualScroll.ts', import.meta.url).pathname,
-    ).text()
+    const src = await Bun.file(HOOK).text()
     const idx = src.indexOf('Ref may not be attached on first subscribe')
     expect(idx).toBeGreaterThan(0)
     const slice = src.slice(idx, idx + 1200)

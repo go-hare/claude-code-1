@@ -10,7 +10,7 @@
 
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
-import type { PromptCommand } from '../commands.js'
+import type { CommandBase, PromptCommand } from '../commands.js'
 import type { QuerySource } from '../constants/querySource.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import { query } from '../query.js'
@@ -31,7 +31,12 @@ import type { Message, StreamEvent } from '../types/message.js'
 import type { ActiveTaskExecutionContext } from './tasks.js'
 import { createChildAbortController } from './abortController.js'
 import { logForDebugging } from './debug.js'
-import { cloneFileStateCache } from './fileStateCache.js'
+import {
+  cloneFileStateCache,
+  createFileStateCacheWithSizeLimit,
+  READ_FILE_STATE_CACHE_SIZE,
+  type FileStateCache,
+} from './fileStateCache.js'
 import type { REPLHookContext } from './hooks/postSamplingHooks.js'
 import {
   createUserMessage,
@@ -39,7 +44,26 @@ import {
   getLastAssistantMessage,
 } from './messages.js'
 import { createDenialTrackingState } from './permissions/denialTracking.js'
+import {
+  mergeAllowedToolsLayer,
+  mergeDisallowedToolsLayer,
+  uniqueStrings,
+} from '../engine/permissionLayerReaders.js'
+import type { HostPermissionLayer } from '../engine/hostPermissionLayers.js'
 import { parseToolListFromCLI } from './permissions/permissionSetup.js'
+import {
+  admitWebFetchTool,
+  agentContextSpawnDepth,
+  filterWebFetchFromForkBase,
+  isWebFetchReadmissionDenied,
+  toolsListMentions,
+} from './webFetchAdmission.js'
+import {
+  addInvokedSkill,
+  getInvokedSkillsForAgent,
+} from '../bootstrap/state.js'
+import { getAgentContext } from './agentContext.js'
+import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTool/prompt.js'
 import { recordSidechainTranscript } from './sessionStorage.js'
 import type { SystemPrompt } from './systemPromptType.js'
 import {
@@ -145,34 +169,82 @@ export function createCacheSafeParams(
   }
 }
 
+export type OverlayForkedCommandAppStateOptions = {
+  replaceCommandRules?: boolean
+  replaceDenyRules?: boolean
+  frozenCommandDenies?: string[]
+}
+
 /**
- * Creates a modified getAppState that adds allowed tools to the permission context.
- * This is used by forked skill/command execution to grant tool permissions.
+ * Official `oSi` — wrap getAppState with allow/deny overlays.
+ * `pollEventDeliveryGuard` skips replace/merge of alwaysAllow command.
+ */
+export function overlayForkedCommandAppState(
+  getAppState: ToolUseContext['getAppState'],
+  allowedTools: string[],
+  disallowedTools: string[],
+  options?: OverlayForkedCommandAppStateOptions,
+): ToolUseContext['getAppState'] {
+  if (
+    !options?.replaceCommandRules &&
+    !options?.replaceDenyRules &&
+    options?.frozenCommandDenies === undefined &&
+    allowedTools.length === 0 &&
+    disallowedTools.length === 0
+  ) {
+    return getAppState
+  }
+  return () => {
+    const appState = getAppState()
+    const base = appState.toolPermissionContext
+    const guarded =
+      'pollEventDeliveryGuard' in base &&
+      (base as { pollEventDeliveryGuard?: boolean }).pollEventDeliveryGuard ===
+        true
+    const withAllow = guarded
+      ? base
+      : options?.replaceCommandRules
+        ? {
+            ...base,
+            alwaysAllowRules: {
+              ...base.alwaysAllowRules,
+              command: allowedTools,
+            },
+          }
+        : mergeAllowedToolsLayer(base, allowedTools)
+    const withDeny = options?.replaceDenyRules
+      ? {
+          ...withAllow,
+          alwaysDenyRules: {
+            ...withAllow.alwaysDenyRules,
+            command: disallowedTools,
+          },
+        }
+      : options?.frozenCommandDenies !== undefined
+        ? {
+            ...withAllow,
+            alwaysDenyRules: {
+              ...withAllow.alwaysDenyRules,
+              command: uniqueStrings([
+                ...options.frozenCommandDenies,
+                ...(withAllow.alwaysDenyRules.command ?? []),
+                ...disallowedTools,
+              ]),
+            },
+          }
+        : mergeDisallowedToolsLayer(withAllow, disallowedTools)
+    return { ...appState, toolPermissionContext: withDeny }
+  }
+}
+
+/**
+ * Allowed-only merge — official oSi(getAppState, allowed, [], undefined).
  */
 export function createGetAppStateWithAllowedTools(
   baseGetAppState: ToolUseContext['getAppState'],
   allowedTools: string[],
 ): ToolUseContext['getAppState'] {
-  if (allowedTools.length === 0) return baseGetAppState
-  return () => {
-    const appState = baseGetAppState()
-    return {
-      ...appState,
-      toolPermissionContext: {
-        ...appState.toolPermissionContext,
-        alwaysAllowRules: {
-          ...appState.toolPermissionContext.alwaysAllowRules,
-          command: [
-            ...new Set([
-              ...(appState.toolPermissionContext.alwaysAllowRules.command ||
-                []),
-              ...allowedTools,
-            ]),
-          ],
-        },
-      },
-    }
-  }
+  return overlayForkedCommandAppState(baseGetAppState, allowedTools, [])
 }
 
 /**
@@ -187,6 +259,34 @@ export type PreparedForkedContext = {
   baseAgent: AgentDefinition
   /** Initial prompt messages */
   promptMessages: Message[]
+  /** Official `webFetchReadmissionAllowed` (`S = !dpw`). */
+  webFetchReadmissionAllowed: boolean
+  /** Official Lto `availableTools` — parent pool, or GIe-readmitted. */
+  availableTools: ToolUseContext['options']['tools']
+  /** Official Lto `contextLayers` (`p`). */
+  contextLayers: HostPermissionLayer[]
+  /** Official Lto `frozenCommandDenies` (`u`). */
+  frozenCommandDenies: string[] | undefined
+  /** Official Lto `recordInvocation` (`a`). */
+  recordInvocation: () => void
+  /** Official Lto `forkReadFileState` (`g` = PG(pq), then drop isPartialView). */
+  forkReadFileState: FileStateCache
+}
+
+export type PrepareForkedCommandOptions = {
+  replaceCommandRules?: boolean
+  replaceDenyRules?: boolean
+  freezeCommandDenies?: boolean
+  deferInvocationRecording?: boolean
+  /**
+   * Official Lto `o.extractAttachments`. Slash passes `n4t` when not
+   * background; Skill omits it. Tip does not host `n4t` — callers may pass
+   * a collector; otherwise attachments stay empty.
+   */
+  extractAttachments?: (
+    skillContent: string,
+    context: ToolUseContext,
+  ) => AsyncIterable<Message> | Iterable<Message>
 }
 
 /**
@@ -194,9 +294,10 @@ export type PreparedForkedContext = {
  * This handles the common setup that both SkillTool and slash commands need.
  */
 export async function prepareForkedCommandContext(
-  command: PromptCommand,
+  command: CommandBase & PromptCommand,
   args: string,
   context: ToolUseContext,
+  options?: PrepareForkedCommandOptions,
 ): Promise<PreparedForkedContext> {
   // Get skill content with $ARGUMENTS replaced
   const skillPrompt = await command.getPromptForCommand(args, context)
@@ -204,18 +305,40 @@ export async function prepareForkedCommandContext(
     .map(block => (block.type === 'text' ? block.text : ''))
     .join('\n')
 
-  // Parse and prepare allowed tools
-  const allowedTools = parseToolListFromCLI(command.allowedTools ?? [])
-
-  // Create modified context with allowed tools
-  const modifiedGetAppState = createGetAppStateWithAllowedTools(
+  // Official zI(await e.getAllowedTools?.() ?? e.allowedTools ?? [])
+  const allowedTools = parseToolListFromCLI(
+    (await command.getAllowedTools?.()) ?? command.allowedTools ?? [],
+  )
+  const disallowedTools = parseToolListFromCLI(command.disallowedTools ?? [])
+  const frozenCommandDenies =
+    options?.freezeCommandDenies && !options?.replaceDenyRules
+      ? (context.getAppState().toolPermissionContext.alwaysDenyRules.command ??
+        [])
+      : undefined
+  const modifiedGetAppState = overlayForkedCommandAppState(
     context.getAppState,
     allowedTools,
+    disallowedTools,
+    {
+      replaceCommandRules: options?.replaceCommandRules,
+      replaceDenyRules: options?.replaceDenyRules,
+      frozenCommandDenies,
+    },
   )
+  const contextLayers: HostPermissionLayer[] = [
+    ...(allowedTools.length === 0
+      ? []
+      : [{ kind: 'allowed_tools' as const, allowedTools }]),
+    ...(disallowedTools.length === 0
+      ? []
+      : [{ kind: 'disallowed_tools' as const, disallowedTools }]),
+  ]
 
   // Use command.agent if specified, otherwise 'general-purpose'
   const agentTypeName = command.agent ?? 'general-purpose'
-  const agents = context.options.agentDefinitions.activeAgents
+  const agents = filterWebFetchFromForkBase(
+    context.options.agentDefinitions.activeAgents,
+  )
   const baseAgent =
     agents.find(a => a.agentType === agentTypeName) ??
     agents.find(a => a.agentType === 'general-purpose') ??
@@ -225,15 +348,92 @@ export async function prepareForkedCommandContext(
     throw new Error('No agent available for forked execution')
   }
 
-  // Prepare prompt messages
-  const promptMessages = [createUserMessage({ content: skillContent })]
+  // Official a(): w=iXe().get(`${r.agentId??""}:${e.name}`)?.content??""
+  // then bft(name, source?source:name, w, r.agentId??null). First call
+  // records empty unless a prior invoke already cached content.
+  const recordInvocation = (): void => {
+    const agentId = context.agentId ?? null
+    const existing =
+      getInvokedSkillsForAgent(agentId).get(`${agentId ?? ''}:${command.name}`)
+        ?.content ?? ''
+    addInvokedSkill(
+      command.name,
+      command.source ? `${command.source}:${command.name}` : command.name,
+      existing,
+      agentId,
+    )
+  }
+  if (!options?.deferInvocationRecording) {
+    recordInvocation()
+  }
+
+  // Official g=PG(pq); n4t writes into g via readFileState overlay.
+  // Tip does not host n4t — optional extractAttachments may fill g.
+  const forkReadFileState = createFileStateCacheWithSizeLimit(
+    READ_FILE_STATE_CACHE_SIZE,
+  )
+  const attachmentMessages =
+    options?.extractAttachments !== undefined
+      ? await collectAttachmentMessages(
+          options.extractAttachments(skillContent, {
+            ...context,
+            readFileState: forkReadFileState,
+          }),
+        )
+      : []
+  for (const [path, state] of forkReadFileState.entries()) {
+    if (state.isPartialView) {
+      forkReadFileState.delete(path)
+    }
+  }
+
+  // Official b=[Cn({content:s,isMeta:!0}),..._]
+  const promptMessages = [
+    createUserMessage({ content: skillContent, isMeta: true }),
+    ...attachmentMessages,
+  ]
+
+  const webFetchReadmissionAllowed = !isWebFetchReadmissionDenied(context)
+  const availableTools = !webFetchReadmissionAllowed
+    ? context.options.tools
+    : admitWebFetchTool(
+        {
+          tools: toolsListMentions(allowedTools, WEB_FETCH_TOOL_NAME)
+            ? allowedTools
+            : undefined,
+          disallowedTools,
+        },
+        context.options.tools,
+        context.getAppState().toolPermissionContext,
+        {
+          depth: agentContextSpawnDepth(getAgentContext()),
+          activeAgents: context.options.agentDefinitions.activeAgents,
+        },
+      )
 
   return {
     skillContent,
     modifiedGetAppState,
     baseAgent,
     promptMessages,
+    webFetchReadmissionAllowed,
+    availableTools,
+    contextLayers,
+    frozenCommandDenies,
+    recordInvocation,
+    forkReadFileState,
   }
+}
+
+/** Official SXr — drain an async/sync iterable of attachment messages. */
+async function collectAttachmentMessages(
+  source: AsyncIterable<Message> | Iterable<Message>,
+): Promise<Message[]> {
+  const out: Message[] = []
+  for await (const message of source) {
+    out.push(message)
+  }
+  return out
 }
 
 /**

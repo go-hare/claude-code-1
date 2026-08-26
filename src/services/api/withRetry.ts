@@ -498,6 +498,7 @@ export async function* withRetry<T>(
       if (
         wasFastModeActive &&
         !isPersistentRetryEnabled() &&
+        !isRetryWatchdogActive() &&
         error instanceof APIError &&
         (error.status === 429 || is529Error(error))
       ) {
@@ -986,9 +987,106 @@ function handleGcpCredentialError(error: unknown): boolean {
   return false
 }
 
+const OVERAGE_DISABLED_REASON_HEADER =
+  'anthropic-ratelimit-unified-overage-disabled-reason'
+const UNIFIED_CLAIM_HEADER = 'anthropic-ratelimit-unified-representative-claim'
+const UNIFIED_OVERAGE_STATUS_HEADER =
+  'anthropic-ratelimit-unified-overage-status'
+
+/** densable n9f */
+const SPEND_CAP_OVERAGE_REASONS = new Set([
+  'org_spend_cap_reached',
+  'org_level_disabled_until',
+])
+
+/** densable Y8f */
+const SPEND_OR_CREDITS_OVERAGE_REASONS = new Set([
+  ...SPEND_CAP_OVERAGE_REASONS,
+  'out_of_credits',
+  'org_level_disabled',
+  'org_service_level_disabled',
+])
+
+/** densable xew — body may quote the key with or without backslashes */
+const OVERAGE_DISABLED_REASON_IN_BODY =
+  /\\?"overageDisabledReason\\?":\s*\\?"([a-z_]+)\\?"/
+
+/** densable r5n */
+function hasUnifiedRateLimitHeaders(error: APIError): boolean {
+  return Boolean(
+    error.headers?.get?.(UNIFIED_CLAIM_HEADER) ||
+      error.headers?.get?.(UNIFIED_OVERAGE_STATUS_HEADER),
+  )
+}
+
+/**
+ * densable 2.1.239 Rew — 429 spend-limit / out-of-credits must not retry
+ * (watchdog included). Header n9f always fails; Y8f fails when the response
+ * has no unified claim/overage-status pair; body `exceeded_limit` + Y8f
+ * reason also fails.
+ */
+export function isSpendLimitOrOutOfCreditsError(error: APIError): boolean {
+  if (error.status !== 429) {
+    return false
+  }
+  if (error.message.includes('service_spend_limit_reached')) {
+    return true
+  }
+  const reason = error.headers?.get?.(OVERAGE_DISABLED_REASON_HEADER)
+  if (
+    reason &&
+    (SPEND_CAP_OVERAGE_REASONS.has(reason) ||
+      (!hasUnifiedRateLimitHeaders(error) &&
+        SPEND_OR_CREDITS_OVERAGE_REASONS.has(reason)))
+  ) {
+    return true
+  }
+  if (!error.message.includes('exceeded_limit')) {
+    return false
+  }
+  const fromBody = OVERAGE_DISABLED_REASON_IN_BODY.exec(error.message)?.[1]
+  return (
+    fromBody !== undefined && SPEND_OR_CREDITS_OVERAGE_REASONS.has(fromBody)
+  )
+}
+
+/**
+ * densable 2.1.239 Cew credits-required gate. `fetch_error` and
+ * `org_level_disabled_until` fall through to Rew.
+ */
+function isNonRetryableCreditsRequired(error: APIError): boolean {
+  if (error.status !== 429) {
+    return false
+  }
+  const body = error.error
+  const detailsCode =
+    typeof body === 'object' && body !== null
+      ? (body as { error?: { details?: { error_code?: unknown } } }).error
+          ?.details?.error_code
+      : undefined
+  const creditsRequired =
+    detailsCode === 'credits_required' ||
+    error.message?.toLowerCase().includes('usage credits are required') ||
+    error.message?.toLowerCase().includes('extra usage is required')
+  if (!creditsRequired) {
+    return false
+  }
+  const reason = error.headers?.get(OVERAGE_DISABLED_REASON_HEADER)
+  return reason !== 'fetch_error' && reason !== 'org_level_disabled_until'
+}
+
 function shouldRetry(error: APIError): boolean {
   // Never retry mock errors - they're from /mock-limits command for testing
   if (isMockRateLimitError(error)) {
+    return false
+  }
+
+  // densable 2.1.239 Cew — credits-required / Rew spend-limit / out-of-credits
+  // fail immediately (watchdog must not retry these; double-wait burns quota).
+  if (
+    isNonRetryableCreditsRequired(error) ||
+    isSpendLimitOrOutOfCreditsError(error)
+  ) {
     return false
   }
 
@@ -1051,6 +1149,14 @@ function shouldRetry(error: APIError): boolean {
   }
 
   if (error instanceof APIConnectionError) {
+    // densable 2.1.239 Cew: BedrockUnexpectedContentType is not retried
+    // (retrying would issue a second Bedrock request / double bill).
+    if (
+      extractConnectionErrorDetails(error)?.code ===
+      'BedrockUnexpectedContentType'
+    ) {
+      return false
+    }
     return true
   }
 

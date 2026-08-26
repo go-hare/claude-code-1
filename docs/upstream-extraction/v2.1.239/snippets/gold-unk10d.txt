@@ -1,0 +1,271 @@
+#### "session_activity" count=4 [139799960,139801768,310382239,310382679]
+--- 139799960 ---
+................................................................................................................
+...............	.......info............	.......session_activity_at_shutdown............................<.......;.................................................p<.@0..@...I....qe.....@.4.N.....3.@`n.I.....3.@.$.X.....3..1'......B4.@@<.X....@3.l.................|................................1........................<...................... d..............................................(.
+.........................................................................
+--- 139801768 ---
+h...............`...............X...............`.......................................................
+.......................	.......warn............	...$...session_activity_main_loop_underflow................................=......................T.....@`<.S....55.@.<.@.,.I.....3.@.$.I.....L.@p4.@.$.Q.....3.@`%.Q.....M.@@4.Y...@.M.Q.....3...e.@.....0C....@.,.N.....4.@`4.......j.@ 6.....@P$.N.....4.@`4.@ ......@.<.N.....4.@.4.....@.,.I...@.U.O.....2.@S'.@ ..O...R.3.@@-.T.....5.@ .............4...6...@...O...S...]...........................................O...............
+--- 310382239 ---
+t=Date.now(),n.activityCallback!==null&&n.heartbeatTimer===null)j3f(n)}if(n.cleanupHandle===null){let o=r.activityKey();n.cleanupHandle=Sa(async()=>{fr("info","session_activity_at_shutdown",{owner_key:o,refcount:n.refcount,active:Object.fromEntries(n.activeReasons),oldest_activity_ms:n.refcount>0&&n.oldestActivityStartedAt!==null?Date.now()-n.oldestActivityStartedAt:null})})}}function shr(e,t){let r=bnt(),n=r.currentStateOrNull();if(!n)return;if(n.refcount>0)n.refcount--;if(t===void 0)if(n.mainLoopRefcount>0)n.mainLoopRefcount--,r.mainLoopActivityListener?.(n.mainLoopRefcou
+#### "api_call" count=12 [85685631,86068574,86068680,86069647,86071452,86071475,86079224,86088927,86089984,86090189,86090678,86090884]
+--- 85685631 ---
+pected,
+  napi_array_expected,
+  napi_generic_failure,
+  napi_pending_exception,
+  napi_cancelled,
+  napi_escape_called_twice,
+  napi_handle_scope_mismatch,
+  napi_callback_scope_mismatch,
+  napi_queue_full,
+  napi_closing,
+  napi_bigint_expected,
+  napi_date_expected,
+  napi_arraybuffer_expected,
+  napi_detachable_arraybuffer_expected,
+  napi_would_deadlock // unused
+} napi_status;
+BUN_FFI_IMPORT void* NapiHandleScope__open(void* napi_env, bool detached);
+BUN_FFI_IMPORT void NapiHandleScope__close(void* napi_env, void* handleScope);
+BUN_FFI_IMPORT extern struct NapiEnv Bun
+--- 86068574 ---
+allback_scope(napi_env env,
+                         napi_value resource_object,
+                         napi_async_context context,
+                         napi_callback_scope* result);
+
+NAPI_EXTERN napi_status NAPI_CDECL
+napi_close_callback_scope(napi_env env, napi_callback_scope scope);
+
+#endif  // NAPI_VERSION >= 3
+
+#if NAPI_VERSION >= 4
+
+// Calling into JS from other threads
+NAPI_EXTERN napi_status NAPI_CDECL
+napi_create_threadsafe_function(napi_env env,
+                                napi_value func,
+                                napi_value async_resource,
+      
+--- 86068680 ---
+napi_async_context context,
+                         napi_callback_scope* result);
+
+NAPI_EXTERN napi_status NAPI_CDECL
+napi_close_callback_scope(napi_env env, napi_callback_scope scope);
+
+#endif  // NAPI_VERSION >= 3
+
+#if NAPI_VERSION >= 4
+
+// Calling into JS from other threads
+NAPI_EXTERN napi_status NAPI_CDECL
+napi_create_threadsafe_function(napi_env env,
+                                napi_value func,
+                                napi_value async_resource,
+                                napi_value async_resource_name,
+                                size_t max_queue
+#### "tool_exec" count=12 [145616238,145616286,147194582,147194838,155721232,266721791,266722247,312098344,312098377,312311390,312312929,313386603]
+--- 145616238 ---
+..Network TTFB............	.......query_api_request_sent..........	.......query_first_chunk_received..............	.......Tool execution..........	.......query_tool_execution_start..............	.......query_tool_execution_end........	...............	.......PHASE BREAKDOWN:.........................%......
+.......2...............	.......  ......................	....... ...............	.......ms .............	...+...Iterator result interface is not an object......................	.......Total pre-API overhead..........	.......ms..............	.......
+.........................
+--- 145616286 ---
+est_sent..........	.......query_first_chunk_received..............	.......Tool execution..........	.......query_tool_execution_start..............	.......query_tool_execution_end........	...............	.......PHASE BREAKDOWN:.........................%......
+.......2...............	.......  ......................	....... ...............	.......ms .............	...+...Iterator result interface is not an object......................	.......Total pre-API overhead..........	.......ms..............	.......
+...........................................................S.............
+--- 147194582 ---
+TOP_HOOK_BLOCK_CAP to raise this limit....U...............	...	...completed.......X...............	.......stop_hook_blocking......\...............	.......query_tool_execution_start......`...............(...................
+....................-......I........-......	........-......................	.......summary.........	.......headline........	.......bg......e.......i.......l.......p...............	.......query_tool_execution_end........(...................
+....................,......	.......v.......x.......|...............................................	......aborted_to
+#### "hook_exec" count=12 [137467680,165295408,165300960,165581888,165583856,165675632,309955263,317109586,317109735,317109846,317109995,317147007]
+--- 137467680 ---
+........................................................................................................	.......file_watcher_change_detected............	.......hook_exec_failed........	.......FileChanged hook failed: ...............	.......error...........	.......a...............
+..........................................$......./.@ ......@P<.@...q ..@0/.@@....3............................................................P........................v........................I.....................(./.....@............a......k.......l....a...a.......H..H........................./.
+--- 165295408 ---
+)...............................I.......x................R..............
+...............................2...............	.......SessionStart............	...	...hook_exec.......................................	...+...Iterator result interface is not an object..............	...R...The iterator, to which yield* delegated iteration, does not have a 'throw' method...................................................5...................5..........E.@ ......@.l.H...@.......@ ...0........;...S.@`o.@...@...@....@..@ ..C.....3...............].@...@.....4.......4.@.l.@...@...@P.k.......
+--- 165300960 ---
+........)....................................... ................<......	.......
+...............................2...............	.......Setup...........	...	...hook_exec.......................................	...+...Iterator result interface is not an object..............	...R...The iterator, to which yield* delegated iteration, does not have a 'throw' method...................................................&........................@ ...0........;...S.@.o..P............].@...@.....4.......4.@.l.@...@...@P.k.......m......;m......Lm.......m,......mL......ml......y...........
+#### "session_start_hook" count=6 [208358489,208358681,208358745,328598899,328599092,328599143]
+--- 208358489 ---
+conds_bucket{le="+Inf"} ...............	...#..._session_init_duration_seconds_sum .............	...%..._session_init_duration_seconds_count ...........	......._session_start_hook_errors_total SessionStart hooks that reported an error outcome (nonzero exit, validation/spawn failure, or HTTP/MCP error; one per failing hook execution).
+........	...)..._session_start_hook_errors_total counter
+...............	...!..._session_start_hook_errors_total ...............	......._session_idle_seconds Seconds since the session went idle (turn-end or awaiting-action); 0 while a turn is ru
+--- 208358681 ---
+SessionStart hooks that reported an error outcome (nonzero exit, validation/spawn failure, or HTTP/MCP error; one per failing hook execution).
+........	...)..._session_start_hook_errors_total counter
+...............	...!..._session_start_hook_errors_total ...............	......._session_idle_seconds Seconds since the session went idle (turn-end or awaiting-action); 0 while a turn is running, background work is pending, or the session is initializing. One series per active session; disappears at session end.
+..............	......._session_idle_seconds gauge
+.................
+--- 208358745 ---
+ validation/spawn failure, or HTTP/MCP error; one per failing hook execution).
+........	...)..._session_start_hook_errors_total counter
+...............	...!..._session_start_hook_errors_total ...............	......._session_idle_seconds Seconds since the session went idle (turn-end or awaiting-action); 0 while a turn is running, background work is pending, or the session is initializing. One series per active session; disappears at session end.
+..............	......._session_idle_seconds gauge
+....................	..."..._session_idle_seconds{session_id="..............	....
+#### "setup_hook" count=4 [171198848,171198888,318141690,318141749]
+--- 171198848 ---
+Terminal ...............	...&...Error: Can't access working directory ..........	.......: ..............	.......
+...............	.......setcwd..........	.......setup_hooks_snapshot_ms.........	.......setup_hooks_captured............	.......setup_file_watcher_ms...................	...8...Error: Can only use --worktree in a git repository, but ........	...u... is not a git repository. Configure a WorktreeCreate hook in settings.json to use --worktree with other VCS systems.
+...........	.......pr-.....................	...9...Error: Could not determine the main git repository r
+--- 171198888 ---
+an't access working directory ..........	.......: ..............	.......
+...............	.......setcwd..........	.......setup_hooks_snapshot_ms.........	.......setup_hooks_captured............	.......setup_file_watcher_ms...................	...8...Error: Can only use --worktree in a git repository, but ........	...u... is not a git repository. Configure a WorktreeCreate hook in settings.json to use --worktree with other VCS systems.
+...........	.......pr-.....................	...9...Error: Could not determine the main git repository root.
+...............	.......worktree_res
+--- 318141690 ---
+rocess.stderr.write(ir.red(`Error: Can't access working directory ${ir.bold(e)}: ${le(y)}
+`)),_D("setcwd"),process.exit(1)}let p=performance.now();if(R0a(),Lh("setup_hooks_snapshot_ms",performance.now()-p,p),fr("info","setup_hooks_captured",{duration_ms:Math.round(performance.now()-p)}),!Jl()){let y=performance.now();S2f(e,c),Lh("setup_file_watcher_ms",performance.now()-y,y)}let f=performance.now();if(n){let y=b3e(),_=await P1();if(!y&&!_)process.stderr.write(ir.red(`Error: Can only use --worktree in a git repository, but ${ir.bold(e)} is not a git repository. Configure a W
+#### "startSessionActivity" count=0 []
+#### "$Qn" count=6 [99141992,310628306,310628914,310629032,310633934,328450834]
+--- 99141992 ---
+........	 ......$Ko..............O4.....Tms.P...........	.......fEy...............5.....UEg.P...........	.......XD0.............	.*.....xz[.P...........I.......$Qn..............35.....UZs.P...........	.......cAi.............	.......aES.P...........	.......uZm.............	.......W9n.P...................mVS..............9*.....oq_.P...................DIt..............?5.....Jwt.P............B......chd.............	k2.....d4u.............	.......Ece.............	.......s_t.............	.......eky.............	.*.....vHT.P...........	.......ixu..............`,.....Q4d.P.......
+--- 310628306 ---
+te_session_bind.v1","utf8")});var Q6f={};Et(Q6f,{ANCESTRY_READ_CAP_MS:()=>q6f,LOCAL_DIVERGENCE_DEADLINE_MS:()=>qdl,countProbeGitOutput:()=>Ydl,failureCause:()=>$Qn,listPathsChangedFromHead:()=>Xdl,nullOnAbort:()=>Ihr,probeLocalDivergence:()=>Kdl,runProbeGit:()=>dge});async function Kdl({gitRoot:e,remoteName:t,revision:r,deadlineMs:n,signal:o}){let i=Date.now();if(O_(o))return{probedAtMs:i,durationMs:0,verdict:ILi("aborted")};if(r==="HEAD")return{probedAtMs:i,durationMs:0,verdict:{reason:"detached_head",diverged:!0,remote:null}};let s=Number.isFinite(n)?Math.max(1,Math.floor
+--- 310628914 ---
+efTimer:!0});try{let l=await XZS({gitRoot:e,signal:a.signal,timeoutMs:s},t,r);return{probedAtMs:i,durationMs:Date.now()-i,verdict:l.reason==="probe_failed"?ILi($Qn(o,a.signal,l.failure)):l}}catch(l){if(!O_(a.signal))Te(l);return{probedAtMs:i,durationMs:Date.now()-i,verdict:ILi($Qn(o,a.signal,"threw"))}}finally{a.cleanup()}}async function XZS(e,t,r){let n=await Ihr(JZS(e,`refs/remotes/${t}/${r}`),e.signal);if(n===null||"detail"in n)return z6f(n?.detail??"deadline or abort during the first reads");if(n.remoteSha===null)return{reason:"remote_ref_unknown",diverged:!0,remote:nul
+#### "BQn" count=10 [11800298,92621613,92691025,98032872,310637820,310637830,326001594,326001700,327190224,327193223]
+--- 11800298 ---
+...H.E.H...........H...P H.E...P ..H....H..P...H.E.H.].H......H.E.H.].H......H.U.I...=q...H........H..8........H.........	...H...aQn......H.............H..@....BQn......H..@..............1.H......E1.E1..W.`.H..H.............1.H..E1.E1..6.`.H..H.............H.....h.H..`.......H..h.......H..p.......O.4.I...I..H..L..H).H.........H..I9.t@H..H...H..8..f........H..PH..t!H.{..t	H.K...._.H.;.t.H.K...._...H.......t.H..0......_...1.....,........H.=.,.........H..`...H......L..h...H..p...H..@H...L..H..x...L......H.........W..(=.%g.D.(...g.L......L.......L;.x.........L..I..`..@=......
+--- 92621613 ---
+EhjQjAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQD
+AwNpADBmAjEAvvNhzwIQHWSVB7gYboiFBS+DCBeQyh+KTOgNG3qxrdWBCUfvO6wIBHxcmbHt
+RwfSAjEAnbpV/KlK6O3t5nYBQnvI+GDZjVGLVTv7jHvrZQnD+JbNR6iC8hZVdyR+EhCVBCyj
+-----END CERTIFICATE-----.-----BEGIN CERTIFICATE-----
+MIIDXzCCAkegAwIBAgILBAAAAAABIVhTCKIwDQYJKoZIhvcNAQELBQAwTDEgMB4GA1UECxMX
+R2xvYmFsU2lnbiBSb290IENBIC0gUjMxEzARBgNVBAoTCkdsb2JhbFNpZ24xEzARBgNVBAMT
+Ckdsb2JhbFNpZ24wHhcNMDkwMzE4MTAwMDAwWhcNMjkwMzE4MTAwMDAwWjBMMSAwHgYDVQQL
+ExdHbG9iYWxTaWduIFJvb3QgQ0EgLSBSMzETMBEGA1UEChMKR2xvYmFsU2lnbjETMBEGA1UE
+AxMKR2xvYmFsU2lnbjCCASIw
+--- 92691025 ---
+wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYE
+FAG5L++/EYZg8k/QQW6rcx/n0m5JMAoGCCqGSM49BAMDA2kAMGYCMQCuSuMrQMN0EfKVrRYj
+3k4MGuZdpSRea0R7/DjiT8ucRRcRTBQnJlU5dUoDzBOQn5ICMQD6SmxgiHPz7riYYqnOK8LZ
+iqZwMR2vsJRM60/G49HzYqc8/5MuB1xJAWdpEgJyv+c=
+-----END CERTIFICATE-----.-----BEGIN CERTIFICATE-----
+MIIDjjCCAnagAwIBAgIQAzrx5qcRqaC7KGSxHQn65TANBgkqhkiG9w0BAQsFADBhMQswCQYD
+VQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQu
+Y29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBHMjAeFw0xMzA4MDExMjAwMDBa
+Fw0zODAxMTUxMjAwMDBaMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaW
+#### "session_activity_at_shutdown" count=2 [139799960,310382239]
+--- 139799960 ---
+................................................................................................................
+...............	.......info............	.......session_activity_at_shutdown............................<.......;.................................................p<.@0..@...I....qe.....@.4.N.....3.@`n.I.....3.@.$.X.....3..1'......B4.@@<.X....@3.l.................|................................1........................<...................... d..............................................(.
+.........................................................................
+--- 310382239 ---
+t=Date.now(),n.activityCallback!==null&&n.heartbeatTimer===null)j3f(n)}if(n.cleanupHandle===null){let o=r.activityKey();n.cleanupHandle=Sa(async()=>{fr("info","session_activity_at_shutdown",{owner_key:o,refcount:n.refcount,active:Object.fromEntries(n.activeReasons),oldest_activity_ms:n.refcount>0&&n.oldestActivityStartedAt!==null?Date.now()-n.oldestActivityStartedAt:null})})}}function shr(e,t){let r=bnt(),n=r.currentStateOrNull();if(!n)return;if(n.refcount>0)n.refcount--;if(t===void 0)if(n.mainLoopRefcount>0)n.mainLoopRefcount--,r.mainLoopActivityListener?.(n.mainLoopRefcou
+#### "session_activity_main_loop_underflow" count=2 [139801768,310382679]
+--- 139801768 ---
+h...............`...............X...............`.......................................................
+.......................	.......warn............	...$...session_activity_main_loop_underflow................................=......................T.....@`<.S....55.@.<.@.,.I.....3.@.$.I.....L.@p4.@.$.Q.....3.@`%.Q.....M.@@4.Y...@.M.Q.....3...e.@.....0C....@.,.N.....4.@`4.......j.@ 6.....@P$.N.....4.@`4.@ ......@.<.N.....4.@.4.....@.,.I...@.U.O.....2.@S'.@ ..O...R.3.@@-.T.....5.@ .............4...6...@...O...S...]...........................................O...............
+--- 310382679 ---
+return;if(n.refcount>0)n.refcount--;if(t===void 0)if(n.mainLoopRefcount>0)n.mainLoopRefcount--,r.mainLoopActivityListener?.(n.mainLoopRefcount);else fr("warn","session_activity_main_loop_underflow",{reason:e});let o=(n.activeReasons.get(e)??0)-1;if(o>0)n.activeReasons.set(e,o);else n.activeReasons.delete(e);if(n.refcount===0&&n.heartbeatTimer!==null)clearInterval(n.heartbeatTimer),n.heartbeatTimer=null,h8S(n)}var U3f=30000,F3f="cli",f8S=1000,m8S;var ZVe=A(()=>{tt();Df();gg();mr();m8S=new Ar(()=>new B3f)});var K3f={};Et(K3f,{asSystemPrompt:()=>$m});function $m(e){return e}fu
+#### "oldest_activity_ms" count=2 [139800576,310382345]
+--- 139800576 ---
+.........@..............................................p.......................p.......................(...............	...	...owner_key...............	.......oldest_activity_ms..........S........................................H..H.......................................................h.........................................
+.....................................................................................................	...................h...h...h...h...h...h...h...h...h...h...h...................................................................................X...
+--- 310382345 ---
+activityKey();n.cleanupHandle=Sa(async()=>{fr("info","session_activity_at_shutdown",{owner_key:o,refcount:n.refcount,active:Object.fromEntries(n.activeReasons),oldest_activity_ms:n.refcount>0&&n.oldestActivityStartedAt!==null?Date.now()-n.oldestActivityStartedAt:null})})}}function shr(e,t){let r=bnt(),n=r.currentStateOrNull();if(!n)return;if(n.refcount>0)n.refcount--;if(t===void 0)if(n.mainLoopRefcount>0)n.mainLoopRefcount--,r.mainLoopActivityListener?.(n.mainLoopRefcount);else fr("warn","session_activity_main_loop_underflow",{reason:e});let o=(n.activeReasons.get(e)??0)-1;
+#### "Hooks: cwd" count=0 []
+#### "falling back to original cwd" count=0 []
+#### "cwd not found" count=0 []
+#### "getHomeDir" count=7 [218759136,301694706,301695058,301695331,301698338,301698441,301699227]
+--- 218759136 ---
+................................................................x...............................................`.......................................	...
+...getHomeDir...................................U......M.......N....U...U.......D..H...............................................P.......h.........................................V.........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...................................
+--- 301694706 ---
+r;Wer.TokenProviderError=eZs;Wer.chain=o8_;Wer.fromStatic=i8_;Wer.memoize=s8_});var rZs=ae(function(mGo){Object.defineProperty(mGo,"__esModule",{value:!0});mGo.getHomeDir=void 0;var a8_=require("os"),l8_=require("path"),tZs={},c8_=()=>{if(process&&process.geteuid)return`${process.geteuid()}`;return"DEFAULT"},u8_=()=>{let{HOME:e,USERPROFILE:t,HOMEPATH:r,HOMEDRIVE:n=`C:${l8_.sep}`}=process.env;if(e)return e;if(t)return t;if(r)return`${n}${r}`;let o=c8_();if(!tZs[o])tZs[o]=(0,a8_.homedir)();return tZs[o]};mGo.getHomeDir=u8_});var nZs=ae(function(hGo){Object.defineProperty(hGo,
+--- 301695058 ---
+:r,HOMEDRIVE:n=`C:${l8_.sep}`}=process.env;if(e)return e;if(t)return t;if(r)return`${n}${r}`;let o=c8_();if(!tZs[o])tZs[o]=(0,a8_.homedir)();return tZs[o]};mGo.getHomeDir=u8_});var nZs=ae(function(hGo){Object.defineProperty(hGo,"__esModule",{value:!0});hGo.getSSOTokenFilepath=void 0;var d8_=require("crypto"),p8_=require("path"),f8_=rZs(),m8_=(e)=>{let r=(0,d8_.createHash)("sha1").update(e).digest("hex");return(0,p8_.join)((0,f8_.getHomeDir)(),".aws","sso","cache",`${r}.json`)};hGo.getSSOTokenFilepath=m8_});var a3u=ae(function(QPt){Object.defineProperty(QPt,"__esModule",{val
+#### "os.homedir()" count=1 [70478632]
+--- 70478632 ---
+")
+        context._refreshLine();
+    }
+  }
+  [kResolveHistoryPath]() {
+    if (!this[kHistoryPath])
+      try {
+        return this[kHistoryPath] = path.join(os.homedir(), ".node_repl_history"), this[kHistoryPath];
+      } catch (err) {
+        return debug(err.stack), null;
+      }
+    return this[kHistoryPath];
+  }
+  [kHasWritePermission]() {
+    return !(permission.isEnabled() && permission.has("fs.write", this[kHistoryPath]) === !1);
+  }
+  [kValidateOptions](options) {
+    if (typeof options.history < "u")
+      validateArray(options.history, "history");
+    if (typeo
+#### "homedir()" count=12 [70478635,85949532,85953212,300675219,300676938,300712642,300844657,301038530,301038598,301153700,301275072,301830891]
+--- 70478635 ---
+        context._refreshLine();
+    }
+  }
+  [kResolveHistoryPath]() {
+    if (!this[kHistoryPath])
+      try {
+        return this[kHistoryPath] = path.join(os.homedir(), ".node_repl_history"), this[kHistoryPath];
+      } catch (err) {
+        return debug(err.stack), null;
+      }
+    return this[kHistoryPath];
+  }
+  [kHasWritePermission]() {
+    return !(permission.isEnabled() && permission.has("fs.write", this[kHistoryPath]) === !1);
+  }
+  [kValidateOptions](options) {
+    if (typeof options.history < "u")
+      validateArray(options.history, "history");
+    if (typeof o
+--- 85949532 ---
+lease document X" | bun feedback --email you@example.com`;console.log([J,"",Q,"",q,"",N].join(`
+`))}async function Xq(){let J=process.env.BUN_INSTALL??j.join(C.homedir(),".bun"),Q=j.join(J,"feedback");try{let N=(await I.readFile(Q,"utf8")).trim();return N.length>0?N:void 0}catch(q){if(q.code!=="ENOENT")console.warn(`Unable to read ${Q}:`,q.message);return}}async function Zq(J){let Q=process.env.BUN_INSTALL;if(!Q)return;let q=j.join(Q,"feedback");try{await I.mkdir(j.dirname(q),{recursive:!0}),await I.writeFile(q,`${J.trim()}
+`,"utf8")}catch(N){console.warn(`Unable to persist
+--- 85953212 ---
+sAbsolute(J)||J.startsWith("~/")||J.includes("/")||J.includes(j.sep)||j.extname(J).length>1))return;let q=new Set;if(q.add(J),J.startsWith("~/"))q.add(j.join(C.homedir(),J.slice(2)));q.add(j.join(process.cwd(),J));for(let N of q)try{if((await I.stat(N)).isFile())return N}catch(Y){let _=Y.code;if(_&&(_==="ENOENT"||_==="ENOTDIR"))continue;console.warn(`Unable to inspect ${N}:`,Y.message)}return}async function Gq(J){let Q=[],q=[],N=[],Y=()=>{if(N.length>0)Q.push(N.join(" ")),N=[]};for(let _ of J){let W=await jq(_);if(W)try{let U=await Bun.file(W).bytes();if(U.length>10485760)U
+#### "project root" count=12 [87169546,87268324,111249909,219256380,230513978,239155758,301759347,302089623,303494020,305235418,315294151,315298540]
+--- 87169546 ---
+emap this bin to its proper location within node_modules.
+This is an indication of a corrupted node_modules directory.
+
+Please run 'bun install --force' in the project root and try
+it again. If this message persists, please open an issue:
+https://github.com/oven-sh/bun/issues
+
+..............................@.......@.......@....r...............~.......................5...&......~...7.~......Mw.j........*....#......RSDS[6V.}j.SLLD PDB.....bun_shim_impl.pdb....#...........%..`$..($...........%...$.......................$.......$.......$.......$.......$...............%......&%.
+--- 87268324 ---
+emap this bin to its proper location within node_modules.
+This is an indication of a corrupted node_modules directory.
+
+Please run 'bun install --force' in the project root and try
+it again. If this message persists, please open an issue:
+https://github.com/oven-sh/bun/issues
+
+.................................A....P..A....@..A...............................A.......A.......A............................`..A.......A.......A...............................A............................0|.@...............................@.......@....................`.QA............................
+--- 111249909 ---
+ith instructions to install an approved version. Only enforced from managed (policy) settings..............	...c...Custom directory for plan files, relative to project root. If not set, defaults to ~/.claude/plans/.............	...
+...fullscreen...................... ...............(.......................	.......default.........	...
+...fullscreen..............	.......Terminal UI renderer. "fullscreen" uses the flicker-free alt-screen renderer with virtualized scrollback (equivalent to CLAUDE_CODE_NO_FLICKER=1). "default" uses the classic main-screen renderer..............	
+#### "executeHooks" count=7 [106690120,106690152,165674790,317116235,317116255,317167976,331829664]
+--- 106690120 ---
+onHooks.........I.......executeElicitationResultHooks............	......executeFileChangedHooks.........	.......executeFileSuggestionCommand............	.......executeHooks............	.......executeHooksOutsideREPL...........8.....executeInstructionsLoadedHooks..................executeMessageDisplayHooks8.............I(......executeNotificationHooks........	.......executePermissionDeniedHooks............	.......executePermissionRequestHooks...........	.......executePostCompactHooks.........I=......executePostToolBatchHooks.8..............G......executePostToolHooks........
+--- 106690152 ---
+licitationResultHooks............	......executeFileChangedHooks.........	.......executeFileSuggestionCommand............	.......executeHooks............	.......executeHooksOutsideREPL...........8.....executeInstructionsLoadedHooks..................executeMessageDisplayHooks8.............I(......executeNotificationHooks........	.......executePermissionDeniedHooks............	.......executePermissionRequestHooks...........	.......executePostCompactHooks.........I=......executePostToolBatchHooks.8..............G......executePostToolHooks............	.......executePostToolUseFa
+--- 165674790 ---
+..........	.......agent...........	...3...Agent stop hooks are not yet supported outside REPL.............	.......function........	...2...Function hook reached executeHooksOutsideREPL for ..............	...B.... Function hooks should only be used in REPL context (Stop hooks)...............	...;...Internal error: function hook executed outside REPL context.............	.......http............	.......p.......................	.......] cancelled.............	.......HTTP ...........	....... from ..........	...
+...] failed: ..............	.......hook_http_request_failed........	.
+#### "runHooks" count=4 [148530616,312505305,312575361,312591710]
+--- 148530616 ---
+........................................8h	..............................................................................................!..............	.......runHooks........	...
+...reprompted......@...W=......uS..|.......]S.......S..KY.......H..H.......................x-	.....................`-	.....h...................................................................................................................................$.......C...)...
+...........A...h...h...h...h...h...h...h...h...h...h...h...(...(...(...(...(...(...(...(...(...(...(...x...x...x...x...x...8...
+--- 312505305 ---
+lled","use-tmux","cancelled"])),default:"cancelled"})});async function kno(e){let{ctx:t,updatedInput:r,suggestions:n,permissionMode:o}=e,i=!1;try{let s=await t.runHooks(o,n,r);if(s&&!("reprompted"in s))return s}catch(s){if(i=!0,s instanceof Error)Te(Ti(s,"coordinator automated permission check failed"));else Te(Ti(Error(`Automated permission check failed: ${String(s)}`),"coordinator automated permission check failed (non-Error throw)"))}finally{if(i)pe("permission_coordinator_check","permission_coordinator_check_failed");else Ee("permission_coordinator_check")}return null}v
+--- 312575361 ---
+edback=${!!d} isSubagent=${h}`),r.abortController.abort();return{behavior:"ask",message:y,contentBlocks:f,...m?.feedbackIsFromUser&&d&&{userFeedback:d}}},async runHooks(d,p,f,m){if(r.forRemoteExecution===!0)return null;for await(let h of KSt(e.name,o,t,r,d,p,r.abortController.signal))if(h.permissionRequestResult){let g=h.permissionRequestResult;if(g.behavior==="allow"){let y=g.updatedInput??f??t;if(!g.updatedInput&&e.requiresUserInteraction?.())return null;if(g.updatedInput){let _=P7r(await qVe(e,y,{...r,toolUseId:o},{hookUpdatedInput:g.updatedInput}),e.name);if(_?.behavior

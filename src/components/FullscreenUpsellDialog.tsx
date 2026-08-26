@@ -12,7 +12,7 @@ import React from 'react';
 import { callTui, type TuiRelaunchCarryInput } from '../commands/tui/index.js';
 import { useAppStateStore } from '../state/AppState.js';
 import { saveGlobalConfig } from '../utils/config.js';
-import { markFullscreenUpsellFullySeen } from '../utils/fullscreenUpsellGate.js';
+import { markFullscreenUpsellFullySeen, recordFullscreenUpsellImpression } from '../utils/fullscreenUpsellGate.js';
 import { Select } from './CustomSelect/index.js';
 
 export type FullscreenUpsellDialogProps = {
@@ -44,6 +44,15 @@ export function carryFromAppStore(store: {
 
 export function FullscreenUpsellDialog({ onDone }: FullscreenUpsellDialogProps): React.ReactNode {
   const store = useAppStateStore();
+
+  // Official udc: increment seen on show so an unanswered prompt still counts
+  // toward M4r=3 (changelog #21). Decline still jfn-caps at max.
+  React.useEffect(() => {
+    saveGlobalConfig(prev => ({
+      ...prev,
+      ...recordFullscreenUpsellImpression(prev),
+    }));
+  }, []);
 
   function handleSelect(value: Choice): void {
     if (value === 'accept') {

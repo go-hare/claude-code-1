@@ -14,6 +14,8 @@ import { feature } from 'bun:bundle'
 import {
   context as otelContext,
   defaultTextMapGetter,
+  defaultTextMapSetter,
+  type Context,
   type Span,
   trace,
 } from '@opentelemetry/api'
@@ -177,6 +179,55 @@ export function isEnhancedTelemetryEnabled(): boolean {
  */
 function isAnyTracingEnabled(): boolean {
   return isEnhancedTelemetryEnabled() || isBetaTracingEnabled()
+}
+
+const w3cPropagator = new W3CTraceContextPropagator()
+
+/** Official EAa — inject W3C traceparent from a span. */
+function injectTraceparentFromSpan(span: Span): string | undefined {
+  const spanContext = span.spanContext()
+  if (
+    !spanContext.traceId ||
+    spanContext.traceId === '00000000000000000000000000000000'
+  ) {
+    return
+  }
+  const ctx = trace.setSpan(otelContext.active(), span)
+  const carrier: Record<string, string> = {}
+  w3cPropagator.inject(ctx, carrier, defaultTextMapSetter)
+  return carrier.traceparent
+}
+
+/**
+ * Official r1t — current OTel span → W3C traceparent (PreToolUse defer).
+ */
+export function injectCurrentTraceparent(): string | undefined {
+  if (!isAnyTracingEnabled()) return
+  const span = trace.getSpan(otelContext.active())
+  if (!span) return
+  return injectTraceparentFromSpan(span)
+}
+
+/**
+ * Official Zrp — extract a context from a stored traceparent.
+ * Returns undefined when extract is a no-op (same as current context).
+ */
+export function extractTraceparentContext(
+  traceparent: string | undefined,
+): Context | undefined {
+  if (!traceparent || !isAnyTracingEnabled()) return
+  const current = otelContext.active()
+  const extracted = w3cPropagator.extract(
+    current,
+    { traceparent },
+    defaultTextMapGetter,
+  )
+  return extracted === current ? undefined : extracted
+}
+
+/** Official Qrp — run fn under extracted context, or bare if none. */
+export function withOtelContext<T>(ctx: Context | undefined, fn: () => T): T {
+  return ctx === undefined ? fn() : otelContext.with(ctx, fn)
 }
 
 function getTracer() {
@@ -552,8 +603,18 @@ export function startToolSpan(
     ...toolAttributes,
   })
 
-  const ctx = parentSpanCtx
-    ? trace.setSpan(otelContext.active(), parentSpanCtx.span)
+  // Official startToolSpan parent is xne() (OTel ALS). Prefer an active
+  // OTel span so Qrp(extracted traceparent) actually parents the resume
+  // tool span; fall back to interaction ALS when OTel context is empty.
+  const activeOtelSpan = trace.getSpan(otelContext.active())
+  const activeOtelCtx = activeOtelSpan?.spanContext()
+  const otelParentValid =
+    !!activeOtelCtx?.traceId &&
+    activeOtelCtx.traceId !== '00000000000000000000000000000000'
+  const parentSpan =
+    otelParentValid && activeOtelSpan ? activeOtelSpan : parentSpanCtx?.span
+  const ctx = parentSpan
+    ? trace.setSpan(otelContext.active(), parentSpan)
     : otelContext.active()
   const span = tracer.startSpan('claude_code.tool', { attributes }, ctx)
 

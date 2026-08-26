@@ -1,0 +1,3 @@
+OFFSET=311565468
+
+ shadowing applies in reverse to Claude Code: after `ant auth login`, Claude Code may warn about an auth conflict between the profile and its own `/login` credential \u2014 keep one (use the profile and `/logout` in Claude Code, or `ant auth logout` to keep Claude Code's own login).\r\n\r\n**Named profiles** \u2014 an interactive-login token is bound to a single org+workspace, and the API only shows resources belonging to that workspace. If an agent, session, or file you created \"disappears\", 

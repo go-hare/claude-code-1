@@ -1,0 +1,45 @@
+OFFSET=298113700
+
+lInput,x.reprompted.decisionReason,x.reprompted);return}if(!x||!c())return;if(f&&g)f.cancelRequest(g);y?.(),b?.(),d(x)})().catch((x)=>{if(x instanceof sw){E("PermissionRequest hooks cancelled (control stream closed)");return}xe(x)});return{notifyBridgeAndTeardown:S}}var enf;var rnf=A(()=>{bt();tr();Yir();IG();Wmi();Jc();Ze();pt();Vr();ty();$mi();pk();enf=require("crypto")});function onf(e,t,r){Yp().bundledWorkflows.push({source:"built-in",...t,script:e,disableModelInvocation:r?.disableModelInvocation})}function b4n(){if(xX())return[];return Yp().bundledWorkflows}var Gmi=A(()=>{See();CKe()});function inf(e,{apply:t}){if(!Si(e))return null;let r=e.args;if(typeof r!=="string")return null;let o=r.trimStart()[0];if(o!=="{"&&o!=="[")return null;let i;try{i=Xt(r)}catch{return null}if(i===null||typeof i!=="object")return null;let s=typeof e.name==="string"?"_named":"",a=Array.isArray(i)?"args_json_string_to_array":"args_json_string_to_object";if(!t)return{input:e,shapeClass:`${a}${s}_detect_only`};return{input:{...e,args:i},shapeClass:`${a}${s}`}}var snf=A(()=>{vr()});var ufe=4096;function u1t(e,t){if(t!=null)return{timeout:t};return{timeout:e}}function Jir(e){WOe.runInContext(`(() => {
+    Object.defineProperty(Error, 'prepareStackTrace', {
+      value: (err, sites) => String(err.stack ?? err),
+      writable: false, configurable: false,
+    });
+    // Delete globals with no REPL use case that either run callbacks on the
+    // host event loop outside any try/catch (FinalizationRegistry \u2014 same
+    // DoS shape as a throwing setTimeout callback) or expose shared-memory
+    // primitives (Atomics/SharedArrayBuffer \u2014 no cross-realm use, pure
+    // attack-surface reduction).
+    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',
+                     'WeakRef', 'Atomics', 'SharedArrayBuffer',
+                     'queueMicrotask',
+                     // eval is NOT deleted here \u2014 hardenVMIntrinsics is
+                     // shared with REPLTool (codeGeneration:{strings:true}).
+                     // WorkflowTool blocks eval via codeGeneration:false.
+                     // JSC debug/shell globals \u2014 present only if
+                     // JSC_useDollarVM=1 or similar, but $vm is a full
+                     // escape (createGlobalObject, addressOf, runScript).
+                     '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile',
+                     'Loader']) {
+      delete globalThis[g];
+    }
+    // SES-style enable-property-override: convert common shadowed data props
+    // to accessors whose setter defineProperty's onto the receiver. Otherwise
+    // freezing makes them non-writable, and [[Set]] on an instance (e.g.
+    // "this.name='X'" in an Error subclass ctor) throws in strict / no-ops in
+    // sloppy \u2014 the TC39 "override mistake".
+    function enableOverride(proto, key) {
+      const d = Object.getOwnPropertyDescriptor(proto, key);
+      if (!d || 'get' in d) return;
+      const v = d.value;
+      Object.defineProperty(proto, key, {
+        get() { return v },
+        set(nv) {
+          if (this === proto) return;
+          Object.defineProperty(this, key, { value: nv, writable: true, enumerable: true, configurable: true });
+        },
+        enumerable: d.enumerable, configurable: true,
+      });
+    }
+    const errorCtors = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, globalThis.SuppressedError].filter(Boolean);
+    const errorPr

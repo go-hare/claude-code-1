@@ -1,0 +1,3 @@
+OFFSET=306364864
+
+"");return(e.text&&e.text!==x?`${e.text} (${x})`:x)+d}let p=u?HPE(e.href):e.href,f=u&&p!==null,m=p??d0l(e.href),h=(e.tokens??[]).map((x)=>jG(x,t,{listDepth:0,orderedListNumber:null,parent:e,highlight:s,glueProse:!1,linkCap:u,promptMode:c})).join(""),g=Ki(h),y=J2o(e.href),b=Boolean(g&&g!==e.href),v=(x)=>x.replace(TPE,"").startsWith(dw),S=v(g)||v(e.text??""),w=g.includes(dw)||(e.text??"").includes(dw);if(y&&b){let x=Array.from(g).filter((I)=>{let P=I.codePointAt(0)??0;if(P===8205||P>=65024&&P<=650

@@ -23,10 +23,32 @@ describe('parseAddress', () => {
     })
   })
 
-  test('bare path routes to uds', () => {
+  test('bare .sock path routes to uds (densable iYb)', () => {
     expect(parseAddress('/var/run/test.sock')).toEqual({
       scheme: 'uds',
       target: '/var/run/test.sock',
+    })
+  })
+
+  test('slash title is other, not uds (densable 2.1.239 xD / #40)', () => {
+    expect(parseAddress('/fix-login')).toEqual({
+      scheme: 'other',
+      target: '/fix-login',
+    })
+    expect(parseAddress('/slash-title')).toEqual({
+      scheme: 'other',
+      target: '/slash-title',
+    })
+  })
+
+  test('windows named pipe is uds (densable sYb)', () => {
+    expect(parseAddress('\\\\.\\pipe\\claude-code-demo')).toEqual({
+      scheme: 'uds',
+      target: '\\\\.\\pipe\\claude-code-demo',
+    })
+    expect(parseAddress('//./pipe/claude-code-demo')).toEqual({
+      scheme: 'uds',
+      target: '//./pipe/claude-code-demo',
     })
   })
 

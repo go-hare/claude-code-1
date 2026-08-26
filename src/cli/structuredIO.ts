@@ -55,7 +55,10 @@ import type {
   PermissionDecision,
   PermissionDecisionReason,
 } from 'src/utils/permissions/PermissionResult.js'
-import { hasPermissionsToUseTool } from 'src/utils/permissions/permissions.js'
+import {
+  hasPermissionsToUseTool,
+  stripWholeToolGrantsForAsk,
+} from 'src/utils/permissions/permissions.js'
 import { writeToStdout } from 'src/utils/process.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { z } from 'zod/v4'
@@ -73,7 +76,7 @@ import {
   republishPendingAction,
   reteeWaitingOnUser,
   type RequiresActionDetails,
-  type SessionExternalMetadata,
+  type RestoredWorkerState,
 } from '../utils/sessionState.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { jsonParse } from '../utils/slowOperations.js'
@@ -235,10 +238,9 @@ export class StructuredIO {
   readonly structuredInput: AsyncGenerator<StdinMessage | SDKMessage>
   private readonly pendingRequests = new Map<string, PendingRequest<unknown>>()
 
-  // CCR external_metadata read back on worker start; null when the
-  // transport doesn't restore. Assigned by RemoteIO.
-  restoredWorkerState: Promise<SessionExternalMetadata | null> =
-    Promise.resolve(null)
+  // CCR worker GET {external, internal}; null when the transport
+  // doesn't restore. Assigned by RemoteIO.
+  restoredWorkerState: Promise<RestoredWorkerState> = Promise.resolve(null)
 
   private inputClosed = false
   private unexpectedResponseCallback?: (
@@ -935,6 +937,8 @@ export class StructuredIO {
           input,
           toolUseContext,
           mainPermissionResult.suggestions,
+          tool,
+          mainPermissionResult.suppressAlwaysAllowRule === true,
         ).then(decision => ({ source: 'hook' as const, decision }))
 
         // Start the SDK permission prompt immediately (don't wait for hooks)
@@ -967,6 +971,9 @@ export class StructuredIO {
               ),
               tool_use_id: toolUseID,
               agent_id: toolUseContext.agentId,
+              // densable 2.1.235 #12 egress — omit when unset (|| void 0).
+              suppress_always_allow_rule:
+                mainPermissionResult.suppressAlwaysAllowRule || undefined,
             },
             permissionToolOutputSchema(),
             hookAbortController.signal,
@@ -993,6 +1000,10 @@ export class StructuredIO {
               tool,
               input,
               toolUseContext,
+              {
+                askSuppressesAlwaysAllowRule:
+                  mainPermissionResult.suppressAlwaysAllowRule === true,
+              },
             )
           }
 
@@ -1003,6 +1014,10 @@ export class StructuredIO {
             tool,
             input,
             toolUseContext,
+            {
+              askSuppressesAlwaysAllowRule:
+                mainPermissionResult.suppressAlwaysAllowRule === true,
+            },
           )
         } finally {
           if (nestedBlocked && nestedAgentId !== undefined) {
@@ -1315,6 +1330,8 @@ async function executePermissionRequestHooksForSDK(
   input: Record<string, unknown>,
   toolUseContext: ToolUseContext,
   suggestions: InternalPermissionUpdate[] | undefined,
+  tool: Tool,
+  askSuppressesAlwaysAllowRule = false,
 ): Promise<PermissionDecision | undefined> {
   const appState = toolUseContext.getAppState()
   const permissionMode = appState.toolPermissionContext.mode
@@ -1344,17 +1361,30 @@ async function executePermissionRequestHooksForSDK(
         const permissionUpdates = (decision.updatedPermissions ??
           []) as unknown as InternalPermissionUpdate[]
         if (permissionUpdates.length > 0) {
-          persistPermissionUpdates(permissionUpdates)
-          const currentAppState = toolUseContext.getAppState()
-          const updatedContext = applyPermissionUpdates(
-            currentAppState.toolPermissionContext,
-            permissionUpdates,
-          )
-          // Update permission context via setAppState
-          toolUseContext.setAppState(prev => {
-            if (prev.toolPermissionContext === updatedContext) return prev
-            return { ...prev, toolPermissionContext: updatedContext }
-          })
+          // densable 2.1.235 #12 — strip bare whole-tool allows on SDK hook allow.
+          const shouldStrip =
+            tool.suppressesAlwaysAllowRule?.(finalInput) === true ||
+            askSuppressesAlwaysAllowRule
+          const updatesToPersist = shouldStrip
+            ? stripWholeToolGrantsForAsk(
+                permissionUpdates,
+                tool,
+                toolUseContext.getAppState().toolPermissionContext,
+              )
+            : permissionUpdates
+          if (updatesToPersist.length > 0) {
+            persistPermissionUpdates(updatesToPersist)
+            const currentAppState = toolUseContext.getAppState()
+            const updatedContext = applyPermissionUpdates(
+              currentAppState.toolPermissionContext,
+              updatesToPersist,
+            )
+            // Update permission context via setAppState
+            toolUseContext.setAppState(prev => {
+              if (prev.toolPermissionContext === updatedContext) return prev
+              return { ...prev, toolPermissionContext: updatedContext }
+            })
+          }
         }
 
         return {

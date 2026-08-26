@@ -15,6 +15,7 @@ describe('densable 2.1.232 #5 /config dialog rows', () => {
     expect(source).toContain("id: 'dialogExpiry'")
     expect(source).toContain("['default', '60s', '5m', '10m', 'never']")
     expect(source).toContain('tengu_dialog_expiry_changed')
+    expect(source).toMatch(/id: 'dialogExpiry'[\s\S]*?consentGated: true/)
   })
 
   test('Messages from your other sessions label and densable c9p options', () => {
@@ -22,6 +23,12 @@ describe('densable 2.1.232 #5 /config dialog rows', () => {
     expect(source).toContain("id: 'crossSessionInbound'")
     expect(source).toContain("['default', 'accept', 'hold', 'refuse']")
     expect(source).toContain('tengu_cross_session_inbound_changed')
+    expect(source).toMatch(
+      /id: 'crossSessionInbound'[\s\S]*?consentGated: true/,
+    )
+    expect(source).toMatch(
+      /id: 'crossSessionInbound'[\s\S]*?pickToCommit: true/,
+    )
   })
 
   test('rDa managed-outside-user hide helper present', () => {

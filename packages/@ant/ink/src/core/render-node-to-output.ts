@@ -10,6 +10,7 @@ import renderBorder from './render-border.js'
 import type { Screen } from './screen.js'
 import { MAX_TREE_DEPTH, warnTreeDepthExceeded } from './maxTreeDepth.js'
 import {
+  applyVirtualScrollRangeClamp,
   clampStoredScrollTop,
   clampVisualScrollTop,
   resolveNearestScrollTop,
@@ -843,6 +844,14 @@ function renderNodeToOutput(
             node.stickyScroll = true
           }
         }
+        // Live sticky must not paint through leftover virtual-range clamp.
+        // useVirtualScroll clears clamp in useLayoutEffect, but Ink can paint
+        // (sticky follow, alreadySticky scrollToBottom) before that effect.
+        const liveSticky = node.stickyScroll ?? Boolean(stickyAttr)
+        if (liveSticky) {
+          node.scrollClampMin = undefined
+          node.scrollClampMax = undefined
+        }
         const followDelta = (node.scrollTop ?? 0) - scrollTopBeforeFollow
         if (followDelta > 0) {
           const vpTop = node.scrollViewportTop ?? 0
@@ -907,9 +916,12 @@ function renderNodeToOutput(
         // the right range. Not scheduling scrollDrainNode here keeps the
         // clamp passive — React's commit → resetAfterCommit → onRender will
         // paint again with fresh bounds.
-        const clamped = haveClamp
-          ? Math.max(cMin, Math.min(scrollTop, cMax))
-          : scrollTop
+        const clamped = applyVirtualScrollRangeClamp(
+          scrollTop,
+          cMin,
+          cMax,
+          liveSticky,
+        )
         node.scrollTop = storedScrollTop
         // Clamp hitting top/bottom consumes any remainder. Set drainPending
         // only after clamp so a wasted no-op frame isn't scheduled.

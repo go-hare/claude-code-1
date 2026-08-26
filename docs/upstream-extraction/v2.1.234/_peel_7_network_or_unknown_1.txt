@@ -1,0 +1,4 @@
+offset=154393568
+needle=b'network_or_unknown'
+window=
+h.e. .w.e.b... .F.o.l.l.o.w. .a.l.o.n.g. .a.t.:. ...........................................task-notification...............................tengu_ultraplan_failed..................network_or_unknown......................Ultraplan terminated: ....................Session: .................F...Cloud ultraplan session failed. Wait for the user's next instructions.......................................

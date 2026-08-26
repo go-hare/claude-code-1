@@ -1,0 +1,22 @@
+ld, this indicates a bug in Bun.internal error: entered unreachable code: Assigns child_done outside Expandinginternal error: entered unreachable code: CondExprOp does not need stat(); this indicates a bug in BunCondExpr.onIOWriterChunktoo many braces in brace expansion%unexpected error from Braces.expand: ........too many brace expansions (.. > ..)..no matches found: ...not a directory: ..
+.file name too long
+..: ..
+.HOME not set
+too many arguments
+Invalid state for "Cp": idle, this indicates a bug in Bun. Please file a GitHub issueunknown error.. is not a directory
+...: No such file or directory
+.pwd: too many arguments
+YesTask set in start()y
+exit: numeric argument required
+exit: too many arguments
+.. not found
+.internal error: entered unreachable code: Dirname.onIOWriterChunk: idleusage: dirname string
+internal error: entered unreachable code: Basename.onIOWriterChunk: idleaborted: sibling worker panickedfailed to respawn test workerno live workersfailed to spawn test worker.... .. (worker crashed: ..)
+...[0m.[31m....[0m .[1m...[0m .[2m(worker crashed: ..).[0m
+.::group::.
+...:
+.reap_pending set only after exit_status.... .. (..)
+...[0m.[31m....[0m .[1m.
+.[0m .[2m(..).[0m
+.+
+err

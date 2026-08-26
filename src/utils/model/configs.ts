@@ -177,6 +177,20 @@ export const CLAUDE_OPUS_5_CONFIG = {
   grok: 'claude-opus-5',
 } as const satisfies ModelConfig
 
+// Official 2.1.239 qNn / EHl claude-fable-5
+export const CLAUDE_FABLE_5_CONFIG = {
+  firstParty: 'claude-fable-5',
+  bedrock: 'us.anthropic.claude-fable-5',
+  vertex: 'claude-fable-5',
+  foundry: 'claude-fable-5',
+  anthropicAws: 'claude-fable-5',
+  mantle: 'anthropic.claude-fable-5',
+  gateway: 'claude-fable-5',
+  openai: 'claude-fable-5',
+  gemini: 'claude-fable-5',
+  grok: 'claude-fable-5',
+} as const satisfies ModelConfig
+
 export const CLAUDE_SONNET_4_6_CONFIG = {
   firstParty: 'claude-sonnet-4-6',
   bedrock: 'us.anthropic.claude-sonnet-4-6',
@@ -222,6 +236,8 @@ export const ALL_MODEL_CONFIGS = {
   opus48: CLAUDE_OPUS_4_8_CONFIG,
   // densable 2.1.219 #1
   opus5: CLAUDE_OPUS_5_CONFIG,
+  // Official 2.1.239 qNn
+  fable5: CLAUDE_FABLE_5_CONFIG,
 } as const satisfies Record<string, ModelConfig>
 
 export type ModelKey = keyof typeof ALL_MODEL_CONFIGS

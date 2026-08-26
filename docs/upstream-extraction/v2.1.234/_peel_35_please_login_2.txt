@@ -1,0 +1,3 @@
+OFFSET=291692432
+
+==0?null:s;if(d.status===401){Tr("error","teleport_events_bad_token"),we("api_teleport_events_fetch","auth_expired");let m="Your session has expired. Please run /login to sign in again.";throw new dx(m,m)}if(d.status===403){Tr("error","teleport_events_forbidden"),we("api_teleport_events_fetch","forbidden");let m=d.data;if(m?.error?.resource==="untrusted_device")throw new dx("This session requires a trusted device. Run /login to enroll this device, then retry.","This session requires a trusted device. Run /login to enroll this device, then retry.");if(m?.error?.resource==="session_stale_relogin")throw new dx("Your session has expired for the trusted-device check. Run /login to re-authenticate, then retry.","Your session has expired for the t

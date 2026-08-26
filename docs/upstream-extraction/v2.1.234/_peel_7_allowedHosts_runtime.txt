@@ -1,0 +1,29 @@
+offset=300900814
+uest!!!), and draft a pull request title and summary:
+   - Keep the PR title short (under 70 characters)
+   - Use the description/body for details, not the title
+3. Run the following commands in parallel:
+   - Create new branch if needed
+   - Push to remote with -u flag if needed
+   - Create PR using gh pr create with the format below. Use a HEREDOC to pass the body to ensure correct formatting.
+<example>
+gh pr create --title "the pr title" --body "$(cat <<'EOF'
+## Summary
+${WNt()}
+
+## Test plan
+${GNt()}${i?`
+
+${i}`:""}
+EOF
+)"
+</example>
+
+Important:
+- DO NOT use the ${n} or ${di} tools
+- Return the PR URL when you're done, so the user can see it
+
+# Other common operations
+- View comments on a Github PR: gh api repos/foo/bar/pulls/123/comments${c?`
+
+${c}`:""}`}function xGr(e){if(!e||e.length===0)return e;return fo(e)}function dlr(e){if(!e||e.length<=L9a)return e;let t=e.length-L9a;return[...e.slice(0,L9a),`... and ${t} more (truncated for prompt size)`]}function b1f(){if(!oi.isSandboxingEnabled())return"";let e=oi.getFsReadConfig(),t=oi.getFsWriteConfig(),r=oi.getNetworkRestrictionConfig(),n=oi.getAllowUnixSockets(),o=oi.getIgnoreViolations(),i=oi.areUnsandboxedCommandsAllowed(),s=new Set([FX(),XXt()]),a=FOr(),l=(m)=>fo(a?m.map((h)=>s.has(h)?"$TMPDIR":h):m.filter((h)=>!s.has(h))),c={read:{denyOnly:dlr(xGr(e.denyOnly)),...e.allowWithinDeny&&{allowWithinDeny:dlr(xGr(e.allowWithinDeny))}},write:{allowOnly:dlr(l(t.allowOnly)),denyWithinAllow:dlr(xGr(t.denyWithinAllow))}},u={...r?.allowedHosts&&{allowedHosts:dlr(xGr(r.allowedHosts))},...r?.deniedHosts&&{deniedHosts:dlr(xGr(r.deniedHosts))},...n&&{allowUnixSockets:dlr(xGr(n))}},d=[];if(Object.keys(c).length>0)d.push(`Filesystem: ${Ie(c)}`);if(Object.keys(u).length>0)d.push(`Network: ${Ie(u)}`);if(o)d.push(`Ignored violations: ${Ie(o)}`);let f=[...i?["You should always default to running commands within the sandbox. Do NOT attempt to set `dangerouslyDisableSandbox: true` unless:",["The user *explicitly* asks you to bypass sandbox","A specific command just failed and you see evidence of sandbox restrictions causing the failure. Note that commands can fail for many reasons unrelated to the sandbox (missing files, wrong arguments, network issues, etc.)."],"Evidence of sandbox-caused failures includes:",['"Operation not permitted" errors for file/network operations',"Access denied to specific paths outside allowed directories","Network connection failures to non-whitelisted hosts","Unix socket connection errors"],"When you see evidence of sandbox-caused failure:",["Immediately retry with `dangerouslyDisableSandbox: true` (don't ask, just do it)","Briefly explain what sandbox restriction likely caused the failure. Be sure to mention that the user can use the `/sandbox` command to manage restrictions.","This goes through the permission gate (a user prompt, or the auto-mode classifier when auto mode is active)"],...[],"Treat each command you execute with `dangerouslyDisableSandbox: true` individually. Even if you have recently run a command with this setting, you should default to running future commands within the sandbox.","Do not suggest adding sensitive paths like ~/.bashrc, ~/.zshrc, ~/.ssh/*, or credential files to the sandbox allowlist."]:["All commands MUST run in sandbox mode - the `dangerouslyDisableSandbox` parameter is disabled by policy.","Commands cannot run outside the sandbox under any circumstances.","If a command fails due to sandbox restrictions, work with the user to adjust sandbox settings instead."],FOr()?"For temporary files, always use the `$TMPDIR` environment variable. TMPDIR is automatically set to the correct sandbox-writable directory in sandbox mode. Do NOT use `/tmp` directly - use `$TMPDIR` instead.":"For temporary files, create a scratch directory with `mktemp -d` and reference it by absolute path. Do NOT assume `$TMPDIR` is set \u2014 the sandbox does not export it in this configuration."];return["","## Command sandbox","By default, your command will be run 

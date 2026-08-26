@@ -95,6 +95,16 @@ export type AppState = DeepImmutable<{
   mainLoopModelForSession: ModelSetting
   statusLineText: string | undefined
   expandedView: 'none' | 'tasks' | 'teammates'
+  /**
+   * densable 2.1.239 `replTab` — convo | diff. Fullscreen sidebar when
+   * `tengu_willow_crate` is on; default convo.
+   */
+  replTab: 'convo' | 'diff'
+  /**
+   * densable `panelFileView` — file detail inside the diff tab.
+   * Toggle/reset always clear this to null.
+   */
+  panelFileView: { path: string } | null
   isBriefOnly: boolean
   // Optional - only present when ENABLE_AGENT_SWARMS is true (for dead code elimination)
   showTeammateMessagePreview?: boolean
@@ -291,6 +301,8 @@ export type AppState = DeepImmutable<{
     setAt: number
     iterations: number
     tokensAtStart: number
+    /** densable 2.1.239 ueu — `"restored"` on --resume picker / print. */
+    origin?: string
     /** densable 2.1.234 iYp — deferral clock while bg work blocks Stop eval. */
     deferredSince?: number
     checkinCount?: number
@@ -568,6 +580,9 @@ export function getDefaultAppState(): AppState {
     mainLoopModelForSession: null,
     statusLineText: undefined,
     expandedView: 'none',
+    // densable defaults: replTab:"convo", panelFileView:null
+    replTab: 'convo',
+    panelFileView: null,
     isBriefOnly: false,
     showTeammateMessagePreview: false,
     selectedIPAgentIndex: -1,

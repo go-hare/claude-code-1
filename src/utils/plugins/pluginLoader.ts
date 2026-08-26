@@ -49,6 +49,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'path'
 import {
   getInlinePlugins,
   getInlinePluginsNoMcp,
+  getSyncedPluginDirs,
 } from '../../bootstrap/state.js'
 import {
   BUILTIN_MARKETPLACE_NAME,
@@ -115,7 +116,12 @@ import {
   type CommandSourceConsent,
 } from './pluginCommandSource.js'
 import { getPluginSeedDirs, getPluginsDirectory } from './pluginDirectories.js'
-import { parsePluginIdentifier } from './pluginIdentifier.js'
+import {
+  foldPluginName,
+  isSyncedPluginEnabled,
+  parsePluginIdentifier,
+  SYNCED_MARKETPLACE_NAME,
+} from './pluginIdentifier.js'
 import { validatePathWithinBase } from './pluginInstallationHelpers.js'
 import { calculatePluginVersion } from './pluginVersioning.js'
 import {
@@ -2077,7 +2083,11 @@ async function loadPluginsFromMarketplaces({
       if (!isValidFormat || value === undefined) return false
       // Skip built-in plugins — handled separately by getBuiltinPlugins()
       const { marketplace } = parsePluginIdentifier(key)
-      return marketplace !== BUILTIN_MARKETPLACE_NAME
+      // densable: @builtin via getBuiltinPlugins; @synced via Zpf(lQt(), iN)
+      return (
+        marketplace !== BUILTIN_MARKETPLACE_NAME &&
+        marketplace !== SYNCED_MARKETPLACE_NAME
+      )
     },
   )
 
@@ -3212,6 +3222,104 @@ async function loadSessionOnlyPlugins(
 }
 
 /**
+ * densable `Zpf(..., {marketplaceName: iN})` — load claude.ai-synced plugin dirs.
+ * Source is `{manifest.name}@synced`. Enabled follows official `f3a`/`AKp`
+ * (settings opt-in, else default-on). Does not invent who populated the dirs.
+ */
+async function loadSyncedPlugins(
+  syncedPluginPaths: Array<string>,
+): Promise<{ plugins: LoadedPlugin[]; errors: PluginError[] }> {
+  if (syncedPluginPaths.length === 0) {
+    return { plugins: [], errors: [] }
+  }
+
+  const enabledPlugins = getSettings_DEPRECATED()?.enabledPlugins
+  const plugins: LoadedPlugin[] = []
+  const errors: PluginError[] = []
+
+  for (const [index, pluginPath] of syncedPluginPaths.entries()) {
+    try {
+      const resolvedPath = resolve(pluginPath)
+
+      if (!(await pathExists(resolvedPath))) {
+        logForDebugging(
+          `Plugin path does not exist: ${resolvedPath}, skipping`,
+          { level: 'warn' },
+        )
+        errors.push({
+          type: 'path-not-found',
+          source: `${SYNCED_MARKETPLACE_NAME}[${index}]`,
+          path: resolvedPath,
+          component: 'commands',
+        })
+        continue
+      }
+
+      const dirName = basename(resolvedPath)
+      const { plugin, errors: pluginErrors } = await createPluginFromPath(
+        resolvedPath,
+        `${dirName}@${SYNCED_MARKETPLACE_NAME}`,
+        true,
+        dirName,
+      )
+
+      plugin.source = `${plugin.name}@${SYNCED_MARKETPLACE_NAME}`
+      plugin.repository = plugin.source
+      plugin.enabled = isSyncedPluginEnabled(
+        plugin.source,
+        undefined,
+        enabledPlugins,
+      )
+
+      plugins.push(plugin)
+      errors.push(...pluginErrors)
+
+      logForDebugging(`Loaded synced plugin from path: ${plugin.name}`)
+    } catch (error) {
+      const errorMsg = errorMessage(error)
+      logForDebugging(
+        `Failed to load synced plugin from ${pluginPath}: ${errorMsg}`,
+        { level: 'warn' },
+      )
+      errors.push({
+        type: 'generic-error',
+        source: `${SYNCED_MARKETPLACE_NAME}[${index}]`,
+        error: `Failed to load plugin: ${errorMsg}`,
+      })
+    }
+  }
+
+  if (plugins.length > 0) {
+    logForDebugging(`Loaded ${plugins.length} claude.ai-synced plugins`)
+  }
+
+  return { plugins, errors }
+}
+
+type SyncedCopyFate = 'used' | 'disabled' | 'dropped'
+
+function syncedDuplicateNameError(
+  plugin: LoadedPlugin,
+  first: LoadedPlugin,
+  fate: SyncedCopyFate,
+): PluginError {
+  const laterDir = basename(plugin.path)
+  const firstDir = basename(first.path)
+  const error =
+    fate === 'used'
+      ? `Not loaded \u2014 the claude.ai-synced copy in ${laterDir}/ declares the same plugin name "${plugin.name}" as ${firstDir}/, which is used instead`
+      : fate === 'disabled'
+        ? `Not loaded \u2014 the claude.ai-synced copy in ${laterDir}/ declares the same plugin name "${plugin.name}" as ${firstDir}/, which is kept as a disabled row`
+        : `Not loaded \u2014 the claude.ai-synced copy in ${laterDir}/ declares the same plugin name "${plugin.name}" as ${firstDir}/ (the first claude.ai copy of that name); only one synced copy per name is considered`
+  return {
+    type: 'generic-error',
+    orphan: true,
+    source: `${laterDir}@${SYNCED_MARKETPLACE_NAME}`,
+    error,
+  }
+}
+
+/**
  * Merge plugins from session (--plugin-dir), marketplace (installed), and
  * builtin sources. Session plugins override marketplace plugins with the
  * same name — the user explicitly pointed at a directory for this session.
@@ -3229,6 +3337,8 @@ export function mergePluginSources(sources: {
   session: LoadedPlugin[]
   marketplace: LoadedPlugin[]
   builtin: LoadedPlugin[]
+  /** densable `e.synced` — claude.ai copies; local same-name wins */
+  synced?: LoadedPlugin[]
   managedNames?: Set<string> | null
 }): { plugins: LoadedPlugin[]; errors: PluginError[] } {
   const errors: PluginError[] = []
@@ -3273,11 +3383,78 @@ export function mergePluginSources(sources: {
     }
     return true
   })
-  // Session first, then non-overridden marketplace, then builtin.
-  // Downstream first-match consumers see session plugins before
-  // installed ones for any that slipped past the name filter.
+  // densable kff `e.synced`: first-wins among synced copies; managed drop;
+  // enabled local (session / marketplace / builtin) shadows. Official zD
+  // applies to this arm only — session↔marketplace matching stays exact.
+  let syncedPlugins: LoadedPlugin[] = []
+  if (sources.synced?.length) {
+    const localByFold = new Map<string, string>()
+    for (const group of [sessionPlugins, marketplacePlugins, sources.builtin]) {
+      for (const plugin of group) {
+        const folded = foldPluginName(plugin.name)
+        if (plugin.enabled !== false && !localByFold.has(folded)) {
+          localByFold.set(folded, plugin.source)
+        }
+      }
+    }
+
+    const managedFolded = sources.managedNames
+      ? new Set(Array.from(sources.managedNames, foldPluginName))
+      : null
+    const seen = new Map<
+      string,
+      { first: LoadedPlugin; fate: SyncedCopyFate }
+    >()
+
+    syncedPlugins = sources.synced.filter(plugin => {
+      const folded = foldPluginName(plugin.name)
+      const previous = seen.get(folded)
+      if (previous) {
+        errors.push(
+          syncedDuplicateNameError(plugin, previous.first, previous.fate),
+        )
+        return false
+      }
+
+      let fate: SyncedCopyFate
+      const localSource = localByFold.get(folded)
+      if (managedFolded?.has(folded)) {
+        errors.push({
+          type: 'generic-error',
+          orphan: true,
+          source: plugin.source,
+          error: `claude.ai-synced copy of "${plugin.name}" ignored: plugin is locked by managed settings`,
+        })
+        fate = 'dropped'
+      } else if (localSource === undefined || plugin.enabled === false) {
+        fate = plugin.enabled === false ? 'disabled' : 'used'
+      } else {
+        logForDebugging(
+          `Synced plugin "${plugin.name}" shadowed by local copy ${localSource}`,
+        )
+        errors.push({
+          type: 'synced-plugin-shadowed',
+          orphan: true,
+          source: plugin.source,
+          shadowedBy: localSource,
+        })
+        fate = 'dropped'
+      }
+
+      seen.set(folded, { first: plugin, fate })
+      return fate !== 'dropped'
+    })
+  }
+
+  // Session, marketplace, synced, builtin — official `[...o,...s,...a,...l,...e.builtin]`
+  // without the skill arm (`a`) tip does not have.
   return {
-    plugins: [...sessionPlugins, ...marketplacePlugins, ...sources.builtin],
+    plugins: [
+      ...sessionPlugins,
+      ...marketplacePlugins,
+      ...syncedPlugins,
+      ...sources.builtin,
+    ],
     errors,
   }
 }
@@ -3295,7 +3472,9 @@ export function mergePluginSources(sources: {
  *    locked by managed settings (policySettings, either force-enabled
  *    or force-disabled)
  * 2. Marketplace-based plugins (plugin@marketplace format from settings)
- * 3. Built-in plugins shipped with the CLI
+ * 3. claude.ai-synced plugins (`name@synced`) — never override a same-named
+ *    local copy (session / marketplace / builtin)
+ * 4. Built-in plugins shipped with the CLI
  *
  * Name collision: session plugin wins over installed. The user explicitly
  * pointed at a directory for this session — that intent beats whatever
@@ -3382,19 +3561,27 @@ async function assemblePluginLoadResult(
   // marketplace loading, so these two sources can be fetched concurrently.
   const inlinePlugins = getInlinePlugins()
   const inlinePluginsNoMcp = getInlinePluginsNoMcp()
-  // densable: Cfe() + Hfe(skipMcpDiscovery) as parallel session sources
-  const [marketplaceResult, sessionMcpResult, sessionNoMcpResult] =
-    await Promise.all([
-      marketplaceLoader(),
-      inlinePlugins.length > 0
-        ? loadSessionOnlyPlugins(inlinePlugins)
-        : Promise.resolve({ plugins: [], errors: [] }),
-      inlinePluginsNoMcp.length > 0
-        ? loadSessionOnlyPlugins(inlinePluginsNoMcp, {
-            skipMcpDiscovery: true,
-          })
-        : Promise.resolve({ plugins: [], errors: [] }),
-    ])
+  const syncedPluginDirs = getSyncedPluginDirs()
+  // densable: Cfe() + Hfe(skipMcpDiscovery) + Zpf(lQt(), iN) as parallel sources
+  const [
+    marketplaceResult,
+    sessionMcpResult,
+    sessionNoMcpResult,
+    syncedResult,
+  ] = await Promise.all([
+    marketplaceLoader(),
+    inlinePlugins.length > 0
+      ? loadSessionOnlyPlugins(inlinePlugins)
+      : Promise.resolve({ plugins: [], errors: [] }),
+    inlinePluginsNoMcp.length > 0
+      ? loadSessionOnlyPlugins(inlinePluginsNoMcp, {
+          skipMcpDiscovery: true,
+        })
+      : Promise.resolve({ plugins: [], errors: [] }),
+    syncedPluginDirs.length > 0
+      ? loadSyncedPlugins(syncedPluginDirs)
+      : Promise.resolve({ plugins: [], errors: [] }),
+  ])
   const sessionResult = {
     plugins: [...sessionMcpResult.plugins, ...sessionNoMcpResult.plugins],
     errors: [...sessionMcpResult.errors, ...sessionNoMcpResult.errors],
@@ -3408,12 +3595,14 @@ async function assemblePluginLoadResult(
   const { plugins: allPlugins, errors: mergeErrors } = mergePluginSources({
     session: sessionResult.plugins,
     marketplace: marketplaceResult.plugins,
+    synced: syncedResult.plugins,
     builtin: [...builtinResult.enabled, ...builtinResult.disabled],
     managedNames: getManagedPluginNames(),
   })
   const allErrors = [
     ...marketplaceResult.errors,
     ...sessionResult.errors,
+    ...syncedResult.errors,
     ...mergeErrors,
   ]
 

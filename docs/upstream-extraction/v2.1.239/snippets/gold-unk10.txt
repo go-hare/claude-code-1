@@ -1,0 +1,566 @@
+#### "queuedCommands" count=12 [176918328,320307255,320307668,320307808,320317698,322377886,323005399,323005557]
+--- 176918328 ---
+................................@.......................H...............	.......queuedCommands..........	......pendingAgents...........	.......pendingWorkflows.....................V,.:...Z...:...[....V,.$W,......D..H...............................................................................................@...............................................
+--- 320307255 ---
+s_teammate"))}var Qat=A(()=>{Dl();NA();I2();poc();p0t()});function cfn({tasks:e,queuedCommands:t=[]}){let r=new Set,n=new Set,o=(i)=>{if(DW(i)&&i.isBackgrounded)r.add(i.id);else if(i.type==="local_workflow")n.add(i.id)};for(let i of Object.values(e))if(i.status==="running"||Ow(i.status)&&!i.notified)o(i);for(let i of t){if(i.mode!=="task-notification"||!dC(i
+#### "queuedCommand" count=15 [115362680,176918328,304200779,320307255,320307668,320307808,320317698,322377886]
+--- 115362680 ---
+	.......hasUsedStash............	.......hasUsedBackgroundTask...........	.......queuedCommandUpHintCount........	.......diffTool........	.......tipsHistory.............	.......memoryUsageCount........	.......promptQueueUseCount.............	.......btwUseCount.............	.......showExpandedTodos...............	.......briefTranscript.........	.......messageI
+--- 176918328 ---
+................................@.......................H...............	.......queuedCommands..........	......pendingAgents...........	.......pendingWorkflows.....................V,.:...Z...:...[....V,.$W,......D..H...............................................................................................@...............................................
+#### "cancelAndAbort" count=15 [148794336,312572172,312574984,312575015,312589497,312590550,312895426,312896506]
+--- 148794336 ---
+h.I.......................X.............	.......logDecision.............	.......cancelAndAbort..........	.......handleUserAllow..............Q...................Q...Q.......D..H.......................................................h...............................................................................................................................
+--- 312572172 ---
+ource:{type:"user_reject",hasFeedback:!1}},{permissionPromptStartTimeMs:i}),u(t.cancelAndAbort(void 0));return}if(y||!a())return;_();let x=Tbw(r,n,T);N("tengu_ext_diff_accepted",C),Ee("ide_diff_view"),l({behavior:"allow",updatedInput:x,updatedPermissions:[]}),c(),t.logDecision({decision:"accept",source:{type:"user",permanent:!1}},{permissionPromptStartTimeMs
+#### "abortQuery" count=0 []
+#### "abort the current" count=0 []
+#### "leaving the session idle" count=0 []
+#### "repeat actions" count=0 []
+#### "cancelRequest" count=19 [109357784,258404474,301617703,301617719,305026746,305027084,309765458,312588408]
+--- 109357784 ---
+........	.......isRemoteMode............	.......sendMessage.............	......cancelRequest...........	...
+...disconnect..............	.......sendControlRequest...........................(......	.......
+....(...(.......D..H.......................................................h.......................................xV......................................
+--- 258404474 ---
+.....................
+.....i.. ...............0.......................	.......$/cancelRequest.
+........................................@P............e.p0:....................................................H............................................{......H.......I....{../|.......D..H.......................................................h.................
+#### "drainQueued" count=0 []
+#### "flushQueued" count=0 []
+#### "submitQueued" count=0 []
+#### "onCancel" count=40+ [70215746,70215954,70216109,70216186,70216265,70216842,70217034,70217193]
+--- 70215746 ---
+ @Promise.@reject(@makeAbortError(@undefined, { cause: signal.reason }));
+  let onCancel, returnValue = new @Promise((resolve, reject) => {
+    let timeout = setTimeoutGlobal(() => resolve(value), after, ...arguments_);
+    if (!reference)
+      timeout?.unref?.();
+    if (signal)
+      onCancel = () => {
+        clearTimeout(timeout), reject(@makeAbortError
+--- 70215954 ---
+rguments_);
+    if (!reference)
+      timeout?.unref?.();
+    if (signal)
+      onCancel = () => {
+        clearTimeout(timeout), reject(@makeAbortError(@undefined, { cause: signal.reason }));
+      }, signal.addEventListener("abort", onCancel, resistStopPropagation({ __proto__: null }));
+  });
+  return typeof onCancel < "u" ? returnValue.finally(() => signa
+#### "escapePressed" count=0 []
+#### "userCancel" count=4 [106601104,244070264,306595940,306602631]
+--- 106601104 ---
+tokenRefreshRequired............	8......unexpectedCredentialType........	.......userCanceled............	.......userTimeoutReached5...............5.....authorityMismatch...............	.......authorityUriInsecure.............(
+.....cannotAllowPlatformBroker.5...............5.....cannotSetOIDCOptions............	.......claimsRequestParsingError...............
+--- 244070264 ---
+eyNotRemovedError...............	.......logoutNotSupported..............	.......userCanceledError............................9[.....m.......n....9[..:[......N..H.......................X)L.....................@)L.........................z9[.	:[.'...........@...............................................................................................H.l.....
+#### "plan mode" count=40+ [100904091,112871864,118050332,120106730,139328522,148626865,148627251,148628680]
+--- 100904091 ---
+ agent proposed a plan that was rejected by the user. The user chose to stay in plan mode rather than proceed with implementation.
+
+Rejected plan:
+..........	.......IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work
+--- 112871864 ---
+ ...............(.......................	.......opusplan........	.......Opus in plan mode, else Sonnet...................................@.....7..0..@ ........;................................hZ(......................Y+...................(.BY..x.....(.y...*.(...(......H..H.........................-.......................-.....h...............................
+#### "planMode" count=40+ [106543480,114186368,150003709,150024413,153749168,157452744,162692351,175776616]
+--- 106543480 ---
+noModelFallbackTripwire.........	.......parseUserSpecifiedModel..........N......planModeConstituentFamily...................#...preserve1mContextForRefusalFallback.............	.......renderDefaultModelSetting...............	.......renderModelName.........	.......renderModelSetting..............	.3.!...resetEnforcementWarnDedupForTests...............	..."...
+--- 114186368 ---
+................................X........................p..............	.......planModeRequired@...?........W/.@...Z....W/.[....W/.7X/......H..H.......................................................h....................................... ...................................................................................................	...................
+#### "enterPlanMode" count=2 [238547040,305011783]
+--- 238547040 ---
+........8.......................@.......................H...............	......enterPlanMode...........	.......scheduleWakeup..........	...
+...cronCreate..................}.B.........Y.B.....}.B...B......D..H.......................................................h.........................................(.....................................................
+--- 305011783 ---
+C;var pRa=A(()=>{qn();W4();Rme();Sn();oNt();jGC=ve(()=>_e({askUserQuestion:Ut(),enterPlanMode:Ut(),scheduleWakeup:Ut(),cronCreate:Ut()}))});function rci(e){return{type:"api_system",message:{role:"system",content:e},uuid:ygp.randomUUID(),timestamp:new Date().toISOString()}}var ygp;var fRa=A(()=>{ygp=require("crypto")});function isr(e){return`IMPORTANT: This i
+#### "restorePlan" count=0 []
+#### "idle worker" count=0 []
+#### "worker restart" count=5 [109278862,203375869,301604555,303396833,327045110]
+--- 109278862 ---
+extension disconnected mid-operation. This is usually transient (Chrome service worker restart, tab closed, network blip) and the extension often reconnects automatically. Retry the same tool call in a few seconds. If it keeps failing, ask the user to switch to Chrome (which wakes the extension) or check that the extension is still logged in...........	...(.
+--- 203375869 ---
+task(s) after restart..............	.......stopped.........	.......Stopped by a worker restart: ........... N......................	...Y...[print.ts] orphaned-task notification flush failed; keeping orphans pending for re-emit: ...............	..._...[print.ts] orphaned-task notification delivery unconfirmed; keeping orphans pending for re-emit.............
+#### "out of plan" count=0 []
+#### "plan_mode" count=40+ [111000512,139698848,145955832,150046480,153815976,153838368,153854960,153855048]
+--- 111000512 ---
+	......prevUltraplan...........	.......permission_mode.........	.......is_ultraplan_mode.......................=~..................	........H..H.........................@.......................@.....h........................................E......................................................................................................................
+--- 139698848 ---
+	.......tool_not_in_agent_pool..........	......workflow_tool...........	.......plan_mode_tool..........	......invalid_input...........	.......input_mismatch..........	.......m...............	.......g...............	.......too_many_pending........	.......S...................................................t...................)....@...@`..O.....4...4B....@.d
+#### "isPlanModeEnabled" count=0 []
+#### "setMcpServers" count=10 [111238512,177557736,177732504,229939052,279659728,302078487,303334218,317674200]
+--- 111238512 ---
+ per-server MCP control; this setting does not gate other MCP entry points (SDK setMcpServers, claude mcp add, .mcp.json). Also blocks surfaces that spawn the CLI with these flags internally (see settings documentation). Only honored from managed settings; ignored in user/project/local settings.........	...J...Marketplace names whose plugins may surface as c
+--- 177557736 ---
+	.......reconnectMcpServer..............	.......toggleMcpServer.........	......setMcpServers...........	......reloadPlugins...........	.......mcpAuthenticate.........	.......mcpClearAuth............	.......mcpSubmitOAuthCallbackUrl...............	.......getContextUsage.........	.......stopTask........	.......getSettings.............	.......generateSessionT
+#### "mid-session" count=40+ [89743288,134315743,186697032,195006104,230113997,230144565,230274076,230417867]
+--- 89743288 ---
+the shared state per-user session DB so concurrent brokers refcount and a crash mid-session is recoverable by the next `acl` opDENY_READPer-exec read-deny: add an additive `(D;OICI;FA;;;<sb>)` ACE for the sandbox user on `<PATH>` (and a parent `FILE_DELETE_CHILD` DENY) for the lifetime of this exec ... under THIS process's PID as holder, released after the c
+--- 134315743 ---
+ll requested apps and either allows the whole set or denies it. Call this again mid-session to add more apps; previously granted apps remain granted. Returns the granted apps, denied apps, and screenshot filtering capability.........	.......object..........	.......Application display names (e.g. "Slack", "Calendar") or bundle identifiers (e.g. "com.tinyspeck
+#### "stuck in a failed" count=0 []
+#### "hasFailedSdk" count=0 []
+#### "mcp reconnect" count=5 [160726113,160728646,316278607,316281778,316283244]
+--- 160726113 ---
+not configured, ...............	...
+... disabled...............	...*... Reply `/mcp reconnect all` here to retry...............	...(... Use `/mcp` in the terminal for details.........	...)... Use `/mcp` in the terminal for details.
+.......................................	.......^(\S+)\s*(.*)$..........................	.......all.............	...	...reconnect
+--- 160728646 ---
+abled, but ...............	...<..." is already enabled but not connected. Run `/mcp reconnect ............	.......` to retry..............	.......All MCP servers are already ............	.......enabled.........	.......................	......" is already ...................	.......Enabled.........	.......Disabled........	....... (..............	....... enabl
+#### "reconnectMcp" count=36 [106629184,106629232,177557664,177728072,184812093,184860288,185040952,185053656]
+--- 106629184 ---
+........	.......processMCPResult........	.......readResourceRaw.........	.......reconnectMcpServerDistrusted............	.......reconnectMcpServerImpl............6."...recordDiscoveryFetchErrorForResult..............	... ...recordFirstPartyDesignConsentAsk........	.......recordRawCommandsForResult..............	.......recordRawResourcesForResult.............
+--- 106629232 ---
+readResourceRaw.........	.......reconnectMcpServerDistrusted............	.......reconnectMcpServerImpl............6."...recordDiscoveryFetchErrorForResult..............	... ...recordFirstPartyDesignConsentAsk........	.......recordRawCommandsForResult..............	.......recordRawResourcesForResult.............	.......recordRawToolsForResult.........Is......
+#### "failed after" count=40+ [70786421,70787419,70788450,87198046,92023080,110323591,110339435,113567961]
+--- 70786421 ---
+ies > 5)
+                throw @makeErrorWithCode(160, "Operation failed: write failed after retries");
+            } else
+              retries = 0;
+            if (totalBytesWritten += bytesWritten, offset += bytesWritten, length -= bytesWritten, position >= 0)
+              position += bytesWritten;
+          }
+        } catch (err) {
+          if (!close
+--- 70787419 ---
+es > 5)
+                throw @makeErrorWithCode(160, "Operation failed: writev failed after retries");
+              continue;
+            }
+            if (retries = 0, totalBytesWritten += bytesWritten, totalSize -= bytesWritten, position >= 0)
+              position += bytesWritten;
+            if (totalSize > 0) {
+              let remaining = @Buffer.c
+#### "transient" count=40+ [71846441,92608492,92794460,100959865,104910963,108393608,109278836,111258512]
+--- 71846441 ---
+ native package private protected public short static super synchronized throws transient volatile",5:"class enum extends super const export import",6:"enum",strict:"implements interface let package private protected public static yield",strictBind:"eval arguments"},ve="break case catch continue debugger default do else finally for function if return switch 
+--- 92608492 ---
+.....IXO..SN..LU.......,.... (near '....^*..The operation failed for an unknown transient reason (e.g. out of memory)..If non-zero, the BBQ->OMG function-entry tier-up increment is scaled down for functions whose bytecode size is below this reference (work-proportional tier-up): increment = clamp(entryIncrement * size / reference, 1, entryIncrement). 0 disab
+#### "statusCode>=500" count=2 [303225743,310737241]
+--- 303225743 ---
+"invalid_grant"'))return"invalid_grant";if(typeof e.statusCode==="number"){if(e.statusCode>=500)return"http_5xx";if(e.statusCode>=400)return"http_4xx"}let t=e.message.toLowerCase();if(t.includes("parse")||t.includes("json"))return"parse_failed";return"network_error"}function o4b(){VJo=void 0,Pfa=void 0,qJo=void 0,anr.clear(),DJo()}async function i4b(){if(a7(
+--- 310737241 ---
+tanceof Cb&&!DUr(e)&&sOt(e)===null&&(e.statusCode===null||e.statusCode===401||e.statusCode>=500)){let t=await iZe().catch(()=>null);if(t===null)return!1;return t.invalidate(),!0}return!1}function Cew(e){if(d9p(e))return!1;if(e.status===429&&(e.error?.error?.details?.error_code==="credits_required"||e.message?.toLowerCase().includes("usage credits are require
+#### "status>=500" count=24 [301021365,303632081,305094359,305095914,306534896,306685687,310507389,310537465]
+--- 301021365 ---
+tatus===408)return!0;if(e.status===409)return!0;if(e.status===429)return!0;if(e.status>=500)return!0;return!1}async retryRequest(e,t,r,n){let o,i=n?.get("retry-after-ms");if(i){let a=parseFloat(i);if(!Number.isNaN(a))o=a}let s=n?.get("retry-after");if(s&&!o){let a=parseFloat(s);if(!Number.isNaN(a))o=a*1000;else o=Date.parse(s)-Date.now()}if(o===void 0){let a
+--- 303632081 ---
+on O2r(e){if(!di.isAxiosError(e))return!1;if(!e.response)return!0;if(e.response.status>=500)return!0;return!1}async function vya(e,t){let r;for(let n=0;n<=bya;n++)try{return await di.get(e,t)}catch(o){if(r=o,!O2r(o))throw o;if(n>=bya)throw E(`Teleport request failed after ${n+1} attempts: ${le(o)}`),o;let i=Hzd[n]??2000;E(`Teleport request failed (attempt ${
+#### "PreToolUse" count=40+ [100779304,100779488,102361000,102361892,102362090,102363116,102363409,102363495]
+--- 100779304 ---
+	...7...The message for the user. Supports markdown formatting..........	.......PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configure
+--- 100779488 ---
+ot executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...................0............... .......K.......`...............................................@.......K...............
+#### "tool_decision" count=6 [137776552,155719248,229948521,303335399,310026433,314452577]
+--- 137776552 ---
+	.......c...............	.......i...............	.......a...............	......tool_decision...1...........................................d...................W....@..-....@...@@........$......B4.@@<..@....].@ ..@ 4.@ 4...3.@.<.I.....U.@ ..@ 4.@ 4.G...@.4.@ ........=.@ ..@ 4.@ 4.G...@.4.@ ......@.-...e.@ ....3...<.@ ..E.....3...T.@ ..@ 4.@ 4.@ 4.......<.VTT
+--- 155719248 ---
+	.......ask.............	.......accept..........	.......reject..........	......tool_decision...........	.......hook............	.......PermissionRequest...............	.......hook_permission_decision........	....... tool permission denied.........	.......unknown.........	...$...tengu_tool_use_can_use_tool_rejected............	......unresolvedAsk...........
+#### "deferredByHook" count=0 []
+#### "hookDeferred" count=0 []
+#### "original turn" count=0 []
+#### "traceparent" count=27 [116278760,134738896,135652376,168802744,228798256,243793568,243795584,260275640]
+--- 116278760 ---
+	.......getSpanContext..........	.......isSpanContextValid..............	.......traceparent.............	...
+...tracestate..............	.......defaultTextMapGetter..... ..........
+.8.....F.....8.G.....8.a.8.....	H..H........................~......................p~......h.......................................p.q.............................................
+--- 134738896 ---
+I.......................	.......GET.............	.......accept..........	.......traceparent.............	.......abort...................2...........................................E....................@`..H.....e...4.@0].@ ..@ ..E....qM.@ ..I.....s.@ =.D...JAL.@.T.D.....M.N1...P-.......l.....@p<.@@..D...OAL.@.U.D...@@M.Q...........@.;...FL....@...@ .OL.....L
+#### "startSpan" count=32 [100861544,116348672,228415632,228422360,303035604,303036061,303036512,303036554]
+--- 100861544 ---
+_accumulate..............U'.....onStart.........	.......onEnd...........	
+.	...startSpan................V'.....startActiveSpan.........	.......getGeneralLimits...............getSpanLimits...........IW'.	...getTracer...............	...
+..._sendSpans...............W'.....transformMetricsForInternal.............	?......extractDataPoints...............	.......
+--- 116348672 ---
+H........................Y..............	......getActiveSpan...........	...	...startSpan...............	.......perfettoSpanId..........	.......lastSequence............	.......user_prompt.............	.......user_prompt_length..............	.......interaction.sequence............	.......propagation...................8.....d...v.8.e.....8...8......H..H.......
+#### "startActiveSpan" count=8 [100861576,228415664,228419872,228422392,303035861,303036571,303036643,315444241]
+--- 100861576 ---
+onStart.........	.......onEnd...........	
+.	...startSpan................V'.....startActiveSpan.........	.......getGeneralLimits...............getSpanLimits...........IW'.	...getTracer...............	...
+..._sendSpans...............W'.....transformMetricsForInternal.............	?......extractDataPoints...............	.......convertAttributesX'.............
+--- 228415664 ---
+	...	...prototype.......J...............	...	...startSpan...............	.......startActiveSpan...................................................05.].............5.......<.......;...D.......;...D.......;...D.......4...4..P:.......,...L...L.......\................................8.......................0.......................h...............................
+#### "otel" count=40+ [85530819,85559905,87139048,106467034,106564752,111277856,115024800,115024888]
+--- 85530819 ---
+uesttrainlaborhelpscausemagicmotortheir250pxleaststepsCountcouldglasssidesfundshotelawardmouthmovesparisgivesdutchtexasfruitnull,||[];top">
+<!--POST"ocean<br/>floorspeakdepth sizebankscatchchart20px;aligndealswould50px;url="parksmouseMost ...</amongbrainbody none;basedcarrydraftreferpage_home.meterdelaydreamprovejoint</tr>drugs<!-- aprilidealallenexactforthc
+--- 85559905 ---
+camiembroofertasalgunospa..sesejemploderechoadem..sprivadoagregarenlacesposiblehotelessevillaprimero..ltimoeventosarchivoculturamujeresentradaanuncioembargomercadograndesestudiomejoresfebrerodise..oturismoc..digoportadaespaciofamiliaantoniopermiteguardaralgunaspreciosalguiensentidovisitast..tuloconocersegundoconsejofranciaminutossegundatenemosefectosm..lagas
+#### "OpenTelemetry" count=40+ [111241358,115025186,115025286,160601832,160614912,160615001,160615224,160615292]
+--- 111241358 ---
+, and exits if the fetch fails............	...3...Path to a script that outputs OpenTelemetry headers.............	...1...Controls the output style for assistant responses...............	.......default.........	.......verbose.........	.......focus...................0...............8...............@.......................	.......default.........	.......verbos
+--- 115025186 ---
+e for key "...........	.......": .............	...E...otelHeadersHelper failed (OpenTelemetry export headers unavailable): ...........	.......
+...............	...J...Error getting OpenTelemetry headers from otelHeadersHelper (in settings): ..............	.......error..........................................................."....@...E....Q4.@0m..05.@ .......
+#### "spanContext" count=35 [100861144,116380944,228391456,228393809,303033814,303033828,303033855,303034826]
+--- 100861144 ---
+contact your administrator...............R'.	...exception...............I`......spanContext..............R'.....addEvent........	.......addLink.........Ih......addLinks........	...
+...updateName..............	......._getTime................isRecording.............	T'.....recordException..........T'....._isSpanEnded............	U'.....shouldSample............
+--- 116380944 ---
+........p.......................p........................p..............	.......spanContext.............	.......traceId.........	.......inject..........	.......defaultTextMapSetter................;.9.h$..L...#.9.M...G.9...9......H..H.......................@.......................(.......h.......................................8,p.............................
+#### "withSpan" count=20 [123951448,306553832,306581152,306854400,306877183,306883993,306887459,306890331]
+--- 123951448 ---
+........	.......packageName.............	.......packageVersion..........	.......withSpan(.......(	............... .......#..................{vZ.@.......@........vZ..xZ......H..H........................9.......................8......x.......................................@...............................................................H.&.....................
+--- 306553832 ---
+Header(c)}function l(c){return $5n().createRequestHeaders(c)}return{startSpan:o,withSpan:i,withContext:s,parseTraceparentHeader:a,createRequestHeaders:l}}var V4p=A(()=>{G4p();EBa()});var ABa=A(()=>{V4p()});function U5n(e){return j2a(e)}var B5r;var O_i=A(()=>{M5r();B5r=VSe});function q4p(e={}){let t=R_i(e.userAgentPrefix),r=new Wet({additionalAllowedQueryPara
+#### "activeSpan" count=6 [271108633,315445298,315445548,315445767,315445881,315446362]
+--- 271108633 ---
+.......0z..............	......._tracers........	......._config.........	......._activeSpanProcessor....H....M.......(...........(.......(...*.......L..H.......................................................h.......................................@...................................................................................................
+............
+--- 315445298 ---
+zm;var Rzm=A(()=>{xzm=P(Gk(),1)});class Gco{_config;_tracers=new Map;_resource;_activeSpanProcessor;constructor(e={}){let t=Izm.merge({},V8i(),Szm(e));this._resource=t.resource??Hzm.defaultResource(),this._config=Object.assign({},t,{resource:this._resource});let r=[];if(e.spanProcessors?.length)r.push(...e.spanProcessors);this._activeSpanProcessor=new iOl(r)
+#### "continueTrace" count=0 []
+#### "vimMode===" count=2 [312192647,322788012]
+--- 312192647 ---
+etState((t)=>t.active===e?t:{...t,active:e})}function _bl(e){IW.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function cim(e){IW.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function uim(){return IW.getState().launchWarning}function nEt(e){IW.setState((t)=>t.launchWarning?.type===e.type&&t.launchWarning.prefillLength===e.prefillLengt
+--- 322788012 ---
+content!==null&&Ro.content!==K)DI(K,ze,w),mt(Ro.content),We(ZW()&&IW.getState().vimMode==="NORMAL"?hTr(Ro.content.normalize("NFC"),Ro.content.length):Ro.content.length)}catch(Hr){if(Hr instanceof Error)Te(Hr);Pl({key:"external-editor-error",kind:"warning",text:`External editor failed: ${le(Hr)}`,color:"warning",priority:"high"}),pe("input_external_editor","s
+#### "vimMode==="NORMAL"" count=1 [322788012]
+--- 322788012 ---
+content!==null&&Ro.content!==K)DI(K,ze,w),mt(Ro.content),We(ZW()&&IW.getState().vimMode==="NORMAL"?hTr(Ro.content.normalize("NFC"),Ro.content.length):Ro.content.length)}catch(Hr){if(Hr instanceof Error)Te(Hr);Pl({key:"external-editor-error",kind:"warning",text:`External editor failed: ${le(Hr)}`,color:"warning",priority:"high"}),pe("input_external_editor","s
+#### "vimMode" count=27 [146118360,189262072,289352016,289352392,312192647,312192667,312193030,320540547]
+--- 146118360 ---
+........ ...@................... .........................;.............	.......vimMode.@...(<......
+..../..J.......K.......`........H..H.........................,.......................,.....h........................................j..........................................................................................................................h...
+--- 189262072 ---
+........................(.Z.............	...	...addedDirs...............	.......vimModeEnabled..........	.......session_name............	.......current_dir.............	.......project_dir.............	...
+...added_dirs..............	.......git_worktree............	.......context_window..........	.......exceeds_200k_tokens.............	...	...fast_mode.......
+#### "setVimMode" count=0 []
+#### "NORMAL" count=40+ [70903268,70903737,71552973,86118635,86119109,86120436,89735976,92482098]
+--- 70903268 ---
+LI_OPERATION_EMIT_METADATA],
+  [ZSTD_e_continue, ZSTD_e_end]
+], FLUSH_BOUND_IDX_NORMAL = 0, FLUSH_BOUND_IDX_BROTLI = 1, FLUSH_BOUND_IDX_ZSTD = 2;
+function ZlibBase(opts, mode, handle, { flush, finishFlush, fullFlush }) {
+  let chunkSize = Z_DEFAULT_CHUNK, maxOutputLength = kMaxLength, flushBoundIdx;
+  if (mode === BROTLI_ENCODE || mode === BROTLI_DECODE)
+   
+--- 70903737 ---
+lushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
+  else
+    flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
+  if (opts) {
+    if (chunkSize = opts.chunkSize, !validateFiniteNumber(chunkSize, "options.chunkSize"))
+      chunkSize = Z_DEFAULT_CHUNK;
+    else if (chunkSize < Z_MIN_CHUNK)
+      throw @makeErrorWithCode(161, "options.chunkSize", `>= ${Z_MIN_CHUNK}`, chunkSize);
+    
+#### "keeps your text" count=0 []
+#### "clearing the prompt" count=0 []
+#### "agent view" count=22 [111228336,180223577,185141815,207225110,207225405,207225797,207226171,207226282]
+--- 111228336 ---
+	...*...Disable all hooks and statusLine execution..............	.......Disable agent view (`claude agents`, `--bg`, /background, the on-demand daemon). Typically set in managed settings. Equivalent to CLAUDE_CODE_DISABLE_AGENT_VIEW=1..............	.......Disable Remote Control (claude.ai/code, `claude remote-control`, `--remote-control`/`--rc`, auto-start, 
+--- 180223577 ---
+ents...................	.......defaultToAgentsView.............	.......Start in agent view......................................................... ....@p..U.. ...cl......i...........A....@...T.. ...`...............a...o...u.......................................pc........................%.....................`O*.....................0........................
+#### "AgentView" count=14 [106568591,111276343,115257923,176606255,302068793,304180948,304180997,304181170]
+--- 106568591 ---
+.bgSupervisorNoun.........A......bgSupervisorNounCap.............	.......consumeAgentViewRelaunchMarker..........	.......daemonColdStartGbDefault..........4.
+...daemonHint	.............	.......ensureFleetGateHydrated.........	.......fleetGateRejected.4...............4.....isAgentsFleetEnabled............	.......isDaemonCliEnabled..............I.4.....isDaemo
+--- 111276343 ---
+.........	.......worktree........	.......disableAllHooks.........	.......disableAgentView........	.......disableRemoteControl............	.......disableWorkflows........	.......disableArtifact.........	.......enableArtifact..........	.......enableWorkflows.........	.......workflowSizeGuideline...........	.......workflowKeywordTriggerEnabled...........	......
+#### "defaultToAgentsView" count=21 [159564040,159576256,180223528,234706512,234709144,304240403,315226475,315226563]
+--- 159564040 ---
+iew.............	.......on..............	.......managedEnum.............	.......defaultToAgentsView.............	.......Open agents view by default.............	.......leftArrowOpensAgents............	...... opens agents...........	.......C...............	.......autoUpdatesChannel..............	.......Auto-update channel.............	.......disabled........
+--- 159576256 ---
+	.......copyOnSelect............	.......leftArrowOpensAgents............	.......defaultToAgentsView.............	.......optionsHint.............	.......defaultView.............	.......prStatusFooterEnabled...........	.......claudeInChromeDefaultEnabled............	.......pickToCommit............	.......labelBoldSuffix.........	...
+...searchText..............
+#### "posix_spawn ENOENT" count=0 []
+#### "ENOENT" count=40+ [7195698,17194247,20908533,28339539,70252107,70396542,70405037,70405473]
+--- 7195698 ---
+.....H...p..H......H....I.H......H..t...L................H...<.......N.H.. H	.H.ENOENT..H9.uQH..H..0.....*....t>....t(.........H..Hz..H......H..:.I.H......H...2..L.......b...H......H......L..........s(...uKH......H......H....x.H......H..-o..H......H....I.H......H...4..L..........H......H......H....x.H......H...n..H......H....I.H......H...4..L..........H...
+--- 17194247 ---
+..I9.......H.ENONET..I9...Y...H.EL2HLT..I9........1........H.DNOENT..I9.......H.ENOENT..I9.......H.ESRMNT..I9...6...H.EBFONT..I9...,....8........H.DSPIPE..I9.......H.ESPIPE..I9...U...H.ENOPKG..I9.......H.ECHRNG..I9........*....1...H.DISNAM..I9.......H.EISNAM..I9.......H.ENOMEM..I9.......H.EAGAIN..I9........
+........H.EBADRQC.I9.......H.ELIBBAD.I9...t...H.ERE
+#### "hook cwd" count=0 []
+#### "hooksCwd" count=0 []
+#### "getOriginalCwd" count=6 [106445448,151748533,152045349,300700591,313432026,313515404]
+--- 106445448 ---
+TokenFromFd.............	.......getOnboardingShownThisSession...........	.......getOriginalCwd..........	.......getParentManagedSettings.........^......getParentManagedSettingsInvalid.........I.......getParentSessionId..............	.......getPendingBranchLinks...................getPendingPrLinks...............	.......getPermissionPromptToolName.............
+--- 151748533 ---
+ull or undefined value.....................	...I...Cannot destructure property 'getOriginalCwd' from null or undefined value.......................	...B...Cannot destructure property 'default' from null or undefined value......................	...O...Cannot destructure property 'isFirstPartyProvider' from null or undefined value.........	.......S............
+#### "getProjectRoot" count=2 [106445992,300700999]
+--- 106445992 ---
+lectorGate..............	... ...getProactivitySelectorGateEverOn........	.......getProjectRoot..........	.......getPromptCache1hAllowlist...............	.......getPromptId.............	.......getPromptIndex..........	... ...getProposeGoalAvailabilityLogged........	.......getQuestionPreviewFormat.........e..&...getRefusalFallbackLatchOriginRequestId..........
+--- 300700999 ---
+s3s,getProactivitySelectorGate:()=>Jm_,getProactivitySelectorGateEverOn:()=>Zm_,getProjectRoot:()=>pl,getPromptCache1hAllowlist:()=>HGs,getPromptId:()=>Sft,getPromptIndex:()=>dRn,getProposeGoalAvailabilityLogged:()=>vGs,getQuestionPreviewFormat:()=>kBo,getRefusalFallbackLatchOriginRequestId:()=>IWs,getRefusalFallbackModelLatch:()=>eXe,getRegisteredHooks:()=>
+#### "homedir" count=40+ [70233987,70234004,70234857,70478635,85949532,85953212,86519233,87652624]
+--- 70233987 ---
+
+    },
+    freemem: binding.freemem,
+    getPriority: binding.getPriority,
+    homedir: binding.homedir,
+    hostname: binding.hostname,
+    loadavg: binding.loadavg,
+    networkInterfaces: binding.networkInterfaces,
+    platform: function() {
+      return "win32";
+    },
+    release: binding.release,
+    setPriority: binding.setPriority,
+    get tmpdir() {
+--- 70234004 ---
+em: binding.freemem,
+    getPriority: binding.getPriority,
+    homedir: binding.homedir,
+    hostname: binding.hostname,
+    loadavg: binding.loadavg,
+    networkInterfaces: binding.networkInterfaces,
+    platform: function() {
+      return "win32";
+    },
+    release: binding.release,
+    setPriority: binding.setPriority,
+    get tmpdir() {
+      return tmp
+#### "os.homedir" count=1 [70478632]
+--- 70478632 ---
+(!this[kHistoryPath])
+      try {
+        return this[kHistoryPath] = path.join(os.homedir(), ".node_repl_history"), this[kHistoryPath];
+      } catch (err) {
+        return debug(err.stack), null;
+      }
+    return this[kHistoryPath];
+  }
+  [kHasWritePermission]() {
+    return !(permission.isEnabled() && permission.has("fs.write", this[kHistoryPath]) === !
+#### "dme()" count=8 [304295819,304297505,307992209,309972800,309978464,313226890,318162758,318565800]
+--- 304295819 ---
+a]});function Ow(e){return e==="completed"||e==="failed"||e==="killed"}function dme(){let e=V.CLAUDE_CODE_TMPDIR;if(e)return e;return L0a.tmpdir()}function WLt(e){let t=process.getuid?.();if(t===void 0)return;let r=e.replace(/[\/]+$/,"")||e,n="Set CLAUDE_CODE_TMPDIR to a directory you control, or ask an administrator to remove it.",o;try{o=i9.openSync(r,i9.c
+--- 304297505 ---
+o=e}}function VC(){return Ctp(ktp.of(ar().host))}function Ctp(e){let r=J2n.join(dme(),"claude");if(r!==e.ensured){if(typeof process.getuid==="function")i9.mkdirSync(r,{recursive:!0,mode:448}),WLt(r);else try{i9.mkdirSync(r,{recursive:!0,mode:448})}catch{}e.markEnsured(r)}return r}function Gjr(){let e=VC();i9.mkdirSync(e,{recursive:!0,mode:448}),WLt(e);let t=
+#### "tmpdir" count=40+ [70231930,70231982,70232287,70232316,70232324,70234257,70234281,70234999]
+--- 70231930 ---
+ $})
+
+.(function (){"use strict";// build/release/tmp_modules/node/os.ts
+var $, tmpdir = function() {
+  var env = Bun.env;
+  return tmpdir = function() {
+    var path = env.TEMP || env.TMP || (env.SystemRoot || env.windir) + "\\temp";
+    if (path.length > 1 && path[path.length - 1] === "\\" && !@String.prototype.endsWith.@call(path, ":\\"))
+      path = @St
+--- 70231982 ---
+p_modules/node/os.ts
+var $, tmpdir = function() {
+  var env = Bun.env;
+  return tmpdir = function() {
+    var path = env.TEMP || env.TMP || (env.SystemRoot || env.windir) + "\\temp";
+    if (path.length > 1 && path[path.length - 1] === "\\" && !@String.prototype.endsWith.@call(path, ":\\"))
+      path = @String.prototype.slice.@call(path, 0, -1);
+    return 
+#### "organization policy" count=3 [185574005,321688044,326596774]
+--- 185574005 ---
+...Please install git and restart Claude Code......................	...B...Your organization policy does not allow any external marketplaces...............	.......Contact your administrator......................	...<...Your organization restricts which marketplaces can be added.............	...7...Switch to the Marketplaces tab to view allowed sources.......
+--- 321688044 ---
+[1]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization policy does not allow any external marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Contact your administrator."})]}),dbn[1]=kJ;else kJ=dbn[1];return kJ}case"policy-restricts-sources":{let kJ;if(dbn[2]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,chil
+#### "policy_hit" count=2 [206204368,328286165]
+--- 206204368 ---
+engine_error............	.......policy check unavailable................	...
+...policy_hit..............	.......string..............................................q...................q........@ .KD...@...@@..D...HA4.T.d.....@...E...@.d.F...@.e.H...@.d.....@.o........_....@...C...@.L.E....QL...4..$<..eT...T.@ ..G.....hB....@.,.k.........>.@...E....Q4M.......
+--- 328286165 ---
+,d);return f("engine_error"),null}if(p.block!==!0)return null;return i(s.sub,l,"policy_hit",typeof p.reason==="string"&&p.reason.length>0?vIT(p.reason):wn_,c.path,u,d,typeof p.rule_id==="string"?p.rule_id:void 0)}}}var wn_="blocked by your organization's policy",Sn_=500;var An_=A(()=>{st();wr();OBs();Mpe();WIt()});function Tn_(e){let t=e.oidcConfigured?`# Cl
+#### "policy_blocked" count=40+ [139598416,139637808,161129368,173033716,173152503,173152668,173723360,175280888]
+--- 139598416 ---
+(y......	.......................	.......allow_remote_sessions...........	.......policy_blocked..........	.......bg_remote_eligibility_check.............	.......n...............	.......t...............................	...+...Iterator result interface is not an object......................	......not_logged_in...........	.......r.......................	.......
+--- 139637808 ---
+........	......not_logged_in...........	......no_git_remote...........	.......policy_blocked..........h.............._..i................j...i.i.......H........................j...F.......................j...i.i.i.................................................(............................... ...............h.......................................	...H...
+#### "shouldRetry" count=25 [71503320,71503794,99479896,209315712,223843904,224066520,232828533,301018853]
+--- 71503320 ---
+s.wrapError(err);
+    if (this.connection = null, this.storedError = err, this.#shouldRetryConnecting(err)) {
+      this.connectAttempts++;
+      let delay = Math.min(20 * 2 ** this.connectAttempts, 1000);
+      this.retryTimer = setTimeout(BasePooledConnection.#retryTimerFired, delay, this);
+      return;
+    }
+    this.connectStartedAt = 0, this.#finishClo
+--- 71503794 ---
+.#beginConnecting();
+    else
+      self.#finishClose(self.storedError);
+  }
+  #shouldRetryConnecting(err) {
+    if (!this.isConnectFailureError(err))
+      return !1;
+    return this.#canKeepRetrying();
+  }
+  #canKeepRetrying() {
+    if (this.adapter.closed || this.onFinish !== null)
+      return !1;
+    if (this.adapter.waitingQueue.length === 0 && this.ad
+#### "resend" count=28 [198445609,198457617,198461887,228697429,264665830,264829680,264871942,303102860]
+--- 198445609 ---
+............... ..  ...........	...............	...+.... Claude was told not to resend right away..............	.......warning.........................................@........@..@0......@..&....@P..@`..@../...................1...6...Y...........................................................("..............................................h.......@........
+--- 198457617 ---
+em). Not delivered to that session's Claude. Do not wait for a reply and do not resend; tell the user, or choose another approach......
+........................................................@.<.@.N.@.n.@.e.@p7.@PL.@.N.....@...@PL.@.N.....@...@PL.@.M.....@...@PL.@.N.@...@PL.@.L................!...&...)...,...P...t...................@............K......r....
+#### "rejected by" count=40+ [85596712,86855954,100904043,104898591,113678222,113678334,134883496,134883725]
+--- 85596712 ---
+on,the subjectcity in the></div>
+		reflect theto completebecame moreradioactiverejected bywithout anyhis father,which couldcopy of theto indicatea politicalaccounts ofconstitutesworked wither</a></li>of his lifeaccompaniedclientWidthprevent theLegislativedifferentlytogether inhas severalfor anothertext of thefounded thee with the is used forchanged theusual
+--- 86855954 ---
+on canceledRequired key not availableKey has expiredKey has been revokedKey was rejected by serviceOwner diedState not recoverableOperation not possible due to RF-killMemory page has hardware error_implements_interface_let_package_private_protected_public_static_yield...]-E.............]-E....
+........]-E.............]-E.............]-E.............]-E....
+.
+#### "policy check failed" count=6 [120231848,206203704,206204248,305480326,328285489,328285984]
+--- 120231848 ---
+t: .............	.......deny....................................	.......sandbox policy check failed: ...........	.......allow...........	.......[request-filter] allow .........	....... ......................................................."....@...G...@@......@ ..H...R.4.@PM.H...U.4...1C......<.....@`4.....@.<.@0............K.@.;.@`E.C.L..1l.@ -.E...@p4...K
+--- 206203704 ---
+policy webhook timed out........................	.......warn............	...&...policy check failed: webhook returned ..........	...'...policy webhook returned a non-OK status.................	.......object..................	...-...policy webhook returned a non-object decision...........	.......boolean.........	.......o...............	...2...policy webhook d
+#### "org_policy" count=6 [113791032,115352952,119945184,303661667,304195444,305437660]
+--- 113791032 ---
+	.......plan_unreadable.........	.......policy_unavailable..............	.......org_policy_unverifiable.........	...
+...org_denied..............	...
+...cache_miss......................._..i.i.i.i.i.i.`...............................(.......................................................................	...>...Artifacts can't check the signed-in Claude accou
+--- 115352952 ---
+n...............	.......remote_control_at_startup.......
+...............	...
+...org_policy..............	.......tengu_cobalt_harbor.............	...
+...growthbook.................................................$............@............@ >.....@.E..P.............0...J...\...z............................m......................................................
+#### "organization_policy" count=0 []
+#### "block_reason" count=0 []
+#### "SessionStart" count=40+ [99464015,102361472,106447299,106447339,106457035,106678974,106690727,107454735]
+--- 99464015 ---
+.replaceClientType...............	.......sessionStartType........	.......replaceSessionStartType.........	.......questionPreviewFormat...........	.......replaceQuestionPreviewFormat............	.......replConfigArgv..........	.......replaceReplConfigArgv............c......userMsgOptIn.............c......replaceUserMsgOptIn.............	.......searchToolsOptI
+--- 102361472 ---
+ compaction (receives summary) |
+| UserPromptSubmit | - | When user submits |
+| SessionStart | - | When session starts |
+
+**Common tool matchers:** `Bash`, `Write`, `Edit`, `Read`, `Glob`, `Grep`
+
+### Hook Types
+
+**1. Command Hook** - Runs a shell command:
+```json
+{ "type": "command", "command": "prettier --write $FILE", "timeout": 30 }
+```
+
+**2. Prompt Hook
+#### "Setup hook" count=8 [157307102,157307424,204925892,204926092,314795294,314795730,327226125,327226320]
+--- 157307102 ---
+..n...............................	...X...Warning: Failed to load plugin hooks. Setup hooks from plugins will not execute. Error: ........	.......warn............	.......r...............	...
+...attachment..............	.......hook_blocking_error.............	.......Setup...........	.......Setup:..........................	...+...Iterator result interface is n
+--- 157307424 ---
+	...+...Iterator result interface is not an object......................	...-...Setup hooks cancelled (control stream closed)...........	.......hook_additional_context.............................d.....................`...........`.......pT......pT.....@.\..0..........@.........<.@ .....R....@...E...@p\.H.....D.@ ......@P<]....@..ol...@.........D.@ ..@ ..@..
+#### "keep-alive" count=39 [71225377,71265795,71268959,71296275,71319916,71320649,71321058,71380929]
+--- 71225377 ---
+s = socket._httpMessage?.res;
+  if (res) {
+    let keepAliveHint = res.headers["keep-alive"];
+    if (keepAliveHint) {
+      let hint = /^timeout=(\d+)/.exec(keepAliveHint)?.[1];
+      if (hint) {
+        let serverHintTimeout = Number.parseInt(hint) * 1000 - this.agentKeepAliveTimeoutBuffer;
+        if (serverHintTimeout = serverHintTimeout > 0 ? serverHint
+--- 71265795 ---
+on: close\r
+`;
+    else if (shouldSendKeepAlive) {
+      header += `Connection: keep-alive\r
+`;
+      let keepAliveTimeout = this._keepAliveTimeout;
+      if (keepAliveTimeout && this._defaultKeepAlive) {
+        let timeoutSeconds = MathFloor(keepAliveTimeout / 1000), max = "", maxRequestsPerSocket = this._maxRequestsPerSocket;
+        if (~~maxRequestsPerS
+#### "keepalive" count=40+ [72590121,85706167,85856019,85938583,93029538,112107344,120660945,122682002]
+--- 72590121 ---
+"manual",
+    maxRedirects: followRedirects ? maxRedirections : @undefined,
+    keepalive: !reset
+  }), { status: statusCode, headers, trailers } = resp;
+  if (throwOnError && statusCode >= 400 && statusCode < 600)
+    throw Error(`Request failed with status code ${statusCode}`);
+  let body = resp.body ? new BodyReadable(resp) : null;
+  return { statusCode, 
+--- 85706167 ---
+tch: 'protocol' must be "http2", "h2", "http3", "h3", "http1.1", or "h1"redirectkeepaliveverbosecurlproxyfetch() proxy URL is invalidwrite to Vec cannot failurlheaderssignal is not of type AbortSignal.Request body already usedfetch() cannot use a proxy with a unix socket..I..E............fetch() request with GET/HEAD method cannot have body......E....6......
+#### "keepAlive" count=40+ [71033577,71033692,71033750,71040491,71040511,71040993,71041056,71041088]
+--- 71033577 ---
+NoDelay)
+    _socket[kSetNoDelay] = !0, clientHandle.setNoDelay(!0);
+  if (self.keepAlive && clientHandle.setKeepAlive)
+    _socket[kSetKeepAlive] = !0, _socket[kSetKeepAliveInitialDelay] = self.keepAliveInitialDelay, clientHandle.setKeepAlive(!0, self.keepAliveInitialDelay);
+  if (self._connections++, _socket.server = self, _socket._server = self, pauseOnCo
+--- 71033692 ---
+ive)
+    _socket[kSetKeepAlive] = !0, _socket[kSetKeepAliveInitialDelay] = self.keepAliveInitialDelay, clientHandle.setKeepAlive(!0, self.keepAliveInitialDelay);
+  if (self._connections++, _socket.server = self, _socket._server = self, pauseOnConnect && !isTLS)
+    _socket.pause();
+  if (typeof connectionListener === "function") {
+    if (clientHandle.pauseO
+#### "idle-reaped" count=0 []
+#### "idle reaped" count=0 []
+#### "sendKeepAlive" count=0 []
+#### "session_keepalive" count=6 [139785712,279499064,310380750,317574778,317575692,326829093]
+--- 139785712 ---
+........8...............X.......................	.......debug...........	.......session_keepalive_heartbeat.....
+...................	........................@ ..I.....`.@./.c...@PN.Q....5M........E...X...[....................t...................... ........................{......................................................@...S...........................
+--- 279499064 ---
+_not_at_capacity........	.......poll_interval_ms_at_capacity............	... ...session_keepalive_interval_v2_ms@....U..................t...........h........D..H.......................................................h.......................................X0......................................................................................................
+#### "saved file path" count=0 []
+#### "mobile" count=40+ [85533896,85548103,85555277,85580344,87137585,87528791,87528835,87530833]
+--- 85533896 ---
+ernumberchangeresultpublicscreenchoosenormaltravelissuessourcetargetspringmodulemobileswitchphotosborderregionitselfsocialactivecolumnrecordfollowtitle>eitherlengthfamilyfriendlayoutauthorcreatereviewsummerserverplayedplayerexpandpolicyformatdoublepointsseriespersonlivingdesignmonthsforcesuniqueweightpeopleenergynaturesearchfigurehavingcustomoffsetletterwind
+--- 85548103 ---
+geAmericaEdition]&quot;Messageneed tovalue="complexlookingstationbelievesmaller-mobilerecordswant tokind ofFirefoxyou aresimilarstudiedmaximumheadingrapidlyclimatekingdomemergedamountsfoundedpioneerformuladynastyhow to SupportrevenueeconomyResultsbrothersoldierlargelycalling.&quot;AccountEdward segmentRobert effortsPacificlearnedup withheight:we haveAngelesn
+#### "uploaded image" count=4 [216597384,216597766,301386916,301387355]
+--- 216597384 ---
+upload_image............	...<...Upload a previously captured screenshot or user-uploaded image to a file input or drag & drop target. Supports two approaches: (1) ref - for targeting specific elements, especially hidden file inputs, (2) coordinate - for drag & drop to visible locations like Google Docs. Provide either ref or coordinate, not both.............
+--- 216597766 ---
+usly captured screenshot (from the computer tool's screenshot action) or a user-uploaded image............	.......Element reference ID from read_page or find tools (e.g., "ref_1", "ref_2"). Use this for file inputs (especially hidden ones) or specific elements. Provide either ref or coordinate, not both..........	.......Viewport coordinates [x, y] for drag &
+#### "image path" count=2 [150241239,312998183]
+--- 150241239 ---
+.
+.......................................................	...*...Failed to read image path from clipboard: ..............	.......error......................................................L...... M.@ ..........I.....3.@ %.G...@.].G....r4.BS4.@@u.@...@...E...@p\.H.....D.@ .....g....@.......@.............B...m...v...|..........................................
+--- 312998183 ---
+|!r.stdout)return null;return r.stdout.trim()}catch(e){return E(`Failed to read image path from clipboard: ${e instanceof Error?e.message:String(e)}`,{level:"error"}),null}}function gEl(e){if(e.startsWith('"')&&e.endsWith('"')||e.startsWith("'")&&e.endsWith("'"))return e.slice(1,-1);return e}function yEl(e){return e}function xmm(e){let t=gEl(e.trim()),r=yEl(
+#### "file_path" count=40+ [99645416,100828352,100838400,102362242,102363810,102364577,108307800,108307864]
+--- 99645416 ---
+RequestAsync..............!.....invalid_file_extension..........	.......invalid_file_path.!..............!.. ...invalid_managed_identity_id_type........	.......invalid_secret............!.....missing_client_id...............	.......network_unavailable.............I.......platform_not_supported..........	.......unable_to_create_azure_arc..............	.......
+--- 100828352 ---
+n.d.e.r. .t.h.e. .w.o.r.k.i.n.g. .d.i.r.e.c.t.o.r.y. .f.i.r.s.t.........	...,...file_path must name a regular file to upload................%...t.h.e. .f.i.l.e. .i.s. .e.m.p.t.y. ..  .n.o.t.h.i.n.g. .t.o. .u.p.l.o.a.d................p......f.i.l.e._.p.a.t.h. .i.s. .o.n. .a. .v.o.l.u.m.e. .t.h.a.t. .r.e.p.o.r.t.s. .n.o. .u.s.a.b.l.e. .f.i.l.e. .i.d.e.n.t.i.t.
+#### "savedPath" count=0 []
+#### "mediaPath" count=0 []
+#### "www.anthropic.com" count=18 [100910994,100958560,100961744,163318556,163318652,163319220,163319316,187200648]
+--- 100910994 ---
+n asks about the differences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.............(.u...O.b.j.e.c.t. .a.n.d. .a.r.r.a.y. .p.a.r.a.m.e.t.e.r. .v.a.l.u.e.s. .m.u.s.t. .b.e. .a. .s.i.n.g.l.e. .J.S.O.N. .v.a.l.u.e. ..  .n.e.v.e.r. .w.r.i.t.e. .p.a.r.a.m.e.t.e.r.-.t.a.g. .m.a.r.k.u.p. .
+--- 100958560 ---
+refreshPending...........O).....tengu-top-of-feed-tip...........	.../...https://www.anthropic.com/legal/promotion-terms.........	.......markRestored............	...7...Auto mode is now Claude Code's default permission mode..........IQ).....Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt
+#### "docs.anthropic.com" count=4 [213219200,213468488,300980940,301007352]
+--- 213219200 ---
+nd-of-life on ..........	...}...
+Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information............	.......enabled.........	.......Using Claude with ..............	....... and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performan
+--- 213468488 ---
+nd-of-life on ..........	...}...
+Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information............	.......enabled.........	.......Using Claude with ..............	....... and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performan
+#### "anthropic.com" count=40+ [99536739,100910998,100935304,100958564,100961748,104905764,104908748,112258732]
+--- 99536739 ---
+.............	...I...Remote Control is only available when using Claude via api.anthropic.com................	...>...unset it (or run in a shell without it) to use Remote Control...........	...B...unset them (or run in a shell without them) to use Remote Control...............I".......external-refresh...............	.../...The corrupted file has already been
+--- 100910998 ---
+ks about the differences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.............(.u...O.b.j.e.c.t. .a.n.d. .a.r.r.a.y. .p.a.r.a.m.e.t.e.r. .v.a.l.u.e.s. .m.u.s.t. .b.e. .a. .s.i.n.g.l.e. .J.S.O.N. .v.a.l.u.e. ..  .n.e.v.e.r. .w.r.i.t.e. .p.a.r.a.m.e.t.e.r.-.t.a.g. .m.a.r.k.u.p. .i.n.
+#### "session proxy" count=2 [200179023,326594530]
+--- 200179023 ---
+or git...........	....... and gh.........	...9... goes through a pre-configured session proxy (CA bundle: ...............	.......) via per-session git config............	....... and a gh PATH shim.............	...^...; other network traffic uses this machine's own egress. If git or gh fail against github.com, ..........	.......check the git config file named
+--- 326594530 ---
+`GitHub access for git${n.ghShimDir?" and gh":""} goes through a pre-configured session proxy (CA bundle: ${e}) via per-session git config${n.ghShimDir?" and a gh PATH shim":""}; other network traffic uses this machine's own egress. If git or gh fail against github.com, ${r}check the git config file named by $GIT_CONFIG_GLOBAL; never disable TLS verification
+#### "allowed domains" count=6 [154484338,154587731,311916385,311916899,313950353,313970221]
+--- 154484338 ---
+......	....... to the network allowlist this session runs behind (the sandbox's allowed domains, or the Claude desktop app's network settings).........................................@P.B....@..a....@.. ...'....@...........................S,......................S,......................R,.................8W......m.......n...8W...W.......D..H.................
+--- 154587731 ---
+ging.........	...............	...;...claudeusercontent.com to the environment's allowed domains...............................................@P.B....@..f....@...D......@......S...X...[...................(.*.......................*.......................*......................e".................^...h.......h.......^...c........D..H..........................
+#### "network proxy" count=2 [219290775,301774905]
+--- 219290775 ---
+.	.......Linux/WSL only: Absolute path to the socat binary used for the sandbox network proxy. Overrides auto-detection via PATH. Only honored from admin-controlled managed settings........................}.....................`..........	!<.B.4..pm.....	!<.B.4..#<"......L>......l.....	!<.B.4...m.....	!<.B.4..#<.......L.......l.......m...... m......`m.@ ..B.
+--- 301774905 ---
+escribe("Linux/WSL only: Absolute path to the socat binary used for the sandbox network proxy. Overrides auto-detection via PATH. Only honored from admin-controlled managed settings.")}).passthrough())});function iDt(e,t){return GGo.run({cwd:xu(e)},t)}function Zft(e,t){return iDt(e??rr(),t)}function sDt(){return GGo.getStore()!==void 0}function jZs(e){let t=
+#### "ANTHROPIC_BASE" count=40+ [106507992,112496224,113792130,114727427,114727539,118310234,208858037,208858081]
+--- 106507992 ---
+C_AWS_BASE_URL..........	.......ANTHROPIC_AWS_WORKSPACE_ID..............	.......ANTHROPIC_BASE_URL2...............2.....ANTHROPIC_BEDROCK_BASE_URL2.............	.2.!...ANTHROPIC_BEDROCK_MANTLE_BASE_URL...............	.......ANTHROPIC_BEDROCK_REGION_PREFIX.........	.......ANTHROPIC_BEDROCK_SERVICE_TIER..........	.......ANTHROPIC_FOUNDRY_BASE_URL..............
+--- 112496224 ---
+C_IDENTITY_TOKEN_FILE...........	.......ANTHROPIC_WORKSPACE_ID..........	.......ANTHROPIC_BASE_URL..............	.......oidc_federation.........	.......ANTHROPIC_SERVICE_ACCOUNT_ID............	.......file............	.......ANTHROPIC_SCOPE.................<.......;..........................................................<..............`>.....@ >.@0....4....

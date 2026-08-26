@@ -1,0 +1,49 @@
+offset=248521051
+needle=b'/oauth/device_authorization'
+
+token_endpoint\` with
+   \`grant_type=refresh_token\`. If you didn't issue a refresh token, the user
+   is sent back through the browser flow instead.
+
+## Discovery \u2014 required
+
+\`GET /.well-known/oauth-authorization-server\` (unauthenticated)
+
+RFC 8414 authorization server metadata. The client reads
+\`device_authorization_endpoint\` and \`token_endpoint\` and ignores the rest;
+both must be same-origin with \`{base}\`. \`authorization_endpoint\` is
+intentionally absent.
+
+    {
+      "issuer": "https://gw.corp.example.com",
+      "device_authorization_endpoint": "https://gw.corp.example.com/oauth/device_authorization",
+      "token_endpoint": "https://gw.corp.example.com/oauth/token",
+      "grant_types_supported": ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"]
+    }
+
+## Device authorization \u2014 required
+
+\`POST {device_authorization_endpoint}\` (unauthenticated)
+
+RFC 8628 \xA73.2. The client opens \`verification_uri_complete\` in the user's
+browser and polls \`token_endpoint\` every \`interval\` seconds.
+
+    {
+      "device_code": "AbK9-s3n4C8H...",
+      "user_code": "WDJB-MJHT",
+      "verification_uri": "https://gw.corp.example.com/device",
+      "verification_uri_complete": "https://gw.corp.example.com/device?user_code=WDJB-MJHT",
+      "expires_in": 600,
+      "interval": 5
+    }
+
+\`device_code\` should be >=256 bits, opaque, single-use. \`user_code\` should
+use a base-20 charset (RFC 8628 \xA76.1).
+
+## Verification page \u2014 required
+
+\`GET/POST {verification_uri}\` (browser-facing; the client never calls this)
+
+Accept the user code, authenticate the user against your IdP, and mark the
+matching \`device_code\` approved so the next token poll succeeds. Apply a
+per-IP rate limit (RFC 8628 \xA75.1) and don't auto-submit a pre-filled code

@@ -11,7 +11,11 @@
  * updated by the watcher once the OSC 11 response arrives.
  */
 
-import type { ThemeName, ThemeSetting } from './theme.js'
+import {
+  isBuiltinThemeName,
+  type ThemeName,
+  type ThemeSetting,
+} from './theme.js'
 
 export type SystemTheme = 'dark' | 'light'
 
@@ -43,7 +47,16 @@ export function resolveThemeSetting(setting: ThemeSetting): ThemeName {
   if (setting === 'auto') {
     return getSystemThemeName()
   }
-  return setting
+  if (isBuiltinThemeName(setting)) {
+    return setting
+  }
+  if (setting.startsWith('custom:')) {
+    const { resolveCustomThemeSetting } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./customThemes.js') as typeof import('./customThemes.js')
+    return resolveCustomThemeSetting(setting).base
+  }
+  return 'dark'
 }
 
 /**

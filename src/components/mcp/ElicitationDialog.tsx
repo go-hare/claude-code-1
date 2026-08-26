@@ -4,8 +4,28 @@ import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { useNotifyAfterTimeout } from '../../hooks/useNotifyAfterTimeout.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw text input for elicitation form
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput, useIsInsideModal, useModalOrTerminalSize } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import { useSwarmBanner } from '../PromptInput/useSwarmBanner.js';
+import { isFullscreenActive } from '../../utils/fullscreen.js';
+import {
+  ELICITATION_LINES_PER_FIELD,
+  clampElicitationText,
+  computeElicitationAvailableRows,
+  computeElicitationFieldWindow,
+  computeElicitationMessageLineBudget,
+  computeElicitationOptionWindow,
+  elicitationDescriptionWidth,
+  elicitationLabelWidth,
+  elicitationMaxVisibleFields,
+  elicitationOptionLabelWidth,
+  elicitationOptionWindowRows,
+  elicitationRemainingRows,
+  elicitationSubtitlePad,
+  elicitationValueWidth,
+  formatElicitationTitle,
+  wrapElicitationMessage,
+} from './elicitationLayout.js';
 import type { ElicitationRequestEvent } from '../../services/mcp/elicitationHandler.js';
 import type {
   ElicitRequestFormParams,
@@ -237,7 +257,12 @@ function ElicitationFormDialog({
     [],
   );
 
-  const { columns, rows } = useTerminalSize();
+  const terminalSize = useTerminalSize();
+  const { columns } = terminalSize;
+  const { rows } = useModalOrTerminalSize(terminalSize);
+  const insideModal = useIsInsideModal();
+  const hasSessionChrome = !!useSwarmBanner();
+  const clampFieldRows = isFullscreenActive();
 
   const currentField = currentFieldIndex !== undefined ? schemaFields[currentFieldIndex] : undefined;
   const currentFieldIsText =
@@ -784,32 +809,39 @@ function ElicitationFormDialog({
     return true;
   }
 
-  // Scroll windowing: compute visible field range
-  // Overhead: ~9 lines (dialog chrome, buttons, footer).
-  // Each field: ~3 lines (label + description + validation spacer).
-  // NOTE(v2): Multi-select accordion expands to N+3 lines when open.
-  // For now we assume 3 lines per field; an expanded accordion may
-  // temporarily push content off-screen (terminal scrollback handles it).
-  // To generalize: track per-field height (3 for collapsed, N+3 for
-  // expanded multi-select) and compute a pixel-budget window instead
-  // of a simple item-count window.
-  const LINES_PER_FIELD = 3;
-  const DIALOG_OVERHEAD = 14;
-  const maxVisibleFields = Math.max(2, Math.floor((rows - DIALOG_OVERHEAD) / LINES_PER_FIELD));
-
-  const scrollWindow = useMemo(() => {
-    const total = schemaFields.length;
-    if (total <= maxVisibleFields) {
-      return { start: 0, end: total };
-    }
-    // When buttons are focused (currentFieldIndex undefined), pin to end
-    const focusIdx = currentFieldIndex ?? total - 1;
-    let start = Math.max(0, focusIdx - Math.floor(maxVisibleFields / 2));
-    const end = Math.min(start + maxVisibleFields, total);
-    // Adjust start if we hit the bottom
-    start = Math.max(0, end - maxVisibleFields);
-    return { start, end };
-  }, [schemaFields.length, maxVisibleFields, currentFieldIndex]);
+  // densable 2.1.239 IZg/xZg: fullscreen ($e=uq) clamps labels and windows
+  // both fields and the expanded accordion. Non-clamp still uses U-14 / 3.
+  const availableRows = computeElicitationAvailableRows(clampFieldRows, insideModal, rows, hasSessionChrome);
+  const subtitlePad = elicitationSubtitlePad(clampFieldRows, availableRows);
+  const messageLineBudget = computeElicitationMessageLineBudget(
+    clampFieldRows,
+    availableRows,
+    schemaFields.length,
+    subtitlePad,
+  );
+  const wrappedMessage = wrapElicitationMessage(message, columns, messageLineBudget);
+  const subtitle = wrappedMessage ? (subtitlePad ? `\n${wrappedMessage}` : wrappedMessage) : undefined;
+  const remainingRows = elicitationRemainingRows(availableRows, subtitlePad, wrappedMessage, schemaFields.length);
+  const expandedField =
+    expandedAccordion !== undefined ? schemaFields.find(f => f.name === expandedAccordion) : undefined;
+  const optionCount = expandedField
+    ? isMultiSelectEnumSchema(expandedField.schema)
+      ? getMultiSelectValues(expandedField.schema).length
+      : isEnumSchema(expandedField.schema)
+        ? getEnumValues(expandedField.schema).length
+        : 0
+    : 0;
+  const optionBudget = remainingRows - ELICITATION_LINES_PER_FIELD;
+  const optionWindow = useMemo(
+    () => computeElicitationOptionWindow(clampFieldRows, optionCount, optionBudget, accordionOptionIndex),
+    [clampFieldRows, optionCount, optionBudget, accordionOptionIndex],
+  );
+  const optionRows = elicitationOptionWindowRows(clampFieldRows, optionCount, optionWindow);
+  const maxVisibleFields = elicitationMaxVisibleFields(clampFieldRows, remainingRows, optionRows, rows);
+  const scrollWindow = useMemo(
+    () => computeElicitationFieldWindow(schemaFields.length, maxVisibleFields, currentFieldIndex),
+    [schemaFields.length, maxVisibleFields, currentFieldIndex],
+  );
 
   const hasFieldsAbove = scrollWindow.start > 0;
   const hasFieldsBelow = scrollWindow.end < schemaFields.length;
@@ -854,10 +886,14 @@ function ElicitationFormDialog({
           const selectionColor = error ? 'error' : hasValue ? 'success' : isRequired ? 'error' : 'suggestion';
 
           const activeColor = isActive ? selectionColor : undefined;
+          const rawLabel = schema.title || name;
+          const displayLabel = clampElicitationText(rawLabel, elicitationLabelWidth(columns), clampFieldRows);
+          const valueWidth = elicitationValueWidth(columns, displayLabel);
+          const optionLabelWidth = elicitationOptionLabelWidth(columns);
 
           const label = (
             <Text color={activeColor} bold={isActive}>
-              {schema.title || name}
+              {displayLabel}
             </Text>
           );
 
@@ -872,10 +908,26 @@ function ElicitationFormDialog({
 
             if (isExpanded) {
               valueContent = <Text dimColor>{figures.triangleDownSmall}</Text>;
+              const win = optionWindow ?? {
+                start: 0,
+                end: msValues.length,
+                showAbove: false,
+                showBelow: false,
+              };
               accordionContent = (
                 <Box flexDirection="column" marginLeft={6}>
-                  {msValues.map((optVal, optIdx) => {
-                    const optLabel = getMultiSelectLabel(schema, optVal);
+                  {win.showAbove && (
+                    <Text dimColor>
+                      {figures.arrowUp} {win.start} more above
+                    </Text>
+                  )}
+                  {msValues.slice(win.start, win.end).map((optVal, sliceIdx) => {
+                    const optIdx = win.start + sliceIdx;
+                    const optLabel = clampElicitationText(
+                      getMultiSelectLabel(schema, optVal),
+                      optionLabelWidth,
+                      clampFieldRows,
+                    );
                     const isChecked = selected.includes(optVal);
                     const isFocused = optIdx === accordionOptionIndex;
                     return (
@@ -890,18 +942,23 @@ function ElicitationFormDialog({
                       </Box>
                     );
                   })}
+                  {win.showBelow && (
+                    <Text dimColor>
+                      {figures.arrowDown} {msValues.length - win.end} more below
+                    </Text>
+                  )}
                 </Box>
               );
             } else {
               // Collapsed: ▸ arrow then comma-joined selected items
               const arrow = isActive ? <Text dimColor>{figures.triangleRightSmall} </Text> : null;
               if (selected.length > 0) {
-                const displayLabels = selected.map(v => getMultiSelectLabel(schema, v));
+                const displayLabels = selected.map(v => getMultiSelectLabel(schema, v)).join(', ');
                 valueContent = (
                   <Text>
                     {arrow}
                     <Text color={activeColor} bold={isActive}>
-                      {displayLabels.join(', ')}
+                      {clampElicitationText(displayLabels, valueWidth, clampFieldRows)}
                     </Text>
                   </Text>
                 );
@@ -922,10 +979,26 @@ function ElicitationFormDialog({
 
             if (isExpanded) {
               valueContent = <Text dimColor>{figures.triangleDownSmall}</Text>;
+              const win = optionWindow ?? {
+                start: 0,
+                end: enumValues.length,
+                showAbove: false,
+                showBelow: false,
+              };
               accordionContent = (
                 <Box flexDirection="column" marginLeft={6}>
-                  {enumValues.map((optVal, optIdx) => {
-                    const optLabel = getEnumLabel(schema, optVal);
+                  {win.showAbove && (
+                    <Text dimColor>
+                      {figures.arrowUp} {win.start} more above
+                    </Text>
+                  )}
+                  {enumValues.slice(win.start, win.end).map((optVal, sliceIdx) => {
+                    const optIdx = win.start + sliceIdx;
+                    const optLabel = clampElicitationText(
+                      getEnumLabel(schema, optVal),
+                      optionLabelWidth,
+                      clampFieldRows,
+                    );
                     const isSelected = value === optVal;
                     const isFocused = optIdx === accordionOptionIndex;
                     return (
@@ -940,6 +1013,11 @@ function ElicitationFormDialog({
                       </Box>
                     );
                   })}
+                  {win.showBelow && (
+                    <Text dimColor>
+                      {figures.arrowDown} {enumValues.length - win.end} more below
+                    </Text>
+                  )}
                 </Box>
               );
             } else {
@@ -950,7 +1028,7 @@ function ElicitationFormDialog({
                   <Text>
                     {arrow}
                     <Text color={activeColor} bold={isActive}>
-                      {getEnumLabel(schema, value as string)}
+                      {clampElicitationText(getEnumLabel(schema, value as string), valueWidth, clampFieldRows)}
                     </Text>
                   </Text>
                 );
@@ -991,7 +1069,8 @@ function ElicitationFormDialog({
                   onChange={handleTextInputChange}
                   onSubmit={handleTextInputSubmit}
                   placeholder={`Type something\u{2026}`}
-                  columns={Math.min(columns - 20, 60)}
+                  columns={Math.min(clampFieldRows ? valueWidth : columns - 20, 60)}
+                  maxVisibleLines={clampFieldRows ? 1 : undefined}
                   cursorOffset={textInputCursorOffset}
                   onChangeCursorOffset={setTextInputCursorOffset}
                   focus
@@ -1002,7 +1081,7 @@ function ElicitationFormDialog({
               const displayValue =
                 hasValue && isDateTimeSchema(schema) ? formatDateDisplay(String(value), schema) : String(value);
               valueContent = hasValue ? (
-                <Text>{displayValue}</Text>
+                <Text>{clampElicitationText(displayValue, valueWidth, clampFieldRows)}</Text>
               ) : (
                 <Text dimColor italic>
                   not set
@@ -1011,7 +1090,7 @@ function ElicitationFormDialog({
             }
           } else {
             valueContent = hasValue ? (
-              <Text>{String(value)}</Text>
+              <Text>{clampElicitationText(String(value), valueWidth, clampFieldRows)}</Text>
             ) : (
               <Text dimColor italic>
                 not set
@@ -1033,13 +1112,15 @@ function ElicitationFormDialog({
               {accordionContent}
               {schema.description && (
                 <Box marginLeft={6}>
-                  <Text dimColor>{schema.description}</Text>
+                  <Text dimColor>
+                    {clampElicitationText(schema.description, elicitationDescriptionWidth(columns), clampFieldRows)}
+                  </Text>
                 </Box>
               )}
               <Box marginLeft={6} height={1}>
                 {error ? (
                   <Text color="error" italic>
-                    {error}
+                    {clampElicitationText(error, elicitationDescriptionWidth(columns), clampFieldRows)}
                   </Text>
                 ) : (
                   <Text> </Text>
@@ -1061,8 +1142,8 @@ function ElicitationFormDialog({
 
   return (
     <Dialog
-      title={`MCP server \u201c${serverName}\u201d requests your input`}
-      subtitle={`\n${message}`}
+      title={formatElicitationTitle(serverName, columns, clampFieldRows)}
+      subtitle={subtitle}
       color="permission"
       onCancel={() => onResponse('cancel')}
       isCancelActive={(!currentField || !!focusedButton) && !expandedAccordion}

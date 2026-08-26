@@ -1,0 +1,3 @@
+OFFSET=288422421
+
+et i=o.access_token;if(!i)throw new z_(`Credentials file at ${e.credentialsPath} must include 'access_token'`);let s=o.expires_at;if(!t?.forceRefresh&&(s==null||r2e()<s-N0t))return{token:i,expiresAt:s??null};let a=o.refresh_token;if(!e.clientId||!a)throw new z_(`Access token at ${e.credentialsPath} has expired and no refresh is available (client_id ${e.clientId?"set":"empty"}, refresh_token ${a?"set":"empty"})`);Q0o(e.baseURL);let l={grant_type:e8c,refresh_token:a,client_id:e.clientId},c=`${e.ba

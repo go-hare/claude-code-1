@@ -1,0 +1,152 @@
+
+#### Input contained only whitespace count=2
+--- 203375055 ---
+................& .S.a.n.d.b.o.x. .d.i.s.a.b.l.e.d.:. ...................d....  Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced......
+.................before_sandbox_init...............................L' .S.a.n.d.b.o.x. .E.r.r.o.r.:. .....................other...................after_sandbox_init.................
+........& ...........................................setup...........................before_loadInitialMessages..........................C...Cannot destructure property 'messages' 
+from null or undefined value.....................q.......................D...............................Y...............(..........................................................
+.............G...........................J...Cannot destructure property 'agentDefinition' from null or undefined value......................Ze......................(..............
+.........................................................warning.................user................8...Error: --rewind-files requires a user message UUID, but ............'... is
+ not a user message in this session..................................Error: .................Unexpected error................Warning: ....................... tracked ..............
+.........path was................paths were...................... skipped: ..................".... Run with --debug for the paths...................."...Files rewound to state at m
+essage ......................Q...................|...Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print....
+.................Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool already ran), or it exceeds the tail-sc
+an window. Provide a prompt to continue the conversation.................^...Error: Input must be provided either through stdin or as a prompt argument when using --print..........
+.....J...Error: When using --print, --output-format=stream-json requires --verbose.......................stdio.......................+...Iterator result interface is not an object.
+.....................[print.ts] .................*... orphaned background task(s) after restart......................stopped.................Stopped by a worker restart: ..........
+. N..........................Y...[print.ts] orphaned-task notification flush failed; keeping orphans pending for re-emit: ..................._...[print.ts] orphaned-task notificati
+on delivery unconfirmed; keeping orphans pending for re-emit.................................j.......................B.......................W.......................F..............
+.....4...[print.ts] deferring stale parked prompt cancel for ................;... ..  .a. .p.e.r.s.i.s.t.e.d. .c.o.n.t.r.o.l._.r.e.s.p.o.n.s.e. .m.a.y. .a.r.r.i.v.e. .v.i.a. .S.S.E
+. .c.a.t.c.h.-.u.p...................[print.ts] stale parked prompt cancel failed: ..................error..............
+--- 327043244 ---
+Ze){if(n((ot)=>({...ot,agent:Ze.agentType})),!c.systemPrompt&&!tv(Ze)){let ot=Ze.getSystemPrompt();if(ot)c.systemPrompt=ot}pwr(Ze.agentType)}}if(c.forkSession)$Mo(D);nHr(D,Boolean(
+c.forkSession));let K=tHr(D,O.mainLoopModel,(Ge)=>D.push(Ss(Ge,"warning"))),ne=K?rHr(D,K,Boolean(c.forkSession),c.storageV5,c.credentials):void 0;if(ne)n((Ge)=>Ge.mainLoopModel===n
+e?Ge:{...Ge,mainLoopModel:ne});if(D.length===0&&process.exitCode!==void 0)return;let ie;if(c.restrictedStartupModel&&Dqy(c.userSpecifiedModel,c.restrictedStartupModel)){let Ge=Vj(c
+.restrictedStartupModel,zi());if(!D.some((ot)=>ot.type==="system"&&ot.subtype==="informational"&&ot.content.includes(Ge)))D.push(Ss(Ge,"warning"));ie=Ss(Ge,"warning")}if(c.rewindFi
+les){let Ge=D.find((Kt)=>Kt.uuid===c.rewindFiles);if(!Ge||Ge.type!=="user"){process.stderr.write(`Error: --rewind-files requires a user message UUID, but ${c.rewindFiles} is not a 
+user message in this session.`),Nd(1);return}let Ze=r(),ot=await Vqy(c.rewindFiles,Ze,!1);if(!ot.canRewind){process.stderr.write(`Error: ${ot.error||"Unexpected error"}.`),Nd(1);re
+turn}if(ot.skippedLinks)process.stderr.write(`Warning: ${ot.skippedLinks} tracked ${ot.skippedLinks===1?"path was":"paths were"} skipped: ${kQo}. Run with --debug for the paths..`)
+;wl(`Files rewound to state at message ${c.rewindFiles}.`),Nd(0);return}let X=typeof c.resume==="string"&&c.resume.trim().length>0,te=Boolean(c.sdkUrl);if(typeof t==="string"&&t.tr
+im()===""&&!te&&!Q&&!U){process.stderr.write(t!==""?`Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print.`:X
+||c.continue?`Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool already ran), or it exceeds the tail-scan 
+window. Provide a prompt to continue the conversation..`:`Error: Input must be provided either through stdin or as a prompt argument when using --print.`),Nd(1);return}if(c.outputF
+ormat==="stream-json"&&!c.verbose){process.stderr.write(`Error: When using --print, --output-format=stream-json requires --verbose.`),Nd(1);return}let re=Hge(O.mcp.tools,O.toolPerm
+issionContext),de=DRl([...s,...re],O.toolPermissionContext);R.current=de;let oe=c.sdkUrl?"stdio":c.permissionPromptToolName,ee=oe?xw(oe)?.serverName:void 0,se=(Ge)=>{_.sessionState
+.notifyStateChanged("requires_action",Ge),QVy?.runClassifierSummaryForBlocked(Ge,_.sessionState)};_.onUserDialogParked=(Ge)=>{QVy?.runClassifierSummaryForBlocked(Ge,_.sessionState)
+};let Se=Gqy(oe,_,()=>r().mcp.tools,se);if(c.permissionPromptToolName)de=de.filter((Ge)=>!ol(Ge,c.permissionPromptToolName));let ge=eTl(D);if(Object.keys(ge).length>0)n((Ge)=>({...
+Ge,sendMessagePins:ge}));if(V.CLAUDE_CODE_RESUME_INTERRUPTED_TURN){let Ge=await _.restoredWorkerState,Ze=Ge?.internal?.running_background_tasks,ot=Ge?.internal?.orphaned_background
+_tasks_pending_notification,Kt=Array.isArray(Ze)?Ze:[],mt=Array.isArray(ot)?ot:[],at=new Map;for(let Rt of[...mt,...Kt])
+
+#### No deferred tool marker count=2
+--- 203375199 ---
+trictions will NOT be enforced.......................before_sandbox_init...............................L' .S.a.n.d.b.o.x. .E.r.r.o.r.:. .....................other..................
+.after_sandbox_init.........................& ...........................................setup...........................before_loadInitialMessages..........................C...Can
+not destructure property 'messages' from null or undefined value.....................q.......................D...............................Y...............(......................
+.................................................G...........................J...Cannot destructure property 'agentDefinition' from null or undefined value......................Ze.
+.....................(.......................................................................warning.................user................8...Error: --rewind-files requires a user m
+essage UUID, but ............'... is not a user message in this session..................................Error: .................Unexpected error................Warning: ..........
+............. tracked .......................path was................paths were...................... skipped: ..................".... Run with --debug for the paths...............
+....."...Files rewound to state at message ......................Q...................|...Error: Input contained only whitespace. Provide a prompt with text through stdin or as a pr
+ompt argument when using --print.....................Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool alr
+eady ran), or it exceeds the tail-scan window. Provide a prompt to continue the conversation.................^...Error: Input must be provided either through stdin or as a prompt a
+rgument when using --print...............J...Error: When using --print, --output-format=stream-json requires --verbose.......................stdio.......................+...Iterato
+r result interface is not an object......................[print.ts] .................*... orphaned background task(s) after restart......................stopped.................Sto
+pped by a worker restart: ........... N..........................Y...[print.ts] orphaned-task notification flush failed; keeping orphans pending for re-emit: ..................._..
+.[print.ts] orphaned-task notification delivery unconfirmed; keeping orphans pending for re-emit.................................j.......................B.......................W..
+.....................F...................4...[print.ts] deferring stale parked prompt cancel for ................;... ..  .a. .p.e.r.s.i.s.t.e.d. .c.o.n.t.r.o.l._.r.e.s.p.o.n.s.e. 
+.m.a.y. .a.r.r.i.v.e. .v.i.a. .S.S.E. .c.a.t.c.h.-.u.p...................[print.ts] stale parked prompt cancel failed: ..................error...................after_loadInitialMe
+ssages.......................transcript_hydrated.....................messages=...............................after_model
+--- 327043385 ---
+}if(c.forkSession)$Mo(D);nHr(D,Boolean(c.forkSession));let K=tHr(D,O.mainLoopModel,(Ge)=>D.push(Ss(Ge,"warning"))),ne=K?rHr(D,K,Boolean(c.forkSession),c.storageV5,c.credentials):vo
+id 0;if(ne)n((Ge)=>Ge.mainLoopModel===ne?Ge:{...Ge,mainLoopModel:ne});if(D.length===0&&process.exitCode!==void 0)return;let ie;if(c.restrictedStartupModel&&Dqy(c.userSpecifiedModel
+,c.restrictedStartupModel)){let Ge=Vj(c.restrictedStartupModel,zi());if(!D.some((ot)=>ot.type==="system"&&ot.subtype==="informational"&&ot.content.includes(Ge)))D.push(Ss(Ge,"warni
+ng"));ie=Ss(Ge,"warning")}if(c.rewindFiles){let Ge=D.find((Kt)=>Kt.uuid===c.rewindFiles);if(!Ge||Ge.type!=="user"){process.stderr.write(`Error: --rewind-files requires a user messa
+ge UUID, but ${c.rewindFiles} is not a user message in this session.`),Nd(1);return}let Ze=r(),ot=await Vqy(c.rewindFiles,Ze,!1);if(!ot.canRewind){process.stderr.write(`Error: ${ot
+.error||"Unexpected error"}.`),Nd(1);return}if(ot.skippedLinks)process.stderr.write(`Warning: ${ot.skippedLinks} tracked ${ot.skippedLinks===1?"path was":"paths were"} skipped: ${k
+Qo}. Run with --debug for the paths..`);wl(`Files rewound to state at message ${c.rewindFiles}.`),Nd(0);return}let X=typeof c.resume==="string"&&c.resume.trim().length>0,te=Boolean
+(c.sdkUrl);if(typeof t==="string"&&t.trim()===""&&!te&&!Q&&!U){process.stderr.write(t!==""?`Error: Input contained only whitespace. Provide a prompt with text through stdin or as a
+ prompt argument when using --print.`:X||c.continue?`Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool alr
+eady ran), or it exceeds the tail-scan window. Provide a prompt to continue the conversation..`:`Error: Input must be provided either through stdin or as a prompt argument when usi
+ng --print.`),Nd(1);return}if(c.outputFormat==="stream-json"&&!c.verbose){process.stderr.write(`Error: When using --print, --output-format=stream-json requires --verbose.`),Nd(1);r
+eturn}let re=Hge(O.mcp.tools,O.toolPermissionContext),de=DRl([...s,...re],O.toolPermissionContext);R.current=de;let oe=c.sdkUrl?"stdio":c.permissionPromptToolName,ee=oe?xw(oe)?.ser
+verName:void 0,se=(Ge)=>{_.sessionState.notifyStateChanged("requires_action",Ge),QVy?.runClassifierSummaryForBlocked(Ge,_.sessionState)};_.onUserDialogParked=(Ge)=>{QVy?.runClassif
+ierSummaryForBlocked(Ge,_.sessionState)};let Se=Gqy(oe,_,()=>r().mcp.tools,se);if(c.permissionPromptToolName)de=de.filter((Ge)=>!ol(Ge,c.permissionPromptToolName));let ge=eTl(D);if
+(Object.keys(ge).length>0)n((Ge)=>({...Ge,sendMessagePins:ge}));if(V.CLAUDE_CODE_RESUME_INTERRUPTED_TURN){let Ge=await _.restoredWorkerState,Ze=Ge?.internal?.running_background_tas
+ks,ot=Ge?.internal?.orphaned_background_tasks_pending_notification,Kt=Array.isArray(Ze)?Ze:[],mt=Array.isArray(ot)?ot:[],at=new Map;for(let Rt of[...mt,...Kt]){if(typeof Rt?.task_i
+d!=="string"||!Rt.task_id)continue;let yt=at.get(Rt.task_id);if(!yt||!yt.description&&Rt.description)at.set(Rt.task_id,R
+
+#### deferred tool marker count=2
+--- 203375202 ---
+ctions will NOT be enforced.......................before_sandbox_init...............................L' .S.a.n.d.b.o.x. .E.r.r.o.r.:. .....................other...................af
+ter_sandbox_init.........................& ...........................................setup...........................before_loadInitialMessages..........................C...Cannot
+ destructure property 'messages' from null or undefined value.....................q.......................D...............................Y...............(.........................
+..............................................G...........................J...Cannot destructure property 'agentDefinition' from null or undefined value......................Ze....
+..................(.......................................................................warning.................user................8...Error: --rewind-files requires a user mess
+age UUID, but ............'... is not a user message in this session..................................Error: .................Unexpected error................Warning: .............
+.......... tracked .......................path was................paths were...................... skipped: ..................".... Run with --debug for the paths..................
+.."...Files rewound to state at message ......................Q...................|...Error: Input contained only whitespace. Provide a prompt with text through stdin or as a promp
+t argument when using --print.....................Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool alread
+y ran), or it exceeds the tail-scan window. Provide a prompt to continue the conversation.................^...Error: Input must be provided either through stdin or as a prompt argu
+ment when using --print...............J...Error: When using --print, --output-format=stream-json requires --verbose.......................stdio.......................+...Iterator r
+esult interface is not an object......................[print.ts] .................*... orphaned background task(s) after restart......................stopped.................Stoppe
+d by a worker restart: ........... N..........................Y...[print.ts] orphaned-task notification flush failed; keeping orphans pending for re-emit: ..................._...[p
+rint.ts] orphaned-task notification delivery unconfirmed; keeping orphans pending for re-emit.................................j.......................B.......................W.....
+..................F...................4...[print.ts] deferring stale parked prompt cancel for ................;... ..  .a. .p.e.r.s.i.s.t.e.d. .c.o.n.t.r.o.l._.r.e.s.p.o.n.s.e. .m.
+a.y. .a.r.r.i.v.e. .v.i.a. .S.S.E. .c.a.t.c.h.-.u.p...................[print.ts] stale parked prompt cancel failed: ..................error...................after_loadInitialMessa
+ges.......................transcript_hydrated.....................messages=...............................after_modelStr
+--- 327043388 ---
+(c.forkSession)$Mo(D);nHr(D,Boolean(c.forkSession));let K=tHr(D,O.mainLoopModel,(Ge)=>D.push(Ss(Ge,"warning"))),ne=K?rHr(D,K,Boolean(c.forkSession),c.storageV5,c.credentials):void 
+0;if(ne)n((Ge)=>Ge.mainLoopModel===ne?Ge:{...Ge,mainLoopModel:ne});if(D.length===0&&process.exitCode!==void 0)return;let ie;if(c.restrictedStartupModel&&Dqy(c.userSpecifiedModel,c.
+restrictedStartupModel)){let Ge=Vj(c.restrictedStartupModel,zi());if(!D.some((ot)=>ot.type==="system"&&ot.subtype==="informational"&&ot.content.includes(Ge)))D.push(Ss(Ge,"warning"
+));ie=Ss(Ge,"warning")}if(c.rewindFiles){let Ge=D.find((Kt)=>Kt.uuid===c.rewindFiles);if(!Ge||Ge.type!=="user"){process.stderr.write(`Error: --rewind-files requires a user message 
+UUID, but ${c.rewindFiles} is not a user message in this session.`),Nd(1);return}let Ze=r(),ot=await Vqy(c.rewindFiles,Ze,!1);if(!ot.canRewind){process.stderr.write(`Error: ${ot.er
+ror||"Unexpected error"}.`),Nd(1);return}if(ot.skippedLinks)process.stderr.write(`Warning: ${ot.skippedLinks} tracked ${ot.skippedLinks===1?"path was":"paths were"} skipped: ${kQo}
+. Run with --debug for the paths..`);wl(`Files rewound to state at message ${c.rewindFiles}.`),Nd(0);return}let X=typeof c.resume==="string"&&c.resume.trim().length>0,te=Boolean(c.
+sdkUrl);if(typeof t==="string"&&t.trim()===""&&!te&&!Q&&!U){process.stderr.write(t!==""?`Error: Input contained only whitespace. Provide a prompt with text through stdin or as a pr
+ompt argument when using --print.`:X||c.continue?`Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool alread
+y ran), or it exceeds the tail-scan window. Provide a prompt to continue the conversation..`:`Error: Input must be provided either through stdin or as a prompt argument when using 
+--print.`),Nd(1);return}if(c.outputFormat==="stream-json"&&!c.verbose){process.stderr.write(`Error: When using --print, --output-format=stream-json requires --verbose.`),Nd(1);retu
+rn}let re=Hge(O.mcp.tools,O.toolPermissionContext),de=DRl([...s,...re],O.toolPermissionContext);R.current=de;let oe=c.sdkUrl?"stdio":c.permissionPromptToolName,ee=oe?xw(oe)?.server
+Name:void 0,se=(Ge)=>{_.sessionState.notifyStateChanged("requires_action",Ge),QVy?.runClassifierSummaryForBlocked(Ge,_.sessionState)};_.onUserDialogParked=(Ge)=>{QVy?.runClassifier
+SummaryForBlocked(Ge,_.sessionState)};let Se=Gqy(oe,_,()=>r().mcp.tools,se);if(c.permissionPromptToolName)de=de.filter((Ge)=>!ol(Ge,c.permissionPromptToolName));let ge=eTl(D);if(Ob
+ject.keys(ge).length>0)n((Ge)=>({...Ge,sendMessagePins:ge}));if(V.CLAUDE_CODE_RESUME_INTERRUPTED_TURN){let Ge=await _.restoredWorkerState,Ze=Ge?.internal?.running_background_tasks,
+ot=Ge?.internal?.orphaned_background_tasks_pending_notification,Kt=Array.isArray(Ze)?Ze:[],mt=Array.isArray(ot)?ot:[],at=new Map;for(let Rt of[...mt,...Kt]){if(typeof Rt?.task_id!=
+="string"||!Rt.task_id)continue;let yt=at.get(Rt.task_id);if(!yt||!yt.description&&Rt.description)at.set(Rt.task_id,Rt)}
+
+#### Input must be provided either through stdin count=2
+--- 203375439 ---
+.............................setup...........................before_loadInitialMessages..........................C...Cannot destructure property 'messages' from null or undefined v
+alue.....................q.......................D...............................Y...............(.......................................................................G..........
+.................J...Cannot destructure property 'agentDefinition' from null or undefined value......................Ze......................(......................................
+.................................warning.................user................8...Error: --rewind-files requires a user message UUID, but ............'... is not a user message in t
+his session..................................Error: .................Unexpected error................Warning: ....................... tracked .......................path was.......
+.........paths were...................... skipped: ..................".... Run with --debug for the paths...................."...Files rewound to state at message .................
+.....Q...................|...Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print.....................Error: 
+No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool already ran), or it exceeds the tail-scan window. Provide a pro
+mpt to continue the conversation.................^...Error: Input must be provided either through stdin or as a prompt argument when using --print...............J...Error: When usi
+ng --print, --output-format=stream-json requires --verbose.......................stdio.......................+...Iterator result interface is not an object......................[pr
+int.ts] .................*... orphaned background task(s) after restart......................stopped.................Stopped by a worker restart: ........... N.....................
+.....Y...[print.ts] orphaned-task notification flush failed; keeping orphans pending for re-emit: ..................._...[print.ts] orphaned-task notification delivery unconfirmed;
+ keeping orphans pending for re-emit.................................j.......................B.......................W.......................F...................4...[print.ts] defe
+rring stale parked prompt cancel for ................;... ..  .a. .p.e.r.s.i.s.t.e.d. .c.o.n.t.r.o.l._.r.e.s.p.o.n.s.e. .m.a.y. .a.r.r.i.v.e. .v.i.a. .S.S.E. .c.a.t.c.h.-.u.p......
+.............[print.ts] stale parked prompt cancel failed: ..................error...................after_loadInitialMessages.......................transcript_hydrated............
+.........messages=...............................after_modelStrings......................json....................before_runHeadlessStreaming.....................starting_query_loop
+.....................first_message_drained...................type=...................system..................init.......
+--- 327043609 ---
+{...Ge,mainLoopModel:ne});if(D.length===0&&process.exitCode!==void 0)return;let ie;if(c.restrictedStartupModel&&Dqy(c.userSpecifiedModel,c.restrictedStartupModel)){let Ge=Vj(c.rest
+rictedStartupModel,zi());if(!D.some((ot)=>ot.type==="system"&&ot.subtype==="informational"&&ot.content.includes(Ge)))D.push(Ss(Ge,"warning"));ie=Ss(Ge,"warning")}if(c.rewindFiles){
+let Ge=D.find((Kt)=>Kt.uuid===c.rewindFiles);if(!Ge||Ge.type!=="user"){process.stderr.write(`Error: --rewind-files requires a user message UUID, but ${c.rewindFiles} is not a user 
+message in this session.`),Nd(1);return}let Ze=r(),ot=await Vqy(c.rewindFiles,Ze,!1);if(!ot.canRewind){process.stderr.write(`Error: ${ot.error||"Unexpected error"}.`),Nd(1);return}
+if(ot.skippedLinks)process.stderr.write(`Warning: ${ot.skippedLinks} tracked ${ot.skippedLinks===1?"path was":"paths were"} skipped: ${kQo}. Run with --debug for the paths..`);wl(`
+Files rewound to state at message ${c.rewindFiles}.`),Nd(0);return}let X=typeof c.resume==="string"&&c.resume.trim().length>0,te=Boolean(c.sdkUrl);if(typeof t==="string"&&t.trim()=
+==""&&!te&&!Q&&!U){process.stderr.write(t!==""?`Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print.`:X||c.c
+ontinue?`Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool already ran), or it exceeds the tail-scan windo
+w. Provide a prompt to continue the conversation..`:`Error: Input must be provided either through stdin or as a prompt argument when using --print.`),Nd(1);return}if(c.outputFormat
+==="stream-json"&&!c.verbose){process.stderr.write(`Error: When using --print, --output-format=stream-json requires --verbose.`),Nd(1);return}let re=Hge(O.mcp.tools,O.toolPermissio
+nContext),de=DRl([...s,...re],O.toolPermissionContext);R.current=de;let oe=c.sdkUrl?"stdio":c.permissionPromptToolName,ee=oe?xw(oe)?.serverName:void 0,se=(Ge)=>{_.sessionState.noti
+fyStateChanged("requires_action",Ge),QVy?.runClassifierSummaryForBlocked(Ge,_.sessionState)};_.onUserDialogParked=(Ge)=>{QVy?.runClassifierSummaryForBlocked(Ge,_.sessionState)};let
+ Se=Gqy(oe,_,()=>r().mcp.tools,se);if(c.permissionPromptToolName)de=de.filter((Ge)=>!ol(Ge,c.permissionPromptToolName));let ge=eTl(D);if(Object.keys(ge).length>0)n((Ge)=>({...Ge,se
+ndMessagePins:ge}));if(V.CLAUDE_CODE_RESUME_INTERRUPTED_TURN){let Ge=await _.restoredWorkerState,Ze=Ge?.internal?.running_background_tasks,ot=Ge?.internal?.orphaned_background_task
+s_pending_notification,Kt=Array.isArray(Ze)?Ze:[],mt=Array.isArray(ot)?ot:[],at=new Map;for(let Rt of[...mt,...Kt]){if(typeof Rt?.task_id!=="string"||!Rt.task_id)continue;let yt=at
+.get(Rt.task_id);if(!yt||!yt.description&&Rt.description)at.set(Rt.task_id,Rt)}let bt=Array.from(at.values());if(bt.length>0){E(`[print.ts] ${bt.length} orphaned background task(s)
+ after restart`),D.push(Cn({content:nSm(bt),isMeta:!0}));for(let yt of bt)Xg(yt.task_id,"stopped",{summary:`Stopped by a

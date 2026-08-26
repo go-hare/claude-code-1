@@ -50,13 +50,15 @@ export function isInterruptAbortReason(reason: unknown): boolean {
 
 /**
  * densable `m0e` / `Cxg` — abort reasons that must NOT yield
- * `[Request interrupted by user]` (2.1.218 #12):
+ * `[Request interrupted by user]` (2.1.218 #12 + 2.1.236 #27):
  * - `interrupt`: submit-interrupt; the following user message is enough context
  * - `refusal-fallback-edit`: model refusal → edit-prompt abort; not a user cancel
+ * - `remote-cancel`: print/SDK SIGTERM (`nC("remote-cancel")`); no interrupted-turn
  */
 const SUPPRESS_INTERRUPTION_MESSAGE_REASONS = new Set([
   'interrupt',
   'refusal-fallback-edit',
+  'remote-cancel',
 ])
 
 export function shouldSuppressInterruptionMessage(reason: unknown): boolean {
@@ -64,9 +66,15 @@ export function shouldSuppressInterruptionMessage(reason: unknown): boolean {
   return msg !== undefined && SUPPRESS_INTERRUPTION_MESSAGE_REASONS.has(msg)
 }
 
-/** densable `Ede` — shutdown abort → mark interrupt message for resume. */
+/** densable print/SDK SIGTERM reason (`nC("remote-cancel")`). */
+export function isRemoteCancelAbortReason(reason: unknown): boolean {
+  return getAbortReasonMessage(reason) === 'remote-cancel'
+}
+
+/** densable `Ede` — shutdown / SIGTERM abort → mark interrupt for resume. */
 export function isShutdownAbortReason(reason: unknown): boolean {
-  return getAbortReasonMessage(reason) === 'shutdown'
+  const msg = getAbortReasonMessage(reason)
+  return msg === 'shutdown' || msg === 'remote-cancel'
 }
 
 /**

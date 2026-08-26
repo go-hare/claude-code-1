@@ -1,0 +1,68 @@
+
+##### needle="function Qen("
+--- @313578907 ---
+function Qen(e){let{getRegisteredSessionName:t,getHeldSessionNames:r}=(su(),pn(XFn)),{ownMessagingSocket:n}=(H$(),pn(nSe)),o=t(),i=n();if(o===void 0||i===void 0||xD(e).scheme!=="other")return"no";let s=WCe(e);if(s!==null){let c=Vu(s.name);if(!v_a(s.ref,"session",i))return"no";if(c!==Vu(o.name)){let u=r().get(c);if(u===void 0)return"no";return u==="derived"?"categorical":"note"}}else if(Vu(e)!==Vu(o.name))return"no";let{getSessionNamingState:a}=(K3e(),pn(bmp));return o.source==="derived"||(o.source==="user"||o.source==="collision")&&a().userTypedName===o.name?"categorical":"note"}function DEe(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name);if(t){let i=o!==null?` ("${o}" is the name OTHER sessions use for it)`:"";return`'${e}' is this process's own main session${i} \u2014 from inside it, ${r} instead.`}return o!==null?`'${e}' is this session itself \u2014 "${o}" 
+(total shown 1)
+
+##### needle="function Zen("
+--- @313578769 ---
+function Zen(e){return!e.cloudUnavailable&&!e.bridgeUnavailable&&!e.localUnavailable&&!e.searchTruncated&&!e.pinnedIdentityClaimedLocally}function Qen(e){let{getRegisteredSessionName:t,getHeldSessionNames:r}=(su(),pn(XFn)),{ownMessagingSocket:n}=(H$(),pn(nSe)),o=t(),i=n();if(o===void 0||i===void 0||xD(e).scheme!=="other")return"no";let s=WCe(e);if(s!==null){let c=Vu(s.name);if(!v_a(s.ref,"session"
+(total shown 1)
+
+##### needle="function Jen("
+--- @313578404 ---
+function Jen(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name),i=o===null?"this session":`this session ("${o}")`;return t?`
+('${e}' also addresses ${i} \u2014 this process's main session; to reach the main conversation from inside it, ${r}.)`:`
+('${e}' also addresses ${i} itself \u2014 if you meant yourself, there is no one to send to.)`}function Zen(e){return!e.cloudUnavailable&&!e.bridgeUnavailable&&!e.localUnavailable&&!e.searchTruncated&&!e.pinnedIdentityClaimedLocally}function Qen(e){let{getRegisteredSessionName:t,getHeldSessionNames:r}=(su(),pn(XFn)),{ownMessagin
+(total shown 1)
+
+##### needle="DEe("
+--- @313579502 ---
+==Vu(o.name))return"no";let{getSessionNamingState:a}=(K3e(),pn(bmp));return o.source==="derived"||(o.source==="user"||o.source==="collision")&&a().userTypedName===o.name?"categorical":"note"}function DEe(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name);if(t){let i=o!==null?` ("${o}" is the name OTHER sessions use for it)`:"";return`'${e}' is this process's own main sessio
+--- @313681846 ---
+014 cross-machine message requires explicit approval",classifierApprovable:!1,circuitBreaker:"isolatePeerMachines"}}}if(o.kind==="cloud-session"){if(XFe(o.sessionId))return{behavior:"deny",message:_g(DEe(e.to,g5(t))),decisionReason:{type:"other",reason:vWi}};let{isRemoteControlPeerUnreachableFromHere:i,formatUnreachableElevatedRefusal:s}=(v$(),pn(MCe));if(o.via==="remote-control"&&i())return ptn({
+--- @313684991 ---
+==="did")return{result:!1,message:u0m,errorCode:9}}let r=Qei(e.to,e_);if(r!==void 0)return{result:!1,message:r,errorCode:9};{let n=xD(e.to);if(n.scheme==="uds"&&VEt(n.target))return{result:!1,message:DEe(e.to,g5(t)),errorCode:9}}if(e.to.includes("@"))return{result:!1,message:"to must be a bare teammate name \u2014 there is only one team per session",errorCode:9};if(typeof e.message==="string"&&e.m
+--- @313685347 ---
+rCode:9};if(typeof e.message==="string"&&e.message.trim().length===0&&!fWt(e))return{result:!1,message:k0m,errorCode:9};if(xD(e.to).scheme==="bridge"){if(XFe(xD(e.to).target))return{result:!1,message:DEe(e.to,g5(t)),errorCode:9};if(typeof e.message!=="string")return{result:!1,message:"structured messages cannot be sent cross-session \u2014 only plain text",errorCode:9};return{result:!0}}if(xD(e.to
+--- @313688269 ---
+uds")&&!rg())return{data:{success:!1,message:Pjn}};let T=Tso(S.scheme==="bridge"?"bridge":"uds");if(S.scheme==="bridge"){if(XFe(S.target))return s("bridge","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(!g0m())return{data:{success:!1,message:h0m}};let{postInterClaudeMessage:k,isLikelyStaleBridgeError:C,classifyBridgeSendError:x}=(Wio(),pn(zio)),R=Ken(t.session,S
+--- @313689950 ---
+ address.`:"";return{data:{success:!1,message:`Failed to send to ${e.to}: ${W.error??"unknown"}${Y}`}}}if(S.scheme==="uds"){if(VEt(S.target))return s("uds","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};let{sendToUdsSocket:k}=(H$(),pn(nSe)),{subscribeToPeerIdle:C,idleSubscriptionLines:x}=(s3i(),pn(i3i)),{notify:R,refusedForPrincipal:I}=UTl(e,t),M=e.message.trim().l
+--- @313691488 ---
+"local-session"||p.kind==="cloud-session")&&!rg())return{data:{success:!1,message:Pjn}};if(p.kind==="cloud-session"&&XFe(p.sessionId))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(p.kind==="local-session"&&Xen(p.sock))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(p.kind==="local-se
+--- @313691631 ---
+"unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(p.kind==="local-session"&&Xen(p.sock))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(p.kind==="local-session"&&Jio(e.to,p.sock))return s("unresolved",void 0,{degradedClass:"claimed_locally"}),{data:{success:!1,message:Zio(e.to),display:Kwm(e.to)}
+--- @313691940 ---
+0,{degradedClass:"claimed_locally"}),{data:{success:!1,message:Zio(e.to),display:Kwm(e.to)}};if(p.kind==="local-session"&&VEt(p.sock))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(JRw(e,n,t.toolUseId)&&p.kind!=="local-session"&&p.kind!=="ambiguous"&&p.kind!=="not-found"){let{idleSelfTargetMessage:S}=(s3i(),pn(i3i));return s("unresolved","i
+--- @313692996 ---
+of e.message==="string"?Qen(e.to):"no",w=p.closest.some((I)=>Vu(I.name)===Vu(WCe(e.to)?.name??e.to));if(S==="categorical"&&!w&&Zen(p))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};let T=p.closest.length>0?` Did you mean: ${p.closest.map((I)=>typeof e.message==="string"&&I.where==="in-process"?VCe(I):I.name).join(", ")}?`:"",k=typeof e.message
+--- @313695440 ---
+""}`}}}if(p.kind==="ambiguous"){let S=typeof e.message==="string"?Qen(e.to):"no";if(S==="categorical"&&p.matchedBy==="prefix"&&Zen(p))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};let w=Date.now(),T=p.candidates.map((G)=>`  ${DFn(G,w)}`).join(`
+`),k=p.total>p.candidates.length?`
+  \u2026and ${p.total-p.candidates.length} more${f?` \u2014 use 
+--- @313719328 ---
+Wi}`:""}`,pin:{displayName:o.displayName,kind:o.refKind,id:o.sessionId}}}case"ambiguous":{let i=Qen(e);if(i==="categorical"&&o.matchedBy==="prefix"&&Zen(o))return{kind:"refused",reason:"self",message:DEe(e,g5(r),y3i)};let s=Date.now(),a=o.candidates.filter((u)=>u.where!=="in-process"),l=a.map((u)=>`  ${DFn(u,s)}`).join(`
+`),c=o.bridgeUnavailable?`
+Your account's other sessions (Remote Control and 
+--- @313720771 ---
+e the file as @<path> instead.${c}`}}case"not-found":{let i=Qen(e),s=o.closest.some((h)=>Vu(h.name)===Vu(WCe(e)?.name??e));if(i==="categorical"&&!s&&Zen(o))return{kind:"refused",reason:"self",message:DEe(e,g5(r),y3i)};let a=r.options.tools.some((h)=>ol(h,e_)),l=o.closest.filter((h)=>h.where!=="in-process"),c=l.length>0?` Did you mean: ${l.map((h)=>h.name).join(", ")}?`:"",u=a?`Use ${e_} to see the
+(total shown 13)
+
+##### needle="Jen("
+--- @313578413 ---
+ome((r)=>typeof r==="string"&&Mf(r)===t)}function g5(e){return e.teammateContext!==void 0||e.agentContext!==void 0&&MZe(e.agentContext)}function sWt(e){return`Not sent \u2014 '${e}' is this session's own name.`}function Jen(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name),i=o===null?"this session":`this session ("${o}")`;return t?`
+('${e}' also address
+--- @313694721 ---
+":p.localUnavailable?"local_unlisted":"not_reachable",p.searchTruncated?{searchTruncated:!0}:void 0),{data:{success:!1,message:`No agent named '${e.to}' is reachable.${T}${C}${x}${R}${p.searchTruncated?rtn:""}${S!=="no"?Jen(e.to,g5(t)):""}
+${k}`,display:`Not sent \u2014 no agent named '${e.to}' is reachable.${p.closest.length>0?` Did you mean: ${p.closest.map((I)=>I.name).join(
+--- @313699178 ---
+agents are named '${e.to}' (${Q}${p.total>p.candidates.length?", \u2026":""}); asked Claude to pick one.`}${C&&p.total!==1?` Note: ${W}.`:""}${R}${B}`;return{data:{success:!1,message:`${I}
+${T}${k}${O}${M}${x}${S!=="no"?Jen(e.to,g5(t)):""}`,display:Y}}}await Dml({refresh:!0,credentials:t.credentials});let h=await Qwm({session:t.session,to:e.to,message:e.message,resolved:p,appSt
+--- @313720476 ---
+ntity, that your user did not set up, is suspicious: ask the user before confirming anyone.`;return{kind:"refused",message:a.length>0?`'${e}' matches ${a.length} peer session(s). Re-send with the ref:
+${l}${c}${i!=="no"?Jen(e,g5(r),y3i):""}`:`'${e}' matches only agents in this session \u2014 use ${Jm} and reference the file as @<path> instead.${c}`}}case"not-found":{let i=Qen(e
+--- @313722013 ---
+d just now, so they were not searched; retry if you meant a session on this machine.`:"";return{kind:"refused",message:`No peer session named '${e}' is reachable.${c}${d}${p}${m}${o.searchTruncated?rtn:""}${f}${i!=="no"?Jen(e,g5(r),y3i):""}
+${u}`}}default:return{kind:"refused",message:`'${e}' is an agent in this session \u2014 it already shares your filesystem, so there is noth
+(total shown 5)

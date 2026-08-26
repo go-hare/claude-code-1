@@ -1,0 +1,272 @@
+--- total hits for b'API returned empty or malformed response': scanning stopped at 0 ---
+
+=== needle=b'empty or malformed' hit#1 @92919799 ===
+ access but the mutator is stopped.
+.Fatal: collector does not believe that the world is stopped.
+.# Bun Heap Profile
+
+Error: No heap profile nodes found. The heap snapshot may be empty or malformed.
+. bytes of executable memory with JITCompilationMustSucceed.
+.environment option "mimalloc_%s" is deprecated -- use "mimalloc_%s" instead.
+. is expected to be dead.
+.
+Grep compatibility mode: -Z and -z reassigned to --null and --null-data.
+.ubrk_swap(): too few bytes (%d after ICU Data header) for break data.
+. changed the IR.
+. ms).
+.: validation failed: %s (%s:%d).
+.) (%s:%d).
+.-----
+.  },
+.  "%s": %lld,
+."trace_
+
+=== needle=b'empty or malformed' hit#2 @296108027 ===
+nized text",other:"body is unrecognized"};Pai=class Pai extends wt{name="UnexpectedApiResponseError";bodyKind;bodyBytes;response;constructor(e){let t=Tbv(e);super(`API returned an empty or malformed response (HTTP ${e.status??"unknown"}) \u2014 check for a proxy or gateway intercepting the request.${t.summary}`,"API returned an empty or malformed response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function YXe(){return K.CLAUDE_CODE_RETRY_WATCHDOG}function uzp(e){return bbe(e)||e instanceof Es&&e.status===429}function L2n(e){return K.CLAUDE_CODE_REMOTE&&e instanceof Es&&(
+
+=== needle=b'empty or malformed' hit#3 @296108177 ===
+Tbv(e);super(`API returned an empty or malformed response (HTTP ${e.status??"unknown"}) \u2014 check for a proxy or gateway intercepting the request.${t.summary}`,"API returned an empty or malformed response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function YXe(){return K.CLAUDE_CODE_RETRY_WATCHDOG}function uzp(e){return bbe(e)||e instanceof Es&&e.status===429}function L2n(e){return K.CLAUDE_CODE_REMOTE&&e instanceof Es&&(e.status===401||e.status===403)}function $bv(e){if(!(e instanceof uk))return!1;let t=lF(e);return t!==null&&Vse.has(t.code)}function Fbv(e){if(!(e ins
+
+--- total hits for b'empty or malformed': scanning stopped at 3 ---
+
+--- total hits for b'why original streaming failed': scanning stopped at 0 ---
+
+--- total hits for b'body kind': scanning stopped at 0 ---
+
+=== needle=b'content type' hit#1 @85943051 ===
+zationBearer ..2error: Invalid response from GitHub (missing body)..?.[0m.[31merror.[0m: Invalid response from GitHub (missing body)..:error: Invalid response from GitHub (missing content type)..G.[0m.[31merror.[0m: Invalid response from GitHub (missing content type)..,error: Unexpected content type from GitHub: ...9.[0m.[31merror.[0m: Unexpected content type from GitHub: ...USERPROFILE.Fetching package.json)https://registry.npmjs.org/@bun-examples/../latest.Parsing package.jsondistDownloading tarball.Error fetching tarball: ...!Error fetching tarball: .[0m.[31m...[0m..?package.json is missing tarball url
+
+=== needle=b'content type' hit#2 @85943125 ===
+[31merror.[0m: Invalid response from GitHub (missing body)..:error: Invalid response from GitHub (missing content type)..G.[0m.[31merror.[0m: Invalid response from GitHub (missing content type)..,error: Unexpected content type from GitHub: ...9.[0m.[31merror.[0m: Unexpected content type from GitHub: ...USERPROFILE.Fetching package.json)https://registry.npmjs.org/@bun-examples/../latest.Parsing package.jsondistDownloading tarball.Error fetching tarball: ...!Error fetching tarball: .[0m.[31m...[0m..?package.json is missing tarball url. This is an internal error!...Error parsing package: ... Error parsing pa
+
+=== needle=b'content type' hit#3 @85943159 ===
+om GitHub (missing body)..:error: Invalid response from GitHub (missing content type)..G.[0m.[31merror.[0m: Invalid response from GitHub (missing content type)..,error: Unexpected content type from GitHub: ...9.[0m.[31merror.[0m: Unexpected content type from GitHub: ...USERPROFILE.Fetching package.json)https://registry.npmjs.org/@bun-examples/../latest.Parsing package.jsondistDownloading tarball.Error fetching tarball: ...!Error fetching tarball: .[0m.[31m...[0m..?package.json is missing tarball url. This is an internal error!...Error parsing package: ... Error parsing package: .[0m.[31m...[0m..  bun cre
+
+=== needle=b'content type' hit#4 @85943220 ===
+b (missing content type)..G.[0m.[31merror.[0m: Invalid response from GitHub (missing content type)..,error: Unexpected content type from GitHub: ...9.[0m.[31merror.[0m: Unexpected content type from GitHub: ...USERPROFILE.Fetching package.json)https://registry.npmjs.org/@bun-examples/../latest.Parsing package.jsondistDownloading tarball.Error fetching tarball: ...!Error fetching tarball: .[0m.[31m...[0m..?package.json is missing tarball url. This is an internal error!...Error parsing package: ... Error parsing package: .[0m.[31m...[0m..  bun create .. ..
+
+..  .[0m.[1mbun create .[36m.	.[0m.[1m ...[0m
+
+.. 
+
+=== needle=b'content type' hit#5 @85980680 ===
+
+      pages: result.paths.map(path => path.params),
+    };
+  }
+  // Allow returning the array directly
+  return result;
+}
+
+// When a dynamic build uses static assets, Bun can map content types in the
+// user's `Accept` header to the different static files.
+export const contentTypeToStaticFile = {
+  "text/html": "index.html",
+  "text/x-component": "index.rsc",
+};
+
+/** Instead of using AbortController, this is used */
+export interface MiniAbortSignal {
+  aborted: Error | undefined;
+  /** Caller must set `aborted` to true before calling. */
+  abort: () => void;
+}
+// This file is loaded in the SSR graph, mea
+
+=== needle=b'content type' hit#6 @92009660 ===
+Expires.internal:sql/postgres.builtin://internal/sql/postgres.ares.EPres.internal:streams/iter/types.builtin://internal/streams/iter/types.node:util/types.selected-attribute-types.content types. and 'list' to show a detailed list of file types.too many basic types.entryTypes.supportedEntryTypes.id-it-signKeyPairTypes.id-it-encKeyPairTypes.columnTypes.timezoneTypes.edgeTypes.operandTypes.JSC_useTrustedTypes.Statement must be executed before accessing declaredTypes.JSC_useWasmJSTypes.Selected Attribute Types.named pipes.IsGeometricShapes.does not have a 'maximum' but the module requires that it does.did not
+
+--- total hits for b'content type': scanning stopped at 6 ---
+
+=== needle=b'setup-token' hit#1 @114126312 ===
+llback failed: .....................	.......OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login..................	...#...tengu_oauth_401_recovered_from_disk.............	.......oauth_401_disk_read_failed......................	..."...OAuth 401 recovery: waiting up to ..............	.......ms for a rotated env token......................	...'...tengu_oauth_401_recovered_from_rotation.........	... ...oauth_401_skipped_user_env_token........	...$...oauth_4
+
+=== needle=b'setup-token' hit#2 @114468362 ===
+ requires claude.ai subscription auth.............	.......to use Remote Control...........	.......Remote Control requires a full-scope login token. Long-lived tokens (from `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) are limited to inference-only for security reasons. Run `claude auth login` to use Remote Control............	.......Unable to determine your organization for Remote Control eligibility. Run `claude auth login` to refresh your account information...............................	.......unavailable.............	...e...Couldn't verify your organization's Remote Control policy. Retry, or run 
+
+=== needle=b'setup-token' hit#3 @166709864 ===
+....................	.......n...............	.......about_to_retry..................	.......confirm:yes.............	.......Confirmation............	.......success.........	.......setup-token.............	.......gateway_done............	.......bedrock_done............	.......vertex_done.............	.......aws_refresh_done........	.......error...........	.......o...............	.......t.......................	.......e...............	.......column..........	.......waiting_for_login.......................	...1...Browser didn't open? Use the url below to sign in...............	....... ......................
+
+=== needle=b'setup-token' hit#4 @166720008 ===
+..i.!...
+.....i.............................................................................................................................................................	.......setup-token.............	.......n...............	.......ready_to_start..........	.......claudeai........	.......h...............	.......console.........	.......g...............	......gateway_setup...........	.......idle.............................................@..#....@@..@..#....@..........$...;...R...^...t.........................o...............................................p.......................p....................
+
+=== needle=b'setup-token' hit#5 @166722016 ===
+............4...............................G.........................i.....@...............H...............X...............`.......................	.......n...............	.......setup-token.............	.......h...............	.......claudeai.................................@P..@0.....2.....................o......................zp.....................>.......>....................D..H.......................................................h...................................................................................................................................................................h..
+
+=== needle=b'setup-token' hit#6 @166723376 ===
+....	.......h...............	.......tengu_oauth_claudeai_forced.............	.......console.........	.......tengu_oauth_console_forced..............	.......g...............	.......setup-token.............	.......n...............	.......tengu_oauth_gateway_forced......
+................................................@...@...b...@.>.@...a...@.>.@p......@.%.a..............6...M...k...............4.......................Xtp.....................(.......................@tp.......................o.........................1.......2................D..H.......................................................h......
+
+--- total hits for b'setup-token': scanning stopped at 6 ---
+
+=== needle=b'unexpected extra' hit#1 @309769803 ===
+
+    else if (a.startsWith("--")) { console.error(\`unknown flag: \${a}\`); process.exit(2); }\r
+    else if (positional === null) { positional = a; }\r
+    else { console.error(\`unexpected extra positional: \${a}\`); process.exit(2); }\r
+  }\r
+  for (const [k, allowed] of Object.entries(CHOICES)) {\r
+    if (opts[k] != null && !allowed.includes(opts[k])) {\r
+      console.error(\`--\${k} must be one of: \${allowed.join(", ")} (got \${JSON.stringify(opts[k])})\`); process.exit(2);\r
+    }\r
+  }\r
+  const palette = splitColors(positional);\r
+  if (!palette.length) { console.error("usage: node validate_palette
+
+--- total hits for b'unexpected extra': scanning stopped at 1 ---
+
+=== needle=b'extra argument' hit#1 @89569682 ===
+[48;5;13m.[38;5;13m.[48;5;11m.[38;5;11m.[48;5;15m.[38;5;15mvalid UTF-8 capture namefewer than u32::MAX flags"similar flags that are available: ...failed to initialize logger: ..no extra arguments found from configuration fileripgrep::flags::parsenot reading config files because --no-config is presentRIPGREP_CONFIG_PATH.%: arguments loaded from config file: ..ripgrep::flags::config..:..
+.:failed to read the file specified in RIPGREP_CONFIG_PATH: ..
+.)failed to get current working directory: ..
+did your CWD get deleted?.pattern contains "\0"....
+
+Consider enabling text mode with the --text flag (or -a for sho
+
+=== needle=b'extra argument' hit#2 @106922685 ===
+.k. .i.n.v.o.c.a.t.i.o.n. ..  .u.n.e.x.p.e.c.t.e.d. .a.r.g.u.m.e.n.t.s. .a.f.t.e.r. .t.h.e. .U.R.I...
+.........	.......The OS protocol handler passes exactly `--handle-uri <uri>`; extra arguments indicate argument injection via the URL. If invoking --handle-uri manually, place other flags before it.....................................@.$.H...P.L.@P=.@.$.@ ......E.3.@`].G...@.,..`....4..0%........*...,...;...C...................X...........
+...................z...........=........H..H........................)y.....................p)y.....h........................................k.............................
+
+=== needle=b'extra argument' hit#3 @175358417 ===
+...	.......--debug-to-stderr...............	.......-d2e............	.......--debug=........	......--debug-file=...........	.......--debug-file....................	..."...warning: extra arguments ignored: ..............	....... ...............	.......
+...................................3......................=.....@P?.G.....+.@.$.C...@pL.D...@`4.C...F.3.@...@ ..G.....+.@pM.@ ..C...@.4.@.$.@.$.@.%.@.$.K.....L.@.T.K.....L.@.U.@@%.....@.5.G....p*.@.O.E...@p4....,....@.D.@ ..G.....+.....@.$.G..D....@.t.E....QL......../...8...Q...S...e...t...x...|...............................................a..................
+
+=== needle=b'extra argument' hit#4 @199498481 ===
+...	.......--debug-to-stderr...............	.......-d2e............	.......--debug=........	......--debug-file=...........	.......--debug-file....................	..."...warning: extra arguments ignored: ..............	....... .......
+...........................-....................@.m.@ ..G.....+.@pM.@ ..C...@.4.I...@.4.....@.U.@.$.@.$.@.%.@.$.K.....L.@.T.K.....L.@.U.@@%.....@.5.G....p*.@.O.E...@p4.........@.D.@ ..G.....+.....@.D.G.....+...$.@p..E....QL..@q............7...;...?...C...G...]...s...w.....................................................|.......................{.......................z........
+
+=== needle=b'extra argument' hit#5 @288183474 ===
+return null;if(e.length>t+2)return`claude: rejected deep-link invocation \u2014 unexpected arguments after the URI.
+`+"The OS protocol handler passes exactly `--handle-uri <uri>`; extra arguments indicate argument injection via the URL. If invoking --handle-uri manually, place other flags before it.";return null}function wA(){return`claude-code/${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.234",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issu
+
+=== needle=b'extra argument' hit#6 @307403157 ===
+==="-d2e"||o.startsWith("--debug=")||o.startsWith("--debug-file="))continue;if(o==="--debug-file"&&n+1<e.length){n++;continue}r.push(o)}if(r.length===0)return null;return`warning: extra arguments ignored: ${r.join(" ")}
+`}function k5l(){let e=Rwh(process.argv.slice(2));if(e)process.stderr.write(e)}async function u9i(e){let t=new Set,r,n=0;do{let o=await e.listEntries({namespace:"job"},{cursor:r,skipScopeStats:!0}).catch(()=>{return});if(o===void 0||!o.ok){E(`[bg] v5 jobs listing failed: ${o===void 0?"rejected":o.error.code}`);return}for(let i of o.value.items)if(i.kind==="scope"&&i.scope.namespace==="job"&&
+
+--- total hits for b'extra argument': scanning stopped at 6 ---
+
+--- total hits for b'rejects unexpected': scanning stopped at 0 ---
+
+=== needle=b'.claude.json' hit#1 @99342160 ===
+...syncerStopped...................armLateStart............	......./mnt/user-data/working..........	.......synced_file_limit_exceeded..............	........env.....................claude.json............	].......git............	.......config..................	.......Claude's conflicted copy...............120000..........	.......S.	.....`...............	.......tree....................	...^...File sync stopped for this session: this directory has more files than per-turn sync can track..........	...l...File sync is off for this session: the commit the cloud session started from cannot be read in this chec
+
+=== needle=b'.claude.json' hit#2 @114013079 ===
+.....	...b...AWS auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal...............	...=...Error running awsAuthRefresh (in settings or ~/.claude.json):...............................!....................@...@`$.k...@...R....$M.@`,.D...@.m.I...@ }.@.D.@0....$....f.....ALi......L....A.....ALF....@.<.........@.4.C...@P,.R....$M.@`,.D..............U...v...y...................................%...S.......................xi.....................XZ...............................................Z......................hx......................0H.......................q.....
+
+=== needle=b'.claude.json' hit#3 @114018121 ===
+...	...2...AWS credentials retrieved from awsCredentialExport..............	.......string..........	...W...Error getting AWS credentials from awsCredentialExport (in settings or ~/.claude.json):.....................................Y............................@.<..0-.......T......pT.....@.lG...}........N...@.........<.@0......@`/.n...@...i...../.@ ....k?....I.....3.@ %.G...@1M.t....O?.....@ ..G....r4.BS4.. ;..p=.@ ......@.<.@..E....@..P......<.@ ..v...@./.K....P5...=.....@.4......pL.@P..L...@.e.P...@.e.M.....e.....@.4.....@PT........[.....AL`....@.<.@...E.....\.....@.4.@ ..H...M.3...=.....@.4.@ ..E.......
+
+=== needle=b'.claude.json' hit#4 @114052767 ===
+.....	...b...GCP auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal...............	...=...Error running gcpAuthRefresh (in settings or ~/.claude.json):...........
+................................................@...@`$.k...@...R....$M.@`,.D...@.U...$....f.....ALi......L....A.....ALI......<.....@.4.C...@P,.R....$M.@`,.D..........U...\...~...............S.......................................................................(.......................H.......................P.
+......................Y......................0......................X...........a.......j"0
+
+=== needle=b'.claude.json' hit#5 @114623347 ===
+.h...............x.......i...............................	...............).......................
+.......................	.......key.............................	...I...Watching ~/.claude.json for other processes through the storage interface.......................	...`...Watching ~/.claude.json through the storage interface failed; staying on the fs.watchFile poll: ........	.......warn.....................................................@...J.............4..pl..r......C...@.LM....@..U......<.@ ..F.....3...e.@ ......@.<e....@..wl...@.......@..............{..................................................
+
+=== needle=b'.claude.json' hit#6 @114623451 ===
+.................	.......key.............................	...I...Watching ~/.claude.json for other processes through the storage interface.......................	...`...Watching ~/.claude.json through the storage interface failed; staying on the fs.watchFile poll: ........	.......warn.....................................................@...J.............4..pl..r......C...@.LM....@..U......<.@ ..F.....3...e.@ ......@.<e....@..wl...@.......@..............{...............................................................................................(................................................&.........
+
+--- total hits for b'.claude.json': scanning stopped at 6 ---
+
+=== needle=b'read-only' hit#1 @70238088 ===
+PE: "broken pipe",
+  EPROTO: "protocol error",
+  EPROTONOSUPPORT: "protocol not supported",
+  EPROTOTYPE: "protocol wrong type for socket",
+  ERANGE: "result too large",
+  EROFS: "read-only file system",
+  ESHUTDOWN: "cannot send after transport endpoint shutdown",
+  ESPIPE: "invalid seek",
+  ESRCH: "no such process",
+  ETIMEDOUT: "connection timed out",
+  ETXTBSY: "text file is busy",
+  EXDEV: "cross-device link not permitted",
+  UNKNOWN: "unknown error",
+  EOF: "end of file",
+  ENXIO: "no such device or address",
+  EMLINK: "too many links",
+  EHOSTDOWN: "host is down",
+  EREMOTEIO: "remote I/O error"
+
+=== needle=b'read-only' hit#2 @71545408 ===
+nonymous = filename === "" || filename === ":memory:";
+    if (anonymous && (flags & constants.SQLITE_OPEN_READONLY) !== 0)
+      throw Error("Cannot open an anonymous database in read-only mode.");
+    if (!SQL)
+      initializeSQL();
+    this.#handle = SQL.open(anonymous ? ":memory:" : filename, flags, this), this.filename = filename;
+  }
+  #internalFlags = 0;
+  #handle;
+  #queryCache = /* @__PURE__ */ new Map;
+  filename;
+  get handle() {
+    return this.#handle;
+  }
+  get inTransaction() {
+    return SQL.isInTransaction(this.#handle);
+  }
+  static open(filename, options) {
+    return new Database(f
+
+=== needle=b'read-only' hit#3 @86473346 ===
+to an empty blob is not implemented yet...................................new File(bits, name) expects at least 2 argumentsCannot write to a Blob backed by bytes, which are always read-onlyCannot write to a detached Bloboptions.type%0D%0AFailed to stream bytes from s3 bucketFailed to stream bytes to s3 bucketfetch() failedInvalid URLInvalid portURL must be HTTP or HTTPSfetch.preconnectfetch() expects a string, but received Undefinedfetch() expects a string, but received Nullfetch() expects a string, but received Stringfetch() expects a string, but received Objectfetch() expects a string, but received B
+
+=== needle=b'read-only' hit#4 @86550671 ===
+finedBlob.global_this set at constructionoptions.contentEncodingoptions.contentDisposition----WebKitFormBoundary--
+multipart/form-data; boundary=chunkSize must be a numberBlob is read-onlyBlob.onStructuredCloneDeserialize failedblob.write(pathOrFdOrBlob, blob) expects a Blob-y thing to writeFormData missing boundary	FormData ..Tag start should be set at this pointDecompression failedThe file read did not complete before its thread stoppedM_SEARCH.......................... ..@....Alloc...........................@8.@............................ _.A....Core.............................{3A....MaxPathExcee
+
+=== needle=b'read-only' hit#5 @86704536 ===
+econnection abortednot connectedaddress in useaddress not availablenetwork downbroken pipeentity already existsoperation would blocknot a directoryis a directorydirectory not emptyread-only filesystem or storage mediumfilesystem loop or indirection limit (e.g. symlink loop)stale network file handleinvalid input parameterinvalid datatimed outwrite zerono storage spaceseek on unseekable filequota exceededfile too largeresource busyexecutable file busydeadlockcross-device link or renametoo many linksinvalid filenameargument list too longoperation interruptedunsupportedin progresstoo many open filesinput/o
+
+=== needle=b'read-only' hit#6 @87440775 ===
+t available in a server component. If you need interactivity, consider converting part of this to a Client Component (by adding `"use client";` to the top of the file)..Writing to read-only method ".." will throw.!Writing to getter-only property ".." will throw.#Reading from setter-only property ".." will throw.%Cannot assign to property on import "..".Cannot specify the "__proto__" property more than once per object.Cannot "continue" to label ..Cannot use "continue" hereinfallible: name checkedinfallible: in namespace.".." is not declared in this file.Cannot use "break" hereinternal error: entered unr
+
+--- total hits for b'read-only': scanning stopped at 6 ---
+
+=== needle=b'readonly' hit#1 @13680379 ===
+H.tnknown.H9.......H.orivate.H9.......H.package.H9...0...H.declare.H9.......H...K\..;..........H....\.Hc..H..H....M...H..H.cebuggerH9.......H.debuggerH9...Y	..H.abstractH9...p	..H.readonlyH9...D...H...K\..<..........H..^.\.Hc..H..H....M.....O.H..I..I.implemenM1.I..I..ts..M	.......I.instanceL1.H..of..H	.................D..H.U. .<.......D.}WH..H.6H.EHL.p.f..D..D..'I..=......H..6......L.........H..D..A.V ......0%..H..I...M.m.u...%..H.nbject..H9.......H.symbol..H9.......H.return..H9.......H.number..H9.......H...I\..3..........H..&.\.Hc..H..H..i.M...H.`wait...H9..._...H.super...H9...f...H.never...H9.......
+
+=== needle=b'readonly' hit#2 @18912350 ===
+.....H.unique..H9...H...H.string..H9...|...H.symbol..H9.......H.E.....Ic..L....A..A..H.H.. H	.H.never...H9............H.infer...H9.......H.keyof...H9...-...H.E.....Ic..L....M..1.H.readonlyI9........I.abstractM9..............................H.bigint..H9.tqH.object..H9.......H.number..H9.......H.E.....Ic..L....H.E.....Ic..L..........'H.E.....Ic..L....H.E.....Ic..L...............Ic..L....H....#..<....
+....9...]...........H.E.....Ic..L....H.E.....Ic..L....H.M H...1....} .........E$D..e%..
+......
+..H..1.E1..u...<....
+....9....uN..3..........`...H......H......H..H......H...."..<...I
+....3......9...
+u......
+
+=== needle=b'readonly' hit#3 @18918916 ===
+e..H9...k...H.string..H9.......H.symbol..H9.......H......H.M.....Hc..H........H.H.. H	.H.never...H9............H.infer...H9.......H.keyof...H9.......H..w...H.M.....Hc..H....L..1.H.readonlyI9........I.abstractM9..........................5...H.bigint..H9.......H.object..H9.......H.number..H9.......H...~..H.M.....Hc..H....H...~..A..D..Hc..H..........5H...~..H.M.....Hc..H....H...~..H.M.....Hc..H...........H.v~......Hc..H....H....	..<...S......9...<].......o...H..>~..H.M.....Hc..H....H..&~..H.M.....Hc..H....H...z	..<.........9...E..\...L..P...H......H......H..H)....	..L9....	..H.....(...H..H...f.<.is..6.
+
+=== needle=b'readonly' hit#4 @18923150 ===
+.....H.unique..H9...J...H.string..H9...~...H.symbol..H9.......H.M.....Ic..L....A.	A..Q.H.. H	.H.never...H9............I.infer...L9.......H.keyof...H9.../...H.M.....Ic..L....M..1.H.readonlyI9.A.......I.abstractM9.......D.......................H.bigint..H9.tqH.object..H9.......H.number..H9.......H.M.....Ic..L....H.M.....Ic..L..........'H.M.....Ic..L....H.M.....Ic..L...............Ic..L....H...g...<...
+.....9...]...........H.M.....Ic..L....H.M.....Ic..L....H.D$ H.M H..A...........} .........E$D..e%..
+......
+..H..1.E1..8...<....
+....9....uN..3..........`...H......H......H..H......H.......<...I
+....3.....
+
+=== needle=b'readonly' hit#5 @19421651 ===
+9.......H.overrideH9.......H.accessorH9.......H..+.H.U....
+E1.H......Hc..H..E1...H.........H......
+.`............C...4C..L4....	.E1...get.........set............H.abstractH9.t?H.readonlyH9.../...H..+.H.U ...
+E1.H......Hc..H..E1..........D..H...*.....E1.H......Hc..H..E1...E1.H........................,............'..........E1.H.accessorK9.4......A.......H..8...D..M..A..L...EL...L...<...+...H....^..<.I..D..M..A..H..8.....^........H..*.H.U....
+E1.H......Hc..H..E1...E1.H..........`..........C..4C..T4.H.. H	.E1.H.async...H9.........,..........L..x...A.D$(.E.t$.H..P...A.D$.........E1...H..`........E
+
+=== needle=b'readonly' hit#6 @19430851 ===
+9.......H.overrideH9.......H.accessorH9.......H....H.U....
+E1.H...a..Hc..H..E1...H.........H......
+.`............C...4C..L4....	.E1...get.........set............H.abstractH9.t?H.readonlyH9.../...H....H.U ...
+E1.H...`..Hc..H..E1..........D..H.........E1.H...`..Hc..H..E1...E1.H........................,............'..........E1.H.accessorK9.4......A.......H..8...D..M..A..L...EL...\...<...+...H...,:..<.I..D..M..A..H..8.....^........H.>..H.U....
+E1.H..._..Hc..H..E1...E1.H..........`..........C..4C..T4.H.. H	.E1.H.async...H9.........,..........L..x...A.D$(.E.t$.H..P...A.D$.........E1...H..`........E
+
+--- total hits for b'readonly': scanning stopped at 6 ---
+
+--- total hits for b'rename retries': scanning stopped at 0 ---
+
+--- total hits for b'repeated rename': scanning stopped at 0 ---

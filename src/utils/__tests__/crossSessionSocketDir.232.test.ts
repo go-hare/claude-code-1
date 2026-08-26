@@ -34,11 +34,13 @@ describe('densable 2.1.232 #46 cross-session socket dir', () => {
     )
   })
 
-  test('capability dir reuses private directory asserts', () => {
-    expect(src).toContain('assertPrivateCapabilityDir')
-    expect(src).toContain(
-      "assertPrivateDirectory(stat, dir, 'capability directory')",
-    )
-    expect(src).toContain('chmod(dir, 0o700)')
+  test('capability publish is 239 xWd sessions/ key (not 232 named helper)', () => {
+    // 232 locked assertPrivateCapabilityDir. 239 #58 replaced that with
+    // writeCapabilityFile → ~/.claude/sessions/${pid}.${hash}.key via od().
+    expect(src).not.toContain('assertPrivateCapabilityDir')
+    expect(src).toContain('async function writeCapabilityFile')
+    expect(src).toContain("join(getClaudeConfigHomeDir(), 'sessions')")
+    expect(src).toContain('mkdir(dir, { recursive: true, mode: 0o700 })')
+    expect(src).toContain('key_publish_failed')
   })
 })

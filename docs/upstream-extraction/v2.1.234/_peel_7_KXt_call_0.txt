@@ -1,0 +1,2 @@
+offset=292974889
+:"),r=e.slice(0,t),n=e.slice(t+1),o=r.indexOf(":");if(wFd.test(n)&&Number(n)<=65535&&r!==""&&!(r.endsWith(":")&&IHt.isIP(r)!==6)&&o!==-1&&r.indexOf(":",o+1)!==-1)return`[${r}]:${n}`;return e}function KXt(e){return IHt.isIP(e)===6?`[${e}]`:e}function kFd(e){return e.flatMap((t)=>{if(t.includes("@"))return[];if(t.startsWith("[")){let n=t.indexOf("]"),o=n===-1?void 0:t.slice(1,n);if(o!==void 0&&E8o(o))return[];if(o!==void 0&&o.includes("*")&&nDe(o)!

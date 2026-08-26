@@ -1,11 +1,12 @@
-import React, { type Ref, useCallback, useEffect, useRef, useState } from 'react';
+import React, { type Ref, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { Except } from 'type-fest';
 import type { DOMElement } from '../core/dom.js';
-import type { ClickEvent } from '../core/events/click-event.js';
+import { MOUNT_SETTLE_MS, type ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
 import type { Styles } from '../core/styles.js';
 import Box from './Box.js';
+import { ClockContext } from './ClockContext.js';
 
 type ButtonState = {
   focused: boolean;
@@ -29,6 +30,11 @@ export type Props = Except<Styles, 'textWrap'> & {
    */
   autoFocus?: boolean;
   /**
+   * densable `mountSettleMs` / `_Yn` — drop clicks this many ms after mount
+   * (same window as window-activation). Default 300.
+   */
+  mountSettleMs?: number;
+  /**
    * Render prop receiving the interactive state. Use this to
    * style children based on focus/hover/active — Button itself
    * is intentionally unstyled.
@@ -38,10 +44,20 @@ export type Props = Except<Styles, 'textWrap'> & {
   children: ((state: ButtonState) => React.ReactNode) | React.ReactNode;
 };
 
-function Button({ onAction, tabIndex = 0, autoFocus, children, ref, ...style }: Props): React.ReactNode {
+function Button({
+  onAction,
+  tabIndex = 0,
+  autoFocus,
+  mountSettleMs = MOUNT_SETTLE_MS,
+  children,
+  ref,
+  ...style
+}: Props): React.ReactNode {
   const [isFocused, setIsFocused] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isActive, setIsActive] = useState(false);
+  const clock = useContext(ClockContext);
+  const [mountedAt] = useState(() => clock?.now() ?? Date.now());
 
   const activeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -65,10 +81,16 @@ function Button({ onAction, tabIndex = 0, autoFocus, children, ref, ...style }: 
   );
 
   const handleClick = useCallback(
-    (_e: ClickEvent) => {
+    (e: ClickEvent) => {
+      // densable Button: isWindowActivation || now-mountedAt < mountSettleMs
+      const now = clock?.now() ?? Date.now();
+      if (e.isWindowActivation || now - mountedAt < mountSettleMs) {
+        e.dropAsStray();
+        return;
+      }
       onAction();
     },
-    [onAction],
+    [clock, mountedAt, mountSettleMs, onAction],
   );
 
   const handleFocus = useCallback((_e: FocusEvent) => setIsFocused(true), []);

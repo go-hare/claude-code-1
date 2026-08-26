@@ -1,0 +1,2 @@
+offset=293013664
+EnforcesAllowlist.get(e)??!1;if(t.initializationPromise===void 0)t.installedFilterRequestEnforcesAllowlist=r;else t.installsSinceInitializeStartedAllEnforce&&=r}class CFd{tenguSandboxGbConfig=iu(Lvb);sessionAllowedHosts=new Set;initializationPromise=void 0;initializedWithTlsTerminate=!1;installedFilterRequestEnforcesAllowlist=!1;installsSinceInitializeStartedAllEnforce=!0;builtConfigEnforcesAllowlist=new WeakMap;settingsSubscriptionCleanup=void 0;sandboxDisabledThisSession=!1;initFailureReason=v

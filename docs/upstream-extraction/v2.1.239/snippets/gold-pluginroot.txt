@@ -1,0 +1,44 @@
+#### "aQ_=" 1 [302032851]
+
+==== aQ_= 302032851 ====
+"))}));rQ_=new Set(["npm","url","github","git-subdir","archive","command","unsupported"]);oQ_=/^[A-Za-z0-9_$.-]{1,40}$/;aQ_=/^[A-Za-z0-9][-A-Za-z0-9._]*$/;Ltr=ve(()=>_e({$schema:L().optional().describe("JSON Schema reference for editor autocomplete/validation; ignored at load time"),name:M9u(),version:L().optional().describe("Marketplace manifest version"),description:L().optional().describe("Human-readable description of this marketplace"),owner:AVo().describe("Marketplace maintainer or curator information"),plugins:ft(Hn()).transform(tQ_).describe("Collection of available plugins in this marketplace"),forceRemo
+
+#### "aQ_=new" 0 []
+
+#### "$ta(" 2 [301998023, 318644385]
+
+==== $ta( 301998023 ====
+id 0||!jo(e)||!MVo(e.source))return e;let r=t==="."?`./${e.source}`:`./${t}/${e.source}`;return{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins))return e;let t=jo(e.metadata)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}}var vVo,SVo,Ptr=500,wVo=32,P9u,fOn,EVo,Dtr,TZ_,kZ_,CZ_,bVo="anthropics",RZ_,COe,Htr,C9u,x9u,Hta,Pta,D9u,M9u,AVo,HZ_,TVo,PZ_,DZ_,MZ_,OZ_,LZ_,kVo,O9u,NZ_,L9u=16,$Z_,FZ_,N9u,UZ_,R9u,BZ_,jZ_,$9u,zZ_,WZ_,QNr,GZ_,Mta,F9u,VZ_,U9u,Mtr,CVo,t$r=16,xVo=64,eWe=1048576,qZ_,KZ_,YZ_,XZ_,Otr,B9u,n$r,Ita,JZ_,RVo="Archive URLs must use
+
+==== $ta( 318644385 ====
+aceholder and cannot be authored"}),p=Ltr().extend({plugins:ft(u),renames:oo(L(),L().nullable()).optional()}).safeParse($ta(i));if(!p.success)t.push(...DNh(p.error));if(p.success&&p.data.renames){let g=new Set(p.data.plugins.map((y)=>y.name));for(let y of Object.keys(p.data.renames)){let _=W6r(y,p.data.renames,g);if(_?.kind==="unresolved")t.push({path:`renames.${y}`,message:`chain does not resolve (${_.reason}) \u2014 target must be a name in plugins[], a key in renames, or null`});else if(_?.kind==="renamed"&&!bCe().safeParse(`${_.to}@placeholder`).success)t.push({path:`renames.${y}`,message:`target "${_.to}" is
+
+#### "function $ta" 1 [301998014]
+
+==== function $ta 301998014 ====
+if(t===void 0||!jo(e)||!MVo(e.source))return e;let r=t==="."?`./${e.source}`:`./${t}/${e.source}`;return{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins))return e;let t=jo(e.metadata)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}}var vVo,SVo,Ptr=500,wVo=32,P9u,fOn,EVo,Dtr,TZ_,kZ_,CZ_,bVo="anthropics",RZ_,COe,Htr,C9u,x9u,Hta,Pta,D9u,M9u,AVo,HZ_,TVo,PZ_,DZ_,MZ_,OZ_,LZ_,kVo,O9u,NZ_,L9u=16,$Z_,FZ_,N9u,UZ_,R9u,BZ_,jZ_,$9u,zZ_,WZ_,QNr,GZ_,Mta,F9u,VZ_,U9u,Mtr,CVo,t$r=16,xVo=64,eWe=1048576,qZ_,KZ_,YZ_,XZ_,Otr,B9u,n$r,Ita,JZ_,RVo="Archive URLs
+
+#### "Lta(e.metadata.pluginRoot)" 1 [301998097]
+
+==== Lta(e.metadata.pluginRoot) 301998097 ====
+}/${e.source}`;return{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins))return e;let t=jo(e.metadata)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}}var vVo,SVo,Ptr=500,wVo=32,P9u,fOn,EVo,Dtr,TZ_,kZ_,CZ_,bVo="anthropics",RZ_,COe,Htr,C9u,x9u,Hta,Pta,D9u,M9u,AVo,HZ_,TVo,PZ_,DZ_,MZ_,OZ_,LZ_,kVo,O9u,NZ_,L9u=16,$Z_,FZ_,N9u,UZ_,R9u,BZ_,jZ_,$9u,zZ_,WZ_,QNr,GZ_,Mta,F9u,VZ_,U9u,Mtr,CVo,t$r=16,xVo=64,eWe=1048576,qZ_,KZ_,YZ_,XZ_,Otr,B9u,n$r,Ita,JZ_,RVo="Archive URLs must use https:// and must not point at a loopback, link-local, or cloud-metadata 
+
+#### "Bare source names resolve" 2 [99499336, 301998662]
+
+==== Bare source names resolve 99499336 ====
+URLs must use https:// and must not point at a loopback, link-local, or cloud-metadata host.....�.....��........	...�...Bare source names resolve under metadata.pluginRoot, which this marketplace does not set (or sets to a path outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names...............	.......[A-Za-z0-9][-A-Za-z0-9._]*..............	.......!
+..............��..	...workspace1..............��..
+...claude_ai_..............ɦ..p...a .ps1 path must not contain "[", "]", "`", "*", or "?" on Windows (PowerShell resolves them as wildcard syntax)........��..
+
+==== Bare source names resolve 301998662 ====
+not point at a loopback, link-local, or cloud-metadata host",ZZ_,j9u,QZ_,HVo,PVo,yOn,eQ_,rQ_,oQ_,iQ_=3,sQ_=160,aQ_,lQ_='Bare source names resolve under metadata.pluginRoot, which this marketplace does not set (or sets to a path outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names.',Ltr,mJe,I9u="[A-Za-z0-9][-A-Za-z0-9._]*",bCe,z9u,W9u,cQ_,uQ_,dQ_,_On,pQ_,fQ_,OVo,mQ_,Ntr;var FM=A(()=>{qn();lf();lOn();qR();qe();sT();Sn();ZY();vVo=require("path"),SVo=require("net");P9u=/[^\x20-\x7E]| {4,}/;fOn=new Set(["claude-community","claude-plugins-community","healthcare"]
+
+#### "I9u=" 1 [301998890]
+
+==== I9u= 301998890 ====
+outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names.',Ltr,mJe,I9u="[A-Za-z0-9][-A-Za-z0-9._]*",bCe,z9u,W9u,cQ_,uQ_,dQ_,_On,pQ_,fQ_,OVo,mQ_,Ntr;var FM=A(()=>{qn();lf();lOn();qR();qe();sT();Sn();ZY();vVo=require("path"),SVo=require("net");P9u=/[^\x20-\x7E]| {4,}/;fOn=new Set(["claude-community","claude-plugins-community","healthcare"]),EVo=new Set(["claude-code-marketplace","claude-code-plugins","claude-plugins-official","anthropic-marketplace","anthropic-plugins","agent-skills","anthropic-agent-skills","life-sciences","knowledge-work-plugins","claude-for-le
+
+
+==== first $ta( wider ====
+
+function Lta(e){if(typeof e!=="string"||e===""||e.startsWith("/")||e.includes("\\")||e.includes(":"))return;let t=e.replace(/^\.\//,"").replace(/\/+$/,"");if(t===""||t===".")return".";if(t.split("/").some((r)=>r===""||r==="."||r===".."))return;return t}function Nta(e,t){if(t===void 0||!jo(e)||!MVo(e.source))return e;let r=t==="."?`./${e.source}`:`./${t}/${e.source}`;return{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins))return e;let t=jo(e.metadata)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}}var vVo,SVo,Ptr=500

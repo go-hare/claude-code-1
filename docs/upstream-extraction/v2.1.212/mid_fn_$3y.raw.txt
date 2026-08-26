@@ -1,0 +1,19 @@
+one if the answer may be elsewhere in the file.]`}function $3y(e){let t=[];for(let n of e){let o=n.message.content;if(typeof o==="string"){t.push(Lks(o));continue}for(let i of o){if(i.type!=="text")return null;t.push(Lks(i.text))}}let r=t.join(`
+`);return r.trim().length>0?r:null}function nm(e){return e.map((t)=>{if(typeof t.message.content==="string")return{...t,message:{...t.message,content:ZA(t.message.content)}};else if(Array.isArray(t.message.content)){let r=t.message.content.map((n)=>{if(n.type==="text")return{...n,text:ZA(n.text)};return n});return{...t,message:{...t.message,content:r}}}return t})}function F3y(e){if(e.isSubAgent)return W3y(e);if(e.reminderType==="sparse")return j3y(e);return B3y(e)}function nDd(){return`At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call ${Aq.name} to indicate to the user that you are done planning.
+This is critical - your turn should only end with either using the ${Nm} tool OR calling ${Aq.name}. Do not stop unless it's for these 2 reasons
+
+**Important:** Use ${Nm} ONLY to clarify requirements or choose between approaches. Use ${Aq.name} to request plan approval. Do NOT ask about plan approval in any other way - no text questions, no AskUserQuestion. Phrases like "Is this plan okay?", "Should I proceed?", "How does this plan look?", "Any changes before we start?", or similar MUST use ${Aq.name}.`}function B3y(e){if(e.isSubAgent)return[];let t=e.planExists?`A plan file already exists at ${e.planFilePath}. You can read it and make incremental edits using the ${zR.name} tool.`:`No plan file exists yet. You should create your plan at ${e.planFilePath} using the ${iI.name} tool.`;if(e.customInstructions){let l=`${rDd}
+
+## Plan File Info:
+${t}
+You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
+
+## Plan Workflow
+
+${e.customInstructions}
+
+### Call ${Aq.name}
+${nDd()}`;return nm([Ur({content:l,isMeta:!0})])}let r=BRd(),n=jRd(),o=JXt(),i=o?`### Phase 1: Initial Understanding
+Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the ${qMe.agentType} subagent type.
+
+1. Focus on understanding the user's request and the code associated with their request. Actively search for existing functions, utilities, and patterns that can be reused \u2014 avoid

@@ -1,0 +1,16 @@
+function DZi(e,t){if(t)return{label:"Wait here, then continue automatically shortly",confirmationPhrase:"shortly"}
+====
+function VXa(e,t=Date.now(),r="dialog"){return M4f(wF(),e,t,r)}
+====
+function Vqn(e){return e.status==="rejected"&&e.resetsAt!==void 0&&Number.isFinite(e.resetsAt)&&e.isUsingOverage!==!0&&e.overageInUse!==!0}
+====
+function d$t(e){return Yi()&&Ac()?.billingType!=="usage_based"&&Vqn(e)&&M0S()}
+====
+function Klr(){return WXa(wF())}
+====
+]!==kVe||BN[30]!==Oyr)Lyr=Oyr?[Ioc,Oyr,...kVe]:[Ioc,...kVe],BN[29]=kVe,BN[30]=Oyr,BN[31]=Lyr;else Lyr=BN[31];E3h=Lyr}let Poc=E3h,LCe;if(BN[32]!==aV||BN[33]!==Vle||BN[34]!==b8)LCe=function xZi(){if(L("tengu_rate_limit_options_menu_select_auto_resume",{}),!Vqn(aV)||!VXa(aV)){Vle.prefillRateLimitAutoQueueContinue?.(),b8(void 0,{display:"skip"});return}let{confirmationPhrase:Q1M}=DZi(aV.resetsAt,aV.resetsAt!==void 0&&aV.resetsAt*1000<=Date.now());b8(`Claude Code will continue automatically ${Q1M}. Keep this session open; it may still pause for permission prompts. Press esc to cancel the wait.`)},BN[32]=aV,BN[33]=Vle,BN[34]=b8,BN[35]=LCe;else LCe=BN[35];let xZi=LCe,kZi;if(BN[36]!==b8)kZi=function Nyr(){bgt("dialog"),b8("Automatic continue cancelled. Your session will wait for you instead; /rate-limit-options can arm it again.")},BN[36]=b8,BN[37]=kZi;else kZi=BN[37];let Nyr=kZi,Lyr;if(BN[38]!==Nyr)Lyr=function CZi(){L("tengu_rate_limit_options_menu_cancel_auto_resume",{}),Nyr()},BN[38]=Nyr,BN[39]=Lyr;else Lyr=BN[39];let CZi=Lyr,xOw;if(BN[40]!==Ado||BN[41]!==Nyr||BN[42]!==Vle||BN[43]!==b8)x
+b'M4f(' count in region 0
+b'offerArm' count in region 0
+b'bgt("dialog")' count in region 1
+b8,BN[35]=LCe;else LCe=BN[35];let xZi=LCe,kZi;if(BN[36]!==b8)kZi=function Nyr(){bgt("dialog"),b8("Automatic continue cancelled. Your session will wait for you instead; /rate-limit-options can arm it again.")},BN[36]=b8,BN[37]=kZi;else kZi=BN[37];let Nyr=kZi,Lyr;if(BN[38]!==Nyr)Ly
+b'L4f(' count in region 0

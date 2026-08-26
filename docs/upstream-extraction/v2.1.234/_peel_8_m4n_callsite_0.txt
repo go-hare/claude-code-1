@@ -1,0 +1,3 @@
+OFFSET=298096127
+
+{if(r)return;r=!0,t=!0,e(n)},isResolved(){return t},claim(){if(t)return!1;return t=!0,!0}}}function m4n(e,t,r,n,o,i,s){let a=n.message.id,l=un(r).mode;function c(d,p){Udp({tool:e,input:p?.input??t,toolUseContext:r,messageId:a,toolUseID:o,permissionMode:l},d,p?.permissionPromptSta

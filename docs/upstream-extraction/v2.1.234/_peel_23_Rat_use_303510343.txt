@@ -1,0 +1,3 @@
+OFFSET=303510343
+
+engu_auto_mode_worktree_fast_path",!1)}async function fKa(e){if(!ZAi())return[];let t=new Set,r=new Set;for(let n of fae(e)){let o=bd(n);if(o===null&&Rat(n))o=bd(n);if(o===null||r.has(o))continue;if(r.add(o),!jX(o,e,mYn(o)))continue;let i;try{i=Pu(await br().realpath(o))}catch{continue}if(i!==o){if(r.has(i))continue;r.add(i)}for(let s of await kSd(o))t.add(s)}return Array.from(t)}function Mj(e,t,{caseFold:r}={caseFold:!0}){let n=_s(e),o=_s(t),i=r?/^\/private\/var\//i:/^\/private\/var\//,s=r?/^\/private\/tmp(\/|$)/i:/^\/private\/tmp(\/|$)/,a=n.r

@@ -1,0 +1,476 @@
+#### "JetBrains" 3 [99680442, 99694460, 109028200]
+
+==== JetBrains 99680442 ====
+..ɰ".....Disabled in /mcp........I�".....claude-code-jetbrains-plugin............��".....didStopImmediatePropagation.............	�".....stopImmediatePropagation........	.......isJetBrainsIdeTerminal..........	�".....isMicrosoftWindowsTerminal".............��".	...isGhostty�..............��......isMintty........	.......windowsConsoleSupportsVirtualTerminalSequences..........	.......hasGeometricShapesInkBleedBug...........	.......hasOsc52ClipboardUtf8Bug........	�".'...macCmdClickArrivesWithoutSgrModifierBit.........	.......customThemeBase.........	.......addCustomThemeBases.............�.......commitUserThemes........ɶ".....cachedUserThemes........I�".....cachedSystemTheme...............	.......setSystemTheme..........�s.....custom:.........	.......probe...........I�.....recordAddonWrite........	�".....beginWaylandCopy........I�".....isLatestWaylandCopy.....L.....��........	...b...[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())..............	...E...[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipboa
+
+==== JetBrains 99694460 ====
+sBlock..........	.......getSeveritySymbolw..............�(#."...IDE diagnostics baseline timed out..............	.......IDE diagnostics fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll........�*#.....clearDeliveredForFile...........	.......clearPendingForFile.............�+#.....pendingCount....�.��..��........	.......diff............	,#.....diffWithOptionsObj..............	...	...addToPath...............	......extractCommon...........	.......equals..........I-#.....removeEmpty.............�...	...castInput-#.............�-#.....tokenize........	.......join............I�.....buildValues.............�.#.g...a-zA-Z0-9_\u{AD}\u{C0}-\u{D6}\u{D8}-\u{F6}\u{F8}-\u{2C6}\u{2C8}-\u{2D7}\u{2DE}-\u{2FF}\u{1E00}-\u{1EFF}.........	...X...Fable 5 as the advisor bills to usage credits, which need to be set up for your account.........I0#.�...# Advisor Tool
+
+You have access to an `advisor` tool backed by a stronger reviewer model. It takes NO parameters -- when
+
+==== JetBrains 109028200 ====
+tudio...............	......androidstudio.........��......��........	...+...Iterator result interface is not an object............��........	.......visualstudio............	.......JetBrains-JediTerm..............	.......pycharm.........	......xterm-ghostty...........	.......ghostty.........	.......kitty...�������.........................	.......^devin([ -]desktop)?$...........	.......tmux............	.......screen..........	.......konsole.........	.......gnome-terminal..........	.......xterm...........	...	...vte-based...............	...
+...terminator..............	...	...alacritty...............	.......tilix...........	.......windows-terminal........	.......cygwin..........	.......conemu..........	.......wsl-............	.......ssh-session.............	.......rxvt............	.......termite.........	.......non-interactive.....................................................�...................���<��.���B4���^��.���B4�͈M�.�4�@���I..���L��.f�@ ����.�@�e�I..���L��.g��.���B4�XM�B�4�@pd�J.4�̢L�@.f�J.4�̢L�@�T�J.4�ɢL�@�e�J.4�ݢL�@�g�� 5������.L��.ğ@���I..�@�4���.
+
+#### "jetbrains" 3 [99680316, 130519120, 131923416]
+
+==== jetbrains 99680316 ====
+........	...$...Blocked by enterprise managed policy............�n
+.-...Disabled by disableClaudeAiConnectors setting...........ɰ".....Disabled in /mcp........I�".....claude-code-jetbrains-plugin............��".....didStopImmediatePropagation.............	�".....stopImmediatePropagation........	.......isJetBrainsIdeTerminal..........	�".....isMicrosoftWindowsTerminal".............��".	...isGhostty�..............��......isMintty........	.......windowsConsoleSupportsVirtualTerminalSequences..........	.......hasGeometricShapesInkBleedBug...........	.......hasOsc52ClipboardUtf8Bug........	�".'...macCmdClickArrivesWithoutSgrModifierBit.........	.......customThemeBase.........	.......addCustomThemeBases.............�.......commitUserThemes........ɶ".....cachedUserThemes........I�".....cachedSystemTheme...............	.......setSystemTheme..........�s.....custom:.........	.......probe...........I�.....recordAddonWrite........	�".....beginWaylandCopy........I�".....isLatestWaylandCopy.....L.....��........	...b...[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Cl
+
+==== jetbrains 130519120 ====
+�...�...�...�.......�������.�������.�&.������������.�������.h.......�������.�������...�������������.�������.��.������������.�������.P�.������������.�������.0�.�����........	.......jetbrainsPluginInstalled....�.......8u.�x..o... u.p..�Du.�u......H..H.......�������.�������.�d$������������.�������.�d$�����h.......�������.............��������....Hq�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...�...�...�...�...�...�...�...�...�...�...�...�...................................................�������.�������.�������.�.......@...............�...............�...............�.......�������.�������.........................�������.........�������.................Q.......���.G..i.��..��...��..��....G�.i.&��...���...&��...���...����.�&��...���.����.�i�.......�...............x...............p...............�...............�...............�...............�...............�...........................
+
+==== jetbrains 131923416 ====
+���.....P...�������.....P...........1...P...���.G..i..��.....��......&��...���H�.��...���.i���.....0.........�.....(............... ........\�.............................I��.	...jetbrains.�.....................................�@�$��0-�@ ����.�@�4�@04�H..............	.../...�������.�������.p�.������������.�������.P�������....�.......c�{.�q..|...K�{.}..�o�{���{......H..H.......�������.�������.`��������������.�������.H�������h.......�������..G�.........��������....H.�������������.....P...�������.....P...�������.�������.............����............����............
+...................	...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...�������.�������.�������.�.......x...........P...�...........P...................�.......�������.�������.....P...8...............�������.....P...�������.....P...........s...P...���..��.....��.......��.....��....��.....��......Q��:���.��.....��.......��.....��.......��....��....
+�.�...
+
+#### "edit write" 0 []
+
+#### "isJetBrains" 3 [99680440, 131164680, 308294338]
+
+==== isJetBrains 99680440 ====
+....ɰ".....Disabled in /mcp........I�".....claude-code-jetbrains-plugin............��".....didStopImmediatePropagation.............	�".....stopImmediatePropagation........	.......isJetBrainsIdeTerminal..........	�".....isMicrosoftWindowsTerminal".............��".	...isGhostty�..............��......isMintty........	.......windowsConsoleSupportsVirtualTerminalSequences..........	.......hasGeometricShapesInkBleedBug...........	.......hasOsc52ClipboardUtf8Bug........	�".'...macCmdClickArrivesWithoutSgrModifierBit.........	.......customThemeBase.........	.......addCustomThemeBases.............�.......commitUserThemes........ɶ".....cachedUserThemes........I�".....cachedSystemTheme...............	.......setSystemTheme..........�s.....custom:.........	.......probe...........I�.....recordAddonWrite........	�".....beginWaylandCopy........I�".....isLatestWaylandCopy.....L.....��........	...b...[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())..............	...E...[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipb
+
+==== isJetBrains 131164680 ====
+���.���������������.�������.�{�������������.�������. ��������������.�������.���������������.�������.���������������.�������..�������........	...
+...syncOutput..............	.......isJetBrainsIdeTerminal......�........�x.....�...��x.�..�.�x.��x......H..H.......�������.�������.�B.������������.�������.xB.�����h.......�������.............��������....���������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...............�...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...�������.�������.�������.�.......................P...............�...............x.......�������.�������.........�...............�������.........�������.................�.......�.��.....��.......��...Q�..i..��.....��.......��....H�..��.....��.......��...���H�".��.....��.......��....��.	.���H�#.��.....��....
+..��....��....���H�..��	....��	.....��....���H�..��.....��.......��
+..���i� ...............(...
+
+==== isJetBrains 308294338 ====
+return!1;let n=t[0]instanceof sVe?t[0]:null;for(let o of r)if(o.apply(this,t),n?.didStopImmediatePropagation())break;return!0}}});class whf{proc;constructor(e=process){this.proc=e}isJetBrainsIdeTerminal(){return this.proc.env.TERMINAL_EMULATOR==="JetBrains-JediTerm"}isMicrosoftWindowsTerminal(){return this.proc.platform==="win32"&&!!this.proc.env.WT_SESSION}isGhostty(){return this.proc.env.TERM==="xterm-ghostty"||this.proc.env.TERM_PROGRAM==="ghostty"}isMintty(){if(this.proc.env.TERM_PROGRAM==="mintty")return!0;if(this.proc.platform==="win32"&&this.proc.env.MSYSTEM)return!0;return!1}windowsConsoleSupportsVirtualTerminalSequences(){if(this.isMicrosoftWindowsTerminal())return!0;if(this.proc.platform==="win32"&&this.proc.env.TERM_PROGRAM==="vscode"&&this.proc.env.TERM_PROGRAM_VERSION)return!0;if(this.isMintty())return!0;return!1}hasGeometricShapesInkBleedBug(){return this.isGhostty()}hasOsc52ClipboardUtf8Bug(){if(this.proc.env.TERM_PROGRAM!=="vscode")return!1;let e=lvS(this.proc.env.TERM_PROGRAM_VERSION);return e!==null&&e>=1123000&&e<1125000}macCmdClickArrivesWithou
+
+#### "queued prompt" 0 []
+
+#### "cancel queued" 0 []
+
+#### "abort queued" 0 []
+
+#### "dark-ansi" 3 [123427736, 179934224, 220297048]
+
+==== dark-ansi 123427736 ====
+............x...............�.......'...............	.......dark-daltonized.........	.......light-daltonized........	.......light...........	...
+...light-ansi..............	...	...dark-ansi...............r.......�_...��.....��......i�.��.....��......i�.��.....��......i�.��.....��......i�.��.....��......i�.��.....��......i�i.......................
+.......................................�@�.���.���������� ���.���0�................(...:...L...^...p...�������.�������.8�~������������.�������.�
+�������������.�������.�܌������������.�������.h.�������������.�������.pP�������������.�������..�������....�.......��W.H.......��W....���W.��W......H..H.......�������.�������.�..������������.�������.h..�����h.......�������.............��������....x�.������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...................................................................................�������.����
+
+==== dark-ansi 179934224 ====
+ly).........	.......dark-daltonized.........	... ...Light mode (colorblind-friendly)........	.......light-daltonized........	.......Dark mode (ANSI colors only)............	...	...dark-ansi...............	.......Light mode (ANSI colors only)...........	...
+...light-ansi............��......��......��......��......��......��......��......��......��................N.e.w. .c.u.s.t.o.m. .t.h.e.m.e.& ............��......��......��........	.......Let's get started.......................	...
+...permission..............	.......Theme.........�� .....��........	...8...Choose the text style that looks best with your terminal!.....��".....��#.....��$.....��........	.......column..%.....��&.....��........	.......vkt.....'.....��........	......._pg.....(.....��).....��*.....��+.....��........	.......ppg.....,.....��-.....��......��/.....��........	.......fpg.....0.....��1.....��2.....��3.....��4.....��5.....��6.....��7.....��8.....��9.....��:.....��;.....��<.....��=.....��........	....... function greet() {.............	... ...-  console.log("Hello, World!");........	...!...+  c
+
+==== dark-ansi 220297048 ====
+
+...in-process..............	.......dark............	.......light...........	.......light-daltonized........	.......dark-daltonized.........	...
+...light-ansi..............	...	...dark-ansi.......................`...............h...............p...............�...............�...............�.......................	.......dark............	.......light...........	.......light-daltonized........	.......dark-daltonized.........	...
+...light-ansi..............	...	...dark-ansi...............	...	...alwaysAsk...............	.......disabled................0...............8...............H.......................	.......auto............	...	...alwaysAsk...............	.......disabled
+...............................................................................���D��.,d.���.|��.,4.���.|��.,��P}��.,���}��.,���~��.,S.���.|���.��Ѓ��@C��@}��.,............�������.�������.@��������������.�������..��������������.�������.���������������.�������.���������������.�������. ��������������.�������.pr�������������.�������.�.�������������.�������.��������....�.......Ю...{.�k...��..
+
+#### "expanded tool" 0 []
+
+#### "<tag>" 2 [204936363, 327235798]
+
+==== <tag> 204936363 ====
+ not available. Accepts a comma-separated list to try each in order. Re-tries the primary at the start of each user turn. (only works with --print)..............	.......--workload <tag>........	...�...Workload tag for billing-header attribution (cc_workload). Process-scoped; set by SDK daemon callers that spawn subprocesses for cron work. (only works with --print)...........	.......--settings <file-or-json>...............	...N...Path to a settings JSON file or a JSON string to load additional settings from..........	.......--managed-settings <json>...............	...G...Policy-tier settings JSON from a spawning parent process (SDK use only).........	.......--add-dir <directories...>..............	.......Additional directories to allow tool access to..........	.......--ide...........	...M...Automatically connect to IDE on startup if exactly one valid IDE is available...........	.......--strict-mcp-config.............	...M...Only use MCP servers from --mcp-config, ignoring all other MCP configurations...........	.......--session-id <uuid>.............	...E...Use a s
+
+==== <tag> 327235798 ====
+r not available. Accepts a comma-separated list to try each in order. Re-tries the primary at the start of each user turn. (only works with --print)").addOption(new Ep("--workload <tag>","Workload tag for billing-header attribution (cc_workload). Process-scoped; set by SDK daemon callers that spawn subprocesses for cron work. (only works with --print)").hideHelp()).option("--settings <file-or-json>","Path to a settings JSON file or a JSON string to load additional settings from").addOption(new Ep("--managed-settings <json>","Policy-tier settings JSON from a spawning parent process (SDK use only)").hideHelp()).option("--add-dir <directories...>","Additional directories to allow tool access to").option("--ide","Automatically connect to IDE on startup if exactly one valid IDE is available",()=>!0).option("--strict-mcp-config","Only use MCP servers from --mcp-config, ignoring all other MCP configurations",()=>!0).option("--session-id <uuid>","Use a specific session ID for the conversation (must be a valid UUID)").option("-n, --name <name>","Set a display name for this
+
+#### "literal tag" 0 []
+
+#### "/insights" 3 [162268162, 277453692, 316593225]
+
+==== /insights 162268162 ====
+..�...............�...............P...............................	...G...Cannot destructure property 'insightsJson' from null or undefined value.........	...~...The user just ran /insights to generate a usage report analyzing their Claude Code sessions.
+
+Here is the full insights data:
+..........	.......e...............	.......
+
+Report URL: ..........	.......t...............	.......
+HTML file: ............	.......r...............	.......
+Facets directory: .............	.......n...................V...
+.
+.A.t.-.a.-.g.l.a.n.c.e. .s.u.m.m.a.r.y. .(.f.o.r. .y.o.u.r. .c.o.n.t.e.x.t. .o.n.l.y. ..  .t.h.e. .u.s.e.r. .h.a.s. .n.o.t. .s.e.e.n. .a.n.y. .o.u.t.p.u.t. .y.e.t.).:.
+.............	.......o...............	.......i...............	...�...
+
+Respond with exactly the following, and nothing else. Do not add, omit, or reword any line:
+
+Your shareable insights report is ready:
+........	...=...
+
+Want to dig into any section or try one of the suggestions?...........................................�d.��@....���@ e�@.e..��@pe_.���@.d�@@L.����@.d........�������.�������.�.....
+
+==== /insights 277453692 ====
+........�������.�������.�B�������.......�B������i........C�������........�������	........C������)........C�������.......
+.......................	.......text............	...L...The /insights report is generated only when the command is invoked directly...................��......��........	...C...Cannot destructure property 'insights' from null or undefined value.............	.......file://.........	.......s...............	.......a...............	....... sessions total � ..............	...	... analyzed...............	...	... sessions...............	...	... messages...............	.......h...............	....... commits........	....... � .....�������.	...............	.......i...............	.......## At a Glance
+
+........	.......**What's working:** ............	...!... See _Impressive Things You Did_................	.......
+
+..............	.......**What's hindering you:** ..............	....... See _Where Things Go Wrong_............	.......**Quick wins to try:** .........	....... See _Features to Try_..........	.......**Ambitious workflows:** ...............	.......
+
+==== /insights 316593225 ====
+e?Object.entries(e):[]}function tgE(e){return e?Object.keys(e):[]}function pnh({insightsJson:e,reportUrl:t,htmlPath:r,facetsDir:n,header:o,summaryText:i}){return`The user just ran /insights to generate a usage report analyzing their Claude Code sessions.
+
+Here is the full insights data:
+${e}
+
+Report URL: ${t}
+HTML file: ${r}
+Facets directory: ${n}
+
+At-a-glance summary (for your context only \u2014 the user has not seen any output yet):
+${o}${i}
+
+Respond with exactly the following, and nothing else. Do not add, omit, or reword any line:
+
+Your shareable insights report is ready:
+${t}
+
+Want to dig into any section or try one of the suggestions?`}function PUl(e){if(!e||typeof e!=="object")return!1;let t=e;return typeof t.underlying_goal==="string"&&typeof t.outcome==="string"&&typeof t.brief_summary==="string"&&t.goal_categories!==null&&typeof t.goal_categories==="object"&&t.user_satisfaction_counts!==null&&typeof t.user_satisfaction_counts==="object"&&t.friction_counts!==null&&typeof t.friction_counts==="object"}var NHe,IUe,Zrh,DhE,MhE,Krh=50,NhE=`Analyze this Claude
+
+#### "ultracode" 3 [111230316, 111245071, 111278552]
+
+==== ultracode 111230316 ====
+s.e.t.t.i.n.g.s. .f.i.l.e. .p.r.o.v.i.d.e.s. .t.h.e. .k.e.y... .T.h.i.s. .i.s. .a. .g.u.i.d.e.l.i.n.e.,. .n.o.t. .a.n. .e.n.f.o.r.c.e.d. .l.i.m.i.t.............	...�...Enable the "ultracode" keyword trigger: including the keyword in a prompt opts that turn into the Workflow tool. Set to false to disable the trigger. Default: true.............	...�...Disable inline shell execution in skills and custom slash commands from user, project, or plugin sources. Commands are replaced with a placeholder instead of being run.........	.......bash............	...
+...powershell...................... ...............(.......................	.......bash............	...
+...powershell..............	...c...Default shell for input-box ! commands. Defaults to 'bash' on all platforms (no Windows auto-flip)..............	...�...Whether Claude responds after an input-box ! bash command runs. Set to false to add the command output to context without a response. Default: true.............	...z...When true (and set in managed settings), only hooks from managed settings run. User, project, an
+
+==== ultracode 111245071 ====
+h............	.......xhigh...........	...&...Persisted effort level for this model...........	...1...Per-model settings keyed by canonical model name................	...]...Enable ultracode for the session: xhigh effort plus standing dynamic-workflow orchestration. ..............._...S.e.s.s.i.o.n.-.s.c.o.p.e.d. ..  .t.y.p.i.c.a.l.l.y. .p.r.o.v.i.d.e.d. .v.i.a. .-.-.s.e.t.t.i.n.g.s. .o.r. .t.h.e. .a.p.p.l.y._.f.l.a.g._.s.e.t.t.i.n.g.s. .c.o.n.t.r.o.l. .r.e.q.u.e.s.t.;. ...........	...b...interactive toggles never persist it. Requires workflows to be enabled and an xhigh-capable model.......��....��@B....��........	.......Auto-compact window size........	.../...Advisor model for the server-side advisor tool..........	...H...When true, fast mode is enabled. When absent or false, fast mode is off.........	...^...When true, fast mode does not persist across sessions. Each session starts with fast mode off...........	...a...When false, prompt suggestions are disabled. When absent or true, prompt suggestions are enabled................	...�...When false, the :emoji: sho
+
+==== ultracode 111278552 ====
+
+...spellcheck..............	.......terminalTitleFromRename.........	.......alwaysThinkingEnabled...........	.......effortLevel.............	......modelSettings...........	...	...ultracode...............	.......autoCompactWindow...............	.......advisorModel............	.......fastMode........	.......fastModePerSessionOptIn.........	.......promptSuggestionEnabled.........	.......emojiCompletionEnabled..........	.......awaySummaryEnabled..............	.......showClearContextOnPlanAccept............	.......askUserQuestionTimeout..........	.......dialogExpiry............	.......modelProposedGoals..............	.......companyAnnouncements............	...
+...mcpServers..............	......pluginConfigs...........	.......defaultEnvironmentId............	.......autoUpdatesChannel..............	.......minimumVersion..........	.......requiredMinimumVersion..........	.......requiredMaximumVersion..........	.......plansDirectory..........	...
+...autoSubmit..............	.......voice...........	.......channelsEnabled.........	.......allowedChannelPlugins...........	...
+
+#### "effortBadge" 0 []
+
+#### "badgeColor" 0 []
+
+#### "PreToolUse" 3 [100779304, 100779488, 102361000]
+
+==== PreToolUse 100779304 ====
+............��......queued-remote-notifications.............IM......flag:idle-window..�...��........	...7...The message for the user. Supports markdown formatting..........	�..�...PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..�������.(...................
+...�������.�.......0��������....... �������K.......`��������.......ئ������.........�������........@�������K........��������.......���������.......�������.................��������..%.....Щ������..%.....��������........ȩ������..%.....��������........��������................I�......depth...............�...
+.[.&  .o.u.t.p.u.t. .t.r.u.n.c.a.t.e.d. ..  .t.h.i.s. .s.e.t.t.l.e. .e.x.c.e.e.d.e.d. .t.h.e. .a.s.y.n.c. .R.E.P.L. .b.y.t.e. .b.u.d.g.e.t.;. .p.r.i.n.t. .l.e.s.s.,. .o.r. .w.r.i.t.e. .l.a.r.g.e. .o.u.t.p.u.t. .t.o. .a. .f.i.l.e. .a.n.d. .r.e.a.d. .i.
+
+==== PreToolUse 100779488 ====
+oolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..�������.(...................
+...�������.�.......0��������....... �������K.......`��������.......ئ������.........�������........@�������K........��������.......���������.......�������.................��������..%.....Щ������..%.....��������........ȩ������..%.....��������........��������................I�......depth...............�...
+.[.&  .o.u.t.p.u.t. .t.r.u.n.c.a.t.e.d. ..  .t.h.i.s. .s.e.t.t.l.e. .e.x.c.e.e.d.e.d. .t.h.e. .a.s.y.n.c. .R.E.P.L. .b.y.t.e. .b.u.d.g.e.t.;. .p.r.i.n.t. .l.e.s.s.,. .o.r. .w.r.i.t.e. .l.a.r.g.e. .o.u.t.p.u.t. .t.o. .a. .f.i.l.e. .a.n.d. .r.e.a.d. .i.t. .i.n. .a. .l.a.t.e.r. .e.v.a.l.].........	.......McpToolError............	... ...enforce_web_search_mcp_isolation........	.......tengu_doorbell_agave..........�?.q....��........�O%.
+
+==== PreToolUse 102361000 ====
+
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Hook Events
+
+| Event | Matcher | Purpose |
+|-------|---------|---------|
+| PermissionRequest | Tool name | Run before permission prompt |
+| PreToolUse | Tool name | Run before tool, can block |
+| PostToolUse | Tool name | Run after successful tool |
+| PostToolUseFailure | Tool name | Run after tool fails |
+| Notification | Notification type | Run on notifications |
+| Stop | - | Run when Claude stops (including clear, resume, compact) |
+| PreCompact | "manual"/"auto" | Before compaction |
+| PostCompact | "manual"/"auto" | After compaction (receives summary) |
+| UserPromptSubmit | - | When user submits |
+| SessionStart | - | When session starts |
+
+**Common tool matchers:** `Bash`, `Write`, `Edit`, `Read`, `Glob`, `Grep`
+
+### Hook Types
+
+**1. Command Hook** - Runs a shell command:
+```json
+{ "type": "command", "command": "prettier --write $FILE", "timeout": 30 }
+```
+
+**2. Prompt Hook** - Evaluates a condition with LLM:
+```json
+{ "type": "prompt", "prompt": "Is this safe? $ARGUMENTS" }
+```
+Only available for tool events: PreToolU
+
+#### "deferred by" 1 [323696901]
+
+==== deferred by 323696901 ====
+his campaign's scope \u2014 the `.sync-diff.json` `changed`+`added` partition on a re-sync, everything user-scoped on a first sync \u2014 authored and graded `good` (or explicitly deferred by the user); no `[LEARNINGS_UNMERGED]` on the final capture run; the user has seen `.review.html` (or declined). Verified-by-upload components are OUTSIDE the gate \u2014 they need no recapture or regrade, and the closing driver run enforces the learnings check itself \u2014 its verdict fails (`[LEARNINGS_UNMERGED]`, the `learningsUnmerged` field) while any unfolded learnings file remains. Floor-card components pass the gate by design \u2014 they're the deliberate baseline, reported as such.\r\n\r\nOn the final full `package-capture.mjs` run (after the final rebuild) every graded component should print `carried forward` with zero `grade cleared` \u2014 that line IS the proof the next sync will be fast. A cleared grade on a no-change run means a nondeterministic source input \u2014 chase it now; a driver-triggered `[SPOT_CHECK]` is not that (pipeline churn being auto-verified \u
+
+#### "selection:copy" 3 [181137512, 181172816, 250198280]
+
+==== selection:copy 181137512 ====
+....	.......internal_jediTermInput..........	......scroll:pageUp...........	.......scroll:pageDown.........	...
+...scroll:top..............	......scroll:bottom...........	.......selection:copy..........	.......scroll:halfPageUp...............	.......scroll:halfPageDown.............	.......scroll:fullPageUp...............	.......scroll:fullPageDown.............	.......selection:extendLeft............	.......selection:extendRight...........	.......selection:extendUp..............	.......selection:extendDown............	.......selection:extendLineStart...............	.......selection:extendLineEnd. .......�	......�......�...................�<6.....#.......$..��<6.�=6......H..H.......�������.�������.�������������.�������.؟������........�������.............��������....@.......�������.........�������.........�������.�������.................�......................���......�������������.���������������8�������H�������X�������h�������x��������.�����������������������9������@��������.������....����............����............#...	...............!...h...h...h...h...
+
+==== selection:copy 181172816 ====
+............................	.......n...............	.......s...............	.......i...............	.......Scroll..........	.......Global..........	.......match...........	.......selection:copy......................F...................�@�.�M.����4�@�d�E..�@�L�F..�@�L�E..�@�L�@�<�H.��@�4�.�.�@�$�O.��.�4�@@,�@ ��C�.�@�<�B.��@.=��P��@ ��@ .���.�@ e�@@��J..�@�L�G..�@�L�E..�@�L�E..�@�L�F..�@�L�F..�@�d�I.����4�@p<�@0.�J.��@�4���.�@�T�O.��.�4���<�@ ����.�@�T�@�̟H.��@�4�@ .�@`.�O.����3�mrs�@ ?�E..�@ U�G..�@0f�O.��.�4....'...)...2...;...D...H...h...�...�...�...�...�...�...............#...,...5...>...g...�...�...�...�...C...M...O...p...2...�.......�...)...�.../...�...�...�...8...�.......�... ...�...�������.�������.x.�������������.�������. �.������������.�������.0�������������.�������.h?�������������.�������.�d�������������.�������.p.�������������.�������.�#.������������.�������.pe�������������.�������.@.�������������.�������.���������������.�������.���������������.�������.��.������������.�������.�!�������������.�������.`��������������.�������.�.�������������.�������.P���
+
+==== selection:copy 250198280 ====
+....	.......theme:toggleSyntaxHighlighting..........	.......theme:editCustom........	.......Scroll..........	......scroll:pageUp...........	.......scroll:pageDown.........	.......selection:copy..........	.......selection:extendLeft............	.......selection:extendRight...........	.......selection:extendUp..............	.......selection:extendDown............	.......selection:extendLineStart...............	.......selection:extendLineEnd.........	.......Help............	.......help:dismiss............	.......Attachments.............	.......attachments:next........	.......attachments:previous............	.......attachments:remove..............	.......attachments:exit........	.......Footer..........	...	...footer:up...............	.......footer:down.............	.......footer:next.............	.......footer:previous.........	.......footer:openSelected.............	.......footer:clearSelection...........	.......footer:close............	.......footer:dismiss..........	.......MessageSelector.........	.......messageSelector:up..............	.......messageSelector:down
+
+#### "selectionCopy" 0 []
+
+#### "posix_spawn" 1 [87652476]
+
+==== posix_spawn 87652476 ====
+tereadlinkstatstatfssymlinkatutimeutimensatgetcwdgetenvchdirfcopyfilerecvsendfilesendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollscandirkeventkqueueepoll_ctlkillwaitpidposix_spawnwritevpwritevreadvpreadvioctl_ficlonebind2connect2try_writesocketpairsetsockoptstatxuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfchownatioctlgetrlimitsetrlimitclone3..��%E............�9E............y�.E............?..E............�9E............�9E............��9E....	........�9E............��.E............�9E.............�9E............$�9E............*�9E............2�9E............8�9E............=�9E....	.......F�9E............K�9E............R�9E............W�9E....	.......`�9E............h�9E....
+.......r�9E............��9E............��9E............M�.E............��9E............��9E............��9E............�� E............��9E............��9E............��9E............��9E............��9E............�s.E............��9E....
+
+#### "Hooks: cwd" 0 []
+
+#### "title sync" 0 []
+
+#### "session-title" 0 []
+
+#### "titleUpdate" 0 []
+
+#### "masked" 3 [92241501, 111362812, 111366793]
+
+==== masked 92241501 ====
+xisting restore frame.Update CallerFrameAndPC to return to the restore frame.Creating the restore frame.cannot decode frame.Abort connection: invalid frame.Received an incorrectly masked frame.Abort connection: stream ID %llu in GOAWAY frame.could not write GOAWAY frame.could not open HQ frame.cannot activate HQ frame.cannot allocate HQ frame.Abort connection: cannot decode CRYPTO frame.Abort connection: received an empty NEW_TOKEN frame.Abort connection: received unexpected NEW_TOKEN frame.Abort connection: cannot decode STREAM frame.could not generate ACK frame.Invalid ACK frame.Abort connection: cannot parse Priority Field Value in PRIORITY_UPDATE frame.could not generate CONNECTION_CLOSE frame.could not generate HANDSHAKE_DONE frame.Abort connection: Client cannot send HANDSHAKE_DONE frame.Abort connection: client does not expect the server to send MAX_PUSH_ID frame.AsyncContextFrame.generatorFrame.ShadowChicken_Packet_callerFrame.CallFrame_callerFrame.RequestAnimationFrame.CancelAnimationFrame.FireAnimationFrame.unexpected frame after reaching a JSToWasmFrame
+
+==== masked 111362812 ====
+	.......[]..............	...+...Invalid entry was degraded to mode "deny": ...........��........	.......failed validation...............	...E.... The credential stays blocked (not masked) until the entry is fixed............	.......files...........	...F... Under sandbox.filesystem.disabled, file read-denies are not enforced...�������.	...............	.......Invalid entry was ignored: .............	...<.... This credential is NOT protected until the entry is fixed.............	.......c...............................................�@�$�@ ��F..�I�3�@�<�.�.�@0%�@�#..�@�.�G..�.r4��2Lg.��@.�)..�&����@..(.��@.,�@�.�@�#..�@�.�G..�.r4��2L�l���@.�.��@.,........%...w...z...�...�...�...�...........!...�...�������.�������.�E�������������.�������..Ծ������������.�������.pUM������������.�������.���������������.�������.�?�������������.�������. O�������������.�������.�q�������������.�������.HM������@...........{�..5..�....5......�{�..��.......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....x.�������������.........�������.
+
+==== masked 111366793 ====
+n [ ] to silence this warning......
+...............	...�..." must be an array; its lone entry object was invalid and was degraded to mode "deny". The credential stays blocked (not masked) until it is fixed............��........	......Invalid value...........	........ ".............	...L..." was ignored; these credential entries are NOT protected until it is fixed.........................2...................�@.�F..�@@e�F..�.@2�@.'�H.��@�4�F..�I�3�@ ��J.��@�4�F..���3�@�<�H..�@.M�@� ..�@..�..��@..�.��@.,�E..�@�t�@ ��F..�I�3�@�<�.�.�@0%�@� ..�@..�..��@..�.��@.,�@�\�@�@��G..�.r4��2L�@.� ..�����@.............=...o...�...�...a...�...�...
+...W.......N...:...'...�������.�������.�ľ������������.�������.hK�������������.�������.���������������.�������.�'�������������.�������.P.�������������.�������.P.�������������.�������.�EM������������.�������.Ȟ�������������.�������.�/�������������.�������. b�������������.�������.���������������.�������.`5�������������.�������..?������............��..�+.��...�+..�..���..p�.......D..H.......�������.�������.�������.�������.�����
+
+#### "killHistory" 0 []
+
+#### "organization policy" 3 [185574005, 321688044, 326596774]
+
+==== organization policy 185574005 ====
+PL.....
+.............��................	...(...Git is required to install marketplaces.........	...+...Please install git and restart Claude Code............��........	...B...Your organization policy does not allow any external marketplaces...............	.......Contact your administrator............��........	...<...Your organization restricts which marketplaces can be added.............	...7...Switch to the Marketplaces tab to view allowed sources........��........	... ...Failed to load marketplace data.........	.......Check your network connection.........��........	...,...All available plugins are already installed.............	...5...Check for new plugins later or add more marketplaces..........��........	...5...All available plugins are installed for this project............	...,...Use the Browse tab to install at user scope...........��........	...3...Add a marketplace first using the Marketplaces tab..............	.......No plugins available........................................�...................��.=��.��C!L��@=���|���N��..���4��`���.����4��.���pU��.��
+
+==== organization policy 321688044 ====
+art Claude Code."})]}),dbn[0]=kJ;else kJ=dbn[0];return kJ}case"all-blocked-by-policy":{let kJ;if(dbn[1]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization policy does not allow any external marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Contact your administrator."})]}),dbn[1]=kJ;else kJ=dbn[1];return kJ}case"policy-restricts-sources":{let kJ;if(dbn[2]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization restricts which marketplaces can be added."}),Pu.jsx(v,{dimColor:!0,children:"Switch to the Marketplaces tab to view allowed sources."})]}),dbn[2]=kJ;else kJ=dbn[2];return kJ}case"all-marketplaces-failed":{let kJ;if(dbn[3]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Failed to load marketplace data."}),Pu.jsx(v,{dimColor:!0,children:"Check your network connection."})]}),dbn[3]=kJ;else kJ=dbn[3];return kJ}case"all-plugins-installed":{let kJ;if(dbn[4]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"All available plugins are already installed."
+
+==== organization policy 326596774 ====
+ fix; gitConfigConflicts
+   codes map to the git section, toolTrustFailureCodes to the JVM section.
+3. Never disable TLS verification, never unset HTTPS_PROXY, and do not retry
+   organization policy denials (403/407) \u2014 report them instead.
+
+## Failure classes and fixes
+
+### "certificate verify failed" / "self-signed certificate in chain" / PKIX errors
+
+The failing tool is not reading the pre-set CA configuration. In order:
+
+- If the tool has a CA flag or env var, point it at ${t}
+  (examples: --cacert, SSL_CERT_FILE, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE,
+  AWS_CA_BUNDLE, DENO_CERT, CARGO_HTTP_CAINFO, PIP_CERT, GIT_SSL_CAINFO,
+  BUNDLE_SSL_CA_CERT, HEX_CACERTS_PATH, NIX_SSL_CERT_FILE).
+- Tool config files override environment variables. If one of these sets its
+  own CA or disables verification, point it at the bundle instead:
+  pip.conf "cert", npm "cafile" (npm config get cafile), ~/.curlrc "cacert",
+  .wgetrc "ca_certificate", conda "ssl_verify", git "http.sslCAInfo",
+  gradle.properties / MAVEN_OPTS "-Djavax.net.ssl.trustStore".
+- JVM tools (Maven, Gra
+
+#### "org policy" 3 [115309456, 115309524, 148856800]
+
+==== org policy 115309456 ====
+..��........	...2...Connected to the Anthropic API (api.anthropic.com)..............	...6...Not connected to the Anthropic API (api.anthropic.com)..........	...1...Not disabled by org policy (disableRemoteControl)...............	...-...Disabled by org policy (disableRemoteControl)...........	.......Signed in to claude.ai..........	.......Not signed in to claude.ai..............	.......claude.ai subscription active...........	...&...claude.ai subscription auth not active..........	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disa
+
+==== org policy 115309524 ====
+m)..............	...6...Not connected to the Anthropic API (api.anthropic.com)..........	...1...Not disabled by org policy (disableRemoteControl)...............	...-...Disabled by org policy (disableRemoteControl)...........	.......Signed in to claude.ai..........	.......Not signed in to claude.ai..............	.......claude.ai subscription active...........	...&...claude.ai subscription auth not active..........	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disabled........	.......disabled by ............	...'...Remote Control e
+
+==== org policy 148856800 ====
+....	.......disabled........	...+...channels feature is not currently available.............	.......policySettings..........	.......policy..........	...R...channels not enabled by org policy (set channelsEnabled: true in managed settings)..............	.......session.........	.......server .........	...(... not in --channels list for this session........	.......plugin..
+...............	.......marketplace.............	.......you asked for plugin:...........	.......@...............	....... but the installed .............	....... plugin is from ........	.......an unknown source...............	...B...Cannot destructure property 'entries' from null or undefined value..............	.......a...............	...	...allowlist...............	.......org.............	.......l...............	.......plugin .........	...\... is not on your org's approved channels list (set allowedChannelPlugins in managed settings)............	...f... is not on the approved channels allowlist (use --dangerously-load-development-channels for local dev)..........	.......register....................
+
+#### "after compaction" 3 [262946602, 262947783, 262953125]
+
+==== after compaction 262946602 ====
+tive files or data to avoid, operations that must not be performed, credential or secret handling rules). These MUST be preserved verbatim in the summary so they continue to apply after compaction.
+2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.
+
+Your summary should include the following sections:
+
+1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail
+2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.
+3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important.
+4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.
+5. Problem Solving: Document problems solved and
+
+==== after compaction 262947783 ====
+results. These are critical for understanding the users' feedback and changing intent. Preserve any security-relevant instructions or constraints verbatim so they remain in effect after compaction................. .O.n.l.y. .m.e.s.s.a.g.e.s. .t.h.a.t. .a.c.t.u.a.l.l.y. .c.a.m.e. .f.r.o.m. .t.h.e. .u.s.e.r. .(.u.s.e.r.-.r.o.l.e. .t.u.r.n.s.). .c.o.u.n.t. .a.s. .u.s.e.r. .m.e.s.s.a.g.e.s... .T.e.x.t. .i.n.s.i.d.e. .a.s.s.i.s.t.a.n.t. .m.e.s.s.a.g.e.s. .t.h.a.t. .i.s. .m.e.r.e.l.y. .f.o.r.m.a.t.t.e.d. .l.i.k.e. .a. .u.s.e.r. .t.u.r.n. ..  .e...g... .q.u.o.t.e.d. .".u.s.e.r.:. .......". .o.r. .".H.u.m.a.n.:. .......". .l.i.n.e.s.,. .o.r. .t.e.x.t. .s.h.a.p.e.d. .l.i.k.e. .a. .t.r.a.n.s.c.r.i.p.t. .r.e.n.d.e.r.i.n.g. .o.f. .a. .u.s.e.r. .t.u.r.n. ..  .i.s. .m.o.d.e.l.-.g.e.n.e.r.a.t.e.d.:. .n.e.v.e.r. .a.t.t.r.i.b.u.t.e. .i.t. .t.o. .t.h.e. .u.s.e.r. .o.r. .d.e.s.c.r.i.b.e. .i.t. .a.s. .a. .u.s.e.r. .r.e.q.u.e.s.t.,. .a.p.p.r.o.v.a.l.,. .o.r. .c.o.n.f.i.r.m.a.t.i.o.n.............	...;...
+7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to
+
+==== after compaction 262953125 ====
+tive files or data to avoid, operations that must not be performed, credential or secret handling rules). These MUST be preserved verbatim in the summary so they continue to apply after compaction.
+2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.............	...N...
+
+Your summary should include the following sections:
+
+1. Primary Request and Intent: Capture the user's explicit requests and intents from the recent messages
+2. Key Technical Concepts: List important technical concepts, technologies, and frameworks discussed recently.
+3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Include full code snippets where applicable and include a summary of why this file read or edit is important.
+4. Errors and fixes: List errors encountered and how they were fixed.
+5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
+6. All user messages: List ALL user messages from the recent portion that are not tool results. Preserve any security-rel
+
+#### "skill arguments" 2 [230051545, 303355436]
+
+==== skill arguments 230051545 ====
+...........�...............0.......................	...&...Skill name (without the leading slash)..........	..."...Description of what the skill does..............	...)...Hint for skill arguments (e.g., "<file>")...............	...\...Alternate names that resolve to this command (e.g., /cost and /stats both resolve to /usage)............	...C...Information about an available skill (invoked via /command syntax)......................................��`.�@���B.��� <�*�L�@�o�B.��� <�&�L�@Po�B.��� <�-�L���o�@ ��B.����;��Q<�.�4��$<`.����LI-����.lK)���	.<G�*��.�L........�������.�������.�<&������������.�������.�w2������������.�������..��������������.�������.�f�������������.�������.H4�������������.�������.`/W������������.�������..�,������������.�������.0=�������������.�������.�+������............��).	p.�I...	p..I..���).خ)......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....x��������������.........�������.........�������.�������.............����............����................	...................h...h...h...h...h...h...h
+
+==== skill arguments 303355436 ====
+()])),S$n=ve(()=>_e({name:L().describe("Skill name (without the leading slash)"),description:L().describe("Description of what the skill does"),argumentHint:L().describe('Hint for skill arguments (e.g., "<file>")'),aliases:ft(L()).optional().describe("Alternate names that resolve to this command (e.g., /cost and /stats both resolve to /usage)")}).describe("Information about an available skill (invoked via /command syntax).")),sha=ve(()=>_e({name:L().describe('Agent type identifier (e.g., "Explore")'),description:L().describe("Description of when to use this agent"),model:L().optional().describe("Model alias this agent uses. If omitted, inherits the parent's model")}).describe("Information about an available subagent that can be invoked via the Task tool.")),JZo=ve(()=>_e({value:L().describe("Model identifier to use in API calls"),resolvedModel:L().optional().describe("Canonical wire model id this row's `value` resolves to (e.g. 'sonnet' \u2192 'claude-sonnet-5'). Lets hosts match a persisted explicit id against the alias row that covers it."),displayName:L().descr
+
+#### "truncateMiddle" 0 []
+
+#### "truncatePathMiddle" 2 [106552672, 303689894]
+
+==== truncatePathMiddle 106552672 ====
+....I�......formatResetTime.........Io......formatSecondsShort..............	.......formatTokenEstimate.............I�3.....formatTokens............��3.....truncate........	.......truncatePathMiddle..............I�3.....truncateStartToWidth............	.......truncateToWidth.........	.......truncateToWidthNoEllipsis...............	.......wrapText........��3.....forcedUnavailable...............	.......captureProcessStartTimeAsync............	.......getAncestorPidsAsync............I�3.....getAncestorPidsCheckedAsync.............	�3.....getAncestorPidsLinuxSync........	.......getProcessCommand�3.............��3.....getProcessCreationTimeMsAsync...........I�3.....getProcessStartTime.............	.......getProcessStartTimeAsync........I�......getProcessStartTokenLinuxSync...........��3.....isProbeablePid..........	�3.....isProcessProvablyGone...........	.......isProcessRunning........	......isSameProcess...........	.......isSameProcessAsync..............I�......looksLikeFullHostProcessTable...........�[......ownProcStart............��......ownProcStartAsync...........
+
+==== truncatePathMiddle 303689894 ====
+Time:()=>kve,formatRelativeTimeAgo:()=>_7,formatResetText:()=>tBr,formatResetTime:()=>w$,formatSecondsShort:()=>GOt,formatTokenEstimate:()=>mle,formatTokens:()=>nc,truncate:()=>Wl,truncatePathMiddle:()=>AU,truncateStartToWidth:()=>bG,truncateToWidth:()=>Hi,truncateToWidthNoEllipsis:()=>xZe,wrapText:()=>Kei});function GOt(e){return`${(e/1000).toFixed(1)}s`}function Bs(e,t){if(e<60000){if(e===0)return"0s";if(e<1)return`${(e/1000).toFixed(1)}s`;return`${Math.floor(e/1000).toString()}s`}let r=Math.floor(e/86400000),n=Math.floor(e%86400000/3600000),o=Math.floor(e%3600000/60000),i=Math.round(e%60000/1000);if(i===60)i=0,o++;if(o===60)o=0,n++;if(n===24)n=0,r++;let s=t?.hideTrailingZeros;if(t?.mostSignificantOnly){if(r>0)return`${r}d`;if(n>0)return`${n}h`;if(o>0)return`${o}m`;return`${i}s`}if(r>0){if(s&&n===0&&o===0)return`${r}d`;if(s&&o===0)return`${r}d ${n}h`;return`${r}d ${n}h ${o}m`}if(n>0){if(s&&o===0&&i===0)return`${n}h`;if(s&&i===0)return`${n}h ${o}m`;return`${n}h ${o}m ${i}s`}if(o>0){if(s&&i===0)return`${o}m`;return`${o}m ${i}s`}return`${i}s`}function VOt(e){let t=
+
+#### "keep-alives" 3 [230622361, 230624034, 303520438]
+
+==== keep-alives 230622361 ====
+JSON object. Besides the SDKMessage members this includes the control protocol - control requests the CLI originates, control responses to the client's requests, cancellations and keep-alives....................................��`.��P���.���`<��.���`<��.���`<��.���`<��.���`<��.���`<��.���`<��.���`<��.���`<��.���PhA..�	�?AM	��.�L........�������.�������.P�!������������.�������.��-������������.�������.�..������������.�������.�,%������������.�������.0�-������������.�������.`�"������������.�������../(������������.�������.@\+������������.�������.p�)������������.�������.��.������������.�������.�6#������������.�������.P�������............P3,.q..��...q...�..�P3,..7,......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....X��������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...H...H...H...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�
+
+==== keep-alives 230624034 ====
+ssage per line, as a single JSON object - user messages that start turns, control requests the client originates, control responses answering the CLI's requests, cancellations and keep-alives. initialize is optional and normally the first line; the first user message initializes with defaults. An initialize that arrives later (e.g. from a client joining the session) is answered with the current state: the one-time session setup (e.g. system prompt, agents, skills, supportedDialogKinds) is not re-applied, but title, sdkMcpServers and agentProgressSummaries are still processed on every initialize, and hooks sent by the process that owns this stream replace the earlier set (see hooks_applied on the response). Closing the stream tells the CLI to finish the current turn and exit..................................��`.��P���.���`<��.���`<��.���`<��.���`<��.���`<��.���`<��.���`<��.���`<��.����h�ɞ?��.��.�L............�������.�������.��!������������.�������.X�.������������.�������.��)������������.�������.�S+������������.�������.p&(������������.�������.��)������������.������
+
+==== keep-alives 303520438 ====
+t, no reply expected. The remaining StdoutMessage members are control-protocol traffic (requests the loop originates and needs a reply to, responses to client-originated requests, keep-alives). This sub-union is the target for QueryEvent convergence so a Transport-shaped REPL can consume events without filtering control noise.")),i2d=ve(()=>Es([yha(),pha(),fha(),mha(),hha(),tQo(),eQo(),rQo(),o2d(),gha()]).describe("Everything the CLI writes to its output stream (stdout in stream-json mode): exactly one StdoutMessage per line, as a single JSON object. Besides the SDKMessage members this includes the control protocol - control requests the CLI originates, control responses to the client's requests, cancellations and keep-alives.")),tiC=ve(()=>Es([uha(),NUd(),eQo(),tQo(),rQo(),o2d(),tVb(),nVb(),rVb()]).describe("Everything a client may write to the CLI's input stream (stdin in stream-json input mode): exactly one StdinMessage per line, as a single JSON object - user messages that start turns, control requests the client originates, control responses answering the CLI
+
+#### "SessionStart" 3 [99464015, 102361472, 106447299]
+
+==== SessionStart 99464015 ====
+ring.........	a......replaceStrictToolResultPairing..........�`..
+...clientType..............�a......replaceClientType...............	.......sessionStartType........	.......replaceSessionStartType.........	�......questionPreviewFormat...........	.......replaceQuestionPreviewFormat............	.......replConfigArgv..........	.......replaceReplConfigArgv...........�c......userMsgOptIn............�c......replaceUserMsgOptIn.............	.......searchToolsOptIn........	.......replaceSearchToolsOptIn.........	�......todoToolsOptIn..........	�......replaceTodoToolsOptIn...........	.......wizardOperatorToolsEnabled..............	...!...replaceWizardOperatorToolsEnabledf..............��......pollEventIngressWired...........	.......markPollEventIngressWired...............	... ...sdkAgentProgressSummariesEnabled........	...'...replaceSdkAgentProgressSummariesEnabled.........�.......sessionPersistenceDisabled..............�g..!...replaceSessionPersistenceDisabled...............	.......sessionBypassPermissionsMode............	...#...replaceSessionBypassPermissionsMode........
+
+==== SessionStart 102361472 ====
+pact) |
+| PreCompact | "manual"/"auto" | Before compaction |
+| PostCompact | "manual"/"auto" | After compaction (receives summary) |
+| UserPromptSubmit | - | When user submits |
+| SessionStart | - | When session starts |
+
+**Common tool matchers:** `Bash`, `Write`, `Edit`, `Read`, `Glob`, `Grep`
+
+### Hook Types
+
+**1. Command Hook** - Runs a shell command:
+```json
+{ "type": "command", "command": "prettier --write $FILE", "timeout": 30 }
+```
+
+**2. Prompt Hook** - Evaluates a condition with LLM:
+```json
+{ "type": "prompt", "prompt": "Is this safe? $ARGUMENTS" }
+```
+Only available for tool events: PreToolUse, PostToolUse, PermissionRequest.
+
+**3. Agent Hook** - Runs an agent with tools:
+```json
+{ "type": "agent", "prompt": "Verify tests pass: $ARGUMENTS" }
+```
+Only available for tool events: PreToolUse, PostToolUse, PermissionRequest.
+
+### Hook Input (stdin JSON)
+```json
+{
+  "session_id": "abc123",
+  "tool_name": "Write",
+  "tool_input": { "file_path": "/path/to/file.txt", "content": "..." },
+  "tool_response": { "success": true }  // PostToolUse only
+}
+```
+
+### Hook J
+
+==== SessionStart 106447299 ====
+asks.............	.......getSessionId............	.......getSessionIngressToken..........I�0.....getSessionProjectDir............	.......getSessionSkillAllowlist........	D......getSessionStartTime.............	.......getSessionStartType.............I�0.....getSessionTrustAccepted.........	.......getSkillsSyncVetoed.............ɋ0.....getSlowOperations...............	.......getStartupPolicySnapshot........Iz.....getStatsStore...........I.......getStickyBetas..........	�0.....getStrictMcpConfig..............	.......getStrictToolResultPairing..............	.......getSurfacedHookSpawnFailures............	.......getSyncedPluginDirs.............	�0.....getSystemPromptSectionCache.............	t......getSystemPromptSectionEpoch.............��......getTeammateAgentId..............	.......getTeleportedSessionInfo........	�0.....getTerminalFocus........��0.....getThinkingDisplayExplicit0.............	�0.....getThinkingTypeOverride.........	.......getTodoToolsOptIn�0.............�1......getTokenCounter.........I�0.....getTotalAPIDuration.............	...!...getTotalAPIDura
+
+#### "restoreGoal" 3 [106711672, 322986350, 322987967]
+
+==== restoreGoal 106711672 ====
+............�-......installAsciicastRecorder........	.......moveRecordingV5.........	.......renameRecordingForSession...............	.......findGoalToRestore89.............��......restoreGoalFromTranscript89.............	99.....applyCoordinatorToolFilter..............I99.....mergeAndFilterTools.............	.......stripSoleNonDeniableTool........I:9.....withoutStaticMcpShadows.........	...!...WORKFLOW_SCRIPT_DISPLAY_MAX_UNITS;9.............	�.....WorkflowPermissionDialog........	.......buildWorkflowAlwaysRow..........	u......mapWorkflowSelectionToResult............�<9.....DECISION_DECISIONS_SCRIPT<9.............�@......DECISION_THEME_SCRIPT...........	.......PAYLOAD_TEMPLATE_FILE...........I4......SEED_HELPER_FILE........	>9.....loadSkillFiles..........�>9.....DESIGN_CANVAS_COMMAND_NAME..............�>9.....isDesignCanvasSkillEnabled9.............�?9.....registerDesignCanvasSkill@9.............I@9.....SETUP_COWORK_PROMPT.............	.......registerCoworkSetupSkill........�@9.....registerLoopSkill...............	...!...registerScheduleRemoteAgentsSkill�..........
+
+==== restoreGoal 322986350 ====
+)||GLe(e.source),r=f9n(e);if(t&&r){oRn(e.hooks);return}if(t&&!r)ypr(e,"mainThread");oRn(void 0)}var aDs=A(()=>{tt();_vl();m9n();EQ()});var deu={};Et(deu,{findGoalToRestore:()=>nuy,restoreGoalFromTranscript:()=>ueu});function nuy(e){if(!e)return null;for(let t=e.length-1;t>=0;t--){let r=e[t];if(r?.type!=="attachment"||r.attachment.type!=="goal_status")continue;if(r.attachment.met||r.attachment.failed)return null;let n=r.attachment.condition;return typeof n==="string"&&n.length>0?n:null}return null}function ueu(e,t){let r=nuy(e),n=r!==null?wro():null;if(n!==null)be("goal_set",n.code,{origin:me("restored")});let o;if(r===null||n!==null){if(t((i)=>(o=i.activeGoal,i.activeGoal===void 0?i:{...i,activeGoal:void 0})),o!==void 0)HFe(o,"resume_swap");return}if(Sro(t,Vt(),"Stop","",{type:"prompt",prompt:r}),t((i)=>(o=i.activeGoal,{...i,activeGoal:{condition:r,iterations:0,setAt:Date.now(),origin:"restored",tokensAtStart:kx()}})),o!==void 0)HFe(o,"resume_swap");N("tengu_goal_restored_on_resume",{promptLength:r.length}),N("tengu_stop_hook_added",{promptLength:r.length,via:xe("
+
+==== restoreGoal 322987967 ====
+t),"resume"),!0}function OMo(e,t,r){if(e.fileHistorySnapshots&&e.fileHistorySnapshots.length>0)AJn(e.fileHistorySnapshots,(n)=>{t((o)=>({...o,fileHistory:n}))});if((lDs(),pn(deu)).restoreGoalFromTranscript(e.messages,t),!zq()&&e.messages&&e.messages.length>0){let n=ZPA(e.messages);if(n.length>0){let o=Vt();t((i)=>({...i,todos:{...i.todos,[o]:n}}))}}}function QPA(e){return}function LMo(e,t){if(!e&&!t)return;return{name:e??"",color:t==="default"?void 0:t}}function CRt(e,t,r,n){if(t)return{agentDefinition:t,agentType:void 0};if(!e)return MMe(void 0),Y7t(void 0),{agentDefinition:void 0,agentType:void 0};let o=n?.sessionAgentDefinitions?e$e(n.sessionAgentDefinitions.activeAgents,e):void 0,i=o??e$e(r.activeAgents,e);if(o)E(`Resume: agent "${e}" restored from the session home set (${n?.sessionCwd??"unknown"})`);if(!i){if(E(`Resumed session had agent "${e}" but it is no longer available. Using default behavior.`),e!==vpr.agentType){if(be("session_resume","agent_resolve_miss"),n?.onResolveMiss){let s=$n(),a=n.sessionAgentDefinitions&&n.sessionCwd&&n.sessionCwd!==s?`${n.ses
+
+#### "active goal" 2 [266475241, 313300250]
+
+==== active goal 266475241 ====
+.l.o.g.............	...3...goal condition exceeds the canonicalized-length cap.............	...n...ProposeGoal only proposes a new goal; it cannot clear one. The user can clear an active goal with /goal clear...................	.......goal evaluator blocked..........	.......plan............	...	...plan_mode...............	...r...Plan mode is active, so a goal cannot be proposed yet. Keep planning; propose the goal after the plan is approved.............��......��........	.......disabled........	.......setting_disabled........	.......The user has disabled model-proposed goals in their settings. Do not propose goals; the user can set one themselves with /goal..........	...	...alwaysAsk...............	.......t.......................	...G...Cannot destructure property 'messageQueue' from null or undefined value.........	.......l...............	...a...Goal proposals need an interactive session to render the approval prompt; none is available here................	...|...A goal proposal is already awaiting the user's decision. Keep working; if it is approved you will rec
+
+==== active goal 313300250 ====
+he approval dialog.`,"goal condition exceeds the canonicalized-length cap");if(bZr(n))throw Error("ProposeGoal only proposes a new goal; it cannot clear one. The user can clear an active goal with /goal clear.");let o=wro();if(o!==null)throw be("goal_propose",o.code),new gt(o.message,"goal evaluator blocked");if(gn(r).mode==="plan")throw be("goal_propose","plan_mode"),Error("Plan mode is active, so a goal cannot be proposed yet. Keep planning; propose the goal after the plan is approved.");let i=await sna();if(i==="disabled")throw be("goal_propose","setting_disabled"),Error("The user has disabled model-proposed goals in their settings. Do not propose goals; the user can set one themselves with /goal.");let s=i==="alwaysAsk"||t!==!1,{messageQueue:a,requestDialog:l}=r;if(l===void 0)throw Error("Goal proposals need an interactive session to render the approval prompt; none is available here.");if(r.getAppState().pendingGoalProposal)throw Error("A goal proposal is already awaiting the user's decision. Keep working; if it is approved you will receive a kickoff message.
+
+#### "us-only" 0 []
+
+#### "usOnly" 3 [111325572, 177908392, 280237414]
+
+==== usOnly 111325572 ====
+�������.��M������������.�������..Ե������������.�������.x.�������������.�������.P.......�������.�������.P.�������������.�������.��A������������.�������.`N������........	...
+...statusOnly..................�.....��.......�..��..��.......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....���������������.........�������.........�������.�������.............����............����................................
+...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...X...X...X...x...x...x...x...x...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......@...............H.......
+.......�.......
+.......�.......�������.�������.................	.......�������.........�������.................�.......�.��.....��......!�..
+�.....�....&��...K�..��...L�J.��.....��......��..��.....��.......��.....��.....��......��.���.��..	.L�.��.�����.j��.
+�.�...��.....��....
+.��.���H�!�..
+�....������......�...i....�...............�...............�.......
+
+==== usOnly 177908392 ====
+���.�LG������������.�������.��<������������.�������.P.�������������.�������..��������������.�������.�.�������������.�������...�������������.�������.��A�����........	.......contiguousOnly......................��.....��.......�..���..b�.......D..H.......�������.�������.�������.�������.�������.�.......X.......�������.............��������....@.......�������.........�������.........�������.�������.................`.......................)Ek............. ...............	.......hog.............	.......gog.............HV������.................��.....����������������X�������........(.......��������........	.......dog.............	......._dc.........����............����....................................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...H...H...�...`...`...`...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...�������.�������.�������.�.......�...............h.......................................�������.�������.........�...............�������.........�������.................�...
+
+==== usOnly 280237414 ====
+�������������.�������.h.�������������.�������.X.......�������.�������.X.......�������.�������...������........	.......settledForMs............	.......bridged.........	.......detritusOnly........................�...�..�....�......��...�........d..H.......�������.�������.�������.�������.�������.�������.x.......�������.............��������....@.......�������.........�������.........�������.�������......... 3.�����H�������....����.X..........����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...................................................................................�������.�������.�������.�.......�...............�������.........�������.........�.......�������.�������.........�...............�������.........�������.................".......�.��.....��.�.....��...��.��...i�..............................���.��.��@�4�.�.........�������.�������.��1������������.�������.H������....NV......F....5.�(.../...)..�S...{........L..H.......�������.�������.����������
+
+#### "1.1" 3 [7006482, 7008610, 10514170]
+
+==== 1.1 7006482 ====
+H�E�....H�U�.��"...<.uS���.....��...H���...H��.��...�.���...�P.���...��..��...H�N.L��M���eb..���...���...H�>..��...��....<..��...H�E�....H�U�I��..��...H�~X..��...H�1.0 200 H�HTTP/1.1I3.L��....M3P.I	�.��...H�HTTP/1.0I3.I3@.H	�.��...H��!...��A..��...Ɔ"....H���y"..H�M��....�[/�.��...���.....��...H���...H��.��...�.���...�P.���...��.u.H�O.L��M���da..���...�ȉ��...��.��...H���.�..�u...I��H�M�H���b=..H�]�H�.......�H.�H��H��?H!�uWH�}ЋE�=�....��...H��=�....�....�"...�...H�M�H���.=..H�]�H�.......�H.�H��H��?H!�.��...H��..��...H��....��@..��...�����...��u.H���N�..���...�ȉ��....��...H�>.t	H�N.����.H���....t.H���...�..�.H���...H��t.H���....t.��.�.H��H�Ĉ...[_^A\A]A^A_]��.�.H�}�L�E�H��H���>..�1L�e�L�}�M9�.��...M��M)�y\E1�L��L���;�.�!...�	@..H��t.H���.�.��....t.H�Ĉ...[_^A\A]A^A_]�H��H�Ĉ...[_^A\A]A^A_]�e@..L��A�....t8L�e.A�....�....L���.�K.H��t�H��J�.?I��M���|b�.M��L��L�e.H�FX.....���...��L�E�t.H���..��...�$...�U?..�...L�e.H���...L���...Hǆ�.......Hǆ�.......Ɔ"....H�~0.t.H�N8H�U��.�.H�U�L�f0H�V8L�f@Hǆ�.......H�M�M���-�.��x>H�N@��H)�H���...L9}..�����H��L��L�u�M��M
+
+==== 1.1 7008610 ====
+H�E�....H�U�.��"...<.uS���.....��...H���...H��.��...�.���...�P.���...��..��...H�N.L��M���.Z..���...���...H�>..��...��....<..��...H�E�....H�U�I��..��...H�~X..��...H�1.0 200 H�HTTP/1.1I3.L��....M3P.I	�.��...H�HTTP/1.0I3.I3@.H	�.��...H��!...�9..��...Ɔ"....H���)...H�M��....�.'�.��...���.....��...H���...H��.��...�.���...�P.���...��.u.H�O.L��M���.Y..���...�ȉ��...��.��...H��趬..�u...I��H�M�H���.5..H�]�H�.......�H.�H��H��?H!�uWH�}ЋE�=�....��...H��=�....�....�"...�...H�M�H���4..H�]�H�.......�H.�H��H��?H!�.��...H��..��...H��....�8..��...�����...��u.H�����..���...�ȉ��....��...H�>.t	H�N.���.H���....t.H���...����.H���...H��t.H���....t.���.H��H�Ĉ...[_^A\A]A^A_]���.H�}�L�E�H��H���<6..�1L�e�L�}�M9�.��...M��M)�y\E1�L��L�����.�!...�7..H��t.H���<��.��....t.H�Ĉ...[_^A\A]A^A_]�H��H�Ĉ...[_^A\A]A^A_]�.8..L��A�....t8L�e.A�....�....L�����K.H��t�H��J�.?I��M���,Z�.M��L��L�e.H�FX.....���...��L�E�t.H���..��...�$...�.7..�...L�e.H���...L���...Hǆ�.......Hǆ�.......Ɔ"....H�~0.t.H�N8H�U��M��.H�U�L�f0H�V8L�f@Hǆ�.......H�M�M���F%�.��x>H�N@��H)�H���...L9}..�����H��L��L�u�M��M
+
+==== 1.1 10514170 ====
+..��...H��.��...H�B0H��....H��t.���....t���.....��...H���...H.�...H�	H��t?�.H��t8H��.tI��..��...H�.�V{.H9�t.f�9h2.��...�E�.H�U�H�E.....�BH�F.....�..H��H��8[_^]�H�.wǇ.H9�t.I�http/1.1L9.u@�E�.H�U�H�E.....H�_8H�U�H���.�7.���.....��...H��.��...H�F.1��.�H�E�H�....... H	�H�U�H.��>r'H�M�H���f}A.�|H��H...H��h...H.p...�.���H�.���.H�����.A����.L.B�A9�s:H�������..H!��,}s.L�.	��.A�q...f��.H���t..H��H����..1��.H�M�H��踊A.H�F.�����H���z.L�.��z.�....�uz.H�����.......u H��t.H��H�{...�����F..�.�.����H�K`�....芃,.H��u������UVWH��0H�l$0L��H��.....E�H�M�����.H��.u H��t:H��1�E1�E1���..H��t.H�F.�.H�F.....1��.H��H��0_^]��F..�.��H�.�z.L�..�z.�....��tz.�UAWAVAUATVWSH��...H��$�...E�q E��.��...M��H��H��H�E�
+...I��0E1�A��.A.��A��.H�M�L���.�v.@�.A��.t.H�E�H��H���H��..��...H��.@.��.....E�H�M��.��.�..��...H��.��...D.���...@��.�....A��..�d...H�B0H���...H��u/H��....H��H...H��u.H��@...H��u.H�.H�HXH��.�%...L���...M��.�....A�...@.���t.D�H.�E.�.u�H���...H��.��...H��L���5.�.H��.�F...H�F.1��A...H�.Rć.A�I...L�����..H��tVI�_8H�{..uKH�......��H��u �x..u.�.���H�.�c&.L�.�ɳ.L9D
+Pt.H��H��E1��
+
+#### "data-residency" 3 [113685448, 128961544, 139531616]
+
+==== data-residency 113685448 ====
+....(+�������.......82������I.......�1�������.......H2������	.......
+...............................	.......essential-traffic-only..........	...
+...firstParty..............	.......data-residency..................	.......teleport-org..........��......��......��........	.......no-auth.........	...E...OAuth refresh token is no longer valid; run /login to re-authenticate...........	.......No OAuth token in keychain............��........	...F...Cannot destructure property 'accessToken' from null or undefined value..........	.......d.......2.....��........	.......p...............	.......:orgUUID........	.......session-jwt.............	.......No session access token.........	.......Bearer .........	.......claude-ai-oauth.......��........	.......no claude.ai login..............	.......none..........��........	.......async.........��........	.......optional........	.......frame...........	.......memory........��........	.......api.....�:....��1.....��......���.....��......��........	.......retry...........	.....��....................................................�.......
+
+==== data-residency 128961544 ====
+/organizations/:orgUUID/marketplace/plugin-assets/..........	.......teleport-org............	.......stream..........	.......application/octet-stream......��......��........	.......data-residency..........	.......skipped_data_residency..........	.......essential-traffic-only..........	.......skipped_essential_traffic_only..........	.......skipped_no_claude_ai_auth...............	.......asset fetch skipped (...........	.......)...............	...A...Cannot destructure property 'status' from null or undefined value...............	.......i.......�.....���.....��........	.......asset not found (404)...........	.......asset_not_found.�.....��........	.......asset denylisted (410)..........	.......asset_denylisted�.....��........	.......asset fetch failed (............	.......asset_transient.........	.......unexpected asset response (.............	.......asset_http_error........	.......sha256........��........	.......error...........	.......wx......�.....��......��........	.......asset exceeds size cap..........	.......asset_too_large.......��......��........	...+...Iter
+
+==== data-residency 139531616 ====
+���.�������.........�������.........�������.........�������.................�������. .......................	.......0...............@...............H.......................	.......data-residency..........	.......no-auth.........	.......essential-traffic-only..................�_..i.i.i.i.....@...............�...............................�...........................=...P.o.s.t.i.n.g. .n.e.e.d.s. .a. .C.l.a.u.d.e...a.i. .a.c.c.o.u.n.t. ..  .r.u.n. ./.l.o.g.i.n. .a.n.d. .t.r.y. .a.g.a.i.n.................	...V...Posting runs on Claude Code on the web, which is unavailable on third-party providers...........	...i...Posting runs on Claude Code on the web, which is unavailable while essential-traffic-only mode is active........
+.......................................�@�.....................
+...........4.......a<�.T.......I<�....�m<�.{?�......H..H.......�������.�������.�!�������������.�������.�!������h.......�������.............��������....��.������������.........�������.........�������.�������.............����............����............
+.......................h...h...
+
+#### "35;150;7M" 0 []
+
+#### "mouse report" 0 []

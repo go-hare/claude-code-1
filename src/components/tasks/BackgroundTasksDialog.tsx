@@ -47,6 +47,8 @@ type Props = {
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
   toolUseContext: ToolUseContext;
   initialDetailTaskId?: string;
+  /** densable xCs promptVisibleBelow — passed through to WorkflowDetailDialog. */
+  promptVisibleBelow?: boolean;
 };
 
 type ListItem =
@@ -142,7 +144,12 @@ function getSelectableBackgroundTasks(
   return backgroundTasks.filter(task => !(task.type === 'local_agent' && task.id === foregroundedTaskId));
 }
 
-export function BackgroundTasksDialog({ onDone, toolUseContext, initialDetailTaskId }: Props): React.ReactNode {
+export function BackgroundTasksDialog({
+  onDone,
+  toolUseContext,
+  initialDetailTaskId,
+  promptVisibleBelow = false,
+}: Props): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
   const foregroundedTaskId = useAppState(s => s.foregroundedTaskId);
   const showSpinnerTree = useAppState(s => s.expandedView) === 'teammates';
@@ -556,6 +563,7 @@ export function BackgroundTasksDialog({ onDone, toolUseContext, initialDetailTas
             onSkipAgent={onSkip}
             onRetryAgent={onRetry}
             onPause={onPause}
+            promptVisibleBelow={promptVisibleBelow}
           />
         );
       }

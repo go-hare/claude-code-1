@@ -94,10 +94,24 @@ import {
   notifySessionStateChanged,
   notifySessionMetadataChanged,
   reteeWaitingOnUser,
+  enableWorkerPermissionModeRecord,
+  notifyInternalMetadataChanged,
+  notifyPermissionModeChanged,
   setPermissionModeChangedListener,
   type RequiresActionDetails,
+  type RestoredWorkerState,
   type SessionExternalMetadata,
 } from 'src/utils/sessionState.js'
+import {
+  applyPlanModeResumeFromInternal,
+  classifyPlanModeOnResume,
+  createPlanModeResumeTracker,
+  isRestartedWorker,
+  recordPlanModeResumeTelemetry,
+  syncWorkerPermissionModeRecord,
+  type PlanModeOnResume,
+  type PlanModeResumeTracker,
+} from 'src/utils/permissions/planModeResume.js'
 import { externalMetadataToAppState } from 'src/state/onChangeAppState.js'
 import { getInMemoryErrors, logError, logMCPDebug } from 'src/utils/log.js'
 import {
@@ -110,6 +124,7 @@ import {
   loadConversationForResume,
   type TurnInterruptionState,
 } from 'src/utils/conversationRecovery.js'
+import type { HookDeferredToolAttachment } from 'src/utils/attachments.js'
 import type {
   JSONRPCMessage,
   MCPServerConnection,
@@ -128,7 +143,6 @@ import {
   isChannelsEnabled,
 } from 'src/services/mcp/channelAllowlist.js'
 import { parsePluginIdentifier } from 'src/utils/plugins/pluginIdentifier.js'
-import { validateUuid } from 'src/utils/uuid.js'
 import { fromArray } from 'src/utils/generators.js'
 import { ask } from 'src/QueryEngine.js'
 import type { PermissionPromptTool } from 'src/utils/queryHelpers.js'
@@ -1004,6 +1018,8 @@ export async function runHeadless(
     messages: initialMessages,
     turnInterruptionState,
     agentSetting: resumedAgentSetting,
+    planModeOnResume,
+    deferredToolUse,
   } = await loadInitialMessages(setAppState, {
     continue: options.continue,
     teleport: options.teleport,
@@ -1102,37 +1118,28 @@ export async function runHeadless(
     return
   }
 
-  // Check if we need input prompt - skip if we're resuming with a valid session ID/JSONL file or using SDK URL
-  const hasValidResumeSessionId =
-    typeof options.resume === 'string' &&
-    (Boolean(validateUuid(options.resume)) || options.resume.endsWith('.jsonl'))
+  // Official 2.1.239:
+  //   typeof t==="string"&&t.trim()===""&&!te&&!Q&&!U
+  // te=sdkUrl, Q=Jqy deferredToolUse, U=SLm() pendingInitialUserMessage.
+  // --resume/--continue only pick the error string (X||c.continue).
   const isUsingSdkUrl = Boolean(options.sdkUrl)
-
-  // densable 2.1.229 #19 — whitespace-only print/stream-json input must not
-  // reach the model (400). densable:
-  //   typeof t==="string"&&t.trim()===""&&!F&&!D&&!Y
-  //   t!=="" → "Input contained only whitespace…"
-  // Local early gate has no deferredToolUse/Gup (D/Y); sdkUrl = F.
-  // Pure empty string still allows valid resume / sdkUrl (pre-229 local).
-  if (typeof inputPrompt === 'string' && inputPrompt.trim() === '') {
-    if (inputPrompt !== '' && !isUsingSdkUrl) {
-      // Non-empty but only whitespace — densable product string 1:1
-      process.stderr.write(
-        `Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print\n`,
-      )
-      gracefulShutdownSync(1)
-      return
-    }
-    if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl) {
-      process.stderr.write(
-        `Error: Input must be provided either through stdin or as a prompt argument when using --print\n`,
-      )
-      gracefulShutdownSync(1)
-      return
-    }
-  } else if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl) {
+  const hasDeferredToolUse = Boolean(deferredToolUse)
+  const hasResumeOrContinue =
+    (typeof options.resume === 'string' && options.resume.trim().length > 0) ||
+    Boolean(options.continue)
+  if (
+    typeof inputPrompt === 'string' &&
+    inputPrompt.trim() === '' &&
+    !isUsingSdkUrl &&
+    !hasDeferredToolUse &&
+    !hookInitialUserMessage
+  ) {
     process.stderr.write(
-      `Error: Input must be provided either through stdin or as a prompt argument when using --print\n`,
+      inputPrompt !== ''
+        ? `Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print\n`
+        : hasResumeOrContinue
+          ? `Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool already ran), or it exceeds the tail-scan window. Provide a prompt to continue the conversation.\n`
+          : `Error: Input must be provided either through stdin or as a prompt argument when using --print\n`,
     )
     gracefulShutdownSync(1)
     return
@@ -1195,6 +1202,25 @@ export async function runHeadless(
 
   headlessProfilerCheckpoint('after_loadInitialMessages')
 
+  // Official XWy — enable worker_permission_mode record; skip when this is a
+  // restarted worker with no restored CCR metadata.
+  try {
+    const { resolveWorkerEpoch } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    const restored = await structuredIO.restoredWorkerState
+    syncWorkerPermissionModeRecord({
+      enable: enableWorkerPermissionModeRecord,
+      notifyInternal: notifyInternalMetadataChanged,
+      currentMode: getAppState().toolPermissionContext.mode,
+      planModeOnResume,
+      restored,
+      restartedWorker: isRestartedWorker(resolveWorkerEpoch()),
+    })
+  } catch {
+    // densable optional
+  }
+
   // Ensure model strings are initialized before generating model options.
   // For Bedrock users, this waits for the profile fetch to get correct region strings.
   await ensureModelStringsInitialized()
@@ -1243,7 +1269,7 @@ export async function runHeadless(
     getAppState,
     setAppState,
     agents,
-    options,
+    { ...options, planModeOnResume, deferredToolUse },
     turnInterruptionState,
     printRequestDialog,
   )) {
@@ -1405,6 +1431,10 @@ function runHeadlessStreaming(
     replyOnResume?: boolean | undefined
     /** densable #27 stream-json commands_changed emission gate */
     outputFormat?: string | undefined
+    /** Official Jqy `planModeOnResume` — restored | declined | none */
+    planModeOnResume?: PlanModeOnResume
+    /** Official JNs `F` — `$2l` attachment from resume, consumed on first ask. */
+    deferredToolUse?: HookDeferredToolAttachment
   },
   turnInterruptionState?: TurnInterruptionState,
   /**
@@ -1423,6 +1453,16 @@ function runHeadlessStreaming(
     options?: { signal?: AbortSignal },
   ) => Promise<unknown>,
 ): AsyncIterable<StdoutMessage> {
+  // Official QueryEngine latches F once. Local print builds a new ask()
+  // engine per queued command — consume Q on the first ask only.
+  let pendingDeferredToolUse = options.deferredToolUse
+  const takePendingDeferredToolUse = ():
+    | HookDeferredToolAttachment
+    | undefined => {
+    const next = pendingDeferredToolUse
+    pendingDeferredToolUse = undefined
+    return next
+  }
   let running = false
   let runPhase:
     | 'draining_commands'
@@ -2832,6 +2872,7 @@ function runHeadlessStreaming(
                   requestDialog: printRequestDialog,
                   agents: currentAgents,
                   orphanedPermission: cmd.orphanedPermission,
+                  deferredToolUse: takePendingDeferredToolUse(),
                   setSDKStatus: status => {
                     output.enqueue({
                       type: 'system',
@@ -3754,10 +3795,17 @@ function runHeadlessStreaming(
       const { setIdleNoticeHandler, idleNoticeModelText } =
         require('../utils/udsIdleNotify.js') as typeof import('../utils/udsIdleNotify.js')
       setIdleNoticeHandler(notice => {
-        if (!notice.modelVisible) return
+        const text = idleNoticeModelText(notice)
+        if (!notice.modelVisible) {
+          // densable hold (sdk-cli/headless): only logged, not delivered to model.
+          logForDebugging(
+            `[Cross-session idle notice] held — only logged, not delivered to model: ${text}`,
+          )
+          return
+        }
         enqueue({
           mode: 'prompt',
-          value: idleNoticeModelText(notice),
+          value: text,
           uuid: randomUUID(),
           origin: { kind: 'peer', from: 'peer_idle_notice' },
           skipSlashCommands: true,
@@ -3772,6 +3820,15 @@ function runHeadlessStreaming(
     if (enqueueUdsInboxMessages()) {
       void run()
     }
+  }
+
+  // Official $qy: after onPermissionModeChanged is wired, emit the
+  // post-y_u mode when resume restored or declined plan.
+  if (
+    options.planModeOnResume === 'restored' ||
+    options.planModeOnResume === 'declined'
+  ) {
+    notifyPermissionModeChanged(getAppState().toolPermissionContext.mode)
   }
 
   // Cron scheduler: runs scheduled_tasks.json tasks in SDK/-p mode.
@@ -6053,6 +6110,10 @@ export function createCanUseToolWithPermissionPrompt(
         permissionPromptTool,
         input,
         toolUseContext,
+        {
+          askSuppressesAlwaysAllowRule:
+            mainPermissionResult.suppressAlwaysAllowRule === true,
+        },
       )
     } finally {
       if (nestedBlocked && nestedAgentId !== undefined) {
@@ -6782,6 +6843,31 @@ type LoadInitialMessagesResult = {
   messages: Message[]
   turnInterruptionState?: TurnInterruptionState
   agentSetting?: string
+  planModeOnResume?: PlanModeOnResume
+  deferredToolUse?: HookDeferredToolAttachment
+}
+
+function applyPrintPlanModeResume(
+  setAppState: (f: (prev: AppState) => AppState) => void,
+  restored: RestoredWorkerState,
+  tracker: PlanModeResumeTracker,
+  options: { forkSession?: boolean; sdkUrl?: string },
+): PlanModeOnResume {
+  setAppState(
+    applyPlanModeResumeFromInternal(
+      (restored?.internal ?? null) as {
+        worker_permission_mode?: unknown
+      } | null,
+      tracker,
+      { forkSession: !!options.forkSession },
+    ),
+  )
+  recordPlanModeResumeTelemetry(tracker, {
+    lane: options.sdkUrl ? 'sdk_url' : 'print',
+    hadExternal: !!restored?.external,
+    hadInternal: !!restored?.internal,
+  })
+  return classifyPlanModeOnResume(tracker)
 }
 
 async function loadInitialMessages(
@@ -6796,7 +6882,7 @@ async function loadInitialMessages(
     /** Official sdkUrl densable — enables RESUME_FROM_SESSION hydrate when empty. */
     sdkUrl?: string | undefined
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
-    restoredWorkerState: Promise<SessionExternalMetadata | null>
+    restoredWorkerState: Promise<RestoredWorkerState>
     /** densable hydratePrefetch — [fg, sub, tip] from RemoteIO */
     hydratePrefetch?: Promise<
       | [
@@ -6898,6 +6984,7 @@ async function loadInitialMessages(
           messages: result.messages,
           turnInterruptionState: result.turnInterruptionState,
           agentSetting: result.agentSetting,
+          deferredToolUse: result.deferredToolUse,
         }
       }
     } catch (error) {
@@ -6956,6 +7043,9 @@ async function loadInitialMessages(
       const parsedSessionId = parseSessionIdentifier(
         typeof options.resume === 'string' ? options.resume : '',
       )
+      let restored: RestoredWorkerState = null
+      const planModeResumeTracker = createPlanModeResumeTracker()
+
       if (!parsedSessionId) {
         let errorMessage =
           'Error: --resume requires a valid session ID when used with --print. Usage: claude -p --resume <session-id>'
@@ -7004,15 +7094,22 @@ async function loadInitialMessages(
           options.restoredWorkerState,
         ])
         if (metadata) {
-          setAppState(externalMetadataToAppState(metadata))
-          if (typeof metadata.model === 'string') {
-            setMainLoopModelOverride(metadata.model)
+          restored = metadata
+          if (metadata.external) {
+            setAppState(
+              externalMetadataToAppState(
+                metadata.external as SessionExternalMetadata,
+              ),
+            )
+            if (typeof metadata.external.model === 'string') {
+              setMainLoopModelOverride(metadata.external.model)
+            }
           }
           // Official hvf — restore declared_dialog_kinds from prior worker epoch.
           try {
-            const internal = (
-              metadata as { internal?: { declared_dialog_kinds?: unknown } }
-            ).internal
+            const internal = metadata.internal as {
+              declared_dialog_kinds?: unknown
+            } | null
             const { getSdkSupportedDialogKinds } =
               // eslint-disable-next-line @typescript-eslint/no-require-imports
               require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
@@ -7098,7 +7195,15 @@ async function loadInitialMessages(
               },
             )
             if (hydrated.length > 0) {
-              return { messages: hydrated }
+              return {
+                messages: hydrated,
+                planModeOnResume: applyPrintPlanModeResume(
+                  setAppState,
+                  restored,
+                  planModeResumeTracker,
+                  options,
+                ),
+              }
             }
           }
         } catch {
@@ -7110,6 +7215,12 @@ async function loadInitialMessages(
           return {
             messages: await (options.sessionStartHooksPromise ??
               processSessionStartHooks('startup')),
+            planModeOnResume: applyPrintPlanModeResume(
+              setAppState,
+              restored,
+              planModeResumeTracker,
+              options,
+            ),
           }
         } else {
           emitLoadError(
@@ -7174,6 +7285,12 @@ async function loadInitialMessages(
         }
       }
       restoreSessionStateFromLog(result, setAppState)
+      const planModeOnResume = applyPrintPlanModeResume(
+        setAppState,
+        restored,
+        planModeResumeTracker,
+        options,
+      )
 
       // Restore session metadata so it's re-appended on exit via reAppendSessionMetadata
       restoreSessionMetadata(
@@ -7206,6 +7323,8 @@ async function loadInitialMessages(
         messages: result.messages,
         turnInterruptionState: result.turnInterruptionState,
         agentSetting: result.agentSetting,
+        planModeOnResume,
+        deferredToolUse: result.deferredToolUse,
       }
     } catch (error) {
       logError(error)

@@ -1,0 +1,119 @@
+
+===== Gateway login is required by your organization @ 134110384 =====
+
+Gateway login is required by your organization's policy, but no gateway URL is configured. Contact your IT administrator.
+
+---
+
+The TLS certificate for this gateway has changed since you last connected. Only continue if your administrator has confirmed a certificate rotation.
+
+---
+
+You haven't connected to this gateway before. Once trusted, it can push settings to this machine that execute commands and change your environment. Only continue if this is your organization's gateway.
+
+---
+
+
+===== Your organization's gateway URL (set by managed settings) @ 134110528 =====
+
+Gateway login is required by your organization's policy, but no gateway URL is configured. Contact your IT administrator.
+
+---
+
+The TLS certificate for this gateway has changed since you last connected. Only continue if your administrator has confirmed a certificate rotation.
+
+---
+
+You haven't connected to this gateway before. Once trusted, it can push settings to this machine that execute commands and change your environment. Only continue if this is your organization's gateway.
+
+---
+
+
+===== Yes, trust this gateway @ 134111352 =====
+
+Gateway login is required by your organization's policy, but no gateway URL is configured. Contact your IT administrator.
+
+---
+
+The TLS certificate for this gateway has changed since you last connected. Only continue if your administrator has confirmed a certificate rotation.
+
+---
+
+You haven't connected to this gateway before. Once trusted, it can push settings to this machine that execute commands and change your environment. Only continue if this is your organization's gateway.
+
+---
+
+
+===== gateway device authorization endpoint returned malformed response @ 134124808 =====
+
+
+===== [gateway-login] ignoring advertised endpoint @ 134105600 =====
+
+self[- ]?signed certificate|unable to (verify the first|get (local )?issuer) certificate|certificate not trusted
+
+---
+
+Could not verify the gateway's TLS certificate. If your gateway uses a private CA or self-signed certificate: Claude Code reads your OS trust
+
+---
+
+Gateway login is required by your organization's policy, but no gateway URL is configured. Contact your IT administrator.
+
+---
+
+The TLS certificate for this gateway has changed since you last connected. Only continue if your administrator has confirmed a certificate rotation.
+
+---
+
+You haven't connected to this gateway before. Once trusted, it can push settings to this machine that execute commands and change your environment. Only continue if this is your organization's gateway.
+
+---
+
+
+===== gatewayUnsupportedWarning @ 134369640 =====
+
+
+===== gatewayScreenLocked @ 134369688 =====
+
+
+===== Certificate fingerprint (SHA-256) @ 134111264 =====
+
+Gateway login is required by your organization's policy, but no gateway URL is configured. Contact your IT administrator.
+
+---
+
+The TLS certificate for this gateway has changed since you last connected. Only continue if your administrator has confirmed a certificate rotation.
+
+---
+
+You haven't connected to this gateway before. Once trusted, it can push settings to this machine that execute commands and change your environment. Only continue if this is your organization's gateway.
+
+---
+
+
+===== Press Enter to connect @ 134110632 =====
+
+Gateway login is required by your organization's policy, but no gateway URL is configured. Contact your IT administrator.
+
+---
+
+The TLS certificate for this gateway has changed since you last connected. Only continue if your administrator has confirmed a certificate rotation.
+
+---
+
+You haven't connected to this gateway before. Once trusted, it can push settings to this machine that execute commands and change your environment. Only continue if this is your organization's gateway.
+
+---
+
+
+===== Connected to Cloud gateway. @ 134427352 =====
+
+awsAuthRefresh failed. Check the command in your settings and try running it in a separate terminal.
+
+---
+
+
+===== deviceAuthorizationEndpoint @ 134121056 =====
+
+
+===== /.well-known/oauth-authorization-server @ 98154688 =====

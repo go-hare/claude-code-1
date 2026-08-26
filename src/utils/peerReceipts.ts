@@ -259,8 +259,13 @@ function debitPacer(to: string): void {
   getOutboundPacer().debit(key)
 }
 
-function summarizeMsgId(id: string | undefined): string {
-  return id ?? 'undefined'
+/** densable vkh / Oih — Gir UUID → id; undefined → (none); else (malformed). */
+export function summarizePeerMsgId(id: unknown): string {
+  return typeof id === 'string' && UUID_RE.test(id)
+    ? id
+    : id === undefined
+      ? '(none)'
+      : '(malformed)'
 }
 
 function peerOriginOf(
@@ -282,7 +287,11 @@ export function dispatchPeerReceipt(opts: {
   ownSocketPath: string
   from: string
   vetReplyAddress: (from: string, own: string) => string | undefined
-  send: (target: string, fields: Record<string, unknown>) => Promise<void>
+  send: (
+    target: string,
+    fields: Record<string, unknown>,
+    sendOpts?: { expectPeerPid?: number },
+  ) => Promise<void>
 }): void {
   const origin = peerOriginOf(opts.message)
   const from = origin?.from
@@ -302,19 +311,29 @@ export function dispatchPeerReceipt(opts: {
     origMsgId,
     extra: opts.extra,
   })
-  void opts.send(reply, fields).catch(err => {
-    const detail = err instanceof Error ? err.message : String(err)
-    logForDebugging(
-      `[uds-messaging] hold-receipt send failed to ${from}: ${detail}`,
-    )
-  })
+  void opts
+    .send(reply, fields, {
+      ...(origin?.verifiedPeerPid !== undefined
+        ? { expectPeerPid: origin.verifiedPeerPid }
+        : {}),
+    })
+    .catch(err => {
+      const detail = err instanceof Error ? err.message : String(err)
+      logForDebugging(
+        `[uds-messaging] hold-receipt send failed to ${from}: ${detail}`,
+      )
+    })
 }
 
 export function installPeerReceiptSender(opts: {
   ownSocketPath: string
   from: string
   vetReplyAddress: (from: string, own: string) => string | undefined
-  send: (target: string, fields: Record<string, unknown>) => Promise<void>
+  send: (
+    target: string,
+    fields: Record<string, unknown>,
+    sendOpts?: { expectPeerPid?: number },
+  ) => Promise<void>
 }): void {
   setSendPeerReceipt((message, status, extra) => {
     dispatchPeerReceipt({
@@ -415,7 +434,7 @@ export function handlePeerMessageStatusFrame(
       }
     }
     if (byDest.size === 0) {
-      const id = summarizeMsgId(orig)
+      const id = summarizePeerMsgId(frame.orig_msg_id)
       logForDebugging(
         `[uds-messaging] peer_message_status dropped: neither orig_msg_id=${id} nor any named id matches an outstanding send`,
       )
@@ -431,7 +450,7 @@ export function handlePeerMessageStatusFrame(
 
   const matched = matchOutstandingSend(orig, status)
   if (matched === undefined) {
-    const id = summarizeMsgId(orig)
+    const id = summarizePeerMsgId(frame.orig_msg_id)
     logForDebugging(
       `[uds-messaging] peer_message_status dropped: no outstanding send matches orig_msg_id=${id}`,
     )

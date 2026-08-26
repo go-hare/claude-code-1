@@ -43,7 +43,24 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 18 / N/A 1**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.45**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 18 / N/A 1** + **236 HAVE 20 / PARTIAL 12** + **237 HAVE 3** + **238 HAVE 34 / PARTIAL 5**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.46**），与 git tag 可能不同步。
+
+#### densable 2.1.236–2.1.238 对齐说明（2.7.46）
+
+对照文档：
+
+- `docs/upstream-extraction/v2.1.236/official-236-checklist.md`（**HAVE 20 / PARTIAL 12 / N/A 1**）
+- `docs/upstream-extraction/v2.1.237/official-237-checklist.md`（**HAVE 3**）
+- `docs/upstream-extraction/v2.1.238/official-238-checklist.md`（**HAVE 34 / PARTIAL 5 / GAP 0**）
+
+叠在 **2.7.45**（235 + 234 quota）之上。**2.7.46** 一次收口 **236–238** CLI 产品面，并把官方 238 SEA 仍保留的 **234 leftover**（stale Enter `qvm`/`hSl`、SendMessage `to` 300/`searchTruncated`、sessionRestore `GGc`、session persist、markdown `d0l`、marketplace allowlist）按金标接回。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **236** | `ANTHROPIC_DEFAULT_MODEL`、SendMessage `notify_when_idle`、sandbox `**/.env` deny、fullscreen 单次失败回退 classic、goal idle check-in、`/model` `LFh`/`sgM` | gold-weak / live E2E 仍 PARTIAL；**#33 VSCode host a11y N/A** |
+| **237** | gateway/custom baseURL `canMarkApiSystem`；内置 **Concise** output style；`isOutputLineTruncated` `r7` typeof+wrap | **不** invent Proactive |
+| **238** | `keybindingFlavor` readline、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation `work-tree-elsewhere`、RC Stop/sign-out/403、update check 10s、`⊘ Disabled` 等 34 HAVE | PARTIAL：#4 live ceiling、#16 live discover、#18 用户可见 isolation、#24 chrome UI、#25 live remint。**不** invent leftover #3 `identity_changed` / G0S / storageV5 |
+| **234 leftover** | stale Enter 续跑、`to` 单行+300、`searchTruncated`、UNC/NT 拒 chdir、session persist + `permissionRecheck`、markdown href/表/HR | 不 invent G0S unknowable-rescan |
 
 #### densable 2.1.234–2.1.235 对齐说明（2.7.45）
 
@@ -219,10 +236,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.45）
+### 近期更新（2.7.5 → 2.7.46）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.46** | **densable 2.1.236–2.1.238**：236 HAVE 20 / PARTIAL 12（`ANTHROPIC_DEFAULT_MODEL`、`notify_when_idle`、sandbox deny、fullscreen fallback、goal check-in、`/model` `LFh`/`sgM`）；237 HAVE 3（`canMarkApiSystem`、Concise、`r7` truncate）；238 HAVE 34 / PARTIAL 5（`keybindingFlavor`、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation pin、RC Stop/sign-out/403、update check 10s）。并接回官方 238 仍保留的 **234 leftover**（stale Enter、SendMessage `to`/truncated、`GGc`、session persist、markdown `d0l`）。不 invent leftover #3 / G0S / chrome UI。 |
 | **2.7.45** | **densable 2.1.235（HAVE 18 / N/A 1）** + tip **2.1.234** quota auto-resume：spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP 门 / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX 门**；CLI IDE bridge `uSm`；quota rearm `HEv=2`。**#19 VSCode host focus N/A**。 |
 | **2.7.44** | **teammate 默认模型跟随 leader**：`teammateDefaultModel` unset/null 经 leader → `mainLoopModel` / `ANTHROPIC_MODEL` 解析，硬编码 Opus 仅最后兜底；Config/ModelPicker 文案对齐；向 teammate 转发 `ANTHROPIC_MODEL` 与 `ANTHROPIC_DEFAULT_*_MODEL`。 |
 | **2.7.43** | **densable 1:1 审查收口 + 兼容层 PTL**：thinking-only re-stream 前 credit session cost；G7 mint-time `cse_*` 放弃/teardown 清理（reattach 暂态保留）；`epoch_stale`-only Ot（`epoch_conflict` 不进 Ba remint）；OpenAI/Grok/Gemini catch 经 `getAssistantMessageFromError`，`maximum prompt length` 可进 reactive compact。 |

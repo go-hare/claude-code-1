@@ -1,0 +1,4 @@
+offset=157332555
+needle=b'sandboxed command'
+window=
+.Not loading ................/... in this directory: it is served in place from .............k..., which contains the working directory, so its content could not be protected from sandboxed commands here......................e...................................................................6...................*........@ ......@...@.u.@ ..C...@.4.@0..@...E...@@..@...@...@PM.@........Q...BT.l.....

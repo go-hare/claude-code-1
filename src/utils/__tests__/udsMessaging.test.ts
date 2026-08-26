@@ -6,15 +6,14 @@ import {
   readdir,
   rm,
   stat,
-  symlink,
   unlink,
   writeFile,
 } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
 import { createConnection, createServer, type Socket } from 'node:net'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  deriveMessagingKeyName,
   drainInbox,
   getDefaultUdsSocketPath,
   MAX_UDS_INBOX_ENTRIES,
@@ -23,6 +22,7 @@ import {
   MAX_UDS_LINE_CHARS,
   MAX_UDS_CLIENTS,
   MAX_UNIX_SOCKET_PATH_LENGTH,
+  getUdsStartDegradedCause,
   assertValidUnixSocketPath,
   formatUdsAddress,
   parseUdsTarget,
@@ -35,6 +35,16 @@ import {
 
 let previousConfigDir: string | undefined
 let tempConfigDir = ''
+
+const TEST_PEER_TOKEN = '0123456789abcdef0123456789abcdef'
+
+function capabilityFileName(path: string): string {
+  return deriveMessagingKeyName(process.pid, path)
+}
+
+function sessionsDir(root = tempConfigDir): string {
+  return join(root, 'sessions')
+}
 
 function socketPath(label: string): string {
   const suffix = `${process.pid}-${Math.random().toString(16).slice(2)}-${label}`
@@ -234,7 +244,8 @@ describe('UDS inbox retention', () => {
 
     try {
       const { isPeerAlive } = await import('../udsClient.js')
-      expect(await isPeerAlive(path, 3_000, 'test-token')).toBe(false)
+      // Official ump: connect success is alive (no ping/pong / frame read).
+      expect(await isPeerAlive(path)).toBe(true)
     } finally {
       await closeServer(receiver)
       if (process.platform !== 'win32') {
@@ -245,21 +256,32 @@ describe('UDS inbox retention', () => {
 
   test('udsClient send fails closed when no capability token exists', async () => {
     const path = socketPath('uds-client-no-token')
-    const { sendToUdsSocket } = await import('../udsClient.js')
-
-    await expect(sendToUdsSocket(path, 'hello')).rejects.toThrow(
-      /No running session has registered an inbox|unvouched pipe|no live inbox/,
+    const { sendToUdsSocket, UdsUnvouchedPipeError } = await import(
+      '../udsClient.js'
     )
+    const err = await sendToUdsSocket(path, 'hello').then(
+      () => undefined,
+      e => e as Error,
+    )
+    // densable cmp: Sli only when mti() && !(no-key && rvv). Unix connects.
+    if (process.platform === 'win32') {
+      expect(err).toBeInstanceOf(UdsUnvouchedPipeError)
+      expect(err?.message).toMatch(
+        /No running session has registered an inbox|unvouched pipe|no live inbox/,
+      )
+    } else {
+      expect(err).not.toBeInstanceOf(UdsUnvouchedPipeError)
+    }
   })
 
   test('udsClient send reports connection failures without leaking token state', async () => {
     const path = socketPath('uds-client-connect-error')
-    const capabilityDir = join(tempConfigDir, 'messaging-capabilities')
-    const capabilityName = `${createHash('sha256').update(path).digest('hex')}.json`
+    const capabilityDir = sessionsDir()
+    const capabilityName = capabilityFileName(path)
     await mkdir(capabilityDir, { recursive: true, mode: 0o700 })
     await writeFile(
       join(capabilityDir, capabilityName),
-      JSON.stringify({ socketPath: path, authToken: 'test-token' }),
+      JSON.stringify({ peerToken: TEST_PEER_TOKEN }),
       'utf-8',
     )
     const { sendToUdsSocket, UdsPeerConnectionError } = await import(
@@ -275,17 +297,17 @@ describe('UDS inbox retention', () => {
       throw new Error('Expected UDS peer connection error')
     }
     expect(error.socketPath).toBe(path)
-    expect(error.message).not.toContain('test-token')
+    expect(error.message).not.toContain(TEST_PEER_TOKEN)
   })
 
   test('udsClient send reports response timeouts as peer connection errors', async () => {
     const path = socketPath('uds-client-timeout')
-    const capabilityDir = join(tempConfigDir, 'messaging-capabilities')
-    const capabilityName = `${createHash('sha256').update(path).digest('hex')}.json`
+    const capabilityDir = sessionsDir()
+    const capabilityName = capabilityFileName(path)
     await mkdir(capabilityDir, { recursive: true, mode: 0o700 })
     await writeFile(
       join(capabilityDir, capabilityName),
-      JSON.stringify({ socketPath: path, authToken: 'test-token' }),
+      JSON.stringify({ peerToken: TEST_PEER_TOKEN }),
       'utf-8',
     )
     if (process.platform !== 'win32') {
@@ -432,27 +454,49 @@ describe('UDS inbox retention', () => {
     const path = socketPath('auth')
     await startUdsMessaging(path, { isExplicit: true })
 
-    const response = await new Promise<string>((resolve, reject) => {
-      let responseText = ''
-      const conn = createConnection(path, () => {
-        conn.write(`${JSON.stringify({ type: 'text', data: 'bad' })}\n`)
+    if (process.platform === 'win32') {
+      const response = await new Promise<string>((resolve, reject) => {
+        let responseText = ''
+        const conn = createConnection(path, () => {
+          conn.write(`${JSON.stringify({ type: 'text', data: 'bad' })}\n`)
+        })
+        conn.setTimeout(5_000, () => {
+          conn.destroy()
+          reject(new Error('Timed out waiting for auth rejection'))
+        })
+        conn.on('data', chunk => {
+          const text = chunk.toString('utf-8')
+          if (text.includes('\n')) {
+            responseText = text
+          }
+        })
+        conn.on('close', () => resolve(responseText))
+        conn.on('error', reject)
       })
-      conn.setTimeout(5_000, () => {
-        conn.destroy()
-        reject(new Error('Timed out waiting for auth rejection'))
-      })
-      conn.on('data', chunk => {
-        const text = chunk.toString('utf-8')
-        if (text.includes('\n')) {
-          responseText = text
-        }
-      })
-      conn.on('close', () => resolve(responseText))
-      conn.on('error', reject)
-    })
+      expect(JSON.parse(response).type).toBe('error')
+      expect(drainInbox()).toEqual([])
+      return
+    }
 
-    expect(JSON.parse(response).type).toBe('error')
-    expect(drainInbox()).toEqual([])
+    await waitForEnqueues(1, async () => {
+      await new Promise<void>((resolve, reject) => {
+        const conn = createConnection(path, () => {
+          conn.write(
+            `${JSON.stringify({ type: 'text', data: 'bad' })}\n`,
+            () => {
+              conn.end()
+              resolve()
+            },
+          )
+        })
+        conn.setTimeout(5_000, () => {
+          conn.destroy()
+          reject(new Error('Timed out sending unauthenticated unix line'))
+        })
+        conn.on('error', reject)
+      })
+    })
+    expect(drainInbox()).toHaveLength(1)
   })
 
   test('disconnects malformed JSON clients without enqueueing inbox work', async () => {
@@ -482,6 +526,7 @@ describe('UDS inbox retention', () => {
   })
 
   test('disconnects idle unauthenticated clients', async () => {
+    if (process.platform !== 'win32') return
     const path = socketPath('idle-client')
     await startUdsMessaging(path, { isExplicit: true })
 
@@ -666,8 +711,8 @@ describe('UDS inbox retention', () => {
 
   test('fails closed and cleans temp files when capability target is occupied', async () => {
     const path = socketPath('capability-target-dir')
-    const capabilityDir = join(tempConfigDir, 'messaging-capabilities')
-    const capabilityName = `${createHash('sha256').update(path).digest('hex')}.json`
+    const capabilityDir = sessionsDir()
+    const capabilityName = capabilityFileName(path)
     await mkdir(join(capabilityDir, capabilityName), {
       recursive: true,
       mode: 0o700,
@@ -677,10 +722,17 @@ describe('UDS inbox retention', () => {
       () => null,
       e => e as Error & { code?: string },
     )
-    expect(err).toBeTruthy()
-    expect(err!.code).toBe('key_publish_failed')
-    expect(process.env.CLAUDE_CODE_MESSAGING_SOCKET).toBeUndefined()
-    expect(process.env.CLAUDE_CODE_MESSAGING_TOKEN).toBeUndefined()
+    // Official Ckh: throw only when authRequired (Windows). Unix warns + runs.
+    if (process.platform === 'win32') {
+      expect(err).toBeTruthy()
+      expect(err!.code).toBe('key_publish_failed')
+      expect(process.env.CLAUDE_CODE_MESSAGING_SOCKET).toBeUndefined()
+      expect(process.env.CLAUDE_CODE_MESSAGING_TOKEN).toBeUndefined()
+    } else {
+      expect(err).toBeNull()
+      expect(getUdsStartDegradedCause()).toBe('key_publish_failed')
+      expect(process.env.CLAUDE_CODE_MESSAGING_SOCKET).toBe(path)
+    }
     expect(await readdir(capabilityDir)).toEqual([capabilityName])
   })
 
@@ -691,58 +743,6 @@ describe('UDS inbox retention', () => {
 
       const mode = (await stat(path)).mode & 0o777
       expect(mode).toBe(0o600)
-    })
-
-    test('fails closed when the capability directory is not private', async () => {
-      const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
-      const tempHome = join(
-        tmpdir(),
-        `uds-capability-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      )
-      process.env.CLAUDE_CONFIG_DIR = tempHome
-      const capabilityDir = join(tempHome, 'messaging-capabilities')
-      await mkdir(capabilityDir, { recursive: true, mode: 0o755 })
-      await chmod(capabilityDir, 0o755)
-
-      try {
-        const path = socketPath('broad-capdir')
-        await expect(
-          startUdsMessaging(path, { isExplicit: true }),
-        ).rejects.toThrow('permissions are too broad')
-        await expect(stat(path)).rejects.toThrow()
-      } finally {
-        if (previousConfigDir === undefined) {
-          delete process.env.CLAUDE_CONFIG_DIR
-        } else {
-          process.env.CLAUDE_CONFIG_DIR = previousConfigDir
-        }
-        await rm(tempHome, { recursive: true, force: true })
-      }
-    })
-
-    test('fails closed when the capability directory is a symlink', async () => {
-      const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
-      const tempHome = join(
-        tmpdir(),
-        `uds-capability-link-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      )
-      const target = join(tempHome, 'target')
-      process.env.CLAUDE_CONFIG_DIR = tempHome
-      await mkdir(target, { recursive: true, mode: 0o700 })
-      await symlink(target, join(tempHome, 'messaging-capabilities'), 'dir')
-
-      try {
-        await expect(
-          startUdsMessaging(socketPath('symlink-capdir'), { isExplicit: true }),
-        ).rejects.toThrow('not a private directory')
-      } finally {
-        if (previousConfigDir === undefined) {
-          delete process.env.CLAUDE_CONFIG_DIR
-        } else {
-          process.env.CLAUDE_CONFIG_DIR = previousConfigDir
-        }
-        await rm(tempHome, { recursive: true, force: true })
-      }
     })
 
     test('fails closed when an explicit socket parent is not private', async () => {

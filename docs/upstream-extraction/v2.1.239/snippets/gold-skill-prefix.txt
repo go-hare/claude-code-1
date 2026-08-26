@@ -1,0 +1,68 @@
+#### "### Skill:" count=2 [163804640,316869019]
+--- 163804640 ---
+........................(.......................................................+............................................j...i......0...............@...............H.......................	.......### Skill: .............	.......
+Path: .........	.......
+
+...............................@@%.E...@.e.E...@.d.H...........................A...............................................O..........$.......q...V...+....
+..+...q............D..H.......................................................x.......................................@...........................................................................................................
+...............................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................................................................................................................................................P.......................................................................................
+--- 316869019 ---
+urn o_([$po(Ts,{file_path:e.filename}),Npo(PP,n)]);case"pdf":return o_([$po(Ts,{file_path:e.filename}),Npo(PP,n)])}break}case"invoked_skills":{if(e.skills.length===0)return[];let n=e.skills.map((o)=>`### Skill: ${o.name}
+Path: ${o.path}
+
+${o.content}`).join(`
+
+---
+
+`);return o_([Cn({content:`The following skills were invoked EARLIER in this session (before the conversation was compacted), not on the current turn. They are shown here for context only so you remain aware of their guidelines.
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time setup actions (e.g., scheduling, creating files) again. Any request or argument text embedded in the skill bodies below \u2014 for example under a "## User Request" or "## Input" heading \u2014 was captured when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to apply ongoing behavioral guidelines from these skills where still relevant.
+
+${n
+#### "case"invoked_skills"" count=3 [316737560,316868940,320266249]
+--- 316737560 ---
+Turn:()=>Hpo,removeInterruptedMessage:()=>Kin,restoreSkillStateFromMessages:()=>csh});function lsh(e){if(typeof e!=="object"||e===null||!("type"in e)||typeof e.type!=="string")return!1;switch(e.type){case"invoked_skills":return"skills"in e&&Array.isArray(e.skills)&&e.skills.every((t)=>typeof t==="object"&&t!==null);case"hook_success":return"content"in e&&typeof e.content==="string";case"skill_listing":return!("names"in e)||e.names===void 0||Array.isArray(e.names)&&e.names.length<=Q_E&&e.names.every((t)=>typeof t==="string"&&t.length<=ebE);case"hook_additional_context":return"content"in e&&Array.isArray(e.content)&&e.content.every((t)=>typeof t==="string");default:return!0}}function Ipo(e){let t=0,r=e.filter((n)=>{if(n.type==="attachment"&&!lsh(n.attachment))return t+=1,!1;return!0});if(t===0)return e;return E(`resume: dropped ${t} attachment ${At(t,"entry","entries")} with a missing or malformed payload \u2014 the session transcript appears partially corrupt`,{level:"error"}),r}functio
+--- 316868940 ---
+Ts} to read more of the file if you need.`,isMeta:!0})]:[]]);case"notebook":return o_([$po(Ts,{file_path:e.filename}),Npo(PP,n)]);case"pdf":return o_([$po(Ts,{file_path:e.filename}),Npo(PP,n)])}break}case"invoked_skills":{if(e.skills.length===0)return[];let n=e.skills.map((o)=>`### Skill: ${o.name}
+Path: ${o.path}
+
+${o.content}`).join(`
+
+---
+
+`);return o_([Cn({content:`The following skills were invoked EARLIER in this session (before the conversation was compacted), not on the current turn. They are shown here for context only so you remain aware of their guidelines.
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time setup actions (e.g., scheduling, creating files) again. Any request or argument text embedded in the skill bodies below \u2014 for example under a "## User Request" or "## Input" heading \u2014 was captured when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to a
+#### "invoked EARLIER" count=1 [316869138]
+--- 316869138 ---
+k}case"invoked_skills":{if(e.skills.length===0)return[];let n=e.skills.map((o)=>`### Skill: ${o.name}
+Path: ${o.path}
+
+${o.content}`).join(`
+
+---
+
+`);return o_([Cn({content:`The following skills were invoked EARLIER in this session (before the conversation was compacted), not on the current turn. They are shown here for context only so you remain aware of their guidelines.
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time setup actions (e.g., scheduling, creating files) again. Any request or argument text embedded in the skill bodies below \u2014 for example under a "## User Request" or "## Input" heading \u2014 was captured when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to apply ongoing behavioral guidelines from these skills where still relevant.
+
+${n}`,isMeta:!0})])}case"todo_reminder":{if(zq()||!zee())return[];let n=e.content.map((i,s)=>`${s+1}. [${i.status}] ${i.co
+#### "function pve" count=2 [303256938,333362614]
+--- 303256938 ---
+uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}function hOt(e,t,r){let n={input_tokens:t.inputTokens,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.inputTokens,outputTokens:r.outputTokens-t.outputTokens,cacheRe
+--- 333362614 ---
+,r)):ss(l)?s.push(t(i,n,l.$refNode,l.$refText,l)):s.push(l);i[n]=s}else i[n]=a;return j1(i,{deep:!0}),i}function Y5(e){return dr.isInstance(e,zs.$type)}function H0(e){return dr.isInstance(e,$2.$type)}function pve(e){return dr.isInstance(e,N1.$type)}function mve(e){return dr.isInstance(e,ho.$type)}function pf(e){return dr.isInstance(e,of.$type)}function j5(e){return dr.isInstance(e,z2.$type)}function gve(e){return dr.isInstance(e,a5.$type)}function v$(e){return dr.isInstance(e,s5.$type)}function lh(e){return dr.isInstance(e,lf.$type)}function x$(e){return dr.isInstance(e,o5.$type)}function b$(e){return dr.isInstance(e,cf.$type)}function yve(e){return dr.isInstance(e,uf.$type)}function T$(e){return dr.isInstance(e,G2.$type)}function Y0(e){return dr.isInstance(e,hf.$type)}function C$(e){return dr.isInstance(e,V2.$type)}function k$(e){return dr.isInstance(e,l5.$type)}function vve(e){return dr.isInstance(e,nh.$type)}function xve(e){return dr.isInstance(e,c5.$type)}function j0(e){return dr.i
+#### "US_ONLY" count=0 []
+#### "usOnly" count=4 [111325572,177908392,280237414,302103365]
+--- 111325572 ---
+....P.........................M.............................................x.......................P.......................P.........................A.....................`N..............	...
+...statusOnly...................................................D..H.......................................................h...............................................................................................................................................................
+...h...h...h...h...h...h...h...h...h...h...h...................................................................................X...X...X...x...x...x...x...x...................................................................................@...............H.......
+...............
+...............................................	........................................................................!...
+...........&.....K........L.J.....................................................................	.L...........j...
+.
+--- 177908392 ---
+(<-......................LG.......................<.....................P.................................................................................................A.............	.......contiguousOnly..............................................b........D..H.......................................................X.......................................@.......................................................................`.......................)Ek............. ...............	.......hog.............	.......gog.............HV..............................................X...............(.......................	.......dog.............	......._dc.................................................................h...h...h...h...h...h...h...h...h...h...h.......................................................................H...H.......`...`...`...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...................................................h.......................
+#### "inference premium" count=0 []
+#### "data-residency premium" count=0 []

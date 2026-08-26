@@ -1,0 +1,4 @@
+offset=297583307
+needle=b're-checking'
+window=
+ agent re-poll; only the user's \`go\` moves it forward \u2192 blocked).."Awaiting your \`go\`. Next check in 20m.".\u2192 {"state":"working","detail":"PR awaiting go-ahead; agent re-checking in 20m","tempo":"idle","output":{}}.  (agent will re-poll on its own; \`go\` is an optional accelerator \u2192 working).."Auto-merge armed on PR #4821. Posted to #stamps. Awaiting stamp.".\u2192 {"state":"don

@@ -1,0 +1,3 @@
+OFFSET=306783554
+
+iah=`${R$r} Run /model fable to review and enable, then set it as the advisor.`});async function $Ol(e,t){let r;try{r=await fs.delete(`/api/frame/${encodeURIComponent(e)}`,void 0,{host:"frame",auth:"claude-ai-oauth",refreshOAuth:!0,headers:XM(),timeout:15000,maxContentLength:j4E,validateStatus:()=>!0,signal:t})}catch(n){if(fx(n))throw n;return pe("artifact_delete","request_error"),{err:"Couldn't d

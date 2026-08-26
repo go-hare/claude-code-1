@@ -1,0 +1,139 @@
+#### "function _ts" count=1 [317576200]
+--- 317576200 ---
+pacity liveness requires non_exclusive_heartbeat_interval_ms > 0 or multisession_poll_interval_ms_at_capacity > 0"}))});function _ts(e){let t={entries:new Map,burst:e?.burst??3,refillMs:e?.refillMs??1e4,retryMs:e?.retryMs??60000,isOwnTitle:e?.isOwnTitle??(()=>!1),onRemoteTitleAdopted:e?.onRemoteTitleAdopted??(()=>{})};return{update:(r,n,o)=>vxE(t,r,n,o),noteRemoteTitle:(r,n)=>hyh(t,r,n),forget:(r)=>AxE(t,r),hasSent:(r,n)=>t.entries.get(r)?.sentTitles.has(n)??!1,isKnownTitle:(r,n)=>t.entries.get(r)?.knownTitles.has(n)??!1}}function myh(e,t){let r=e.entries.get(t);if(!r)r={lastSentTitle:void 0,lastSentOk:!1,sentTitles:new Set,knownTitles:new Set,tokens:e.burst,refilledAt:Date.now(),pending:void 0,inFlight:!1,timer:void 0,retryTimer:void 0,sendingRetry:!1,suppressed:0},e.entries.set(t,r);return r}function vxE(e,t,r,n){let o=myh(e,t);if(gyh(o,r,n))return fWl(o),Promise.resolve();return new Promise((i)=>{let s=[i];if(Vfo(o),o.pending||o.inFlight){if(o.suppressed===0)be("bridge_session_patch","title_write_coale
+#### "_ts()" count=0 []
+#### "_ts({" count=2 [317595153,322413658]
+--- 317595153 ---
+tle] derived title for ${Ge}: ${lt}`),Promise.resolve().then(() => (Lot(),R_r)).then(async({getBridgeSession:pr})=>{C??=_ts({isOwnTitle:(vt,Gt)=>k.get(vt)?.has(Gt)??!1,onRemoteTitleAdopted:(vt,Gt)=>i.setSessionTitle(vt,Gt)});let Mt=await pr(Ge,{baseUrl:e.apiBaseUrl});if(Mt===null||I.get($e)!==Ze)return;let Bt=k.get(Ge);if(Mt.title&&!Bt?.has(Mt.title)&&!C.hasSent(Ge,Mt.title)){i.setSessionTitle(Ge,Mt.title),C.noteRemoteTitle(Ge,Mt.title),E(`[bridge:title] remote rename for ${Ge}: ${Mt.title}`);return}k.set(Ge,(Bt??new Set).add(lt)),await C.update(Ge,lt,{baseUrl:e.apiBaseUrl})}).catch((pr)=>E(`[bridge:title] failed to update title for ${Ge}: ${pr}`,{level:"error"}))}},We);if(typeof Kt==="string"){i.logError(`Failed to spawn session ${$e}: ${Kt}`),W(Xmh(ot));let xt=b.get($e);if(xt)b.delete($e),W(vWl(xt,i,{force:!0}));_.add(ge.id),W(qfo(n,t,ge.id,i,a.stopWorkBaseDelayMs));break}let mt=Kt,at=Date.now()-Fe;N("tengu_bridge_session_started",{active_sessions:f.size,spawn_mode:me(ze),in_worktree:b.has($e),spawn_dur
+--- 322413658 ---
+sage.content);if(!Ui)continue;let Ri=CbA(Ui);if(!Ri)continue;hr=Ri,dr=!0;break}}let ke=0,Pe,et=null,ct=0,Ke=!1,nt=!1,Ct=_ts({isOwnTitle:(gr,Br)=>zt.has(Br),onRemoteTitleAdopted:(gr,Br)=>{xwt(gr,Br),Ft=gr}}),_t=(gr,Br)=>zt.has(Br)||Ct.hasSent(gr,Br),Ft,Qe=`${qzt()}-${zWe()}`,zt=new Set([hr]),qt;if(Se){let gr=Vt(),Br=gr?l8e(gr):void 0;if(Br)zt.add(Br);qt=gr?EA(gr):void 0}let fn=Promise.resolve(),jr=(gr,Br,Rn,ri)=>{let Ui=()=>ri&&(_Gt()||ge()),Ri=()=>!nt;if(Ke||Ui()||H2(Br))return;dr=!0,hr=gr,zt.add(gr),xwt(Br,gr),E(`[bridge:repl] derived title from message ${Rn}: ${gr}`),Ct.update(Br,gr,{baseUrl:Dt,getAccessToken:Yj,shouldSend:()=>{if(Ke||Ui()||!Ri())return!1;return!H2(Br)}}).catch(()=>{})},cn=(gr,Br,Rn)=>{if(Ke)return;let ri=++ct,Ui=ke,Ri=AbortSignal.timeout(15000);Y0t(gr,Ri,te).then(async(Ir)=>{let no=()=>{let On=l8e(Vt());return Boolean(On&&!zt.has(On))},Sr=()=>{let On=EA(Vt());return Ke||ri!==ct||Pe!==Br||ur||Boolean(On&&On!==qt)||no()};if(!Ir||Sr())return;let Yr=lt?await iie(te):void 0,Er=await x_r(Br,
+#### "title_write_coalesced" count=2 [168026744,317577083]
+--- 168026744 ---
+........................................................................	.......bridge_session_patch............	.......title_write_coalesced...........
+................................................@.$...L.@ ......@P,.H...@.L.I...@.L.K.... U.....@ /.K...B.d..`4.@ ..H...I.L..`[.@`-.@...@p..@...c.1.@P6.P....@5.@ ..@ .............K...d...~....................................U......................P.]......................aX.....................x.......................P................................................................................................@\.......................o......................@\......................................................................................................................^\.............	.......waiters......U......`...........H.......l............H..H.......................................................h.........................................\.........................................................................................................
+--- 317577083 ---
+ve();return new Promise((i)=>{let s=[i];if(Vfo(o),o.pending||o.inFlight){if(o.suppressed===0)be("bridge_session_patch","title_write_coalesced");o.suppressed+=1}yts(o.pending?.waiters),o.pending={title:r,opts:n,waiters:s},o.sendingRetry=!1,bts(e,t)})}function SxE(e,t,r){let n=Math.floor((r-t.refilledAt)/e.refillMs);if(n>0)t.tokens=Math.min(e.burst,t.tokens+n),t.refilledAt+=n*e.refillMs;if(t.tokens===e.burst)t.refilledAt=r}function bts(e,t){let r=e.entries.get(t);if(!r||r.inFlight||!r.pending)return;let n=Date.now();if(SxE(e,r,n),r.tokens<=0&&!r.pending.opts?.userInitiated){if(!r.timer){let l=Math.max(0,r.refilledAt+e.refillMs-n);r.timer=setTimeout(wxE,l,e,t),r.timer.unref?.()}return}let{title:o,opts:i,waiters:s}=r.pending;if(r.pending=void 0,gyh(r,o,i)||i?.shouldSend!==void 0&&!i.shouldSend()){Vfo(r),r.sendingRetry=!1,r.suppressed=0,yts(s);return}r.tokens=Math.max(0,r.tokens-1),r.inFlight=!0,r.lastSentTitle=o,r.lastSentOk=!1,r.sentTitles.add(o),r.knownTitles.add(o),Vfo(r);let a=r.sendingRetry;if(r.sendingR
+#### "function x_r" count=1 [313433757]
+--- 313433757 ---
+"bridge_session_create","bridge_session_create_bad_response"),null;return aAl(x),Ee("bridge_session_create"),F.id}async function x_r(e,t){return(await B4i(e,t)).session}async function B4i(e,t){let{getClaudeAIOAuthTokens:r,getClaudeAIOAuthTokensAsync:n}=await Promise.resolve().then(() => (oi(),_ne)),{getOauthConfig:o}=await Promise.resolve().then(() => (kp(),eer)),{getCodeSession:i}=await Promise.resolve().then(() => (xWe(),P$n)),{isCcrV2SessionCrudEnabled:s}=await Promise.resolve().then(() => (zx(),wjr)),a=t?.getAccessToken?.()??($t()&&t?.credentials!==void 0?(await n(t.credentials))?.accessToken:r()?.accessToken);if(!a)return E("[bridge] No access token for session fetch"),pe("bridge_session_get","bridge_session_get_no_token"),{session:null,notFound:!1};let l=s(),c;if(!l){let{getOrganizationUUID:d}=await Promise.resolve().then(() => (hG(),_Br));if(c=await d()??void 0,!c)return E("[bridge] No org UUID for session fetch"),pe("bridge_session_get","bridge_session_get_no_org"),{session:null,notFound:!1}}let u
+#### "async function x_r" count=1 [313433751]
+--- 313433751 ---
+"),pe("bridge_session_create","bridge_session_create_bad_response"),null;return aAl(x),Ee("bridge_session_create"),F.id}async function x_r(e,t){return(await B4i(e,t)).session}async function B4i(e,t){let{getClaudeAIOAuthTokens:r,getClaudeAIOAuthTokensAsync:n}=await Promise.resolve().then(() => (oi(),_ne)),{getOauthConfig:o}=await Promise.resolve().then(() => (kp(),eer)),{getCodeSession:i}=await Promise.resolve().then(() => (xWe(),P$n)),{isCcrV2SessionCrudEnabled:s}=await Promise.resolve().then(() => (zx(),wjr)),a=t?.getAccessToken?.()??($t()&&t?.credentials!==void 0?(await n(t.credentials))?.accessToken:r()?.accessToken);if(!a)return E("[bridge] No access token for session fetch"),pe("bridge_session_get","bridge_session_get_no_token"),{session:null,notFound:!1};let l=s(),c;if(!l){let{getOrganizationUUID:d}=await Promise.resolve().then(() => (hG(),_Br));if(c=await d()??void 0,!c)return E("[bridge] No org UUID for session fetch"),pe("bridge_session_get","bridge_session_get_no_org"),{session:null,notFound:!1}
+#### "x_r=" count=0 []
+#### "title write retry" count=8 [168039393,168041417,168041497,168043073,317578695,317578901,317579040,317579245]
+--- 168039393 ---
+...........0.].....	.......................	...9...[bridge] title write retry dropped: sending is now barred...................'...................1....@...H.L.D.4.@`4.C.K.@ ;.@pE.@.t.R.L..p5.@ ..@ L.@ L.@ L...K.@Pe.L.d...[.@.%.K.L...4.@PT.}..H......<.@ ..@.l.I.d.@...P.d.@...M.dTl......W......<......Pt........j...l...........................	...:...=...W...Z...t...w..........................................
+--- 168041417 ---
+...................
+.......................	...;...[bridge] title write retry skipped: server state unreadable.............	...E...[bridge] title write retry dropped: the session was renamed elsewhere.......................3........................@ ..@ ..@ ..@ ......@Pe.@.$....K....@.<.F...@.L.L...D.4.@`4.F...I.3.@.T.K...@.4.@ ..F.....3.@.TI....@..M......,.@ ..@ ..@ ..F.....3.@.,.U...@p5.@ ..F.....3.@@=.@.
+--- 168041497 ---
+ipped: server state unreadable.............	...E...[bridge] title write retry dropped: the session was renamed elsewhere.......................3........................@ ..@ ..@ ..@ ......@Pe.@.$....K....@.<.F...@.L.L...D.4.@`4.F...I.3.@.T.K...@.4.@ ..F.....3.@.TI....@..M......,.@ ..@ ..@ ..F.....3.@.,.U...@p5.@ ..F.....3.@@=.@...@p."....d...@`6.P....@5.@ ..@ .............[...]...a...{...............l......
+#### "noteRemoteTitle" count=8 [168016040,317576436,317595445,322414717,322414924,322414974,322415723,322416010]
+--- 168016040 ---
+refillMs........	.......retryMs.........	...
+...isOwnTitle..............	.......onRemoteTitleAdopted............	.......noteRemoteTitle.........	.......hasSent.........	.......isKnownTitle....8.......................(	......p.......................................|.......|....................D..H.......................................................x.......................................@.................................................................h.....@H\..............................................................................................................................................................................................................................................................................................................................................................................................................................................................i..................................................................................*...................*...
+--- 317576436 ---
+tle:e?.isOwnTitle??(()=>!1),onRemoteTitleAdopted:e?.onRemoteTitleAdopted??(()=>{})};return{update:(r,n,o)=>vxE(t,r,n,o),noteRemoteTitle:(r,n)=>hyh(t,r,n),forget:(r)=>AxE(t,r),hasSent:(r,n)=>t.entries.get(r)?.sentTitles.has(n)??!1,isKnownTitle:(r,n)=>t.entries.get(r)?.knownTitles.has(n)??!1}}function myh(e,t){let r=e.entries.get(t);if(!r)r={lastSentTitle:void 0,lastSentOk:!1,sentTitles:new Set,knownTitles:new Set,tokens:e.burst,refilledAt:Date.now(),pending:void 0,inFlight:!1,timer:void 0,retryTimer:void 0,sendingRetry:!1,suppressed:0},e.entries.set(t,r);return r}function vxE(e,t,r,n){let o=myh(e,t);if(gyh(o,r,n))return fWl(o),Promise.resolve();return new Promise((i)=>{let s=[i];if(Vfo(o),o.pending||o.inFlight){if(o.suppressed===0)be("bridge_session_patch","title_write_coalesced");o.suppressed+=1}yts(o.pending?.waiters),o.pending={title:r,opts:n,waiters:s},o.sendingRetry=!1,bts(e,t)})}function SxE(e,t,r){let n=Math.floor((r-t.refilledAt)/e.refillMs);if(n>0)t.tokens=Math.min(e.burst,t.tokens+n),t.refilledAt
+--- 317595445 ---
+==Ze)return;let Bt=k.get(Ge);if(Mt.title&&!Bt?.has(Mt.title)&&!C.hasSent(Ge,Mt.title)){i.setSessionTitle(Ge,Mt.title),C.noteRemoteTitle(Ge,Mt.title),E(`[bridge:title] remote rename for ${Ge}: ${Mt.title}`);return}k.set(Ge,(Bt??new Set).add(lt)),await C.update(Ge,lt,{baseUrl:e.apiBaseUrl})}).catch((pr)=>E(`[bridge:title] failed to update title for ${Ge}: ${pr}`,{level:"error"}))}},We);if(typeof Kt==="string"){i.logError(`Failed to spawn session ${$e}: ${Kt}`),W(Xmh(ot));let xt=b.get($e);if(xt)b.delete($e),W(vWl(xt,i,{force:!0}));_.add(ge.id),W(qfo(n,t,ge.id,i,a.stopWorkBaseDelayMs));break}let mt=Kt,at=Date.now()-Fe;N("tengu_bridge_session_started",{active_sessions:f.size,spawn_mode:me(ze),in_worktree:b.has($e),spawn_duration_ms:at,worktree_create_ms:De,inProtectedNamespace:fbe(),...Fen()}),fr("info","bridge_session_started",{spawn_mode:ze,in_worktree:b.has($e),spawn_duration_ms:at,worktree_create_ms:De}),f.set($e,mt),h.set($e,ge.id),g.set($e,Ge),S.delete($e),w.delete(We);let bt=Date.now();m.set($e,bt),i.lo
+#### "onRemoteTitleAdopted" count=6 [168016000,317576344,317576368,317579122,317595201,322413694]
+--- 168016000 ---
+....retryMs.........	...
+...isOwnTitle..............	.......onRemoteTitleAdopted............	.......noteRemoteTitle.........	.......hasSent.........	.......isKnownTitle....8.......................(	......p.......................................|.......|....................D..H.......................................................x.......................................@.....................................
+--- 317576344 ---
+etryMs:e?.retryMs??60000,isOwnTitle:e?.isOwnTitle??(()=>!1),onRemoteTitleAdopted:e?.onRemoteTitleAdopted??(()=>{})};return{update:(r,n,o)=>vxE(t,r,n,o),noteRemoteTitle:(r,n)=>hyh(t,r,n),forget:(r)=>AxE(t,r),hasSent:(r,n)=>t.entries.get(r)?.sentTitles.has(n)??!1,isKnownTitle:(r,n)=>t.entries.get(r)?.knownTitles.has(n)??!1}}function myh(e,t){let r=e.entries.get(t);if(!r)r={lastSentTitle:void 0,lastSentOk:!1,s
+--- 317576368 ---
+,isOwnTitle:e?.isOwnTitle??(()=>!1),onRemoteTitleAdopted:e?.onRemoteTitleAdopted??(()=>{})};return{update:(r,n,o)=>vxE(t,r,n,o),noteRemoteTitle:(r,n)=>hyh(t,r,n),forget:(r)=>AxE(t,r),hasSent:(r,n)=>t.entries.get(r)?.sentTitles.has(n)??!1,isKnownTitle:(r,n)=>t.entries.get(r)?.knownTitles.has(n)??!1}}function myh(e,t){let r=e.entries.get(t);if(!r)r={lastSentTitle:void 0,lastSentOk:!1,sentTitles:new Set,knownT
+#### "userInitiated" count=8 [146033240,147526365,147529528,312154162,312337302,312337576,313620193,314631244]
+--- 146033240 ---
+....................	...
+...shouldSend..............	......userInitiated...........	.......titleWriter.....(.......@...............H
+......`..................<...>.......>.......<...@........D..H...............................................................................................@...............................................................h.>..............................................;"...
+--- 147526365 ---
+.......
+...............	...H...Cannot destructure property 'userInitiated' from null or undefined value................	.......t.......................	.......running.........	...	...completed.......................................,..... ..@ ......@.e.@ E.N.....3.@.=.G...@`m.G..............,...I...K...Q...S...w.......................X6.............................................. ........................0.
+--- 147529528 ---
+............ .......................................	.......userInitiatedAt.....\<...... ...`...&.......'...,...R........H..H.....................................................h.......................................h...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h.....................
+#### "shouldSend" count=8 [71265509,71265630,71265743,146033208,274973864,312154086,316045603,316050343]
+--- 71265509 ---
+is.shouldKeepAlive;
+  else if (!state.connection) {
+    let shouldSendKeepAlive = this.shouldKeepAlive && (state.contLen || this.useChunkedEncodingByDefault || this.agent);
+    if (shouldSendKeepAlive && this.maxRequestsOnConnectionReached)
+      header += `Connection: close\r
+`;
+    else if (shouldSendKeepAlive) {
+      header += `Connection: keep-alive\r
+`;
+      let keepAliveTimeout = this._keepAliveTime
+--- 71265630 ---
+|| this.useChunkedEncodingByDefault || this.agent);
+    if (shouldSendKeepAlive && this.maxRequestsOnConnectionReached)
+      header += `Connection: close\r
+`;
+    else if (shouldSendKeepAlive) {
+      header += `Connection: keep-alive\r
+`;
+      let keepAliveTimeout = this._keepAliveTimeout;
+      if (keepAliveTimeout && this._defaultKeepAlive) {
+        let timeoutSeconds = MathFloor(keepAliveTimeout / 10
+--- 71265743 ---
+ached)
+      header += `Connection: close\r
+`;
+    else if (shouldSendKeepAlive) {
+      header += `Connection: keep-alive\r
+`;
+      let keepAliveTimeout = this._keepAliveTimeout;
+      if (keepAliveTimeout && this._defaultKeepAlive) {
+        let timeoutSeconds = MathFloor(keepAliveTimeout / 1000), max = "", maxRequestsPerSocket = this._maxRequestsPerSocket;
+        if (~~maxRequestsPerSocket > 0)
+       
+#### ".update(" count=8 [70931696,70931800,70933283,70933488,70934163,70934359,70938066,70938378]
+--- 70931696 ---
+, {
+  _write: function(chunk, encoding, callback) {
+    this.update(chunk, encoding), callback();
+  },
+  update: function(data, encoding) {
+    return this[kHandle].update(this, data, encoding);
+  },
+  sign: function(options, encoding) {
+    return this[kHandle].sign(options, encoding);
+  }
+});
+crypto_exports.Sign = Sign;
+crypto_exports.sign = sign;
+function createSign(algorithm, options) {
+  return new Sig
+--- 70931800 ---
+ update: function(data, encoding) {
+    return this[kHandle].update(this, data, encoding);
+  },
+  sign: function(options, encoding) {
+    return this[kHandle].sign(options, encoding);
+  }
+});
+crypto_exports.Sign = Sign;
+crypto_exports.sign = sign;
+function createSign(algorithm, options) {
+  return new Sign(algorithm, options);
+}
+crypto_exports.createSign = createSign;
+function Verify(algorithm, options) {
+ 
+--- 70933283 ---
+orm: function(chunk, encoding, callback) {
+    this[kHandle].update(this, chunk, encoding), callback();
+  },
+  _flush: function(callback) {
+    this.push(this[kHandle].digest(null, !1)), callback();
+  },
+  update: function(data, encoding) {
+    return this[kHandle].update(this, data, encoding);
+  },
+  digest: function(outputEncoding) {
+    return this[kHandle].digest(outputEncoding);
+  }
+});
+crypto_exports.

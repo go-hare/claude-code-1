@@ -1,0 +1,82 @@
+import { readFileSync, writeFileSync } from "node:fs";
+const exe = process.env.TEMP + "\\official-239\\package\\claude.exe";
+const buf = readFileSync(exe);
+function ascii(s) {
+  return s.replace(/[^\x09\x0a\x0d\x20-\x7e]/g, ".");
+}
+function hits(needle, max = 8) {
+  const n = Buffer.from(needle);
+  const out = [];
+  let i = 0;
+  while (out.length < max) {
+    const j = buf.indexOf(n, i);
+    if (j < 0) break;
+    out.push(j);
+    i = j + 1;
+  }
+  return out;
+}
+function around(i, b, a) {
+  return ascii(
+    buf.subarray(Math.max(0, i - b), Math.min(buf.length, i + a)).toString("latin1"),
+  );
+}
+const needles = [
+  "function Jhf(",
+  "Jhf()",
+  "terminalFocusGainedAt=",
+  "Date.now()-Jhf",
+  "Date.now()-bp.terminalFocusGainedAt",
+  "worktree-gone",
+  "declining to resume into",
+  "the worktree directory no longer exists",
+  "user-cancel",
+  "queued command",
+  "hasQueuedCommand",
+  "clearQueue",
+  "commandQueue",
+  "organization_policy",
+  "policy_violation",
+  "request_blocked",
+  "shouldRetry",
+  "CLAUDE_CODE_PROPAGATE_TRACEPARENT",
+  "trace.getSpan",
+  "activeSpan",
+  "hookSpan",
+  "deferredTool",
+  "vimMode",
+  "setMode(\"NORMAL\")",
+  "mode:\"NORMAL\"",
+  '{"type":"KeepAlive"}',
+  "SessionStart",
+  "CCR_PROXY",
+  "www.anthropic.com",
+  "saved file path",
+  "imagePath",
+  "mobile",
+];
+const lines = [];
+for (const n of needles) {
+  const hs = hits(n);
+  lines.push(`#### "${n}" count=${hs.length} [${hs.slice(0, 6).join(",")}]`);
+  if (hs.length === 0) continue;
+  const big =
+    n.includes("Jhf") ||
+    n.includes("worktree") ||
+    n.includes("user-cancel") ||
+    n.includes("policy") ||
+    n.includes("KeepAlive") ||
+    n.includes("vim") ||
+    n.includes("TRACE") ||
+    n.includes("CCR") ||
+    n.includes("anthropic");
+  for (const i of hs.slice(0, 2)) {
+    lines.push(`--- ${i} ---`);
+    lines.push(around(i, 100, big ? 1600 : 400));
+  }
+}
+writeFileSync(
+  "docs/upstream-extraction/v2.1.239/snippets/gold-u13b.txt",
+  lines.join("\n"),
+);
+console.log("ok", lines.length);

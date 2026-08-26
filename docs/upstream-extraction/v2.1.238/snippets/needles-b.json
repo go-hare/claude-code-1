@@ -1,0 +1,9 @@
+[
+  { "name": "receipt-wereheld", "needle": "wereHeld", "before": 3000, "after": 3000, "occ": 0 },
+  { "name": "receipt-wereheld1", "needle": "wereHeld", "before": 3000, "after": 3000, "occ": 3 },
+  { "name": "receipt-send", "needle": "sendPeerReceipt", "before": 2500, "after": 3000, "occ": 8 },
+  { "name": "receipt-dropreason", "needle": "dropped_msg_ids", "before": 3000, "after": 3000, "occ": 2 },
+  { "name": "pacer-credit", "needle": "queue-full", "before": 3000, "after": 3000, "occ": 8 },
+  { "name": "spare-hide", "needle": "CLAUDE_BG_SOURCE", "before": 2000, "after": 2500, "occ": 0 },
+  { "name": "listpeers-spare", "needle": "spare", "before": 1200, "after": 1600, "occ": 0 }
+]

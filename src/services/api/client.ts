@@ -19,6 +19,7 @@ import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
 } from 'src/utils/model/providers.js'
+import { wrapFetchWithBedrockContentTypeGuard } from './bedrockContentTypeGuard.js'
 import { wrapFetchWithBodyIdleWatchdog } from 'src/utils/bodyIdleWatchdog.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import {
@@ -218,6 +219,16 @@ export async function getAnthropicClient({
   // Base fetch (gzip / client-request-id), then byte-body idle watchdog when
   // NMh is on so J_ timeout:false is not a hang hole.
   let resolvedFetch = buildFetch(fetchOverride, source)
+  // densable 2.1.239: default missing Bedrock eventstream Content-Type,
+  // then throw (no retry) when a proxy transformed it.
+  resolvedFetch = wrapFetchWithBedrockContentTypeGuard(
+    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+    (resolvedFetch ?? globalThis.fetch) as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>,
+    () => requestProvider,
+  ) as ClientOptions['fetch']
   if (hasBodyIdleWatchdog && bodyIdleTimeoutMs > 0) {
     resolvedFetch = wrapFetchWithBodyIdleWatchdog(
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins

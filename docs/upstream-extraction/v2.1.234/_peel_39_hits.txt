@@ -1,0 +1,144 @@
+
+===== b'Reduced context cost of built-in `claude-api`' heap=[] all=[] =====
+
+
+===== b'claude-api skill' heap=[] all=[] =====
+
+
+===== b'Included Documentation' heap=[] all=[] =====
+
+
+===== b'Quick Task Reference' heap=[311537478, 311537582] all=[311537478, 311537582] =====
+
+
+----- @311537478 -----
+
+itions, agentic loop, Anthropic-defined tools, structured outputs), `streaming.md`, `batches.md`, `files-api.md`. Not every language has every file (e.g., Ruby has no `batches.md`); if a file is absent, that feature's example is not yet documented for that language \u2014 fall back to the cURL shape or WebFetch the SDK repo from `shared/live-sources.md`. **cURL** \u2192 `curl/examples.md`.\n\nThe Quick Task Reference below uses the `{lang}/claude-api/FILE.md` path notation for all languages.\n\n### Quick Task Reference\n\n**Single text classification/summarization/extraction/Q&A:**\n\u2192 Read only `{lang}/claude-api/README.md` \u2014 **always read the README first** for any task (installation, quick start, common patterns, error handling)\n\n**Chat UI or real-time response display:**\n\u2192 Read `{lang}/claude-api/README.md` + `{lang}/claude-api/streaming.md`\n\n**Long-running conversations (may exceed context window):**\n\u2192 Read `{lang}/claude-api/README.md` \u2014 see Compaction section\n**Migrating to a newer model (Fable 5 / Opus 5 / Opus 4.8 / Opus 4.7 / Opus 4.6 / Sonnet 5 / Sonnet 4.6), replacing a retired model, or translating `budget_tokens` / prefill patterns to the current API:**\n\u2192 Read `shared/model-migration.md`\n**Prompting or tuning Fable 5 (long turns, effort, verbosity, autonomous runs, sub-agents):**\n\u2192 Read `shared/model-migration.md` \u2192 Migrating to Fable 5 \u2192 Behavioral shifts (prompt-tunable) + Long-running agent recommendations\n**Prompt caching / optimize caching / \"why is my cache hit rate low\":**\n\u2192 Read `shared/pro
+
+----- @311537582 -----
+
+-api.md`. Not every language has every file (e.g., Ruby has no `batches.md`); if a file is absent, that feature's example is not yet documented for that language \u2014 fall back to the cURL shape or WebFetch the SDK repo from `shared/live-sources.md`. **cURL** \u2192 `curl/examples.md`.\n\nThe Quick Task Reference below uses the `{lang}/claude-api/FILE.md` path notation for all languages.\n\n### Quick Task Reference\n\n**Single text classification/summarization/extraction/Q&A:**\n\u2192 Read only `{lang}/claude-api/README.md` \u2014 **always read the README first** for any task (installation, quick start, common patterns, error handling)\n\n**Chat UI or real-time response display:**\n\u2192 Read `{lang}/claude-api/README.md` + `{lang}/claude-api/streaming.md`\n\n**Long-running conversations (may exceed context window):**\n\u2192 Read `{lang}/claude-api/README.md` \u2014 see Compaction section\n**Migrating to a newer model (Fable 5 / Opus 5 / Opus 4.8 / Opus 4.7 / Opus 4.6 / Sonnet 5 / Sonnet 4.6), replacing a retired model, or translating `budget_tokens` / prefill patterns to the current API:**\n\u2192 Read `shared/model-migration.md`\n**Prompting or tuning Fable 5 (long turns, effort, verbosity, autonomous runs, sub-agents):**\n\u2192 Read `shared/model-migration.md` \u2192 Migrating to Fable 5 \u2192 Behavioral shifts (prompt-tunable) + Long-running agent recommendations\n**Prompt caching / optimize caching / \"why is my cache hit rate low\":**\n\u2192 Read `shared/prompt-caching.md` (prefix-stability design, breakpoint placement, anti-patterns that silently invalidate c
+
+===== b'on-demand reference' heap=[] all=[] =====
+
+
+===== b'shared/prompt-audit.md' heap=[311482692, 311482964, 311539020, 311897206, 312213672, 312215315] all=[279729984, 311482692, 311482964, 311539020, 311897206, 312213672, 312215315] =====
+
+
+----- @311482692 -----
+
+14 ask which files/directories before any edit), Step 1 (classify each file), then the per-target breaking-changes section. Do not summarize the guide \u2014 execute it. If the user did not name a target model, ask which model to migrate to in the same turn as the scope question. After the per-target changes are applied, audit the in-scope prompt text, tool descriptions, and request code against `shared/prompt-audit.md` \u2014 prompting written for the source model is part of every migration, and it does not announce itself. |\n| `prompt-audit` | Audit existing prompts, skills, and tool descriptions for dated patterns (\"cruft\") written for older models. **Read `shared/prompt-audit.md` immediately** and follow it in order: Step 0 (establish scope and target model from the request and the repository \u2014 state the assumptions in the report, do not stop to ask), inventory, provenance, then the pattern scan. Produce both deliverables in full \u2014 the audit report (findings with `file:line`, pattern, why it's obsolete for the target model, confidence) and a proposed diff \u2014 without pausing for confirmation; apply edits only if the request explicitly asked for them. Do not summarize the guide \u2014 execute it. |\n<!-- TODO(prompt-audit): remaining trigger question \u2014 whether the skill trigger description should also name auditing directly (it is eval-pinned; re-validate before changing it). The migrate-row cross-reference above is the no-revalidation half, already applied. -->\n\n---\n\n## Language Detection\n\nBefore reading code examples, determine which language
+
+----- @311482964 -----
+
+uestion. After the per-target changes are applied, audit the in-scope prompt text, tool descriptions, and request code against `shared/prompt-audit.md` \u2014 prompting written for the source model is part of every migration, and it does not announce itself. |\n| `prompt-audit` | Audit existing prompts, skills, and tool descriptions for dated patterns (\"cruft\") written for older models. **Read `shared/prompt-audit.md` immediately** and follow it in order: Step 0 (establish scope and target model from the request and the repository \u2014 state the assumptions in the report, do not stop to ask), inventory, provenance, then the pattern scan. Produce both deliverables in full \u2014 the audit report (findings with `file:line`, pattern, why it's obsolete for the target model, confidence) and a proposed diff \u2014 without pausing for confirmation; apply edits only if the request explicitly asked for them. Do not summarize the guide \u2014 execute it. |\n<!-- TODO(prompt-audit): remaining trigger question \u2014 whether the skill trigger description should also name auditing directly (it is eval-pinned; re-validate before changing it). The migrate-row cross-reference above is the no-revalidation half, already applied. -->\n\n---\n\n## Language Detection\n\nBefore reading code examples, determine which language the user is working in (exception: for the `prompt-audit` subcommand, skip this section's ask steps \u2014 the audit is non-interactive and its inventory is language-agnostic; when no language is inferable, proceed without asking and state the assumption in the report):\
+
+----- @311539020 -----
+
+why is my cache hit rate low\":**\n\u2192 Read `shared/prompt-caching.md` (prefix-stability design, breakpoint placement, anti-patterns that silently invalidate cache) + `{lang}/claude-api/README.md` (Prompt Caching section)\n**Auditing or cleaning up prompts, skills, or tool descriptions (\"is this prompt outdated\", \"remove the cruft\", \"this was written for an older model\"):**\n\u2192 Read `shared/prompt-audit.md` \u2014 dated-pattern tables with greppable signals, the keep list (what NOT to delete), and the report + proposed-diff output contract\n**Count tokens in a file / prompt / diff (\"how many tokens is X\"):**\n\u2192 Read `shared/token-counting.md` \u2014 use `messages.count_tokens`, never `tiktoken`\n\n**Function calling / tool use / agents:**\n\u2192 Read `{lang}/claude-api/README.md` + `shared/tool-use-concepts.md` (conceptual foundations: function calling, code execution, memory, structured outputs) + `{lang}/claude-api/tool-use.md` (language-specific code examples: tool runner, manual loop, code execution, memory, structured outputs)\n\n**Agent design (tool surface, context management, caching strategy):**\n\u2192 Read `shared/agent-design.md` (bash vs. dedicated tools, programmatic tool calling, tool search/skills, context editing vs. compaction vs. memory, caching principles)\n\n**Batch processing (non-latency-sensitive; runs asynchronously at 50% cost):**\n\u2192 Read `{lang}/claude-api/README.md` + `{lang}/claude-api/batches.md`\n\n**File uploads across multiple requests (same file without re-uploading):**\n\u2192 Read `{lang}/claude-api/README.md` + 
+
+===== b'function gPl(' heap=[] all=[] =====
+
+
+===== b'function Y5T(' heap=[] all=[] =====
+
+
+===== b'SKILL_FILES' heap=[296623080, 296623331, 297139075, 297179843, 299430116, 309383362, 309499534] all=[106578448, 296623080, 296623331, 297139075, 297179843, 299430116, 309383362, 309499534] =====
+
+
+----- @296623080 -----
+
+erver = writeServer;
+    target.textContent = anchor.owner + '/' + anchor.repo + ' #' + String(anchor.number);
+    new MutationObserver(function () {
+      render();
+    }).observe(banner, { attributes: true, attributeFilter: ['hidden'] });
+    render();
+    box.hidden = false;
+  }).catch(function () {
+    return;
+  });
+})();
+</script>
+`;var mGp=()=>{};var rci={};yt(rci,{SKILL_COMPOSED_MD:()=>rAv,SKILL_FILES:()=>nAv,SKILL_MD:()=>tAv});var tAv,rAv,nAv;var nci=A(()=>{uGp();pGp();mGp();tAv=dGp,rAv=fGp,nAv={"template.html":hGp}});function Gnr(){let e=Jo().prReviewTemplate;return e.chrome??=Promise.resolve().then(() => (nci(),rci)).then((t)=>oAv(t.SKILL_FILES["template.html"]??"")),e.chrome}function oci(e,t){let r=e.indexOf(t);if(r===-1)return"";let n=/<div\b|<\/div>/g;n.lastIndex=r;let o=0;for(let i=n.exec(e);i!==null;i=n.exec(e))if(o+=i[0]==="</div>"?-1:1,o===0)return e.slice(r,i.index+6);return""}function oAv(e){return{pinnedMarkup:[{label:"stylesheet",bytes:e.match(/<style>[\s\S]*?<\/style>/)?.[0]??"",terminal:"</style>"},{label:"stale-banner",bytes:oci(e,'<div class="stale-banner"'),terminal:"</div>"},{label:"stamp-control",bytes:oci(e,'<div class="stamp"'),terminal:"</div>"}],inlineStyleAllowlist:fo([...e.matchAll(/\bstyle\s*=\s*"([^"]*)"/g)].map((r)=>r[1])),linkPlaceholders:fo([...e.matchAll(/(?:src|href)\s*=\s*"([^"]*)"/gi)].map((r)=>r[1]).filter((r)=>!/^[a-z][a-z0-9+.-]*:|^\/\//i.test(r)))}}function ajr(e,t,r){return`https://github.com/${e}/${t}/pull/${r}`}function ljr(e){let t=[],r=/<script/gi,n=/<\/script/gi,o=0;for(;;){r.lastIndex=o;let i=r.exec(e);if(i===null)break;
+
+----- @296623331 -----
+
+();
+    box.hidden = false;
+  }).catch(function () {
+    return;
+  });
+})();
+</script>
+`;var mGp=()=>{};var rci={};yt(rci,{SKILL_COMPOSED_MD:()=>rAv,SKILL_FILES:()=>nAv,SKILL_MD:()=>tAv});var tAv,rAv,nAv;var nci=A(()=>{uGp();pGp();mGp();tAv=dGp,rAv=fGp,nAv={"template.html":hGp}});function Gnr(){let e=Jo().prReviewTemplate;return e.chrome??=Promise.resolve().then(() => (nci(),rci)).then((t)=>oAv(t.SKILL_FILES["template.html"]??"")),e.chrome}function oci(e,t){let r=e.indexOf(t);if(r===-1)return"";let n=/<div\b|<\/div>/g;n.lastIndex=r;let o=0;for(let i=n.exec(e);i!==null;i=n.exec(e))if(o+=i[0]==="</div>"?-1:1,o===0)return e.slice(r,i.index+6);return""}function oAv(e){return{pinnedMarkup:[{label:"stylesheet",bytes:e.match(/<style>[\s\S]*?<\/style>/)?.[0]??"",terminal:"</style>"},{label:"stale-banner",bytes:oci(e,'<div class="stale-banner"'),terminal:"</div>"},{label:"stamp-control",bytes:oci(e,'<div class="stamp"'),terminal:"</div>"}],inlineStyleAllowlist:fo([...e.matchAll(/\bstyle\s*=\s*"([^"]*)"/g)].map((r)=>r[1])),linkPlaceholders:fo([...e.matchAll(/(?:src|href)\s*=\s*"([^"]*)"/gi)].map((r)=>r[1]).filter((r)=>!/^[a-z][a-z0-9+.-]*:|^\/\//i.test(r)))}}function ajr(e,t,r){return`https://github.com/${e}/${t}/pull/${r}`}function ljr(e){let t=[],r=/<script/gi,n=/<\/script/gi,o=0;for(;;){r.lastIndex=o;let i=r.exec(e);if(i===null)break;let s=i.index,a=e[s+7];if(a!==void 0&&!/[\t\n\f\r />]/.test(a)){o=s+1;continue}let l=s+7,c=-1;for(;;){n.lastIndex=l;let u=n.exec(e);if(u===null)break;let d=e[u.index+8];if(d===">"){c=u.index+9;break}if(d!==void 0&&/[\t\n\f\r /]/.test(d)){let p=e.index
+
+----- @297139075 -----
+
+          clearWaitingMarker();
+          exitWaiting();
+        })
+        .catch(function () {
+          /* Transient self-read failure: keep the chrome and retry
+             briefly; the hard stop above bounds it. */
+          attempts++;
+          if (attempts < 3) setTimeout(verify, attempts * 5000);
+        });
+    }
+    verify();
+  })();
+})();
+</script>
+`;var vqp=()=>{};var Gci={};yt(Gci,{SKILL_FILES:()=>Fxv,SKILL_MD:()=>Lxv,WORKSHOP_PAGE_TEMPLATE:()=>$xv,WORKSHOP_TEMPLATE:()=>Nxv});var Lxv,Nxv,$xv,Fxv;var Vci=A(()=>{yqp();bqp();vqp();Lxv=_qp,Nxv=_Da,$xv=bDa,Fxv={"templates/artifact-workshop.html":_Da,"templates/workshop-page.html":bDa}});var Eqp=`---
+name: plan-artifact
+description: Create or customize a shareable plan Artifact from an implementation plan, design doc, or RFC. Use when asked to publish a plan as an artifact, restyle or edit a plan artifact, or present a plan as a shareable page.
+---
+
+Turn a markdown plan into a published Artifact with the standard plan treatment. All plan artifacts share one blessed template so they read as a family: same type system, same palette, same rhythm, in both light and dark mode.
+
+Plans approved in plan mode can already be published from the approval dialog's publish option (or \`/plan share\`) \u2014 that built-in path fills this same template mechanically, and only runs when the user picks it. Use this skill when a human asks you to create a plan artifact by hand, re-publish an edited plan, or customize what the built-in publish produced.
+
+## Process
+
+Always start from the template. Never write the HTML shell from scratc
+
+===== b'## Reading Guide' heap=[311536508, 311795108] all=[311536508, 311795108] =====
+
+
+----- @311536508 -----
+
+s not gate activation \u2014 required only when the federation rule spans multiple workspaces (else 400 `workspace_id_required`), optional for single-workspace rules. `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` (even empty) outrank WIF, and a set `ANTHROPIC_PROFILE` also wins over the federation env vars (a missing named profile is an error, not a fall-through) \u2014 unset all three.\n\n---\n\n## Reading Guide\n\nAfter detecting the language, read the relevant files based on what the user needs. Every `{lang}/\u2026`, `shared/\u2026`, and `curl/\u2026` path cited in this document is relative to this skill's base directory, and none of those files' content is included above \u2014 Read each one on demand before relying on what it covers.\n\n**All SDK languages use the same multi-file layout** \u2014 directory `{lang}/claude-api/` containing `README.md` (install, client init, basic request, thinking, caching, stop details, misc), `tool-use.md` (tool definitions, agentic loop, Anthropic-defined tools, structured outputs), `streaming.md`, `batches.md`, `files-api.md`. Not every language has every file (e.g., Ruby has no `batches.md`); if a file is absent, that feature's example is not yet documented for that language \u2014 fall back to the cURL shape or WebFetch the SDK repo from `shared/live-sources.md`. **cURL** \u2192 `curl/examples.md`.\n\nThe Quick Task Reference below uses the `{lang}/claude-api/FILE.md` path notation for all languages.\n\n### Quick Task Reference\n\n**Single text classification/summarization/extraction/Q&A:**\n\u2192 Read only `{lang}/claude-api/READ
+
+----- @311795108 -----
+
+xception \u2014 session-scoped file listing:** \`client.beta.files.list({scope_id: session.id})\` is a Files endpoint that takes a Managed Agents parameter, so it needs **both** headers. Pass \`betas: ["managed-agents-2026-04-01"]\` explicitly on that call (the SDK adds the Files header; you add the Managed Agents one). See \`shared/managed-agents-environments.md\` \u2192 Session outputs.\r
+\r
+\r
+## Reading Guide\r
+\r
+| User wants to...                       | Read these files                                        |\r
+| -------------------------------------- | ------------------------------------------------------- |\r
+| **Get started from scratch / "help me set up an agent"** | \`shared/managed-agents-onboarding.md\` \u2014 guided interview (WHERE\u2192WHO\u2192WHAT\u2192WATCH), then emit code |\r
+| Understand how the API works           | \`shared/managed-agents-core.md\`                         |\r
+| See the full endpoint reference        | \`shared/managed-agents-api-reference.md\`                |\r
+| **Create an agent** (required first step) | \`shared/managed-agents-core.md\` (Agents section) + language file |\r
+| Update/version an agent                | \`shared/managed-agents-core.md\` (Agents \u2192 Versioning) \u2014 update, don't re-create |\r
+| Create a session                       | \`shared/managed-agents-core.md\` + \`{lang}/managed-agents/README.md\` (cURL/C#: \`curl/managed-agents.md\`) |\r
+| Configure tools and permissions        | \`shared/managed-agents-tools.md\`                        |\r
+| Set up MCP servers                     | \`shared/managed-a
+
+===== b'Do not dump every file' heap=[] all=[] =====
+
+
+===== b'read the relevant' heap=[311476812, 311536558] all=[311476812, 311536558] =====
+
+
+----- @311476812 -----
+
+first.id\r\n\r\nclient.beta.sessions.resources.update(\r\n  repo_resource_id,\r\n  session_id: session.id,\r\n  authorization_token: \"ghp_your_new_github_token\"\r\n)\r\n```\r\n";var kTg=()=>{};var RTg="# Building LLM-Powered Applications with Claude\n\nThis skill helps you build LLM-powered applications with Claude. Choose the right surface based on your needs, detect the project language, then read the relevant language-specific documentation.\n\n## Before You Start\n\nScan the target file (or, if no target file, the prompt and project) for non-Anthropic provider markers \u2014 `import openai`, `from openai`, `langchain_openai`, `OpenAI(`, `gpt-4`, `gpt-5`, file names like `agent-openai.py` or `*-generic.py`, or any explicit instruction to keep the code provider-neutral. If you find any, stop and tell the user that this skill produces Claude/Anthropic SDK code; ask whether they want to switch the file to Claude or want a non-Claude implementation. Do not edit a non-Anthropic file with Anthropic SDK calls. (Exception: the `prompt-audit` subcommand is non-interactive and does not stop here \u2014 it records non-Anthropic provider markers in its report's stated assumptions and never proposes switching a non-Anthropic file to the Anthropic SDK.)\n\n## Output Requirement\n\nWhen the user asks you to add, modify, or implement a Claude feature, your code must call Claude through one of:\n\n1. **The official Anthropic SDK** for the project's language (`anthropic`, `@anthropic-ai/sdk`, `com.anthropic.*`, etc.). This is the default whenever a supported SDK exists for the project.\
+
+----- @311536558 -----
+
+e federation rule spans multiple workspaces (else 400 `workspace_id_required`), optional for single-workspace rules. `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` (even empty) outrank WIF, and a set `ANTHROPIC_PROFILE` also wins over the federation env vars (a missing named profile is an error, not a fall-through) \u2014 unset all three.\n\n---\n\n## Reading Guide\n\nAfter detecting the language, read the relevant files based on what the user needs. Every `{lang}/\u2026`, `shared/\u2026`, and `curl/\u2026` path cited in this document is relative to this skill's base directory, and none of those files' content is included above \u2014 Read each one on demand before relying on what it covers.\n\n**All SDK languages use the same multi-file layout** \u2014 directory `{lang}/claude-api/` containing `README.md` (install, client init, basic request, thinking, caching, stop details, misc), `tool-use.md` (tool definitions, agentic loop, Anthropic-defined tools, structured outputs), `streaming.md`, `batches.md`, `files-api.md`. Not every language has every file (e.g., Ruby has no `batches.md`); if a file is absent, that feature's example is not yet documented for that language \u2014 fall back to the cURL shape or WebFetch the SDK repo from `shared/live-sources.md`. **cURL** \u2192 `curl/examples.md`.\n\nThe Quick Task Reference below uses the `{lang}/claude-api/FILE.md` path notation for all languages.\n\n### Quick Task Reference\n\n**Single text classification/summarization/extraction/Q&A:**\n\u2192 Read only `{lang}/claude-api/README.md` \u2014 **always read the README first** for
+
+===== b'claude-api/SKILL.md' heap=[] all=[] =====

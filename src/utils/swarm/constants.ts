@@ -4,6 +4,11 @@ export const TEAM_LEAD_NAME = 'team-lead'
  * Teammate/agent display names must not claim this (see pzg / registerName).
  */
 export const MAIN_RECIPIENT_NAME = 'main'
+/**
+ * densable B4f — Agent `name` schema: letter/digit start, then
+ * letters/digits/_/- up to 64 chars total.
+ */
+export const AGENT_NAME_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 export const SWARM_SESSION_NAME = 'claude-swarm'
 export const SWARM_VIEW_WINDOW_NAME = 'swarm-view'
 export const TMUX_COMMAND = 'tmux'

@@ -1,0 +1,53 @@
+#### "do not re-run" [230530532,303498015]
+--- 230530532 ---
+st) is denied with an error; the registration pipeline and DirectoryAdded hooks do not re-run.........................................`..........@ n.B....`m.....	!<.B.4..@m.....	!<.B.4..0m.....	!<.B.4.......l.....	.<.m.....L................
+--- 303498015 ---
+st) is denied with an error; the registration pipeline and DirectoryAdded hooks do not re-run.")),V5b=ve(()=>_e({directory:L().describe("The registered root as a resolved absolute path.")}).describe("Success payload answering register_repo_
+#### "original arguments" []
+#### "skill invocation" [122793760,306254222,312551238,324729839]
+--- 122793760 ---
+ MCP servers, and project skills via the ...............	....... tool. Delegate skill invocations that need worker tools (e.g. /commit, /verify) to workers by including "Use the /<name> skill" in the worker prompt...........	.......- **....
+--- 306254222 ---
+ls from configured MCP servers, and project skills via the ${Nf} tool. Delegate skill invocations that need worker tools (e.g. /commit, /verify) to workers by including "Use the /<name> skill" in the worker prompt.`,i=V.CLAUDE_CODE_SIMPLE||
+#### "after compact" [262946602,262947783,262953125,262954093,262956819]
+--- 262946602 ---
+les). These MUST be preserved verbatim in the summary so they continue to apply after compaction.
+2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.
+
+Your summary should include the followi
+--- 262947783 ---
+security-relevant instructions or constraints verbatim so they remain in effect after compaction................. .O.n.l.y. .m.e.s.s.a.g.e.s. .t.h.a.t. .a.c.t.u.a.l.l.y. .c.a.m.e. .f.r.o.m. .t.h.e. .u.s.e.r. .(.u.s.e.r.-.r.o.l.e. .t.u.r.n.s
+#### "empty <>" []
+#### "<>" [92130,298055,343677,418503,462192]
+--- 92130 ---
+A..L..hB..M.......A..7.I.V.H......r.H.C.H...H).H.. ..[6..I..(L..H..H...S....[.J.<>H..PB..H..@B..I.........H..@B.......H..H..@B..I...&...H..H..H...A..H..hB..I...
+.....3.H..@B.......H..H...L..H9.I..L.G.L..H..u&I......1......H......r'H.....	..
+--- 298055 ---
+..I...?...H.U.H......r.I.G.I...I).I.. ......H..(H..I..L........?L..H..I.......M.<>L.....$....M.......H).H..H..M..L..H..I.......L.6H..H..([]_^A\A]A^A_.L..H...H..H9.I..L.G.L..H..u.E1.I...........H......r.H...................I............H.D$ 
+#### "literal ` `" []
+#### "mouse leftover" []
+#### "partial mouse" []
+#### "sgrBuf" []
+#### "csiBuf" []
+#### "1006h" [85854334]
+--- 85854334 ---
+anges made.[0m...... Would update catalog .. to .....:...[2K.[1A.[2K.[?1000h.[?1006h.[1GSpace to toggle, Enter to confirm, a to select all, n to select none, i to invert, l to toggle latest.? Select packages to update - .../.[0m.[36m?.[0m 
+#### "expandedToolResult" []
+#### "toolResultColor" []
+#### "cwd no longer" []
+#### "resume in the current directory" []
+#### "existsSync(e.cwd)" []
+#### "SessionStart" [99464015,102361472,106447299,106447339,106457035]
+--- 99464015 ---
+.replaceClientType...............	.......sessionStartType........	.......replaceSessionStartType.........	.......questionPreviewFormat...........	.......replaceQuestionPreviewFormat............	.......replConfigArgv..........	.......replace
+--- 102361472 ---
+ compaction (receives summary) |
+| UserPromptSubmit | - | When user submits |
+| SessionStart | - | When session starts |
+
+**Common tool matchers:** `Bash`, `Write`, `Edit`, `Read`, `Glob`, `Grep`
+
+### Hook Types
+
+**1. Command Hook** - Runs 
+#### "keepAliveWhile" []

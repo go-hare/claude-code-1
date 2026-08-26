@@ -1,0 +1,41 @@
+ this window resets
+       },
+       "seven_day": {             // Optional: 7-day weekly limit (may be absent)
+         "used_percentage": number,   // Percentage of limit used (0-100)
+         "resets_at": number          // Unix epoch seconds when this window resets
+       }
+     },
+     "vim": {                     // Optional, only present when vim mode is enabled
+       "mode": "INSERT" | "NORMAL" | "VISUAL" | "VISUAL LINE"  // Current vim editor mode
+     },
+     "agent": {                    // Optional, only present when Claude is started with --agent flag
+       "name": "string",           // Agent name (e.g., "code-architect", "test-runner")
+       "type": "string"            // Optional: Agent type identifier
+     },
+     "pr": {                       // Optional: open PR/MR for the current branch (mirrors the footer badge)
+       "number": number,           // PR number (or GitLab MR iid)
+       "url": "string",            // PR/MR URL
+       "review_state": "approved" | "pending" | "changes_requested" | "draft",  // Optional review status
+       "kind": "mr"                // Optional: present when this is a GitLab merge request (conventionally shown as !N); absent for GitHub PRs
+     },
+     "worktree": {                 // Optional, only present when in a --worktree session
+       "name": "string",           // Worktree name/slug (e.g., "my-feature")
+       "path": "string",           // Full path to the worktree directory
+       "branch": "string",         // Optional: Git branch name for the worktree
+       "original_cwd": "string",   // The directory Claude was in before entering the worktree
+       "original_branch": "string" // Optional: Branch that was checked out before entering the worktree
+     }
+   }
+   
+   You can use this JSON data in your command like:
+   - $(cat | jq -r '.model.display_name')
+   - $(cat | jq -r '.workspace.current_dir')
+   - $(cat | jq -r '.output_style.name')
+
+   Or store it in a variable first:
+   - input=$(cat); echo "$(echo "$input" | jq -r '.model.display_name') in $(echo "$input" | jq -r '.workspace.current_dir')"
+
+   To display context remaining percentage (simplest approach using pre-calculated field):
+   - input=$(cat); remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty'); [ -n "$remaining" ] && echo "Context: $remaining% remaining"
+
+   Or to display context used percentage

@@ -1,0 +1,271 @@
+#### "UTF-8 BOM" [] count~0
+#### "utf-8 bom" [] count~0
+#### "starts with a BOM" [] count~0
+#### "\uFEFF" [110953889,120049481,120049537,214725396,214725412,220985703] count~6
+--- 110953889 ---
+...............	.......[\u2066-\u2069].................................	.......[\uFEFF]................................	.......[\uE000-\uF8FF]..................................@.$.H...].d.@.>.H...W.d..x=...d...=G......d^.....p=f......dv....
+--- 120049481 ---
+...............	.......^\s*(?:\/\*\*)?$................................	.......^\uFEFF([!#]?)..................................	.......^\uFEFF.................[...]....................................@.$.H...O.d..TV.@p4.....@.T.@...H...e.l.
+#### "^﻿" [] count~0
+#### "charCodeAt(0)===65279" [301165465,305142126,306318732,306319829,306330523,310976804] count~6
+--- 301165465 ---
+,writable:!0,enumerable:!0,configurable:!0})},{allOwnKeys:n}),e),I0_=(e)=>{if(e.charCodeAt(0)===65279)e=e.slice(1);return e},H0_=(e,t,r,n)=>{e.prototype=Object.create(t.prototype,n),Object.defineProperty(e.prototype,"constructor",{value:e,w
+--- 305142126 ---
+id 0)return e.contentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this
+#### "charCodeAt(0)===0xFEFF" [] count~0
+#### "5000" [70155107,71227281,71320754,71324787,71415392,71430908] count~6
+--- 70155107 ---
+ingle, escapeReplace = strEscapeSequencesReplacerSingle;
+  }
+  if (str.length < 5000 && RegExpPrototypeExec(escapeTest, str) === null)
+    return addQuotes(str, singleQuote);
+  if (str.length > 100)
+    return str = RegExpPrototypeSymbolRep
+--- 71227281 ---
+lobalAgent: new Agent({
+    keepAlive: !0,
+    scheduling: "lifo",
+    timeout: 5000,
+    proxyEnv: shouldUseEnvProxy() ? process.env : @undefined
+  }),
+  shouldUseEnvProxy
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modu
+#### "JetBrains" [99680442,99694460,109028200,116665064,127762096,127884673] count~6
+--- 99680442 ---
+ediatePropagation.............	.".....stopImmediatePropagation........	.......isJetBrainsIdeTerminal..........	.".....isMicrosoftWindowsTerminal"...............".	...isGhostty.......................isMintty........	.......windowsConsoleSupp
+--- 99694460 ---
+............	.......IDE diagnostics fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFil
+#### "jediTerm" [130539016,131250216,181131467,181135166,181137353,308296351] count~6
+--- 130539016 ---
+..................................#.....................(	..............	.......jediTerm........	.......isPasted............'.u.~...z.....u.{...3.u...u......H..H.......................................................h.......................
+--- 131250216 ---
+........................................................x...............	......jediTermInput...........	.......emitJediTermScrollBug...........	.......querier.........	.......handleTerminalFocus.............	.......props...........	.......
+#### "JediTerm" [109028210,116665074,127762106,131250252,131569090,229653274] count~6
+--- 109028210 ---
+n object......................	.......visualstudio............	.......JetBrains-JediTerm..............	.......pycharm.........	......xterm-ghostty...........	.......ghostty.........	.......kitty...................................	.......^d
+--- 116665074 ---
+......xterm-256color..........	...	...alacritty...............	.......JetBrains-JediTerm..................-..............................4..P3...&.......4..C4...3...6..@........4..C4...3..QV..@........4..C4...3..pV.......4..C4...n.......4..
+#### "plugin is connected" [] count~0
+#### "dark-ansi" [123427736,179934224,220297048,220297336,301979077,306386140] count~6
+--- 123427736 ---
+ltonized........	.......light...........	...
+...light-ansi..............	...	...dark-ansi...............r........_..................i.................i.................i.................i.................i.................i.i...............
+--- 179934224 ---
+light-daltonized........	.......Dark mode (ANSI colors only)............	...	...dark-ansi...............	.......Light mode (ANSI colors only)...........	...
+...light-ansi......................................................................
+#### "expandedTool" [] count~0
+#### "toolResult" [132071200,135092328,135104616,135987336,135999624,142868240] count~6
+--- 132071200 ---
+
+.......3.......0...............H...............0.......................	...
+...toolResult..............	.......contentArray............6........_..i.H...........j...F....i.H...........j...F....i.i...`...............p.......................
+--- 135092328 ---
+........@.c.............
+.......................	.......object..........	...
+...toolResult..............	.......structuredContent...............	.......content.................................	.......text............	.......contentArray....
+#### "ultracode" [111230316,111245071,111278552,113389973,113390184,113390261] count~6
+--- 111230316 ---
+e.,. .n.o.t. .a.n. .e.n.f.o.r.c.e.d. .l.i.m.i.t.............	.......Enable the "ultracode" keyword trigger: including the keyword in a prompt opts that turn into the Workflow tool. Set to false to disable the trigger. Default: true.........
+--- 111245071 ---
+.Per-model settings keyed by canonical model name................	...]...Enable ultracode for the session: xhigh effort plus standing dynamic-workflow orchestration. ..............._...S.e.s.s.i.o.n.-.s.c.o.p.e.d. ..  .t.y.p.i.c.a.l.l.y. .p
+#### "effortLevel" [111278488,113389957,113390008,113390125,151845096,151845234] count~6
+--- 111278488 ---
+terminalTitleFromRename.........	.......alwaysThinkingEnabled...........	.......effortLevel.............	......modelSettings...........	...	...ultracode...............	.......autoCompactWindow...............	.......advisorModel............
+--- 113389957 ---
+...	......., ..............	...K... cannot be changed over Remote Control (only effortLevel and ultracode can).............	.......effortLevel.....................	.......string..........	.......invalid_type............	...9...apply_flag_se
+#### "statusBadge" [] count~0
+#### "badge" [100976514,111233693,111233778,111233943,111234174,137794720] count~6
+--- 100976514 ---
+......isMisspelled............	.......surveyRating............	.......rc-active-badge.`.......p...............	.......idle-teammate-summary...........	.*.....launch-prompt-warning...........	.......persistence-suppressed............*.....tr
+--- 111233693 ---
+splay configuration........	.......URL template for PR links in the footer link badges and inline messages. The detected git PR is rendered as the first footer-link badge. Placeholders: {host} {owner} {repo} {number} {url}. Example: "https:
+#### "1006h" [85854334] count~1
+--- 85854334 ---
+anges made.[0m...... Would update catalog .. to .....:...[2K.[1A.[2K.[?1000h.[?1006h.[1GSpace to toggle, Enter to confirm, a to select all, n to select none, i to invert, l to toggle latest.? Select packages to update - .../.[0m.[36m?.[0m 
+#### "mouse tracking" [] count~0
+#### "DECSET" [] count~0
+#### "SGR mouse" [] count~0
+#### "split across" [92194538,121858649,173435136,305316540,306083123,318640637] count~6
+--- 92194538 ---
+ve.Format must be set before you can write to an archive.Mismatch of file parts split across multi-volume archive.invalid archive.Archive.EverythingIsLive.execve.cannot save.zh-yue.tue.op_jtrue.**jtrue.'maximum' page count must be defined i
+--- 121858649 ---
+le contents over the browser bridge in a single message; use a smaller file, or split across multiple file_upload calls if the page accepts files one at a time........................	.......grew............	.......": file grew during read.
+#### "vim mode" [263601495,307947806,312455423] count~3
+--- 263601495 ---
+
+## Examples
+
+1. Initial task: "Search for and understand the implementation of vim mode in the codebase" - Do not use the exit plan mode tool because you are not planning the implementation steps of a task.
+2. Initial task: "Help me implem
+--- 307947806 ---
+     }
+     },
+     "vim": {                     // Optional, only present when vim mode is enabled
+       "mode": "INSERT" | "NORMAL" | "VISUAL" | "VISUAL LINE"  // Current vim editor mode
+     },
+     "agent": {                    // Opti
+#### "NORMAL mode" [111256950,302096858] count~2
+--- 111256950 ---
+h key is exactly two printable characters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim"...............	...4...Show full tool output instead of truncated summaries..........
+--- 302096858 ---
+h key is exactly two printable characters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim".'),verbose:Ut().optional().describe("Show full tool output instead of truncated summ
+#### "agent view" [111228336,180223577,185141815,207225110,207225405,207225797] count~6
+--- 111228336 ---
+	...*...Disable all hooks and statusLine execution..............	.......Disable agent view (`claude agents`, `--bg`, /background, the on-demand daemon). Typically set in managed settings. Equivalent to CLAUDE_CODE_DISABLE_AGENT_VIEW=1......
+--- 180223577 ---
+ents...................	.......defaultToAgentsView.............	.......Start in agent view......................................................... ....@p..U.. ...cl......i...........A....@...T.. ...`...............a...o...u................
+#### "mask" [70885499,70885512,70885530,70885535,70885551,70885590] count~6
+--- 70885499 ---
+ocess", "_debugEnd"])
+    try {
+      delete proc[k];
+    } catch {}
+  let realUmask = proc.umask;
+  function umask(mask) {
+    if (mask === @undefined)
+      return realUmask.@call(proc);
+    throw @makeErrorWithCode(270, "Setting process.
+--- 70885512 ---
+ugEnd"])
+    try {
+      delete proc[k];
+    } catch {}
+  let realUmask = proc.umask;
+  function umask(mask) {
+    if (mask === @undefined)
+      return realUmask.@call(proc);
+    throw @makeErrorWithCode(270, "Setting process.umask() is no
+#### "password-style" [] count~0
+#### "login code" [] count~0
+#### "echo:false" [] count~0
+#### "<tag>" [204936363,327235798] count~2
+--- 204936363 ---
+rt of each user turn. (only works with --print)..............	.......--workload <tag>........	.......Workload tag for billing-header attribution (cc_workload). Process-scoped; set by SDK daemon callers that spawn subprocesses for cron work.
+--- 327235798 ---
+art of each user turn. (only works with --print)").addOption(new Ep("--workload <tag>","Workload tag for billing-header attribution (cc_workload). Process-scoped; set by SDK daemon callers that spawn subprocesses for cron work. (only works 
+#### "literal" [71543659,71549474,71574836,71878681,71906341,71906859] count~6
+--- 71543659 ---
+llError() {
+    return new PostgresError("Query not called as a tagged template literal", {
+      code: "ERR_POSTGRES_NOT_TAGGED_CALL"
+    });
+  }
+  queryCancelledError() {
+    return new PostgresError("Query cancelled", {
+      code: "ERR_
+--- 71549474 ---
+dCallError() {
+    return new MySQLError("Query not called as a tagged template literal", {
+      code: "ERR_MYSQL_NOT_TAGGED_CALL"
+    });
+  }
+  queryCancelledError() {
+    return new MySQLError("Query cancelled", {
+      code: "ERR_MYSQL_
+#### "transcriptPeek" [] count~0
+#### "peekRows" [] count~0
+#### "pinned above" [] count~0
+#### "after compaction" [262946602,262947783,262953125,262954093,262956819,262957719] count~6
+--- 262946602 ---
+les). These MUST be preserved verbatim in the summary so they continue to apply after compaction.
+2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.
+
+Your summary should include the followi
+--- 262947783 ---
+security-relevant instructions or constraints verbatim so they remain in effect after compaction................. .O.n.l.y. .m.e.s.s.a.g.e.s. .t.h.a.t. .a.c.t.u.a.l.l.y. .c.a.m.e. .f.r.o.m. .t.h.e. .u.s.e.r. .(.u.s.e.r.-.r.o.l.e. .t.u.r.n.s
+#### "skill's original" [] count~0
+#### "compact reminder" [] count~0
+#### "PreToolUse" [100779304,100779488,102361000,102361892,102362090,102363116] count~6
+--- 100779304 ---
+	...7...The message for the user. Supports markdown formatting..........	.......PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have complet
+--- 100779488 ---
+ot executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...
+#### "deferred by" [323696901] count~1
+--- 323696901 ---
+ng user-scoped on a first sync \u2014 authored and graded `good` (or explicitly deferred by the user); no `[LEARNINGS_UNMERGED]` on the final capture run; the user has seen `.review.html` (or declined). Verified-by-upload components are OUT
+#### "original turn" [] count~0
+#### "resume in the current" [] count~0
+#### "all-projects" [] count~0
+#### "deleted directory" [] count~0
+#### "posix_spawn ENOENT" [] count~0
+#### "project root or home" [] count~0
+#### "function GCe" [303699654,333413410] count~2
+--- 303699654 ---
+-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.
+--- 333413410 ---
+me}function zz(e){return Vs(e.LABEL)&&e.LABEL!==""}function q1(e){return GCe(e)}function GCe(e){let t=e.pattern,r={};if(r.name=e.name,dh(t)||(r.PATTERN=t),mr(e,S0t))throw`The parent property is no longer supported.
+See: https://github.com/c
+#### "live teammates" [] count~0
+#### "no agent named" [182281801,313694772,321115719] count~3
+--- 182281801 ---
+ <id> to continue an existing session)
+........................	.......warning: no agent named '...................#...'. ..  .s.p.a.w.n.i.n.g. .w.i.t.h. .d.e.f.a.u.l.t. .t.e.m.p.l.a.t.e.
+...........	.......................	.......fleet....
+--- 313694772 ---
+hTruncated?rtn:""}${S!=="no"?Jen(e.to,g5(t)):""}
+${k}`,display:`Not sent \u2014 no agent named '${e.to}' is reachable.${p.closest.length>0?` Did you mean: ${p.closest.map((I)=>I.name).join(", ")}?`:""}${p.bridgeUnavailable||p.cloudUnavailab
+#### "your own name" [] count~0
+#### "sending to yourself" [] count~0
+#### "registeredName" [114211904,303730528,303730716,303730779,303731133,303731775] count~6
+--- 114211904 ---
+.O!<....................................................................	.......registeredName......?........j/. ...C....j/.D....j/..k/......H..H.......................................................h.......................................
+--- 303730528 ---
+ncleanExitPaths=new Set;watchedCache=void 0;pidFileWriteChain=Promise.resolve();registeredName=void 0;formerNames=[];heldNames=new Map;registered=!1;bornSpare=!1;spareClaimPoll=void 0;registration=void 0;registrySweepPermitted=void 0;setReg
+#### "titleUpdate" [] count~0
+#### "sessionTitle" [150377021,157292200,164588600,164691645,165583275,303348847] count~6
+--- 150377021 ---
+...........(Lt.....).......8Lt.............
+.......................	.......Hook sessionTitle applied (.............	....... chars).........	.......hook......................................................`....... e.@ ......@.<...-.@ ......
+--- 157292200 ---
+.........|.......................Z.......................|..............	.......sessionTitle............	.......forceSyncExecution...........................1..Z...S...Z...S....1...9.......D..H...............................................
+#### "rate-limit" [100869680,100939160,117291784,137900404,146611176,163398634] count~6
+--- 100869680 ---
+............a...the automatic continue at the usage-limit reset was cancelled (/rate-limit-options to wait again)....(..........	.f.:...Automatic continue at the usage-limit reset was cancelled...G(..........I.......workflow_launch_result..
+--- 100939160 ---
+quota-auto-resume-cancelled.............. ).<...Automatic continue cancelled . /rate-limit-options to re-arm.............!)...../usage-credits to continue now..........	").	...{"code":".	.............I").....    .....................%......
+#### "queued" [71370131,71370157,71370169,71370196,71370210,71370245] count~6
+--- 71370131 ---
+ses] = @undefined;
+      for (let i = 0;i < pipelinedLength; i++) {
+        let queuedRes = pipelined[i], queuedReq = queuedRes.req;
+        if (queuedReq && !queuedReq.destroyed)
+          if (queuedReq[kHandle] = @undefined, queuedReq.lis
+--- 71370157 ---
+or (let i = 0;i < pipelinedLength; i++) {
+        let queuedRes = pipelined[i], queuedReq = queuedRes.req;
+        if (queuedReq && !queuedReq.destroyed)
+          if (queuedReq[kHandle] = @undefined, queuedReq.listenerCount("error") > 0)
+ 
+#### "finish early" [] count~0
+#### "focus click" [] count~0
+#### "gained focus" [] count~0
+#### "mousedown" [85594602,87470595,260405368,261054504,261056824,261221872] count~6
+--- 85594602 ---
+fpoliticiansreached theas early as:none; over<table cellvalidity ofdirectly toonmousedownwhere it iswhen it wasmembers of relation toaccommodatealong with In the latethe Englishdelicious">this is notthe presentif they areand finallya matter
+--- 87470595 ---
+esult.locationbar.oncuechange.ondragenter.ondragleave.ondragstart.onloadstart.onmousedown.onmousemove.onmouseover.onpointerup.outerHeight.performance.personalbar.postMessage.setInterval.AnalyserNode.CDATASection.CSSAnimation.CSSMediaRule.CS
+#### "organization policy" [185574005,321688044,326596774] count~3
+--- 185574005 ---
+...Please install git and restart Claude Code......................	...B...Your organization policy does not allow any external marketplaces...............	.......Contact your administrator......................	...<...Your organization res
+--- 321688044 ---
+[1]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization policy does not allow any external marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Contact your administrator."})]}),dbn[1]=kJ;else kJ=dbn[1];retu
+#### "policy check" [120231848,206203704,206204248,206204320,303509832,305480326] count~6
+--- 120231848 ---
+t: .............	.......deny....................................	.......sandbox policy check failed: ...........	.......allow...........	.......[request-filter] allow .........	....... .......................................................
+--- 206203704 ---
+policy webhook timed out........................	.......warn............	...&...policy check failed: webhook returned ..........	...'...policy webhook returned a non-OK status.................	.......object..................	...-...policy w
+#### "usOnlyInference" [] count~0
+#### "us_only" [] count~0
+#### "dataResidency" [] count~0
+#### "1.1" [7006482,7008610,10514170,21708685,71162156,71169551] count~6
+--- 7006482 ---
+......H.>.............<.......H.E.....H.U.I.........H.~X.......H.1.0 200 H.HTTP/1.1I3.L......M3P.I	.......H.HTTP/1.0I3.I3@.H	.......H...!.....A........."....H...y"..H.M.......[/....................H......H.................P..........u.H.O.L
+--- 7008610 ---
+......H.>.............<.......H.E.....H.U.I.........H.~X.......H.1.0 200 H.HTTP/1.1I3.L......M3P.I	.......H.HTTP/1.0I3.I3@.H	.......H...!.....9........."....H...)...H.M........'....................H......H.................P..........u.H.O.L
+#### "inference premium" [] count~0

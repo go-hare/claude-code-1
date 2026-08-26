@@ -43,6 +43,10 @@ export type NameResolveResult =
   | {
       kind: 'ambiguous'
       candidates: PeerCandidate[]
+      /** densable tso `matchedBy` — exact same-name vs yRw prefix. */
+      matchedBy: 'exact' | 'prefix'
+      /** densable tso `total` — unsliced prefix/exact hit count. */
+      total: number
       pinnedIdentityClaimedLocally?: string
       searchTruncated?: boolean
     }
@@ -245,6 +249,22 @@ export function resolvePeerByName(args: {
         return { kind: 'ok', candidate: pinned, ...truncatedFlag }
       }
     }
+    // densable yRw — after exact miss, before tTl not-found
+    const prefix = leftoverPrefixPeers(to, candidates)
+    if (prefix.length > 0) {
+      return {
+        kind: 'ambiguous',
+        candidates: prefix.slice(0, CLOSEST_NAME_CAP),
+        matchedBy: 'prefix',
+        total: prefix.length,
+        ...truncatedFlag,
+        ...(pin &&
+        (pinKind === 'remote-control' || pinKind === 'cloud') &&
+        localClaimed.has(stripSessionPrefix(pin.id))
+          ? { pinnedIdentityClaimedLocally: pin.name }
+          : {}),
+      }
+    }
     return {
       kind: 'not-found',
       message: `No agent named '${rawName}' is reachable. Use ListAgents to discover targets (name [ref]).`,
@@ -282,7 +302,9 @@ export function resolvePeerByName(args: {
 
   return {
     kind: 'ambiguous',
-    candidates: byKey.slice(0, 3),
+    candidates: byKey.slice(0, CLOSEST_NAME_CAP),
+    matchedBy: 'exact',
+    total: byKey.length,
     ...truncatedFlag,
     ...(pin &&
     (pinKind === 'remote-control' || pinKind === 'cloud') &&
@@ -290,6 +312,96 @@ export function resolvePeerByName(args: {
       ? { pinnedIdentityClaimedLocally: pin.name }
       : {}),
   }
+}
+
+/** densable fEm — tso/tTl/nQr cap. */
+export const CLOSEST_NAME_CAP = 3
+
+/** densable yRw — prefix resolve only when the typed key is this long. */
+export const PREFIX_MATCH_MIN = 3
+
+/**
+ * densable c4t — Damerau–Levenshtein (UTF-16 units, transposition cost 1).
+ */
+export function damerauLevenshtein(a: string, b: string): number {
+  if (a === b) return 0
+  const rows = a.length
+  const cols = b.length
+  const grid: number[][] = Array.from({ length: rows + 1 }, (_, i) =>
+    Array.from({ length: cols + 1 }, (__, j) =>
+      i === 0 ? j : j === 0 ? i : 0,
+    ),
+  )
+  for (let i = 1; i <= rows; i++) {
+    for (let j = 1; j <= cols; j++) {
+      const sub = a[i - 1] === b[j - 1] ? 0 : 1
+      grid[i]![j] = Math.min(
+        grid[i - 1]![j]! + 1,
+        grid[i]![j - 1]! + 1,
+        grid[i - 1]![j - 1]! + sub,
+      )
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        grid[i]![j] = Math.min(grid[i]![j]!, grid[i - 2]![j - 2]! + 1)
+      }
+    }
+  }
+  return grid[rows]![cols]!
+}
+
+/**
+ * densable nQr — unique names within abs(len)≤2 and edit distance ≤2, nearest first.
+ */
+export function closestNormalizedNames(
+  query: string,
+  names: string[],
+  cap = CLOSEST_NAME_CAP,
+): string[] {
+  const seen = new Set<string>()
+  const hits: Array<{ name: string; distance: number }> = []
+  for (const name of names) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    if (Math.abs(name.length - query.length) > 2) continue
+    const distance = damerauLevenshtein(query, name)
+    if (distance <= 2) hits.push({ name, distance })
+  }
+  return hits
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, cap)
+    .map(h => h.name)
+}
+
+/**
+ * densable tTl closest — nQr over Vu names, then first candidate per name.
+ * Includes exact-name hits so leftover DEe `closest同名` is live.
+ */
+export function leftoverClosestPeers(
+  to: string,
+  candidates: PeerCandidate[],
+  cap = CLOSEST_NAME_CAP,
+): PeerCandidate[] {
+  const parsed = parseNameRef(to)
+  const key = normalizeAgentName(parsed?.name ?? to)
+  if (!key) return []
+  const names = [...new Set(candidates.map(c => c.key))]
+  return closestNormalizedNames(key, names, cap)
+    .map(name => candidates.find(c => c.key === name))
+    .filter((c): c is PeerCandidate => c !== undefined)
+}
+
+/**
+ * densable yRw — bare name, length≥3, byName keys that start with the query.
+ * Local candidates are sessions (never in-process), so unique prefix stays
+ * ambiguous + matchedBy prefix — official Jnr is "one" only for in-process.
+ */
+export function leftoverPrefixPeers(
+  to: string,
+  candidates: PeerCandidate[],
+): PeerCandidate[] {
+  if (parseNameRef(to)) return []
+  const key = normalizeAgentName(to)
+  if (key.length < PREFIX_MATCH_MIN) return []
+  return candidates.filter(c => c.key.startsWith(key))
 }
 
 export function formatAmbiguousMessage(

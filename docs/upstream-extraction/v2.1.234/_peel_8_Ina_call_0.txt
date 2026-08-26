@@ -1,0 +1,4 @@
+OFFSET=298096650
+NEEDLE=b'Ina(un('
+
+t:t,toolUseContext:r,assistantMessage:n,messageId:a,toolUseID:o,setClassifierApprovals:i,permissionMode:l,logDecision:c,logCancelled(){L("tengu_tool_use_cancelled",{messageID:Qr(a),toolName:Hl(e.name)})},persistPermissions(d){if(d.length===0)return!1;if(zAe(d,r.storageV5).catch(xe),s!==void 0)s(Bie(Ina(un(r)),d));else r.setSessionToolPermissionContext((p)=>Bie(p,d)),setImmediate(()=>{n3e.emit()});return d.some((p)=>Fna(p.destination))},setModeFromBridge(d){return lfe(d,un(r),r.setToolPermissionContext)},resolveIfAborted(d){if(!r.abortController.signal.aborted)return!1;return this.logCancelled(),d(this.cancelAndAbort(void 0,!0)),!0},cancelAndAbort(d,p,f,m){let h=!!r.agentId,g=d?`${h?Umi:c3e}${d}`:h?

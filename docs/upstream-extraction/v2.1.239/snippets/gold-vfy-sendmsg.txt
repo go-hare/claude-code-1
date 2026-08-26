@@ -1,0 +1,23 @@
+gSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&HFn(e,r)}function VEt(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&eti(e,r)}function lRw(e){let{ownMessagingSocket:t}=(H$(),p
+n(nSe)),r=t(),n=WCe(e);return r!==void 0&&n!==null&&v_a(n.ref,"session",r)}function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for 
+ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to send to.)`
+}function Kwm(e){return`Not sent \u2014 '${e}' is this session's own name and ref, but another session record on this machine claims it.`}function qEt(e){return`'${e}' is this session's own address \u
+2014 a message or file sent there would only come back to this conversation; there is no one else at that address to send to.`}function XFe(e){let t=Mf(e);return[Jhr()?.bridgeSessionId,Lgt()].some((r)
+=>typeof r==="string"&&Mf(r)===t)}function g5(e){return e.teammateContext!==void 0||e.agentContext!==void 0&&MZe(e.agentContext)}function sWt(e){return`Not sent \u2014 '${e}' is this session's own nam
+e.`}function Jen(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name),i=o===null?"this session":`this session ("${o}")`;return t?`
+('${e}' also addresses ${i} \u2014 this process's main session; to reach the main conversation from inside it, ${r}.)`:`
+('${e}' also addresses ${i} itself \u2014 if you meant yourself, there is no one to send to.)`}function Zen(e){return!e.cloudUnavailable&&!e.bridgeUnavailable&&!e.localUnavailable&&!e.searchTruncated&
+&!e.pinnedIdentityClaimedLocally}function Qen(e){let{getRegisteredSessionName:t,getHeldSessionNames:r}=(su(),pn(XFn)),{ownMessagingSocket:n}=(H$(),pn(nSe)),o=t(),i=n();if(o===void 0||i===void 0||xD(e)
+.scheme!=="other")return"no";let s=WCe(e);if(s!==null){let c=Vu(s.name);if(!v_a(s.ref,"session",i))return"no";if(c!==Vu(o.name)){let u=r().get(c);if(u===void 0)return"no";return u==="derived"?"categor
+ical":"note"}}else if(Vu(e)!==Vu(o.name))return"no";let{getSessionNamingState:a}=(K3e(),pn(bmp));return o.source==="derived"||(o.source==="user"||o.source==="collision")&&a().userTypedName===o.name?"c
+ategorical":"note"}function DEe(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name);if(t){let i=o!==null?` ("${o}" is the name OTHER sessions use for it)`:"";return`'${e}' is th
+is process's own main session${i} \u2014 from inside it, ${r} instead.`}return o!==null?`'${e}' is this session itself \u2014 "${o}" is the name other sessions use to message YOU; there is no one else
+ by that name to send to.`:`'${e}' is this session itself \u2014 there is no one else at that address to send to.`}var vWi="target is this session itself \u2014 there is no one else to send to",qwm;va
+r etn=A(()=>{Djn();xP();qk();Hh();jCe();Qfe();Zfe();qwm=`address the main conversation as "${dL}"`});function N_r(e,t,r){let n=Vu(t);e((o)=>o.sendMessagePins[n]?.id===r.id?o:{...o,sendMessagePins:{...
+o.sendMessagePins,[n]:{id:r.id,name:t,ref:sBr(r.kind,r.id)}}})}function wWi(e){return e==="cloud"?"a Claude session running in the cloud":"a Claude session on another machine, over Remote Control"}fun
+ction ttn(e){return`${e.alsoListedRemotely?"; it is also connected via Remote Control":""}${e.remoteNamesakeClaimedLocally?`; a Remote Control or cloud session also named '${e.displayName}' is registe
+red to a session on this machine`:""}${e.searchTruncated?Xwm:""}`}function EWi(e,t,r="live session",n="delivery"){return Ywm(e,`. ${n==="subscription"?"The subscription":"This"} went to the one this c
+onversation confirmed; to switch, re-send with that ${r==="agent"?"agent":"session"}'s 'name [ref]'${t}.`,r)}function AWi(e,t="live session",r="delivery"){return Ywm(e,`; ${r==="subscription"?"the sub
+scription":"this"} went to the one confirmed earlier in this conversation.`,t)}function Ywm(e,t,r){let n=e.previouslyPinned?`
+${SWi}`:"",o=e.sameNamedSiblings?`
+Note: ${e.sameNamedSiblings} other ${At(e.sameNamedSiblings,`${r} is`,`${r}s are`)} also named '${e.displayName}'${t}`:"";return`${n}${o}`}function TWi(e){return`${e

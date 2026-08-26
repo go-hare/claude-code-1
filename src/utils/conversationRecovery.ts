@@ -19,6 +19,7 @@ import type {
 } from '../types/message.js'
 import { PERMISSION_MODES } from '../types/permissions.js'
 import {
+  type HookDeferredToolAttachment,
   suppressNextSkillDiscovery,
   suppressNextSkillListing,
 } from './attachments.js'
@@ -43,6 +44,7 @@ import {
   normalizeMessages,
 } from './messages.js'
 import { copyPlanForResume } from './plans.js'
+import { scanDeferredToolUseFromTranscriptTail } from './queryHelpers.js'
 import { getResumePrompt } from './resumeReturn.js'
 import { processSessionStartHooks } from './sessionStart.js'
 import {
@@ -275,6 +277,11 @@ export function deserializeMessagesWithInterruptDetection(
    * interactive REPL replay path owns continue via initialMessage:{replay}.
    */
   replyOnResume = false,
+  /**
+   * Official `M2l` second arg — `$2l` deferred tool_use IDs. Non-empty
+   * skips interrupt classification (`t?.size || r` → kind none).
+   */
+  preserveUnresolvedToolUseIds?: Set<string>,
 ): DeserializeResult {
   try {
     // densable dQr before Hgy — drop malformed attachments so resume never
@@ -299,6 +306,7 @@ export function deserializeMessagesWithInterruptDetection(
     // Filter out unresolved tool uses and any synthetic messages that follow them
     const filteredToolUses = filterUnresolvedToolUses(
       migratedMessages,
+      preserveUnresolvedToolUseIds,
     ) as NormalizedMessage[]
 
     // Filter out orphaned thinking-only assistant messages that can cause API errors
@@ -316,9 +324,10 @@ export function deserializeMessagesWithInterruptDetection(
 
     // densable lrs: f = t?.size||r ? {kind:"none"} : N4g(p)
     // replyOnResume skips interrupt classification (REPL uses {replay:true}).
+    // Official M2l: preserve-set size also forces none (deferred resume).
     // densable Szu: age-out → force none (+ tengu_resume_stale_turn_suppressed).
     let turnInterruptionState: TurnInterruptionState
-    if (replyOnResume) {
+    if (replyOnResume || (preserveUnresolvedToolUseIds?.size ?? 0) > 0) {
       turnInterruptionState = { kind: 'none' }
     } else {
       const internalState = detectTurnInterruption(filteredMessages)
@@ -669,6 +678,8 @@ export async function loadConversationForResume(
    * when present; clearBridgeSession tombstone leaves this undefined.
    */
   bridgeSessionId?: string
+  /** Official `$2l` / `Jqy` `deferredToolUse`. */
+  deferredToolUse?: HookDeferredToolAttachment
 } | null> {
   try {
     let log: LogOption | null = null
@@ -754,11 +765,20 @@ export async function loadConversationForResume(
     // This ensures skills survive multiple compaction cycles after resume.
     restoreSkillStateFromMessages(messages!)
 
+    // Official `$2l` before `M2l`: `p=s?.fullPath??t`, `f=p?await $2l(p)??void 0`
+    const transcriptPath = log?.fullPath ?? sourceJsonlFile
+    const deferredToolUse = transcriptPath
+      ? ((await scanDeferredToolUseFromTranscriptTail(transcriptPath)) ??
+        undefined)
+      : undefined
+
     // Deserialize messages to handle unresolved tool uses and ensure proper format
     // densable lrs(..., replyOnResume) — skip interrupt+sentinel for mid-turn fork
+    // Official M2l(a, f?new Set([f.toolUseID]):void 0, ...)
     const deserialized = deserializeMessagesWithInterruptDetection(
       messages!,
       Boolean(opts?.replyOnResume),
+      deferredToolUse ? new Set([deferredToolUse.toolUseID]) : undefined,
     )
     messages = deserialized.messages
 
@@ -801,6 +821,7 @@ export async function loadConversationForResume(
       relocatedCwd: log?.relocatedCwd ?? relocatedFromJsonl,
       // densable 2.1.224 #30 — non-empty bridge pointer for resume force-on
       bridgeSessionId: log?.bridgeSessionId ?? bridgeFromJsonl,
+      deferredToolUse,
     }
   } catch (error) {
     logError(error as Error)

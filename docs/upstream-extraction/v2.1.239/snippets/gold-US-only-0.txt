@@ -1,0 +1,22 @@
+# offset=122714068 (0x75077d4) kw="US-only"
+
+..........................................!...
+.....
+............i....0...............8...............@.......................	.......en-US...........	.......long............	.......numeric...................................!......"<.g...........................m......................x.z.......................I.......................I...................U.K.......o.U.......U...U......H..H....................... i.......................i......h.......................................h...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...H...H...H...h...........................................................................................................................................................................................................................................................\............................................................H..............j...i.............j...i.....P...............H...............................H...............................................	...]...Search the web. Returns result blocks with titles and URLs. US-only.
+
+- The current month is ................... ..  .u.s.e. .t.h.i.s. .w.h.e.n. .s.e.a.r.c.h.i.n.g. .f.o.r. .r.e.c.e.n.t. .i.n.f.o.r.m.a.t.i.o.n...
+.-. .`.a.l.l.o.w.e.d._.d.o.m.a.i.n.s.`. ./. .`.b.l.o.c.k.e.d._.d.o.m.a.i.n.s.`. .f.i.l.t.e.r. .r.e.s.u.l.t.s...
+.-. .A.f.t.e.r. .a.n.s.w.e.r.i.n.g. .f.r.o.m. .r.e.s.u.l.t.s.,. .e.n.d. .w.i.t.h. .a. .".S.o.u.r.c.e.s.:.". .l.i.s.t. .o.f. .t.h.e. .U.R.L.s. .y.o.u. .u.s.e.d. .a.s. .m.a.r.k.d.o.w.n. .l.i.n.k.s.................	...=...
+- Allows Claude to search the web and use the results to inform responses
+- Provides up-to-date information for current events and recent data
+- Returns search result information formatted as search result blocks, including links as markdown hyperlinks
+- Use this tool for accessing information beyond Claude's knowledge cutoff
+- Searches are performed automatically within a single API call
+
+CRITICAL REQUIREMENT - You MUST follow this:
+  - After answering the user's question, you MUST include a "Sources:" section at the end of your response
+  - In the Sources section, list all relevant URLs from the search results as markdown hyperlinks: [Title](URL)
+  - This is MANDATORY - never skip including sources in your response
+  - Example format:
+
+    [Your answer 

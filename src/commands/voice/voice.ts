@@ -8,7 +8,11 @@ import {
   getInitialSettings,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
-import { isVoiceAvailable } from '../../voice/voiceModeEnabled.js'
+import {
+  isVoiceAvailable,
+  isVoiceSettingEnabled,
+  withVoiceEnabledFlag,
+} from '../../voice/voiceModeEnabled.js'
 
 const LANG_HINT_MAX_SHOWS = 2
 
@@ -22,7 +26,7 @@ export const call: LocalCommandCall = async args => {
   }
 
   const currentSettings = getInitialSettings()
-  const isCurrentlyEnabled = currentSettings.voiceEnabled === true
+  const isCurrentlyEnabled = isVoiceSettingEnabled(currentSettings)
   const providerArg = args?.trim().toLowerCase()
 
   // Handle provider argument when already enabled — switch backend only
@@ -69,6 +73,7 @@ export const call: LocalCommandCall = async args => {
   if (isCurrentlyEnabled) {
     const result = updateSettingsForSource('userSettings', {
       voiceEnabled: false,
+      voice: withVoiceEnabledFlag(currentSettings.voice, false),
     })
     if (result.error) {
       return {
@@ -148,6 +153,7 @@ export const call: LocalCommandCall = async args => {
   // All checks passed — enable voice with provider
   const result = updateSettingsForSource('userSettings', {
     voiceEnabled: true,
+    voice: withVoiceEnabledFlag(currentSettings.voice, true),
     ...(provider === 'doubao' ? { voiceProvider: 'doubao' } : {}),
   })
   if (result.error) {

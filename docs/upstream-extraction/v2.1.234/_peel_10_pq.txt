@@ -1,0 +1,4 @@
+OFFSET=290920756
+
+p});function sr(e){return Bun.stringWidth(e,zB_)}var zB_;var i3=A(()=>{zB_={ambiguousIsNarrow:!0}});function pq(e,t,r){if(!(t>0))return e;let n=Bun.wrapAnsi(e,t,r);if(WB_.test(e)&&n.includes(`
+`))return qB_(n);return n}function qB_(e){let t="",r="",n="",o=0;$Ws.lastIndex=0;let i;while((i=$Ws.exec(e))!==null){t+=Zed(e.slice(o,i.index),r,n),t+=i[0],o=$Ws.lastIndex;let s=i[1];if(s===""||s==="0")r="",n="";else if(s.startsWith("38;"))r=i[0];else if(GB_.test(s))r="";else if(s.startsWith("48;"))n=i[0];else if(VB_.test(s))n=""}return t+=Zed(e.slice(o),r,n),t}function Zed(e,t,r){if(e===""||t===""&&r===

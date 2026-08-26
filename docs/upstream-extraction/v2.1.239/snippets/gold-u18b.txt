@@ -1,0 +1,151 @@
+#### "commitUserThemes" count=4 [99680864,251825016,308300895,308306288]
+--- 99680864 ---
+ModifierBit.........	.......customThemeBase.........	.......addCustomThemeBases.....................commitUserThemes..........".....cachedUserThemes........I.".....cachedSystemTheme...............	.......setSystemTheme...........s.....custom:.........	.......probe...........I......recordAddonWrite........	.".....beginWaylandCopy........I.".....isLatestWaylandCopy.....L...............	...b...[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())..............	...E...[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipboard -Raw...........	.".....subscribeThemeChange............	...
+...onResponse..............	.......dark............(...................
+....................H........................".....insertChild.............I.".....removeChild...............".....getChild........	......getChildCount...........	...	...getParent...............	.......free.............".....freeRecursive...........I.......clearLayoutCacheRecursive...............	.".	...markDirtyb..............I.".....isDirty.........	.......hasNewLayout............	.......markLayoutSeen..........	.......setMeasureFunc..........	.......unsetMeasureFunc........	.......getComputedLeft.........	.......getComputedTop..........	.......getComputedWidth........	.......getComputedHeight."...............".....getComputedRight........	.".....getComputedBottom...............	.......getComputedLayout...............	.".....getComputedBorder...............	.......getComputedPadding"...............".....getComputedMargin...............	.......setWidth................setWidthPercent.........	.......setWidthAuto.............P..	...setHeight.".............I.".....setHeigh
+--- 251825016 ---
+............................................................................................	.......commitUserThemes........................................................	...h...h...h...h...h...h...h...h...h...h...h...............................................8...8...8...8...8...................................................................................................................................h............................................................................... .......................................................f.........................................a....................
+...............................	......
+.....i...................
+.........................................N.@ ..D...VAT...S.6q:...O..5.I.4...4..V:.@./.1..............................Fg.......................U.....................H.......................x....................... .......................x.......................................	...
+...userThemes..........................."u.(.......(........"u.#u......D..H.......................................................h...................................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................................................................................................................................................................................................x............................................................................................................".....i.............................@p..E...@p4.E..
+#### "cachedUserThemes" count=6 [99680896,130550064,308301047,308301719,308301775,308306216]
+--- 99680896 ---
+meBases.....................commitUserThemes..........".....cachedUserThemes........I.".....cachedSystemTheme...............	.......setSystemTheme...........s.....custom:.........	.......probe...........I......recordAddonWrite........	.".....beginWaylandCopy........I.".....isLatestWaylandCopy.....L...............	...b...[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())..............	...E...[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipboard -Raw...........	.".....subscribeThemeChange........
+--- 130550064 ---
+....................................................	.......cachedUserThemes@...........&u.d...r....%u.s....&u..&u......H..H........................N.......................N......h.......................................p..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...........................................(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...............
+#### "function ZGn" count=1 [306386537]
+--- 306386537 ---
+^ansi256\(\d{1,3}\)$/.test(e))return!0;if(e.startsWith("ansi:"))return X1p.has(e.slice(5));return!1}function ZGn(e,t){if(!t)return e;let r={...e};for(let[n,o]of Object.entries(t))if(Object.hasOwn(e,n)&&wNe(o))r[n]=o;return r}function Qgi(e){let t=e.match(/rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)/);if(t){let o=parseInt(t[1],10),i=parseInt(t[2],10),s=parseInt(t[3],10),a=yWv.rgb(o,i,s)("X");return a.slice(0,a.indexOf("X"))}if(ir.level===0)return"";let r=ZGe("X",e,"foreground"),n=r.indexOf("X");return n>0?r.slice(0,n):"\x1B[35m"}var dWv,pWv,fWv,mWv,hWv,gWv,yWv;var QGe=A(()=>{J1p();sh();kDt();mr();y_t();dWv={autoAccept:"rgb(135,0,255)",autoAcceptShimmer:"rgb(208,180,255)",skill:"rgb(135,0,255)",bashBorder:"rgb(255,0,135)",claude:"rgb(215,119,87)",claudeShimmer:"rgb(245,149,117)",claudeBlue_FOR_SYSTEM_SPINNER:"rgb(87,105,247)",claudeBlueShimmer_FOR_SYSTEM_SPINNER:"rgb(117,135,255)",permission:"rgb(87,105,247)",permissionShimmer:"rgb(137,155,255)",planMode:"rgb(0,102,102)",ide:"rgb(71,130,200)",promptBorder:"rgb(153,153,153)",promptBorderShimmer:"rgb(183,183,183)",text:"rgb(0,0,0)",inverseText:"rgb(255,255,255)",inactive:"rgb(102,102,102)",inactiveShimmer:"rgb(142,142,142)",subtle:"rgb(175,175,175)",suggestion:"rgb(87,105,247)",remember:"rgb(0,0,255)",background:"rgb(0,153,153)",success:"rgb(44,122,57)",error:"rgb(171,43,63)",warning:"rgb(150,108,30)",merged:"rgb(135,0,255)",warningShimmer:"rgb(200,158,80)",diffAdded:"rgb(105,219,124)",diffRemoved:"rgb(255,168,180)",diffAddedDimmed:"rgb(199,225,203)",diffRemovedDimmed:"rgb(253,210,216)",diffAddedWord:"rgb(47,157,68)",diffRemovedWord:"rgb(209,69,75)",red_FOR_SUBAGENTS_ONLY:"rgb(220,38,38)",blue_FOR_SUBAGENTS_ONLY:"rgb(106,155,204)",g
+#### "loadCustomThemes" count=6 [106620144,130716098,308301491,308324017,308325028,308325201]
+--- 106620144 ---
+meBase6.............	26.....getThemesDir.............26.....loadCustomThemes........	36.....parseCustomThemeRef.............	.......readThemesFromPathAsync..........36.....saveCustomTheme.........I0......watchCustomThemes...............	.......watchSystemTheme........	.......consumeEarlyInput46.............I.
+.....earlyInputCaptures..............	......hasEarlyInput...........	.......isCapturingEarlyInput...........	66.....processChunk............I66.....seedEarlyInput...........66.....startCapturingEarlyInput........	.......stopCapturingEarlyInput.....
+--- 130716098 ---
+..........	.......activeCustomTheme...............	.......reloadCustomThemes..............	.......setPreviewOverrides.....X................................................/.......2.......7.......;......8@..................Tru.....(.......(...Tru.{ru......D..H...............................................................................................@........................................................................o..............-.......................................P....... .......X............... .......X.......h.......x.....................
+#### "getThemesDir" count=2 [106620112,308301470]
+--- 106620112 ---
+s...........	.......getCustomThemeBase6.............	26.....getThemesDir.............26.....loadCustomThemes........	36.....parseCustomThemeRef.............	.......readThemesFromPathAsync..........36.....saveCustomTheme.........I0......watchCustomThemes...............	.......watchSystemTheme........	.......consumeEarlyInput46.............I.
+.....earlyInputCaptures..............	......hasEarlyInput...........	.......isCapturingEarlyInput...........	66.....processChunk............I66.....seedEarlyInput...........66.....startCapturingEarlyInput........	...
+--- 308301470 ---
+Ka,getCachedCustomThemes:()=>BTi,getCustomThemeBase:()=>PKa,getThemesDir:()=>k2t,loadCustomThemes:()=>I8r,parseCustomThemeRef:()=>e5,readThemesFromPathAsync:()=>jTi,saveCustomTheme:()=>H8r,slugify:()=>MKa,watchCustomThemes:()=>zTi});function PKa(e){return yee().customThemeBase(e)}function BTi(){return yee().cachedUserThemes()}function DKa(e){let t=yee();return t.cachedUserThemes().find((r)=>r.slug===e)??t.pluginThemes.getState().find((r)=>r.slug===e)}function k2t(){return qRe.join(En(),"themes")}function c$e(e){return`${IKa}${e}`}function e5(e){return e.
+#### "effortUltra" count=6 [179970768,242913992,306388909,306391211,306393591,306396029]
+--- 179970768 ---
+....	.......theme...........	.......dark............	.......effortUltra.....
+...............	...	...ultracode...................
+....................@.....4..0........=...2..@>.@.........m........m........................A0......................8...............................................;0.........zZ.......*3..f..u....*3.v....*3.'+3......H..H.......................P,!.....................8,!.....h...........................................................................................................................................................
+--- 242913992 ---
+_limit_empty........	.......fastModeShimmer.........	.......effortUltra.............	......briefLabelYou...........	.......briefLabelClaude........	.......rainbow_red.............	.......rainbow_orange..........	.......rainbow_yellow..........	......rainbow_green...........	.......rainbow_blue............	.......rainbow_indigo..........	.......rainbow_violet..........	.......rainbow_red_shimmer.............	.......rainbow_orange_shimmer..........	.......rainbow_yellow_shimmer..........	.......rainbow_green_shimmer...........	.......rainbow_blue_shimmer
+#### "CLAUDE_CODE_PROPAGATE_TRACEPARENT" count=4 [106482416,301290053,303006236,317297311]
+--- 106482416 ---
+....	.......CLAUDE_CODE_PRINT_ENGINE_LOOP...................CLAUDE_CODE_PROACTIVE...........	...!...CLAUDE_CODE_PROPAGATE_TRACEPARENT.1...............1.&...CLAUDE_CODE_REFUSAL_FALLBACK_CATCH_ALL..........	.......CLAUDE_CODE_REPORT_FINDINGS.............	.......CLAUDE_CODE_SEND_FEEDBACK...............	... ...CLAUDE_CODE_SILENT_TURN_REMINDER........	...%...CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT.............	.&...CLAUDE_CODE_SILENT_TURN_REMINDER_TURNS..........	.......CLAUDE_CODE_SKILL_PROPOSALS.............	...#...CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS..............R..*...CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS_EXCEPT...............z..!...CLAUDE_CODE_SKIP_PROJECT_BACKFILL...............	.......CLAUDE_CODE_SKIP_PROMPT_HISTORY.........	.......CLAUDE_CODE_SKIP_REPO_UPLOAD............	... ...CLAUDE_CODE_SUBAGENT_CACHE_EVICT........	...(...CLAUDE_CODE_SUPPRESS_SESSION_ATTRIBUTION................CLAUDE_CODE_SYNC_PLUGINS........	.......CLAUDE_CODE_SYNC_PLUGIN_INSTALL.........	.......CLAUDE_CODE_SYNC_SKILLS.........	.1.....CLAUDE_CODE_TAG_ISMETA_MESSAGES.........I.1.....CLAUDE_CODE_THISTLE_GREBE.1.....................CLAUDE_CODE_THRIFTY_SONIC...............	.......CLAUDE_CODE_TOASTY_THIMBLE1.............I.1.....CLAUDE_CODE_TODO_REMINDER_MODE............1.!...CLAUDE_CODE_TOTAL_TOKENS_REMINDER...............	...1...CLAUDE_CODE_TOTAL_TOKENS_REMINDER_AFTER_USER_TURN.1...............1.(...CLAUDE_CODE_TOTAL_TOKENS_REMINDER_BUDGET........	.......CLAUDE_CODE_TRANSCRIPT_LOCAL_GC.........	.......CLAUDE_CODE_TURN_UPDATES........I.1. ...CLAUDE_CODE_TWO_STAGE_CLASSIFIER................CLAUDE_CODE_USE_COWORK_PLUGINS..........I.1."...CLAUDE_CODE_USE_NATIVE_FILE_SEARCH..............	.......CLAUDE_CODE_USE_
+--- 301290053 ---
+ESPECT_EXECUTION_POLICY:()=>gH_,CLAUDE_CODE_PRINT_ENGINE_LOOP:()=>BI_,CLAUDE_CODE_PROACTIVE:()=>jI_,CLAUDE_CODE_PROPAGATE_TRACEPARENT:()=>yH_,CLAUDE_CODE_REFUSAL_FALLBACK_CATCH_ALL:()=>iR_,CLAUDE_CODE_REPORT_FINDINGS:()=>sR_,CLAUDE_CODE_SEND_FEEDBACK:()=>lR_,CLAUDE_CODE_SILENT_TURN_REMINDER:()=>tI_,CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT:()=>nI_,CLAUDE_CODE_SILENT_TURN_REMINDER_TURNS:()=>rI_,CLAUDE_CODE_SKILL_PROPOSALS:()=>zI_,CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS:()=>WI_,CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS_EXCEPT:()=>GI_,CLAUDE_CODE_SKIP_PROJECT_BACKFILL:()=>VI_,CLAUDE_CODE_SKIP_PROMPT_HISTORY:()=>qI_,CLAUDE_CODE_SKIP_REPO_UPLOAD:()=>KI_,CLAUDE_CODE_SUBAGENT_CACHE_EVICT:()=>YI_,CLAUDE_CODE_SUPPRESS_SESSION_ATTRIBUTION:()=>XI_,CLAUDE_CODE_SYNC_PLUGINS:()=>ZI_,CLAUDE_CODE_SYNC_PLUGIN_INSTALL:()=>JI_,CLAUDE_CODE_SYNC_SKILLS:()=>QI_,CLAUDE_CODE_TAG_ISMETA_MESSAGES:()=>eH_,CLAUDE_CODE_THISTLE_GREBE:()=>dx_,CLAUDE_CODE_THRIFTY_SONIC:()=>fx_,CLAUDE_CODE_TOASTY_THIMBLE:()=>px_,CLAUDE_CODE_TODO_REMINDER_MODE:()=>VR_,CLAUDE_CODE_TOTAL_TOKENS_REMINDER:()=>qR_,CLAUDE_CODE_TOTAL_TOKENS_REMINDER_AFTER_USER_TURN:()=>YR_,CLAUDE_CODE_TOTAL_TOKENS_REMINDER_BUDGET:()=>KR_,CLAUDE_CODE_TRANSCRIPT_LOCAL_GC:()=>tH_,CLAUDE_CODE_TURN_UPDATES:()=>eI_,CLAUDE_CODE_TWO_STAGE_CLASSIFIER:()=>rH_,CLAUDE_CODE_USE_COWORK_PLUGINS:()=>nH_,CLAUDE_CODE_USE_NATIVE_FILE_SEARCH:()=>oH_,CLAUDE_CODE_USE_POWERSHELL_TOOL:()=>iH_,CLAUDE_CODE_WALNUT_SPIRE:()=>sH_,CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS:()=>cH_,CLAUDE_CODE_WEBFETCH_USE_CCR_PROXY:()=>uH_,CLAUDE_CODE_WEBSEARCH_USE_CCR_PROXY:()=>dH_,CLAUDE_CODE_WEB_FETCH_AGENT:()=>lH_,CLAUDE_CODE_WORKFLOWS:()=>pR_,CLAUDE_CODE_WORKFLOW_PREFIX_STAGGER_MS:()=>kH_,CLAUDE_CODE_WORKFLOW
+#### "propagateTraceparent" count=0 []
+#### "original turn" count=0 []
+#### "startActiveSpan" count=6 [100861576,228415664,228419872,228422392,303035861,303036571]
+--- 100861576 ---
+....onEnd...........	
+.	...startSpan................V'.....startActiveSpan.........	.......getGeneralLimits...............getSpanLimits...........IW'.	...getTracer...............	...
+..._sendSpans...............W'.....transformMetricsForInternal.............	?......extractDataPoints...............	.......convertAttributesX'.............	s......hrTimeToISOString...............	.......selectAggregationTemporality............	.......setDelegate.............	.......[3P telemetry] OTEL diag error:.........	...0...https://slack.com/marketplace/A08SF47R6P4-cl
+--- 228415664 ---
+....J...............	...	...startSpan...............	.......startActiveSpan...................................................05.].............5.......<.......;...D.......;...D.......;...D.......4...4..P:.......,...L...L.......\................................8.......................0.......................h.......................................................................H;@.....................`.I.............................................@;M............................................. .@.............................................Xn..........
+#### "deduplicateDiagnosticFiles" count=4 [99694496,258008544,309732082,309732941]
+--- 99694496 ---
+....IDE diagnostics fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFile...........	.......clearPendingForFile..............+#.....pendingCount....................	.......diff............	,#.....diffWithOptionsObj..............	...	...addToPath...............	......extractCommon...........	.......equals..........I-#.....removeEmpty.................	...castInput-#..............-#.....tokenize........	.......join............I......buildValues...............#.g...a-zA-Z0-9_\u{AD}\u{C0}-\u{D6}\u{D8}-\u{F6}\u{F8}-\u{2C6}\u{2C8}-\u{2D7}\u{2DE}-\u{2FF}\u{1E00}-\u{1EFF}.........	...X...Fable 5 as the advisor bills to usage credits, which need to be set up for your account.........I0#.....# Advisor Tool
+
+You have access to an `advisor` tool backed by a stronger reviewer model. It takes NO parameters -- when you call advisor(), your entire conversation history is automatically forwarded. They see the task, every tool call you've made, every result you've seen.
+
+Call advisor BEFORE substantive work -- before writing, before committing to an interpretation, before building on an assumption. If the task requires orientation first (finding files, fetching a source, seeing what's there), do that, then call advisor. Orientation is not substantive work. Writing, editing, and declaring an answer are.
+
+Also call advisor:
+- When you believe the task is complete. BEFORE this call, make your deliverable durable: write the file, save the result, commit the change. The advisor call takes time; if the session ends during it, a durable result pe
+--- 258008544 ---
+....................0.......................................................................	.......deduplicateDiagnosticFiles...............P..................,.......L...................J...h...h...h...............................................h...h...h...h...h...............`...`...`...`...`.......@...@...........H...H...X...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...........................X......................................(..............(...............0	..............8	..................................................................................................................................................................................J...z...\..............._.......*.......^.......:......._...:...V.......^.........................................................".....p......................................\z.........r..p..........................
+	.G.................................................G.o................................................................!..................
+.....".....
+..................	..............................
+.	a...............
+...	 ........!....."......#.G................$.........%..............&	....'....(..........+*)..........\z......... .-,.G....................../
+......."0........1........"2.G.........3........"4.G........5.......".....6.....7.......".F........................8........&9.....:.K......;...........&<	F....G......................=...............>..........?.....@...........A.............j.......*B
+......&.....C.....D........&E..F......F.K......... G....G..t..Q...s.O...s..F......H.K..........I...G..t..Q...s.O...s.r.........J.a........i......F.........F.....F........
+#### "function DHm" count=1 [314384662]
+--- 314384662 ---
+available),localListFailed:a,messagingDisabled:!o,listTruncated:u.truncated===!0||c.truncated===!0}}function DHm(e=!1){let t=EQe(),r=MFn(QV()?.name);if(!t||r===null)return null;return{name:r,token:`${r} [${sBr("session",t)}]`,callerIsSubagent:e}}function G1w(e){if(!e)return null;return e.callerIsSubagent?`This process's main session is ${e.token} \u2014 the name OTHER sessions use to message it (it is not listed below; from inside this process, address the main conversation as "${dL}").`:`This session is ${e.token} \u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(t.appState,{teamFile:t.teamFile,sessions:c,cloud:u,bridge:o?[]:e.flatMap((b)=>b.transport==="bridge"?[b.session]:[])}),p=new Map(d.candidates.map((b)=>[`${b.kind}\x00${b.id}`,b])),f=MHm(t.appState),m=OHm(t.appState,t.teamFile,t.callerTeammateId),h=e.flatMap((b)=>b.transport==="bridge"?[b]:[]),g=e.flatMap((b)=>b.transport==="did"?[b.session]:[]),y=[];if(f.length>0)y.push(J1w(f,p));if(m.length>0)y.push(Z1w(m,p));if(!n&&(c.length>0||u.length>0||h.length>0||o||i||s||l))y.push(Q1w(c,p,u,h,o,i,s,l));let _
+#### "function G1w" count=1 [314384808]
+--- 314384808 ---
+e);if(!t||r===null)return null;return{name:r,token:`${r} [${sBr("session",t)}]`,callerIsSubagent:e}}function G1w(e){if(!e)return null;return e.callerIsSubagent?`This process's main session is ${e.token} \u2014 the name OTHER sessions use to message it (it is not listed below; from inside this process, address the main conversation as "${dL}").`:`This session is ${e.token} \u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(t.appState,{teamFile:t.teamFile,sessions:c,cloud:u,bridge:o?[]:e.flatMap((b)=>b.transport==="bridge"?[b.session]:[])}),p=new Map(d.candidates.map((b)=>[`${b.kind}\x00${b.id}`,b])),f=MHm(t.appState),m=OHm(t.appState,t.teamFile,t.callerTeammateId),h=e.flatMap((b)=>b.transport==="bridge"?[b]:[]),g=e.flatMap((b)=>b.transport==="did"?[b.session]:[]),y=[];if(f.length>0)y.push(J1w(f,p));if(m.length>0)y.push(Z1w(m,p));if(!n&&(c.length>0||u.length>0||h.length>0||o||i||s||l))y.push(Q1w(c,p,u,h,o,i,s,l));let _=a?null:G1w(t.self);if(a&&y.length>0)y.unshift(p5i);if(y.length===0){if(a)return p5i;if(!_)return"No reachable agents.";return!n&&!o?`${_}
+
+No rea
+#### "a message to yourself" count=1 [314385182]
+--- 314385182 ---
+essage it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[
+#### "buildInsightsResponsePrompt" count=2 [106673896,316525025]
+--- 106673896 ---
+egateData...........	.......buildExportData.........	.7.....buildInsightsResponsePrompt...............7.....deduplicateSessionBranches7.............Iu......detectMultiClauding.............	.......extractToolStats........	.......generateUsageReport...............7.....loadCachedFacets................loadCachedSessionMeta...........	.......normalizeSessionMeta............I.7.
+...saveFacets..............I.......saveSessionMeta..........[......summarizeTranscriptChunk........	.......createWorkflowCommand...........I.7.....getWorkflowCommands.............	...
+--- 316525025 ---
+nh={};Et(fnh,{aggregateData:()=>unh,buildExportData:()=>QhE,buildInsightsResponsePrompt:()=>pnh,deduplicateSessionBranches:()=>UhE,default:()=>ngE,detectMultiClauding:()=>cnh,extractToolStats:()=>tnh,generateUsageReport:()=>dnh,loadCachedFacets:()=>nnh,loadCachedSessionMeta:()=>snh,normalizeSessionMeta:()=>HUl,saveFacets:()=>inh,saveSessionMeta:()=>lnh,summarizeTranscriptChunk:()=>rnh});function Jrh(){return BC()}function PhE(){return BC()}function mpo(){return IUe.join(En(),"usage-data")}function aZi(){return IUe.join(mpo(),"facets")}function OhE(){retu
+#### "The user just ran /insights" count=2 [162268144,316593207]
+--- 162268144 ---
+....	...G...Cannot destructure property 'insightsJson' from null or undefined value.........	...~...The user just ran /insights to generate a usage report analyzing their Claude Code sessions.
+
+Here is the full insights data:
+..........	.......e...............	.......
+
+Report URL: ..........	.......t...............	.......
+HTML file: ............	.......r...............	.......
+Facets directory: .............	.......n...................V...
+.
+.A.t.-.a.-.g.l.a.n.c.e. .s.u.m.m.a.r.y. .(.f.o.r. .y.o.u.r. .c.o.n.t.e.x.t. .o.n.l.y. ..  .t.h.e. .u.s.e.r. .h.a.s. .n.o.t. .s.e.e.n. .a.n.y. .o.u.t.p.u.t. .y.e.t.).:.
+.............	.......o...............	.......i...............	.......
+
+Respond with exactly the following, and nothing else. Do not add, omit, or reword any line:
+
+Your shareable insights report is ready:
+........	...=...
+
+Want to dig into any section or try one of the suggestions?............................................d...@.......@ e.@.e.....@pe_....@.d.@@L.....@.d................................................................................................x.......................pL	.....................(...............	.......insightsJson............	...	...reportUrl...............	...	...facetsDir...........9R..........I...i...k...j................H..H.......................H.......................0.......h.......................................P...........................................................................................
+...........................	...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...............................................................................................................
+--- 316593207 ---
+:[]}function pnh({insightsJson:e,reportUrl:t,htmlPath:r,facetsDir:n,header:o,summaryText:i}){return`The user just ran /insights to generate a usage report analyzing their Claude Code sessions.
+
+Here is the full insights data:
+${e}
+
+Report URL: ${t}
+HTML file: ${r}
+Facets directory: ${n}
+
+At-a-glance summary (for your context only \u2014 the user has not seen any output yet):
+${o}${i}
+
+Respond with exactly the following, and nothing else. Do not add, omit, or reword any line:
+
+Your shareable insights report is ready:
+${t}
+
+Want to dig into any section or try one of the suggestions?`}function PUl(e){if(!e||typeof e!=="object")return!1;let t=e;return typeof t.underlying_goal==="string"&&typeof t.outcome==="string"&&typeof t.brief_summary==="string"&&t.goal_categories!==null&&typeof t.goal_categories==="object"&&t.user_satisfaction_counts!==null&&typeof t.user_satisfaction_counts==="object"&&t.friction_counts!==null&&typeof t.friction_counts==="object"}var NHe,IUe,Zrh,DhE,MhE,Krh=50,NhE=`Analyze this Claude Code session and extract structured facets.
+
+CRITICAL GUIDELINES:
+
+1. **goal_categories**: Count ONLY what the USER explicitly asked for.
+   - DO NOT count Claude's autonomous codebase exploration
+   - DO NOT count work Claude decided to do on its own
+   - ONLY count when user says "can you...", "please...", "I need...", "let's..."
+
+2. **user_satisfaction_counts**: Base ONLY on explicit user signals.
+   - "Yay!", "great!", "perfect!" \u2192 happy
+   - "thanks", "looks good", "that works" \u2192 satisfied
+   - "ok, now let's..." (continuing without complaint) \u2192 likely_satisfied
+   - "that's not right", "try again" \u2192 dissatisfied
+   - "this is broken", "I give up" 
+#### "stripHtml" count=0 []
+#### "<empty>" count=5 [68844532,85443038,86307424,92512128,92931337]
+--- 68844532 ---
+H.|..A.....H........H...u>L.$.A..D$.A..L$....	.H.. A..$H	.H.<empty>.H9.u.1..tf..........L.$.H...+|........eH.	H=....tgH......w{H..tvH.G.H...H.......L.x.M..t]I..H.H.f.@.I......L..L..I.......L.u`L.e.L;uP..	...H.MP.@G.......H..t.H..'+|.H...H......v...1.H..E1.E1..._..I..H..u...&..H.E`H.E.H.EPH.E.H.EXH.E.H......H...L.m.L.u.H.].tTH.5....H..t7H.=....H.....f........H...H..t.H.?.t.H.O...o....H......H..t.H.......o..H.E.H......f.oE.....~...H....
+.A.
+...H.......H..tQH...u%..D..@.I.. I	.H.bundle..I9.......1...H...........I.externalL9.......A..<...H....
+.A.....H...&.
+--- 85443038 ---
+..............."..................@.............zoneStrings.<empty>.E.t.c./...S.y.s.t.e.m.V./.R.i.y.a.d.h.8.............................................................<dummy>.meta:.@....................... .......`..E......5@...............E......5@....p.5@.....s(@....`.5@.....s(@....0u(@......5@....P.5@.....v(@....@w(@............0..E......5@....0.5@...............E....p.5@.......@.... .5@....0.5@....P.5@....P.5@......5@....@.5@....`.5@....`.5@....`.5@......-@......5@....@.5@....@.5@.......E......5@.......@......5@....p..E......5@.......E......5@......

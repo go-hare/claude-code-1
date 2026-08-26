@@ -1,0 +1,31 @@
+#### $ta( 2 [301998023, 318644385]
+
+==== $ta( 301998023 ====
+.source))return e;let r=t==="."?`./${e.source}`:`./${t}/${e.source}`;return{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins))return e;let t=jo(e.metadata)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}
+
+==== $ta( 318644385 ====
+ be authored"}),p=Ltr().extend({plugins:ft(u),renames:oo(L(),L().nullable()).optional()}).safeParse($ta(i));if(!p.success)t.push(...DNh(p.error));if(p.success&&p.data.renames){let g=new Set(p.data.plugins.map((y)=>y.name));for(let y of Object.keys(p.data.renames)){let _=W6r(y,p.d
+
+#### Nta( 3 [301997885, 301998193, 318649013]
+
+==== Nta( 301997885 ====
+""||t===".")return".";if(t.split("/").some((r)=>r===""||r==="."||r===".."))return;return t}function Nta(e,t){if(t===void 0||!jo(e)||!MVo(e.source))return e;let r=t==="."?`./${e.source}`:`./${t}/${e.source}`;return{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins
+
+==== Nta( 301998193 ====
+ta)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}}var vVo,SVo,Ptr=500,wVo=32,P9u,fOn,EVo,Dtr,TZ_,kZ_,CZ_,bVo="anthropics",RZ_,COe,Htr,C9u,x9u,Hta,Pta,D9u,M9u,AVo,HZ_,TVo,PZ_,DZ_,MZ_,OZ_,LZ_,kVo,O9u,NZ_,L9u=16,$Z_,FZ_,N9
+
+==== Nta( 318649013 ====
+),h=ny.basename(m)===".claude-plugin"?ny.dirname(m):m;for(let[g,y]of s.entries()){let _=f.safeParse(Nta(y,l));if(!_.success)continue;let b=_.data,S=b.source;if(!gOn(S)||S.includes(".."))continue;let w=ny.join(h,S),T=ny.join(w,".claude-plugin","plugin.json"),k=ny.relative(h,T),C=a
+
+#### Lta( 3 [301997632, 301998097, 318642234]
+
+==== Lta( 301997632 ====
+)`:t.join(", ")}function MVo(e){return typeof e==="string"&&aQ_.test(e)&&!e.includes("..")}function Lta(e){if(typeof e!=="string"||e===""||e.startsWith("/")||e.includes("\\")||e.includes(":"))return;let t=e.replace(/^\.\//,"").replace(/\/+$/,"");if(t===""||t===".")return".";if(t.
+
+==== Lta( 301998097 ====
+n{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins))return e;let t=jo(e.metadata)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}}var vVo,SVo,Ptr=500,wVo=32,P9u,fOn,EVo,Dtr,TZ_,kZ_,CZ_,bVo="anthropics",R
+
+==== Lta( 318642234 ====
+,filePath:n,fileType:"marketplace"}}let s=[],a=jo(i)&&jo(i.metadata)?i.metadata.pluginRoot:void 0,l=Lta(a);if(i&&typeof i==="object"){let g=i;if(Array.isArray(g.plugins))s=g.plugins,g.plugins.forEach((y,_)=>{if(y&&typeof y==="object"&&"source"in y){let b=y.source;if(typeof b==="s
+
+#### applyMarketplace 0 []

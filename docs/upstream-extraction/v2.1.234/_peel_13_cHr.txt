@@ -1,0 +1,19 @@
+function cHr(e){if(!("url"in e)||typeof e.url!=="string")return;try{return new URL(e.url).origin}catch{return}}
+cHr@290896576: L(e.url);return t.search="",t.username="",t.password="",t.hash="",t.toString().replace(/\/$/,"")}catch{return}}function cHr(e){if(!("url"in e)||typeof e.url!=="string")return;try{return new URL(e.url).origin}catch{return}}function Ted(){return process.env.SESSION_INGRESS_URL??process.env.ANTHROPIC_B
+cHr@300588053: UT";if(t.type==="http"&&T==="404"&&l?.sessionId===void 0&&!oAn(t))T="ENDPOINT_NOT_FOUND",v=`MCP endpoint not found at ${cHr(t)??"(unparseable url)"}. Check the URL in your MCP config.`;l0i(e,t,{status:"failed",durationMs:b,errorCode:T,error:v});let k=T==="ENOENT"&&(t.type==="stdio"||t.type===void 0)
+cHr@300750936: d 0;if(t.type==="http"&&m==="404"&&l?.sessionId===void 0&&!oAn(t))m="ENDPOINT_NOT_FOUND",d=`MCP endpoint not found at ${cHr(t)??"(unparseable url)"}. Check the URL in your MCP config.`;j0i(e,t,{status:"failed",durationMs:u,errorCode:m,error:d});let h=m==="ENOENT"&&(t.type==="stdio"||t.type===void 0)
+cHr@304449188: l;var Xml=A(()=>{UT();$U();nde();pg();Dt();Pxm();kXn();tCm=H(It(),1),gh=H(be(),1),Yml=H(De(),1)});function iFi(e){let t=cHr("url"in e.config&&typeof e.config.url==="string"&&(e.config.scope==="dynamic"||uye(e.config))&&RUe(e.config.url)?{...e.config,url:Wpi(e.config.url)}:e.config),r=e.errorCode;if(
+b"Failed to connect to MCP server '"@137177714
+back: 
+..subagent MCP server connect................................. ...' connect timed out or aborted: ................g.......................connected.......................v...............................] Connected to MCP server '.....................' with ................. tools..............#...] Failed to connect to MCP server '.....................': .................................................`............................@ ..J...@.4.. ..@@=.@@6.....@.<.E...@p4.E.....3.@P?.....@@..@04...K.@...G.....+.@0%.@...J...@.ec....@p.e....@.,.E...@p4...3...?......P,..0......PS<.B.5..P.......P,..@......@...@ 4.@ 4.E.3.@PU.@ 4.@.<.x.{+....@...@...J...@.e..Pf.@ .....cL...@..e....@.,.@ 4.E..A.....Qt[....@.l.E...@.U.@ 4.C.......@...J...@.f.@.d.G..Q....@.|X....@.<.@...J...@.g.@pd.E..\l...@..l....@
+b'Failed to connect to MCP server "'@-1
+b'Failed to connect to MCP server'@137177714
+back: 
+..subagent MCP server connect................................. ...' connect timed out or aborted: ................g.......................connected.......................v...............................] Connected to MCP server '.....................' with ................. tools..............#...] Failed to connect to MCP server '.....................': .................................................`............................@ ..J...@.4.. ..@@=.@@6.....@.<.E...@p4.E.....3.@P?.....@@..@04...K.@...G.....+.@0%.@...J...@.ec....@p.e....@.,.E...@p4...3...?......P,..0......PS<.B.5..P.......P,..@......@...@ 4.@ 4.E.3.@PU.@ 4.@.<.x.{+....@...@...J...@.e..Pf.@ .....cL...@..e....@.,.@ 4.E..A.....Qt[....@.l.E...@.U.@ 4.C.......@...J...@.f.@.d.G..Q....@.|X....@.<.@...J...@.g.@pd.E..\l...@..l....@
+b'displayDetail[^;]{0,200}origin': 0
+b'origin[^;]{0,120}displayDetail': 0
+b'cHr\\([^)]+\\)': 4
+cHr(e)
+cHr(t)
+cHr(t)
+cHr("url"in e.config&&typeof e.config.url==="string"&&(e.config.scope==="dynamic"||uye(e.config)

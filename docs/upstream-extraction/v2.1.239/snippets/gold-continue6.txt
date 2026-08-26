@@ -1,0 +1,138 @@
+#### "falling back to original cwd" 0 []
+
+#### "posix_spawn" 1 [87652476]
+
+==== posix_spawn 87652476 ====
+fcopyfilerecvsendfilesendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollscandirkeventkqueueepoll_ctlkillwaitpidposix_spawnwritevpwritevreadvpreadvioctl_ficlonebind2connect2try_writesocketpairsetsockoptstatxuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfchownatioctlgetrlimitsetrlimitclone3..��%E............�9E............y�.E............?..E............�9E............�9E............��9E....	........�9E............��.E............�9E.............�9E............$�9E............*�9E............2�9E............8�9E............=�9E....	.......F�9E............K�9E............R�9E............W�9E....	.......`�9E............h�9E....
+.......r�9E............��9E............
+
+#### "Hooks: cwd" 0 []
+
+#### "config.worktree" 4 [116247894, 116247934, 121585560, 121585616]
+
+==== config.worktree 116247894 ====
+..	......./.git/hooks.............	......./.git/config............	......./.git/config.lock...............	......./.git/config.worktree...........	......./.git/config.worktree.lock..............	......./.git/commondir.........	......./.git/worktrees.........	....../.git/modules...........	......./.git/info/exclude..............	......./.git/glab-cli..........	......./.gitmodules............	......./.github........	......./.claude........	......./run/docker.sock........	......./run/containerd/containerd.sock.........	......./run/podman/podman.sock.........	......./run/buildkit/buildkitd.sock............	...	.../run/dbus...............	...	.../run/user.......................`...............p...............�...............�...............�...............�.......................	......./run/docker.sock........	.
+
+==== config.worktree 116247934 ====
+../.git/config............	......./.git/config.lock...............	......./.git/config.worktree...........	......./.git/config.worktree.lock..............	......./.git/commondir.........	......./.git/worktrees.........	....../.git/modules...........	......./.git/info/exclude..............	......./.git/glab-cli..........	......./.gitmodules............	......./.github........	......./.claude........	......./run/docker.sock........	......./run/containerd/containerd.sock.........	......./run/podman/podman.sock.........	......./run/buildkit/buildkitd.sock............	...	.../run/dbus...............	...	.../run/user.......................`...............p...............�...............�...............�...............�.......................	......./run/docker.sock........	......./run/containerd/containerd.sock...
+
+==== config.worktree 121585560 ====
+........	.......d...............	.......config..........	.......Q...............	.......config.lock.............	.......config.worktree.........	.......G...............	.......config.worktree.lock............	...	...commondir...............	...	...worktrees.............��........	...+...Iterator result interface is not an object............��............................x...................�@�T�D.���p4�D�.�@�d�D.���p4�D�.�.��@.L��0���.����4���3�[�k�@�-�E.����4��0���.����4���3�ր;���;�@�-�@ ��V.���e5���4��.����4���3�.�;�@ >�E.����4��0���.����4���3�ۀ;���;���.��.����4���3�@�=��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4���3���;��p.��0.��.����4���3���;��0.��.����4���3��PV��.����4���k���:��.L��.ğ�.���..���4��pT��..�B�4��PU��.����4��0.��..�ޡK�@.>��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4��0.��..��K���;
+
+==== config.worktree 121585616 ====
+	.......Q...............	.......config.lock.............	.......config.worktree.........	.......G...............	.......config.worktree.lock............	...	...commondir...............	...	...worktrees.............��........	...+...Iterator result interface is not an object............��............................x...................�@�T�D.���p4�D�.�@�d�D.���p4�D�.�.��@.L��0���.����4���3�[�k�@�-�E.����4��0���.����4���3�ր;���;�@�-�@ ��V.���e5���4��.����4���3�.�;�@ >�E.����4��0���.����4���3�ۀ;���;���.��.����4���3�@�=��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4���3���;��p.��0.��.����4���3���;��0.��.����4���3��PV��.����4���k���:��.L��.ğ�.���..���4��pT��..�B�4��PU��.����4��0.��..�ޡK�@.>��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4��0.��..��K���;�@�.�E.����4��0���.����4��0.��..�ءK��;���;*����.�....
+
+#### "worktreeConfig" 4 [165816267, 166077115, 166077196, 166077317]
+
+==== worktreeConfig 165816267 ====
+ content.....$.....��........	.......config..........	.......--local.........	.......--get...........	.......extensions.worktreeConfig.......%.....��........	.......true....&.....��........	.......sparse-checkout.........	.......set.............	.......--cone..........	.......--......'.....��........	......._...............	...%...git_worktree_create_sparse_set_failed...........	...%...Failed to configure sparse-checkout: ...........	.......b.......(.....��........	.......checkout................@...............H...............X...............`.......................	.......-c..............	.......core.fsmonitor=.........	.......checkout........	.......HEAD....).....��........	.......S...............	...*...git_worktree_create_sparse_checkout_failed..............	...$...Failed to checkout sparse worktree: ...
+
+==== worktreeConfig 166077115 ====
+...........��........	.......config..........	.......--local.........	.......--unset-all.............	.......extensions.worktreeConfig.............��......��	.....��........	...&...Restored extensions.worktreeConfig in ..........	...(... after removing its last linked worktree........	...0...Could not restore extensions.worktreeConfig for ........	.......: ..............	.......warn........................................c...................��0͟@ �����`..����.�@ ����.^..��@�\���.�@ ���@.������.�Y..���.����4��.��@p4���3�.�;T..��. 1L.��.\�@ ����.��pT�@ ����.�.`;���g�@ �����I..���.L��.ğ�p��@ ��M..���3���~��.��@�4�M..�.�3�..=�fWt=..��@ ��K..���3s�.���..�.��@.�.�.���5��0���.����<����G.��@.ğ�p���.�\.����.l+..��@.��I..�.�3�@.%�I..�.�2���6��0���.����<������pf�@�̟�p���.�D.��.h...��@.��@��V.��@P�a.��@.T�@P
+
+==== worktreeConfig 166077196 ====
+set-all.............	.......extensions.worktreeConfig.............��......��	.....��........	...&...Restored extensions.worktreeConfig in ..........	...(... after removing its last linked worktree........	...0...Could not restore extensions.worktreeConfig for ........	.......: ..............	.......warn........................................c...................��0͟@ �����`..����.�@ ����.^..��@�\���.�@ ���@.������.�Y..���.����4��.��@p4���3�.�;T..��. 1L.��.\�@ ����.��pT�@ ����.�.`;���g�@ �����I..���.L��.ğ�p��@ ��M..���3���~��.��@�4�M..�.�3�..=�fWt=..��@ ��K..���3s�.���..�.��@.�.�.���5��0���.����<����G.��@.ğ�p���.�\.����.l+..��@.��I..�.�3�@.%�I..�.�2���6��0���.����<������pf�@�̟�p���.�D.��.h...��@.��@��V.��@P�a.��@.T�@P���p��@ ����.Q.��@@�...�@p�!..�@`�!..���...���!..�@�e..��.�a.��...�..��
+
+==== worktreeConfig 166077317 ====
+orktreeConfig in ..........	...(... after removing its last linked worktree........	...0...Could not restore extensions.worktreeConfig for ........	.......: ..............	.......warn........................................c...................��0͟@ �����`..����.�@ ����.^..��@�\���.�@ ���@.������.�Y..���.����4��.��@p4���3�.�;T..��. 1L.��.\�@ ����.��pT�@ ����.�.`;���g�@ �����I..���.L��.ğ�p��@ ��M..���3���~��.��@�4�M..�.�3�..=�fWt=..��@ ��K..���3s�.���..�.��@.�.�.���5��0���.����<����G.��@.ğ�p���.�\.����.l+..��@.��I..�.�3�@.%�I..�.�2���6��0���.����<������pf�@�̟�p���.�D.��.h...��@.��@��V.��@P�a.��@.T�@P���p��@ ����.Q.��@@�...�@p�!..�@`�!..���...���!..�@�e..��.�a.��...�..��F.��...�..��...........N...W...]...�...�...�...�...�...�.......$...*...1...3...�...�...�...�...�...�...$...6...<...[...n
+
+#### "yourself" 4 [71652854, 71652992, 85563952, 109097816]
+
+==== yourself 71652854 ====
+at automatically serves the HTML files you pass in without
+having to manually call Bun.serve() or write the boilerplate yourself. This runs Bun's bundler on
+the HTML files, their JavaScript, and CSS, and serves them up. This doesn't do anything you can't do
+yourself with Bun.serve().
+`), process.exit(0);
+      continue;
+    }
+    if (arg.includes("*") || arg.includes("**") || arg.includes("{")) {
+      let glob = new Bun.Glob(arg);
+      for (let file of glob.scanSync(cwd)) {
+        let resolved = path.resolve(cwd, file);
+        if (resolved.includes(path.sep + "node_modules" + path.sep))
+          continue;
+        try {
+          resolved = Bun.resolveSync(resolved, cwd);
+        } catch {
+          resolved = Bun.resolveSync("./" + resolved, cwd);
+        }
+        if (resolved.includes(path.sep + "node_
+
+==== yourself 71652992 ====
+s Bun's bundler on
+the HTML files, their JavaScript, and CSS, and serves them up. This doesn't do anything you can't do
+yourself with Bun.serve().
+`), process.exit(0);
+      continue;
+    }
+    if (arg.includes("*") || arg.includes("**") || arg.includes("{")) {
+      let glob = new Bun.Glob(arg);
+      for (let file of glob.scanSync(cwd)) {
+        let resolved = path.resolve(cwd, file);
+        if (resolved.includes(path.sep + "node_modules" + path.sep))
+          continue;
+        try {
+          resolved = Bun.resolveSync(resolved, cwd);
+        } catch {
+          resolved = Bun.resolveSync("./" + resolved, cwd);
+        }
+        if (resolved.includes(path.sep + "node_modules" + path.sep))
+          continue;
+        args.push(resolved);
+      }
+    } else {
+      let resolved = arg;
+      try {
+        
+
+==== yourself 85563952 ====
+designedGeneral conceptsExampleswilliamsOriginal"><span>search">operatorrequestsa &quot;allowingDocumentrevision. 
+
+The yourselfContact michiganEnglish columbiapriorityprintingdrinkingfacilityreturnedContent officersRussian generate-8859-1"indicatefamiliar qualitymargin:0 contentviewportcontacts-title">portable.length eligibleinvolvesatlanticonload="default.suppliedpaymentsglossary
+
+After guidance</td><tdencodingmiddle">came to displaysscottishjonathanmajoritywidgets.clinicalthailandteachers<head>
+	affectedsupportspointer;toString</small>oklahomawill be investor0" alt="holidaysResourcelicensed (which . After considervisitingexplorerprimary search" android"quickly meetingsestimate;return ;color:# height=approval, &quot; checked.min.js"magnetic></a></hforecast. While thursdaydvertise&eacute;hasClassevaluateorde
+
+==== yourself 109097816 ====
+s), plus one final option labeled exactly: "............	...�..." Do not skip any connected browser and do not pick one yourself. If the user picks a specific browser, call select_browser with that browser's deviceId. ..................�...I.f. .t.h.e. .u.s.e.r. .p.i.c.k.s. .t.h.e. .f.i.n.a.l. .o.p.t.i.o.n.,. .c.a.l.l. .s.w.i.t.c.h._.b.r.o.w.s.e.r. ..  .t.h.i.s. .s.e.n.d.s. .a. .c.o.n.f.i.r.m.a.t.i.o.n. .p.r.o.m.p.t. .t.o. .e.v.e.r.y. .c.o.n.n.e.c.t.e.d. .C.h.r.o.m.e. .e.x.t.e.n.s.i.o.n. .a.n.d. .w.a.i.t.s. .f.o.r. .t.h.e. .u.s.e.r. .t.o. .c.l.i.c.k. .C.o.n.n.e.c.t. .i.n. .t.h.e. .o.n.e. .t.h.e.y. .w.a.n.t.;. .i.t. .a.l.s.o. .l.e.t.s. .t.h.e.m. .n.a.m.e. .t.h.a.t. .b.r.o.w.s.e.r.........................................�@p'�@�4�.���.�����..�................�������.�������.PcX�����....{.......��..�M..�...��..
+
+#### "G1w(" 2 [314384817, 314386270]
+
+==== G1w( 314384817 ====
+n(QV()?.name);if(!t||r===null)return null;return{name:r,token:`${r} [${sBr("session",t)}]`,callerIsSubagent:e}}function G1w(e){if(!e)return null;return e.callerIsSubagent?`This process's main session is ${e.token} \u2014 the name OTHER sessions use to message it (it is not listed below; from inside this process, address the main conversation as "${dL}").`:`This session is ${e.token} \u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didF
+
+==== G1w( 314386270 ====
+th>0)y.push(Z1w(m,p));if(!n&&(c.length>0||u.length>0||h.length>0||o||i||s||l))y.push(Q1w(c,p,u,h,o,i,s,l));let _=a?null:G1w(t.self);if(a&&y.length>0)y.unshift(p5i);if(y.length===0){if(a)return p5i;if(!_)return"No reachable agents.";return!n&&!o?`${_}
+
+No reachable agents \u2014 no other Claude session is running on this machine right now (peer messaging itself is available; a session appears here once it is started).`:`${_}
+
+No other session appears in this listing right now (peer messaging itself is available).`}return _?`${_}
+
+${y.join(`
+
+`)}`:y.join(`
+
+`)}function MHm(e){let t=new Map;for(let[o,i]of e.agentNameRegistry)t.set(i,o);let r=new Set(Object.values(e.teamContext?.teammates??{}).map((o)=>o.name)),n=[];for(let o of Object.values(e.tasks)){if(o.type!=="local_agent"||o.agentType==="main-session")conti
+
+#### "DHm(" 2 [314384671, 314385470]
+
+==== DHm( 314384671 ====
+ed:qen(u.unavailable),localListFailed:a,messagingDisabled:!o,listTruncated:u.truncated===!0||c.truncated===!0}}function DHm(e=!1){let t=EQe(),r=MFn(QV()?.name);if(!t||r===null)return null;return{name:r,token:`${r} [${sBr("session",t)}]`,callerIsSubagent:e}}function G1w(e){if(!e)return null;return e.callerIsSubagent?`This process's main session is ${e.token} \u2014 the name OTHER sessions use to message it (it is not listed below; from inside this process, address the main conversation as "${dL}").`:`This session is ${e.token} \u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===voi
+
+==== DHm( 314385470 ====
+teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(t.appState,{teamFile:t.teamFile,sessions:c,cloud:u,bridge:o?[]:e.flatMap((b)=>b.transport==="bridge"?[b.session]:[])}),p=new Map(d.candidates.map((b)=>[`${b.kind}\x00${b.id}`,b])),f=MHm(t.appState),m=OHm(t.appState,t.teamFile,t.callerTeammateId),h=e.flatMap((b)=>b.transport==="bridge"?[b]:[]),g=e.flatMap((b)=>b.transport==="did"?[b.session]:[]),y=[];if(f.length>0)y.push(J1w(f,p));if(m.length>0)y.push(Z1w(m,p)
+
+#### "function IMr(" 1 [300672979]
+
+==== function IMr( 300672979 ====
+ponse:t,...r&&{fallbackNotice:r}}].slice(-20)}}function xu(e){return e}function Yc(e){return/^[\\/]{2}/.test(e)||Eke(e)}function IMr(e){return/(^|[\\/])\.\.([\\/]|$)/.test(e)}function XA(e){return/^[\\/]\?\?[\\/]/.test(e)}function HMe(e){if(/^[\\/]{2}[?.][\\/](?!unc[\\/])/i.test(e))return null;return e.match(/^[\\/]{2}(?:[?.][\\/]unc[\\/])?([^\\/]+)/i)?.[1]?.replace(/[A-Z]/g,(t)=>t.toLowerCase())??null}function NI(e){return/(^|[\\/])\.{1,2}([\\/]|$)/.test(e)}function obe(e){return/^[\\/]{2}[?.][\\/]/.test(e)}function P4s(e){return/^[\\/](GLOBAL\?\?|GLOBALROOT|DosDevices|Device)[\\/]/i.test(e)}function RMr(e,t){if(!Yc(e))return!1;if(obe(e)||Eke(e))return!0;if(NI(e))return!0;let r=HMe(e);return r===null||r!==HMe(t)}function tBo(e){return null}function R4s(e){return e.replace(/[A-Z]/g,(t)=>t.toLowerCase())}funct
+
+#### "refusing to derive a messaging key" 2 [114130360, 303721263]
+
+==== refusing to derive a messaging key 114130360 ====
+j��.i�..P...............H...............@...............�...............�.......................
+...............	...G...refusing to derive a messaging key name for a non-canonical socket path.........	.......................	........key....................................���$�@ ����.�@�<�@Q%K.��@.�Vh���..<�@�.�@PL........"...>.......�������.�������.؜.������������.�������.�������....=.......�A/....��...�A/.�..�.B/.�B/.....	H..H.......�������.�������.8�.������������.�������. �.�����h.......�������.............��������....���������������.........�������.........�������.�������.............����....$.......����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...�...�...�...�...�...�...�...�...�...�...........................................
+
+==== refusing to derive a messaging key 303721263 ====
+oid 0?void 0:zFn.createHash("sha256").update(t).digest("hex")}function HYb(e,t){let r=CWd(t);if(r===void 0)throw Error("refusing to derive a messaging key name for a non-canonical socket path");return`${e}.${r}.key`}async function xWd(e,t,{sweepPermitted:r}){let n=kLe();await Uht.mkdir(n,{recursive:!0,mode:448}),await PYb(n,r);let o=eor.join(n,HYb(process.pid,e));try{await Uht.unlink(o)}catch{}return await od(o,He({peerToken:t,...GWe(await eme())}),384),o}async function PYb(e,t){if(!t)return;let r;try{r=await Uht.readdir(e)}catch{return}await Promise.all(r.map(async(n)=>{let o=CYb.exec(n);if(o&&b7(parseInt(o[1],10)))try{await Uht.unlink(eor.join(e,n))}catch{}}))}async function RWd(e){try{await Uht.unlink(e)}catch{}}async function IWd(e,t){let r=kLe(),n;try{n=await Uht.readdir(r)}catch(c){return lr(c)?{kind:"n

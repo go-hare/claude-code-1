@@ -1,0 +1,80 @@
+==== dialog shown + show gate ====
+
+#### tengu_fullscreen_upsell_dialog_shown [198319584,326381428]
+....................................................................!...
+..........i....@...............8...............@...............h...............................	.......v7e.............	...$...tengu_fullscreen_upsell_dialog_shown....
+..........................................%..@......@p<..p..y.0........................PV..............................................Ha......................................	...
+...impression...........................................	......	D..H.......................................................h...................................................................................................................$...............................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p.......0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...8...
+urn!1;if(Vfs())return!1;return!0}function jfu(Ee$){let YAn=q1y.c(18),{onDone:mPr,getMessages:z1y}=Ee$,{storageV5:v7e}=tn(),Ffu=XAn.useRef(!1),v1s=au(),u7A;if(YAn[0]!==v7e)u7A=()=>{let Ae$=udc(v7e);N("tengu_fullscreen_upsell_dialog_shown",{impression:Ae$})},YAn[0]=v7e,YAn[1]=u7A;else u7A=YAn[1];let d7A;if(YAn[2]===ue)d7A=[],YAn[2]=d7A;else d7A=YAn[2];XAn.useEffect(u7A,d7A);let p7A;if(YAn[3]!==z1y||YAn[4]!==mPr||YAn[5]!==v7e||YAn[6]!==v1s)p7A=async function S1s(){if(Ffu.current){return}Ffu.current=!0;let f7A=v7A;if(f7A(v1s.getState())){mPr();return}await s0e(v1s.getState().transcripts[Di()]?.messages??[],v7e);let m7A=v1s.getState();if(f7A(m7A)){mPr();return}let{toolPermissionContext:W1y,sessionEffort:Te$,proactivityLevel:ke$}=m7A;let Ce$=[...Ywt(W1y,Te$),...Xwt(W1y,PMe())];N("tengu_fullscreen_upsell_dialog_accepted",{}),gRr("fullscreen",Ce$,z1y(),{proactivityLevel:ke$,toolPermissionContext
+
+#### CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL [106496064,188771256,188771472,301307315]
+ODE_EXIT_AFTER_FIRST_RENDER.............	...!...CLAUDE_CODE_EXIT_AFTER_STOP_DELAY...............	.......CLAUDE_CODE_FORCE_BRIDGE........	...!...CLAUDE_CODE_FORCE_EVALUATE_MEMORY.2.............	...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL.............	.......CLAUDE_CODE_FORCE_FULL_LOGO.............	.......CLAUDE_CODE_FORCE_MEMORY_SURVEY.........	.......CLAUDE_CODE_FORCE_TIP_ID........	 2.....CLAUDE_CODE_GIT_BASH_PATH 2.............. 2. ...CLAUDE_CODE_GLOB_TIMEOUT_SECONDS........	!2. ...CLAUDE_CODE_GOAL_CHECKIN_MINUTES................CLAUDE_CODE_HIDE_SETTINGS_HINT..........I"2.$...CLAUDE_CODE_HOLD_REPORT_PARK_AT_INIT............	...-...CLAUDE_CODE_HOLD_UNANSWERED_PARKED_PERMISSION...........	...%...CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS...........I$2.(...CLAUDE_CODE_HOME_SEED_VERDICT_TIMEOUT_MS........	.......CLAUDE_CODE_HOST_PLATFORM...............	.......CLAUDE_CODE_IDE_HOST_OVERRIDE.......
+................	.......relaunch........................	...
+...fullscreen......1...............	.......CLAUDE_CODE_NO_FLICKER..........	...$...CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN............	...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL.....................0...............H...............p.......................	.......CLAUDE_CODE_NO_FLICKER..........	...$...CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN............	...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL..........................................................@ ..@...........@ ..@@n.@...@P..@P..G...@.L..0... ............ky....@................ .................5...D...........G...K........................y.......................L...............................................%!............................................. }b.....................x........................|b...............................................$.....................P,..
+
+#### fullscreenUpsellSeenCount??0)<M4r [304985660]
+UP:"win32"}.VERSION}function Kxa(){return V.CLAUDE_CODE_NO_FLICKER===!1||V.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN}function Lhp(){try{if(axe())return!1;let e=cr();return e.firstStartVersion!==void 0&&(e.fullscreenUpsellSeenCount??0)<M4r}catch{return}}function eEv(e){if(e.freshInstallCached!==void 0)return e.freshInstallCached;let t=Lhp();if(t!==void 0)e.freshInstallCached=t;return t??!1}function Vs(e=Lne){if(K3()==="local-agent")return!1;if(V.CLAUDE_CODE_SESSION_KIND==="bg")return!0;if(CU())return!1;if(Kxa())return!1;if(V.CLAUDE_CODE_NO_FLICKER===!0)return!0;if(e.crashAutoOff)return!1;if(X3e(e)){if(!e.loggedTmuxCcDisable)e.loggedTmuxCcDisable=!0,E("fullscreen disabled: tmux -CC (iTerm2 integration mode) detected \xB7 set CLAUDE_CODE_NO_FLICKER=1 to override");return!1}if(qxa()){if(!e.loggedWinSshDisable)e.loggedWinSshDisable=!0,E("fullscreen disabled: Windows over SSH (ConPTY re-rendering) 
+
+#### fresh_install_on [117755304,117757664,287595976,287596272]
+........	.......win_ssh_auto_off........	...
+...fullscreen..............	.......default.........	.......settings_on.............	.......upsell_trial_on.........	.......settings_off............	.......fresh_install_on........	.......tengu_amber_creek.......................	.......downsell_on.............	.......tengu_pewter_brook..............	.......gb_on...........	.......gb_off..............................$.....................`d.@`..Y.....g.......e.....@pe.W...@.g.M.....^.@ .......0f......@f......!<.@.4..P4.....@..W....@...S.....u.....@.f.S....pu.....@Pg.M.....u............<...>...X...Z...t...v........................................... ...%...(...*...,...:...T...V...d................................................................................................=T.......................................................................S.....................h...........................
+d_on............	.......settings_off............	.......downsell_on.............	.......gb_on...........	.......env_off.........	.......crash_auto_off..........	.......tmux_cc_auto_off........	.......fresh_install_on........	.......settings_on.............
+........_..i.i.i.......0...............@...............H.......................	...
+...fullscreen..............	.......default.
+........................................@..........................K.........B.....[.....B.\.....B...B......H..H.......................................................h........................................)[.................................................................................................................................................................................................................................................................................................................
+
+#### Selected text auto-copies [198316338,326383139]
+ .r.e.s.p.o.n.s.e.s...........	...................=..... .M.o.u.s.e. .s.u.p.p.o.r.t. ..  .c.l.i.c.k. .t.o. .m.o.v.e. .y.o.u.r. .c.u.r.s.o.r. .o.r. .e.x.p.a.n.d. .r.e.s.u.l.t.s...............	...-.... Selected text auto-copies to your clipboard..........................	.......Yes, try it.............	.......Not now.................................	... ...Try the new fullscreen renderer?........................................................................*............D!L..P>...z...u...E...........D......rL..P;..`E.......;...].......4..@cf......D..p4...c...4..p.......@E...... M.......4......p.......@E......p4.......4..@..I.....E.......4..@c...%.......4..`b...%.......4...a...&.......4...Hh......D..p4...c...4..p4...c...4..p4...c...4..p4...K...4..p.......@E.......4...4.......4..@c...%.......4..`b.......D..p4...c...4..p4...c...4..........PE.......5...........;...5.......4.........@p4..`...
+fixes the flashing you see during long responses":""]}),xpe.jsx(v,{dimColor:!0,children:"\xB7 Mouse support \u2014 click to move your cursor or expand results"}),xpe.jsx(v,{dimColor:!0,children:"\xB7 Selected text auto-copies to your clipboard"})]}),YAn[11]=y7A;else y7A=YAn[11];let Bfu;if(YAn[12]!==S1s||YAn[13]!==hPr)Bfu=xpe.jsxs(H,{flexDirection:"column",gap:1,children:[y7A,xpe.jsx(sc,{confirmLabel:"Yes, try it",cancelLabel:"Not now",onConfirm:S1s,onCancel:hPr})]}),YAn[12]=S1s,YAn[13]=hPr,YAn[14]=Bfu;else Bfu=YAn[14];let _7A;if(YAn[15]!==hPr||YAn[16]!==Bfu)_7A=xpe.jsx(Vr,{title:"Try the new fullscreen renderer?",onCancel:hPr,children:Bfu}),YAn[15]=hPr,YAn[16]=Bfu,YAn[17]=_7A;else _7A=YAn[17];return _7A}var XAn,xpe,q1y;var K1y=A(()=>{tt();uVc();Srt();Nt();jt();su();uQ();Wn();mr();kUe();vh();A6t();Yfs();$r();Eie();dj();tot();Ho();ca();rs();bC();ec();XAn=P(Lt(),1),xpe=P(Ae(),1),q1y=P(Me(),
+
+==== fWv rest ====
+fWv={autoAccept:"ansi:magentaBright",autoAcceptShimmer:"ansi:magentaBright",skill:"ansi:magentaBright",bashBorder:"ansi:magentaBright",claude:"ansi:redBright",claudeShimmer:"ansi:yellowBright",claudeBlue_FOR_SYSTEM_SPINNER:"ansi:blueBright",claudeBlueShimmer_FOR_SYSTEM_SPINNER:"ansi:blueBright",permission:"ansi:blueBright",permissionShimmer:"ansi:blueBright",planMode:"ansi:cyanBright",ide:"ansi:blue",promptBorder:"ansi:white",promptBorderShimmer:"ansi:whiteBright",text:"ansi:whiteBright",inverseText:"ansi:black",inactive:"ansi:white",inactiveShimmer:"ansi:whiteBright",subtle:"ansi:white",suggestion:"ansi:blueBright",remember:"ansi:blueBright",background:"ansi:cyanBright",success:"ansi:greenBright",error:"ansi:redBright",warning:"ansi:yellowBright",merged:"ansi:magentaBright",warningShimmer:"ansi:yellowBright",diffAdded:"ansi:green",diffRemoved:"ansi:red",diffAddedDimmed:"ansi:green",diffRemovedDimmed:"ansi:red",diffAddedWord:"ansi:greenBright",diffRemovedWord:"ansi:redBright",red_FOR_SUBAGENTS_ONLY:"ansi:redBright",blue_FOR_SUBAGENTS_ONLY:"ansi:blueBright",green_FOR_SUBAGENTS_ONLY:"ansi:greenBright",yellow_FOR_SUBAGENTS_ONLY:"ansi:yellowBright",purple_FOR_SUBAGENTS_ONLY:"ansi:magentaBright",orange_FOR_SUBAGENTS_ONLY:"ansi:redBright",pink_FOR_SUBAGENTS_ONLY:"ansi:magentaBright",cyan_FOR_SUBAGENTS_ONLY:"ansi:cyanBright",professionalBlue:"rgb(106,155,204)",chromeYellow:"ansi:yellowBright",clawd_body:"ansi:redBright",clawd_background:"ansi:black",userMessageBackground:"ansi:blackBright",userMessageBackgroundHover:"ansi:black",composerSidebarBackground:"ansi:blackBright",selectionBg:"ansi:blue",bashMessageBackgroundColor:"ansi:black",memoryBackgroundColor:"ansi:blackBright",rate_limit_fill:"ansi:yellow",rate_limit_empty:"ansi:white",fastMode:"ansi:redBright",fastModeShimmer:"ansi:redBright",effortUltra:"ansi:magentaBright",briefLabelYou:"ansi:blueBright",briefLabelClaude:"ansi:redBright",rainbow_red:"ansi:red",rainbow_orange:"ansi:redBright",rainbow_yellow:"ansi:yellow",rainbow_green:"ansi:green",rainbow_blue:"ansi:cyan",rainbow_indigo:"ansi:blue",rainbow_violet:"ansi:magenta",rainbow_red_shimmer:"ansi:redBright",rainbow_orange_shimmer:"ansi:yellow",rainbow_yellow_sh
+
+==== expanded tool color ====
+
+#### expanded tool count=0
+
+#### toolResult count=3
+
+.......3.......0...............H...............0.......................	...
+...toolResult..............	.......contentArray............6........_..i.H...........j...F....i.H...........j...F....i.i...`...............p.......................................................................................	...
+...Plain text..P...........	.......JSON with schema: u.............	.......JSON............IF......JSON array with schema
+
+#### verbose: count=3
+rinfoThe socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()Unable to connect. Is the computer able to access the url?The response redirected too many times. For more information, pass `verbose: true` in the second argument to fetch()Redirect URL in Location header is invalid.Was there a typo in the url or port?unable to get issuer certificateunable to get cer
+
+#### isCollapsed count=1
+) return;
+      var s = getSelection();
+      if (!s || s.rangeCount === 0 || s.isCollapsed) return;
+      var r = s.getRangeAt(0);
+      if (!editing.el.contains(r.commonAncestorContainer)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var a = document.createElement('a');
+      a.setAttribute('href', txt);
+      try {
+        r.surroundContents(a);
+      } catch (err) {
+        // Selection crosses elemen
+
+#### userMessageBackgroundHover count=3
+	.......
+...............	.......ikg....................................	.......userMessageBackgroundHover..............	.......userMessageBackground...........................	.......text....................	.......truncate-end....................................	.......absolute........	.......center..........................................................................................W............D!L...>...... E.......L.	
+
+#### composerSidebarBackground count=3
+#.......$.......%.......&...............	.......oSs.....'...............	.......composerSidebarBackground.......(.......).......*...............	.......row.....+...............	.......none............	.......flex....,.......-.......................	.......v9t.............	.......100%..../.......0.......1.......2.......3.......4.......5.......6.......7...............	.......myn.....8.......9...............	...
+...permission....
+
+#### messageActionsBackground count=0
+
+==== KQd firstStart ====
+
+#### function KQd [304235823]
+te().toISOString();ln((r)=>KQd(r,t),e)}}function KQd(e,t){if(e.firstStartTime)return e;return{...e,firstStartTime:t,firstStartVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.239",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-21T04:40:30Z",GIT_SHA:"9bf8e9521fe06414183309865310e27c9b8db3dd",DD_SOURCEMAP_GROUP:"win32"}.VERSION}}function PLt(e)
+
+#### function r0a [304235730]
+neId:n}),e).catch(()=>!1)||n!==r?n:null}function r0a(e){if(!cr().firstStartTime){let t=new Date().toISOString();ln((r)=>KQd(r,t),e)}}function KQd(e,t){if(e.firstStartTime)return e;return{...e,firstStartTime:t,firstStartVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.239",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-21T04:40:30Z",GIT_SHA:"9
+
+#### firstStartVersion: [304235899]
+e)return e;return{...e,firstStartTime:t,firstStartVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.239",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-21T04:40:30Z",GIT_SHA:"9bf8e9521fe06414183309865310e27c9b8db3dd",DD_SOURCEMAP_GROUP:"win32"}.VERSION}}function PLt(e){let t=$n();switch(e){case"User":return qv.join(En(),"CLAUDE.md");case"Local

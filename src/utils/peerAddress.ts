@@ -12,12 +12,12 @@ export function parseAddress(to: string): {
   if (to.startsWith('uds:')) return { scheme: 'uds', target: to.slice(4) }
   if (to.startsWith('bridge:')) return { scheme: 'bridge', target: to.slice(7) }
   if (to.startsWith('tcp:')) return { scheme: 'tcp', target: to.slice(4) }
-  // Legacy: old-code UDS senders emit bare socket paths in from=; route them
-  // through the UDS branch so replies aren't silently dropped into teammate
-  // routing. (No bare-session-ID fallback — bridge messaging is new enough
-  // that no old senders exist, and the prefix would hijack teammate names
-  // like session_manager.)
-  if (to.startsWith('/')) return { scheme: 'uds', target: to }
+  // densable 2.1.239 xD iYb/sYb — only real socket paths are UDS.
+  // A title like `/fix-login` must stay `other` so ListAgents/SendMessage
+  // do not treat it as a socket (changelog #40 untitled / unreachable).
+  if (/^\/\S*\.sock$/.test(to) || /^[\\/]{2}[.?][\\/]pipe[\\/]/i.test(to)) {
+    return { scheme: 'uds', target: to }
+  }
   return { scheme: 'other', target: to }
 }
 

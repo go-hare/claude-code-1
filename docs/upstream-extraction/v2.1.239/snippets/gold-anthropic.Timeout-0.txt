@@ -1,0 +1,69 @@
+# offset=324942377 (0x135e3a29) kw="anthropic.Timeout"
+
+for b in response.content if b.type == "text"), "")\r
+    print(f"A: {text[:200]}")\r
+\r
+# 3. Clean up when done\r
+client.beta.files.delete(uploaded.id)\r
+\`\`\`\r
+`;var j0y=()=>{};var G0y=`# Claude API \u2014 Python\r
+\r
+## Installation\r
+\r
+\`\`\`bash\r
+pip install anthropic\r
+\`\`\`\r
+\r
+## Client Initialization\r
+\r
+\`\`\`python\r
+import anthropic\r
+\r
+# Default \u2014 resolves credentials from the environment:\r
+# ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN, or an \`ant auth login\` profile.\r
+# Prefer this for local dev; don't hardcode a key.\r
+client = anthropic.Anthropic()\r
+\r
+# Explicit API key (only when you must inject a specific key)\r
+client = anthropic.Anthropic(api_key="your-api-key")\r
+\r
+# Async client\r
+async_client = anthropic.AsyncAnthropic()\r
+\`\`\`\r
+\r
+---\r
+\r
+## Client Configuration\r
+\r
+### Per-request overrides\r
+\r
+Use \`with_options()\` to override client settings for a single call without mutating the client:\r
+\r
+\`\`\`python\r
+client.with_options(timeout=5.0, max_retries=5).messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=1024,\r
+    messages=[{"role": "user", "content": "Hello"}],\r
+)\r
+\`\`\`\r
+\r
+### Timeouts\r
+\r
+Default request timeout is 10 minutes. Pass a float (seconds) or an \`anthropic.Timeout\` for granular control. On timeout the SDK raises \`anthropic.APITimeoutError\` (and retries per \`max_retries\`).\r
+\r
+\`\`\`python\r
+client = anthropic.Anthropic(timeout=20.0)\r
+client = anthropic.Anthropic(\r
+    timeout=anthropic.Timeout(60.0, read=5.0, write=10.0, connect=2.0),\r
+)\r
+\`\`\`\r
+\r
+\`anthropic\` 1.x is built on [\`httpx2\`](https://pypi.org/project/httpx2/), not \`httpx\`. \`anthropic.Timeout\` is \`httpx2.Timeout\`; if you import the HTTP library yourself, write \`import httpx2 as httpx\` \u2014 an object from the \`httpx\` package (\`httpx.Timeout\`, \`httpx.Client\`, transports, limits) is rejected or fails at request time. Existing \`httpx\`-era code is covered by the [v1 migration guide](https://github.com/anthropics/anthropic-sdk-python/blob/main/MIGRATION.md) and \`/claude-api upgrade python\`.\r
+\r
+### Retries\r
+\r
+The SDK auto-retries connection errors, 408, 409, 429, and \u2265500 with exponential backoff (default 2 retries). Set \`max_retries\` on the client or via \`with_options()\`; \`max_retries=0\` disables.\r
+\r
+### Async performance (aiohttp backend)\r
+\r
+For high-concurrency async workloads, install \`anthropic[aiohttp]\` and pass \`DefaultAioHttpClient\` instead of the defaul

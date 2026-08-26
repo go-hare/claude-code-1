@@ -1,5 +1,5 @@
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './errors.js'
-import { isEnvTruthy } from './envUtils.js'
+import { getAWSRegion, isEnvTruthy } from './envUtils.js'
 import { logForDebugging } from './debug.js'
 import { resolveAwsChainResolveTimeoutMs } from './residualMsEnvGates.js'
 
@@ -156,12 +156,35 @@ export async function resolveWithStallGuard<T>(
   }
 }
 
-/** Throws if STS caller identity cannot be retrieved. */
-export async function checkStsCallerIdentity(): Promise<void> {
-  const { STSClient, GetCallerIdentityCommand } = await import(
-    '@aws-sdk/client-sts'
+/**
+ * densable 2.1.239 LMt — STS endpoint for proxy / NO_PROXY matching.
+ * AWS_ENDPOINT_URL_STS, then AWS_ENDPOINT_URL, then regional default.
+ */
+export function getStsEndpointUrl(region: string): string {
+  return (
+    process.env.AWS_ENDPOINT_URL_STS ||
+    process.env.AWS_ENDPOINT_URL ||
+    `https://sts.${region}.amazonaws.com`
   )
-  await new STSClient().send(new GetCallerIdentityCommand({}))
+}
+
+/**
+ * densable 2.1.239 iYd — STS GetCallerIdentity through HTTPS_PROXY (NMt/pYt)
+ * with region + stall guard. Used as the awsAuthRefresh pre-check.
+ */
+export async function checkStsCallerIdentity(): Promise<void> {
+  const [
+    { STSClient, GetCallerIdentityCommand },
+    { getAWSClientProxyConfig, AWS_SDK_REQUEST_TIMEOUT_MS },
+  ] = await Promise.all([import('@aws-sdk/client-sts'), import('./proxy.js')])
+  const region = getAWSRegion()
+  const proxyCfg = await getAWSClientProxyConfig({
+    url: getStsEndpointUrl(region),
+    region,
+    requestTimeoutMs: AWS_SDK_REQUEST_TIMEOUT_MS,
+  })
+  const client = new STSClient({ region, ...proxyCfg })
+  await resolveWithStallGuard(client.send(new GetCallerIdentityCommand({})))
 }
 
 /**
@@ -171,9 +194,26 @@ export async function checkStsCallerIdentity(): Promise<void> {
 export async function clearAwsIniCache(): Promise<void> {
   try {
     logForDebugging('Clearing AWS credential provider cache')
-    const { fromIni } = await import('@aws-sdk/credential-providers')
-    const iniProvider = fromIni({ ignoreCache: true })
-    await iniProvider() // This updates the global file cache
+    const [
+      { fromIni },
+      { getAwsSdkProxyRequestHandler, AWS_SDK_REQUEST_TIMEOUT_MS },
+    ] = await Promise.all([
+      import('@aws-sdk/credential-providers'),
+      import('./proxy.js'),
+    ])
+    const region = getAWSRegion()
+    const requestHandler = await getAwsSdkProxyRequestHandler({
+      url: getStsEndpointUrl(region),
+      requestTimeoutMs: AWS_SDK_REQUEST_TIMEOUT_MS,
+    })
+    const iniProvider = fromIni({
+      ignoreCache: true,
+      ...(requestHandler && {
+        clientConfig: { requestHandler },
+        parentClientConfig: { requestHandler, region },
+      }),
+    })
+    await resolveWithStallGuard(iniProvider())
     logForDebugging('AWS credential provider cache refreshed')
   } catch (_error) {
     // Ignore errors - we're just clearing the cache

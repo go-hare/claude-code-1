@@ -288,6 +288,11 @@ const MarketplaceNameSchema = lazySchema(() =>
     })
     .refine(name => name.toLowerCase() !== 'builtin', {
       message: 'Marketplace name "builtin" is reserved for built-in plugins',
+    })
+    // densable D9u.synced — official reserved marketplace name
+    .refine(name => name.toLowerCase() !== 'synced', {
+      message:
+        'Marketplace name "synced" is reserved for plugins synced from your claude.ai account',
     }),
 )
 
@@ -1545,7 +1550,9 @@ export const PluginMarketplaceSchema = lazySchema(() =>
         pluginRoot: z
           .string()
           .optional()
-          .describe('Base path for relative plugin sources'),
+          .describe(
+            'Base directory for bare plugin source names, relative to the marketplace root (e.g. "./plugins" resolves "source": "formatter" as ./plugins/formatter). Sources that already start with "./" are unaffected.',
+          ),
         version: z.string().optional().describe('Marketplace version'),
         description: z.string().optional().describe('Marketplace description'),
       })

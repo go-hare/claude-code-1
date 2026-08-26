@@ -1,0 +1,24 @@
+=== H8e_long ===
+function H8e(e){let t=Ndu(e.replace(/[\t\n\r]/g,"").toLowerCase());if(t===""||c8y.test(t))return t;try{let r=new URL(`https://${t}`);if(r.username!==""||r.password!==""||r.port!==""||r.pathname!=="/"||r.search!==""||r.hash!=="")return t;return Ndu(r.hostname)}catch{return t}}
+
+=== om_long ===
+function om(e){return NPs(e,"github.com")}
+
+=== Ldu_long ===
+function Ldu(e){return/[%\x00-\x1f\x7f-\u{10FFFF}]/u.test(e)}
+
+=== WAd_long ===
+function WAd(e,t,r){let n=r?.blocklistDirection?O7t(e):zAd(e);if(!n)return!1;let o=r?.blocklistDirection&&n===q7s?[n,i_]:[n];try{let i=new RegExp(t.hostPattern);return o.some((s)=>i.test(s))}catch{return E(`Invalid hostPattern regex in policy settings: ${t.hostPattern}`,{level:"error"}),!1}}
+
+=== Utb_long ===
+function Utb(e){switch(e.source){case"github":return i_;case"git":{if(e.url.includes("://")){if(x5o(e.url))return null;try{return new URL(e.url).hostname||null}catch{return null}}return e.url.match(/^[^@]+@([^:]+):/)?.[1]??null}case"url":try{return new URL(e.url).hostname}catch{return null}default:return null}}
+
+=== BAd_long ===
+function BAd(e){if(e.startsWith("/")||e.startsWith("\\")||/^[A-Za-z]:/.test(e))return!1;return!e.split(/[\\/]/).some((t)=>t==="..")}
+
+=== GAd ===
+function GAd(e,t){if(e.source!=="file"&&e.source!=="directory")return!1;try{return new RegExp(t.pathPattern).test(e.path)}catch{return E(`Invalid pathPattern regex in policy settings strictKnownMarketplaces: ${t.pathPattern}`,{level:"error"}),!1}}
+
+=== jDr ===
+function jDr(e){let t=A5o();if(t===null)return!1;return t.some((r)=>{if(r.source==="hostPattern")return WAd(e,r,{blocklistDirection:!0}
+

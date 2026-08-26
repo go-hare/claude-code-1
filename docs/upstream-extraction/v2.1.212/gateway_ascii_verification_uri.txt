@@ -1,0 +1,18 @@
+offset=134126112 needle=b'verification_uri'
+count=15
+
+connecting
+application/x-www-form-urlencoded
+Cannot destructure property 'data' from null or undefined value
+gateway device authorization endpoint returned malformed response
+polling
+verification_uri_complete
+verification_uri
+user_code
+device_code
+application/x-www-form-urlencoded
+Cannot destructure property 'data' from null or undefined value
+gateway token endpoint returned malformed response
+authorization_pending
+expired_token
+Sign-in timed out before the browser flow completed. Try again.

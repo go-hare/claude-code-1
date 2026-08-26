@@ -1,0 +1,12 @@
+OFFSET=100387112
+
+ .t.o. .t.h.e. .c.a.l.l.i.n.g. .s.c.r.i.p.t. ..  .i.t. .i.s. .y.o.u.r. .r.e.t.u.r.n. .v.a.l.u.e.,. .n.o.t. .a. .m.e.s.s.a.g.e. .t.o. .a. .h.u.m.a.n... .O.u.t.p.u.t. .t.h.e. .l.i.t.e.r.a.l. .r.e.s.u.l.t.;. .d.o. .n.o.t. .o.u.t.p.u.t. .c.o.n.f.i.r.m.a.t.i.o.n.s. .l.i.k.e. .".D.o.n.e...". .B.e. .c.o.n.c.i.s.e. ..  .t.h.e. .s.c.r.i.p.t. .w.i.l.l. .p.a.r.s.e. .y.o.u.r. .o.u.t.p.u.t.................
+...'worktree'......................medium...........K..N...script contains control characters that would be hidden in the approval dialog...........c..$...0123456789abcdefghijklmnopqrstuvwxyz................K...Shell command or script. Each stdout line is an event; exit ends the watch..................O...command contains control characters that would be hidden in the approval dialog.................registerSetter..................unregisterSetter................
+# Agent Teammate Communication
+
+IMPORTANT: You are running as an agent in a team. To communicate with anyone on your team, use the SendMessage tool with `to: "<name>"` to send messages to specific teammates.
+
+Just writing a response in text is not visible to others on your team - you MUST use the SendMessage tool.
+
+The user interacts primarily with the team lead. Your work is coordinated through the task system and teammate messaging.
+................queued_notifications.............:......queued-remote-notifications.............

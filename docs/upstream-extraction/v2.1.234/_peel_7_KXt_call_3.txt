@@ -1,0 +1,2 @@
+offset=312891138
+,persistToSettings:Rn}=Lt,Po=Le.queue[0];if(!Po)return;let Vo=Po.host;if(Ihi(Po.workerName,Po.requestId,Vo,Rr,ke?.teamName,Y),Rn&&Rr){let cs={type:"addRules",rules:[{toolName:Xf,ruleContent:`domain:${KXt(Vo)}`}],behavior:"allow",destination:"localSettings"};Je((rs)=>({...rs,toolPermissionContext:WA(rs.toolPermissionContext,cs)})),oi.addSessionAllowedHost(Vo),_De(cs).then(()=>oi.refreshConfig()).catch(xe)}else if(Rr)oi.addSessionAllowedHost(Vo);Je

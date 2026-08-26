@@ -1,0 +1,58 @@
+
+==== "fable5:\"claude" hits=0 ====
+
+==== "fable5:\"us." hits=0 ====
+
+==== "fable5:" hits=1 ====
+@305039803:
+e=!R_(),t=`Fable 5 \xB7 ${Hyp}${Pyp()}`;return{value:e?zv().fable5:"fable",label:"Fable",description:t,descriptionForModel:"Fable 5 - most capable for your hardest and longest-running tasks"}}function Eyp(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(Rci()&&e){let t=H0(e);return{value:"opus",label:V.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME??e,description:V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" (1M context)":""}`,descriptionForModel:`${V.AN
+
+
+==== "inherit" hits=8 ====
+@69985497:
+strinaryoperator.idsu.idsunaryoperator.imperialaramaic.incb.inherited.inscriptionalpahlavi.inscriptionalparthian.ital.java.javanese.joinc.joincontrol.kaithi.kali.kana.kannada.katakana.kawi.kayahli.khar.kharoshthi.khitansmallscript.khmer.khmr.khoj.khojki.khudawadi.kiratrai.kits.knda.krai.kthi.l.l&.lana.lao.laoo.latin.latn.lc.lepc.lepcha.limb.limbu.lina.linb.lineara.linearb.lisu.ll.lm.lo.loe.logicalorderexception.lower.lowercase.lt.lu.lyci.lycian.lydi.lydian
+
+@70043748:
+if (typeof value === "object" && value !== null) {.    if (@inherits(4, value)).      return new @Buffer(value, encodingOrOffset, length);.    if (@isTypedArrayView(value)).      return new @Buffer(value, encodingOrOffset, length);.    let valueOf = value.valueOf && value.valueOf();.    if (valueOf != null && valueOf !== value && (typeof valueOf === "string" || typeof valueOf === "object")).      return @Buffer.from(valueOf, encodingOrOffset, length);.    
+
+@70044219:
+ngth = value.length;.    if (valueLength !== @undefined || @inherits(4, value.buffer)) {.      if (typeof valueLength !== "number").        return new @Buffer(0);.      if (valueLength <= 0).        return new @Buffer(0);.      return new @Buffer(value);.    }.    let { type, data } = value;.    if (type === "Buffer" && @isArray(data)) {.      if (data.length <= 0).        return new @Buffer(0);.      return new @Buffer(data);.    }.    let toPrimitive = v
+
+@70185483:
+ing(err);.  //! temp fix for Bun losing the error name from inherited errors + extraneous ": " with no message.  if (stack = stack.replace(/^Error: /, `${name}${err.message ? ": " : ""}`), removeDuplicateErrorKeys(ctx, keys, err, stack), "cause" in err && (keys.length === 0 || !ArrayPrototypeIncludes(keys, "cause"))).    ArrayPrototypePush.@call(keys, "cause");.  if (@isJSArray(err.errors) && (keys.length === 0 || !ArrayPrototypeIncludes(keys, "errors"))).
+
+
+==== "AGENT_MODEL" hits=8 ====
+@106505871:
+_SKIP_FAST_MODE_ORG_CHECK.............p2.....CLAUDE_CODE_SUBAGENT_MODEL...............q2.....CLAUDE_CONTEXT_COLLAPSE.................CLAUDE_CONTEXT_COLLAPSE_MODEL...................FALLBACK_FOR_ALL_PRIMARY_MODELS.................ALL_PROXY.......................ANTHROPIC_BETAS.................ANTHROPIC_CUSTOM_HEADERS.........s2.....API_FORCE_IDLE_TIMEOUT..................API_TIMEOUT_MS.............."...CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS.....................
+
+@220232239:
+MALL_FAST_MODEL_AWS_REGION...................CLAUDE_CODE_SUBAGENT_MODEL..................)...CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT...................'...CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT.................p...............................................................................................H...............h...............................................................................@...............h......................................
+
+@220233919:
+MALL_FAST_MODEL_AWS_REGION...................CLAUDE_CODE_SUBAGENT_MODEL..................)...CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT...................'...CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT.................ANTHROPIC_CUSTOM_MODEL_OPTION...............)...ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION..................."...ANTHROPIC_CUSTOM_MODEL_OPTION_NAME..................4...ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES....................@......
+
+@220252367:
+UDE_CODE_SKIP_VERTEX_AUTH....................CLAUDE_CODE_SUBAGENT_MODEL......................CLAUDE_CODE_USE_BEDROCK.................CLAUDE_CODE_USE_FOUNDRY.................CLAUDE_CODE_USE_ANTHROPIC_AWS...............&...CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD..................CLAUDE_CODE_USE_GATEWAY.................CLAUDE_CODE_USE_MANTLE..................CLAUDE_CODE_USE_POWERSHELL_TOOL.................CLAUDE_CODE_USE_VERTEX..................DISABLE_AUTOUPD
+
+
+==== "subagent model" hits=1 ====
+@325292459:
+u2014 `system.message` lands on the primary thread only, so subagent models are not considered. On an unsupported primary model the event is rejected with a `model_does_not_support_mid_conversation_system` validation error.\r\n- **While the session is idle with `stop_reason: requires_action`** (blocked on `user.custom_tool_result` / `user.tool_confirmation`), a `system.message` is accepted **only when it trails a tool result event in the same request**. Se
+
+
+==== "for this agent" hits=8 ====
+@111013965:
+ent execution (default 60).................Y...Model to use for this agent hook (e.g., "claude-sonnet-5"). If not specified, uses Haiku....................................................7................................I.<...L.@Pn.B.... <...L..@n.@ ..B.....;..Q<...4..$<...4.......k.......l.......l..@.......Q<...4..$<.......L.......l......!<.B.4..#<...4..&<...L@....@.l.B.... <...4..#<...LG......l......!<.B.4..#<.:.LC......l......!<.B.4..#<.5.LD......l.....
+
+@137613592:
+....................The working-directory isolation context for this agent was lost, so this command would run in the parent session's directory instead of this agent's worktree (.............i...). Refusing to run it. Retry the command; if this keeps failing, report that worktree isolation was lost............................................+...Iterator result interface is not an object..............................Working directory ".................E...
+
+@230064051:
+.................Array of tool names to explicitly disallow for this agent. MCP server-level specs (mcp__server, mcp__server__*, mcp__*) remove every tool from the named server (or all MCP tools)......................The agent's system prompt.......................Model alias (e.g. 'fable', 'opus', 'sonnet', 'haiku') or full model ID (e.g. 'claude-fable-5'). If omitted or 'inherit', uses the main model................6...Experimental: Critical reminder add
+
+@230065687:
+.............max.................I...Reasoning effort level for this agent. Either a named level or an integer...................;...Permission mode controlling how tool executions are handled.....................Agent type auto-spawned as a background observer whenever this agent runs. The observer receives read-only activity digests and reports via the ObserverReport tool; it never participates in the task..................Supplemental postamble appended
+
+
+==== "Balanced performance" hits=0 ====

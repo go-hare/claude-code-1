@@ -1,0 +1,3 @@
+OFFSET=293780134
+
+;if(["options","block"].includes(i))continue;let s=i,a=r.hooks[s],l=o[s];if(tDn.passThroughHooks.has(i))o[s]=(c)=>{if(this.defaults.async)return Promise.resolve(a.call(o,c)).then((d)=>l.call(o,d));let u=a.call(o,c);return l.call(o,u)};else o[s]=(...c)=>{let u=a.apply(o,c);if(u===!1)u=l.apply(o,c);return u}}n.hooks=o}if(r.walkTokens){let o=this.defaults.walkTokens,i=r.walkTokens;n.walkTokens=function(s){let a=[];if(a.push(i.call(this,s)),o)a=a.concat(o.call(this,s));return a}}this.defaults={...this.defaults,...n}}),this}setOptions(e){return this.defaults={...this.defaults,..

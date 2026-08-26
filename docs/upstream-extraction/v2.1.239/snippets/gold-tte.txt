@@ -1,0 +1,41 @@
+#### "function tTe(" 2 [322131172, 333391246]
+
+==== function tTe( 322131172 ====
+[scA,c3c,u3c,acA]}),Pks[6]=c3c,Pks[7]=u3c,Pks[8]=lcA;else lcA=Pks[8];return lcA}function tTe(e,t){let r=e.from>0?rt.arrowUp:" ",n=e.to<t?rt.arrowDown:" ";return`${r} ${e.from+1}${f9u}${e.to} of ${t} ${n}`}function zGc(Tt1){let ccA=hYe.c(5),{win:CVg,total:xVg}=Tt1,ucA;if(ccA[0]!==xVg||ccA[1]!==CVg)ucA=tTe(CVg,xVg),ccA[0]=xVg,ccA[1]=CVg,ccA[2]=ucA;else ucA=ccA[2];const RVg=`  ${ucA}`;let dcA;if(ccA[3]!==RVg)dcA=ms.jsx(v,{dimColor:!0,wrap:"truncate-end",children:RVg}),ccA[3]=RVg,ccA[4]=dcA;else dcA=ccA[4];return dcA}function WGc(kt1){let xse=hYe.c(53),{phase:Ext,selectedAgent:
+
+==== function tTe( 333391246 ====
+t),s=i(t),l=s.length;l--;){var u=s[e?l:++n];if(r(a[u],u,a)===!1)break}return t}}function tTe(e,t){return e&&Spt(e,t,po)}function rTe(e,t){return function(r,i){if(r==null)return r;if(!ru(r))return e(r,i);for(var n=r.length,a=t?n:-1,s=Object(r);(t?a--:++a<n)&&i(s[a],a,s)!==!1;);return r}}function iTe(e,t,r,i){return rm(e,function(n,a,s){t(i,n,r(n),s)}),i}function nTe(e,t){return function(r,i){var n=Kr(r)?Cpt:Dpt,a=t?t():{};return n(r,e,iu(i,2),a)}}function sTe(e){return Yl(e)&&ru(e)}function oTe(e,t,r){for(var i=-1,n=e==null?0:e.length;++i<n;)if(r(t,e[i]))return!0;return!1}fu
+
+#### "f9u=" 1 [301979732]
+
+==== f9u= 301979732 ====
+"\xB7\u2714\uFE0E\xB7",nOn="\xD7",Sta="\u2715",Itr="\u25B8",oOn="\u283F",bZ_,VR,f9u="\u2013",JB;var Lu=A(()=>{ki();hu=Wt()==="macos"?"\u23FA":"\u25CF";tOn=["\xB7|\xB7","\xB7/\xB7","\xB7\u2014\xB7","\xB7\\\xB7"],bZ_=["\u280B","\u2819","\u2839","\u2838","\u283C","\u2834","\u2826","\u2827","\u2807","\u280F"];VR={topLeft:"\u256D",topRight:"\u256E",bottomLeft:"\u2570",bottomRight:"\u256F"},JB={branch:"\u251C",last:"\u2514",pipe:"\u2502",teeDown:"\u252C",teeUp:"\u2534"}});function XNr(e,t){if(!e)return;if(t==="auto"&&e==="acceptEdits")return;return m9u[e]<=m9u[t]?e:void 0}functio
+
+#### " of " 4 [5803309, 9904346, 10637942, 10777630]
+
+====  of  5803309 ====
+Hǅ�.......H�D$ ....H���...A�...A�....1��uO�.H���...H���...H�f memoryH�T..H�Out of mH�..H��H���...H�O...��......�����H��H...H�.H���...H���...H���...H�E�H�.�.|.H�E�H�..��.L�E�L���k3�.��H��0...�:x.A��.u.H��8....t.H��@...�!_�.���....u*H��H���...��+.u.H��谂�.H����^�.��H������������E1�H��p...H���...���...D���...E��L���...t1�E.��A�.L���...A��.s]ǅD.......A�....L���...�...E1��...H�..��.H���...H�._��.H�D$ H�c��.L�4��.L���...�....�kW�.�E.��E�P�E!�A� ...�E.��E��E)�E�J�E!�D��D...t7D���E.��D��)�D9�A.��u.A�A�D!�A��u�H��p...H���...H���...D.���...D.���...�L.�ǃ��fD��H....��...E.
+
+====  of  9904346 ====
+....H�E�....H�E�....H�D$ ....H�M�A�...A�....1��»�.H�E�H�M�H�f memoryH�T..H�Out of mH�..H��H�M�H�K...E�...����H����...t.H����..���|.H��.�...H���...t.H��.�..��|.H�?�uoHǅ��......Hǅ��......Hǅ.�......H�.؜�.H����..A�=...��D�.H��t.����.�Q���.r.H��t	H��H���P.H��.�..H�G...���.....H����..豲����...H�.g-�.�....�'H����..�.\�.�..��H�V.�.H�.�H���.H�.�H���...H��X�..H��`�..H��X�..H��H�..H�.�� .H��P�..H�?�upHǅ��......Hǅ��......Hǅ��......H�.
+��.H����..L��H�..��C�.H��t.����.�Q���.r.H��t	H��H���P.H����..H�G...���.....H��.�..�t���M��t)I�|$.�...�.....H��.I��t.H�?.t�H�O��.�|.��H��p
+
+====  of  10637942 ====
+....H�E8....H�E@....H�D$ ....H�M0A�...A�....1��&�z.H�E8H�M@H�f memoryH�T..H�Out of mH�..H��H�M@H�O...E0...�����L�2�x.1�E1�蘕x.L�!�x.1�H��E1�脕x.H�D$ ....H�M.A�....I��H��I��裉z.L��H�](������������UAWAVATVWSH��`H�l$`1����....uxH�΀��....ul�.H�~.H�.....��.uNH���.#>.���\...u=��C....w,H�� ....t.H��....脙q.H��0....t.H��(...�n�q.H���f�q.H���...�t.�.H��`[_^A\A^A_]�.���....���...D.���...���...L���...H��....L��.....��....D.��....Ɔ....�A���.�....D.��A��.D	�H�� H	�A��.E.���....A.C�D.��L��Ǉ.Oc.�M.�A���U�}�H��H��0�E�H��H�� f�E���..��...D.���...@��.D.�.��A��..��...��.��...H�Nx
+
+====  of  10777630 ====
+....H�E�....H�E�....H�D$ ....H�M�A�...A�....1��~hx.H�E�H�M�H�f memoryH�T..H�Out of mH�..H��H�M�H�O.�...H���...�.��...H�M�豎���...H�}�.t	H�M��|xo.H�}..t	H�M��lxo.H��t.H���.3+.��.�:...H���...�udH���...H�E�....H�E�....H�E�....H�.G�z.H�M�A�3...�x�.H��t.����.�Q���.r.H��t	H��H���P.H�E�H�G...E�...H�}�.t	H�M���wo.H���q...�H�Ę...[_^A^A_]�H���...H�E�....H�E�....H�E�....H�D$ ....H�M�A�....A�....1��!gx.H�E�H�M�...3i�.....H��.H�M�H�O...E�...�~���H��.��...eH�.%`...H�@ H9x .�����H9x0.�����H9x(.��...�}���H��.��...eH�.%`...H�@ H9x .�����H9x0.�����H9x(.��...����H���...H�E�....H�E�...
+
+#### "isMidTurn" 4 [133657528, 161686480, 309274433, 312263815]
+
+==== isMidTurn 133657528 ====
+	.......isFoldInFlight..........	.......suspendMidTurnFold..............	.......isMidTurnFoldSuspended..........	.......setInFlightDrainBatch...........	.......clearInFlightDrainBatch.........	.......someInFlightDrainCommand........	.......takeInboundEnqueueTurn..�.......0.......8.......H.......�.......�.......�.......�$......0*......h-......�0......�3.......7......�:.......>......�E......�H......HL......PO......�R......�U.......\......�_......hd......�g......�m...... {......x�......��......��......��......б.......�......p�......��......��......��......��......h�......��..
+
+==== isMidTurn 161686480 ====
+	.......getMessages.............	.......getIsResponseStreaming..........	...	...isMidTurn...........�N......!��.C...V...	��.W..�-��.���......H..H.......�������.�������.�.E������������.�������.h.E�����h.......�������.............��������....�ݼ������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...................................................................................�������.����
+
+==== isMidTurn 309274433 ====
+erFoldInFlight:h,unregisterFoldInFlight:g,isFoldInFlight:y,suspendMidTurnFold:b,isMidTurnFoldSuspended:S,setInFlightDrainBatch:T,clearInFlightDrainBatch:k,someInFlightDrainCommand:C,takeInboundEnqueueTurn:R}}function mPf(e){if(pPf)return rIi;let t=rIi,r=e(t.getCommandQueue());return t.resetCommandQueue(),rIi=r,pPf=!0,r}function _W(){return rIi}function iIi(e){return e.getCommandQueue().some((t)=>dC(t)&&$q(t))}function $tl(e,t){return e.getCommandQueue().some((r)=>DBt(r,t))}var fPf,sLS=(e)=>{_Xn(e)},tIi,aLS,rIi,pPf=!1,nIi=(...e)=>_W().getCommandQueueSnapshot(...e),RSt=(...e)
+
+==== isMidTurn 312263815 ====
+s:e,queue:t,signal:r,phase:n,deliveredPollEventUuids:o}){if(X9r(e),r.aborted||t.isMidTurnFoldSuspended()){E(`[query] abort/suspension during ${n} absorption \u2014 leaving ${e.length} poll event(s) queued`);return}t.remove(e),MGr(e),Ee("poll_event_delivery");for(let i of e)if(i.uuid)o.push(i.uuid),yield{type:"command_lifecycle",uuid:i.uuid,state:"started"}}function Qsm(e,t){be("poll_event_delivery","left_queued"),E(`[query] ${e} poll_events emission degraded to 0 for ${t} event(s) \u2014 leaving them queued`,{level:"warn"})}async function*tam(e,t,r){let{systemPrompt:n,userC

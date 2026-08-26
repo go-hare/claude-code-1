@@ -1,0 +1,4 @@
+offset=210039319
+needle=b'sandbox network'
+window=
+rap) binary. Overrides auto-detection via PATH. Only honored from admin-controlled managed settings..................Linux/WSL only: Absolute path to the socat binary used for the sandbox network proxy. Overrides auto-detection via PATH. Only honored from admin-controlled managed settings........................}.....................`...........!<.B.4..pm......!<.B.4..#<"......L>......l......!<.B.

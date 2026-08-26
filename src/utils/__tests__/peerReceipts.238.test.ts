@@ -25,6 +25,7 @@ import {
   sendPeerReceipt,
   setOnPeerMessageStatus,
   setSendPeerReceipt,
+  summarizePeerMsgId,
 } from '../peerReceipts.js'
 
 afterEach(() => {
@@ -319,6 +320,15 @@ describe('QJd / Xow', () => {
     expect(admitDropReason('queue-full')).toBe('queue-full')
     expect(admitDropReason('rate-limited')).toBe('rate-limited')
     expect(admitDropReason('nope')).toBeUndefined()
+  })
+
+  test('vkh summarizePeerMsgId is UUID / (none) / (malformed)', () => {
+    expect(summarizePeerMsgId('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')).toBe(
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    )
+    expect(summarizePeerMsgId(undefined)).toBe('(none)')
+    expect(summarizePeerMsgId('not-a-uuid')).toBe('(malformed)')
+    expect(summarizePeerMsgId(12)).toBe('(malformed)')
   })
 
   test('UUID-filters dropped_msg_ids cap 256', () => {

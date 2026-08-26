@@ -51,17 +51,12 @@ export function hitTest(
 }
 
 /**
- * Hit-test the root at (col, row) and bubble a ClickEvent from the deepest
- * containing node up through parentNode. Only nodes with an onClick handler
- * fire. Stops when a handler calls stopImmediatePropagation(). Returns
- * true if at least one onClick handler fired.
+ * densable `bvf` — bubble a pre-built ClickEvent. Resets `defaultAllowed`
+ * per handler; a handler that calls `allowDefault()` does not count as
+ * handled. `stopImmediatePropagation` returns `!defaultAllowed`.
  */
-export function dispatchClick(
-  root: DOMElement,
-  col: number,
-  row: number,
-  cellIsBlank = false,
-): boolean {
+export function bubbleClick(root: DOMElement, event: ClickEvent): boolean {
+  const { col, row } = event
   let target: DOMElement | undefined = hitTest(root, col, row) ?? undefined
   if (!target) return false
 
@@ -77,25 +72,45 @@ export function dispatchClick(
       focusTarget = focusTarget.parentNode
     }
   }
-  const event = new ClickEvent(col, row, cellIsBlank)
   let handled = false
   while (target) {
     const handler = target._eventHandlers?.onClick as
       | ((event: ClickEvent) => void)
       | undefined
     if (handler) {
-      handled = true
       const rect = nodeCache.get(target)
       if (rect) {
         event.localCol = col - rect.x
         event.localRow = row - rect.y
       }
+      event.defaultAllowed = false
       handler(event)
-      if (event.didStopImmediatePropagation()) return true
+      if (event.didStopImmediatePropagation()) return !event.defaultAllowed
+      if (!event.defaultAllowed) handled = true
     }
     target = target.parentNode
   }
   return handled
+}
+
+/**
+ * Hit-test the root at (col, row) and bubble a ClickEvent from the deepest
+ * containing node up through parentNode. Only nodes with an onClick handler
+ * fire. Stops when a handler calls stopImmediatePropagation(). Returns
+ * true if a handler fired without `allowDefault()`.
+ */
+export function dispatchClick(
+  root: DOMElement,
+  col: number,
+  row: number,
+  cellIsBlank = false,
+  hyperlinkUrl?: string,
+  isWindowActivation = false,
+): boolean {
+  return bubbleClick(
+    root,
+    new ClickEvent(col, row, cellIsBlank, hyperlinkUrl, isWindowActivation),
+  )
 }
 
 /**

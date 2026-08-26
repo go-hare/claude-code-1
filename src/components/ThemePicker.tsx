@@ -9,7 +9,9 @@ import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
+import { getCachedCustomThemes } from '../utils/customThemes.js';
 import type { ThemeSetting } from '../utils/theme.js';
+import { CUSTOM_THEME_PREFIX } from '../utils/theme.js';
 import { Select } from './CustomSelect/index.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { getColorModuleUnavailableReason, getSyntaxTheme } from './StructuredDiff/colorDiff.js';
@@ -89,6 +91,10 @@ export function ThemePicker({
       label: 'Light mode (ANSI colors only)',
       value: 'light-ansi',
     },
+    ...getCachedCustomThemes().map(t => ({
+      label: t.name,
+      value: `${CUSTOM_THEME_PREFIX}${t.slug}` as ThemeSetting,
+    })),
   ];
 
   const content = (

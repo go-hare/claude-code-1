@@ -1,0 +1,106 @@
+#### "eNf="IDE diagnostics baseline timed out"" count=1 [309730972]
+--- 309730972 ---
+out";return e instanceof SyntaxError?"parse_failed":"error"}var sNf,Q1f=4000,wBS=500,_ol=3,EBS=2000,eNf="IDE diagnostics baseline timed out",tNf="IDE diagnostics fetch timed out",ABS="Claude Code JetBrains Plugin",TBS,kBS,CBS,BHi,xBS,oNf,Qrt;var zBt=A(()=>{Dl();$r();tt();qe();st();Ju();vP();wr();Zt();sNf=class sNf extends ZOr{};TBS=["file://","_claude_fs_right:","_claude_fs_left:"],kBS=/^[\\/][A-Za-z]:[\\/]/,CBS=/(?:^|[\\/])([A-Za-z])(?::|%3[Aa])(?=[\\/]|%5[Cc]|%2[Ff])/;BHi=new WeakSet;xBS=new Ar(()=>new aNf);oNf={error:"Error",warning:"Warning",info:"Info",information:"Info",hint:"Hint"};Qrt=new Cp(()=>new Bwe)});function Qhe(e,t){Te(Ti(Tn(e),t))}var XKr=A(()=>{st();$r()});function cNf(e){switch(e){case"Error":return 1;case"Warning":return 2;case"Info":return 3;case"Hint":return 4;default:return 4}}function uNf(e){return He({message:e.message,severity:e.severity,range:e.range,source:e.source||null,code:e.code||null})}class pNf{pending=new Map;delivered=new Mx({max:IBS});register({serverName:e,files:t}){let r=dNf.randomUUID();E(`LSP Diagnostics: Registering ${t.length} diagnostic file(s) from ${e} (ID: ${r})`),this.pending.set(r,{serverName:e,files:t,timestamp:Date.now(),attachmentSent:!1})}deduplicateDiagnosticFiles(e){let t=new Map,r=[];for(let n of e){if(!t.has(n.uri))t.set(n.uri,new Set),r.push({uri:n.uri,diagnostics:[]});let o=t.get(n.uri),i=r.find((a)=>a.uri===n.uri),s=this.delivered.get(n.uri)||new Set;for(let a of n.diagnostics)try{let l=uNf(a);if(o.has(l)||s.has(l))continue;o.add(l),i.diagnostics.push(a)}catch(l){let c=Tn(l),u=a.message?.substring(0,100)||"<no message>";Qhe(Error(`Failed to deduplicate diagnostic in ${n.uri}: ${c.message}. Diagnostic message: ${u}`),"Failed to deduplicate diagnostic"),i.diagnostics.push(a)}}return r.filter((n)=>n.diagnostics.length>0)}takePending(){E(`LSP Diagnostics: Checking registry - ${this.pending.size} pending`);let e=[
+#### "Q1f=4000" count=1 [309730940]
+--- 309730940 ---
+iNf(e,t){if(Hre(e,t))return"timeout";return e instanceof SyntaxError?"parse_failed":"error"}var sNf,Q1f=4000,wBS=500,_ol=3,EBS=2000,eNf="IDE diagnostics baseline timed out",tNf="IDE diagnostics fetch timed out",ABS="Claude Code JetBrains Plugin",TBS,kBS,CBS,BHi,xBS,oNf,Qrt;var zBt=A(()=>{Dl();$r();tt();qe();st();Ju();vP();wr();Zt();sNf=class sNf extends ZOr{};TBS=["file://","_claude_fs_right:","_claude_fs_left:"],kBS=/^[\\/][A-Za-z]:[\\/]/,CBS=/(?:^|[\\/])([A-Za-z])(?::|%3[Aa])(?=[\\/]|%5[Cc]|%2[Ff])/;BHi=new WeakSet;xBS=new Ar(()=>new aNf);oNf={error:"Error",warning:"Warning",info:"Info",information:"Info",hint:"Hint"};Qrt=new Cp(()=>new Bwe)});function Qhe(e,t){Te(Ti(Tn(e),t))}var XKr=A(()=>{st();$r()});function cNf(e){switch(e){case"Error":return 1;case"Warning":return 2;case"Info":return 3;case"Hint":return 4;default:return 4}}function uNf(e){return He({message:e.message,severity:e.severity,range:e.range,source:e.source||null,code:e.code||null})}class pNf{pending=new Map;delivered=new Mx({max:IBS});register({serverName:e,files:t}){let r=dNf.randomUUID();E(`LSP Diagnostics: Registering ${t.length} diagnostic file(s) from ${e} (ID: ${r})`),this.pending.set(r,{serverName:e,files:t,timestamp:Date.now(),attachmentSent:!1})}deduplicateDiagnosticFiles(e){let t=new Map,r=[];for(let n of e){if(!t.has(n.uri))t.set(n.uri,new Set),r.push({uri:n.uri,diagnostics:[]});let o=t.get(n.uri),i=r.find((a)=>a.uri===n.uri),s=this.delivered.get(n.uri)||new Set;for(let a of n.diagnostics)try{let l=uNf(a);if(o.has(l)||s.has(l))continue;o.add(l),i.diagnostics.push(a)}catch(l){let c=Tn(l),u=a.message?.substring(0,100)||"<no message>";Qhe(Error(`Failed to deduplicate diagnostic in ${n.uri}: ${c.message}. Diagnostic message: ${u}`),"Failed to deduplicate diagnostic"),i.diagnostics.push(a)}}return r.filter((n)=>n.diagnostics.length>0)}takePending(){E(`LSP Diagnostics: Checking registry - ${this
+#### "function Q1f" count=0 []
+#### "Claude Code JetBrains Plugin" count=2 [99694448,309731056]
+--- 99694448 ---
+diagnostics baseline timed out..............	.......IDE diagnostics fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFile...........	.......clearPendingForFile..............+#.....pendingCount....................	.......diff............	,#.....diffWithOptionsObj..............	...	...addToPath...............	......extractCommon...........	.......equals..........I-#.....removeEmpty.................	...castInput-#..............-#.....tokenize........	.......join............I......buildValues...............#.g...a-zA-Z0-9_\u{AD}\u{C0}-\u{D6}\u{
+--- 309731056 ---
+,_ol=3,EBS=2000,eNf="IDE diagnostics baseline timed out",tNf="IDE diagnostics fetch timed out",ABS="Claude Code JetBrains Plugin",TBS,kBS,CBS,BHi,xBS,oNf,Qrt;var zBt=A(()=>{Dl();$r();tt();qe();st();Ju();vP();wr();Zt();sNf=class sNf extends ZOr{};TBS=["file://","_claude_fs_right:","_claude_fs_left:"],kBS=/^[\\/][A-Za-z]:[\\/]/,CBS=/(?:^|[\\/])([A-Za-z])(?::|%3[Aa])(?=[\\/]|%5[Cc]|%2[Ff])/;BHi=new WeakSet;xBS=new Ar(()=>new aNf);oNf={error:"Error",warning:"Warning",info:"Info",information:"Info",hint:"Hint"};Qrt=new Cp(()=>new Bwe)});function Qhe(e,t){Te(Ti(Tn(e),t))}var XKr=A(()=>{st();$r()});function cNf(e){switch(e){case"Error":return 1;case"Warning":return 2;case"Info":return 3;case"Hint":
+#### "isJetBrainsIdeTerminal()" count=6 [308294338,308296216,308548371,308548893,316341898,320042536]
+--- 308294338 ---
+.didStopImmediatePropagation())break;return!0}}});class whf{proc;constructor(e=process){this.proc=e}isJetBrainsIdeTerminal(){return this.proc.env.TERMINAL_EMULATOR==="JetBrains-JediTerm"}isMicrosoftWindowsTerminal(){return this.proc.platform==="win32"&&!!this.proc.env.WT_SESSION}isGhostty(){return this.proc.env.TERM==="xterm-ghostty"||this.proc.env.TERM_PROGRAM==="ghostty"}isMintty(){if(this.proc.env.TERM_PROGRAM==="mintty")return!0;if(this.proc.platform==="win32"&&this.proc.env.MSYSTEM)return!0;return!1}windowsConsoleSupportsVirtualTerminalSequences(){if(this.isMicrosoftWindowsTerminal())return!0;if(this.proc.platform==="win32"&&this.proc.env.TERM_PROGRAM==="vscode"&&this.proc.env.TERM_PROG
+--- 308296216 ---
+hf{value=void 0;get(){let e=hKn(),t=dA(),r=t?.wheelFlood??wKa(),n=t?ZMe.includes(t.terminal??""):Mq.isJetBrainsIdeTerminal(),o=t?.wtSession??!!V.WT_SESSION,i=tH(),s=this.value;if(s&&s.xtversion===(e??"(no reply)")&&s.wheelFlood===r&&s.jediTerm===n&&s.wtSession===o&&s.xtermJs===i)return s;let a="win32";return this.value={useDecayCurve:!r&&(i||a==="win32"||o),useAdaptiveDrain:i,base:n?2:dvS(i,r,o),xtermJs:i,wheelFlood:r,jediTerm:n,termProgram:V.TERM_PROGRAM??"unset",termProgramVersion:V.TERM_PROGRAM_VERSION??"unset",xtversion:e??"(no reply)",wtSession:o,scrollSpeedEnv:V.CLAUDE_CODE_SCROLL_SPEED??"unset",platform:a},this.value}invalidate(){this.value=void 0}}function gee(){return Chf.of(ar().ho
+#### "message to yourself" count=1 [314385184]
+--- 314385184 ---
+u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(t.appState,{teamFile:t.teamFile,sessions:c,cloud:u,bridge:o?[]:e.flatMap((b)=>b.transport==="bridge"?[b.session]:[])}),p=new Map(d.candidates.map((b)=>[`${b.kind}\x00${b.id}`,b])),f=MHm(t.appState),m=OHm(t.appState,t.teamFile,t.callerTeammateId),h=e.flatMap((b)=>b.transport==="bridge"?[b]:[]),g=e.flatMap((b)=>b.transport==="did"?[b.session]:[]),y=[];if(f.length>0)y.push(J1w(f,p));if(m.length>0)y.push(Z1w(m,p));if(!n&&(c.length>0||u.length>0||h.length>0||o||i||s||l))y.push(Q1w(c,p,u,h,o,i,s,l));let _=a?null:G1w(t.self);if(a&&y.length>0)y.unshift(p5i);if(y.length===0){if(a)return p5i;if(!_)return"No reachable agents.";return!n&&!o?`${_}
+
+No reachable agents \u2014 no other Claude session is running on this machine right now (peer messaging itself is available; a session appears here once it is started).`:`${_}
+
+No other session appears in this listing right now (peer messaging itself is available).`}return _?`${_}
+
+${y.join(`
+
+`)}`:y.join(`
+
+`)}function MHm(e){let t=new Map;for(let[o,i]of e.agentNameRegistry)t.set(i,o);let r=new Set(Object.values(e.teamContext?.teammates??{}).map((o)=>o.name)),n=[];for(let o of Object.values(e.tasks)){if(o.type!=="local_agent"||o.agentType==="main-session")continue;let i=t.ge
+#### "You are sending" count=0 []
+#### "a message to it would be" count=1 [314385157]
+--- 314385157 ---
+his session is ${e.token} \u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe
+#### "posix_spawn ENOENT" count=0 []
+#### "getOriginalCwd" count=6 [106445448,151748533,152045349,300700591,313432026,313515404]
+--- 106445448 ---
+.....y0.....getOauthTokenFromFd.............	.......getOnboardingShownThisSession...........	.......getOriginalCwd..........	.......getParentManagedSettings.........^......getParentManagedSettingsInvalid.........I.......getParentSessionId..............	.......getPendingBranchLinks...................getPendingPrLinks...............	.......getPermissionPromptToolName.............	.......getPlanSlugCache........	..."...getPolicyPredicateTelemetryEmitted0.............I~0.....getPrCounter.............~0.....getPrintOutputFormat............	.......getProactivitySelectorGate..............	... ...getProactivitySelectorGateEverOn........	.......getProjectRoot..........	.......getPromptCache1hAllowlis
+--- 151748533 ---
+ainLoopModel' from null or undefined value.....................	...I...Cannot destructure property 'getOriginalCwd' from null or undefined value.......................	...B...Cannot destructure property 'default' from null or undefined value......................	...O...Cannot destructure property 'isFirstPartyProvider' from null or undefined value.........	.......S...............	...:...[bridge] Session create skipped on non-firstParty provider..............	.......bridge_session_create...........	...!...bridge_session_create_3p_provider.......................	.......l...............	.......c...............	.......f.......	...............	.......p...............	...-...[bridge] No access to
+#### "homedir()" count=6 [70478635,85949532,85953212,300675219,300676938,300712642]
+--- 70478635 ---
+Path]() {
+    if (!this[kHistoryPath])
+      try {
+        return this[kHistoryPath] = path.join(os.homedir(), ".node_repl_history"), this[kHistoryPath];
+      } catch (err) {
+        return debug(err.stack), null;
+      }
+    return this[kHistoryPath];
+  }
+  [kHasWritePermission]() {
+    return !(permission.isEnabled() && permission.has("fs.write", this[kHistoryPath]) === !1);
+  }
+  [kValidateOptions](options) {
+    if (typeof options.history < "u")
+      validateArray(options.history, "history");
+    if (typeof options.size < "u")
+      validateNumber(options.size, "size", 0);
+  }
+  async[kInitializeHistory](onReadyCallback) {
+    try {
+      await (await fs.promises.open(this[kHistoryPath
+--- 85949532 ---
+nsole.log([J,"",Q,"",q,"",N].join(`
+`))}async function Xq(){let J=process.env.BUN_INSTALL??j.join(C.homedir(),".bun"),Q=j.join(J,"feedback");try{let N=(await I.readFile(Q,"utf8")).trim();return N.length>0?N:void 0}catch(q){if(q.code!=="ENOENT")console.warn(`Unable to read ${Q}:`,q.message);return}}async function Zq(J){let Q=process.env.BUN_INSTALL;if(!Q)return;let q=j.join(Q,"feedback");try{await I.mkdir(j.dirname(q),{recursive:!0}),await I.writeFile(q,`${J.trim()}
+`,"utf8")}catch(N){console.warn(`Unable to persist email to ${q}:`,N.message)}}function $q(){let J=s("git",["config","user.email"],{encoding:"utf8",stdio:["ignore","pipe","ignore"]});if(J.status!==0)return;let Q=J.stdout.trim();re
+#### "keepAliveWhile" count=0 []
+#### "SessionStart" count=6 [99464015,102361472,106447299,106447339,106457035,106678974]
+--- 99464015 ---
+..............a......replaceClientType...............	.......sessionStartType........	.......replaceSessionStartType.........	.......questionPreviewFormat...........	.......replaceQuestionPreviewFormat............	.......replConfigArgv..........	.......replaceReplConfigArgv............c......userMsgOptIn.............c......replaceUserMsgOptIn.............	.......searchToolsOptIn........	.......replaceSearchToolsOptIn.........	.......todoToolsOptIn..........	.......replaceTodoToolsOptIn...........	.......wizardOperatorToolsEnabled..............	...!...replaceWizardOperatorToolsEnabledf......................pollEventIngressWired...........	.......markPollEventIngressWired...............	... ..
+--- 102361472 ---
+nual"/"auto" | After compaction (receives summary) |
+| UserPromptSubmit | - | When user submits |
+| SessionStart | - | When session starts |
+
+**Common tool matchers:** `Bash`, `Write`, `Edit`, `Read`, `Glob`, `Grep`
+
+### Hook Types
+
+**1. Command Hook** - Runs a shell command:
+```json
+{ "type": "command", "command": "prettier --write $FILE", "timeout": 30 }
+```
+
+**2. Prompt Hook** - Evaluates a condition with LLM:
+```json
+{ "type": "prompt", "prompt": "Is this safe? $ARGUMENTS" }
+```
+Only available for tool events: PreToolUse, PostToolUse, PermissionRequest.
+
+**3. Agent Hook** - Runs an agent with tools:
+```json
+{ "type": "agent", "prompt": "Verify tests pass: $ARGUMENTS" }
+```
+Only available
+#### "setMcpServers" count=6 [111238512,177557736,177732504,229939052,279659728,302078487]
+--- 111238512 ---
+llowedMcpServers for per-server MCP control; this setting does not gate other MCP entry points (SDK setMcpServers, claude mcp add, .mcp.json). Also blocks surfaces that spawn the CLI with these flags internally (see settings documentation). Only honored from managed settings; ignored in user/project/local settings.........	...J...Marketplace names whose plugins may surface as contextual install suggestions (relevance-based tips). No marketplace-declared suggestions surface without this allowlist; the built-in first-party frontend-design tip is unaffected. Only honored when set in managed settings (policy scope); the key is ignored in user, project, and local settings. A name only takes effect when the marketplace is registered on the machine AND its registered source is also declared in managed settings, either as the extraKnownMarketplaces entry for that name or as an entry of strictKnownMarketplaces. A marketplace registered from a different source under an allowlisted name is ignored. The official marketplace is exempt from the source requirement: allowlisting its name alone suffices, since that name can only register from the official Anthropic source...............	.......claudeai........	.......console.........	.......gateway.................0...............8...............@.......................	.......claudeai........	.......console.........	.......gateway.........	.......Force a specific login method: "claudeai" for Claude Pro/Max, "console" for Console billing, "gateway" for the Cloud gateway OIDC device flow...........	.......Cloud gateway URL to pre-fill and auto-connect to during login, alongside forceLoginMethod: "gateway". Honored only from admin-controlled managed settings (MDM / managed-settings.json / policy helper); ignored in user, project, and remote-delivered settings...............	...
+...first-wins..............	.......merge...................
+--- 177557736 ---
+erverStatus.........	.......reconnectMcpServer..............	.......toggleMcpServer.........	......setMcpServers...........	......reloadPlugins...........	.......mcpAuthenticate.........	.......mcpClearAuth............	.......mcpSubmitOAuthCallbackUrl...............	.......getContextUsage.........	.......stopTask........	.......getSettings.............	.......generateSessionTitle............	.......messageRated............	.......askSideQuestion.........	.......rewindFiles.............	.......submitFeedback..........	.......launchUltrareview.......X.......................H................!.......1.......<..........................................YE......f.......g...dE...E.......H..H...............................................................................................@................................................................................................D.......k......0.......X......................(.......8...............`.......h.......0......p.......Ho.......j..............(k.....................H...............p.......................H........................j.............................8.......H...................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...x...x...x...x...................................................................................x...............................................................X.........................................a...~...~...i.....................................................fE......e.......e...fE...E.......D..H.......................................................h.......................................P.......................................................................................................
+#### "ignoreNextClick" count=0 []
+#### "FOCUS_IN" count=0 []
+#### "MODAL_TRANSCRIPT_PEEK" count=0 []
+#### "abortOnEscape" count=0 []

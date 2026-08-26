@@ -224,6 +224,11 @@ export type ToolUseContext = {
      */
     isSkillPreload?: boolean
     /**
+     * Official toolAliases — SDK-renamed tools. leftover Ld walks this
+     * map before findToolByName so resume does not miss a renamed tool.
+     */
+    toolAliases?: Record<string, string>
+    /**
      * densable 2.1.222 #6 — sticky MCP attribution stamps set by MCP tool
      * `call` wrap. Captured + cleared at next main/subagent API request so
      * only requests that consumed that server's tool results attribute cost.
@@ -766,6 +771,8 @@ export type Tool<
     tools: Tools
     agents: AgentDefinition[]
     allowedAgentTypes?: string[]
+    /** Official YHp `e` — current model for lean WebFetch prompt. */
+    model?: string
   }): Promise<string>
   userFacingName(input: Partial<z.infer<Input>> | undefined): string
   userFacingNameBackgroundColor?(

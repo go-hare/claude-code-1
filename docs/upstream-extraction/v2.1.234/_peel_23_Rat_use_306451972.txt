@@ -1,0 +1,3 @@
+OFFSET=306451972
+
+idebar:()=>w4i,toggleReplDiffTab:()=>A4i});function E4i(){b4i=!0}function rkl(){let e=b4i;return b4i=!1,e}function nkl(){b4i=!1}function iBt(){return Rat(Yt())!==null}function w4i(e){let t=or().diffSidebarOpen;if(t===!1)return!1;return e>=(t===!0?S5e:v4i)&&iBt()}function A4i(e,t,r){let n=t==="diff"?"convo":"diff";nkl(),e((i)=>i.replTab===n&&i.panelFileView===null?i:{...i,replTab:n,panelFileView:null});let o=n==="diff";if(or().diffSidebarOpen!==o)tn((i)=>({...i,diffSidebarOpen:o}),r);return _e("repl_tab_switch",{tab:ge(n)}),n}function sBt(e){nkl

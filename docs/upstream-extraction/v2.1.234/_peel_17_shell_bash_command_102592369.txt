@@ -1,0 +1,16 @@
+ol_input.file_path' | { read -r f; prettier --write \"$f\"; } 2>/dev/null || true"
+      }]
+    }]
+  }
+}
+```
+
+**Log all bash commands:**
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "jq -r '.tool_input.command' >

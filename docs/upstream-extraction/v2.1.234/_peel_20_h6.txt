@@ -1,0 +1,32 @@
+
+===== b'function h6(' in PromptInput heap [] =====
+
+
+===== b'h6=()' in PromptInput heap [] =====
+
+
+===== b'let h6' in PromptInput heap [] =====
+
+
+===== b'h6=' in PromptInput heap [] =====
+
+
+===== b'function Phe(' in PromptInput heap [] =====
+
+
+===== b'Phe=()' in PromptInput heap [] =====
+
+
+===== selectionHighlight=== @306543578 =====
+
+[1]=sZ,Utt[2]=$Bt,Utt[3]=N$E;else N$E=Utt[3];let Bto=N$E;if(X5P){let nZr;if(Utt[4]!==$Rl)nZr=$Rl?QQn($Rl):"",Utt[4]=$Rl,Utt[5]=nZr;else nZr=Utt[5];let FRl=nZr;let jto=U3i?"subtle":"text";let URl=zfr?.selectionHighlight==="on";let FBt;if(Utt[6]!==URl)FBt=URl?Hh.jsxs(_,{"aria-label":"selected:",color:"suggestion",children:[ot.pointer," "]}):null,Utt[6]=URl,Utt[7]=FBt;else FBt=Utt[7];const zto=URl?"suggestion":U3i?"subtle":"briefLabelYou";let BRl;if(Utt[8]!==zto)BRl=Hh.jsx(_,{color:zto,children:"You"}),Utt[8]=zto,Utt[9]=BRl;else BRl=Utt[9];let jRl;if(Utt[10]!==FRl)jRl=FRl?Hh.jsxs(_,{dimColor:!0,children:[" ",FRl]}):null,Utt[10]=FRl,Utt[11]=jRl;else jRl=Utt[11];let zRl;if(Utt[12]!==FBt||Utt[13]!==BRl||Utt[14]!==jRl)zRl=Hh.jsxs(R,{flexDirection:"row",children:[FBt,BRl,jRl]}),Utt[12]=FBt,Utt[13]=BRl,Utt[14]=jRl,Utt[15]=zRl;else zRl=Utt[15];let WRl;if(Utt[16]!==Bto||Utt[17]!==sZ||Utt[18]!==jto||Utt[19]!==$Bt)WRl=$Bt?Hh.jsxs(Hh.Fragment,{children:[Hh.jsx(_,{color:jto,children:sZ.head}),Hh.jsx(Gto,{hiddenLines:sZ.hiddenLines,indent:2}),Hh.jsx(_,{color:jto,children:sZ.tail})]}):Bto?Hh.jsx(jh,{promptMode:!0,color:jto,children:sZ}):Hh.jsx(_,{color:jto,children:sZ}),Utt[16]=Bto,Utt[17]=sZ,Utt[18]=jto,Utt[19]=$Bt,Utt[20]=WRl;else WRl=Utt[20];let $$E;if(Utt[21]!==zRl||Utt[22]!==WRl)$$E=Hh.jsxs(R,{flexDirection:"column",paddingLeft:2,children:[zRl,WRl]}),Utt[21]=zRl,Utt[22]=WRl,Utt[23]=$$E;else $$E=Utt[23];return $$E}let dQm=3+(zfr?.paddingWidth??0),nZr;if(Utt[24]!==zfr?.selectionHighlight)nZr=Hh.jsx(R,{flexShrink:0,children:zfr?.selectionHighlight==="off"?Hh.jsx(_,{children:"  "}):Hh.jsxs(_,{"aria-label":zfr?.selectionHighlight==="on"?"selected:":"you:",color:zfr?.selectionHighlight==="on"?"suggestion":"subtle",children:[ot.pointer," "]})}),Utt[24]=zfr?.selectionHighlight,Utt[25]=nZr;else nZr=Utt[25];let FBt;if(Utt[26]!==dQm||Utt[27]!==Bto||Utt[28]!==sZ||Utt[29]!==$Bt)FBt=$Bt?Hh.jsxs(R,{flexDirection:"column",children:[Hh.jsx(Gfr,{text:sZ.head}),Hh.jsx(Gto,{hiddenLines:sZ.hiddenLines,indent:dQm}),Hh.jsx(Gfr,{text:sZ.tail})]}):Bto?Hh.jsx(jh,{promptMode:!0,color:"text",children:sZ}):Hh.jsx(Gfr,{text:sZ}),Utt[26]=dQm,Utt[27]=Bto,Utt[28]=sZ,Utt[29]=$Bt,Utt[30]=FBt;else FBt=Utt[30];let zto;if(Utt[31]!==nZr||Utt[32]!==FBt)zto=Hh.jsxs(R,{flexDirection:"row",children:[nZr,FBt]}),Utt[31]=nZr,Utt[32]=FBt,Utt[33]=zto;else zto=Utt[33];return zto}function Gto(J5P){let Z5P=z3i.c(3),{hiddenLines:F$E,indent:pQm}=J5P,fQm=`(${F$E} ${F$E===1?"line":"lines"} hidden)`,U$E;if(Z5P[0]!==pQm||Z5P[1]!==fQm)U$E=Hh.jsx(H_,{title:fQm,titleAlign:"start",color:"subtle",padding:pQm}),Z5P[0]=pQm,Z5P[1]=fQm,Z5P[2]=U$E;else U$E=Z5P[2];return U$E}function Gfr(Q5P){let eGP=z3i.c(3),{text:Wfr}=Q5P,B$E,mQ
+
+===== selectionHighlight=== #2 @306544918 =====
+
+children:[zRl,WRl]}),Utt[21]=zRl,Utt[22]=WRl,Utt[23]=$$E;else $$E=Utt[23];return $$E}let dQm=3+(zfr?.paddingWidth??0),nZr;if(Utt[24]!==zfr?.selectionHighlight)nZr=Hh.jsx(R,{flexShrink:0,children:zfr?.selectionHighlight==="off"?Hh.jsx(_,{children:"  "}):Hh.jsxs(_,{"aria-label":zfr?.selectionHighlight==="on"?"selected:":"you:",color:zfr?.selectionHighlight==="on"?"suggestion":"subtle",children:[ot.pointer," "]})}),Utt[24]=zfr?.selectionHighlight,Utt[25]=nZr;else nZr=Utt[25];let FBt;if(Utt[26]!==dQm||Utt[27]!==Bto||Utt[28]!==sZ||Utt[29]!==$Bt)FBt=$Bt?Hh.jsxs(R,{flexDirection:"column",children:[Hh.jsx(Gfr,{text:sZ.head}),Hh.jsx(Gto,{hiddenLines:sZ.hiddenLines,indent:dQm}),Hh.jsx(Gfr,{text:sZ.tail})]}):Bto?Hh.jsx(jh,{promptMode:!0,color:"text",children:sZ}):Hh.jsx(Gfr,{text:sZ}),Utt[26]=dQm,Utt[27]=Bto,Utt[28]=sZ,Utt[29]=$Bt,Utt[30]=FBt;else FBt=Utt[30];let zto;if(Utt[31]!==nZr||Utt[32]!==FBt)zto=Hh.jsxs(R,{flexDirection:"row",children:[nZr,FBt]}),Utt[31]=nZr,Utt[32]=FBt,Utt[33]=zto;else zto=Utt[33];return zto}function Gto(J5P){let Z5P=z3i.c(3),{hiddenLines:F$E,indent:pQm}=J5P,fQm=`(${F$E} ${F$E===1?"line":"lines"} hidden)`,U$E;if(Z5P[0]!==pQm||Z5P[1]!==fQm)U$E=Hh.jsx(H_,{title:fQm,titleAlign:"start",color:"subtle",padding:pQm}),Z5P[0]=pQm,Z5P[1]=fQm,Z5P[2]=U$E;else U$E=Z5P[2];return U$E}function Gfr(Q5P){let eGP=z3i.c(3),{text:Wfr}=Q5P,B$E,mQm;if(eGP[0]!==Wfr){mQm=ol;bb0:{let j$E=H9e()?p0n(Wfr):[];if(j$E.length===0){mQm=Hh.jsx(_,{color:"text",children:Wfr});break bb0}let GRl=[];let oZr=0;for(const Wto of j$E){if(Wto.start>oZr)GRl.push(Hh.jsx(_,{color:"text",children:Wfr.slice(oZr,Wto.start)},`plain-${oZr}`));for(let B3i=Wto.start;B3i<Wto.end;B3i++)GRl.push(Hh.jsx(_,{color:Zoe
+
+===== hTy= @288840326 =====
+
+ol(),dTy=qe.enum(["baseline","off"]),pTy=qe.str(),fTy=qe.int(),mTy=qe.triBool(),hTy=qe.bool(),gTy=qe.bool(),yTy=qe.triBool(),_Ty=qe.triBool(),bTy=qe.triBool(),vTy=qe.triBool(),STy=qe.triBool(),ETy=qe.triBool(),wTy=qe.triBool(),ATy=qe.triBool(),TTy=qe.bool(),kTy=qe.triBool(),xTy=qe.bool(),CTy=qe.bool(),RTy=qe.bool(),HTy=qe.bool(),ITy=qe.bool(),PTy=qe.bool(),DTy=qe.triBool(),MTy=qe.bool(),OTy=qe.bool(),LTy=qe.bool(),NTy=qe.bool(),$Ty=qe.bool(),FTy=qe.bool(),UTy=qe.str(),BTy=qe.
+
+===== function hTy @-1 =====

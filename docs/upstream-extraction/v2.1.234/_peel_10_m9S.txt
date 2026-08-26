@@ -1,0 +1,7 @@
+OFFSET=303336600
+
+Count:0,resolvedToolUseIDs:new Set,erroredToolUseIDs:new Set},VKn=Object.freeze(new Set);i9S=new Set(["image","document"]);m9S=/<(commit_analysis|context|function_analysis|pr_analysis)>.*?<\/\1>\n?/gs;_9S=new Set(["claude-in-chrome"]),b9S=new Set(["You used a single tool call this turn. Prefer browser_batch to execute multiple actions in one call \u2014 it is significantly faster. Batch your next sequence of clicks, types, navigations, and screenshots together."]);k9S=`### Phase 3: Review
+Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
+1. Read the critical files you identified during exploration to deepen your understanding
+2. Ensure that the plans align with the user's original request
+3. Use ${eg} to clarify any remaining questions with the user`;ipm={poll_events:(e)=>e.deliveredVia!==void 0?[]:Sy([yn({content:vLn(e.envelopes,e.remainingWakeCount),isMeta:!0})]),directory:(e)=>Sy([jKn(hp.name,{command:`ls ${Iy([e.path])}`,description:`Lists files in ${e.path}`}),BKn(hp,{stdout:e.content,stderr:"",interrupted:!1})]),edited_text_file:(e)=>{let t=`Note: ${Pie(e.filename)} changed on disk since you last read it. That's usually deliberate, so take

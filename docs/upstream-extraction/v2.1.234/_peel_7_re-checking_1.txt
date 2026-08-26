@@ -1,0 +1,4 @@
+offset=311963519
+needle=b're-checking'
+window=
+ minimum cacheable prompt is **512 tokens** on {{OPUS_NAME}}, down from 1024 on Opus 4.8. Prompts previously too short to cache now create entries with no code change \u2014 worth re-checking any prompt you'd written off as uncacheable. See \`shared/prompt-caching.md\`.\r.\r.**Fast mode.** \`speed: "fast"\` (beta header \`fast-mode-2026-02-01\`) is supported on {{OPUS_NAME}}, priced at $10 / $50 p

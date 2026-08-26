@@ -1,0 +1,3 @@
+totypeEnabled:()=>spi,isPublishToolEnabled:()=>i3r,isResumeFrameSeedEligible:()=>s3r,isWhiteboardEnabled:()=>iDa,isWorkshopDefaultPlanEnabled:()=>hxv,isWorkshopEnabled:()=>TSe,isWorkshopSchemaEnabled:
+()=>oDa,maybeLogArtifactDisabledSession:()=>nDa});function X4n(){return V.CLAUDE_CODE_DISABLE_ARTIFACT||B3()?.settings.disableArtifact===!0}function qwp(){let e=V.CLAUDE_CODE_ENTRYPOINT;return Nbe()||
+e==="claude-code-github-action"||e==="mcp"||(EZ()||O1r())&&it("tengu_retire_chat_relay_artifact_back

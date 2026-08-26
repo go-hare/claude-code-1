@@ -1,0 +1,209 @@
+#### "function Lhp" [304985572] count=1
+--- 304985572 ---
+e06414183309865310e27c9b8db3dd",DD_SOURCEMAP_GROUP:"win32"}.VERSION}function Kxa(){return V.CLAUDE_CODE_NO_FLICKER===!1||V.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN}function Lhp(){try{if(axe())return!1;let e=cr();return e.firstStartVersion!==void 0&&(e.fullscreenUpsellSeenCount??0)<M4r}catch{return}}function eEv(e){if(e.freshInstallCached!==void 0)return e.freshInstallCached;let t=Lhp();if(t!==void 0)e.freshInstallCached=t;return t??!1}function Vs(e=Lne){if(K3()==="local-agent")return!1;if(V.CLAUDE_CODE_SESSION_KIND==="bg")return!0;if(CU())return!1;if(Kxa())r
+#### "function eEv" [304985708] count=1
+--- 304985708 ---
+ISABLE_ALTERNATE_SCREEN}function Lhp(){try{if(axe())return!1;let e=cr();return e.firstStartVersion!==void 0&&(e.fullscreenUpsellSeenCount??0)<M4r}catch{return}}function eEv(e){if(e.freshInstallCached!==void 0)return e.freshInstallCached;let t=Lhp();if(t!==void 0)e.freshInstallCached=t;return t??!1}function Vs(e=Lne){if(K3()==="local-agent")return!1;if(V.CLAUDE_CODE_SESSION_KIND==="bg")return!0;if(CU())return!1;if(Kxa())return!1;if(V.CLAUDE_CODE_NO_FLICKER===!0)return!0;if(e.crashAutoOff)return!1;if(X3e(e)){if(!e.loggedTmuxCcDisable)e.loggedTmuxCcDisable=
+#### "function axe" [304163946,333376037] count=2
+--- 304163946 ---
+onDefaultFeatureKeys()}function wov(){return hQ().getConfigOverrides()}function Eov(e,t){hQ().setConfigOverride(e,t)}function Aov(){hQ().clearConfigOverrides()}function axe(){return!V.DISABLE_GROWTHBOOK&&Pve()}function Tov(){return V.CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF&&!V.DISABLE_GROWTHBOOK&&Jke()&&id()}function jZd(){let e=V.ANTHROPIC_BASE_URL;if(!e)return;try{let t=new URL(e).host;if(t==="api.anthropic.com")return;return t}catch{return}}function sEa(){let e=RNd(),t=void 0,r=e.email,n=Jo()?.autoUpdatesChannel,o=void 0,i=jZd(),s=K3(),a=void 0,l
+--- 333376037 ---
+);return i&&(t?e[x2]=r:delete e[x2]),n}function ixe(e){return oct.call(e)}function nxe(e){return e==null?e===void 0?uct:cct:v1e&&v1e in Object(e)?act(e):lct(e)}function axe(e){return e!=null&&typeof e=="object"}function sxe(e){return typeof e=="symbol"||Yl(e)&&Tf(e)==hct}function oxe(e,t){for(var r=-1,i=e==null?0:e.length,n=Array(i);++r<i;)n[r]=t(e[r],r,e);return n}function dz(e){if(typeof e=="string")return e;if(Kr(e))return AT(e,dz)+"";if(lA(e))return b1e?b1e.call(e):"";var t=e+"";return t=="0"&&1/e==-fct?"-0":t}function lxe(e){for(var t=e.length;t--&&
+#### "M4r" [92759250,98365632,304985690,304989714,320464847,320464992,326381221,335461872] count=8+
+--- 92759250 ---
+Y2LS+VIG24ugBA/5J8bZT8RtOpXaZ+0
+AOuFJJkk9SGdl6r7NH8CaxWQrbueWhl/pIzY+m0o/DjH40ytas7ZTpOSjswMZ78LS5bOZmdT
+aMsXEY5Z96ycG7mOaES3GK/m5Q9l3JUJsJMStR8+lKXHiHUhsd4JJCpM4rzsTGdHwimIuQq6
++cF0zowYJmXa92/GjHtoXAvuY8BeS/FOzJ8vD+HomnqT8eDI278n5mUpezbgMxVz8p1rhAho
+KzYHKyfMeNhqhw5HdPSqoBNdZH702xSu+zrkL8Fl47l6QGzwBrd7KJvX4V84c5Ss2XCTLdyE
+r0YconosP4EmQufU2MVshGYRi3drVByjtdgQ8K4p92cIiBdcuJd5z+orKu5YM+Vt6SmqZQEN
+ghPsJQtdLEByFSnTkCz3GkPVavBpAgMBAAGjYzBhMA8GA1UdEwEB/wQFMAMBAf8wHwYDVR0j
+BBgwFoAU8snBDw1jALvsRQ5KH7WxszbNDo0wHQYDVR0OBBYEFPLJwQ8NYwC77EUOSh+1sbM2
+zQ6NMA4GA1UdDwEB/
+--- 98365632 ---
+........	.......N2A.............	.......esT.............	.......TAw.............	.......xkw.............	.......mml.............	.......Vhs.............	.......M4r.............	.......fx_.............	.......fpr.............	.......Yxw.............	.......TLe.............	.......Deo.............	.......eDf.............	......._5e.............	......._4g.............	.......mQm.............	.......mFv.............	.......pDi.............	.......gVe.............	.......cse.............	.......aBw.............	.......a6n.............	.......WBw.............
+#### "freshInstallCached" [117735064,304983885,304985729,304985766,304985813,304987443] count=6
+--- 117735064 ---
+........	.......tmuxFocusOptionProbe............	.......gbGateCached............	.......gbGateSource............	.......downsellGateCached..............	.......freshInstallCached..............	.......crashAutoOff........K.........B...........B.......B.l.B......H..H....................... ...............................h.........................................[.....................................................................................................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...
+--- 304983885 ---
+sHint:!1,tmuxControlModeProbed:void 0,tmuxMouseOptionProbe:void 0,tmuxFocusOptionProbe:void 0,gbGateCached:void 0,gbGateSource:void 0,downsellGateCached:void 0,freshInstallCached:void 0,crashAutoOff:!1}}function Dhp(){if(!V.TMUX)return!1;if(V.TERM_PROGRAM!=="iTerm.app")return!1;let e=V.TERM??"";return!e.startsWith("screen")&&!e.startsWith("tmux")}function Zwv(e){if(e.tmuxControlModeProbed=Dhp(),e.tmuxControlModeProbed)return;if(!V.TMUX)return;if(V.TERM_PROGRAM)return;let t=Ube("tmux");if(t===null)return;let r;try{r=Php.spawnSync(t,["display-message","-p"
+#### "firstStartVersion" [115687888,304235899,304985629] count=3
+--- 115687888 ---
+.................ls......................^{......................^{......................^{......................^{.....................................	.......firstStartVersion...................w.7.b......._.7.......7.n.7......H..H.......................................................h.........................................z.........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................
+--- 304235899 ---
+r0a(e){if(!cr().firstStartTime){let t=new Date().toISOString();ln((r)=>KQd(r,t),e)}}function KQd(e,t){if(e.firstStartTime)return e;return{...e,firstStartTime:t,firstStartVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.239",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-21T04:40:30Z",GIT_SHA:"9bf8e9521fe06414183309865310e27c9b8db3dd",DD_SOURCEMAP_GROUP:"win32"}.
+#### "Yes, try it" [198316416,326383343] count=2
+--- 198316416 ---
+y.o.u.r. .c.u.r.s.o.r. .o.r. .e.x.p.a.n.d. .r.e.s.u.l.t.s...............	...-.... Selected text auto-copies to your clipboard..........................	.......Yes, try it.............	.......Not now.................................	... ...Try the new fullscreen renderer?........................................................................*............D!L..P>...z...u...E...........D......rL..P;..`E.......;...].......4..@cf......D..p4...c...4..p.......@E...... M.......4......p.......@E......p4.......4..@..I.....E.......4..@c...%.......4..`b...%.......4
+--- 326383343 ---
+})]}),YAn[11]=y7A;else y7A=YAn[11];let Bfu;if(YAn[12]!==S1s||YAn[13]!==hPr)Bfu=xpe.jsxs(H,{flexDirection:"column",gap:1,children:[y7A,xpe.jsx(sc,{confirmLabel:"Yes, try it",cancelLabel:"Not now",onConfirm:S1s,onCancel:hPr})]}),YAn[12]=S1s,YAn[13]=hPr,YAn[14]=Bfu;else Bfu=YAn[14];let _7A;if(YAn[15]!==hPr||YAn[16]!==Bfu)_7A=xpe.jsx(Vr,{title:"Try the new fullscreen renderer?",onCancel:hPr,children:Bfu}),YAn[15]=hPr,YAn[16]=Bfu,YAn[17]=_7A;else _7A=YAn[17];return _7A}var XAn,xpe,q1y;var K1y=A(()=>{tt();uVc();Srt();Nt();jt();su();uQ();Wn();mr();kUe();vh();A6
+#### "Not now" [178892576,186697152,187213176,188818736,188843192,189474968,194691384,198316448] count=8+
+--- 178892576 ---
+n your behalf using your GitHub identity........................	.......continue........	.......Continue........	.......start monitoring this PR........	.......Not now.	.......
+......................................................	.......column..................................	...
+...Autofix PR..............	.......Before you start........................................................................*............D!L...>..`z...t...u.......4.....	.:.	.L.	.l.	.......	.... ....5.......4..@....%.......4..`b...%.......4...a...&.......4...............I...>
+--- 186697152 ---
+........	.......o...............	.......mid-session.............	.......e...............	...
+...Switch to ..............	...... and continue...........	.......Not now.........	.......No, keep my current model...............	.......picker..........	.......Switch to Fable 5?..............	...!...You've reached your Fable 5 limit...............	.......Fable 5 now uses usage credits..........	.......warning.................C.h.e.c.k.i.n.g. .u.s.a.g.e. .c.r.e.d.i.t.s.& ..........(...................
+....................Y......I........Zz.....	.........O.....
+#### "could never" [230504071,303490263,311296273,313660233,323836434,324177069,328236308,328236771] count=8+
+--- 230504071 ---
+can only match file-writing tools. The worker never forwards after-edit events for those tools (the device copy of the file is stale or absent), so such a hook could never fire and is not sent.........	...K...@internal Hooks of a kind that is never forwarded: prompt, agent, mcp_tool..............	...L...@internal Hooks contributed by plugins, which this version does not forward.............	...T...@internal Hooks from managed (policy) settings, which this version does not forward.............	...{...@internal Every other hook not sent: on an event that i
+--- 303490263 ---
+can only match file-writing tools. The worker never forwards after-edit events for those tools (the device copy of the file is stale or absent), so such a hook could never fire and is not sent."),kind_unsupported:Xe().int().nonnegative().optional().describe("@internal Hooks of a kind that is never forwarded: prompt, agent, mcp_tool."),plugin:Xe().int().nonnegative().optional().describe("@internal Hooks contributed by plugins, which this version does not forward."),managed:Xe().int().nonnegative().optional().describe("@internal Hooks from managed (policy)
+#### "unable to answer" [] count=0
+#### "previously excluded" [] count=0
+#### "providerAgnostic" [197999104,326300447,326302849,326305263,326305589,326305842,326306179,326306591] count=8+
+--- 197999104 ---
+x.......................................................	..............i.................................@`..Q..........................................	.......providerAgnostic................%...<...%...=.......N........D..H.......................................................h...................................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...............................
+--- 326300447 ---
+n("-"),d=o===bj?`marketplace-plugin:${a.name}`:`marketplace-plugin:${a.name}@${o}`;n.push({id:d,pluginId:`${a.name}@${o}`,advertisedCommand:"plugin",priority:1,providerAgnostic:!0,cooldownSessions:3,content:async(p)=>{let f=ni("suggestion",p.theme);return`Working with ${u}? Install the ${a.name} plugin:
+${f(`/plugin install ${a.name}@${o}`)}`},isRelevant:async(p)=>KMy(this,a.name,p,c,o)})}}return n}getDesktopInstalled(){return this.desktopInstalled??=kEc(),this.desktopInstalled}countSessionsOnce(e){if(this.sessionCountInFlight!==void 0)return this.sessio
+#### "isSSH()" [308253523,313320168,321020374,322792026,326312649,326318054,326441373] count=7
+--- 308253523 ---
+mE();cN()});function pmf(){return Cv(),pn(kv)}function tKn(){return pmf().mcpAuthModule()}function dmf(){return pmf().mcpClientModule()}function $_S(){return V.isSSH()||V.CLAUDE_CODE_REMOTE||Jl()}function F_S(e){try{let t=new URL(e).searchParams.get("redirect_uri");if(t)return t}catch{}return"http://localhost:<port>/callback"}function Ghe(e,t){if(jn())return[];return[U_S(e,t),B_S(e,t)]}function U_S(e,t){let r="url"in t?t.url:void 0,n=t.type??"stdio",o=r?`${n} at ${r}`:n,i=`The \`${e}\` MCP server (${o}) is installed but requires authentication. `+"Call t
+--- 313320168 ---
+essToken:e.accessToken,refreshToken:e.refreshToken,expiresAt:e.expiresAt,scopes:e.scopes.filter((n)=>RXe.some((o)=>o===n)),clientId:t}}}function L0l(){return V.isSSH()||V.CLAUDE_CODE_REMOTE===!0||Jl()}async function evm(e){if(e?.aborted)return{ok:!1,message:"Design login was interrupted."};if(!Ien())return{ok:!1,message:"The Claude Design OAuth client is not configured in this build. Set CLAUDE_CODE_DESIGN_OAUTH_CLIENT_ID to the registered client id, or update to a build with the registered client."};if(L0l())return{ok:!1,message:"This session is remote,
+#### "CLAUDE_CODE_USE_BEDROCK" [106509968,220225272,220226144,220226840,220252400,228226032,264953288,299098160] count=8+
+--- 106509968 ---
+CLAUDE_CODE_SKIP_HFI_VERSION_CHECK..............	.......CLAUDE_CODE_USE_ANTHROPIC_AWS...........	...&...CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD............2.....CLAUDE_CODE_USE_BEDROCK.........	.......CLAUDE_CODE_USE_FOUNDRY...........2.....CLAUDE_CODE_USE_GATEWAY.........	.......CLAUDE_CODE_USE_MANTLE...........,......CLAUDE_CODE_USE_VERTEX..........	.......CLAUDE_GATEWAY_ALLOW_LOOPBACK...........	.......CLAUDE_GATEWAY_LOG_LEVEL..........2.....CLOUD_ML_REGION.............(..._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL........	.......CLAUDE_CODE_MESSAGING_SO
+--- 220225272 ---
+hS...............S...............S..............h.......................................................................................................	.......CLAUDE_CODE_USE_BEDROCK.........	.......CLAUDE_CODE_USE_VERTEX..........	.......CLAUDE_CODE_USE_FOUNDRY.........	.......CLAUDE_CODE_USE_ANTHROPIC_AWS...........	...&...CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD..........	.......CLAUDE_CODE_USE_MANTLE..........	.......CLAUDE_CODE_USE_GATEWAY.........	.......ANTHROPIC_FOUNDRY_RESOURCE..............	.......ANTHROPIC_VERTEX_PROJECT_ID.............	.......
+#### "foundry" [99473480,99587829,107410104,112237640,112241288,112241472,112246064,112254920] count=8+
+--- 99473480 ---
+	.......markPerTurnEffortOkEmitted..............	.......inferenceProfileBackingModels...........	..."...recordInferenceProfileBackingModel..............	.......foundryDeploymentCapabilities...........(...................
+...........H...............................K.......@...............H...............................................................................	.......longContext1mCreditsBlocked.............	..."...replaceLongContext1mCreditsBlocked..............II......fableCreditsRequired............	.......replaceFableCreditsRequired.............
+--- 99587829 ---
+s:
+- server (required): The name of the MCP server from which to read the resource
+- uri (required): The URI of the resource to read
+ ............... .....fail:foundry-purpose-request...................#. .A.u.t.o.n.o.m.o.u.s. .l.o.o.p. .c.h.e.c.k..
+..
+.Y.o.u.'.r.e. .b.e.i.n.g. .i.n.v.o.k.e.d. .o.n. .a. .t.i.m.e.r. .w.h.i.l.e. .t.h.e. .u.s.e.r. .i.s. .a.w.a.y. .o.r. .o.c.c.u.p.i.e.d... .T.h.e. .p.o.i.n.t. .i.s. .t.o. .k.e.e.p. .w.o.r.k. .m.o.v.i.n.g. .f.o.r.w.a.r.d. .w.i.t.h.o.u.t. .t.h.e. .u.s.e.r. .d.r.i.v.i.n.g. .e.v.e.r.y. .s.t.e.p. ..  .f.i.n.i.s
+#### "US_ONLY" [] count=0
+#### "us_only" [] count=0
+#### "only-inference" [] count=0
+#### "data_residency" [128961584,160905408,175272432,197448000,276982880,308082492,316309568,316408567] count=8+
+--- 128961584 ---
+	.......teleport-org............	.......stream..........	.......application/octet-stream........................	.......data-residency..........	.......skipped_data_residency..........	.......essential-traffic-only..........	.......skipped_essential_traffic_only..........	.......skipped_no_claude_ai_auth...............	.......asset fetch skipped (...........	.......)...............	...A...Cannot destructure property 'status' from null or undefined value...............	.......i...............................	.......asset not found (404)...........	.......
+--- 160905408 ---
+s active................	.......zdr.............	...W...Ultrareview runs in Claude Code on the web and is unavailable on third-party providers..........	.......data_residency..........	...E...Ultrareview requires a Claude.ai account. Run /login to authenticate............	.......no_oauth_token..........	...+...fetchUltrareviewPreflight schema mismatch: .............	.......api_ultrareview_preflight...............	.......schema_mismatch.........	..."...fetchUltrareviewPreflight failed: ..............	.......request_failed..............................?...
+#### "skipped_data_residency" [128961576,308082484] count=2
+--- 128961576 ---
+........	.......teleport-org............	.......stream..........	.......application/octet-stream........................	.......data-residency..........	.......skipped_data_residency..........	.......essential-traffic-only..........	.......skipped_essential_traffic_only..........	.......skipped_no_claude_ai_auth...............	.......asset fetch skipped (...........	.......)...............	...A...Cannot destructure property 'status' from null or undefined value...............	.......i...............................	.......asset not found (404)...........
+--- 308082484 ---
+=void 0)throw h;throw new _ce(`asset fetch failed: ${h instanceof Error?h.message:String(h)}`,"asset_transient")});if(!o.ok){let h=o.reason==="data-residency"?"skipped_data_residency":o.reason==="essential-traffic-only"?"skipped_essential_traffic_only":"skipped_no_claude_ai_auth";throw new _ce(`asset fetch skipped (${h})`,h)}let{status:i}=o;if(i!==200){if(o.data.destroy(),i===404)throw new _ce("asset not found (404)","asset_not_found",i);if(i===410)throw new _ce("asset denylisted (410)","asset_denylisted",i);if(i>=500)throw new _ce(`asset fetch failed ($
+#### "costMultiplier" [] count=0
+#### "priceMultiplier" [] count=0
+#### "budgetUsd" [] count=0
+#### "max-budget-usd" [203913275,204929098,204987898,229855786,229859314,230143652,262999970,263002362] count=8+
+--- 203913275 ---
+.....	...............	.......he..............	.......q...............	.......sm..............	.......print budget halt: total cost ..........	....... reached --max-budget-usd ..............	.......; stopping background agents............	.......Budget limit reached ($.................	....... of $...........	.......); stopping background agents.
+.........	.......print_budget_halt...............	.......Se..............	.......re..............	.......ge..............	...%...Background tasks still running after ...................	...Q...s; terminating. Set
+--- 204929098 ---
+agentic turns in non-interactive mode. This will early exit the conversation after the specified number of turns. (only works with --print)...........	.......--max-budget-usd <amount>...............	...E...Maximum dollar amount to spend on API calls (only works with --print)...........	.......--task-budget <tokens>..........	...:...API-side task budget in tokens (output_config.task_budget)..............	.......--replay-user-messages..........	.......Re-emit user messages from stdin back on stdout for acknowledgment (only works with --input-format=stream-
+#### "function parseMultipleKeypresses" [] count=0
+#### "incomplete:" [305141130,305141260,308359748,308363565,308369466,316686260] count=6
+--- 305141130 ---
+ndex+o[0].length,n=Xbp(o[0]);continue}if(r===null)continue;let{sentence:i,cut:s}=Vbp(e.slice(r,o.index));if(i!==""&&i!=="\u2026")t.push({sentence:i,filenames:n,incomplete:s});r=null}if(r!==null){let{sentence:o}=Vbp(e.slice(r,r+uHa+1));if(o!==""&&o!=="\u2026")t.push({sentence:o,filenames:n,incomplete:!0})}return t}function yWr(e){let t=e.map((r)=>{if(r.type==="text"){let n=lP(r.text);return n===r.text?r:{...r,text:n}}if(r.type==="thinking"){let n=lP(r.thinking);return n===r.thinking?r:{...r,thinking:n}}return r});return t.every((r,n)=>r===e[n])?e:t}var vu
+--- 305141260 ---
+.push({sentence:i,filenames:n,incomplete:s});r=null}if(r!==null){let{sentence:o}=Vbp(e.slice(r,r+uHa+1));if(o!==""&&o!=="\u2026")t.push({sentence:o,filenames:n,incomplete:!0})}return t}function yWr(e){let t=e.map((r)=>{if(r.type==="text"){let n=lP(r.text);return n===r.text?r:{...r,text:n}}if(r.type==="thinking"){let n=lP(r.thinking);return n===r.thinking?r:{...r,thinking:n}}return r});return t.every((r,n)=>r===e[n])?e:t}var vui="tengu_salt_marsh",Sui="cc-memory",Wzn,qbp,uHa=300,mTv,hTv=32;var Wne=A(()=>{Wzn=/<\/?cc-memory\b[^>]*>/g,qbp=/\bfilenames="([^"
+#### "pendingMouse" [] count=0
+#### "sgrPartial" [] count=0
+#### "orphanSgr" [] count=0
+#### "function kTd" [] count=0
+#### "function ZXc" [] count=0
+#### "35;" [70065295,70065822,71947449,88755478,92518277,154910553,261540668,299384289] count=8+
+--- 70065295 ---
+ return offset + byteLength;
+})
+(function (value, offset) {"use strict";
+  if (offset === @undefined)
+    offset = 0;
+  value = +value;
+  let min = 0, max = 65535;
+  if (typeof offset !== "number" || value < min || value > max || this[offset] === @undefined || this[offset + 1] === @undefined)
+    (@getInternalField(@internalModuleRegistry, 11) || @createInternalModuleById(11)).checkInt(this, value, offset, min, max, 2);
+  return (this.@dataView ||= new DataView(this.buffer, this.byteOffset, this.byteLength)).setUint16(offset, value, !1), offset + 2;
+})
+(
+--- 70065822 ---
+set, value, !1), offset + 2;
+})
+(function (value, offset) {"use strict";
+  if (offset === @undefined)
+    offset = 0;
+  value = +value;
+  let min = 0, max = 65535;
+  if (typeof offset !== "number" || value < min || value > max || this[offset] === @undefined || this[offset + 1] === @undefined)
+    (@getInternalField(@internalModuleRegistry, 11) || @createInternalModuleById(11)).checkInt(this, value, offset, min, max, 2);
+  return (this.@dataView ||= new DataView(this.buffer, this.byteOffset, this.byteLength)).setUint16(offset, value, !0), offset + 2;
+})
+(
+#### "echoing" [166002364,230539233,303500797,314951396,317210189,324624885,324790853,324805075] count=8+
+--- 166002364 ---
+_create_path_missing........	...=...WorktreeCreate hook returned a path that is not a directory: ...........	...=.... The hook must create the directory before echoing its path............	...%...Worktree directory does not exist at ...........	....... after creation. ...................e...R.e.f.u.s.i.n.g. .t.o. .l.a.u.n.c.h. .a.g.e.n.t. .i.n. .p.a.r.e.n.t. .r.e.p.o. ..  .c.h.e.c.k. .f.o.r. .c.o.n.c.u.r.r.e.n.t. .w.o.r.k.t.r.e.e. .c.l.e.a.n.u.p. .o.r. .f.i.l.e.s.y.s.t.e.m. .e.r.r.o.r.s..........................................................@p4........
+--- 230539233 ---
+anonical target directory. Nothing changed; show a trust dialog for exactly this string and, on accept, re-send with trust_accepted: true and trusted_directory echoing it verbatim. Safe to render verbatim in the dialog, by construction: every character is a visible, space-distinguishable glyph. Targets whose canonical path contains control (Cc), format (Cf), default-ignorable, line/paragraph-separator (Zl/Zp), non-ASCII-space Zs, or braille-blank code points are rejected (reason: unsafe_path) before this arm can carry them...............	.......rejected.
+#### "literal `" [315274876] count=1
+--- 315274876 ---
+the shell exec would be silently lost. Port it manually."}}if(t.replace(/!\{[^}]+\}/g,"").includes("!`"))return{body:t,hasShellExec:!0,untranslatable:"It has a literal `` !` `` outside any `!{\u2026}` block (inert in Gemini, live in Claude Code \u2014 and it may pair with a translated block's backtick to run something other than the block). Port it manually."};let n=[...t.matchAll(/!\{([^}]+)\}/g)].map((u)=>u[1].trim()).filter((u)=>u.length>0),o=t.replace(/@\{([^}]+)\}/g,(u,d)=>"@"+d.replaceAll(" ","\\ ")).replace(/!\{([^}]+)\}/g,"!`$1`");if(o.includes("
+#### "</" [430543,2985359,3862928,4091868,4210840,4330403,4330851,5153207] count=8+
+--- 430543 ---
+....H..([_^A\A]A^A_].fff.........H.T$.UAWAVAUATVWSH..(H.jpH.M.......H..([_^A\A]A^A_].............AWAVVWUSH..8D..H..H......H1.H.D$01.H....x.H.....A..A...E....D.D</H.....H..H...H..w.H..<H..0..~M..A..............H.H.H..`.....0.....v'H..`...H..X...L..H9.r.H...}...H..`.....H..`...H..H).H..A.....L..X...M..L9.rLffffff.........I).H..M.......L..L).L..`...H.......H..`...H..9L..X...M..L9.s.H..I.......H..`...H.D$0H1.H.....H9.uH..8[]_^A^A_.H.L$0H1..#.	....AWAVVWSH..0H..H......H1.H.D$(H...........f.n.f...k...f...s...f.~D$$H.=p...H.T$$H...9.
+.H....s...H).H.VUUUUUUUH.
+--- 2985359 ---
+M....!...|$<....H................H....j..H....9...I..H.........H.T$@L..A.......Hc..D.@..|$@.u=.D$<....H.T$@L.L$<L..E1..f!...|$<.A...A.....D.N.I.O..-I....t.A..E.</u.A.E.:.:..H....g..A..H........I..L.......H.......>.......H.]Jl..He..H..Jl.H..$.....4...H..u"H....g..H..t.H..Il.H..M..I...=...E..t..>..)H..Il.L.......H..u.H..Il.L..M..I...
+...H..Il...e..L.............E1..K...........VH.. H..H.q...H......E1.I.......H..`Il.H..t..>...........H..CIl.....H... .......H.. ^.u.....D....f..f..........VWH..(L..H..L.......H..t..?...H....I..A............H.......H..H
+#### "stripXml" [] count=0
+#### "stripEmpty" [299536864,299946032,328123664,328179412,328193569,328193625] count=6
+--- 299536864 ---
+	.......normalizeWinPathJSON............	.......assignParsedKey.........	.......resolveLegacyFlatKeys...........	.......legacyFlatKeyWarning............	.......stripEmptyKeys..........	.......parseForceLoginOrgUUIDs.........	.......enforceConfigurationValues..............	.......configurationWarnings...X.......p........	..............X#......h-.......0.......=.......F.......T.......\..................&...................2...M........H..H.......................`.......................H.......h........................................n......................
+--- 299946032 ---
+requiredProviderLeaves..........	.......PROVIDER_CLI_FLAG...............	.......providerCliFlagEnv..............	.......redactSensitiveKeys.............	.......stripEmptyKeys..........	.......bootstrapableKeys...............	.......nonBootstrapableKeys............	.......remotePolicyDefaults............	.......staticTierKeys..........	.......isStaticTier3pKey...............	.......keysWithRemotePolicy............	.......appBehaviorMdmKeys..............	.......GROUP_DESCRIPTIONS..............	.......OTLP_CONTENT_CATEGORIES.........	.......HelperScriptCred
+#### "empty tags" [] count=0
+#### "function dme()" [304295810] count=1
+--- 304295810 ---
+skCreated","TaskCompleted"];kav=[Iii,Tav,Bya].filter((e)=>e.length>0),Cav=[P0a,D0a,M0a,O0a]});function Ow(e){return e==="completed"||e==="failed"||e==="killed"}function dme(){let e=V.CLAUDE_CODE_TMPDIR;if(e)return e;return L0a.tmpdir()}function WLt(e){let t=process.getuid?.();if(t===void 0)return;let r=e.replace(/[\/]+$/,"")||e,n="Set CLAUDE_CODE_TMPDIR to a directory you control, or ask an administrator to remove it.",o;try{o=i9.openSync(r,i9.constants.O_RDONLY|i9.constants.O_DIRECTORY|i9.constants.O_NOFOLLOW)}catch(i){let s=dt(i);if(s==="ELOOP"||s==="E
+#### "project root or home" [] count=0
+#### "getOriginalCwd" [106445448,151748533,152045349,300700591,313432026,313515404] count=6
+--- 106445448 ---
+indowCloseCause.........	.......getOauthScopesFromFd.............y0.....getOauthTokenFromFd.............	.......getOnboardingShownThisSession...........	.......getOriginalCwd..........	.......getParentManagedSettings.........^......getParentManagedSettingsInvalid.........I.......getParentSessionId..............	.......getPendingBranchLinks...................getPendingPrLinks...............	.......getPermissionPromptToolName.............	.......getPlanSlugCache........	..."...getPolicyPredicateTelemetryEmitted0.............I~0.....getPrCounter............
+--- 151748533 ---
+...................	...K...Cannot destructure property 'getMainLoopModel' from null or undefined value.....................	...I...Cannot destructure property 'getOriginalCwd' from null or undefined value.......................	...B...Cannot destructure property 'default' from null or undefined value......................	...O...Cannot destructure property 'isFirstPartyProvider' from null or undefined value.........	.......S...............	...:...[bridge] Session create skipped on non-firstParty provider..............	.......bridge_session_create........
+#### "posix_spawn ENOENT" [] count=0
+#### "rate-limit" [100869680,100939160,117291784,137900404,146611176,163398634,176020123,176021346] count=8+
+--- 100869680 ---
+ellCommandEnabled...P............".."...CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE..P...............a...the automatic continue at the usage-limit reset was cancelled (/rate-limit-options to wait again)....(..........	.f.:...Automatic continue at the usage-limit reset was cancelled...G(..........I.......workflow_launch_result..........."....../.workflow/.F(..........	.......Requesting usage credits notifies your organization admins. To review and send the request, run /usage-credits in an interactive Claude Code session................".../extra-usage is now /usa
+--- 100939160 ---
+to-resume-credits...............	.......quota-auto-resume-cap............[......quota-auto-resume-cancelled.............. ).<...Automatic continue cancelled . /rate-limit-options to re-arm.............!)...../usage-credits to continue now..........	").	...{"code":".	.............I").....    .....................%...............").....ctrl+b..........	......ctrl+x ctrl+b...........	.......cyan_FOR_SUBAGENTS_ONLY..........#).....session running..........#).....session waiting for a prompt............	.......session waiting.........	&...... . .............
+#### "title updates" [] count=0
+#### "session-title" [] count=0
+#### "dedup" [87181213,99694496,106618576,106618616,106673944,106678968,117292688,122180848] count=8+
+--- 87181213 ---
+ge.json must be writable to add packages..D.[34mnote.[0m.[2m:.[0m package.json must be writable to add packages.../.npmrc.Cache Dir: ...yarn auditautocleancheckdedupedlxexecexplaingenerate-lock-entrygenerateLockEntrygloballicensesloginlogoutoutdatedpatchpluginpoliciesrebuildteamunplugupupgrade-interactiveupgradeInteractive.......y..E............sj.E.............S2E.............S2E....	..........E.............. E.............S2E............Wg.E.............. E.............S2E.............S2E.............S2E.............S2E.............S2E.............S2E.
+--- 99694496 ---
+.(#."...IDE diagnostics baseline timed out..............	.......IDE diagnostics fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFile...........	.......clearPendingForFile..............+#.....pendingCount....................	.......diff............	,#.....diffWithOptionsObj..............	...	...addToPath...............	......extractCommon...........	.......equals..........I-#.....removeEmpty.............
+#### "organization_policy" [] count=0
+#### "policy_violation" [] count=0
+#### "shouldRetry:!1" [303915610,303916356] count=2
+--- 303915610 ---
+(rSa){Object.defineProperty(rSa,"__esModule",{value:!0});rSa.getRetryConfig=XZb;async function XZb(e){let t=DYd(e);if(!e||!e.config||!t&&!e.config.retry)return{shouldRetry:!1};t=t||{},t.currentRetryAttempt=t.currentRetryAttempt||0,t.retry=t.retry===void 0||t.retry===null?3:t.retry,t.httpMethodsToRetry=t.httpMethodsToRetry||["GET","HEAD","PUT","OPTIONS","DELETE"],t.noResponseRetries=t.noResponseRetries===void 0||t.noResponseRetries===null?2:t.noResponseRetries,t.retryDelayMultiplier=t.retryDelayMultiplier?t.retryDelayMultiplier:2,t.timeOfFirstRequest=t.ti
+--- 303916356 ---
+GER;let r=[[100,199],[408,408],[429,429],[500,599]];if(t.statusCodesToRetry=t.statusCodesToRetry||r,e.config.retryConfig=t,!await(t.shouldRetry||JZb)(e))return{shouldRetry:!1,config:e.config};let o=ZZb(t);e.config.retryConfig.currentRetryAttempt+=1;let i=t.retryBackoff?t.retryBackoff(e,o):new Promise((s)=>{setTimeout(s,o)});if(t.onRetryAttempt)await t.onRetryAttempt(e);return await i,{shouldRetry:!0,config:e.config}}function JZb(e){let t=DYd(e);if(e.config.signal?.aborted&&e.code!=="TimeoutError"||e.code==="AbortError")return!1;if(!t||t.retry===0)return!
+#### "PreToolUse" [100779304,100779488,102361000,102361892,102362090,102363116,102363409,102363495] count=8+
+--- 100779304 ---
+queued-remote-notifications.............IM......flag:idle-window................	...7...The message for the user. Supports markdown formatting..........	.......PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...................0............... .......K.......`.......
+--- 100779488 ---
+respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...................0............... .......K.......`...............................................@.......K.........................................................................%...............%...............................%.............
+#### "original turn" [] count=0
+#### "traceId" [116380976,271010555,271010684,271749664,271762136,271762184,271778776,271813840] count=8+
+--- 116380976 ---
+..........j.............................................p.......................p........................p..............	.......spanContext.............	.......traceId.........	.......inject..........	.......defaultTextMapSetter................;.9.h$..L...#.9.M...G.9...9......H..H.......................@.......................(.......h.......................................8,p.....................................................................................................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...
+--- 271010555 ---
+..............i......P...............H...............x...............................................................	...,...Operation attempted on ended Span {traceId: ............	...
+..., spanId: ..............	.......}...............	...5...Cannot execute the operation on ended Span {traceId: ......................................4.@Ae.A..H.4..e.G.4r,...@..v......<......R4B.....L.H.4..e.G.4.@..}....@.........,.........................................w......................P =.......................u...............................................u

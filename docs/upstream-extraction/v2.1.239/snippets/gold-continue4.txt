@@ -1,0 +1,134 @@
+#### "function EQe(" 2 [304934236, 332668969]
+
+==== function EQe( 304934236 ====
+[i];if(r[i])o.push(a);else if(n&&b7(a.pid))Y1t.unlink(s).catch(()=>{})}return o}function EQe(){return A8.CLAUDE_CODE_MESSAGING_SOCKET}async function mxa(){let e=EQe(),t=(await k4r({rejectUnreadable:!0})).filter((i)=>i.sock&&!(e&&HFn(i.sock,e))&&!i.spare),r=await Promise.all(t.map((i)=>ump(i.sock))),n=await fBr(),o=[];for(let i=0;i<t.length;i++){let{file:s,...a}=t[i];if(r[i])o.push(a);else if(n&&b7(a.pid))Y1t.unlink(s).catch(()=>{})}return o}async function hxa(e){let t=EQe(),r=(await k4r()).filter((n)=>n.sessionId===e&&n.sock&&!(t&&HFn(n.sock,t))&&!n.spare);for(let n of r){let{file:o,...i}=n;if(await ump(i.sock))return i}return null}function nvv(e){return $H(e).filter((t)=>/^[a-z0-9_]{1,32}$/.test(t)).slice(0,16)}var Y1t,sxa,rmp,qbv,Ybv,evv,imp=200,tvv=150,dmp=4000000000
+
+==== function EQe( 332668969 ====
+;yue=wQe});var SQe,Xg,xue=z(()=>{"use strict";gue();vue();SQe=mue(yue),Xg=SQe});function EQe(e,t){var r=-1,i=ia(e)?Array(e.length):[];return Ld(e,function(n,a,s){i[++r]=t(n,a,s)}),i}var KS,MI=z(()=>{"use strict";Sb();Ac();o(EQe,"baseMap");KS=EQe});function AQe(e,t){var r=Or(e)?wc:KS;return r(e,Ia(t,3))}var Jr,bue=z(()=>{"use strict";sb();Hu();MI();An();o(AQe,"map");Jr=AQe});function _Qe(e,t){return e==null?e:Hg(e,jg(t),Is)}var NI,Tue=z(()=>{"use strict";US();XS();kd();o(_Qe,"forIn");NI=_Qe});function DQe(e,t){return e&&Yg(e,jg(t))}var II,Cue=z(()=>{"use strict";HS();XS();o(DQe,"forOwn");II=DQe});function RQe(e,t){return e>t}var kue,wue=z(()=>{"use strict";o(RQe,"baseGt");kue=RQe});function NQe(e,t){return e!=null&&MQe.call(e,t)}var LQe,MQe,Sue,Eue=z(()=>{"use strict";LQ
+
+#### "function sBr(" 1 [303703777]
+
+==== function sBr( 303703777 ====
+ngth&&e[r]===t[r])r++;return r}function iti(e,t){return String(iu(`${e}:${t}`))}function sBr(e,t){return iti(e,t).slice(0,sti)}function v_a(e,t,r){return e.length>=sti&&iti(t,r).startsWith(e)}function aBr(e){return new Set(e.flatMap((t)=>t.bridgeSessionId?[Mf(t.bridgeSessionId)]:[]))}function OFn(e,t){let r=Mf(t);return e.some((n)=>n.bridgeSessionId!==void 0&&Mf(n.bridgeSessionId)===r)}var nWd,sti=6,b_a=12,Xnr,uYb,dYb;var Qfe=A(()=>{tt();qk();mr();jCe();Rs();Zfe();fne();nWd=require("path");Xnr=`[0-9a-f]{${sti},${b_a}}`,uYb=new RegExp(`^(.*\\S)\\s*\\[(${Xnr})\\]$`);dYb=fle});function dn(e){if(e==null)return;return/^[A-Za-z0-9_-]{1,128}$/.test(e)?Pf(e):xe("nonconforming")}function oWd(e){return Pf(e.map((t)=>dn(t)).join(","))}var Mg=()=>{};function mYb(e){return iWd.rando
+
+#### "function QV(" 1 [303731748]
+
+==== function QV( 303731748 ====
+}}function Rve(){return e3d.of(ar().host)}function UYb(){return Rve().heldNames}function QV(){return Rve().registeredName}function GFn(){let e=Rve();return e.registration??Promise.resolve(e.registered)}function KWe(){let e=V.CLAUDE_CODE_SESSION_KIND;if(e==="bg"||e==="daemon"||e==="daemon-worker")return e;return}function As(){return KWe()==="bg"}function QOt(){return Cx()||As()||Kxn()!==void 0}function XM(){return As()&&!dA()}function Xk(){return As()||aj()!==null}function PZe(){return aj()?.jobDir??V.CLAUDE_JOB_DIR}function DZe(){return V.CLAUDE_BG_BACKEND==="daemon"}function F_a(){return Pn.session(Sti)}function gti(){return Pn.session(`${process.pid}.json`)}async function U_a(e){if(e){try{let t=await e.write(F_a(),String(Date.now()),{publishDiscipline:"inPlace"});if(!
+
+#### "function jWe(" 1 [303698325]
+
+==== function jWe( 303698325 ====
+et t=nft(e),r=/^\/private(\/(?:var|tmp|etc)(?:\/.*)?)$/.exec(t);return r?r[1]:t}function jWe(e){let t=/^[\\/]{2}[.?][\\/]pipe[\\/](?:(LOCAL)[\\/])?([^\\/]+)$/i.exec(e);if(t===null||t[2]==="."||t[2]==="..")return;if(/[. ]$/.test(t[2]))return;if(e.startsWith("\\\\?\\")&&e.includes("/"))return;return t[1]===void 0?t[2]:`${rti}\\${t[2]}`}function y_a(e,t){if(jWe(t)!==void 0){let r=jWe(e);return r!==void 0&&cYb.test(r)}if(IMr(e))return!1;return RZe.dirname(RZe.resolve(e))===RZe.dirname(RZe.resolve(t))&&e.endsWith(".sock")}function tWd(e,t){let r=jWe(e),n=jWe(t);if(r!==void 0&&n!==void 0&&Q4d.test(n)&&!Q4d.test(r))return!1;return y_a(e,t)}var RZe,oYb,iYb,sYb,aYb,tti="cc-msg-",rti="LOCAL",cYb,Q4d;var Zfe=A(()=>{Y8();gl();ki();RZe=require("path"),oYb=new RegExp(`^(?:uds|bridge|
+
+#### "function IMr(" 1 [300672979]
+
+==== function IMr( 300672979 ====
+(-20)}}function xu(e){return e}function Yc(e){return/^[\\/]{2}/.test(e)||Eke(e)}function IMr(e){return/(^|[\\/])\.\.([\\/]|$)/.test(e)}function XA(e){return/^[\\/]\?\?[\\/]/.test(e)}function HMe(e){if(/^[\\/]{2}[?.][\\/](?!unc[\\/])/i.test(e))return null;return e.match(/^[\\/]{2}(?:[?.][\\/]unc[\\/])?([^\\/]+)/i)?.[1]?.replace(/[A-Z]/g,(t)=>t.toLowerCase())??null}function NI(e){return/(^|[\\/])\.{1,2}([\\/]|$)/.test(e)}function obe(e){return/^[\\/]{2}[?.][\\/]/.test(e)}function P4s(e){return/^[\\/](GLOBAL\?\?|GLOBALROOT|DosDevices|Device)[\\/]/i.test(e)}function RMr(e,t){if(!Yc(e))return!1;if(obe(e)||Eke(e))return!0;if(NI(e))return!0;let r=HMe(e);return r===null||r!==HMe(t)}function tBo(e){return null}function R4s(e){return e.replace(/[A-Z]/g,(t)=>t.toLowerCase())}funct
+
+#### "The current working directory" 2 [85698686, 85698842]
+
+==== The current working directory 85698686 ====
+(#����.)�.�	Immediate�. �.(#����.)�..[0mHeaders .[0m.[34m.[0m.[2m.[33m��.error: The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again.�.��..[0m.[31merror.[0m.[2m:.[0m The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again.�.SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)�.a.[0m.[31merror.[0m: bun ran out of file descriptors .[2m(.[31mProcessFdQuotaExceeded.[0m.[2m).[0m�."error: An unknown error occurre
+
+==== The current working directory 85698842 ====
+se cd into a different directory and try again.�.��..[0m.[31merror.[0m.[2m:.[0m The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again.�.SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)�.a.[0m.[31merror.[0m: bun ran out of file descriptors .[2m(.[31mProcessFdQuotaExceeded.[0m.[2m).[0m�."error: An unknown error occurred (�.)�.@.[0m.[31merror.[0m.[2m:.[0m An unknown error occurred .[2m(.[31m�.[0m.[2m).[0m�.ENOENTBun could not find a file, and the code that produces this e
+
+#### "working directory no longer exists" 2 [280372056, 317819653]
+
+==== working directory no longer exists 280372056 ====
+�...............�...............�.......................
+...............	...9...working directory no longer exists or is not accessible: ...............	.......tengu_bg_spawn_cwd_gone.........	.......crashed................. ..  .t.h.i.s. .j.o.b. .c.a.n.n.o.t. .b.e. .r.e.s.p.a.w.n.e.d...................................�	�ԟD�4I.��@.��@@T��P��	Q��F�4�� 3�.!n���d�@ ����.[L���@.l`.��..D�@.���b2�
+qF�@�4���k�	.W�@�4�C�.�	�,�E�4�@p4���.�.�D��rL........&...�������.�������.8��������������.�������..)2������������.�������.�Z$������������.�������.@�5������������.�������.�.?������������.�������.X��������������.�������.�j3������������.�������.���������������.�������.0��������������.�������..��������������.�������.�!.������������.�������..e�������������.�������..e�������������.����
+
+==== working directory no longer exists 317819653 ====
+tle("killed");return this.doSpawn()}settleCwdGone(e,t=this.dispatch.cwd){let r=`working directory no longer exists or is not accessible: ${t}`;N("tengu_bg_spawn_cwd_gone",{short:Bee(this.dispatch.short),attempt:this.attempt,via:me(e)}),this.patch({state:"crashed",detail:r});let n=this.dimNotice(`${r} \u2014 this job cannot be respawned`);this.pushRing(n),this.onStream.emit(n),this.settle("crashed")}async buildBridgeReattachEnvFromState(){let e=await Uc(xc(this.dispatch.short),this.storageV5).catch(()=>null);if(!e)return;return Uzt(e.bridgeSessionId,e.bridgeSessionSeq,e.bridgeOutboundOnly,e.bridgeSessionGroupingId,{ownerAccountUuid:e.bridgeOwnerAccountUuid,ownerOrganizationUuid:e.bridgeOwnerOrganizationUuid,noHistoryBackfill:e.bridgeNoHistoryBackfill})}scheduleRespawn(e)
+
+#### "startup directory" 0 []
+
+#### "process.chdir" 4 [301039257, 301848844, 301848869, 301848901]
+
+==== process.chdir 301039257 ====
+(s&&i!==t)r.add(i);return Array.from(r)}function Cr(){return vae}function NH(e){process.chdir(e);try{process.cwd()}catch{}}async function lPt(e,t,r){await using n=await T0.open(e,"r");let o=(await n.stat()).size;if(o<=t)return null;let i=Math.min(o-t,r),s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await n.read(s,a,i-a,t+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:o}}async function eL(e,t){await using r=await T0.open(e,"r");let n=(await r.stat()).size;if(n===0)return{content:"",bytesRead:0,bytesTotal:0};let o=Math.max(0,n-t),i=n-o,s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await r.read(s,a,i-a,o+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:n}}async function*KMu(e,t=6553
+
+==== process.chdir 301848844 ====
+,t){let r=e.options.env||process.env,n=process.cwd(),o=e.options.cwd!=null,i=o&&process.chdir!==void 0&&!process.chdir.disabled;if(i)try{process.chdir(e.options.cwd)}catch(a){}let s;try{s=b7_.sync(e.command,{path:r[v7_({env:r})],pathExt:t?vVu.delimiter:void 0})}catch(a){}finally{if(i)try{process.chdir(n)}catch(a){let l=a!==null&&typeof a==="object"&&typeof a.code==="string"?a.code:"";if(!(/^E[A-Z0-9]+$/.test(l)||l==="UNKNOWN"||l.startsWith("Unknown system error")))throw a}}if(s)s=vVu.resolve(o?e.options.cwd:"",s);return s}function S7_(e){return SVu(e)||SVu(e,!0)}wVu.exports=S7_});var AVu=ae(function(Quk,bQs){var _Qs=/([()\][%!^"`<>&|;, *?])/g;function w7_(e){return e=e.replace(_Qs,"^$1"),e}function E7_(e,t){if(e=`${e}`,e=e.replace(/(?=(\\+?)?)\1"/g,"$1$1\\\""),e=e.repla
+
+==== process.chdir 301848869 ====
+process.env,n=process.cwd(),o=e.options.cwd!=null,i=o&&process.chdir!==void 0&&!process.chdir.disabled;if(i)try{process.chdir(e.options.cwd)}catch(a){}let s;try{s=b7_.sync(e.command,{path:r[v7_({env:r})],pathExt:t?vVu.delimiter:void 0})}catch(a){}finally{if(i)try{process.chdir(n)}catch(a){let l=a!==null&&typeof a==="object"&&typeof a.code==="string"?a.code:"";if(!(/^E[A-Z0-9]+$/.test(l)||l==="UNKNOWN"||l.startsWith("Unknown system error")))throw a}}if(s)s=vVu.resolve(o?e.options.cwd:"",s);return s}function S7_(e){return SVu(e)||SVu(e,!0)}wVu.exports=S7_});var AVu=ae(function(Quk,bQs){var _Qs=/([()\][%!^"`<>&|;, *?])/g;function w7_(e){return e=e.replace(_Qs,"^$1"),e}function E7_(e,t){if(e=`${e}`,e=e.replace(/(?=(\\+?)?)\1"/g,"$1$1\\\""),e=e.replace(/(?=(\\+?)?)\1$/,"$1$1
+
+==== process.chdir 301848901 ====
+options.cwd!=null,i=o&&process.chdir!==void 0&&!process.chdir.disabled;if(i)try{process.chdir(e.options.cwd)}catch(a){}let s;try{s=b7_.sync(e.command,{path:r[v7_({env:r})],pathExt:t?vVu.delimiter:void 0})}catch(a){}finally{if(i)try{process.chdir(n)}catch(a){let l=a!==null&&typeof a==="object"&&typeof a.code==="string"?a.code:"";if(!(/^E[A-Z0-9]+$/.test(l)||l==="UNKNOWN"||l.startsWith("Unknown system error")))throw a}}if(s)s=vVu.resolve(o?e.options.cwd:"",s);return s}function S7_(e){return SVu(e)||SVu(e,!0)}wVu.exports=S7_});var AVu=ae(function(Quk,bQs){var _Qs=/([()\][%!^"`<>&|;, *?])/g;function w7_(e){return e=e.replace(_Qs,"^$1"),e}function E7_(e,t){if(e=`${e}`,e=e.replace(/(?=(\\+?)?)\1"/g,"$1$1\\\""),e=e.replace(/(?=(\\+?)?)\1$/,"$1$1"),e=`"${e}"`,e=e.replace(_Qs,"^
+
+#### "ENOENT" 4 [7195698, 17194247, 20908533, 28339539]
+
+==== ENOENT 7195698 ====
+���..H�..p�.H����..H�.��I.H��ȇ..H�.t��.L����..��...�....H���<.�.�..�N.H�� H	�H�ENOENT..H9�uQH��H��0�..�*�.��t>.�..t(.��.��...H�.Hz�.H����..H�.:�I.H����..H�.�2�.L����..�b...H���...H���...L����...�.�s(.��uKH����..H����..H�.۲x.H����..H�.-o�.H����..H�.��I.H����..H�..4�.L����..��..H����..H����..H�.��x.H����..H�.�n�.H����..H�.��I.H����..H�..4�.L����..�..H���...H����..�W�..H���...�.��...H���...H�E�..��....)E�H�E�H���...H�E�H���...H���...H����...�.�r(.��.�....H����..H���...H�.۱x.H���...H�.-n�.H���...H�.��I.H���...H�.�.�.�....H��i�.��.�.H�.�m�.H����..H�.��I.H����..H�.["�.L����..��...H���...H����..H�.�=�.H����..H�.^x�.H����..H�.P�I.H����..H�..!�.L����..�x...H��p�..H���...H��؈..H���...H���...H�E�.�.�q(.��.�{...H����..H�.�x.H����..H�.4m�.H����..H�.��I.H����..H�.�!�.L����.
+
+==== ENOENT 17194247 ====
+..I9�.��...H�ENONET..I9�.�Y...H�EL2HLT..I9�.������1...��...H�DNOENT..I9�.��...H�ENOENT..I9�.��...H�ESRMNT..I9�.�6...H�EBFONT..I9�.�,����8...�...H�DSPIPE..I9�.��...H�ESPIPE..I9�.�U...H�ENOPKG..I9�.�....H�ECHRNG..I9�.������*...�1...H�DISNAM..I9�.��...H�EISNAM..I9�.�....H�ENOMEM..I9�.��...H�EAGAIN..I9�.������
+...��...H�EBADRQC.I9�.��...H�ELIBBAD.I9�.�t...H�EREMOTE.I9�.�=����?...�...H�ENOTBLK.I9�.�v...H�EDEADLK.I9�.�;...H�ENOLINK.I9�.������@...�U...H�EUCLEAN.I9�.�[...H�ELIBSCN.I9�.�4...H�EISCONN.I9�.������h...�....H�ENOTSUP.I9�.�@...H�ENOTDIR.I9�.�#...H�ENOBUFS.I9�.�t����g...��...H�EPIPE...I9�.��...H�EBADF...I9�.�D����....�...H�ELOOP...I9�.��...H�EBADR...I9�.�.����3...�o...�....H�E2BIG...I9�.�W...H�EFBIG...I9�.������....�:...H�ENOSR...I9�.�}...H�EINTR...I9�.������....�
+.
+
+==== ENOENT 20908533 ====
+9�.��...H�ENONET..H9�.��...M��H�EL2HLT..H9�.�f����1...�P���H�DNOENT..H9�.��...H�ENOENT..H9�.��...H�ESRMNT..H9�.�{...M��H�EBFONT..H9�.�����8...�����H�DSPIPE..H9�.��...H�ESPIPE..H9�.��...H�ENOPKG..H9�.�|...M��H�ECHRNG..H9�.������*...����H�DISNAM..H9�.��...H�EISNAM..H9�.�r...H�ENOMEM..H9�.�-...M��H�EAGAIN..H9�.�[����
+...�E���H�EBADRQC.H9�.��...H�ELIBBAD.H9�.��...M��H�EREMOTE.H9�.�.����?...�����H�ENOTBLK.H9�.��...H�EDEADLK.H9�.�k...M��H�ENOLINK.H9�.������@...����H�EUCLEAN.H9�.��...H�ELIBSCN.H9�.�a...M��H�EISCONN.H9�.������h...�s���H�ENOTSUP.H9�.�j...H�ENOTDIR.H9�.�M...M��H�ENOBUFS.H9�.�C����g...�-���H�EPIPE...H9�.��...M��H�EBADF...H9�.�.����....�����H�ELOOP...H9�.��...M��H�EBADR...H9�.������3...������....I�E2BIG...L9�.�����M��H�EFBIG...H9�.������....����H�ENOSR...H9�.��
+
+==== ENOENT 28339539 ====
+..H9�.��...H�ENONET..H9�.�Y...H�EL2HLT..H9�.������1...��...H�DNOENT..H9�.��...H�ENOENT..H9�.��...H�ESRMNT..H9�.�6...H�EBFONT..H9�.�{����8...�...H�DSPIPE..H9�.��...H�ESPIPE..H9�.�U...H�ENOPKG..H9�.�....H�ECHRNG..H9�.�%����*...�1...H�DISNAM..H9�.��...H�EISNAM..H9�.�....H�ENOMEM..H9�.��...H�EAGAIN..H9�.������
+...��...H�EBADRQC.H9�.��...H�ELIBBAD.H9�.�t...H�EREMOTE.H9�.������?...�...H�ENOTBLK.H9�.�v...H�EDEADLK.H9�.�;...H�ENOLINK.H9�.�I����@...�U...H�EUCLEAN.H9�.�[...H�ELIBSCN.H9�.�4...H�EISCONN.H9�.�.����h...�....H�ENOTSUP.H9�.�@...H�ENOTDIR.H9�.�#...H�ENOBUFS.H9�.������g...��...H�EPIPE...H9�.��...H�EBADF...H9�.������....�...H�ELOOP...H9�.��...H�EBADR...H9�.�c����3...�o...�....H�E2BIG...H9�.�W...H�EFBIG...H9�.�.����....�:...H�ENOSR...H9�.�}...H�EINTR...H9�.������....�
+.
+
+#### "US-only inference" 0 []
+
+#### "us-only-inference" 0 []
+
+#### "fullscreen offer" 0 []
+
+#### "pluginRoot" 4 [99499377, 99499523, 107579616, 165489968]
+
+==== pluginRoot 99499377 ====
+adata host.....�.....��........	...�...Bare source names resolve under metadata.pluginRoot, which this marketplace does not set (or sets to a path outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names...............	.......[A-Za-z0-9][-A-Za-z0-9._]*..............	.......!
+..............��..	...workspace1..............��..
+...claude_ai_..............ɦ..p...a .ps1 path must not contain "[", "]", "`", "*", or "?" on Windows (PowerShell resolves them as wildcard syntax)........��..-...exactly one of path/script must be configured...........I�..6..."script" and "interpreter" must be configured together..........	...�...script must be ASCII-only on Windows (PowerShell decodes stdin with the console OEM code page); spell
+
+==== pluginRoot 99499523 ====
+ outside the marketplace root). Use a "./relative/path" source, or set metadata.pluginRoot to allow bare names...............	.......[A-Za-z0-9][-A-Za-z0-9._]*..............	.......!
+..............��..	...workspace1..............��..
+...claude_ai_..............ɦ..p...a .ps1 path must not contain "[", "]", "`", "*", or "?" on Windows (PowerShell resolves them as wildcard syntax)........��..-...exactly one of path/script must be configured...........I�..6..."script" and "interpreter" must be configured together..........	...�...script must be ASCII-only on Windows (PowerShell decodes stdin with the console OEM code page); spell non-ASCII characters as escapes, e.g. [char]0x00E9........��..�...Entry must carry "path" (a helper executable) or "script" + "interpreter" (an i
+
+==== pluginRoot 107579616 ====
+................�@p���.�.�"............�������.�������.................	...
+...pluginRoot..........
+.......;�..��..+...#�..,..�G�..r�.......H..H.......�������.�������.pҁ������������.�������.Xҁ�����h.......�������.............��������....�x�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�....... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ...�������.�������.�������.�.......�...............�������.........�������.........�.......�������.�������.........�...............�������.........�������.................&.......�.��.....��.......��....��....��....
+
+==== pluginRoot 165489968 ====
+	...+...Iterator result interface is not an object............��........	...
+...pluginRoot..............	.......deviceOwner.............	.......string........��....................�...................�@ടR..���e��.��@p=�Q..�@���G..�@�L���.��`{���U��.��@�<���\��.��@`T���.�ΐ{��@E��.��@`<��P.��.���`T��.��@�d�@@.���4��.��@`T���.�@�\�@�4���.��.L��.ğ@`��E..�@p4���.��P��@`���D��.��@`T���.�@�\�@�4���.��.L��.ğ@���@ .���.�@P<�E.L�@p4�I..���3�@�V�.�.��p<��.���`T��.��@PU�E..�@p4���.����.��.��..�@�<�@0\���.��.��@PT�.p.�@.>���.��.L��.ğ��@ ��@ .�@ .�Ǡ.��r<�@`4���.�@�<�@�4���.��.L��.ğ@`��E..�@p4���.��P�,..�0.C.��@.�C..���4��.��@PT�.p.�@P%�.�.���>�@ ��@ .�@ .�Ǡ.��r<�@`4���.�@�<�@�4���.��.L��.ğ@`��E..�@p4���.��P��@p�...."...J...M...Q...Y...n...t...~...�...�...�...�...
+
+#### "stripBom" 3 [236186072, 304534058, 304534179]
+
+==== stripBom 236186072 ====
+�������.p+X������������.�������. .......�������.�������.��������........	.......stripBom........�...................��;.....j.......w..���;..�;......H..H.......�������.�������.�.......�������.�������.p.......�.......�������.............��������....�.L������������.........�������.........�������.�������.................	.......ypv.........����............����................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......�.......	.......8...............�...............�.......�������.�������.........X...............�������.........�������.................�.......���.
+
+==== stripBom 304534058 ====
+)e=e.toString("utf8");return e.replace(/^\uFEFF/,"")}Gap.exports={stringify:ypv,stripBom:_pv}});var rka=ae(function(NUC,Kap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.parse(o,t?t.reviver:null)}catch(s){if(n)throw s.message=`${e}: ${s.message}`,s;else return null}return i}var vpv=eai.fromPromise(bpv);function Spv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0;try{let o=r.readFileSync(e,t);return o=qap(o),JSON.parse(o,t.reviver)}catch(o){if(n)throw o.message=`${e}: ${o.message}`,o;else return null}}async 
+
+==== stripBom 304534179 ====
+ap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.parse(o,t?t.reviver:null)}catch(s){if(n)throw s.message=`${e}: ${s.message}`,s;else return null}return i}var vpv=eai.fromPromise(bpv);function Spv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0;try{let o=r.readFileSync(e,t);return o=qap(o),JSON.parse(o,t.reviver)}catch(o){if(n)throw o.message=`${e}: ${o.message}`,o;else return null}}async function wpv(e,t,r={}){let n=r.fs||Bzr,o=Vap(t,r);await eai.fromCallback(n.writeFile)(e,o,r)}var Epv=eai.fromPromise(wpv)
+
+#### "no agent named" 3 [182281801, 313694772, 321115719]
+
+==== no agent named 182281801 ====
+ <id> to continue an existing session)
+......��......��........	.......warning: no agent named '...................#...'. ..  .s.p.a.w.n.i.n.g. .w.i.t.h. .d.e.f.a.u.l.t. .t.e.m.p.l.a.t.e.
+...�������.	.......................	.......fleet...........	.......spare...........	.......u.......................	.......c.............��........	.......exec............	.......bg..............	.......user....................(.i.d.l.e. ..  .w.a.i.t.i.n.g. .f.o.r. .........	.......)...............	.......idle............	.......blocked.........2.....��........	.......l...............	.......slash...1.....��........	.......resume..........	.......prompt..........	.......1...............	.......worktree........	.......built-in......��........	...+...Iterator result interface is not an o
+
+==== no agent named 313694772 ====
+hTruncated?rtn:""}${S!=="no"?Jen(e.to,g5(t)):""}
+${k}`,display:`Not sent \u2014 no agent named '${e.to}' is reachable.${p.closest.length>0?` Did you mean: ${p.closest.map((I)=>I.name).join(", ")}?`:""}${p.bridgeUnavailable||p.cloudUnavailable||p.localUnavailable?` Note: ${qAl(p)} \u2014 it may exist there; a retry searches again.`:""}${p.searchTruncated?` Note: ${YAl} \u2014 it may exist beyond what was searched.`:""}${p.pinnedIdentityClaimedLocally?` ${KAl(p.pinnedIdentityClaimedLocally)} \u2014 that is suspicious if you did not set it up.`:""}`}}}if(p.kind==="ambiguous"){let S=typeof e.message==="string"?Qen(e.to):"no";if(S==="categorical"&&p.matchedBy==="prefix"&&Zen(p))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to
+
+==== no agent named 321115719 ====
+s)).activeAgents,f):void 0;if(f&&!Y&&t==="shell")process.stderr.write(`warning: no agent named '${f}' \u2014 spawning with default template
+`);let G=void 0,q=n?.intent??_??"",j=!Y?.initialPrompt&&!n?.exec&&!_&&!p.some((X,te)=>!b.has(te)&&X==="--reply-on-resume"),U=!1,Z;if(t!=="fleet"&&t!=="spare"){let X=u?null:await Uc(c,s);if(X===null)Z=S_(c,rot({template:{name:n?.exec?"exec":f??void 0??"bg",description:Y?.whenToUse??G?.description??"",initialPrompt:Y?.initialPrompt,color:Y?.color},routine:void 0,respawnFlags:F,intent:q,name:g,nameSource:h?"user":n?.nameSource,color:n?.color,detail:n?.detail??(j?G?`(idle \u2014 waiting for ${lSg(G.triggers)})`:uZr:void 0),tempo:j?G?"idle":"blocked":void 0,needs:j&&!G?bN:void 0,sessionId:a,cwd:r??rr(),worktreePath:n?.worktree?.path,work

@@ -1,0 +1,20 @@
+OFFSET=298113400
+
+"watcher_stopped"),E(`Server-approval watcher stopped (${ue(I)})`)})}if(!s)(async()=>{if(u())return;let x=await t.runHooks(un(t.toolUseContext).mode,n.suggestions,n.updatedInput,i);if(x&&"reprompted"in x){if(u())return;if(_Je(h,t.toolUseID),f&&g)f.cancelRequest(g),g=void 0;y?.(),b?.(),v?.(),p(x.finalInput,x.reprompted.decisionReason,x.reprompted);return}if(!x||!c())return;if(f&&g)f.cancelRequest(g);y?.(),b?.(),d(x)})().catch((x)=>{if(x instanceof sw){E("PermissionRequest hooks cancelled (control stream closed)");return}xe(x)});return{notifyBridgeAndTeardown:S}}var enf;var rnf=A(()=>{bt();tr();Yir();IG();Wmi();Jc();Ze();pt();Vr();ty();$mi();pk();enf=require("crypto")});function onf(e,t,r){Yp().bundledWorkflows.push({source:"built-in",...t,script:e,disableModelInvocation:r?.disableModelInvocation})}function b4n(){if(xX())return[];return Yp().bundledWorkflows}var Gmi=A(()=>{See();CKe()});function inf(e,{apply:t}){if(!Si(e))return null;let r=e.args;if(typeof r!=="string")return null;let o=r.trimStart()[0];if(o!=="{"&&o!=="[")return null;let i;try{i=Xt(r)}catch{return null}if(i===null||typeof i!=="object")return null;let s=typeof e.name==="string"?"_named":"",a=Array.isArray(i)?"args_json_string_to_array":"args_json_string_to_object";if(!t)return{input:e,shapeClass:`${a}${s}_detect_only`};return{input:{...e,args:i},shapeClass:`${a}${s}`}}var snf=A(()=>{vr()});var ufe=4096;function u1t(e,t){if(t!=null)return{timeout:t};return{timeout:e}}function Jir(e){WOe.runInContext(`(() => {
+    Object.defineProperty(Error, 'prepareStackTrace', {
+      value: (err, sites) => String(err.stack ?? err),
+      writable: false, configurable: false,
+    });
+    // Delete globals with no REPL use case that either run callbacks on the
+    // host event loop outside any try/catch (FinalizationRegistry \u2014 same
+    // DoS shape as a throwing setTimeout callback) or expose shared-memory
+    // primitives (Atomics/SharedArrayBuffer \u2014 no cross-realm use, pure
+    // attack-surface reduction).
+    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',
+                     'WeakRef', 'Atomics', 'SharedArrayBuffer',
+                     'queueMicrotask',
+                     // eval is NOT deleted here \u2014 hardenVMIntrinsics is
+                     // shared with REPLTool (codeGeneration:{strings:true}).
+                     // WorkflowTool blocks eval via codeGeneration:false.
+                     // JSC debug/shell globals \u2014 present only if
+                

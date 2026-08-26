@@ -1,9 +1,41 @@
 import React, { useCallback } from 'react';
-import { logEvent } from 'src/services/analytics/index.js';
+import {
+  logEvent,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from 'src/services/analytics/index.js';
 import { Box, Dialog, Link, Text } from '@anthropic/ink';
 import type { ExternalClaudeMdInclude } from '../utils/claudemd.js';
 import { saveCurrentProjectConfig } from '../utils/config.js';
 import { Select } from './CustomSelect/index.js';
+
+/** densable phn source — dialog vs /config Jr toggle. */
+export type ExternalIncludesDecisionSource = 'dialog' | 'config_toggle';
+
+/**
+ * densable phn / recordExternalIncludesDecision.
+ * Official: KE(flags, storageV5) then N(..., {source: me(t)}).
+ * Local save has no storageV5; me is the analytics identity wrap.
+ */
+export function recordExternalIncludesDecision(
+  approved: boolean,
+  source: ExternalIncludesDecisionSource,
+  // Official phn third arg is context / storageV5. Local save has no storageV5.
+  _context?: unknown,
+): void {
+  saveCurrentProjectConfig(current => ({
+    ...current,
+    hasClaudeMdExternalIncludesApproved: approved,
+    hasClaudeMdExternalIncludesWarningShown: true,
+  }));
+  logEvent(
+    approved
+      ? 'tengu_claude_md_external_includes_dialog_accepted'
+      : 'tengu_claude_md_external_includes_dialog_declined',
+    {
+      source: source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    },
+  );
+}
 
 type Props = {
   onDone(): void;
@@ -23,23 +55,8 @@ export function ClaudeMdExternalIncludesDialog({
 
   const handleSelection = useCallback(
     (value: 'yes' | 'no') => {
-      if (value === 'no') {
-        logEvent('tengu_claude_md_external_includes_dialog_declined', {});
-        // Mark that we've shown the dialog but it was declined
-        saveCurrentProjectConfig(current => ({
-          ...current,
-          hasClaudeMdExternalIncludesApproved: false,
-          hasClaudeMdExternalIncludesWarningShown: true,
-        }));
-      } else {
-        logEvent('tengu_claude_md_external_includes_dialog_accepted', {});
-        saveCurrentProjectConfig(current => ({
-          ...current,
-          hasClaudeMdExternalIncludesApproved: true,
-          hasClaudeMdExternalIncludesWarningShown: true,
-        }));
-      }
-
+      // densable A0o → phn(kDO==="yes", "dialog", storageV5)
+      recordExternalIncludesDecision(value === 'yes', 'dialog');
       onDone();
     },
     [onDone],

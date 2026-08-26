@@ -1,0 +1,8 @@
+176398696: Cannot destructure property 'messages' from null or undefined value
+176398952: Cannot destructure property 'setStickyPrompt' from null or undefined value
+176399256: ] firstVisible=
+176404856: force
+176407064: clicked
+176414160: VirtualMessageList: duplicate sibling itemKeys (deduped via #N suffix; upstream uuid-dup): 
+176419320: prompt
+176422064: prompt

@@ -2,6 +2,7 @@ import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import { has1mContext } from '../utils/context.js';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -37,6 +38,10 @@ import {
   modelDisplayString,
   parseUserSpecifiedModel,
 } from '../utils/model/model.js';
+import {
+  computeModelPickerVisibleSlots,
+  isModelPickerFastModeNoticeChrome,
+} from '../utils/model/modelPickerVisible.js';
 import { getModelOptions } from '../utils/model/modelOptions.js';
 import { getSettingsForSource, updateSettingsForSource } from '../utils/settings/settings.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
@@ -103,7 +108,19 @@ export function ModelPicker({
 }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const exitState = useExitOnCtrlCDWithKeybindings();
-  const maxVisible = 10;
+  const { rows } = useTerminalSize();
+  // densable sgM — LFh=14 chrome; no XKl search host → ngM=0
+  const maxVisible = computeModelPickerVisibleSlots({
+    rows,
+    searchChrome: false,
+    fastModeNotice: isModelPickerFastModeNoticeChrome(
+      isFastModeEnabled(),
+      showFastModeNotice,
+      isFastModeAvailable(),
+      isFastModeCooldown(),
+    ),
+    sessionModelBanner: sessionModel != null,
+  });
 
   const initialValue = initial === null ? NO_PREFERENCE : initial;
   const [focusedValue, setFocusedValue] = useState<string | undefined>(initialValue);

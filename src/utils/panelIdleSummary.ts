@@ -10,12 +10,16 @@
  * means "waiting on nested Agent" (Yqe D), not panel idle collapse.
  */
 import { isTerminalStatus } from '../components/tasks/taskStatusUtils.js'
-import type { LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import {
   isInProcessTeammateTask,
   type InProcessTeammateTaskState,
 } from '../tasks/InProcessTeammateTask/types.js'
-import { isPanelAgentTask } from '../tasks/LocalAgentTask/LocalAgentTask.js'
+import {
+  isPanelAgentTask,
+  type LocalAgentTaskState,
+} from '../tasks/LocalAgentTask/LocalAgentTask.js'
+import type { TaskState } from '../tasks/types.js'
+import { IDLE_WINDOW_KEEPALIVE_REASON } from './task/framework.js'
 
 /** densable cIa — show this many idle rows before collapsing the rest. */
 export const IDLE_COLLAPSE_THRESHOLD = 3
@@ -156,4 +160,94 @@ export function remapPanelSelectionIndex(
     if (o !== -1) return o + 1
   }
   return 0
+}
+
+/**
+ * densable gpe — DW (panel local_agent) || pR (in_process_teammate).
+ * Unlike isPanelListTask, does not require evictAfter !== 0.
+ */
+export function isPanelManagedTask(t: unknown): t is PanelAgentTask {
+  return isPanelAgentTask(t) || isInProcessTeammateTask(t)
+}
+
+/**
+ * densable iHs — completed backgrounded panel local_agent that is only held
+ * by idle-window keepalive (empty Set still passes every()).
+ * Official: type==="local_agent" && completed && DW && isBackgrounded &&
+ * !cx && quietlyParked!==true && keepalive.every(===qFe).
+ */
+export function isParkedIdleWindowSubagent(
+  e: TaskState | PanelAgentTask,
+): boolean {
+  return (
+    e.type === 'local_agent' &&
+    e.status === 'completed' &&
+    isPanelAgentTask(e) &&
+    e.isBackgrounded &&
+    !('isObserver' in e && e.isObserver === true) &&
+    e.quietlyParked !== true &&
+    [...(e.keepaliveReasons ?? [])].every(
+      t => t === IDLE_WINDOW_KEEPALIVE_REASON,
+    )
+  )
+}
+
+/**
+ * densable jYe — nearest ancestor that is still a visible panel local_agent
+ * and is not iHs. in_process_teammate has no parent chain.
+ */
+function nearestNonParkedPanelAncestorId(
+  tasks: Record<string, TaskState | undefined>,
+  task: PanelAgentTask,
+): string | undefined {
+  if (task.type === 'in_process_teammate') return undefined
+  const seen = new Set<string>()
+  let n = task.parentAgentId
+  while (n && !seen.has(n)) {
+    seen.add(n)
+    const o = tasks[n]
+    if (!isPanelAgentTask(o) || o.evictAfter === 0) return undefined
+    if (!isParkedIdleWindowSubagent(o)) return n
+    n = o.parentAgentId
+  }
+  return undefined
+}
+
+/**
+ * densable sXc — viewed task plus jYe ancestor chain of gpe nodes.
+ */
+function viewingPanelAncestorIds(
+  tasks: Record<string, TaskState | undefined>,
+  viewingAgentTaskId: string | undefined,
+): Set<string> {
+  const viewed = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined
+  const ids = new Set<string>()
+  for (
+    let o = isPanelManagedTask(viewed) ? viewed : undefined;
+    o && !ids.has(o.id);
+  ) {
+    ids.add(o.id)
+    const ancestorId = nearestNonParkedPanelAncestorId(tasks, o)
+    const ancestor = ancestorId ? tasks[ancestorId] : undefined
+    o = isPanelManagedTask(ancestor) ? ancestor : undefined
+  }
+  return ids
+}
+
+/**
+ * densable ary — a visible gpe row is iHs and not in the viewed ancestor set.
+ * Footer MJc: "/tasks to see subagents". Gate !fl() (screen reader) at host.
+ */
+export function hasParkedSubagentsForFooter(
+  tasks: Record<string, TaskState | undefined>,
+  viewingAgentTaskId: string | undefined,
+): boolean {
+  const ancestors = viewingPanelAncestorIds(tasks, viewingAgentTaskId)
+  return Object.values(tasks).some(
+    n =>
+      isPanelManagedTask(n) &&
+      n.evictAfter !== 0 &&
+      !ancestors.has(n.id) &&
+      isParkedIdleWindowSubagent(n),
+  )
 }

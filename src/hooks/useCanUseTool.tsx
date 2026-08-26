@@ -185,6 +185,7 @@ function useCanUseTool(setToolUseConfirmQueue: React.Dispatch<React.SetStateActi
                     updatedInput: result.updatedInput,
                     suggestions: result.suggestions,
                     permissionMode: appState.toolPermissionContext.mode,
+                    suppressAlwaysAllowRule: result.suppressAlwaysAllowRule === true,
                   });
                   if (isPermissionHookReprompt(coordinatorDecision)) {
                     result = {

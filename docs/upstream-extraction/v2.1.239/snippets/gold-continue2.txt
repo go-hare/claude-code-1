@@ -1,0 +1,158 @@
+
+==== iYd STS 303896722 ====
+l}function oYd(){return V.CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS??60000}async function iYd(){let[{STSClient:e,GetCallerIdentityCommand:t},r]=await Promise.all([Promise.resolve().then(() => (Fba(),$ba)),qY()]),n=new e({region:r,...await NMt({url:LMt(r),region:r,requestTimeoutMs:nYd})});await Za(n.send(new t({})),oYd(),"AWS STS")}async function sYd(){try{E("Clearing AWS credential provider cache");let[{fromIni:e},t]=await Promise.all([Promise.resolve().then(() => (fLt(),pLt)),qY()]),r=await Gmt({url:LMt(t),requestTimeoutMs:nYd}),n=e({ignoreCache:!0,...r&&{clientConfig:{requestHandler:r},parentClientConfig:{requestHandler:r,region:t}}});await Za(n(),oYd(),"AWS ini cache refresh"),E("AWS credential provider cache refreshed")}catch(e){E(`Failed to refresh AWS credential cache: ${le(e)}`)}}var NZb,txe,nYd=30000;var OZe=A(()=>{mr();Yft();qe();st();my();NZb=/ExpiredToken|InvalidSignature|SignatureDoesNotMatch|UnrecognizedClient|InvalidClientTokenId|security token.*(invalid|expired)|signature we calculated does not match|Bearer Token has expired|Authentication failed.*AP
+
+==== async function iYd 303896716 ====
+rn null}function oYd(){return V.CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS??60000}async function iYd(){let[{STSClient:e,GetCallerIdentityCommand:t},r]=await Promise.all([Promise.resolve().then(() => (Fba(),$ba)),qY()]),n=new e({region:r,...await NMt({url:LMt(r),region:r,requestTimeoutMs:nYd})});await Za(n.send(new t({})),oYd(),"AWS STS")}async function sYd(){try{E("Clearing AWS credential provider cache");let[{fromIni:e},t]=await Promise.all([Promise.resolve().then(() => (fLt(),pLt)),qY()]),r=await Gmt({url:LMt(t),requestTimeoutMs:nYd}),n=e({ignoreCache:!0,...r&&{clientConfig:{requestHandler:r},parentClientConfig:{requestHandler:r,region:t}}});await Za(n(),oYd(),"AWS ini cache refresh"),E("AWS credential provider cache refreshed")}catch(e){E(`Failed to refresh AWS credential cache: ${le(e)}`)}}var NZb,txe,nYd=30000;var OZe=A(()=>{mr();Yft();qe();st();my();NZb=/ExpiredToken|InvalidSignature|SignatureDoesNotMatch|UnrecognizedClient|InvalidClientTokenId|security token.*(invalid|expired)|signature we calculated does not match|Bearer Token has expired|Authentication fail
+
+==== chdir 301848844 301848844 ====
+ts=_Vu;yQs.exports.default=_Vu});var EVu=ae(function(Zuk,wVu){var vVu=require("path"),b7_=yVu(),v7_=bVu();function SVu(e,t){let r=e.options.env||process.env,n=process.cwd(),o=e.options.cwd!=null,i=o&&process.chdir!==void 0&&!process.chdir.disabled;if(i)try{process.chdir(e.options.cwd)}catch(a){}let s;try{s=b7_.sync(e.command,{path:r[v7_({env:r})],pathExt:t?vVu.delimiter:void 0})}catch(a){}finally{if(i)try{process.chdir(n)}catch(a){let l=a!==null&&typeof a==="object"&&typeof a.code==="string"?a.code:"";if(!(/^E[A-Z0-9]+$/.test(l)||l==="UNKNOWN"||l.startsWith("Unknown system error")))throw a}}if
+
+==== chdir 303198708 303198708 ====
+ aOt=require("constants"),Azb=process.cwd,OJo=null,Tzb=process.env.GRACEFUL_FS_PLATFORM||"win32";process.cwd=function(){if(!OJo)OJo=Azb.call(process);return OJo};try{process.cwd()}catch(e){}if(typeof process.chdir==="function"){if(LJo=process.chdir,process.chdir=function(e){OJo=null,LJo.call(process,e)},Object.setPrototypeOf)Object.setPrototypeOf(process.chdir,LJo)}var LJo;qNd.exports=kzb;function kzb(e){if(aOt.hasOwnProperty("O_SYMLINK")&&process.version.match(/^v0\.6\.[0-2]|^v0\.5\./))t(e);if(!e.lutimes)r(e);if(e.chown=i(e.chown),e.fchown=i(e.fchown),e.lchown=i(e.lchown),e.chmod=n(e.chmod),e
+
+==== chdir 313030487 313030487 ====
+ file paths[]
+- \`gl(pat,path?)\` \u2192 glob file paths[]
+- \`put(path,content)\` \u2192 write file
+${o?`- \\\`gh(args)\\\` \u2192 \\\`sh('gh '+args)\\\` with \\\`-R \\\${REPO}\\\` injected
+`:""}- \`chdir(path)\` \u2014 set cwd for this REPL call
+- \`haiku(prompt,schema?)\` \u2014 one-turn model sampling
+- \`registerTool(name,desc,schema,handler)\` / \`unregisterTool\` / \`listTools\` / \`getTool\`
+- \`log\` (console.log) \xB7 \`str\` (JSON.stringify) \xB7 \`shQuote(s)\`${o?" \xB7 \\`REPO\\` ('owner/name')":""}
+- \`await ${xl}({\u2026})\` / \`await ${ik}({\u2026})\` / \`await mcp__server__tool({\u2026})\` (MCP tools by full name)
+
+Shorthands never throw \u2014 \`sh\`/\`cat\`/\`rg\` return t
+
+==== NH chdir 301039242 ====
+k:s}=Wy(n,t);if(s&&i!==t)r.add(i);return Array.from(r)}function Cr(){return vae}function NH(e){process.chdir(e);try{process.cwd()}catch{}}async function lPt(e,t,r){await using n=await T0.open(e,"r");let o=(await n.stat()).size;if(o<=t)return null;let i=Math.min(o-t,r),s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await n.read(s,a,i-a,t+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:o}}async function eL(e,t){await using r=await T0.open(e,"r");let n=(await r.stat()).size;if(n===0)return{content:"",bytesRead:0,bytesTotal:0};let o=Math.max(0,n-t),i=n-o,s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await r.read(s,a,i-a,o+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:n}}async function*KMu(e,t=65536){let r=await T0.open(e,"r"),n=Buffer.alloc(t),o=0,i=[],s=0;try{while(!0){let{bytesRead:a}=await r.read(n,0,t,o);if(a===0)break;o+=a;let l=n.subarray(0,a),c=0;while(c<a){let u=l.indexOf(10,c);if(u===-1){i.push(Buffer.from(l.subarray(c))),s+=a-c;break}if(s===0)yield l.subarray(c,u);el
+
+#### "function iYd(" 1 [303896722] 
+
+==== function iYd( 303896722 ====
+l}function oYd(){return V.CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS??60000}async function iYd(){let[{STSClient:e,GetCallerIdentityCommand:t},r]=await Promise.all([Promise.resolve().then(() => (Fba(),$ba)),qY()]),n=new e({region:r,...await NMt({url:LMt(r),region:r,requestTimeoutMs:nYd})});await Za(n.send(new t({})),oYd(),"AWS STS")}async function sYd(){try{E("Clearing AWS credential provider cache");let[{fromIni:e},t]=await Promise.all([Promise.resolve().then(() => (fLt(),pLt)),qY()]),r=await Gmt({url:LMt(t),requestTimeoutMs:nYd}),n=e({ignoreCache:!0,...r&&{clientConfig:{requestHandler:r},parentClientConfig:{requestHandler:r,region:t}}});await Za(n(),oYd(),"AWS ini cache refresh"),E("AWS credential provider cache refreshed")}catch(e){E(`Failed to refresh AWS credential ca
+
+#### "await iYd()" 1 [304100658] 
+
+==== await iYd() 304100658 ====
+n bor;try{return E("Fetching AWS caller identity for AWS auth refresh command"),await iYd(),E("Fetched AWS caller identity, skipping AWS auth refresh command"),!1}catch{if(bor)return bor;if(coi!==null&&Date.now()-coi<Snv)return!1;return bor=(async()=>{try{return await o2n(e)}finally{if(t===Cwa)coi=Date.now();bor=null}})(),bor}}function o2n(e,t){E("Running AWS auth refresh command");let r=ome.getInstance();return r.startAuthentication(),new Promise((n)=>{let o=Mwa.exec(e,{timeout:Env,signal:t,windowsHide:!0});o.stdout.on("data",(i)=>{let s=i.toString().trim();if(s)r.addOutput(s),E(s,{level:"debug"})}),o.stderr.on("data",(i)=>{let s=i.toString().trim();if(s)r.setError(s),E(s,{level:"error"})}),o.on("close",(i,s)=>{if(i===0)E("AWS auth refresh completed successfully"),r.en
+
+#### "the teammates on your team" 1 [306241212] 
+
+==== the teammates on your team 306241212 ====
+G();gjv=`Lists agents you can ${Jm} to \u2014 in-process subagents you spawned, the teammates on your team, other local Claude sessions on this machine, your Claude sessions running in the cloud (when this session has cloud access; a cloud session receives your message but cannot message any session back yet \u2014 do not ask it to reply, read its answer in its own transcript), and (when Remote Control is connected here) your account's other sessions \u2014 Remote Control sessions on other machines and cloud sessions, each row labeled by kind. Names are the address: send with \`${Jm}({to: "<name>", message: "..."})\`, copying the name exactly as a row prints it. Append a row's \` [ref]\` only when the bare name is not enough \u2014 two rows share it, or an error asks yo
+
+#### "cannot message any session back" 1 [306241406] 
+
+==== cannot message any session back 306241406 ====
+ (when this session has cloud access; a cloud session receives your message but cannot message any session back yet \u2014 do not ask it to reply, read its answer in its own transcript), and (when Remote Control is connected here) your account's other sessions \u2014 Remote Control sessions on other machines and cloud sessions, each row labeled by kind. Names are the address: send with \`${Jm}({to: "<name>", message: "..."})\`, copying the name exactly as a row prints it. Append a row's \` [ref]\` only when the bare name is not enough \u2014 two rows share it, or an error asks you to disambiguate.`});var DOp={};Et(DOp,{CRON_CREATE_TOOL_NAME:()=>iP,CRON_DELETE_DESCRIPTION:()=>R$a,CRON_DELETE_TOOL_NAME:()=>dq,CRON_LIST_DESCRIPTION:()=>H$a,CRON_LIST_TOOL_NAME:()=>rNt,DEFAU
+
+#### "this session (" 10 [100818825,118659361,121709620,127893444,138568412,144175214,144661514,146611833,150138967,150808126] 
+
+==== this session ( 100818825 ====
+.......	...p...notify_when_idle is only available from the main conversation of this session (not from a subagent or teammate).........	...I...No idle subscription was made (only the main conversation can subscribe)................	...|...
+The message was delivered, but no idle subscription was made: a permission handler removed notify_when_idle from this call.............	...N...No idle subscription was made (a permission handler removed it from the call)...........	...�...Cross-machine messaging is unavailable: it sends the message through Anthropic servers, which is not allowed on a third-party provider or with nonessential traffic disabled. Messages to sessions on this machine still work...........	.......file-transfers..........	...=...Cross-session file transfer i
+
+#### "you —" 0 [] 
+
+#### " (you)" 0 [] 
+
+#### "is you" 10 [85640234,127899266,144459440,150416286,160969252,163739053,163750501,167009592,168359761,172308226] 
+
+==== is you 85640234 ====
+theparticipants in thefurther developmentunder the directionis often consideredhis younger brother</td></tr></table><a http-equiv="X-UA-physical propertiesof British Columbiahas been criticized(with the exceptionquestions about thepassing through the0" cellpadding="0" thousands of peopleredirects here. Forhave children under%3E%3C/script%3E"));<a href="http://www.<li><a href="http://site_name" content="text-decoration:nonestyle="display: none<meta http-equiv="X-new Date().getTime() type="image/x-icon"</span><span class="language="javascriptwindow.location.href<a href="javascript:-->
+<script type="t<a href='http://www.hortcut icon" href="</div>
+<div class="<script src="http://" rel="stylesheet" t</div>
+<script type=/a> <a href="http:// allowTransparency="X-UA-Compatibl
+
+#### "your name is" 0 [] 
+
+#### "this session is" 10 [100839096,113793078,115320101,115320204,121820414,139102500,148098272,153566411,155065158,155103160] 
+
+==== this session is 100839096 ====
+onversation.............	... ...__artifactConsentAskCanReachUser........	...�...this session is notified when it is republished elsewhere (another session, or someone saving from the page); in a remote session, also when a comment on it is sent to Claude (which Claude may then read and answer). In an interactive session this uses a live background connection; a remote session is woken with a new turn. Lasts for the rest of this session; republish notifications carry no content...............	�&.�...approving resumes republish notifications (and, in remote sessions, to-Claude comment wakes) for the rest of the session; republish notifications carry no content..............	...p...schema-validated entries only, including typed answers other collaborators may have written 
+
+#### "yourself" 10 [71652854,71652992,85563952,109097816,141777721,148496373,153819863,153820830,153822285,166195058] 
+
+==== yourself 71652854 ====
+ou pass in without
+having to manually call Bun.serve() or write the boilerplate yourself. This runs Bun's bundler on
+the HTML files, their JavaScript, and CSS, and serves them up. This doesn't do anything you can't do
+yourself with Bun.serve().
+`), process.exit(0);
+      continue;
+    }
+    if (arg.includes("*") || arg.includes("**") || arg.includes("{")) {
+      let glob = new Bun.Glob(arg);
+      for (let file of glob.scanSync(cwd)) {
+        let resolved = path.resolve(cwd, file);
+        if (resolved.includes(path.sep + "node_modules" + path.sep))
+          continue;
+        try {
+          resolved = Bun.resolveSync(resolved, cwd);
+        } catch {
+          resolved = Bun.resolveSync("./" + resolved, cwd);
+        }
+        if (resolved.includes(path.sep + "node_
+
+#### "sending to yourself" 0 [] 
+
+#### "this session's name" 0 [] 
+
+#### "Found " 10 [70897738,72304312,72304765,86033155,86033398,87085979,87086733,87086936,87087663,87088631] 
+
+==== Found  70897738 ====
+= "string" && errorMessage.includes("(entry point)")) {
+      let m = /ModuleNotFound resolving "(.+?)"/.exec(errorMessage);
+      if (m)
+        error = Error(`Cannot find module '${m[1]}'`, { cause: error }), error.code = "MODULE_NOT_FOUND";
+    }
+    this.emit("error", error);
+  }
+  #onMessage(event) {
+    this.emit("message", event.data);
+  }
+  #onMessageError(event) {
+    this.emit("messageerror", event.error ?? event.data ?? event);
+  }
+  #onOpen() {
+    this.emit("online");
+  }
+  async[Symbol.asyncDispose]() {
+    await this.terminate();
+  }
+}
+
+class HeapSnapshotStream extends Readable {
+  #json;
+  constructor(json) {
+    super();
+    this.#json = json;
+  }
+  _read() {
+    if (this.#json !== @undefined)
+      this.push(this.#json), this.push(null), this.#json = @
+
+#### "agent(s):" 0 [] 
+
+#### "pipe\\\\claude-code" 0 [] 
+
+#### "\\\\.\\\\pipe\\\\" 9 [303721007,307765080,307765205,309797175,312017160,318116128,327239712,328559489,328560412] 
+
+==== \\.\\pipe\\ 303721007 ====
+rn eor.join(En(),"sessions")}function lQ(e){let t=jWe(e);if(t!==void 0)return`\\\\.\\pipe\\${t.replace(/[A-Z]+/g,(r)=>r.toLowerCase())}`;if(IMr(e))return;return eor.resolve(e)}function CWd(e){let t=lQ(e);return t===void 0?void 0:zFn.createHash("sha256").update(t).digest("hex")}function HYb(e,t){let r=CWd(t);if(r===void 0)throw Error("refusing to derive a messaging key name for a non-canonical socket path");return`${e}.${r}.key`}async function xWd(e,t,{sweepPermitted:r}){let n=kLe();await Uht.mkdir(n,{recursive:!0,mode:448}),await PYb(n,r);let o=eor.join(n,HYb(process.pid,e));try{await Uht.unlink(o)}catch{}return await od(o,He({peerToken:t,...GWe(await eme())}),384),o}async function PYb(e,t){if(!t)return;let r;try{r=await Uht.readdir(e)}catch{return}await Promise.all(r.m
+
+#### "function xD(" 2 [303696581,331852616] 
+
+==== function xD( 303696581 ====
+_a}}$`)});function XOt(e){return oYb.test(e)}function g_a(e){return aYb.test(e)}function xD(e){if(e.startsWith("uds:"))return{scheme:"uds",target:p_a(e.slice(4))};if(e.startsWith("bridge:"))return{scheme:"bridge",target:p_a(e.slice(7))};if(e.startsWith("did:"))return{scheme:"did",target:e};if(iYb.test(e)||sYb.test(e))return{scheme:"uds",target:e};return{scheme:"other",target:e}}function Qei(e,t){if(e.trim().length===0)return"to must not be empty";let r=xD(e);if((r.scheme==="bridge"||r.scheme==="uds")&&r.target.trim().length===0)return"address target must not be empty";if(!ELe(r.target)||!ELe(e))return`'${e}' is not a local socket address. Use an address from ${t}.`;return}function ELe(e){if(!Yc(e))return!0;return jWe(e)!==void 0}function HFn(e,t){return eWd(e,t)==="same
+
+#### "scheme:\"other\"" 1 [303696857] 
+
+==== scheme:"other" 303696857 ====
+did",target:e};if(iYb.test(e)||sYb.test(e))return{scheme:"uds",target:e};return{scheme:"other",target:e}}function Qei(e,t){if(e.trim().length===0)return"to must not be empty";let r=xD(e);if((r.scheme==="bridge"||r.scheme==="uds")&&r.target.trim().length===0)return"address target must not be empty";if(!ELe(r.target)||!ELe(e))return`'${e}' is not a local socket address. Use an address from ${t}.`;return}function ELe(e){if(!Yc(e))return!0;return jWe(e)!==void 0}function HFn(e,t){return eWd(e,t)==="same"}function eti(e,t){return eWd(e,t)!=="different"}function eWd(e,t){let r=jWe(e),n=jWe(t);if(r!==void 0||n!==void 0){if(r===void 0||n===void 0)return"different";if(h_a(r)===h_a(n))return"same";return Zei(r)===Zei(n)?"maybe":"different"}if(e===t)return"same";if(IMr(e)||IMr(t))
+
+#### "untitled session" 10 [113986392,114012048,155480176,196032312,303699308,303699346,303702874,314393335,326025778,326025866] 
+
+==== untitled session 303699308 ====
+nction nti(e){let t=typeof e==="string"?e.trim():"",r=ALe(t);return!t||!r||r==="untitled session"&&t.toLowerCase()!=="untitled session"}function PFn(e){return e.environmentKind!==void 0&&e.environmentKind!=="bridge"}function Vu(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.type===

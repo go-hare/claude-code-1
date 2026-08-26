@@ -1,0 +1,194 @@
+===== Dy0/Oy0 @312214149 before=200 after=8000 =====
+
+":Okg,"typescript/claude-api/tool-use.md":Nkg,"typescript/managed-agents/README.md":Fkg}});var Gkg={};yt(Gkg,{CLAUDE_API_SKILL_DESCRIPTION:()=>Wkg,matchSubcommand:()=>wRc,processSkillMarkdown:()=>Ryo,registerClaudeApiSkill:()=>Oy0});function jkg(){return Promise.resolve().then(() => (Bkg(),Ukg))}function Hy0(e){let t={};for(let[r,n]of Object.entries(e.SKILL_FILES))t[r]=Ryo(n,e.SKILL_MODEL_VARS);return t}async function Py0(){let e=Yt(),t;try{t=await zkg.readdir(e)}catch{return null}for(let[r,n]of Object.entries(Iy0)){if(n.length===0)continue;for(let o of n)if(o.startsWith(".")){if(t.some((i)=>i.endsWith(o)))return r}else if(t.includes(o))return r}return null}function Ryo(e,t){let r=e,n;do n=r,r=r.replace(/<!--[\s\S]*?-->\n?/g,"");while(r!==n);return r=r.replace(/\{\{(\w+)\}\}/g,(o,i)=>t[i]??o),r}function Dy0(e,t,r,n){let o=[Ryo(r.SKILL_PROMPT,r.SKILL_MODEL_VARS).trimEnd()];if(!n)o.push(`## Reference Files Unavailable
+
+This skill's reference files could not be written to disk for this session, so the \`{lang}/\u2026\`, \`shared/\u2026\`, and \`curl/\u2026\` files cited above cannot be Read. Do not guess their contents \u2014 WebFetch the matching URL from \`shared/live-sources.md\`, included below, whenever the Reading Guide points at one of those files. If a cited \`shared/\u2026\` file has no matching URL below (skill-authored guides such as \`shared/prompt-audit.md\`, \`shared/agent-design.md\`, \`shared/platform-availability.md\`), state that the reference is unavailable this session and proceed best-effort from this document.
+
+<doc path="shared/live-sources.md">
+${Ryo(r.SKILL_FILES["shared/live-sources.md"]??"",r.SKILL_MODEL_VARS).trim()}
+</doc>`);if(e){let i=`${e}/claude-api/README.md`,s=r.SKILL_FILES[i];if(s)o.push(`## Detected Language: ${e}
+
+\`${i}\` is included below since every task starts there.${n?" Read the other referenced files from the base directory on demand. That directory is session-scoped \u2014 after resuming a session, or if a Read under it ever fails, re-invoke this skill to re-extract.":""}
+
+<doc path="${i}">
+${Ryo(s,r.SKILL_MODEL_VARS).trim()}
+</doc>`)}else if(wRc(t)!=="prompt-audit")o.push(n?"No project language was auto-detected. Ask the user which language they are using (see Language Detection above), then Read the matching `{lang}/claude-api/README.md` (or `curl/examples.md` for cURL/raw HTTP or an unsupported language) from the base directory before anything else.":"No project language was auto-detected. Ask the user which language they are using (see Language Detection above) before writing code.");if(t)o.push(`## User Request
+
+${t}`);return o.join(`
+
+`)}function wRc(e){let t=e.trim().toLowerCase().split(/\s+/)[0]??"";return My0.find((r)=>r===t)??"none"}function Oy0({disabled:e=!1}={}){ad({name:"claude-api",menuDescription:"Build and debug apps that use the Claude API",description:Wkg,allowedTools:["Read","Grep","Glob","WebFetch"],userInvocable:!0,isEnabled:()=>!e,files:()=>jkg().then(Hy0),async getPromptForCommand(t,r,n){let[o,i]=await Promise.all([Py0(),jkg()]);return L("tengu_claude_api_skill_loaded",{detected_lang:ge(o??"none"),subcommand:ge(wRc(t)),has_args:t.trim().length>0}),[{type:"text",text:Dy0(o,t,i,typeof n==="string")}]}})}var zkg,Iy0,Wkg,My0;var Vkg=A(()=>{Ut();Ii();Bb();zkg=require("fs/promises");Iy0={python:[".py","requirements.txt","pyproject.toml","setup.py","Pipfile"],typescript:[".ts",".tsx","tsconfig.json","package.json"],java:[".java","pom.xml","build.gradle"],go:[".go","go.mod"],ruby:[".rb","Gemfile"],csharp:[".cs",".csproj"],php:[".php","composer.json"],curl:[]};Wkg=["Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.",'TRIGGER \u2014 read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).',"SKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named \u2014 don't Read the file)."].join(`
+`),My0=["migrate","managed-agents-onboard","prompt-audit"]});var Kkg=`# Claude Tag (Claude in Slack)\r
+\r
+Claude Tag is Claude Code's Slack surface. This file is the offline floor for questions about it \u2014 it exists because Claude Tag is newer than most training data, so answers from memory are usually wrong or describe the earlier, now-replaced Slack app. Read this first, then fetch the docs.\r
+\r
+## What it is\r
+\r
+Claude Tag puts Claude in a Slack workspace as a teammate the whole organization shares. Anyone in a channel Claude has been invited to can \`@Claude\` with a task, and Claude works on it in that thread \u2014 reading the thread for context, posting progress, and replying when it's done.\r
+\r
+Behind every Slack thread is a full remote Claude Code session running in an isolated cloud container, with the organization's connected repositories, tools, and connections available to it. It is the same Claude Code that runs in a terminal or on the web, driven from Slack instead of a prompt.\r
+\r
+Key properties:\r
+\r
+- **One \`@Claude\` for the org.** Claude Tag runs as the organization's shared Claude identity with admin-configured access, not as each individual user's Claude account. What Claude can reach in a thread is decided by the organization's configuration, not by who mentioned it.\r
+- **Thread = session.** Each Slack thread maps to one remote Claude Code session. Follow-up messages in the same thread continue that session; a new thread starts a fresh one.\r
+- **Configuration is snapshotted at thread start.** A session captures the organization's Claude Tag configuration when its thread begins. Changing the configuration afterward does not affect threads that are already running \u2014 start a new thread to pick up the change.\r
+\r
+## Availability and what it replaces\r
+\r
+- Claude Tag launched in beta for Claude **Enterprise** and **Team** plans.\r
+- It **replaces the earlier "Claude in Slack" / "Claude Code in Slack" app**, which routed each user's \`@Claude\` mentions to sessions under that user's own Claude account. Workspaces using the earlier app migrate to the organization-managed model \u2014 see the migration guide linked from the docs below.\r
+- If the user's training-data mental model is "each person connects their own Claude account and their own repos in the Slack App Home", that describes the earlier app, not Claude Tag. Verify against the docs before repeating it.\r
+\r
+## Getting started\r
+\r
+From the Claude Code CLI, the user can run:\r
+\r
+\`\`\`\r
+/install-slack-app\r
+\`\`\`\r
+\r
+This opens the Claude app's Slack Marketplace listing in the browser so a workspace admin can install it. (Check the "Available commands" list in the Current Build section of your prompt \u2014 if \`/install-slack-app\` is not listed there, it is not available in this build; point the user at the docs instead.)\r
+\r
+Enabling and configuring Claude Tag is an **organization owner** action, done in either of two places:\r
+\r
+- **Admin settings \u2192 Claude Tag** at \`https://claude.ai/admin-settings/claude-tag\`\r
+- **\`@Claude connect\`** from inside Slack, which starts the connection flow\r
+\r
+Once enabled, users invite Claude to a channel (\`/invite @Claude\`) and mention \`@Claude\` in a message or thread to start a session.\r
+\r
+## What an organization owner can configure\r
+\r
+All of this lives in Admin settings \u2192 Claude Tag and applies organization-wide:\r
+\r
+| Setting | What it controls |\r
+|---|---|\r
+| Repositories | W
+
+
+===== b'function Oy0(' @312216683 =====
+
+/\s+/)[0]??"";return My0.find((r)=>r===t)??"none"}function Oy0({disabled:e=!1}={}){ad({name:"claude-api",menuDescription:"Build and debug apps that use the Claude API",description:Wkg,allowedTools:["Read","Grep","Glob","WebFetch"],userInvocable:!0,isEnabled:()=>!e,files:()=>jkg().then(Hy0),async getPromptForCommand(t,r,n){let[o,i]=await Promise.all([Py0(),jkg()]);return L("tengu_claude_api_skill_loaded",{detected_lang:ge(o??"none"),subcommand:ge(wRc(t)),has_args:t.trim().length>0}),[{type:"text",text:Dy0(o,t,i,typeof n==="string")}]}})}var zkg,Iy0,Wkg,My0;var Vkg=A(()=>{Ut();Ii();Bb();zkg=require("fs/promises");Iy0={python:[".py","requirements.txt","pyproject.toml","setup.py","Pipfile"],typescript:[".ts",".tsx","tsconfig.json","package.json"],java:[".java","pom.xml","build.gradle"],go:[".go","go.mod"],ruby:[".rb","Gemfile"],csharp:[".cs",".csproj"],php:[".php","composer.json"],curl:[]};Wkg=["Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.",'TRIGGER \u2014 read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).',"SKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named \u2014 don't Read the file)."].join(`
+`),My0=["migrate","managed-agents-onboard","prompt-audit"]});var Kkg=`# Claude Tag (Claude in Slack)\r
+\r
+Claude Tag is Claude Code's Slack surface. This file is the offline floor for questions about it \u2014 it exists because Claude Tag is newer than most training data, so answers from memory are usually wrong or describe the earlier, now-replaced Slack app. Read this first, then fetch the docs.\r
+\r
+## What it is\r
+\r
+Claude Tag puts Claude in a Slack workspace as a teammate the whole organization shares. Anyone in a channel Claude has been invited to can \`@Claude\` with a task, and Claude works on it in that thread \u2014 reading the thread for context, posting progress, and replying when it's done.\r
+\r
+Behind every Slack thread is a full remote Claude Code session running in an isolated cloud container, with the organization's connected repositories, tools, and connections available to it. It is the same Claude Code that runs in a terminal or on the web, driven from Slack instead of a prompt.\r
+\r
+Key properties:\r
+\r
+- **One \`@Claude\` for the org.** Claude Tag runs as the organization's shared Claude identity with admin-configured access, not as each individual user's Claude account. What Claude can reach in a thread is decided by the organization's configuration, not by who mentioned it.\r
+- **Thread = session.** Each Slack thread maps to one remote Claude Code session. Follow-up messages in the same thread continue that session; a new thread starts a fresh one.\r
+- **Configuration is snapshotted at thread start.** A session captures the organization's Claude Tag configuration when its thread begins. Changing the configuration afterward does not affect threads that are already running \u2014 start a new thread to pick up the change.\r
+\r
+## Availability and what it replaces\r
+\r
+- Claude Tag launched in beta for Claude **Enterprise** and **Team** plans.\r
+- It **replaces the earlier "Claude in Slack" / "Claude Code in Slack" app**, which routed each user's \`@Claude\` mentions to sessions un
+
+
+===== b'function Dy0(' @312214755 =====
+
+rn r=r.replace(/\{\{(\w+)\}\}/g,(o,i)=>t[i]??o),r}function Dy0(e,t,r,n){let o=[Ryo(r.SKILL_PROMPT,r.SKILL_MODEL_VARS).trimEnd()];if(!n)o.push(`## Reference Files Unavailable
+
+This skill's reference files could not be written to disk for this session, so the \`{lang}/\u2026\`, \`shared/\u2026\`, and \`curl/\u2026\` files cited above cannot be Read. Do not guess their contents \u2014 WebFetch the matching URL from \`shared/live-sources.md\`, included below, whenever the Reading Guide points at one of those files. If a cited \`shared/\u2026\` file has no matching URL below (skill-authored guides such as \`shared/prompt-audit.md\`, \`shared/agent-design.md\`, \`shared/platform-availability.md\`), state that the reference is unavailable this session and proceed best-effort from this document.
+
+<doc path="shared/live-sources.md">
+${Ryo(r.SKILL_FILES["shared/live-sources.md"]??"",r.SKILL_MODEL_VARS).trim()}
+</doc>`);if(e){let i=`${e}/claude-api/README.md`,s=r.SKILL_FILES[i];if(s)o.push(`## Detected Language: ${e}
+
+\`${i}\` is included below since every task starts there.${n?" Read the other referenced files from the base directory on demand. That directory is session-scoped \u2014 after resuming a session, or if a Read under it ever fails, re-invoke this skill to re-extract.":""}
+
+<doc path="${i}">
+${Ryo(s,r.SKILL_MODEL_VARS).trim()}
+</doc>`)}else if(wRc(t)!=="prompt-audit")o.push(n?"No project language was auto-detected. Ask the user which language they are using (see Language Detection above), then Read the matching `{lang}/claude-api/README.md` (or `curl/examples.md` for cURL/raw HTTP or an unsupported language) from the base directory before anything else.":"No project language was auto-detected. Ask the user which language they are using (see Language Detection above) before writing code.");if(t)o.push(`## User Request
+
+${t}`);return o.join(`
+
+`)}function wRc(e){let t=e.trim().toLowerCase().split(/\s+/)[0]??"";return My0.find((r)=>r===t)??"none"}function Oy0({disabled:e=!1}={}){ad({name:"claude-api",menuDescription:"Build and debug apps that use the Claude API",description:Wkg,allowedTools:["Read","Grep","Glob","WebFetch"],userInvocable:!0,isEnabled:()=>!e,files:()=>jkg().then(Hy0),async getPromptForCommand(t,r,n){let[o,i]=await Promise.all([Py0(),jkg()]);return L("tengu_claude_api_skill_loaded",{detected_lang:ge(o??"none"),subcommand:ge(wRc(t)),has_args:t.trim().length>0}),[{type:"text",text:Dy0(o,t,i,typeof n==="string")}]}})}var zkg,Iy0,Wkg,My0;var Vkg=A(()=>{Ut();Ii();Bb();zkg=require("fs/promises");Iy0={python:[".py","requirements.txt","pyproject.toml","setup.py","Pipfile"],typescript:[".ts",".tsx","tsconfig.json","package.json"],java:[".java","pom.xml","build.gradle"],go:[".go","go.mod"],ruby:[".rb","Gemfile"],csharp:[".cs",".csproj"],php:[".php","composer.json"],curl:[]};Wkg=["Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.",'TRIGGER \u2014 read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).',"SKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named \u2014 don't Read the file)."].join(`
+`),My0=["migrate","managed-agents-onboard","prompt-audit"]});var Kkg=`# Claude Tag (Claude in Slack)\r
+\r
+Cla
+
+
+===== b'function wRc(' @312216582 =====
+
+push(`## User Request
+
+${t}`);return o.join(`
+
+`)}function wRc(e){let t=e.trim().toLowerCase().split(/\s+/)[0]??"";return My0.find((r)=>r===t)??"none"}function Oy0({disabled:e=!1}={}){ad({name:"claude-api",menuDescription:"Build and debug apps that use the Claude API",description:Wkg,allowedTools:["Read","Grep","Glob","WebFetch"],userInvocable:!0,isEnabled:()=>!e,files:()=>jkg().then(Hy0),async getPromptForCommand(t,r,n){let[o,i]=await Promise.all([Py0(),jkg()]);return L("tengu_claude_api_skill_loaded",{detected_lang:ge(o??"none"),subcommand:ge(wRc(t)),has_args:t.trim().length>0}),[{type:"text",text:Dy0(o,t,i,typeof n==="string")}]}})}var zkg,Iy0,Wkg,My0;var Vkg=A(()=>{Ut();Ii();Bb();zkg=require("fs/promises");Iy0={python:[".py","requirements.txt","pyproject.toml","setup.py","Pipfile"],typescript:[".ts",".tsx","tsconfig.json","package.json"],java:[".java","pom.xml","build.gradle"],go:[".go","go.mod"],ruby:[".rb","Gemfile"],csharp:[".cs",".csproj"],php:[".php","composer.json"],curl:[]};Wkg=["Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.",'TRIGGER \u2014 read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).',"SKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named \u2014 don't Read the file)."].join(`
+`),My0=["migrate","managed-agents-onboard","prompt-audit"]});var Kkg=`# Claude Tag (Claude in Slack)\r
+\r
+Claude Tag is Claude Code's Slack surface. This file is the offline floor for questions about it \u2014 it exists because Claude Tag is newer than most training data, so answers from memory are usually wrong or describe the earlier, now-replaced Slack app. Read this first, then fetch the docs.\r
+\r
+## What it is\r
+\r
+Claude Tag puts Claude in a Slack workspace as a teammate the whole organization shares. Anyone in a channel Claude has been invited to can \`@Claude\` with a task, and Claude works on it in that thread \u2014 reading the thread for context, posting progress, and replying when it's done.\r
+\r
+Behind every Slack thread is a full remote Claude Code session running in an isolated cloud container, with the organization's connected repositories, tools, and connections available to it. It is the same Claude Code that runs in a terminal or on the web, driven from Slack instead of a prompt.\r
+\r
+Key properties:\r
+\r
+- **One \`@Claude\` for the org.** Claude Tag runs as the organization's shared Claude identity with admin-configured access, not as each individual user's Claude account. What Claude can reach in a thread is decided by the organization's configuration, not by who mentioned it.\r
+- **Thread = session.** Each Slack thread maps to one remote Claude Code session. Follow-up messages in the same thread continue that session; a new thread starts a fresh one.\r
+- **Configuration is snapshotted at thread start.** A session captures the organization's Claude Tag configuration when its thread begins. Changing the configuration afterward does not affect threads that are already running \u2014 start a new thread to pick up the change.\r
+\r
+## Availability and what it replaces\r
+\r
+- Claude Tag launched in beta for Claude **Enterprise** and **Team** plans.\r
+- It **replaces the earlier "Claude i
+
+
+===== b'function Hy0(' @312214246 =====
+
+{return Promise.resolve().then(() => (Bkg(),Ukg))}function Hy0(e){let t={};for(let[r,n]of Object.entries(e.SKILL_FILES))t[r]=Ryo(n,e.SKILL_MODEL_VARS);return t}async function Py0(){let e=Yt(),t;try{t=await zkg.readdir(e)}catch{return null}for(let[r,n]of Object.entries(Iy0)){if(n.length===0)continue;for(let o of n)if(o.startsWith(".")){if(t.some((i)=>i.endsWith(o)))return r}else if(t.includes(o))return r}return null}function Ryo(e,t){let r=e,n;do n=r,r=r.replace(/<!--[\s\S]*?-->\n?/g,"");while(r!==n);return r=r.replace(/\{\{(\w+)\}\}/g,(o,i)=>t[i]??o),r}function Dy0(e,t,r,n){let o=[Ryo(r.SKILL_PROMPT,r.SKILL_MODEL_VARS).trimEnd()];if(!n)o.push(`## Reference Files Unavailable
+
+This skill's reference files could not be written to disk for this session, so the \`{lang}/\u2026\`, \`shared/\u2026\`, and \`curl/\u2026\` files cited above cannot be Read. Do not guess their contents \u2014 WebFetch the matching URL from \`shared/live-sources.md\`, included below, whenever the Reading Guide points at one of those files. If a cited \`shared/\u2026\` file has no matching URL below (skill-authored guides such as \`shared/prompt-audit.md\`, \`shared/agent-design.md\`, \`shared/platform-availability.md\`), state that the reference is unavailable this session and proceed best-effort from this document.
+
+<doc path="shared/live-sources.md">
+${Ryo(r.SKILL_FILES["shared/live-sources.md"]??"",r.SKILL_MODEL_VARS).trim()}
+</doc>`);if(e){let i=`${e}/claude-api/README.md`,s=r.SKILL_FILES[i];if(s)o.push(`## Detected Language: ${e}
+
+\`${i}\` is included below since every task starts there.${n?" Read the other referenced files from the base directory on demand. That directory is session-scoped \u2014 after resuming a session, or if a Read under it ever fails, re-invoke this skill to re-extract.":""}
+
+<doc path="${i}">
+${Ryo(s,r.SKILL_MODEL_VARS).trim()}
+</doc>`)}else if(wRc(t)!=="prompt-audit")o.push(n?"No project language was auto-detected. Ask the user which language they are using (see Language Detection above), then Read the matching `{lang}/claude-api/README.md` (or `curl/examples.md` for cURL/raw HTTP or an unsupported language) from the base directory before anything else.":"No project language was auto-detected. Ask the user which language they are using (see Language Detection above) before writing code.");if(t)o.push(`## User Request
+
+${t}`);return o.join(`
+
+`)}function wRc(e){let t=e.trim().toLowerCase().split(/\s+/)[0]??"";return My0.find((r)=>r===t)??"none"}function Oy0({disabled:e=!1}={}){ad({name:"claude-api",menuDescription:"Build and debug apps that use the Claude API",description:Wkg,allowedTools:["Read","Grep","Glob","WebFetch"],userInvocable:!0,isEnabled:()=>!e,files:()=>jkg().then(Hy0),async getPromptForCommand(t,r,n){let[o,i]=await Promise.all([Py0(),jkg()]);return L("tengu_claude_api_skill_loaded",{detected_lang:ge(o??"none"),subcommand:ge(wRc(t)),has_args:t.trim().length>0}),[{type:"text",text:Dy0(o,t,i,typeof n==="string")}]}})}var zkg,Iy0,Wkg,My0;var Vkg=A(()=>{Ut();Ii();Bb();zkg=require("fs/promises");Iy0={python:[".py","requirements.txt","pyproject.toml","setup.py","Pipfile"],typescript:[".ts",".tsx","tsconfig.json","package.json"],java:[".java","pom.xml","build.gradle"],go:[".go","go.mod"],ruby:[".rb","Gemfile"],csharp:[".cs",".csproj"],php:[".php","composer.json"],curl:[]};Wkg=["Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.",'TRIGGER \u2014 read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse ove
+
+
+===== reading guide @311536746 =====
+
+ `ANTHROPIC_IDENTITY_TOKEN_FILE` (or `ANTHROPIC_IDENTITY_TOKEN`) are set, exchanges the JWT at `/v1/oauth/token`, and auto-refreshes. `ANTHROPIC_WORKSPACE_ID` does not gate activation \u2014 required only when the federation rule spans multiple workspaces (else 400 `workspace_id_required`), optional for single-workspace rules. `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` (even empty) outrank WIF, and a set `ANTHROPIC_PROFILE` also wins over the federation env vars (a missing named profile is an error, not a fall-through) \u2014 unset all three.\n\n---\n\n## Reading Guide\n\nAfter detecting the language, read the relevant files based on what the user needs. Every `{lang}/\u2026`, `shared/\u2026`, and `curl/\u2026` path cited in this document is relative to this skill's base directory, and none of those files' content is included above \u2014 Read each one on demand before relying on what it covers.\n\n**All SDK languages use the same multi-file layout** \u2014 directory `{lang}/claude-api/` containing `README.md` (install, client init, basic request, thinking, caching, stop details, misc), `tool-use.md` (tool definitions, agentic loop, Anthropic-defined tools, structured outputs), `streaming.md`, `batches.md`, `files-api.md`. Not every language has every file (e.g., Ruby has no `batches.md`); if a file is absent, that feature's example is not yet documented for that language \u2014 fall back to the cURL shape or WebFetch the SDK repo from `shared/live-sources.md`. **cURL** \u2192 `curl/examples.md`.\n\nThe Quick Task Reference below uses the `{lang}/claude-api/FILE.md` path notation for all languages.\n\n### Quick Task Reference\n\n**Single text classification/summarization/extraction/Q&A:**\n\u2192 Read only `{lang}/claude-api/README.md` \u2014 **always read the README first** for any task (installation, quick start, common patterns, error handling)\n\n**Chat UI or real-time response display:**\n\u2192 Read `{lang}/claude-api/README.md` + `{lang}/claude-api/streaming.md`\n\n**Long-running conversations (may exceed context window):**\n\u2192 Read `{lang}/claude-api/README.md` \u2014 see Compaction section\n**Migrating to a newer model (Fable 5 / Opus 5 / Opus 4.8 / Opus 4.7 / Opus 4.6 / Sonnet 5 / Sonnet 4.6), replacing a retired model, or translating `budget_tokens` / prefill patterns to the current API:**\n\u2192 Read `shared/model-migration.md`\n**Prompting or tuning Fable 5 (long turns, effort, verbosity, autonomous runs, sub-agents):**\n\u2192 Read `shared/model-migration.md` \u2192 Migrating to Fable 5 \u2192 Behavioral shifts (prompt-tunable) + Long-running agent recommendations\n**Prompt caching / optimize caching / \"why is my cache hit rate low\":**\n\u2192 Read `shared/prompt-caching.md` (prefix-stability design, breakpoint placement, anti-patterns that silently invalidate cache) + `{lang}/claude-api/README.md` (Prompt Caching section)\n**Auditing or cleaning up prompts, skills, or tool descriptions (\"is this prompt outdated\", \"remove the cruft\", \"this was written for an older model\"):**\n\u2192 Read `shared/prompt-audit.md` \u2014 dated-pattern tables with greppable signals, the keep list (what NOT to delete), and the report + proposed-diff output contract\n**Count tokens in a file / prompt / diff (\"how many tokens is X\"
+
+
+===== ${e}/cla @312215641 =====
+
+${Ryo(r.SKILL_FILES["shared/live-sources.md"]??"",r.SKILL_MODEL_VARS).trim()}
+</doc>`);if(e){let i=`${e}/claude-api/README.md`,s=r.SKILL_FILES[i];if(s)o.push(`## Detected Language: ${e}
+
+\`${i}\` is included below since every task starts there.${n?" Read the other referenced files from the base directory on demand. That directory is session-scoped \u2014 after resuming a session, or if a Read under it ever fails, re-invoke this skill to re-extract.":""}
+
+<doc path="${i}">
+${Ryo(s,r.SKILL_MODEL_VARS).trim()}
+</doc>`)}else if(wRc(t)!=="prompt-audit")o.push(n?"No project language was auto-detected. Ask the user which language they are using (see Language Detection above), then Read the matching `{lang}/claude-api/README.md` (or `curl/examples.md` for cURL/raw HTTP or an unsupported language) from the base directory before anything else.":"No project language was auto-detected. Ask the user which language they are using (see Language Detection above) before writing code.");if(t)o.push(`## User Request
+
+${t}`);return o.join(`
+
+`)}function wRc(e){let t=e.trim().toLowerCase().split(/\s+/)[0]??"";return My0.find((r)=>r===t)??"none"}function Oy0({disabled:e=!1}={}){ad({name:"claude-api",menuDescription:"Build and debug apps that use the Claude API",description:Wkg,allowedTools:["Read","Grep","Glob","WebFetch"],userInvocable:!0,isEnabled:()=>!e,files:()=>jkg().then(Hy0),async getPromptForCommand(t,r,n){let[o,i]=await Promise.all([Py0(),jkg()]);return L("tengu_claude_api_skill_loaded",{detected_lang:ge(o??"none"),subcommand:ge(wRc(t)),has_args:t.trim().length>0}),[{type:"text",text:Dy0(o,t,i,typeof n==="string")}]}})}var zkg,Iy0,Wkg,My0;var Vkg=A(()=>{Ut();Ii();Bb();zkg=require("fs/promises");Iy0={python:[".py","requirements.txt","pyproject.toml","setup.py","Pipfile"],typescript:[".ts",".tsx","tsconfig.json","package.json"],java:[".java","pom.xml","build.gradle"],go:[".go","go.mod"],ruby:[".rb","Gemfile"],csharp:[".cs",".csproj"],php:[".php","composer.json"],curl:[]};Wkg=["Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.",'TRIGGER \u2014 read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-de
+
+
+===== User Request @312216538 =====
+
+e) from the base directory before anything else.":"No project language was auto-detected. Ask the user which language they are using (see Language Detection above) before writing code.");if(t)o.push(`## User Request
+
+${t}`);return o.join(`
+
+`)}function wRc(e){let t=e.trim().toLowerCase().split(/\s+/)[0]??"";return My0.find((r)=>r===t)??"none"}function Oy0({disabled:e=!1}={}){ad({name:"claude-api",menuDescription:"Build and debug apps that use the Claude API",description:Wkg,allowedTools:["Read","Grep","Glob","WebFetch"],userInvocable:!0,isEnabled:()=>!e,files:()=>jkg().then(Hy0),async getPromptForCommand(t,r,n){let[o,i]=await Promise.all([Py0(),jkg()]);return L("tengu_claude_api_skill_loaded",{detected_lang:ge(o??"none"),subcommand:ge(wRc(t)),has_args:t.trim().length>0}),[{type:"text",text:Dy0(o,t,i,typeof n==="string")}]}})}var zkg,Iy0,Wkg,My0;var Vkg=A(()=>{Ut();Ii();Bb();zkg=require("fs/promises");Iy0={python:[".py","requirements.txt","pyproject.toml","setup.py","Pipfile"],typescript:[".ts",".tsx","tsconfig.json","package.json"],java:[".java","pom.xml","build.gradle"],go:[".go","go.mod"],ruby:[".rb","Gemfile"],csharp:[".cs",".csproj"],php:[".php","composer.json"],curl:[]};Wkg=["Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.",'TRIGGER \u2014 read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/cachin

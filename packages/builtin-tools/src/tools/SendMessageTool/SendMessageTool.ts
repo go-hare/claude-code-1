@@ -5,6 +5,10 @@ import {
   formatRemoteControlSendBlock,
   getRemoteControlSendBlockReason,
 } from 'src/bridge/remoteControlSendGate.js'
+import {
+  formatUnreachableElevatedRefusal,
+  isRemoteControlPeerUnreachableFromHere,
+} from 'src/bridge/trustedDevice.js'
 import type { Tool, ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { findTeammateTaskByAgentId } from 'src/tasks/InProcessTeammateTask/InProcessTeammateTask.js'
@@ -27,14 +31,18 @@ import { isObserverTaskId } from 'src/utils/observerAgents.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { readAgentMetadata } from 'src/utils/sessionStorage.js'
 import { errorMessage } from 'src/utils/errors.js'
-import { isUdsMessageTooLargeError } from 'src/utils/udsMessaging.js'
+import {
+  isDefinitelyOwnMessagingSocket,
+  isOwnMessagingSocketTarget,
+  isUdsMessageTooLargeError,
+} from 'src/utils/udsMessaging.js'
 import { truncate } from 'src/utils/format.js'
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { enqueuePendingNotification } from 'src/utils/messageQueueManager.js'
 import { parseAddress } from 'src/utils/peerAddress.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
-import { jsonStringify } from 'src/utils/slowOperations.js'
+import { jsonParse, jsonStringify } from 'src/utils/slowOperations.js'
 import type { BackendType } from 'src/utils/swarm/backends/types.js'
 import {
   MAIN_RECIPIENT_NAME,
@@ -53,12 +61,19 @@ import {
   createShutdownApprovedMessage,
   createShutdownRejectedMessage,
   createShutdownRequestMessage,
+  isStructuredProtocolMessage,
   writeToMailbox,
 } from 'src/utils/teammateMailbox.js'
 import {
   formatResumedAgentMessage,
   resumeAgentBackground,
 } from '../AgentTool/resumeAgent.js'
+import { LIST_AGENTS_TOOL_NAME } from '../ListPeersTool/constants.js'
+import {
+  CROSS_MACHINE_MESSAGING_UNAVAILABLE,
+  isCrossMachineMessagingAvailable,
+} from './cloudHop.js'
+import { validateSendMessageTo } from './validateTo.js'
 import {
   SEND_MESSAGE_SUMMARY_MAX_CHARS,
   SEND_MESSAGE_TO_MAX_CHARS,
@@ -69,15 +84,212 @@ import {
 import {
   buildPeerCandidates,
   formatAmbiguousMessage,
+  leftoverClosestPeers,
   localClaimedRemoteBodies,
   resolvePeerByName,
   setSendMessagePinOnAppState,
+  type PeerCandidate,
 } from './nameResolve.js'
+import {
+  callerIsSubagentFromContext,
+  classifyOwnNameTarget,
+  describeOwnSession,
+  formatImpersonationDisplay,
+  formatImpersonationMessage,
+  formatOwnNameAlsoNote,
+  formatOwnNameNotSentDisplay,
+  formatSelfSendMessage,
+  isImpersonatingOwnSession,
+  isOwnNameSearchComplete,
+  leftoverAmbiguousIsSelfSend,
+  leftoverNotFoundIsSelfSend,
+  SELF_SEND_ERROR_CLASS,
+} from './ownSession.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 /** densable D6 — reserved recipient routed to the main conversation queue. */
 export const MAIN_RECIPIENT = MAIN_RECIPIENT_NAME
+
+/** densable g5 leftover — ALS + optional agentId, not ToolUseContext fields. */
+function callerIsSubagentForSend(context?: { agentId?: string }): boolean {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { getTeammateContext } =
+    require('src/utils/teammateContext.js') as typeof import('src/utils/teammateContext.js')
+  const { getAgentContext } =
+    require('src/utils/agentContext.js') as typeof import('src/utils/agentContext.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  return callerIsSubagentFromContext({
+    teammateContext: getTeammateContext(),
+    agentContext:
+      getAgentContext() ??
+      (context?.agentId ? { agentType: 'subagent' } : undefined),
+  })
+}
+
+/** densable DEe(to, g5(t)) — name from QV via DHm. */
+function formatDeeMessage(to: string, context?: { agentId?: string }): string {
+  const callerIsSubagent = callerIsSubagentForSend(context)
+  const self = describeOwnSession(callerIsSubagent)
+  return formatSelfSendMessage(to, self?.name ?? null, callerIsSubagent)
+}
+
+/** leftover Qen/Zen/Jen on not-found. Official DEe only after resolve. */
+function leftoverOwnNameMiss(
+  to: string,
+  message: unknown,
+  opts: {
+    closest: PeerCandidate[]
+    searchTruncated?: boolean
+    pinnedIdentityClaimedLocally?: string
+  },
+  context?: { agentId?: string },
+):
+  | {
+      kind: 'dee'
+      data: {
+        success: false
+        message: string
+        display: string
+        errorClass: typeof SELF_SEND_ERROR_CLASS
+      }
+    }
+  | {
+      kind: 'not-found'
+      data: {
+        success: false
+        message: string
+        display: string
+        errorClass: 'not_reachable'
+      }
+    }
+  | { kind: 'mailbox' } {
+  const qen = typeof message === 'string' ? classifyOwnNameTarget(to) : 'no'
+  const zen = isOwnNameSearchComplete({
+    searchTruncated: opts.searchTruncated,
+    pinnedIdentityClaimedLocally: opts.pinnedIdentityClaimedLocally,
+  })
+  if (leftoverNotFoundIsSelfSend(qen, to, opts.closest, zen)) {
+    return {
+      kind: 'dee',
+      data: {
+        success: false,
+        message: formatDeeMessage(to, context),
+        display: formatOwnNameNotSentDisplay(to),
+        errorClass: SELF_SEND_ERROR_CLASS,
+      },
+    }
+  }
+  if (qen === 'no' && !opts.searchTruncated && opts.closest.length === 0) {
+    return { kind: 'mailbox' }
+  }
+  const didYouMean =
+    opts.closest.length > 0
+      ? ` Did you mean: ${opts.closest.map(c => c.name).join(', ')}?`
+      : ''
+  const jen =
+    qen !== 'no'
+      ? formatOwnNameAlsoNote(to, callerIsSubagentForSend(context))
+      : ''
+  let body = `No agent named '${to}' is reachable.${didYouMean}${jen}\nUse ListAgents to discover targets (name [ref]).`
+  let display = `Not sent — no agent named '${to}' is reachable.${didYouMean}`
+  if (opts.searchTruncated) {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { appendSearchTruncatedBody, searchTruncatedDisplayNote } =
+      require('src/utils/sessionListIncompleteCopy.js') as typeof import('src/utils/sessionListIncompleteCopy.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    body = appendSearchTruncatedBody(body, true)
+    display += searchTruncatedDisplayNote(true)
+  }
+  return {
+    kind: 'not-found',
+    data: {
+      success: false,
+      message: body,
+      display,
+      errorClass: 'not_reachable',
+    },
+  }
+}
+
+/** leftover Qen/Zen on yRw prefix-ambiguous. Official DEe only when matchedBy prefix. */
+function leftoverOwnNameAmbiguous(
+  to: string,
+  message: unknown,
+  opts: {
+    matchedBy: 'exact' | 'prefix'
+    searchTruncated?: boolean
+    pinnedIdentityClaimedLocally?: string
+  },
+  context?: { agentId?: string },
+):
+  | {
+      kind: 'dee'
+      data: {
+        success: false
+        message: string
+        display: string
+        errorClass: typeof SELF_SEND_ERROR_CLASS
+      }
+    }
+  | { kind: 'ambiguous' } {
+  const qen = typeof message === 'string' ? classifyOwnNameTarget(to) : 'no'
+  const zen = isOwnNameSearchComplete({
+    searchTruncated: opts.searchTruncated,
+    pinnedIdentityClaimedLocally: opts.pinnedIdentityClaimedLocally,
+  })
+  if (leftoverAmbiguousIsSelfSend(qen, opts.matchedBy, zen)) {
+    return {
+      kind: 'dee',
+      data: {
+        success: false,
+        message: formatDeeMessage(to, context),
+        display: formatOwnNameNotSentDisplay(to),
+        errorClass: SELF_SEND_ERROR_CLASS,
+      },
+    }
+  }
+  return { kind: 'ambiguous' }
+}
+
+/** densable Xen → Jio → VEt. */
+function refuseOwnOrImpersonatedSocket(
+  to: string,
+  sock: string,
+  context?: { agentId?: string },
+):
+  | { kind: 'self'; message: string; display: string }
+  | {
+      kind: 'impersonation'
+      message: string
+      display: string
+      degradedClass: 'claimed_locally'
+    }
+  | undefined {
+  if (isDefinitelyOwnMessagingSocket(sock)) {
+    return {
+      kind: 'self',
+      message: formatDeeMessage(to, context),
+      display: formatOwnNameNotSentDisplay(to),
+    }
+  }
+  if (isImpersonatingOwnSession(to, sock)) {
+    return {
+      kind: 'impersonation',
+      message: formatImpersonationMessage(to),
+      display: formatImpersonationDisplay(to),
+      degradedClass: 'claimed_locally',
+    }
+  }
+  if (isOwnMessagingSocketTarget(sock)) {
+    return {
+      kind: 'self',
+      message: formatDeeMessage(to, context),
+      display: formatOwnNameNotSentDisplay(to),
+    }
+  }
+  return undefined
+}
 
 /**
  * densable `na` — character truncate with high-surrogate safety (not display width).
@@ -120,6 +332,17 @@ export function coerceSendMessageInput(
   }
 }
 
+/** densable jTl = fle+GRw (GRw=100); fle=200 → 300, same numeric cap as Agf. */
+const SEND_MESSAGE_REQUEST_ID = z
+  .string()
+  .min(1, 'must be the request id being responded to')
+  .regex(SEND_MESSAGE_TO_SINGLE_LINE_RE, 'must be a single-line request id')
+  .regex(
+    SEND_MESSAGE_TO_MAX_RE,
+    `request id longer than any real one (max ${SEND_MESSAGE_TO_MAX_CHARS} characters)`,
+  )
+
+/** densable KRw */
 const StructuredMessage = lazySchema(() =>
   z.discriminatedUnion('type', [
     z.object({
@@ -128,50 +351,66 @@ const StructuredMessage = lazySchema(() =>
     }),
     z.object({
       type: z.literal('shutdown_response'),
-      request_id: z.string(),
+      request_id: SEND_MESSAGE_REQUEST_ID,
       approve: semanticBoolean(),
       reason: z.string().optional(),
     }),
     z.object({
       type: z.literal('plan_approval_response'),
-      request_id: z.string(),
+      request_id: SEND_MESSAGE_REQUEST_ID,
       approve: semanticBoolean(),
       feedback: z.string().optional(),
     }),
   ]),
 )
 
-// densable e$f / $2f: hoist feature() to module scope — Bun forbids feature()
-// inside lazySchema arrows, const assignment bodies, or && chains.
-const SEND_MESSAGE_TO_DESC = feature('UDS_INBOX')
-  ? feature('LAN_PIPES')
-    ? 'Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer, or "tcp:<host>:<port>" for a LAN peer (use ListAgents to discover)'
-    : 'Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer (use ListAgents to discover)'
-  : 'Recipient: teammate name, or "*" for broadcast to all teammates'
+const PLAIN_TEXT_MESSAGE = z.string().describe('Plain text message content')
 
-const SEND_MESSAGE_MESSAGE_FIELD = feature('UDS_INBOX')
-  ? z
-      .union([
-        z.string().describe('Plain text message content'),
-        StructuredMessage(),
-      ])
-      .optional()
-      .default('')
-  : z.union([
-      z.string().describe('Plain text message content'),
-      StructuredMessage(),
-    ])
+/** densable idle_notification / teammate_terminated / task_* / shutdown_rejected */
+const TEAMMATE_LIFECYCLE_FRAME_TYPES = new Set([
+  'idle_notification',
+  'teammate_terminated',
+  'task_assignment',
+  'task_completed',
+  'shutdown_rejected',
+])
 
-const SEND_MESSAGE_NOTIFY_WHEN_IDLE_FIELD = feature('UDS_INBOX')
-  ? {
-      notify_when_idle: semanticBoolean(z.boolean().optional()).describe(
-        'Ask a session ON THIS MACHINE to send you ONE notice when it next goes idle (finishes its turn with nothing queued) or exits — opt-in, one-shot, no polling. With a message: deliver it now AND subscribe. Without a message (omit it): a pure subscription that costs the other session nothing.',
-      ),
-    }
-  : {}
+function isTeammateLifecycleFrame(message: string): boolean {
+  try {
+    const parsed = jsonParse(message)
+    return (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'type' in parsed &&
+      typeof parsed.type === 'string' &&
+      TEAMMATE_LIFECYCLE_FRAME_TYPES.has(parsed.type)
+    )
+  } catch {
+    return false
+  }
+}
 
-const inputSchema = lazySchema(() =>
-  z.object({
+/**
+ * densable E0m(uds) + FTl:
+ *   T0m = E0m(true)  UDS + teams (union + default "")
+ *   A0m = E0m(false) teams, no UDS (union)
+ *   XRw = T0m.extend({message: string.default("")})  UDS, no teams
+ *   YRw = A0m.extend({message: string})              no UDS, no teams
+ * Do not call feature() in here — Bun forbids it inside lazySchema arrows.
+ */
+function sendMessageObjectSchema(uds: boolean, teams: boolean) {
+  const toDesc = uds
+    ? `Recipient: a name from ${LIST_AGENTS_TOOL_NAME} (append its " [ref]" only when a listing or an error shows one), a teammate name, "main", or a background agent's agentId`
+    : 'Recipient: teammate name'
+  const unionMessage = z.union([PLAIN_TEXT_MESSAGE, StructuredMessage()])
+  const message = teams
+    ? uds
+      ? unionMessage.optional().default('')
+      : unionMessage
+    : uds
+      ? PLAIN_TEXT_MESSAGE.default('')
+      : PLAIN_TEXT_MESSAGE
+  return z.object({
     // densable 2.1.234 #11 / SEA kgf: b4a single-line + bVv unicode max Agf=300
     to: z
       .string()
@@ -183,20 +422,40 @@ const inputSchema = lazySchema(() =>
         SEND_MESSAGE_TO_MAX_RE,
         `recipient longer than any listed name or address (max ${SEND_MESSAGE_TO_MAX_CHARS} characters)`,
       )
-      .describe(SEND_MESSAGE_TO_DESC),
-    // densable SRp: summary.max(Cpr) + soft-truncate describe (Cpr=200).
+      .describe(toDesc),
+    // densable 2.1.239 E0m summary describe — no longer "required when message is a string"
     summary: z
       .string()
       .max(SEND_MESSAGE_SUMMARY_MAX_CHARS)
       .optional()
       .describe(
-        `A 5-10 word summary shown as a one-line preview in the UI (required when message is a string). Longer summaries are truncated to ${SEND_MESSAGE_SUMMARY_MAX_CHARS} characters rather than rejected, and only the first line is shown.`,
+        `A 5-10 word summary shown as a one-line preview in the UI. Defaults to the first line of a plain-text message; longer summaries are truncated to ${SEND_MESSAGE_SUMMARY_MAX_CHARS} characters rather than rejected.`,
       ),
-    message: SEND_MESSAGE_MESSAGE_FIELD,
-    ...SEND_MESSAGE_NOTIFY_WHEN_IDLE_FIELD,
-  }),
+    message,
+    ...(uds
+      ? {
+          notify_when_idle: semanticBoolean(z.boolean().optional()).describe(
+            'Ask a session ON THIS MACHINE to send you ONE notice when it next goes idle (finishes its turn with nothing queued) or exits — opt-in, one-shot, no polling. With a message: deliver it now AND subscribe. Without a message (omit it): a pure subscription that costs the other session nothing.',
+          ),
+        }
+      : {}),
+  })
+}
+
+const sendMessageInputSchemaUdsTeams = lazySchema(() =>
+  sendMessageObjectSchema(true, true),
 )
-type InputSchema = ReturnType<typeof inputSchema>
+const sendMessageInputSchemaUdsPlain = lazySchema(() =>
+  sendMessageObjectSchema(true, false),
+)
+const sendMessageInputSchemaTeams = lazySchema(() =>
+  sendMessageObjectSchema(false, true),
+)
+const sendMessageInputSchemaPlain = lazySchema(() =>
+  sendMessageObjectSchema(false, false),
+)
+
+type InputSchema = ReturnType<typeof sendMessageInputSchemaUdsTeams>
 
 export type Input = z.infer<InputSchema>
 
@@ -1218,7 +1477,19 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
     },
 
     get inputSchema(): InputSchema {
-      return inputSchema()
+      // densable FTl: rg()=UDS_INBOX, xd()=isAgentSwarmsEnabled
+      if (feature('UDS_INBOX')) {
+        return (
+          isAgentSwarmsEnabled()
+            ? sendMessageInputSchemaUdsTeams()
+            : sendMessageInputSchemaUdsPlain()
+        ) as InputSchema
+      }
+      return (
+        isAgentSwarmsEnabled()
+          ? sendMessageInputSchemaTeams()
+          : sendMessageInputSchemaPlain()
+      ) as InputSchema
     },
     shouldDefer: true,
     alwaysLoad: isAgentSwarmsEnabled(),
@@ -1287,6 +1558,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       // Local safety (feature-gated OFF by default): bridge/LAN still ask.
       // densable SEA core for SendMessage is only Pjs passthrough — no bridge/LAN.
       if (feature('UDS_INBOX') && parseAddress(input.to).scheme === 'bridge') {
+        // densable: via==="remote-control" && H9b() → deny P9b (cloud → elevated RC).
+        if (isRemoteControlPeerUnreachableFromHere()) {
+          return {
+            behavior: 'deny' as const,
+            message: formatUnreachableElevatedRefusal(input.to),
+            decisionReason: {
+              type: 'other',
+              reason:
+                'target is an elevated-security session unreachable from a cloud session',
+            },
+          }
+        }
         return {
           behavior: 'ask' as const,
           message: `Send a message to Remote Control session ${input.to}? It arrives as a user prompt on the receiving Claude (possibly another machine) via Anthropic's servers.`,
@@ -1320,21 +1603,34 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       return { behavior: 'allow' as const, updatedInput: input }
     },
 
-    async validateInput(input, _context) {
-      if (input.to.trim().length === 0) {
+    async validateInput(input, context) {
+      // densable Qei(e.to, e_) — empty to / empty bridge|uds target / ELe.
+      const qei = validateSendMessageTo(input.to, LIST_AGENTS_TOOL_NAME)
+      if (qei !== undefined) {
         return {
           result: false,
-          message: 'to must not be empty',
+          message: qei,
           errorCode: 9,
         }
       }
       const addr = parseAddress(input.to)
-      if (
-        (addr.scheme === 'bridge' ||
-          addr.scheme === 'uds' ||
-          addr.scheme === 'tcp') &&
-        addr.target.trim().length === 0
-      ) {
+      // densable Xen → Jio → VEt on explicit uds targets.
+      if (addr.scheme === 'uds') {
+        const ownOrFake = refuseOwnOrImpersonatedSocket(
+          input.to,
+          addr.target,
+          context,
+        )
+        if (ownOrFake) {
+          return {
+            result: false,
+            message: ownOrFake.message,
+            errorCode: 9,
+          }
+        }
+      }
+      // local tcp: empty-target (official xD has did: not tcp:)
+      if (addr.scheme === 'tcp' && addr.target.trim().length === 0) {
         return {
           result: false,
           message: 'address target must not be empty',
@@ -1353,7 +1649,21 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         return {
           result: false,
           message:
-            'to must be a bare teammate name or "*" — there is only one team per session',
+            'to must be a bare teammate name — there is only one team per session',
+          errorCode: 9,
+        }
+      }
+
+      // densable 2.1.239 k0m: empty string fails before uds/bridge early-return
+      // (unless notify_when_idle).
+      if (
+        typeof input.message === 'string' &&
+        input.message.trim().length === 0 &&
+        !wantsNotifyWhenIdle(input)
+      ) {
+        return {
+          result: false,
+          message: 'message must not be empty',
           errorCode: 9,
         }
       }
@@ -1430,24 +1740,33 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         return { result: true }
       }
       if (typeof input.message === 'string') {
-        if (input.message.trim().length === 0 && !wantsNotifyWhenIdle(input)) {
+        // densable Kwe — protocol frames as text (uds/bridge already returned)
+        if (isStructuredProtocolMessage(input.message)) {
           return {
             result: false,
-            message: 'message must not be empty',
+            message:
+              'message text must not be a teammate protocol frame (permission/mode/plan/shutdown JSON) — to respond to a plan or shutdown request, use the structured object form ({"message": {"type": ...}}); otherwise send plain text',
             errorCode: 9,
           }
         }
-        if (
-          input.message.trim().length > 0 &&
-          (!input.summary || input.summary.trim().length === 0)
-        ) {
+        if (isTeammateLifecycleFrame(input.message)) {
           return {
             result: false,
-            message: 'summary is required when message is a string',
+            message:
+              'message text must not be a teammate lifecycle/task frame (idle/terminated/task/shutdown JSON) — send plain text instead',
             errorCode: 9,
           }
         }
         return { result: true }
+      }
+
+      if (!isAgentSwarmsEnabled()) {
+        return {
+          result: false,
+          message:
+            'Structured team-protocol messages are only available with agent teams enabled.',
+          errorCode: 9,
+        }
       }
 
       if (input.to === '*') {
@@ -1479,6 +1798,19 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       if (
         input.message.type === 'shutdown_response' &&
+        input.message.approve &&
+        input.message.reason !== undefined
+      ) {
+        return {
+          result: false,
+          message:
+            'reason is only delivered on rejections (approve: false) — approvals are sent as a silent confirmation with no reason text; omit reason or reject instead',
+          errorCode: 9,
+        }
+      }
+
+      if (
+        input.message.type === 'shutdown_response' &&
         !input.message.approve &&
         (!input.message.reason || input.message.reason.trim().length === 0)
       ) {
@@ -1497,7 +1829,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
     },
 
     async prompt() {
-      return getPrompt()
+      return getPrompt(isAgentSwarmsEnabled())
     },
 
     mapToolResultToToolResultBlockParam(data, toolUseID) {
@@ -1635,13 +1967,41 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             return { data: { success: false, message: resolved.message } }
           }
           if (resolved.kind === 'ambiguous') {
+            const prefixDee = leftoverOwnNameAmbiguous(
+              input.to,
+              input.message,
+              {
+                matchedBy: resolved.matchedBy,
+                pinnedIdentityClaimedLocally:
+                  resolved.pinnedIdentityClaimedLocally,
+              },
+              context,
+            )
+            if (prefixDee.kind === 'dee') {
+              return { data: prefixDee.data }
+            }
+            const qen =
+              typeof input.message === 'string'
+                ? classifyOwnNameTarget(input.to)
+                : 'no'
+            let message = formatAmbiguousMessage(
+              input.to,
+              resolved.candidates,
+              {
+                pinnedIdentityClaimedLocally:
+                  resolved.pinnedIdentityClaimedLocally,
+              },
+            )
+            if (qen !== 'no') {
+              message += formatOwnNameAlsoNote(
+                input.to,
+                callerIsSubagentForSend(context),
+              )
+            }
             return {
               data: {
                 success: false,
-                message: formatAmbiguousMessage(input.to, resolved.candidates, {
-                  pinnedIdentityClaimedLocally:
-                    resolved.pinnedIdentityClaimedLocally,
-                }),
+                message,
               },
             }
           }
@@ -1673,6 +2033,20 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               },
             }
           }
+          if (resolved.kind === 'not-found') {
+            const miss = leftoverOwnNameMiss(
+              input.to,
+              input.message,
+              {
+                closest: leftoverClosestPeers(input.to, candidates),
+                searchTruncated: resolved.searchTruncated,
+              },
+              context,
+            )
+            if (miss.kind === 'dee') {
+              return { data: miss.data }
+            }
+          }
           return {
             data: {
               success: false,
@@ -1692,6 +2066,24 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         // Explicit uds:/bridge:/tcp: schemes only here.
         // densable gIn bare-name / name [ref] peer resolve runs AFTER local_agent.
         if (addr.scheme === 'bridge') {
+          // densable H9b/P9b — cloud session cannot reach elevated RC.
+          if (isRemoteControlPeerUnreachableFromHere()) {
+            return {
+              data: {
+                success: false,
+                message: formatUnreachableElevatedRefusal(input.to),
+              },
+            }
+          }
+          // densable g0m — before posting through Anthropic servers.
+          if (!isCrossMachineMessagingAvailable()) {
+            return {
+              data: {
+                success: false,
+                message: CROSS_MACHINE_MESSAGING_UNAVAILABLE,
+              },
+            }
+          }
           // densable 2.1.238 #27 — re-check Aom after permission wait.
           const rcBlock = getRemoteControlSendBlockReason()
           if (rcBlock) {
@@ -1743,6 +2135,23 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           }
         }
         if (addr.scheme === 'uds') {
+          const ownOrFake = refuseOwnOrImpersonatedSocket(
+            input.to,
+            addr.target,
+            context,
+          )
+          if (ownOrFake) {
+            return {
+              data: {
+                success: false,
+                message: ownOrFake.message,
+                display: ownOrFake.display,
+                ...(ownOrFake.kind === 'impersonation'
+                  ? { degradedClass: ownOrFake.degradedClass }
+                  : {}),
+              },
+            }
+          }
           const recipient = recipientForDisplay(input.to)
           /* eslint-disable @typescript-eslint/no-require-imports */
           const { sendToUdsSocket } =
@@ -2029,14 +2438,38 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           return { data: { success: false, message: resolved.message } }
         }
         if (resolved.kind === 'ambiguous') {
+          const prefixDee = leftoverOwnNameAmbiguous(
+            input.to,
+            input.message,
+            {
+              matchedBy: resolved.matchedBy,
+              searchTruncated: resolved.searchTruncated,
+              pinnedIdentityClaimedLocally:
+                resolved.pinnedIdentityClaimedLocally,
+            },
+            context,
+          )
+          if (prefixDee.kind === 'dee') {
+            return { data: prefixDee.data }
+          }
+          const qen =
+            typeof input.message === 'string'
+              ? classifyOwnNameTarget(input.to)
+              : 'no'
+          let message = formatAmbiguousMessage(input.to, resolved.candidates, {
+            pinnedIdentityClaimedLocally: resolved.pinnedIdentityClaimedLocally,
+            searchTruncated: resolved.searchTruncated,
+          })
+          if (qen !== 'no') {
+            message += formatOwnNameAlsoNote(
+              input.to,
+              callerIsSubagentForSend(context),
+            )
+          }
           return {
             data: {
               success: false,
-              message: formatAmbiguousMessage(input.to, resolved.candidates, {
-                pinnedIdentityClaimedLocally:
-                  resolved.pinnedIdentityClaimedLocally,
-                searchTruncated: resolved.searchTruncated,
-              }),
+              message,
             },
           }
         }
@@ -2044,6 +2477,24 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           const cand = resolved.candidate
           const preview = input.summary || truncate(input.message, 50)
           if (cand.kind === 'bridge-session') {
+            // densable H9b/P9b — via remote-control from a cloud session.
+            if (isRemoteControlPeerUnreachableFromHere()) {
+              return {
+                data: {
+                  success: false,
+                  message: formatUnreachableElevatedRefusal(cand.name),
+                },
+              }
+            }
+            // densable g0m — official also gates resolved cloud-session here.
+            if (!isCrossMachineMessagingAvailable()) {
+              return {
+                data: {
+                  success: false,
+                  message: CROSS_MACHINE_MESSAGING_UNAVAILABLE,
+                },
+              }
+            }
             const rcBlock = getRemoteControlSendBlockReason()
             if (rcBlock) {
               return {
@@ -2100,6 +2551,24 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           }
           const { permissionModeClassOf, shouldHonorPeerFromMode } =
             require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
+          // densable Xen → Jio → VEt on resolved local-session.
+          const ownOrFake = refuseOwnOrImpersonatedSocket(
+            input.to,
+            cand.id,
+            context,
+          )
+          if (ownOrFake) {
+            return {
+              data: {
+                success: false,
+                message: ownOrFake.message,
+                display: ownOrFake.display,
+                ...(ownOrFake.kind === 'impersonation'
+                  ? { degradedClass: ownOrFake.degradedClass }
+                  : {}),
+              },
+            }
+          }
           try {
             const perm = context.getAppState().toolPermissionContext
             const fromMode = shouldHonorPeerFromMode()
@@ -2177,16 +2646,22 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
           }
         }
-        if (resolved.kind === 'not-found' && searchTruncated) {
-          return {
-            data: {
-              success: false,
-              message: appendSearchTruncatedBody(resolved.message, true),
-              display: `Not sent — no agent named '${input.to}' is reachable.${searchTruncatedDisplayNote(true)}`,
+        if (resolved.kind === 'not-found') {
+          const miss = leftoverOwnNameMiss(
+            input.to,
+            input.message,
+            {
+              closest: leftoverClosestPeers(input.to, candidates),
+              searchTruncated,
+              pinnedIdentityClaimedLocally: undefined,
             },
+            context,
+          )
+          if (miss.kind !== 'mailbox') {
+            return { data: miss.data }
           }
         }
-        // not-found among peers → mailbox fallthrough
+        // leftover mailbox: Qen==="no" && !truncated && no closest
       }
 
       // densable U2f — notify_when_idle never rides teammate mailbox / broadcast.

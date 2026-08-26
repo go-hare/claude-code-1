@@ -1,0 +1,60 @@
+=== pTt ===
+function pTt(e){e=e.replace(/^[\x00-\x20]+/,"");let t=e.indexOf("://");if(t===-1)return!1;let r=e.slice(t+3),n=e.slice(0,t).toLowerCase();if(u8y.has(n)){let s=r.match(/^[/\\]+/)?.[0]??"";if(s.includes("\\"))return!0;r=r.slice(s.length)}let o=r.search(/[/?#]/);return(o===-1?r:r.slice(0,o)).includes("\\")}
+
+=== I8s ===
+function I8s(e){let t=/^([^@:/[\]]+)@([^@:/[\]]+):(.*)$/s.exec(e);return t?{user:t[1],host:t[2],path:t[3]}:null}
+
+=== SCn ===
+function SCn(e){let t=H8e(e);return om(t)?i_:t}
+
+=== H8e ===
+function H8e(e){let t=Ndu(e.replace(/[\t\n\r]/g,"").toLowerCase());if(t===""||c8y.test(t))return t;try{let r=new URL(`https://${t}`);if(r.username!==""||r.password!==""||r.port!==""||r.pathname!=="/"||r.search!==""||r.hash!=="")return t;return Ndu(r.hostname)}catch{return t}}
+
+=== Ndu ===
+function Ndu(e){let t=e.length;while(t>0&&e[t-1]===".")t--;return e.slice(0,t)}
+
+=== om ===
+function om(e){return NPs(e,"github.com")}
+
+=== Ldu ===
+function Ldu(e){return/[%\x00-\x1f\x7f-\u{10FFFF}]/u.test(e)}
+
+=== Obn ===
+function Obn(e){if(e.includes("://")){if(pTt(e))return!0;try{let o=new URL(e);if(o.protocol==="http:"||o.protocol==="https:")return!1;return Ldu(o.hostname)}catch{return!0}}let t=e.indexOf(":"),r=e.indexOf("@");if(t>=0&&r>t)return!0;let n=e.match(/^(?:[^@]+@)?([^:]+):/)?.[1];return n?Ldu(n):!1}
+
+=== x5o ===
+function x5o(e){return pTt(e)}
+
+=== O7t ===
+function O7t(e){let t=Utb(e);return t===null?null:SCn(t)}
+
+=== Utb ===
+function Utb(e){switch(e.source){case"github":return i_;case"git":{if(e.url.includes("://")){if(x5o(e.url))return null;try{return new URL(e.url).hostname||null}catch{return null}}return e.url.match(/^[^@]+@([^:]+):/)?.[1]??null}case"url":try{return new URL(e.url).hostname}catch{return null}default:return null}}
+
+=== zAd ===
+function zAd(e){if(e.source==="git"&&!e.url.includes("://")){let t=I8s(e.url);return t?SCn(t.host):null}return O7t(e)}
+
+=== WAd ===
+function WAd(e,t,r){let n=r?.blocklistDirection?O7t(e):zAd(e);if(!n)return!1;let o=r?.blocklistDirection&&n===q7s?[n,i_]:[n];try{let i=new RegExp(t.hostPattern);return o.some((s)=>i.test(s))}catch{return E(`Invalid hostPattern regex in policy settings: ${t.hostPattern}`,{level:"error"}),!1}}
+
+=== JAd ===
+function JAd(e,t){if(e.source==="git"&&Obn(e.url))return!1;if(t.source==="hostPattern"){if((e.source==="github"||e.source==="git")&&e.path&&!BAd(e.path))return!1;return WAd(e,t)}if(t.source==="pathPattern")return GAd(e,t);if(e.source==="github"&&t.source==="github"){let r=qAd(t.repo);if(r===null&&t.repo.includes("*"))E(`Invalid owner-wildcard repo in policy settings strictKnownMarketplaces: ${t.repo} (only "<owner>/*" is supported); entry only matches a literally identical repo string`,{level:"error"});if(r!==null)return ztb(e.repo,r)&&(t.ref||void 0)===(e.ref||void 0)&&(t.path?t.path===(e.path||void 0):!e.path||BAd(e.path))}if(t.source==="skills-dir")return!1;return jAd(e,t)}
+
+=== pL ===
+function pL(e){if(e.source==="git"&&x5o(e.url))return!1;if(jDr(e))return!1;let t=Rde();if(t===null)return!0;return t.some((r)=>JAd(e,r))}
+
+=== BAd ===
+function BAd(e){if(e.startsWith("/")||e.startsWith("\\")||/^[A-Za-z]:/.test(e))return!1;return!e.split(/[\\/]/).some((t)=>t==="..")}
+
+=== NPs ===
+function NPs(e,t){let r=H8e(e);while(r.startsWith("www."))r=r.slice(4);return r===t}
+
+=== q7s ===
+MISS q7s
+
+q7s hit b'q7s="[^"]+"': q7s="ssh.github.com"
+q7s hit b'q7s=i_': MISS
+q7s hit b',q7s=': ,q7s=
+q7s hit b'q7s="ssh\\.github\\.com"': q7s="ssh.github.com"
+=== NPs ===
+function NPs(e,t){let r=H8e(e);while(r.startsWith("www."))r=r.slice(4);return r===t}

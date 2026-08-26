@@ -1,0 +1,1 @@
+function ret(e){let t=or(),r=t.tipsHistory?.[e];if(!r)return 1/0;return t.numStartups-r}function rnm(e){return or().pluginSuggestionDiscoverShownCounts?.[e]??0}function nnm(e){if(e.length===0)return;tn((t)=>{let r=t.pluginSuggestionDiscoverShownCounts??{};if(e.every((o)=>(r[o]??0)>0))return t;let n={...r};for(let o of e)n[o]=(n[o]??0)+1;return{...t

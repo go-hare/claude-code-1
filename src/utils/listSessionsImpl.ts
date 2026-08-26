@@ -21,10 +21,14 @@ import {
   extractTypedJsonlField,
   findProjectDir,
   getProjectsDir,
+  isSlugCollisionCollapsedCwd,
   MAX_SANITIZED_LENGTH,
   readSessionLite,
+  recordedCwdCollidesWithProjectResolved,
+  recordedCwdIsWithinOwnWorktrees,
   sanitizePath,
   sanitizePathRaw,
+  slugCollisionGuardFoldsCase,
   validateUuid,
 } from './sessionStoragePortable.js'
 
@@ -167,6 +171,8 @@ type Candidate = {
   mtime: number
   /** Project path for cwd fallback when file lacks a cwd field. */
   projectPath?: string
+  /** densable 2.1.239 #17 — worktree list for `cNr`. */
+  ownWorktrees?: string[]
 }
 
 /**
@@ -178,6 +184,7 @@ export async function listCandidates(
   projectDir: string,
   doStat: boolean,
   projectPath?: string,
+  ownWorktrees?: string[],
 ): Promise<Candidate[]> {
   // densable NMt / 2.1.214 #30: withFileTypes + isFile() so a directory named
   // `*.jsonl` (or unreadable non-file) cannot enter the candidate set and
@@ -195,12 +202,20 @@ export async function listCandidates(
       const sessionId = validateUuid(dirent.name.slice(0, -6))
       if (!sessionId) return null
       const filePath = join(projectDir, dirent.name)
-      if (!doStat) return { sessionId, filePath, mtime: 0, projectPath }
+      if (!doStat) {
+        return { sessionId, filePath, mtime: 0, projectPath, ownWorktrees }
+      }
       try {
         const s = await stat(filePath)
         // densable: race / non-file after readdir — skip
         if (!s.isFile()) return null
-        return { sessionId, filePath, mtime: s.mtime.getTime(), projectPath }
+        return {
+          sessionId,
+          filePath,
+          mtime: s.mtime.getTime(),
+          projectPath,
+          ownWorktrees,
+        }
       } catch {
         return null
       }
@@ -220,6 +235,28 @@ async function readCandidate(c: Candidate): Promise<SessionInfo | null> {
 
   const info = parseSessionInfoFromLite(c.sessionId, lite, c.projectPath)
   if (!info) return null
+
+  // densable `vom` — same-slug / different-path recorded cwd is not this project.
+  const recordedCwd =
+    extractTypedJsonlField(lite.tail, 'relocated', 'relocatedCwd') ??
+    extractJsonStringField(lite.head, 'cwd')
+  if (
+    recordedCwd !== undefined &&
+    c.projectPath !== undefined &&
+    !recordedCwdIsWithinOwnWorktrees(
+      recordedCwd,
+      c.ownWorktrees,
+      slugCollisionGuardFoldsCase(),
+    ) &&
+    (await recordedCwdCollidesWithProjectResolved(
+      recordedCwd,
+      c.projectPath,
+      slugCollisionGuardFoldsCase(),
+      isSlugCollisionCollapsedCwd,
+    ))
+  ) {
+    return null
+  }
 
   // Prefer stat-pass mtime for sort-key consistency; fall back to
   // lite.mtime when doStat=false (c.mtime is 0 placeholder).
@@ -337,11 +374,13 @@ async function gatherProjectCandidates(
     worktreePaths = []
   }
 
+  const ownWorktrees = worktreePaths.length > 0 ? worktreePaths : undefined
+
   // No worktrees (or git not available / scanning disabled) — just scan the single project dir
   if (worktreePaths.length <= 1) {
     const projectDir = await findProjectDir(canonicalDir)
     if (!projectDir) return []
-    return listCandidates(projectDir, doStat, canonicalDir)
+    return listCandidates(projectDir, doStat, canonicalDir, ownWorktrees)
   }
 
   // Worktree-aware scanning: find all project dirs matching any worktree
@@ -371,7 +410,7 @@ async function gatherProjectCandidates(
     // Fall back to single project dir
     const projectDir = await findProjectDir(canonicalDir)
     if (!projectDir) return []
-    return listCandidates(projectDir, doStat, canonicalDir)
+    return listCandidates(projectDir, doStat, canonicalDir, ownWorktrees)
   }
 
   const all: Candidate[] = []
@@ -384,7 +423,12 @@ async function gatherProjectCandidates(
     const dirBase = basename(canonicalProjectDir)
     seenDirs.add(caseInsensitive ? dirBase.toLowerCase() : dirBase)
     all.push(
-      ...(await listCandidates(canonicalProjectDir, doStat, canonicalDir)),
+      ...(await listCandidates(
+        canonicalProjectDir,
+        doStat,
+        canonicalDir,
+        ownWorktrees,
+      )),
     )
   }
 
@@ -410,7 +454,9 @@ async function gatherProjectCandidates(
       }
 
       seenDirs.add(dirName)
-      all.push(...(await listCandidates(candidateDir, doStat, wtPath)))
+      all.push(
+        ...(await listCandidates(candidateDir, doStat, wtPath, ownWorktrees)),
+      )
       break
     }
   }

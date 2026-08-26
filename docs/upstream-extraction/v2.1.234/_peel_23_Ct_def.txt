@@ -1,0 +1,3 @@
+OFFSET=291446502
+
+bs.setInsideParseErrorTelemetry(!1)}}}return t()}}function _Ct(){if(bs.projectPathForConfig!==null)return bs.projectPathForConfig;let e=Sn(),t=bd(e),r=t?kat(t):kat(Pu(Ub.resolve(e)));return bs.setProjectPathForConfig(r),r}function gkn(){bs.setProjectPathForConfig(null)}function l8s(){return or().projects?.[_Ct()]}function nf(){let e=_Ct(),t=or();if(!t.projects)return Ect;let r=t.projects[e]??Ect;if(typeof r.allowedTools==="string")r.allowedTools=bl(r.allowedTools)??[];return r}function TT(e){let t=_Ct(),r=Cgd((n)=>{let o=n.projects?.[t]??Ect,i=e(o);if(i===o)return n;return{...n,projects:{...n.projects,[t]:i}}});return t4o(bS(),()=>t9_(e,t,r))

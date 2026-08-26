@@ -1,0 +1,3 @@
+OFFSET=299783692
+
+wed working directories for this session: ${S}.`;if(y?.type==="rule")return{behavior:"deny",message:w,decisionReason:y};let T=[];if(g&&Xbe(m))if(u==="read"){let k=QXt(Soe(g),"session");if(k)T.push(k)}else T.push({type:"addDirectories",directories:[Soe(g)],destination:"session"});if(Xbe(m)&&(u==="write"||u==="create")&&(t.mode==="default"||t.mode==="plan"))T.push({type:"setMode",mode:"acceptEdits",destination:"session"});o??={behavior:"ask",message:w,blockedPath:Xbe(m)?g:void 0,decisionReason:y,suggestions:T}}}if(i)o??={behavior:"ask",message:`${Hw(l.name)} appears inside a control-flow or chain statement where piped expression sources cannot be statically validated and requires manual approv

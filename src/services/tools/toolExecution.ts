@@ -83,6 +83,10 @@ import type { PermissionResult } from '../../utils/permissions/PermissionResult.
 import { decisionReasonToOTelSource } from '../../utils/permissions/permissionDecisionReasons.js'
 import { getAgentContext } from '../../utils/agentContext.js'
 import {
+  agentContextSpawnDepth,
+  webFetchHookBlockedHint,
+} from '../../utils/webFetchAdmission.js'
+import {
   resolveSessionActivityAgentId,
   startSessionActivity,
   stopSessionActivity,
@@ -100,6 +104,7 @@ import {
   isBetaTracingEnabled,
   startToolBlockedOnUserSpan,
   startToolExecutionSpan,
+  injectCurrentTraceparent,
   startToolSpan,
 } from '../../utils/telemetry/sessionTracing.js'
 import {
@@ -849,6 +854,64 @@ async function checkPermissionsAndCallTool(
       case 'additionalContext':
         resultingMessages.push(result.message)
         break
+      case 'defer': {
+        // Official 2.1.239: print-only + solo-only; emit hook_deferred_tool + r1t()
+        getStatsStore()?.observe(
+          'pre_tool_hook_duration_ms',
+          Date.now() - preToolHookStart,
+        )
+        if (!toolUseContext.options.isNonInteractiveSession) {
+          logForDebugging(
+            `Hook ${result.hookName} returned permissionDecision=defer in interactive mode; ignoring (defer is print-mode only)`,
+            { level: 'warn' },
+          )
+          break
+        }
+        const batchToolUses = Array.isArray(assistantMessage.message.content)
+          ? count(
+              assistantMessage.message.content,
+              block => block.type === 'tool_use',
+            )
+          : 1
+        if (batchToolUses > 1) {
+          logForDebugging(
+            `Hook ${result.hookName} returned permissionDecision=defer but ${batchToolUses} tool calls are in this batch; ignoring (defer is solo-only — siblings would be orphaned on resume)`,
+            { level: 'warn' },
+          )
+          break
+        }
+        if (toolUseContext.abortController.signal.aborted) {
+          resultingMessages.push({
+            message: createUserMessage({
+              content: [createToolResultStopMessage(toolUseID)],
+              toolUseResult: CANCEL_MESSAGE,
+              sourceToolAssistantUUID: assistantMessage.uuid,
+            }),
+          })
+          return resultingMessages
+        }
+        logEvent('tengu_pre_tool_hook_deferred', {
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+          queryChainId: toolUseContext.queryTracking
+            ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          queryDepth: toolUseContext.queryTracking?.depth,
+        })
+        const traceparent = injectCurrentTraceparent()
+        resultingMessages.push({
+          message: createAttachmentMessage({
+            type: 'hook_deferred_tool',
+            toolUseID,
+            toolName: tool.name,
+            toolInput: processedInput,
+            hookName: result.hookName,
+            hookEvent: 'PreToolUse',
+            permissionMode:
+              toolUseContext.getAppState().toolPermissionContext.mode,
+            ...(traceparent ? { traceparent } : {}),
+          }),
+        })
+        return resultingMessages
+      }
       case 'stop': {
         // densable: stop may carry stopReason (ZFu infra default or continue:false)
         getStatsStore()?.observe(
@@ -1062,6 +1125,25 @@ async function checkPermissionsAndCallTool(
     // Only use generic "Execution stopped" message if we don't have a detailed hook message
     if (shouldPreventContinuation && !errorMessage) {
       errorMessage = `Execution stopped by PreToolUse hook${stopReason ? `: ${stopReason}` : ''}`
+    }
+    if (permissionDecision.decisionReason?.type === 'hook') {
+      // Keep errorMessage undefined when the hint is empty — '' would defeat
+      // the `?? 'Execution stopped by hook'` fallback below.
+      const webFetchHint = webFetchHookBlockedHint(
+        tool.name,
+        processedInput,
+        toolUseContext.options.tools,
+        toolUseContext.getAppState().toolPermissionContext,
+        {
+          depth: agentContextSpawnDepth(getAgentContext()),
+          allowedAgentTypes:
+            toolUseContext.options.agentDefinitions.allowedAgentTypes,
+          activeAgents: toolUseContext.options.agentDefinitions.activeAgents,
+        },
+      )
+      if (webFetchHint) {
+        errorMessage = (errorMessage ?? '') + webFetchHint
+      }
     }
 
     // Build top-level content: tool_result (text-only for is_error compatibility) + images alongside

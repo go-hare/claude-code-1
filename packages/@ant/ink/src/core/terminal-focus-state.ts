@@ -6,10 +6,14 @@
 export type TerminalFocusState = 'focused' | 'blurred' | 'unknown'
 
 let focusState: TerminalFocusState = 'unknown'
+/** densable `bp.terminalFocusGainedAt` / `Jhf()` — wall clock of last FOCUS_IN. */
+let focusGainedAt = Number.NEGATIVE_INFINITY
 const resolvers: Set<() => void> = new Set()
 const subscribers: Set<() => void> = new Set()
 
 export function setTerminalFocused(v: boolean): void {
+  // densable OKa: stamp only on focus-gained, keep last stamp on blur.
+  if (v) focusGainedAt = Date.now()
   focusState = v ? 'focused' : 'blurred'
   // Notify useSyncExternalStore subscribers
   for (const cb of subscribers) {
@@ -21,6 +25,11 @@ export function setTerminalFocused(v: boolean): void {
     }
     resolvers.clear()
   }
+}
+
+/** densable `Jhf` — Date.now() of last FOCUS_IN, or −∞ before any focus. */
+export function getTerminalFocusGainedAt(): number {
+  return focusGainedAt
 }
 
 export function getTerminalFocused(): boolean {
@@ -41,6 +50,7 @@ export function subscribeTerminalFocus(cb: () => void): () => void {
 
 export function resetTerminalFocusState(): void {
   focusState = 'unknown'
+  focusGainedAt = Number.NEGATIVE_INFINITY
   for (const cb of subscribers) {
     cb()
   }

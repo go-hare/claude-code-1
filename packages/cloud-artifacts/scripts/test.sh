@@ -46,6 +46,12 @@ expect() {
       404) want_error="not_found" ;;
       400) want_error="invalid_" ;; # invalid_ttl 或 invalid_hash，前缀匹配
     esac
+    # empty_body is a 400 that does not share the invalid_ prefix
+    if [[ "$want_code" == "400" ]] && echo "$body" | grep -q '"error":"empty_body"'; then
+      printf "${G}✓ %s -> HTTP 200 [via body] %s${D}\n" "$label" "$body"
+      pass=$((pass+1))
+      return
+    fi
     if [[ -z "$want_error" ]] || echo "$body" | grep -q "\"error\":\"$want_error"; then
       printf "${G}✓ %s -> HTTP 200 [via body] %s${D}\n" "$label" "$body"
       pass=$((pass+1))
@@ -113,6 +119,12 @@ call "wrong path" 404 \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: text/html" --data-binary "@$TMP/v1.html"
 
+# 8b. 400 empty_body（空 POST 不得写入）
+call "empty body" 400 \
+  -X POST "$WORKER_URL/upload" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: text/html" --data-binary ""
+
 echo
 echo "===== 成功用例 ====="
 
@@ -141,6 +153,13 @@ curl -sS -o "$TMP/resp" -w "HTTP %{http_code}\n" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: text/html" --data-binary "@$TMP/v2.html"
 cat "$TMP/resp"; echo
+
+# 11b. 空 body 覆盖不得抹掉 v2
+echo "--- 空 body 覆盖须 400 empty_body 且保留 v2 ---"
+call "empty overwrite" 400 \
+  -X POST "$WORKER_URL/upload?ttl=30&hash=test-artifact-v1" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: text/html" --data-binary ""
 
 echo
 echo "===== R2 写入验证（不走 CDN，走 Cloudflare API） ====="

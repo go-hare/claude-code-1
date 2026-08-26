@@ -1,0 +1,109 @@
+# readline offset=70493236
+
+t() {
+    return this[kPrompt];
+  }
+  setupHistoryManager(options) {
+    if (ReplHistory ??= (@getInternalField(@internalModuleRegistry, 60) || @createInternalModuleById(60)).ReplHistory, this.historyManager = new ReplHistory(this, options), options.onHistoryFileLoaded)
+      this.historyManager.initialize(options.onHistoryFileLoaded);
+    ObjectDefineProperty(this, "history", {
+      __proto__: null,
+      configurable: !0,
+      enumerable: !0,
+      get() {
+        return this.historyManager.history;
+      },
+      set(newHistory) {
+        return this.historyManager.history = newHistory;
+      }
+    }), ObjectDefineProperty(this, "historyIndex", {
+      __proto__: null,
+      configurable: !0,
+      enumerable: !0,
+      get() {
+        return this.historyManager.index;
+      },
+      set(historyIndex) {
+        return this.historyManager.index = historyIndex;
+      }
+    }), ObjectDefineProperty(this, "historySize", {
+      __proto__: null,
+      configurable: !0,
+      enumerable: !0,
+      get() {
+        return this.historyManager.size;
+      }
+    }), ObjectDefineProperty(this, "isFlushing", {
+      __proto__: null,
+      configurable: !0,
+      enumerable: !0,
+      get() {
+        return this.historyManager.isFlushing;
+      }
+    });
+  }
+  [kSetRawMode](mode) {
+    let wasInRawMode = this.input.isRaw;
+    if (typeof this.input.setRawMode === "function")
+      this.input.setRawMode(mode);
+    return wasInRawMode;
+  }
+  prompt(preserveCursor) {
+    if (this.paused)
+      this.resume();
+    if (this.terminal && process.env.TERM !== "dumb") {
+      if (!preserveCursor)
+        this.cursor = 0;
+      this[kRefreshLine]();
+    } else
+      this[kWriteToOutput](this[kPrompt]);
+  }
+  [kQuestion](query, cb) {
+    if (this.closed)
+      throw new ERR_USE_AFTER_CLOSE("readline");
+    if (this[kQuestionCallback])
+      this.prompt();
+    else
+      this[kOldPrompt] = this[kPrompt], this.setPrompt(query), this[kQuestionCallback] = cb, this.prompt();
+  }
+  [kSetLine](line = "") {
+    this.line = line, this[kIsMultiline] = StringPrototypeIncludes(line, `
+`);
+  }
+  [kOnLine](line) {
+    if (this[kQuestionCallback]) {
+      let cb = this[kQuestionCallback];
+      this[kQuestionCallback] = null, this.setPrompt(this[kOldPrompt]), cb(line);
+    } else
+      this.emit("line", line);
+  }
+  [kBeforeEdit](oldText, oldCursor) {
+    this[kPushToUndoStack](oldText, oldCursor);
+  }
+  [kQuestionCancel]() {
+    if (this[kQuestionCallback])
+      this[kQuestionCallback] = null, this.setPrompt(this[kOldPrompt]), this.clearLine();
+  }
+  [kWriteToOutput](stringToWrite) {
+    if (validateString(stringToWrite, "stringToWrite"), this.output !== null && this.output !== @undefined)
+      this.output.write(stringToWrite);
+  }
+  [kAddHistory]() {
+    return this.historyManager.addHistory(this[kIsMultiline], this[kLastCommandErrored]);
+  }
+  [kRefreshLine]() {
+    let line = this[kPrompt] + this.line, dispPos = this[kGetDisplayPos](line), lineCols = dispPos.cols, lineRows = dispPos.rows, cursorPos = this.getCursorPos(), prevRows = this.prevRows || 0;
+    if (prevRows > 0)
+      moveCursor(this.output, 0, -prevRows);
+    if (cursorTo(this.output, 0), clearScreenDown(this.output), this[kIsMultiline]) {
+      let lines = StringPrototypeSplit(this.line, `
+`);
+      this[kWriteToOutput](this[kPrompt] + lines[0]);
+      for (let i = 1;i < lines.length; i++)
+        this[kWriteToOutput](`
+${kMultilinePrompt.description}` + lines[i]);
+    } else
+      this[kWriteToOutput](line);
+    if (lineCols === 0)
+      this[kWriteToOutput](" ");
+    cursorTo(this.output, cursorPos.c

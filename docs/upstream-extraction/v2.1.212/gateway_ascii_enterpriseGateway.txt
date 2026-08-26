@@ -1,0 +1,8 @@
+offset=96482952 needle=b'enterpriseGateway'
+count=5
+
+[gateway-refresh] secureStorage write failed; applying refreshed credential in-memory only: 
+[gateway-refresh] auth changed during persist; discarding outcome
+enterpriseGateway
+Failed to persist gateway credential
+Iterator result interface is not an object.

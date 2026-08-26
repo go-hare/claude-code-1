@@ -1,6 +1,7 @@
 import figures from 'figures';
 import type { ReactNode } from 'react';
 import React from 'react';
+import type { ClickEvent } from '../core/events/click-event.js';
 import { useDeclaredCursor } from '../hooks/use-declared-cursor.js';
 import { Box, Text } from '../index.js';
 
@@ -60,6 +61,9 @@ type ListItemProps = {
    * @default true
    */
   declareCursor?: boolean;
+
+  /** densable Select option click (yln-guarded by the caller). */
+  onClick?: (event: ClickEvent) => void;
 };
 
 /**
@@ -111,6 +115,7 @@ export function ListItem({
   styled = true,
   disabled = false,
   declareCursor,
+  onClick,
 }: ListItemProps): React.ReactNode {
   // Determine which indicator to show
   function renderIndicator(): ReactNode {
@@ -166,7 +171,7 @@ export function ListItem({
   });
 
   return (
-    <Box ref={cursorRef} flexDirection="column">
+    <Box ref={cursorRef} flexDirection="column" onClick={onClick}>
       <Box flexDirection="row" gap={1}>
         {renderIndicator()}
         {styled ? (

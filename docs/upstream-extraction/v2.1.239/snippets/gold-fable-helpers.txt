@@ -1,0 +1,54 @@
+
+==== "function UV(" hits=2 ====
+@303005898:
+return e==="firstParty"||BZ(e)||e==="foundry"||e==="mantle"}function UV(){return ao()==="firstParty"&&Vm()}function Vm(){if(V._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0;return Vmt()}function Vmt(){let e=process.env.ANTHROPIC_BASE_URL;if(!e)return!0;return QOe(e)}function QOe(e){try{let t=new URL(e).host;return["api.anthropic.com"].includes(t)}catch{return!1}}function Mrr(){return Vm()||V.CLAUDE_CODE_PROPAGATE_TRACEPARENT}var Kae,aUr;var Fs=A(()=>{tt();Pa();fb();nG();Kae={bedrock:"Amazon Bedrock",vertex:"Google Vertex AI",foundry:"Microsoft Foundry
+
+@334128629:
+})}function $2t(e){wa.setData({yAxisBottomText:wh(e.text)})}function UV(e){let t={};for(let r of e){let[i,n]=r.trim().split(/\s*:\s*/);if(i==="radius"){if(uAe(n))throw new pm(i,n,"number");t.radius=parseInt(n)}else if(i==="color"){if(qV(n))throw new pm(i,n,"hex code");t.color=n}else if(i==="stroke-color"){if(qV(n))throw new pm(i,n,"hex code");t.strokeColor=n}else if(i==="stroke-width"){if(hAe(n))throw new pm(i,n,"number of pixels (eg. 10px)");t.strokeWidth=n}else throw new Error(`style named ${i} is not supported.`)}return t}function z2t(e,t,r,i,n){let a
+
+
+==== "function tle(" hits=1 ====
+@303296279:
+s(e))if(Object.hasOwn(ZOe,r)&&ZOe[r]===t&&n)return n;return}function tle(e){return e.replace(/\[1m\]/gi,"")}var hZo,_ma="opus46",hve="sonnet45",hht="haiku45",GNn="opus5",VNn="opus5",vnr="opus5",qNn="fable5",fWb,gWb,yWb,bWb,vWb,SWb,wWb;var Li=A(()=>{tt();oi();WH();Pa();yWe();PNn();nve();qLr();ENn();HCe();Ho();Fs();pT();Lu();nG();$B();dZo();WV();WV();fb();jNn();qe();lf();hZo={fable:{available:Snr,defaultModel:()=>XNn(),builtinDefault:(e)=>Ema(e)}};fWb={firstParty:"first_party",bedrock:"bedrock",vertex:"vertex",foundry:"foundry",anthropicAws:"anthropic_aws"
+
+
+==== "function m$(" hits=2 ====
+@303006798:
+"CLAUDE_CODE_USE_MANTLE",vertex:"CLAUDE_CODE_USE_VERTEX"}});function m$(e){return e}function N1n(e,t){let r=wda.find((i)=>md[i][e]!==null),n=e==="bedrock"?sUr(t??vGo()):void 0,o={};for(let i of wda){let s=md[i][e]??(r?md[r][e]:md[i].firstParty);o[i]=m$(n?ZMt(s,n):s)}return o}async function jPb(){let e=await qY(),t=sUr(e),r=QMt(e),n=N1n("bedrock",e),o=()=>{if(t!==r)E(`ANTHROPIC_BEDROCK_REGION_PREFIX=${t} is being applied without an availability check (inference-profile discovery is unavailable). If requests 400, ensure ${t}.* cross-region inference profil
+
+@337320262:
+"),removeAttribute:t("removeAttribute"),remove:t("remove")}}function m$(e,t){for(let n of Array.from(t.childNodes(e)))t.nodeType(n)===8&&t.removeChild(e,n);for(let n of Array.from(t.children(e))){let r=t.tagName(n).toLowerCase(),o=r.startsWith("sc-raw-")?r.slice(7):r;if(l$.has(r)||l$.has(o)){t.remove(n);continue}if(cc.test("<"+r)){t.remove(n);continue}if(Hpe.has(r)&&!Bpe(t.getAttribute(n,"attributeName"))){t.remove(n);continue}for(let a of Array.from(t.attributes(n))){let i=a.name.toLowerCase();if(i==="is"){t.remove(n);break}if(i.startsWith("on")||Upe.ha
+
+
+==== "function SZo(" hits=1 ====
+@303276281:
+a(e){return}function pWb(e){return}function zNn(e){return!1}function SZo(e,t,r=ao()){let n=QHu(e,fWb[r]);if(n===void 0)return;let o=ZA(n)?.provider_ids.first_party,i=o!==void 0?ZOe[o]:void 0;return i!==void 0?t[i]:void 0}function XNn(){let e=V.ANTHROPIC_DEFAULT_FABLE_MODEL??Ema();return m$(UV()?tle(e):e)}function Ema(e=zv()){let t=SZo("fable",e)??e.fable5;return UV()?tle(t):t}function BC(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(e!==void 0)return m$(e);return dZe()}function dZe(e=zv()){return SZo("opus",e)??e.opus5}function Ama(){return dZe(WJe())}functi
+
+
+==== "function zv(" hits=2 ====
+@303008337:
+ull)return;if(ao()!=="bedrock"){Txn(N1n(ao()));return}_kd()}function zv(){let e=nQt();if(e===null)return bkd(),ykd(N1n(ao()));return ykd(e)}function WJe(){let e=nQt();if(e===null)return bkd(),N1n(ao());return e}async function D7o(){if(nQt()!==null)return;if(ao()!=="bedrock"){Txn(N1n(ao()));return}await _kd()}var wda,_kd;var yWe=A(()=>{tt();Yft();qe();$r();Ho();XOe();nG();Fs();wda=Object.keys(md);_kd=_fe(async()=>{if(nQt()!==null)return;try{let e=await jPb();if(ao()!=="bedrock")return;Txn(e)}catch(e){Te(e)}})});function zPb(e){if(e<60000)return`${Math.rou
+
+@336150612:
+hes("html,body")}function kp(e){return Mn(e)&&e.matches(OA)}function zv(e){return e?.closest(`button,a[href],[role="button"],select,[tabindex]:not([tabindex="-1"]),${OA}`)!=null}function Fv(e){return e?e.getAttribute("role")==="combobox"&&kp(e):!1}function s4(e){if(!e||lr.env.jsdom)return!0;try{return e.matches(":focus-visible")}catch{return!0}}function Hv(e){return e?e.hasAttribute(Ov)?e:e.querySelector(`[${Ov}]`)||e:null}var qa=j(()=>{Mr();pl();Iv();a4()});function roe(e,t){return t!=null&&!ml(t)?0:typeof e=="function"?e():e}function Du(e,t,n){let r=ro
+
+
+==== "function H0(" hits=3 ====
+@85866893:
+et { ${G.join(", ")} }`;return`Set {.  ${G.join(`,.  `)}.}`}function H0(Z,$){let X=$.constructor.name,G=$.length,Y=Math.min(Z.maxArrayLength,G),J=[];for(let W=0;W<Y;W++)J.push(String($[W]));if($.length>Y){let W=$.length-Y;J.push(`... ${W} more item${W>1?"s":""}`)}return`${X} [ ${J.join(", ")} ]`}function D0(Z,$){let X=BZ($),G;try{G=new Uint8Array($)}catch{return`${X} { [Detached] }`}let Y=G.byteLength,J=Math.min(Z.maxArrayLength,Y),W=[];for(let K=0;K<J;K++)W.push(G[K].toString(16).padStart(2,"0"));if(Y>J){let K=Y-J;W.push(`... ${K} more byte${K>1?"s":""}
+
+@303300410:
+))});function $fe(){return V.CLAUDE_CODE_DISABLE_1M_CONTEXT}function H0(e){if($fe())return!1;return/\[1m\]/i.test(e)}function KFd(e){let t=Ya(e),r=$o(t);if(qFd(r))return r;if(t===e)return;let n=$o(e);if(qFd(n))return n;return}function qFd(e){let t=Ya(e);return ZA(t)?.context?.native_1m===!0||t===D9o}function RZo(e){return KFd(e)!==void 0}function YFd(e){if(V.DISABLE_COMPACT)return!0;return!$o(bs(e)).startsWith("claude-")}function nj(e){if($fe())return!1;let t=KFd(e);if(t===void 0)return!1;let r=ZA(Ya(t))?.context,n=Iw(e);if(n==="firstParty"&&Vm()||BZ(n)|
+
+@333362566:
+deep:!0}),i}function Y5(e){return dr.isInstance(e,zs.$type)}function H0(e){return dr.isInstance(e,$2.$type)}function pve(e){return dr.isInstance(e,N1.$type)}function mve(e){return dr.isInstance(e,ho.$type)}function pf(e){return dr.isInstance(e,of.$type)}function j5(e){return dr.isInstance(e,z2.$type)}function gve(e){return dr.isInstance(e,a5.$type)}function v$(e){return dr.isInstance(e,s5.$type)}function lh(e){return dr.isInstance(e,lf.$type)}function x$(e){return dr.isInstance(e,o5.$type)}function b$(e){return dr.isInstance(e,cf.$type)}function yve(e){r
+
+
+==== "function dne(" hits=1 ====
+@303279741:
+c),E(c,{level:"warn"});return bs("haiku")}return s}return r}function dne(e){return e.replace(/(\[1m\])+$/i,"")+"[1m]"}function ght(){let e=bnr();if(!e)return null;return LFd(e.name)}function OFd(){return!1}function LFd(e){if(OFd())return null;let t=EZo(e,null)??e,r=wZo(t)??t;return uZe(r,{ignoreModelOverrides:!0})===null?r:null}function q8(){return yht().setting}function JNn(e){switch(e){case"org":return" \xB7 Org default";case"enforced":case"entitlement":return" \xB7 Set by your organization";case"env":return" \xB7 Set by ANTHROPIC_DEFAULT_MODEL";case"t
+
+
+==== "isFable1m" hits=0 ====
+
+==== "FABLE_1M" hits=0 ====

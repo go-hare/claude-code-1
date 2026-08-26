@@ -74,11 +74,28 @@ export const init = memoize(async (): Promise<void> => {
   try {
     const configsStart = Date.now()
     enableConfigs()
+    const { loadCustomThemes, resolveCustomThemeSetting } = await import(
+      'src/utils/customThemes.js'
+    )
+    const { setCustomThemeOverrides } = await import('src/utils/theme.js')
+    // densable I8r — commit user theme cache before first d$e / ThemeProvider.
+    await loadCustomThemes()
     setThemeConfigCallbacks({
       loadTheme: () => getGlobalConfig().theme,
       saveTheme: setting =>
         saveGlobalConfig(current => ({ ...current, theme: setting })),
+      // Mirror resolved overrides into the src-side getTheme() state — Ink's
+      // ThemeProvider only writes its own copy (no ink→src import, Ym), but
+      // src components calling getTheme() directly must see them too.
+      resolveCustomTheme: setting => {
+        const resolved = resolveCustomThemeSetting(setting)
+        setCustomThemeOverrides(resolved.overrides)
+        return resolved
+      },
     })
+    setCustomThemeOverrides(
+      resolveCustomThemeSetting(getGlobalConfig().theme).overrides,
+    )
     // densable Ym → Ink hasReleasedTerminal (no ink→src import).
     setAppCallbacks({
       isShutdownCommitted: isShuttingDown,

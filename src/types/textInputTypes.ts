@@ -450,6 +450,11 @@ export type QueuedCommand = {
    * auto-opt into multi-agent orchestration).
    */
   suppressWorkflowKeyword?: boolean
+  /**
+   * Official Cuy `passive!==true` — wake/receipt drains skip these.
+   * Omitted = active (same as official undefined).
+   */
+  passive?: boolean
 }
 
 /**

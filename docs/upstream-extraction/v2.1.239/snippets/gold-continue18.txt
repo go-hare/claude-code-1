@@ -1,0 +1,133 @@
+#### "function AU(" 2 [303688155, 336305540]
+[0-79]|10[0-7])$/});function AU(e,t){if(or(e)<=t)return e;if(t<=0)return"\u2026";if(t<5)return Hi(e,t);let r=e.lastIndexOf("/"),n=r>=0?r:e.lastIndexOf("\\"),o=n>=0?e.slice(n):e,i=n>=0?e.slice(0,n):"",s=or(o);if(s>=t-1)return bG(e,t);let a=t-1-s;return xZe(i,a)+"\u2026"+o}function Hi(e,t){if(or(e)<=t)return e;if(t<=1)return"\u2026";let r=0,n="";for(let{segment:o}of V_().segment(e)){let i=or(o);if(r+i>t-1)break;n+=o,r+
+---
+bp();Mc=A(ae(),1)});function AU(e){let{multiple:t=!1,defaultValue:n,value:r,onValueChange:o,autoComplete:a,...i}=e;return(0,PU.jsx)(RU,{...i,selectionMode:t?"multiple":"single",selectedValue:r,defaultSelectedValue:n,onSelectedValueChange:o,formAutoComplete:a})}var QPe,PU,_U=j(()=>{"use client";QPe=A(ne(),1);TU();PU=A(ae(),1)});function DU(e,t){let n=br(e);return Ee(()=>(t(n),()=>{t(void 0)}),[n,t]),n}var MU=j(()=>{"u
+---
+
+#### "truncatePathMiddle" 2 [106552672, 303689894]
+..........3.....truncate........	.......truncatePathMiddle..............I.3.....truncateStartToWidth............	.......truncateToWidth.........	.......truncateToWidthNoEllipsis...............	.......wrapText..........3.....forcedUnavailabl
+---
+mle,formatTokens:()=>nc,truncate:()=>Wl,truncatePathMiddle:()=>AU,truncateStartToWidth:()=>bG,truncateToWidth:()=>Hi,truncateToWidthNoEllipsis:()=>xZe,wrapText:()=>Kei});function GOt(e){return`${(e/1000).toFixed(1)}s`}function Bs(e,t){if(e<
+---
+
+#### "35;150;7M" 0 []
+
+#### "mouse report" 0 []
+
+#### "dark-ansi" 8 [123427736, 179934224, 220297048, 220297336, 301979077, 306386140, 320748632, 320802591]
+	...
+...light-ansi..............	...	...dark-ansi...............r........_..................i.................i.................i.................i.................i.................i.i.......................
+...............................
+---
+e (ANSI colors only)............	...	...dark-ansi...............	.......Light mode (ANSI colors only)...........	...
+...light-ansi..............................................................................................N.e.w. .c.u.s.t.
+---
+	...
+...light-ansi..............	...	...dark-ansi.......................`...............h...............p.......................................................................	.......dark............	.......light...........	.......light-da
+---
+	...
+...light-ansi..............	...	...dark-ansi...............	...	...alwaysAsk...............	.......disabled................0...............8...............H.......................	.......auto............	...	...alwaysAsk...............
+---
+onized","dark-daltonized","light-ansi","dark-ansi"],qMn=["auto",...mta],KMn=["auto","alwaysAsk","disabled"]});function bta(e){return`${BS} ${e}`}function wta(){return bZ_}var hu,uJe="\u2219",s9u="\u2315",LV="\u273B",YMn="\u2234",a9u="\u25CC
+---
+rn dWv;case"light-ansi":return pWv;case"dark-ansi":return fWv;case"light-daltonized":return mWv;case"dark-daltonized":return gWv;default:return hWv}}function wNe(e){if(typeof e!=="string")return!1;if(/^rgb\(\s?\d{1,3},\s?\d{1,3},\s?\d{1,3}\
+---
+
+#### "effortBadge" 0 []
+
+#### "badgeColor" 0 []
+
+#### "ultracodeBadge" 0 []
+
+#### "JediTerm" 15 [109028210, 116665074, 127762106, 131250252, 131569090, 229653274, 251787194, 301277779, 303236363, 304412500]
+sualstudio............	.......JetBrains-JediTerm..............	.......pycharm.........	......xterm-ghostty...........	.......ghostty.........	.......kitty...................................	.......^devin([ -]desktop)?$...........	.......tm
+---
+acritty...............	.......JetBrains-JediTerm..................-..............................4..P3...&.......4..C4...3...6..@........4..C4...3..QV..@........4..C4...3..pV.......4..C4...n.......4..C4..pn.......4..C4...m.......4..C4...m..
+---
+de-256color...........	.......JetBrains-JediTerm.................................................U.....@ ...p........4..P3.@p&.......5.@ ..K.....3..qU.@ ..Q.....3.@pU.K...@.m.@.U.@.T.@`U.@.U.@@U.@.U.R..........&...8...d...m.................
+---
+...jediTermInput...........	.......emitJediTermScrollBug...........	.......querier.........	.......handleTerminalFocus.............	.......props...........	.......getMouseMode............	.......internal_eventEmitter...........	.......onSe
+---
+......................	.......JetBrains-JediTerm..............	.......tmux............	...............	.......................	...+...Iterator result interface is not an object......
+...............................	.......kitty.............
+---
+......Ar..............	.......JetBrains-JediTerm..............	.......darwin..........	.......pycharm.
+.........................................p.......`,......P,......`d..p.I..........;S......|.@.$.R...@.V.I....01M....@.L.I..Q...........>.
+---
+
+#### "JetBrains" 16 [99680442, 99694460, 109028200, 116665064, 127762096, 127884673, 130505208, 131164682, 131569080, 131925705]
+opImmediatePropagation........	.......isJetBrainsIdeTerminal..........	.".....isMicrosoftWindowsTerminal"...............".	...isGhostty.......................isMintty........	.......windowsConsoleSupp
+---
+h timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFil
+---
+	.......visualstudio............	.......JetBrains-JediTerm..............	.......pycharm.........	......xterm-ghostty...........	.......ghostty.........	.......kitty...................................
+---
+	...	...alacritty...............	.......JetBrains-JediTerm..................-..............................4..P3...&.......4..C4...3...6..@........4..C4...3..QV..@........4..C4...3..pV.......4..C4...n
+---
+rxvt-unicode-256color...........	.......JetBrains-JediTerm.................................................U.....@ ...p........4..P3.@p&.......5.@ ..K.....3..qU.@ ..Q.....3.@pU.K...@.m.@.U.@.T.@`U.@.U
+---
+guration
+  - IDE integrations (VS Code, JetBrains)
+  - Settings files and configuration
+  - Keyboard shortcuts and hotkeys
+  - Subagents and plugins
+  - Sandboxing and security
+
+- **Claude Agent SDK d
+---
+
+#### "selection:copy" 10 [181137512, 181172816, 250198280, 250218720, 250225816, 307566801, 307566826, 307576354, 320957390, 320959481]
+	......scroll:bottom...........	.......selection:copy..........	.......scroll:halfPageUp...............	.......scroll:halfPageDown.............	.......scroll:fullPageUp...............	.......scroll:fullPageDown.............	.......selectio
+---
+........	.......match...........	.......selection:copy......................F....................@...M.....4.@.d.E...@.L.F...@.L.E...@.L.@.<.H...@.4.....@.$.O.....4.@@,.@ ..C...@.<.B...@.=..P..@ ..@ ......@ e.@@..J...@.L.G...@.L.E...@.L.E..
+---
+	.......scroll:pageDown.........	.......selection:copy..........	.......selection:extendLeft............	.......selection:extendRight...........	.......selection:extendUp..............	.......selection:extendDown............	.......selectio
+---
+scroll:fullPageDown.............	.......selection:copy..........	.......selection:clear.........	.......selection:extendLeft............	.......selection:extendRight...........	.......selection:extendUp..............	.......selection:extend
+---
+
+#### "Shift+Arrow" 0 []
+
+#### "\uFEFF" 16 [110953889, 120049481, 120049537, 214725396, 214725412, 220985703, 239199104, 251666007, 253235670, 262749401]
+...............................	.......[\uFEFF]................................	.......[\uE000-\uF8FF]..................................@.$.H...].d.@.>.H...W.d..x=...d...=G......d^.....p=f......dv......=~......d.@.=.........................
+---
+...............................	.......^\uFEFF([!#]?)..................................	.......^\uFEFF.................[...]....................................@.$.H...O.d..TV.@p4.....@.T.@...H...e.l..[>...d....0...2.......................h
+---
+...............................	.......^\uFEFF.................[...]....................................@.$.H...O.d..TV.@p4.....@.T.@...H...e.l..[>...d....0...2.......................h.8..................... .8...........................I.l
+---
+............................	...!...^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$...............	........................................@`..E...@pL.E....Q4.@@L.H...i.d....
+.......2....................O.......................<..........g........@......
+---
+............	...!...^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$...............	........................................@`..E...@pL.E....Q4.@@L.H...i.d....
+.......2....................O.......................<..........g........@...........@.......@..
+---
+80D\u180F\u200B\u2060\u2064\uFE00-\uFE0F\uFEFF\u{1BCA0}-\u{1BCA3}\u{E0100}-\u{E01EF}]....
+..........................................D...........;..0}.......}.......}...............}....e......|...............................................
+---
+
+#### "stripBom" 3 [236186072, 304534058, 304534179]
+................................	.......stripBom..............................;.....j.......w.....;...;......H..H...............................................p.................................................L.............................
+---
+^\uFEFF/,"")}Gap.exports={stringify:ypv,stripBom:_pv}});var rka=ae(function(NUC,Kap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encodi
+---
+quire("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.pars
+---
+
+#### "us-only-inference" 0 []
+
+#### "usOnlyInference" 0 []
+
+#### "1.1x" 0 []
+
+#### "US-only" 2 [122714068, 306231692]
+rns result blocks with titles and URLs. US-only.
+
+- The current month is ................... ..  .u.s.e. .t.h.i.s. .w.h.e.n. .s.e.a.r.c.h.i.n.g. .f.o.r. .r.e.c.e.n.t. .i.n.f.o.r.m.a.t.i.o.n...
+.-. .`.
+---
+rns result blocks with titles and URLs. US-only.
+
+- The current month is ${t} \u2014 use this when searching for recent information.
+- \`allowed_domains\` / \`blocked_domains\` filter results.
+- After
+---

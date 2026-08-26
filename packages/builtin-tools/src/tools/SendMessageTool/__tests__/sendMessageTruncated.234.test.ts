@@ -24,9 +24,8 @@ describe('densable 2.1.234 #34 SendMessageTool truncated wiring', () => {
     expect(toolSrc).toContain('appendSearchTruncatedSuccessSuffix')
     expect(toolSrc).toContain('appendSearchTruncatedBody')
     expect(toolSrc).toContain('searchTruncatedDisplayNote')
-    expect(toolSrc).toContain(
-      "resolved.kind === 'not-found' && searchTruncated",
-    )
+    expect(toolSrc).toContain("resolved.kind === 'not-found'")
+    expect(toolSrc).toContain('leftoverOwnNameMiss')
     expect(toolSrc).toContain('searchTruncated: resolved.searchTruncated')
   })
 

@@ -1,0 +1,7 @@
+it nso(t.session,e.to,e.message,t.getAppState(),t.storageV5,t.credentials);if((p.kind==="local-session"||p.kind==="cloud-session")&&!rg())return{data:{success:!1,message:Pjn}};if(p.kind==="cloud-sessi
+on"&&XFe(p.sessionId))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(p.kind==="local-session"&&Xen(p.sock))return s("unresolved","invalid_targ
+et"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(p.kind==="local-session"&&Jio(e.to,p.sock))return s("unresolved",void 0,{degradedClass:"claimed_locally"}),{data:{success:!1,messa
+ge:Zio(e.to),display:Kwm(e.to)}};if(p.kind==="local-session"&&VEt(p.sock))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};if(JRw(e,n,t.toolUseId)&
+&p.kind!=="local-session"&&p.kind!=="ambiguous"&&p.kind!=="not-found"){let{idleSelfTargetMessage:S}=(s3i(),pn(i3i));return s("unresolved","invalid_target"),be("cross_session_notify_idle",p.kind==="mai
+n"?"subscribe_self_target":"subscribe_refused_target"),{data:{success:!1,message:`${p.kind==="main"?S('"main"'):u0m}${typeof e.message!=="string"||e.message.trim().length>0?tIw:""}`}}}let f=t.options.
+tools.some((S)=>ol(S,e_)),m=f?` (${e_} lists them)`:"";if(p.kind==="agent-live"||p.kind==="agent-stopped"||p.kind==="agent-evicted"){if(ZZn(t.session,p.agentId))return s("unresolved","not_reachable"),

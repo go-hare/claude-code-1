@@ -1,0 +1,3 @@
+OFFSET=301565878
+
+ctWindow)};return{type:"text",value:await CVr(r,t)}};var CXa=A(()=>{Ut();Kie();Cs();To()});var p4f,uxi;var f4f=A(()=>{bt();p4f={type:"local-jsx",name:"autocompact",description:"Set how full the context gets before auto-summarizing",immediate:!0,isEnabled:()=>!xn(),isHidden:!1,argumentHint:"[auto|<tokens>]",userFacingName(){return"autocompact"}},uxi={type:"local",name:"autocompact",supportsNonInteractive:!0,thinClientDispatch:"post-text",description:"Configure the auto-compact window size",get isHidden(){return!xn()&&!sc()},isEnabled(){return xn

@@ -3,10 +3,11 @@ import { useAppState } from '../state/AppState.js'
 import {
   hasVoiceAuth,
   isVoiceGrowthBookEnabled,
+  isVoiceSettingEnabled,
 } from '../voice/voiceModeEnabled.js'
 
 /**
- * Combines user intent (settings.voiceEnabled) with auth + GB kill-switch.
+ * Combines user intent (Ldo: voice.enabled ?? voiceEnabled) with auth + GB kill-switch.
  * When using Doubao backend, auth check is skipped (Doubao has its own credentials).
  * Only the auth half is memoized on authVersion — it's the expensive one
  * (cold getClaudeAIOAuthTokens memoize → sync `security` spawn, ~60ms/call,
@@ -15,7 +16,7 @@ import {
  * kill-switch flip still takes effect on the next render.
  */
 export function useVoiceEnabled(): boolean {
-  const userIntent = useAppState(s => s.settings.voiceEnabled === true)
+  const userIntent = useAppState(s => isVoiceSettingEnabled(s.settings))
   const provider = useAppState(s => s.settings.voiceProvider)
   // All hooks must be called unconditionally (Rules of Hooks)
   const authVersion = useAppState(s => s.authVersion)

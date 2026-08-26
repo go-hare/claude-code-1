@@ -1,0 +1,3 @@
+OFFSET=215757781
+
+login with the corresponding profile...........................The SSO session associated with this profile has expired. To refresh this SSO session run aws sso login with the corresponding profile..............F...Cannot destructure property 'accessToken' from null or undefined value......................D...Cannot destructure property 'SSOClient' from null or undefined value....................i.......................g.......................s.......................a.......................n....

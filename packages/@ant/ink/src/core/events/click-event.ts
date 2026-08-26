@@ -1,11 +1,18 @@
 import { Event } from './event.js'
 
+/** densable `_Yn` — Button/Select mount-settle window (ms). */
+export const MOUNT_SETTLE_MS = 300
+
+export type MouseClickResult = 'stray' | 'handled' | 'unhandled'
+
 /**
  * Mouse click event. Fired on left-button release without drag, only when
  * mouse tracking is enabled (i.e. inside <AlternateScreen>).
  *
  * Bubbles from the deepest hit node up through parentNode. Call
  * stopImmediatePropagation() to prevent ancestors' onClick from firing.
+ *
+ * densable `p9r`: hyperlinkUrl / isWindowActivation / allowDefault / dropAsStray.
  */
 export class ClickEvent extends Event {
   /** 0-indexed screen column of the click */
@@ -28,11 +35,40 @@ export class ClickEvent extends Event {
    * clicks on empty terminal space don't toggle state.
    */
   readonly cellIsBlank: boolean
+  /** OSC 8 / plain-text URL under the click, if any. densable `hyperlinkUrl`. */
+  readonly hyperlinkUrl: string | undefined
+  /**
+   * densable `isWindowActivation` — this press only brought the terminal
+   * window back into focus (`yvf=400` grace after `Jhf()`).
+   */
+  readonly isWindowActivation: boolean
+  /** densable `defaultAllowed` — handler called `allowDefault()`. */
+  defaultAllowed = false
+  /** densable `droppedAsStray` — handler called `dropAsStray()`. */
+  droppedAsStray = false
 
-  constructor(col: number, row: number, cellIsBlank: boolean) {
+  constructor(
+    col: number,
+    row: number,
+    cellIsBlank: boolean,
+    hyperlinkUrl?: string,
+    isWindowActivation = false,
+  ) {
     super()
     this.col = col
     this.row = row
     this.cellIsBlank = cellIsBlank
+    this.hyperlinkUrl = hyperlinkUrl
+    this.isWindowActivation = isWindowActivation
+  }
+
+  /** densable `allowDefault` — treat the click as unhandled (e.g. hyperlink). */
+  allowDefault(): void {
+    this.defaultAllowed = true
+  }
+
+  /** densable `dropAsStray` — discard this click (focus-activation / mount settle). */
+  dropAsStray(): void {
+    this.droppedAsStray = true
   }
 }

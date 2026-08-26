@@ -147,6 +147,11 @@ const goal = {
             return { type: 'text', value: 'No goal set' }
           }
           const condition = activeGoal.condition
+          // densable 1:1 — cancel idle check-in timer on every activeGoal teardown.
+          const { cancelPendingGoalIdleCheckin } = await import(
+            '../services/goal/goalIdleCheckin.js'
+          )
+          cancelPendingGoalIdleCheckin()
           removeGoalHooks(context.setAppState, appState, sessionId)
           context.setAppState(prev =>
             prev.activeGoal === undefined

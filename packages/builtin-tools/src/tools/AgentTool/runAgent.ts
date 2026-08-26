@@ -55,6 +55,7 @@ import {
   cloneFileStateCache,
   createFileStateCacheWithSizeLimit,
   READ_FILE_STATE_CACHE_SIZE,
+  type FileStateCache,
 } from 'src/utils/fileStateCache.js'
 import {
   type CacheSafeParams,
@@ -108,6 +109,11 @@ import {
 import type { ContentReplacementState } from 'src/utils/toolResultStorage.js'
 import { createAgentId } from 'src/utils/uuid.js'
 import type { ActiveTaskExecutionContext } from 'src/utils/tasks.js'
+import { getAgentContext } from 'src/utils/agentContext.js'
+import {
+  admitWebFetchTool,
+  agentContextSpawnDepth,
+} from 'src/utils/webFetchAdmission.js'
 import { resolveAgentTools } from './agentToolUtils.js'
 import { FORK_SUBAGENT_TYPE } from './forkSubagent.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
@@ -295,6 +301,7 @@ export async function* runAgent({
   ownedFiles,
   activeTaskExecutionContext,
   useExactTools,
+  webFetchReadmissionAllowed = true,
   worktreePath,
   worktreeBranch,
   cwd,
@@ -328,6 +335,8 @@ export async function* runAgent({
     systemPrompt?: SystemPrompt
     abortController?: AbortController
     agentId?: AgentId
+    /** Official Lto `forkReadFileState` (`g`) passed through nK override. */
+    readFileState?: FileStateCache
   }
   model?: ModelAlias
   maxTurns?: number
@@ -360,6 +369,12 @@ export async function* runAgent({
    * subagent path to produce byte-identical API request prefixes for
    * prompt cache hits. */
   useExactTools?: boolean
+  /**
+   * Official `webFetchReadmissionAllowed` (`y`, default true). When set,
+   * `GIe` may splice WebFetch into the pool before resolveAgentTools.
+   * Fork exact-tools skips resolve and therefore skips GIe here.
+   */
+  webFetchReadmissionAllowed?: boolean
   /** Worktree path if the agent was spawned with isolation: "worktree".
    * Persisted to metadata so resume can restore the correct cwd. */
   worktreePath?: string
@@ -455,9 +470,11 @@ export async function* runAgent({
   const initialMessages: Message[] = [...contextMessages, ...promptMessages]
 
   const agentReadFileState =
-    forkContextMessages !== undefined
-      ? cloneFileStateCache(toolUseContext.readFileState)
-      : createFileStateCacheWithSizeLimit(READ_FILE_STATE_CACHE_SIZE)
+    override?.readFileState !== undefined
+      ? cloneFileStateCache(override.readFileState)
+      : forkContextMessages !== undefined
+        ? cloneFileStateCache(toolUseContext.readFileState)
+        : createFileStateCacheWithSizeLimit(READ_FILE_STATE_CACHE_SIZE)
 
   const [baseUserContext, baseSystemContext] = await Promise.all([
     override?.userContext ?? getUserContext(),
@@ -610,7 +627,18 @@ export async function* runAgent({
     ? availableTools
     : resolveAgentTools(
         agentDefinition,
-        availableTools,
+        webFetchReadmissionAllowed
+          ? admitWebFetchTool(
+              agentDefinition,
+              availableTools,
+              appState.toolPermissionContext,
+              {
+                depth: agentContextSpawnDepth(getAgentContext()),
+                activeAgents:
+                  toolUseContext.options.agentDefinitions.activeAgents,
+              },
+            )
+          : availableTools,
         isAsync,
         false,
         isObserverAgent,

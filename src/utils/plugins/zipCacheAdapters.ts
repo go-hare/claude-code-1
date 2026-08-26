@@ -14,6 +14,7 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { logForDebugging } from '../debug.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
+import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
 import { loadKnownMarketplacesConfigSafe } from './marketplaceManager.js'
 import {
   type KnownMarketplacesFile,
@@ -81,7 +82,9 @@ export async function readMarketplaceJson(
   try {
     const content = await readFile(fullPath, 'utf-8')
     const parsed = jsonParse(content)
-    const result = PluginMarketplaceSchema().safeParse(parsed)
+    const result = PluginMarketplaceSchema().safeParse(
+      applyMarketplacePluginRoot(parsed),
+    )
     if (result.success) {
       return result.data
     }

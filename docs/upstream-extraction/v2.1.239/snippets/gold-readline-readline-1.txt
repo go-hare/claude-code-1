@@ -1,0 +1,94 @@
+# readline offset=70441998
+
+lse if (ch === "\t")
+      key.name = "tab", key.meta = escaped;
+    else if (ch === "\b" || ch === "\x7F")
+      key.name = "backspace", key.meta = escaped;
+    else if (ch === kEscape)
+      key.name = "escape", key.meta = escaped;
+    else if (ch === " ")
+      key.name = "space", key.meta = escaped;
+    else if (!escaped && ch <= "\x1A")
+      key.name = StringFromCharCode(StringPrototypeCharCodeAt(ch) + StringPrototypeCharCodeAt("a") - 1), key.ctrl = !0;
+    else if (RegExpPrototypeExec(/^[0-9A-Za-z]$/, ch) !== null)
+      key.name = StringPrototypeToLowerCase(ch), key.shift = RegExpPrototypeExec(/^[A-Z]$/, ch) !== null, key.meta = escaped;
+    else if (escaped)
+      key.name = ch.length ? @undefined : "escape", key.meta = !0;
+    if (key.sequence = s, s.length !== 0 && (key.name !== @undefined || escaped))
+      stream.emit("keypress", escaped ? @undefined : s, key);
+    else if (charLengthAt(s, 0) === s.length)
+      stream.emit("keypress", s, key);
+  }
+}
+function commonPrefix(strings) {
+  if (strings.length === 0)
+    return "";
+  if (strings.length === 1)
+    return strings[0];
+  let sorted = ArrayPrototypeToSorted(strings), min = sorted[0], max = sorted[sorted.length - 1];
+  for (let i = 0;i < min.length; i++)
+    if (min[i] !== max[i])
+      return StringPrototypeSlice(min, 0, i);
+  return min;
+}
+function reverseString(line, from = "\r", to = "\r") {
+  let parts = StringPrototypeSplit(line, from), result = "";
+  for (let i = parts.length - 1;i > 0; i--)
+    result += parts[i] + to;
+  return result += parts[0], result;
+}
+__node_module__.exports = {
+  charLengthAt,
+  charLengthLeft,
+  commonPrefix,
+  emitKeys,
+  reverseString,
+  kSubstringSearch,
+  CSI
+};
+$ = __node_module__.exports;
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/readline/callbacks.ts
+var $, primordials = @getInternalField(@internalModuleRegistry, 64) || @createInternalModuleById(64), __node_module__ = { exports: {} }, { NumberIsNaN } = primordials, {
+  codes: { ERR_INVALID_ARG_VALUE, ERR_INVALID_CURSOR_POS }
+} = @getInternalField(@internalModuleRegistry, 62) || @createInternalModuleById(62), { validateFunction } = @getInternalField(@internalModuleRegistry, 122) || @createInternalModuleById(122), { CSI } = @getInternalField(@internalModuleRegistry, 54) || @createInternalModuleById(54), { kClearLine, kClearScreenDown, kClearToLineBeginning, kClearToLineEnd } = CSI;
+function cursorTo(stream, x, y, callback) {
+  if (callback !== @undefined)
+    validateFunction(callback, "callback");
+  if (typeof y === "function")
+    callback = y, y = @undefined;
+  if (NumberIsNaN(x))
+    throw new ERR_INVALID_ARG_VALUE("x", x);
+  if (NumberIsNaN(y))
+    throw new ERR_INVALID_ARG_VALUE("y", y);
+  if (stream == null || typeof x !== "number" && typeof y !== "number") {
+    if (typeof callback === "function")
+      process.nextTick(callback, null);
+    return !0;
+  }
+  if (typeof x !== "number")
+    throw new ERR_INVALID_CURSOR_POS;
+  let data = typeof y !== "number" ? CSI`${x + 1}G` : CSI`${y + 1};${x + 1}H`;
+  return stream.write(data, callback);
+}
+function moveCursor(stream, dx, dy, callback) {
+  if (callback !== @undefined)
+    validateFunction(callback, "callback");
+  if (stream == null || !(dx || dy)) {
+    if (typeof callback === "function")
+      process.nextTick(callback, null);
+    return !0;
+  }
+  let data = "";
+  if (dx < 0)
+    data += CSI`${-dx}D`;
+  else if (dx > 0)
+    data += CSI`${dx}C`;
+  if (dy < 0)
+    data += CSI`${-dy}A`;
+  else if (dy > 0)
+    data += CSI`${dy}B`;
+  return stream.write(data, callback);
+}
+function clearLine(str

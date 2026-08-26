@@ -1,0 +1,4 @@
+offset=100489002
+needle=b'auto mode'
+window=
+ words only)!...............!.(...Other git repos under the home directory............-...Recent usage across all projects (names only)...................denied by the Claude Code auto mode classifier.................._.N.O.T. .G.A.T.H.E.R.E.D. ..  .t.h.e. .h.o.m.e. .d.i.r.e.c.t.o.r.y. .r.e.s.o.l.v.e.s. .t.o. .a. .n.e.t.w.o.r.k. .p.a.t.h... .T.r.e.a.t. .s.h.e.l.l. .h.i.s.t.o.r.y. .a.s. .".n.o.t. .

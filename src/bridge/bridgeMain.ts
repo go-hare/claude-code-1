@@ -35,6 +35,7 @@ import { describeAxiosError } from './debugUtils.js'
 import { createTokenRefreshScheduler } from './jwtUtils.js'
 import { getPollIntervalConfig } from './pollConfig.js'
 import { toCompatSessionId, toInfraSessionId } from './sessionIdCompat.js'
+import { createTitleWriteScheduler } from './titleWriteScheduler.js'
 import { createSessionSpawner, safeFilenameId } from './sessionRunner.js'
 import { getTrustedDeviceToken } from './trustedDevice.js'
 import {
@@ -188,6 +189,14 @@ export async function runBridgeLoop(
   // onFirstUserMessage doesn't clobber a user-assigned --name / web rename.
   // Keyed by compatSessionId to match logger.setSessionTitle's key.
   const titledSessions = new Set<string>()
+  // densable 2.1.239 #39 `k` / `_ts` — titles we derived vs remote-adopted.
+  const derivedTitles = new Map<string, Set<string>>()
+  const titleWriter = createTitleWriteScheduler({
+    isOwnTitle: (sessionId, ownTitle) =>
+      derivedTitles.get(sessionId)?.has(ownTitle) ?? false,
+    onRemoteTitleAdopted: (sessionId, remoteTitle) =>
+      logger.setSessionTitle(sessionId, remoteTitle),
+  })
   // Signal to wake the at-capacity sleep early when a session completes,
   // so the bridge can immediately accept new work.
   const capacityWake = createCapacityWake(loopSignal)
@@ -457,6 +466,7 @@ export async function runBridgeLoop(
       sessionIngressTokens.delete(sessionId)
       const compatId = sessionCompatIds.get(sessionId) ?? sessionId
       sessionCompatIds.delete(sessionId)
+      titleWriter.forget(compatId)
       logger.removeSession(compatId)
       titledSessions.delete(compatId)
       v2Sessions.delete(sessionId)
@@ -1060,12 +1070,14 @@ export async function runBridgeLoop(
                 logForDebugging(
                   `[bridge:title] derived title for ${compatSessionId}: ${title}`,
                 )
-                void import('./createSession.js')
-                  .then(({ updateBridgeSessionTitle }) =>
-                    updateBridgeSessionTitle(compatSessionId, title, {
-                      baseUrl: config.apiBaseUrl,
-                    }),
-                  )
+                derivedTitles.set(
+                  compatSessionId,
+                  (derivedTitles.get(compatSessionId) ?? new Set()).add(title),
+                )
+                void titleWriter
+                  .update(compatSessionId, title, {
+                    baseUrl: config.apiBaseUrl,
+                  })
                   .catch(err =>
                     logForDebugging(
                       `[bridge:title] failed to update title for ${compatSessionId}: ${err}`,
@@ -1181,6 +1193,7 @@ export async function runBridgeLoop(
               if (title && activeSessions.has(sessionId)) {
                 titledSessions.add(compatSessionId)
                 logger.setSessionTitle(compatSessionId, title)
+                titleWriter.noteRemoteTitle(compatSessionId, title)
                 logForDebugging(
                   `[bridge:title] server title for ${compatSessionId}: ${title}`,
                 )

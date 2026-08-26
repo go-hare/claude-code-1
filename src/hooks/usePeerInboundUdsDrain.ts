@@ -28,6 +28,7 @@ import {
 import { PeerInboundApprovalDialog } from '../components/PeerInboundApprovalDialog.js'
 import { useNotifications } from '../context/notifications.js'
 import { useAppStateStore } from '../state/AppState.js'
+import { logForDebugging } from '../utils/debug.js'
 import { enqueue } from '../utils/messageQueueManager.js'
 import { createPeerInboundApprovalQueue } from '../utils/peerInboundApprovalQueue.js'
 import {
@@ -314,12 +315,28 @@ export function usePeerInboundUdsDrain(
 
     // densable 2.1.236 — deliver correlated [Cross-session idle notice] prompts.
     try {
-      const { setIdleNoticeHandler, idleNoticeModelText } =
+      const {
+        setIdleNoticeHandler,
+        idleNoticeDisplayText,
+        idleNoticeModelText,
+      } =
         require('../utils/udsIdleNotify.js') as typeof import('../utils/udsIdleNotify.js')
+      let heldToastSeq = 0
       setIdleNoticeHandler(notice => {
         const text = idleNoticeModelText(notice)
         if (!notice.modelVisible) {
-          // densable hold: shown to user / logged, not delivered to the model.
+          // densable hold: shown/logged to the user, not delivered to the model.
+          // Match idleSubscribedLine hold copy: interactive → transcript toast.
+          logForDebugging(
+            `[Cross-session idle notice] held — only logged, not delivered to model: ${text}`,
+          )
+          heldToastSeq += 1
+          addNotification({
+            key: `peer-idle-notice-held-${Date.now()}-${heldToastSeq}`,
+            text: idleNoticeDisplayText(notice),
+            color: 'warning',
+            priority: 'high',
+          })
           return
         }
         enqueue({

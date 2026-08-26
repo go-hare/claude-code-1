@@ -1,0 +1,86 @@
+==== fWv dark-ansi ====
+--- 306391774 ---
+nsi:magentaBright"},fWv={autoAccept:"ansi:magentaBright",autoAcceptShimmer:"ansi:magentaBright",skill:"ansi:magentaBright",bashBorder:"ansi:magentaBright",claude:"ansi:redBright",claudeShimmer:"ansi:yellowBright",claudeBlue_FOR_SYSTEM_SPINNER:"ansi:blueBright",claudeBlueShimmer_FOR_SYSTEM_SPINNER:"ansi:blueBright",permission:"ansi:blueBright",permissionShimmer:"ansi:blueBright",planMode:"ansi:cyanBright",ide:"ansi:blue",promptBorder:"ansi:white",promptBorderShimmer:"ansi:whiteBright",text:"ansi:whiteBright",inverseText:"ansi:black",inactive:"ansi:white",inactiveShimmer:"ansi:whiteBright",subtle:"ansi:white",suggestion:"ansi:blueBright",remember:"ansi:blueBright",background:"ansi:cyanBright",success:"ansi:greenBright",error:"ansi:redBright",warning:"ansi:yellowBright",merged:"ansi:magentaBright",warningShimmer:"ansi:yellowBright",diffAdded:"ansi:green",diffRemoved:"ansi:red",diffAddedDimmed:"ansi:green",diffRemovedDimmed:"ansi:red",diffAddedWord:"ansi:greenBright",diffRemovedWord:"ansi:redBright",red_FOR_SUBAGENTS_ONLY:"ansi:redBright",blue_FOR_SUBAGENTS_ONLY:"ansi:blueBright",green_FOR_SUBAGENTS_ONLY:"ansi:greenBright",yellow_FOR_SUBAGENTS_ONLY:"ansi:yellowBright",purple_FOR_SUBAGENTS_ONLY:"ansi:magentaBright",orange_FOR_SUBAGENTS_ONLY:"ansi:redBright",pink_FOR_SUBAGENTS_ONLY:"ansi:magentaBright",cyan_FOR_SUBAGENTS_ONLY:"ansi:cyanBright",professionalBlue:"rgb(106,155,204)",chromeYellow:"ansi:yellowBright",clawd_body:"ansi:redBright",clawd_background:"ansi:black",userMessageBackground:"ansi:blackBright",userMessageBackgroundHover:"ansi:black",composerSidebarBackground:"ansi:blackBright",selectionBg:"ansi:blue",bashMessageBackgroundColor:"ansi:black",memoryBackgroundColor:"ansi:blackBright",rate_limit_fill:"ansi:yellow",rate_limit_empty:"ansi:white",fastMode:"ansi:redBright",fastModeShimmer:
+
+==== function ZGn ====
+.slice(5));return!1}function ZGn(e,t){if(!t)return e;let r={...e};for(let[n,o]of Object.entries(t))if(Object.hasOwn(e,n)&&wNe(o))r[n]=o;return r}function Qgi(e){let t=e.match(/rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)/);if(t){let o=parseInt(t[1],10),i=parseInt(t[2],10),s=parseInt(t[3],10),a=yWv.rgb(o,i,s)("X");return a.slice(0,a.indexOf("X"))}if(ir.level===0)return"";let r=ZGe("X",e,"foreground"),n=r.indexOf("X");return n
+
+==== udc callers ====
+
+#### udc( [320464863,326381416]
+>=e?r:{...r,fullscreenUpsellSeenCount:e},t)}function jfn(e){Zng(M4r,e)}function udc(e){let t=Kjn();if(t.upsellImpression!==void 0)return t.upsellImpression;let r=Math.min((cr().fullscreenUpsellSeenCount??0)+1,M4r);return t.upsellImpression=r,Zng(r,e),r}async function Qng(e){let t=Kjn();if(t.persisted||D4r()!=="fullscreen")return!1;if(Jo().tui!==void 0)return E("fullscreen trial: settings.tui was set explicitly during the trial \u2014 not persisting"),!1;if(!Vs())return E("ful
+geV5:v7e}=tn(),Ffu=XAn.useRef(!1),v1s=au(),u7A;if(YAn[0]!==v7e)u7A=()=>{let Ae$=udc(v7e);N("tengu_fullscreen_upsell_dialog_shown",{impression:Ae$})},YAn[0]=v7e,YAn[1]=u7A;else u7A=YAn[1];let d7A;if(YAn[2]===ue)d7A=[],YAn[2]=d7A;else d7A=YAn[2];XAn.useEffect(u7A,d7A);let p7A;if(YAn[3]!==z1y||YAn[4]!==mPr||YAn[5]!==v7e||YAn[6]!==v1s)p7A=async function S1s(){if(Ffu.current){return}Ffu.current=!0;let f7A=v7A;if(f7A(v1s.getState())){mPr();return}await s0e(v1s.getState().transcript
+
+#### udc() []
+
+#### jfn( [320464836,320465686,326382267,326382657]
+llscreenUpsellSeenCount??0)>=e?r:{...r,fullscreenUpsellSeenCount:e},t)}function jfn(e){Zng(M4r,e)}function udc(e){let t=Kjn();if(t.upsellImpression!==void 0)return t.upsellImpression;let r=Math.min((cr().fullscreenUpsellSeenCount??0)+1,M4r);return t.upsellImpression=r,Zng(r,e),r}async function Qng(e){let t=Kjn();if(t.persisted||D4r()!=="fullscreen")return!1;if(Jo().tui!==void 0)return E("fullscreen trial: settings.tui was set explicitly during the trial \u2014 not persisting"
+ring the trial (seen inside the queued write) \u2014 not persisting"),!1;return jfn(e),t.persisted=!0,Ee("tui_fullscreen_upsell_trial"),N("tengu_fullscreen_upsell_trial_persisted",{session_age_ms:Math.round(process.uptime()*1000)}),E("fullscreen trial: healthy \u2014 persisted settings.tui=fullscreen"),!0}var Jng;var Yfs=A(()=>{Zt();jt();Wn();qe();vh();$r();Ho();Jng={CLAUDE_CODE_TUI_TRIAL:"fullscreen"}});function okt(e){if(!DZe())return;let t=oth();if(Mqe({type:"detach-reques
+
+#### shouldShowFullscreen []
+
+#### tui_fullscreen_upsell [177851432,320465482,320465712]
+rty 'error' from null or undefined value........	.......n...............	.......tui_fullscreen_upsell_trial.............	.......settings_write_failed...............r...f.u.l.l.s.c.r.e.e.n. .t.r.i.a.l.:. .s.e.t.t.i.n.g.s...t.u.i. .w.a.s. .s.e.t. .e.x.p.l.i.c.i.t.l.y. .d.u.r.i.n.g. .t.h.e. .t.r.i.a.l. .(.s.e.e.n. .i.n.s.i.d.e. .t.h.e. .q.u.e.u.e.d. .w.r.i.t.e.). ..  .n.o.t. .p.e.r.s.i.s.t.i.n.g.....................	...'...tengu_fullscreen_upsell_trial_persisted.................
+=>(r=o?.tui!==void 0,r?null:{tui:"fullscreen"}),void 0,e);if(n)return Te(n),be("tui_fullscreen_upsell_trial","settings_write_failed"),!1;if(r)return E("fullscreen trial: settings.tui was set explicitly during the trial (seen inside the queued write) \u2014 not persisting"),!1;return jfn(e),t.persisted=!0,Ee("tui_fullscreen_upsell_trial"),N("tengu_fullscreen_upsell_trial_persisted",{session_age_ms:Math.round(process.uptime()*1000)}),E("fullscreen trial: healthy \u2014 persiste
+
+==== official upsell gate ====
+
+#### function Npf [308108462]
+et r=jir(t,ST());return r===null?void 0:{from:e,to:r}}async function Npf(e,t){let r=await e.delete(Pn.pluginCache(t.marketplace,t.plugin,t.version,[c9]));if(!r.ok)E(`Could not drop a stray orphan marker from the staged plugin: ${ai(r.error)}`,{level:"warn"})}function nyS(e){if(e.code!=="Failed"||!("telemetryCode"in e)||e.telemetryCode!==Y6u||!(e.cause instanceof Error)||"moveError"in e.cause&&e.cause.moveError!==void 0)return;let t=e.cause,r="path"in t?t.path:void 0,n="entry"in t?t.entry:void 0;if(typeof r!=="string")return;if(n===void 0)return;if(n!=="o
+
+#### ochre [118640286,191434206,278760030,305151994]
+....i. ...............8.......................	.......tengu_ochre_finch................................................................................d......@...........n.E.g.......V.E.....z.E...E......H..H.......................X.......................@.......h.........................................M.........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x.............................
+
+#### fresh_install_on [117755304,117757664,287595976,287596272]
+ll_trial_on.........	.......settings_off............	.......fresh_install_on........	.......tengu_amber_creek.......................	.......downsell_on.............	.......tengu_pewter_brook..............	.......gb_on...........	.......gb_off..............................$.....................`d.@`..Y.....g.......e.....@pe.W...@.g.M.....^.@ .......0f......@f......!<.@.4..P4.....@..W....@...S.....u.....@.f.S....pu.....@Pg.M.....u............<...>...X...Z...t...v........................................... ...%...(...*...,...:...T...V...d...................
+
+#### tui_fullscreen_upsell [177851432,320465482,320465712]
+l or undefined value........	.......n...............	.......tui_fullscreen_upsell_trial.............	.......settings_write_failed...............r...f.u.l.l.s.c.r.e.e.n. .t.r.i.a.l.:. .s.e.t.t.i.n.g.s...t.u.i. .w.a.s. .s.e.t. .e.x.p.l.i.c.i.t.l.y. .d.u.r.i.n.g. .t.h.e. .t.r.i.a.l. .(.s.e.e.n. .i.n.s.i.d.e. .t.h.e. .q.u.e.u.e.d. .w.r.i.t.e.). ..  .n.o.t. .p.e.r.s.i.s.t.i.n.g.....................	...'...tengu_fullscreen_upsell_trial_persisted.....................=...f.u.l.l.s.c.r.e.e.n. .t.r.i.a.l.:. .h.e.a.l.t.h.y. ..  .p.e.r.s.i.s.t.e.d. .s.e.t.t.i.n.g.s.
+
+#### Yes, try it [198316416,326383343]
+-copies to your clipboard..........................	.......Yes, try it.............	.......Not now.................................	... ...Try the new fullscreen renderer?........................................................................*............D!L..P>...z...u...E...........D......rL..P;..`E.......;...].......4..@cf......D..p4...c...4..p.......@E...... M.......4......p.......@E......p4.......4..@..I.....E.......4..@c...%.......4..`b...%.......4...a...&.......4...Hh......D..p4...c...4..p4...c...4..p4...c...4..p4...K...4..p.......@E.......4...4
+
+#### Could not [70474791,70480315,72177061,85670935]
+return ReplHistory[kWriteToOutput](this[kContext], `
+Error: Could not get the home directory.
+REPL session history will not be persisted.
+`), this.historyPrev = this[kContext]._historyPrev, this[kContext]._historyPrev = this[kReplHistoryMessage].bind(this), onReadyCallback(null, this[kContext]);
+    if (!this[kHasWritePermission]())
+      return ReplHistory[kWriteToOutput](this[kContext], `
+Access to FileSystemWrite is restricted.
+REPL session history will not be persisted.
+`), onReadyCallback(null, this[kContext]);
+    this[kContext].pause(), this[kInit
+
+==== more knives ====
+function parseKeypress count=0
+pendingIncomplete count=0
+incomplete+= count=0
+tokenizer.buffer count=0
+FOCUS_IN count=0
+ignoreNextMouse count=0
+lastFocusAt count=0
+focusGainedAt count=0
+queuedCommands count=4
+................................@.......................H...............	.......queuedCommands..........	......pendingAgents...........	.......pendingWorkflows.....................V,.:...Z...:...[....V,.$W,......D..H...............................................................................................@...............................................
+abortOnEscape count=0
+organization_policy_violation count=0
+policy_rejection count=0
+do_not_resend count=0
+keep-alive count=4
+s = socket._httpMessage?.res;
+  if (res) {
+    let keepAliveHint = res.headers["keep-alive"];
+    if (keepAliveHint) {
+      let hint = /^timeout=(\d+)/.exec(keepAliveHint)?.[1];
+      if (hint) {
+        let serverHintTimeout = Number.parseInt(hint) * 1000 - this.agentKeepAliveTimeoutBuffer;
+        if (serverHintTimeout = serverHintTimeout > 0 ? serverHint
+keep_alive count=4
+http_set_lenient_data_after_close.llhttp_set_lenient_headers.llhttp_set_lenient_keep_alive.llhttp_set_lenient_optional_cr_before_lf.llhttp_set_lenient_optional_crlf_after_chunk.llhttp_set_lenient_optional_lf_after_cr.llhttp_set_lenient_spaces_after_chunk_size.llhttp_set_lenient_transfer_encoding.llhttp_set_lenient_version.llhttp_settings_init.llhttp_should_k
+SessionStart hook count=4
+ins from your settings............	..._...Warning: Failed to load plugin hooks. SessionStart hooks from plugins will not execute. Error: .........	........ ..............	.......error...........	.......o...............	.......r...............	.......n...............	.......i...............	.......s...............	...
+...attachment..............	.......hook_b
+Setup hook count=4
+..n...............................	...X...Warning: Failed to load plugin hooks. Setup hooks from plugins will not execute. Error: ........	.......warn............	.......r...............	...
+...attachment..............	.......hook_blocking_error.............	.......Setup...........	.......Setup:..........................	...+...Iterator result interface is n

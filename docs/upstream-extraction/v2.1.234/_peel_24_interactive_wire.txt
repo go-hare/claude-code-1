@@ -1,0 +1,322 @@
+OFFSET=298115000
+
+?? err),
+      writable: false, configurable: false,
+    });
+    // Delete globals with no REPL use case that either run callbacks on the
+    // host event loop outside any try/catch (FinalizationRegistry \u2014 same
+    // DoS shape as a throwing setTimeout callback) or expose shared-memory
+    // primitives (Atomics/SharedArrayBuffer \u2014 no cross-realm use, pure
+    // attack-surface reduction).
+    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',
+                     'WeakRef', 'Atomics', 'SharedArrayBuffer',
+                     'queueMicrotask',
+                     // eval is NOT deleted here \u2014 hardenVMIntrinsics is
+                     // shared with REPLTool (codeGeneration:{strings:true}).
+                     // WorkflowTool blocks eval via codeGeneration:false.
+                     // JSC debug/shell globals \u2014 present only if
+                     // JSC_useDollarVM=1 or similar, but $vm is a full
+                     // escape (createGlobalObject, addressOf, runScript).
+                     '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile',
+                     'Loader']) {
+      delete globalThis[g];
+    }
+    // SES-style enable-property-override: convert common shadowed data props
+    // to accessors whose setter defineProperty's onto the receiver. Otherwise
+    // freezing makes them non-writable, and [[Set]] on an instance (e.g.
+    // "this.name='X'" in an Error subclass ctor) throws in strict / no-ops in
+    // sloppy \u2014 the TC39 "override mistake".
+    function enableOverride(proto, key) {
+      const d = Object.getOwnPropertyDescriptor(proto, key);
+      if (!d || 'get' in d) return;
+      const v = d.value;
+      Object.defineProperty(proto, key, {
+        get() { return v },
+        set(nv) {
+          if (this === proto) return;
+          Object.defineProperty(this, key, { value: nv, writable: true, enumerable: true, configurable: true });
+        },
+        enumerable: d.enumerable, configurable: true,
+      });
+    }
+    const errorCtors = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, globalThis.SuppressedError].filter(Boolean);
+    const errorProtos = errorCtors.map(C => C.prototype);
+    for (const [proto, keys] of [
+      // All Object.prototype data props \u2014 Object.assign({}, {propertyIsEnumerable:x})
+      // and friends would otherwise throw post-freeze. Accessor props (__proto__,
+      // __define/lookupGetter__) are skipped by the 'get' in d guard above.
+      [Object.prototype, Object.getOwnPropertyNames(Object.prototype)],
+      [Function.prototype, ['toString', 'constructor', 'name', 'length']],
+      [Array.prototype, ['toString', 'constructor']],
+      [Date.prototype, ['toString', 'toLocaleString', 'valueOf', 'constructor']],
+      ...errorProtos.map(p => [p, ['name', 'message', 'toString', 'constructor']]),
+    ]) for (const k of keys) enableOverride(proto, k);
+    // Error subclasses each have their own .prototype; freezing only Error
+    // leaves TypeError.prototype.then etc. writable. SuppressedError is
+    // from the explicit-resource-management proposal (bun/JSC ship it).
+    for (const C of [Promise, Object, Array, Function, globalThis.Iterator,
+                     Map, Set, WeakMap, WeakSet,
+                     String, Number, Boolean, Symbol, BigInt,
+                     Date, RegExp, ArrayBuffer, DataView,
+                     ...errorCtors,
+                     typeof URL !== 'undefined' ? URL : undefined,
+                    ].filter(Boolean)) {
+      Object.freeze(C);
+      Object.freeze(C.prototype);
+    }
+    // %TypedArray% (shared prototype of all typed arrays) + each concrete.
+    for (const C of [Object.getPrototypeOf(Int8Array),
+                     Int8Array, Uint8Array, Uint8ClampedArray,
+                     Int16Array, Uint16Array, Int32Array, Uint32Array,
+                     globalThis.Float16Array, Float32Array, Float64Array,
+                     BigInt64Array, BigUint64Array].filter(Boolean)) {
+      Object.freeze(C);
+      Object.freeze(C.prototype);
+    }
+    // %AsyncFunction%, %GeneratorFunction%, %AsyncGeneratorFunction% and
+    // their .prototype are not reachable as globals \u2014 walk from instances.
+    for (const f of [async()=>{}, function*(){}, async function*(){}]) {
+      Object.freeze(f.constructor);
+      Object.freeze(f.constructor.prototype);
+    }
+    for (const C of [globalThis.DisposableStack, globalThis.AsyncDisposableStack,
+                     globalThis.Intl].filter(Boolean)) {
+      Object.freeze(C);
+      if (C.prototype) Object.freeze(C.prototype);
+    }
+    // Namespace objects (no .prototype) \u2014 VM code could otherwise set
+    // JSON.then/Math.then/Reflect.then and any host await on the namespace
+    // object (or on a VM value that aliases it) becomes a thenable escape.
+    // Proxy has no .prototype but freeze closes Proxy.revocable tampering.
+    for (const ns of [JSON, Math, Reflect, Proxy]) Object.freeze(ns);
+    // globalThis can't be frozen (populateContext writes to it), but pinning
+    // .then as non-configurable undefined prevents the sandbox object itself
+    // from becoming a thenable via direct assignment, defineProperty, or
+    // registerTool('then',...).
+    Object.defineProperty(globalThis, 'then', {
+      value: undefined, writable: false, configurable: false,
+    });
+    // Intl.* sub-constructors each have their own .prototype \u2014 freezing the
+    // Intl namespace above does NOT freeze Intl.Collator.prototype etc.
+    // Same own-property-.then escape shape as Promise.prototype.then if any
+    // host code ever awaits an Intl.* instance.
+    if (typeof Intl !== 'undefined') {
+      for (const k of Object.getOwnPropertyNames(Intl)) {
+        const C = Intl[k];
+        if (typeof C === 'function') {
+          Object.freeze(C);
+          if (C.prototype) Object.freeze(C.prototype);
+        }
+      }
+    }
+    for (const it of [
+      [][Symbol.iterator](),
+      ''[Symbol.iterator](),
+      new Map()[Symbol.iterator](),
+      new Set()[Symbol.iterator](),
+      'a'.matchAll(/a/g),
+      // Iterator helpers (map/from) are stage-4 but guard for older runtimes.
+      ...(typeof Iterator !== 'undefined' && Iterator.from ? [
+        [].values().map(x=>x),
+        // %WrapForValidIteratorPrototype% \u2014 Iterator.from(non-Iterator) wraps
+        // via a distinct intrinsic prototype not reachable from any other path.
+        Iterator.from({next:()=>({done:true})}),
+      ] : []),
+      (function*(){})(),
+      (async function*(){})(),
+      // %SegmentsPrototype% + %SegmentIteratorPrototype% \u2014 host for..of on a
+      // VM Segments object would otherwise see a writable .then on the chain.
+      ...(typeof Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+    ]) {
+      for (let p = Object.getPrototypeOf(it); p; p = Object.getPrototypeOf(p)) {
+        Object.freeze(p);
+      }
+    }
+    })()`,e)}function a3r(e){return WOe.runInContext("(async v => ({__proto__: null, v: await v}))",e)}function cnf(e){return WOe.runInContext("((fn, ...args) => fn(...args))",e)}function Vmi(e){return WOe.runInContext(`(e => {
+      let name = 'Error', message = '', stack = ''
+      try { const v = e?.name; if (typeof v === 'string') name = v } catch {}
+      try {
+        const v = e?.message
+        if (typeof v === 'string') message = v
+        else if (typeof e === 'string') message = e
+        else if (typeof e === 'number' || typeof e === 'boolean' || typeof e === 'bigint') {
+          const s = \`\${e}\`
+          if (typeof s === 'string') message = s
+        }
+      } catch {}
+      try { const v = e?.stack; if (typeof v === 'string') stack = v } catch {}
+      return { __proto__: null, name, message, stack }
+    })`,e)}function qmi(e){return WOe.runInContext(`(() => {
+      const _WeakMap = WeakMap, _WeakSet = WeakSet, _isArray = Array.isArray,
+            _keys = Object.keys, _defineProperty = Object.defineProperty,
+            _Error = Error, _isSafeInteger = Number.isSafeInteger
+      // Closure-private registry of clone-created boundary-cap errors, so
+      // the per-element/per-key catch blocks below can tell them apart from
+      // an INCIDENTAL throw (a hostile getter / Proxy trap on a single
+      // value). The cap error must propagate out of the whole clone at any
+      // nesting depth; incidental throws still degrade that one slot to
+      // undefined. Membership, NOT a tag property: childWorkflow feeds this
+      // cloner parent-VM (attacker-reachable) values as childArgs, and a
+      // thrown Proxy whose get trap answers true for any key would
+      // fake-match a property-based check \u2014 the walker would then rethrow
+      // the ATTACKER'S object to the host, whose error extraction reads
+      // .message on it host-side. WeakSet.has is identity-based and runs
+      // no attacker code.
+      const _capSet = new _WeakSet()
+      function capErr(msg) {
+        const e = new _Error(msg)
+        _capSet.add(e)
+        return e
+      }
+      function isCap(e) {
+        try { return _capSet.has(e) } catch { return false }
+      }
+      return (hostVal) => {
+        const seen = new _WeakMap()
+        function c(v) {
+          if (typeof v === 'function') return undefined
+          if (v === null || typeof v !== 'object') return v
+          const hit = seen.get(v); if (hit !== undefined) return hit
+          if (_isArray(v)) {
+            // Read length ONCE \u2014 re-reading v.length per iteration lets a
+            // Proxy length getter that increments make i < len never false
+            // (infinite host-thread hang outside the VM sync-timeout). The
+            // read is guarded: at the ROOT of the clone there is no
+            // enclosing per-slot catch, so an unguarded read would let a
+            // length getter throw an ATTACKER value out to host error
+            // extraction with identity preserved \u2014 defeating the
+            // only-walker-created-errors-propagate invariant (childArgs /
+            // child-result inputs are attacker-reachable).
+            let len
+            try { len = v.length } catch {
+              throw new _Error('unable to read array length across the workflow VM boundary')
+            }
+            if (typeof len !== 'number' || !_isSafeInteger(len)) {
+              throw capErr('array length is not a safe integer across the workflow VM boundary')
+            }
+            if (len > ${ufe}) {
+              throw capErr('array length ' + len + ' exceeds the maximum of ${ufe} supported across the workflow VM boundary')
+            }
+            const out = []; seen.set(v, out)
+            for (let i = 0; i < len; i++) {
+              try { out[i] = c(v[i]) } catch (e) { if (isCap(e)) throw e; out[i] = undefined }
+            }
+            return out
+          }
+          const out = {}; seen.set(v, out)
+          let ks; try { ks = _keys(v) } catch { return out }
+          for (const k of ks) {
+            if (k === '__proto__') continue
+            try {
+              const vk = v[k]
+              if (typeof vk === 'function') continue
+              _defineProperty(out, k, { value: c(vk), writable: true, enumerable: true, configurable: true })
+            } catch (e) { if (isCap(e)) throw e }
+          }
+          return out
+        }
+        return c(hostVal)
+      }
+    })()`,e)}function Kmi(e){return WOe.runInContext("(hostFn => async (...a) => hostFn(...a))",e)}function eZe(e,t="Error",r){let n=()=>`${t}: ${e}`;return Object.setPrototypeOf(n,null),Object.freeze(n),Object.freeze({__proto__:null,name:t,message:e,stack:r??`${t}: ${e}`,toString:n})}function V$v(){if(!a2a){let e=WOe.createContext({__proto__:null},{codeGeneration:{strings:!1,wasm:!1}});Jir(e),a2a=WOe.runInContext(`(e => {
+        // Independent try blocks \u2014 a throwing .name getter must not discard
+        // an already-validated .message (and vice versa).
+        let msg, name = 'Error', stack
+        try {
+          const m = e?.message
+          msg = typeof m === 'string' ? m : typeof e === 'string' ? e : '<non-string error>'
+        } catch { msg = '<unprintable thrown value>' }
+        try {
+          const n = e?.name
+          if (typeof n === 'string') name = n
+        } catch {}
+        try {
+          const s = e?.stack
+          if (typeof s === 'string') stack = s
+        } catch {}
+        return { __proto__: null, msg, name, stack }
+      })`,e)}return a2a}function S4n(e){try{let t=V$v()(e);return{msg:typeof t.msg==="string"?t.msg:"<unprintable thrown value>",name:typeof t.name==="string"?t.name:"Error",stack:typeof t.stack==="string"?t.stack:void 0}}catch{return{msg:"<unprintable thrown value>",name:"Error"}}}function Ymi(e){if(e==null||typeof e!=="object"&&typeof e!=="function")return String(e);return`[${typeof e}]`}function GOe(e){let t=(...r)=>{try{return e(...r)}catch(n){let{msg:o,name:i,stack:s}=S4n(n);throw eZe(o,i,s)}};return Object.setPrototypeOf(t,null),t}function Xmi(e){let t=async(...r)=>{try{return await e(...r)}catch(n){let{msg:o,name:i,stack:s}=S4n(n);throw eZe(o,i,s)}};return Object.setPrototypeOf(t,null),t}function anf(e){let t=Error(e);return unf.add(t),t}function lnf(e){return typeof e==="object"&&e!==null&&unf.has(e)}function dnf(e){let t;try{t=e.length}catch{throw Error("unable to read array length across the workflow VM boundary")}if(typeof t!=="number"||!Number.isSafeInteger(t))throw anf("array length is not a safe integer across the workflow VM boundary");if(t>ufe)throw anf(`array length ${t} exceeds the maximum of ${ufe} supported across the workflow VM boundary`);return t}function v4n(e,t=new WeakMap){if(typeof e==="function")return;if(e===null||typeof e!=="object")return e;let r=t.get(e);if(r!==void 0)return r;if(Array.isArray(e)){let i=[];t.set(e,i);let s=dnf(e);for(let a=0;a<s;a++)try{i[a]=v4n(e[a],t)}catch(l){if(lnf(l))throw l;i[a]=void 0}return i}let n={};t.set(e,n);let o;try{o=Object.keys(e)}catch{return n}for(let i of o){if(i==="__proto__")continue;try{let s=e[i];if(typeof s==="function")continue;n[i]=v4n(s,t)}catch(s){if(lnf(s))throw s}}return n}function Jmi(e){if(e===null||typeof e!=="object")return[];let t=dnf(e),r=[];for(let n=0;n<t;n++)try{r[n]=e[n]}catch{r[n]=void 0}return r}function Zmi(e){return WOe.runInContext(`((S, JS) => ({
+      vmToStr: v => { try { return S(v) } catch { return '<unprintable>' } },
+      vmStringify: v => JS(v),
+      vmOwnString: (o, k) => {
+        try { const v = o == null ? undefined : o[k]; return typeof v === 'string' ? v : undefined }
+        catch { return undefined }
+      },
+    }))(String, JSON.stringify)`,e)}function Qmi(e){return WOe.runInContext(`(() => {
+      const _WeakMap = WeakMap, _WeakSet = WeakSet, _isArray = Array.isArray,
+            _keys = Object.keys, _defineProperty = Object.defineProperty,
+            _Error = Error, _isSafeInteger = Number.isSafeInteger
+      // Closure-private registry of walker-created boundary-cap errors: the
+      // cap error must propagate out of the whole walk at any nesting depth,
+      // while incidental trap throws degrade one slot. Membership, NOT a
+      // tag property: the input here is attacker-controlled, so a thrown
+      // value can be a Proxy whose get trap answers true for ANY key \u2014 a
+      // property-based isCap would fake-match and the walker would rethrow
+      // the ATTACKER'S object to the host, whose error extraction then
+      // reads .message on it host-side (the very escape this walker
+      // exists to close). WeakSet.has is identity-based and runs no
+      // attacker code, so only errors we created here ever propagate.
+      const _capSet = new _WeakSet()
+      function capErr(msg) {
+        const e = new _Error(msg)
+        _capSet.add(e)
+        return e
+      }
+      function isCap(e) {
+        try { return _capSet.has(e) } catch { return false }
+      }
+      function checkedLength(v) {
+        let len
+        try { len = v.length } catch {
+          throw new _Error('unable to read array length across the workflow VM boundary')
+        }
+        if (typeof len !== 'number' || !_isSafeInteger(len)) {
+          throw capErr('array length is not a safe integer across the workflow VM boundary')
+        }
+        if (len > ${ufe}) {
+          throw capErr('array length ' + len + ' exceeds the maximum of ${ufe} supported across the workflow VM boundary')
+        }
+        return len
+      }
+      return { __proto__: null,
+        sanitize: (inputV) => {
+          const seen = new _WeakMap()
+          function c(v) {
+            if (typeof v === 'function') return undefined
+            if (v === null || typeof v !== 'object') return v
+            const hit = seen.get(v); if (hit !== undefined) return hit
+            if (_isArray(v)) {
+              const out = []; seen.set(v, out)
+              const len = checkedLength(v)
+              for (let i = 0; i < len; i++) {
+                try { out[i] = c(v[i]) } catch (e) { if (isCap(e)) throw e; out[i] = undefined }
+              }
+              return out
+            }
+            const out = {}; seen.set(v, out)
+            let ks; try { ks = _keys(v) } catch { return out }
+            for (const k of ks) {
+              if (k === '__proto__') continue
+              try {
+                const vk = v[k]
+                if (typeof vk === 'function') continue
+                _defineProperty(out, k, { value: c(vk), writable: true, enumerable: true, configurable: true })
+              } catch (e) { if (isCap(e)) throw e }
+            }
+            return out
+          }
+          return c(inputV)
+        },
+        snapshot: (v) => {
+          if (v === null || typeof v !== 'object') return []
+          const len = checkedLength(v)
+          const out = []
+          for (let i = 0; i < len; i++) {
+            try { out[i] = v[i] } catch { out[i] = undefined }
+          }
+          return out
+        },
+        getProp: (o, k) => {
+          try { return o === null || o === undefined ? undefined : o[k] } catch { return undefined }
+        },
+      }
+    })()`,e)}function l3r(e){if(typeof e==="string")return e;if(e===null||typeof e!=="object"&&typeof e!=="function")return String(e);return typeof e==="function"?"[function]":"[object]"}var WOe,a2a,unf;var lht=A(()=>{WOe=H(require("vm"));unf=new WeakSet});var thi=ne(function(ehi,pnf){(function(e,t){typeof ehi==="object"&&typeof pnf<"u"?t(ehi):typeof define==="function"&&define.amd?define(["exports"],t):(e=typeof globalThis<"u"?globalThis:e||self,t(e.acorn={}))})(ehi,function(e){var t=[509,0,227,0,150,4,294,9,1368,2,2,1,6,3,41,2,5,0,166,1,574,3,9,9,7,9,32,4,318,1,80,3,71,10,50,3,123,2,54,14,32,10,3,1,11,3,46,10,8,0,46,9,7,2,37,13,2,9,6,1,45,0,13,2,49,13,9,3,2,11,83,11,7,0,3,0,158,11,6,9,7,3,56,1,2,6,3,1,3,2,10,0,11,1,3,6,4,4,68,8,2,0,3,0,2,3,2,4,2,0,15,1,83,17,10,9,5,0,82,19,13,9,214,6,3,8,28,1,83,16,16,9,82,12,9,9,7,19,58,14,5,9,243,14,166,9,71,5,2,1,3,3,2,0,2,1,13,9,120,6,3,6,4,0,29,9,41,6,2,3,9,0,10,10,47,15,343,9,54,7,2,7,17,9,57,21,2,13,123,5,4,0,2,1,2,6,2,0,9,9,49,4,2,1,2,4,9,9,330,3,10,1,2,0,49,6,4,4,14,10,5350,0,7,14,11465,27,2343,9,87,9,39,4,60,6,26,9,535,9,470,0,2,54,8,3,82,0,12,1,19628,1,4178,9,519,45,3,22,543,4,4,5,9,7,3,6,31,3,149,2,1418,49,513,54,5,49,9,0,15,0,23,4,2,14,1361,6,2,16,3,6,2,1,2,4,101,0,161,6,10,9,357,0,62,13,499,13,245,1,2,9,726,6,110,6,6,9,4759,9,787719,239],r=[0,11,2,25,2,18,2,1,2,14,3,13,35,122,70,52,268,28,4,48,48,31,14,29,6,37,11,29,3,35,5,7,2,4,43,157,19,35,5,35,5,39,9,51,13,10,2,14,2,6,2,1,2,10,2,14,2,6,2,1,4,51,13,310,10,21,11,7,25,5,2,41,2,8,70,5,3,0,2,43,2,1,4,0,3,22,11,22,10,30,66,18,2,1,11,21,11,25,71,55,7,1,65,0,16,3,2,2,2,28,43,28,4,28,36,7,2,27,28,53,11,21,11,18,14,17,111,72,56,50,14,50,14,35,39,27,10,22,251,41,7,1,17,2,60,28,11,0,9,21,43,17,47,20,28,22,13,52,58,1,3,0,14,44,33,24,27,35,30,0,3,0,9,34,4,0,13,47,15,3,22,0,2,0,36,17,2,24,20,1,64,6,2,0,2,3,2,14,2,9,8,46,39,7,3,1,3,21,2,6,2,1,2,4,4,0,19,0,13,4,31,9

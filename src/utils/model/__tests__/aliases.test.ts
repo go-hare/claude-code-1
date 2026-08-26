@@ -14,6 +14,10 @@ describe('isModelAlias', () => {
     expect(isModelAlias('haiku')).toBe(true)
   })
 
+  test('returns true for "fable"', () => {
+    expect(isModelAlias('fable')).toBe(true)
+  })
+
   test('returns true for "best"', () => {
     expect(isModelAlias('best')).toBe(true)
   })
@@ -24,6 +28,10 @@ describe('isModelAlias', () => {
 
   test('returns true for "opus[1m]"', () => {
     expect(isModelAlias('opus[1m]')).toBe(true)
+  })
+
+  test('returns true for "fable[1m]"', () => {
+    expect(isModelAlias('fable[1m]')).toBe(true)
   })
 
   test('returns true for "opusplan"', () => {
@@ -56,6 +64,10 @@ describe('isModelFamilyAlias', () => {
     expect(isModelFamilyAlias('haiku')).toBe(true)
   })
 
+  test('returns true for "fable"', () => {
+    expect(isModelFamilyAlias('fable')).toBe(true)
+  })
+
   test('returns false for "best"', () => {
     expect(isModelFamilyAlias('best')).toBe(false)
   })
@@ -66,5 +78,9 @@ describe('isModelFamilyAlias', () => {
 
   test('returns false for "sonnet[1m]"', () => {
     expect(isModelFamilyAlias('sonnet[1m]')).toBe(false)
+  })
+
+  test('returns false for "fable[1m]"', () => {
+    expect(isModelFamilyAlias('fable[1m]')).toBe(false)
   })
 })

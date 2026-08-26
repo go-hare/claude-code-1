@@ -8,11 +8,39 @@ import { normalizePathForComparison, pathsEqual } from '../utils/file.js'
 import { getConnectedIdeClient } from '../utils/ide.js'
 import { every } from '../utils/set.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
+import { withTimeout } from '../utils/sleep.js'
 
 class DiagnosticsTrackingError extends ClaudeError {}
 
 /** densable QUd */
 const MAX_DIAGNOSTICS_SUMMARY_CHARS = 4000
+
+/** densable ABS — JetBrains plugin must not wait on getDiagnostics (2.1.239 #10). */
+export const JETBRAINS_IDE_PLUGIN_NAME = 'Claude Code JetBrains Plugin'
+/** densable wBS */
+export const IDE_DIAGNOSTICS_BASELINE_TIMEOUT_MS = 500
+/** densable EBS */
+export const IDE_DIAGNOSTICS_FETCH_TIMEOUT_MS = 2000
+/** densable _ol */
+export const IDE_DIAGNOSTICS_BASELINE_TIMEOUT_LIMIT = 3
+/** densable eNf */
+export const IDE_DIAGNOSTICS_BASELINE_TIMEOUT_MESSAGE =
+  'IDE diagnostics baseline timed out'
+/** densable tNf */
+export const IDE_DIAGNOSTICS_FETCH_TIMEOUT_MESSAGE =
+  'IDE diagnostics fetch timed out'
+
+/** densable iNf */
+export function classifyIdeDiagnosticsFailure(
+  error: unknown,
+  timeoutMessage: string,
+): 'timeout' | 'parse_failed' | 'error' {
+  if (error instanceof Error && error.message === timeoutMessage) {
+    return 'timeout'
+  }
+  if (error instanceof SyntaxError) return 'parse_failed'
+  return 'error'
+}
 
 /**
  * densable sQ_ — strip leading `/` before Windows drive-letter URIs
@@ -103,6 +131,10 @@ export class DiagnosticTrackingService {
 
   private initialized = false
   private mcpClient: MCPServerConnection | undefined
+  /** densable consecutiveBaselineTimeouts */
+  private consecutiveBaselineTimeouts = 0
+  /** densable workspaceFetchInFlight */
+  private workspaceFetchInFlight: Promise<unknown> | undefined
 
   // Track when files were last processed/fetched
   private lastProcessedTimestamps: Map<string, number> = new Map()
@@ -133,6 +165,7 @@ export class DiagnosticTrackingService {
     this.baseline.clear()
     this.rightFileDiagnosticsState.clear()
     this.lastProcessedTimestamps.clear()
+    this.workspaceFetchInFlight = undefined
   }
 
   /**
@@ -143,6 +176,7 @@ export class DiagnosticTrackingService {
     this.baseline.clear()
     this.rightFileDiagnosticsState.clear()
     this.lastProcessedTimestamps.clear()
+    this.workspaceFetchInFlight = undefined
   }
 
   private normalizeFileUri(fileUri: string): string {
@@ -213,18 +247,25 @@ export class DiagnosticTrackingService {
     if (
       !this.initialized ||
       !this.mcpClient ||
-      this.mcpClient.type !== 'connected'
+      this.mcpClient.type !== 'connected' ||
+      this.mcpClient.serverInfo?.name === JETBRAINS_IDE_PLUGIN_NAME ||
+      this.consecutiveBaselineTimeouts >= IDE_DIAGNOSTICS_BASELINE_TIMEOUT_LIMIT
     ) {
       return
     }
 
     const timestamp = Date.now()
+    const timeoutsBefore = this.consecutiveBaselineTimeouts
 
     try {
-      const result = await callIdeRpc(
-        'getDiagnostics',
-        { uri: `file://${filePath}` },
-        this.mcpClient,
+      const result = await withTimeout(
+        callIdeRpc(
+          'getDiagnostics',
+          { uri: `file://${filePath}` },
+          this.mcpClient,
+        ),
+        IDE_DIAGNOSTICS_BASELINE_TIMEOUT_MS,
+        IDE_DIAGNOSTICS_BASELINE_TIMEOUT_MESSAGE,
       )
       const diagnosticFile = this.parseDiagnosticResult(result)[0]
       if (diagnosticFile) {
@@ -253,8 +294,27 @@ export class DiagnosticTrackingService {
         this.baseline.set(normalizedPath, [])
         this.lastProcessedTimestamps.set(normalizedPath, timestamp)
       }
-    } catch (_error) {
-      // Fail silently if IDE doesn't support diagnostics
+      this.consecutiveBaselineTimeouts = 0
+    } catch (error) {
+      const kind = classifyIdeDiagnosticsFailure(
+        error,
+        IDE_DIAGNOSTICS_BASELINE_TIMEOUT_MESSAGE,
+      )
+      if (
+        kind === 'timeout' &&
+        this.consecutiveBaselineTimeouts === timeoutsBefore
+      ) {
+        this.consecutiveBaselineTimeouts++
+        if (
+          this.consecutiveBaselineTimeouts ===
+          IDE_DIAGNOSTICS_BASELINE_TIMEOUT_LIMIT
+        ) {
+          logForDebugging(
+            `IDE diagnostics baselines disabled after ${IDE_DIAGNOSTICS_BASELINE_TIMEOUT_LIMIT} consecutive timeouts`,
+            { level: 'warn' },
+          )
+        }
+      }
     }
   }
 
@@ -276,13 +336,30 @@ export class DiagnosticTrackingService {
       return []
     }
 
+    if (this.workspaceFetchInFlight) {
+      return []
+    }
+
     // Check if we have any files with diagnostic changes
     let allDiagnosticFiles: DiagnosticFile[] = []
     try {
-      const result = await callIdeRpc(
+      const fetch = callIdeRpc(
         'getDiagnostics',
         {}, // Empty params fetches all diagnostics
         this.mcpClient,
+      )
+      this.workspaceFetchInFlight = fetch
+      void fetch
+        .finally(() => {
+          if (this.workspaceFetchInFlight === fetch) {
+            this.workspaceFetchInFlight = undefined
+          }
+        })
+        .catch(() => {})
+      const result = await withTimeout(
+        fetch,
+        IDE_DIAGNOSTICS_FETCH_TIMEOUT_MS,
+        IDE_DIAGNOSTICS_FETCH_TIMEOUT_MESSAGE,
       )
       allDiagnosticFiles = this.parseDiagnosticResult(result)
     } catch (_error) {

@@ -63,6 +63,17 @@ export type SessionExternalMetadata = {
   task_summary?: string | null
 }
 
+/**
+ * Official CCR worker GET shape (densable 2.1.239 #13).
+ * `internal` carries `worker_permission_mode` — not the external
+ * `permission_mode` key.
+ */
+export type RestoredWorkerState = {
+  external: SessionExternalMetadata | Record<string, unknown> | null
+  internal: Record<string, unknown> | null
+  readFailed?: boolean
+} | null
+
 type SessionStateChangedListener = (
   state: SessionState,
   details?: RequiresActionDetails,
@@ -75,11 +86,17 @@ type WaitingOnUserChangedListener = (waiting: boolean) => void
 type SessionMetadataListenerOptions = {
   replayCurrent?: boolean
 }
+type SessionInternalMetadataChangedListener = (
+  metadata: Record<string, unknown>,
+) => void
 
 let stateListener: SessionStateChangedListener | null = null
 let metadataListener: SessionMetadataChangedListener | null = null
 let permissionModeListener: PermissionModeChangedListener | null = null
 let waitingOnUserListener: WaitingOnUserChangedListener | null = null
+let internalMetadataListener: SessionInternalMetadataChangedListener | null =
+  null
+let workerPermissionModeRecordEnabled = false
 
 /**
  * Official Imn nested-chain idle densable tracker (module singleton).
@@ -429,11 +446,36 @@ export function notifyPermissionModeChanged(mode: PermissionMode): void {
   permissionModeListener?.(mode)
 }
 
+/** Official `Aio.enableWorkerPermissionModeRecord`. */
+export function enableWorkerPermissionModeRecord(): void {
+  workerPermissionModeRecordEnabled = true
+}
+
+/** Official `Aio.isWorkerPermissionModeRecordEnabled`. */
+export function isWorkerPermissionModeRecordEnabled(): boolean {
+  return workerPermissionModeRecordEnabled
+}
+
+export function setInternalMetadataChangedListener(
+  cb: SessionInternalMetadataChangedListener | null,
+): void {
+  internalMetadataListener = cb
+}
+
+/** Official `Aio.notifyInternalMetadataChanged`. */
+export function notifyInternalMetadataChanged(
+  metadata: Record<string, unknown>,
+): void {
+  internalMetadataListener?.(metadata)
+}
+
 export function resetSessionStateForTests(): void {
   stateListener = null
   metadataListener = null
   permissionModeListener = null
   waitingOnUserListener = null
+  internalMetadataListener = null
+  workerPermissionModeRecordEnabled = false
   hasPendingAction = false
   currentState = 'idle'
   currentAutomationState = null

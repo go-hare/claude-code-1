@@ -33,6 +33,7 @@ export type GoalCheckinActiveGoal = {
   setAt: number
   iterations: number
   tokensAtStart: number
+  origin?: string
   deferredSince?: number
   checkinCount?: number
   lastDeferralPassAt?: number
@@ -106,14 +107,12 @@ export function getGoalCheckinIntervalMs(
     deps.isFeatureEnabled ??
     (() => getFeatureValue_CACHED_MAY_BE_STALE('tengu_saffron_wren', true))
   if (!enabled()) return 0
-  const raw = env.CLAUDE_CODE_GOAL_CHECKIN_MINUTES
-  let minutes = DEFAULT_GOAL_CHECKIN_MINUTES
-  if (raw !== undefined && raw !== '') {
-    const n = Number(raw)
-    if (Number.isFinite(n)) minutes = n
-  }
-  if (minutes <= 0) return 0
-  return minutes * 60_000
+  // densable Y_l / wPv — bare `??`. "" → 0; "abc" → NaN (every tick fires).
+  return (
+    Number(
+      env.CLAUDE_CODE_GOAL_CHECKIN_MINUTES ?? DEFAULT_GOAL_CHECKIN_MINUTES,
+    ) * 60_000
+  )
 }
 
 /**

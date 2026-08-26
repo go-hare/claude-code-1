@@ -15,6 +15,17 @@ import {
   LIST_PEERS_LEGACY_TOOL_NAME,
 } from './constants.js'
 import { getListAgentsPrompt } from './prompt.js'
+import {
+  callerIsSubagentFromContext,
+  describeOwnSession,
+  formatOwnSessionListing,
+} from '../SendMessageTool/ownSession.js'
+import {
+  callerTeammateIdFromContext,
+  formatTeammatesSection,
+  listTeammatesForListing,
+  teammateCandidatesFromRows,
+} from './teammatesListing.js'
 
 /** densable yWp */
 const LIST_AGENTS_MAX_RESULT_CHARS = 10_000
@@ -78,6 +89,10 @@ function formatPeersListing(
     listTruncated?: boolean
     cloudListFailed?: boolean
     bridgeWalkIncomplete?: boolean
+    /** densable G1w */
+    selfHeader?: string | null
+    /** densable Z1w — Teammates (n): section */
+    teammatesSection?: string | null
   },
 ): string {
   const notes = listAgentsIncompleteNotes({
@@ -85,25 +100,49 @@ function formatPeersListing(
     cloudListFailed: opts?.cloudListFailed,
     bridgeWalkIncomplete: opts?.bridgeWalkIncomplete,
   })
+  const teammatesSection = opts?.teammatesSection?.trim()
+    ? opts.teammatesSection
+    : null
+
+  let peerBody: string | null
   if (peers.length === 0) {
-    if (notes.length === 0) return 'No agents found.'
-    return `No agents found.\n${notes.map(n => `  ${n}`).join('\n')}`
+    // densable V1w: teammates-only listing does not append "No agents found."
+    if (teammatesSection && notes.length === 0) {
+      peerBody = null
+    } else if (teammatesSection) {
+      // densable Q1w empty-rows: keep indent on every note
+      peerBody = notes.map(n => `  ${n}`).join('\n')
+    } else {
+      peerBody =
+        notes.length === 0
+          ? 'No agents found.'
+          : `No agents found.\n${notes.map(n => `  ${n}`).join('\n')}`
+    }
+  } else {
+    const lines = peers.map(p => {
+      const name = p.name?.trim() || p.address
+      const ref = p.address
+      const bits = [`${name} [${ref}]`]
+      const status = resolvePeerStatusLabel(p)
+      if (status) bits.push(status)
+      if (p.cwd) bits.push(`@ ${p.cwd}`)
+      if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
+      return bits.join(' ')
+    })
+    peerBody = `Found ${lines.length} agent(s):\n${lines.join('\n')}`
+    if (notes.length > 0) {
+      peerBody += `\n${notes.map(n => `  ${n}`).join('\n')}`
+    }
   }
-  const lines = peers.map(p => {
-    const name = p.name?.trim() || p.address
-    const ref = p.address
-    const bits = [`${name} [${ref}]`]
-    const status = resolvePeerStatusLabel(p)
-    if (status) bits.push(status)
-    if (p.cwd) bits.push(`@ ${p.cwd}`)
-    if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
-    return bits.join(' ')
-  })
-  let out = `Found ${lines.length} agent(s):\n${lines.join('\n')}`
-  if (notes.length > 0) {
-    out += `\n${notes.map(n => `  ${n}`).join('\n')}`
+
+  const sections = [teammatesSection, peerBody].filter((s): s is string =>
+    Boolean(s),
+  )
+  const body = sections.join('\n\n')
+  if (opts?.selfHeader) {
+    return `${opts.selfHeader}\n\n${body}`
   }
-  return out
+  return body
 }
 
 /** @internal densable 2.1.229 / 2.1.234 tests */
@@ -162,7 +201,7 @@ export const ListAgentsTool = buildTool({
     }
   },
 
-  async call(_input: ListAgentsInput) {
+  async call(_input: ListAgentsInput, context) {
     const peers: PeerInfo[] = []
     const seen = new Set<string>()
     const addPeer = (peer: PeerInfo): void => {
@@ -261,12 +300,58 @@ export const ListAgentsTool = buildTool({
     const bridgeWalkIncomplete =
       accountStatus.failed === true && accountBridge.length > 0
 
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { getTeammateContext } =
+      require('src/utils/teammateContext.js') as typeof import('src/utils/teammateContext.js')
+    const { getAgentContext } =
+      require('src/utils/agentContext.js') as typeof import('src/utils/agentContext.js')
+    const { readTeamFileAsync } =
+      require('src/utils/swarm/teamHelpers.js') as typeof import('src/utils/swarm/teamHelpers.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+
+    // densable SRl(t, g5(t)) — leftover maps official tool-context fields
+    // (e.teammateContext / e.agentContext) from ALS + context.agentId.
+    // DHm reads QV() (`getRegisteredSessionName`).
+    const self = describeOwnSession(
+      callerIsSubagentFromContext({
+        teammateContext: getTeammateContext(),
+        agentContext:
+          getAgentContext() ??
+          (context.agentId ? { agentType: 'subagent' } : undefined),
+      }),
+    )
+
+    // densable SRl / OHm / Z1w — live teammates section
+    // leftover: official reads e.teammateContext / e.agentContext on the tool
+    // context; tip maps ALS + context.agentId. Hy is teamContext.teamName only.
+    let teammatesSection: string | null = null
+    const appState = context.getAppState()
+    const teamName = appState.teamContext?.teamName
+    const teamFile = teamName ? await readTeamFileAsync(teamName) : null
+    const callerTeammateId = callerTeammateIdFromContext(
+      getTeammateContext(),
+      getAgentContext()?.agentId ?? context.agentId,
+    )
+    const teammateRows = listTeammatesForListing(
+      appState,
+      teamFile,
+      callerTeammateId,
+    )
+    if (teammateRows.length > 0) {
+      teammatesSection = formatTeammatesSection(
+        teammateRows,
+        teammateCandidatesFromRows(teammateRows),
+      )
+    }
+
     return {
       data: {
         listing: formatPeersListing(peers, {
           listTruncated,
           cloudListFailed,
           bridgeWalkIncomplete,
+          selfHeader: formatOwnSessionListing(self),
+          teammatesSection,
         }),
       },
     }

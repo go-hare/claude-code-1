@@ -68,6 +68,8 @@ export const KEYBINDING_ACTIONS = [
   'app:toggleTodos',
   'app:toggleTranscript',
   'app:toggleBrief',
+  // densable 2.1.239 tengu_willow_crate — official default chord is unset
+  'app:toggleReplTab',
   'app:toggleTeammatePreview',
   'app:toggleTerminal',
   'app:redraw',
@@ -181,6 +183,13 @@ export const KEYBINDING_ACTIONS = [
   'select:nextValue',
   // Voice actions
   'voice:pushToTalk',
+  // densable 2.1.239 #30 — Scroll selection extend (after selection:copy/clear)
+  'selection:extendLeft',
+  'selection:extendRight',
+  'selection:extendUp',
+  'selection:extendDown',
+  'selection:extendLineStart',
+  'selection:extendLineEnd',
 ] as const
 
 /**

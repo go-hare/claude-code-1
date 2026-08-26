@@ -1,0 +1,75 @@
+#### "effortUltra" [179970768,242913992,306388909,306391211,306393591,306396029]
+--- 179970768 ---
+............p...............................	.......theme...........	.......dark............	.......effortUltra.....
+...............	...	...ultracode...................
+....................@.....4..0........=...2..@>.@.........m........m........................A0......................8..............
+--- 242913992 ---
+....rate_limit_fill.........	.......rate_limit_empty........	.......fastModeShimmer.........	.......effortUltra.............	......briefLabelYou...........	.......briefLabelClaude........	.......rainbow_red.............	.......rainbow_orange..........	.......rainbow_yellow..........	......rainbow_
+#### "themeOverrides" []
+#### "customTheme" [99680792,106619960,130549248,130716024,130739765,179933565]
+--- 99680792 ---
+....hasOsc52ClipboardUtf8Bug........	.".'...macCmdClickArrivesWithoutSgrModifierBit.........	.......customThemeBase.........	.......addCustomThemeBases.....................commitUserThemes..........".....cachedUserThemes........I.".....cachedSystemTheme...............	.......setSystemTheme..........
+--- 106619960 ---
+...../6.....userScopeMcpServerExists........	.......verifyBridgeCarrierPrompt...............	.......customThemeRef..........	.......getCachedCustomTheme............	0......getCachedCustomThemes...........	.......getCustomThemeBase6.............	26.....getThemesDir.............26.....loadCustomThemes
+#### "dark-ansi" [123427736,179934224,220297048,220297336,301979077,306386140]
+--- 123427736 ---
+....	.......light-daltonized........	.......light...........	...
+...light-ansi..............	...	...dark-ansi...............r........_..................i.................i.................i.................i.................i.................i.i.......................
+...............................
+--- 179934224 ---
+dly)........	.......light-daltonized........	.......Dark mode (ANSI colors only)............	...	...dark-ansi...............	.......Light mode (ANSI colors only)...........	...
+...light-ansi..............................................................................................N.e.w. .c.u.s.t.
+#### "if(mask)" []
+#### "if(!mask)" []
+#### "mask&&" []
+#### "35;150" []
+#### "incompleteCsi" []
+#### "mousePartial" []
+#### "vimMode===" [312192647,322788012]
+--- 312192647 ---
+function hyr(e){IW.setState((t)=>t.active===e?t:{...t,active:e})}function _bl(e){IW.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function cim(e){IW.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function uim(){return IW.getState().launchWarning}function nEt(e){IW.setState((t)
+--- 322788012 ---
+rnal_editor");if(Ro.content!==null&&Ro.content!==K)DI(K,ze,w),mt(Ro.content),We(ZW()&&IW.getState().vimMode==="NORMAL"?hTr(Ro.content.normalize("NFC"),Ro.content.length):Ro.content.length)}catch(Hr){if(Hr instanceof Error)Te(Hr);Pl({key:"external-editor-error",kind:"warning",text:`External editor fa
+#### "US-only" [122714068,306231692]
+--- 122714068 ---
+................................	...]...Search the web. Returns result blocks with titles and URLs. US-only.
+
+- The current month is ................... ..  .u.s.e. .t.h.i.s. .w.h.e.n. .s.e.a.r.c.h.i.n.g. .f.o.r. .r.e.c.e.n.t. .i.n.f.o.r.m.a.t.i.o.n...
+.-. .`.a.l.l.o.w.e.d._.d.o.m.a.i.n.s.`. ./. .`.
+--- 306231692 ---
+tion gOp(e){let t=hOp();if(eC(e))return`Search the web. Returns result blocks with titles and URLs. US-only.
+
+- The current month is ${t} \u2014 use this when searching for recent information.
+- \`allowed_domains\` / \`blocked_domains\` filter results.
+- After answering from results, end with a "Sou
+#### "us-only" []
+#### "data-residency" [113685448,128961544,139531616,141634987,270314208,301274241]
+--- 113685448 ---
+....................	.......essential-traffic-only..........	...
+...firstParty..............	.......data-residency..................	.......teleport-org....................................	.......no-auth.........	...E...OAuth refresh token is no longer valid; run /login to re-authenticate...........
+--- 128961544 ---
+............	.......stream..........	.......application/octet-stream........................	.......data-residency..........	.......skipped_data_residency..........	.......essential-traffic-only..........	.......skipped_essential_traffic_only..........	.......skipped_no_claude_ai_auth...............
+#### "fullscreenOffer" []
+#### "tuiOffer" []
+#### "launchCount" []
+#### "ignoreNextClick" []
+#### "function DHm" [314384662]
+--- 314384662 ---
+available),localListFailed:a,messagingDisabled:!o,listTruncated:u.truncated===!0||c.truncated===!0}}function DHm(e=!1){let t=EQe(),r=MFn(QV()?.name);if(!t||r===null)return null;return{name:r,token:`${r} [${sBr("session",t)}]`,callerIsSubagent:e}}function G1w(e){if(!e)return null;return e.callerIsSub
+#### "yourself" [71652854,71652992,85563952,109097816,141777721,148496373]
+--- 71652854 ---
+ves the HTML files you pass in without
+having to manually call Bun.serve() or write the boilerplate yourself. This runs Bun's bundler on
+the HTML files, their JavaScript, and CSS, and serves them up. This doesn't do anything you can't do
+yourself with Bun.serve().
+`), process.exit(0);
+      continue
+--- 71652992 ---
+he HTML files, their JavaScript, and CSS, and serves them up. This doesn't do anything you can't do
+yourself with Bun.serve().
+`), process.exit(0);
+      continue;
+    }
+    if (arg.includes("*") || arg.includes("**") || arg.includes("{")) {
+      let glob = new Bun.Glob(arg);
+      for (let file of

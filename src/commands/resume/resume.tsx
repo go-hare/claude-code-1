@@ -131,27 +131,18 @@ function ResumeCommand({
     // Load full messages for lite logs
     const fullLog = isLiteLog(log) ? await loadFullLog(log) : log;
 
-    // Check if this conversation is from a different directory
-    const crossProjectCheck = checkCrossProjectResume(fullLog, showAllProjects, worktreePaths);
-    if (crossProjectCheck.isCrossProject) {
-      if (crossProjectCheck.isSameRepoWorktree) {
-        // Same repo worktree - can resume directly
-        setResuming(true);
-        void onResume(sessionId, fullLog, 'slash_command_picker');
-        return;
-      }
-
-      // Different project - show command instead of resuming
-      const raw = await setClipboard((crossProjectCheck as { command: string }).command);
+    // densable MTs: null → resume here (same dir / worktree / deleted path)
+    const command = await checkCrossProjectResume(fullLog, showAllProjects, worktreePaths);
+    if (command) {
+      const raw = await setClipboard(command);
       if (raw) process.stdout.write(raw);
 
-      // Format the output message
       const message = [
         '',
         'This conversation is from a different directory.',
         '',
         'To resume, run:',
-        `  ${(crossProjectCheck as { command: string }).command}`,
+        `  ${command}`,
         '',
         '(Command copied to clipboard)',
         '',

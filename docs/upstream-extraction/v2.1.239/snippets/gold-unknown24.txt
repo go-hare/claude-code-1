@@ -1,0 +1,173 @@
+#### "fullscreenUpsellSeenCount" [117747120,304985660,320464754,320464795,320464960,326381190]
+--- 117747120 ---
+8.......................X.......................X....................... ........................C..............	.......fullscreenUpsellSeenCount...........K.........B....~.....B.......B.Y.B......H..H.......................................................h........................................S[.....................................................................................................
+--- 304985660 ---
+E_CODE_DISABLE_ALTERNATE_SCREEN}function Lhp(){try{if(axe())return!1;let e=cr();return e.firstStartVersion!==void 0&&(e.fullscreenUpsellSeenCount??0)<M4r}catch{return}}function eEv(e){if(e.freshInstallCached!==void 0)return e.freshInstallCached;let t=Lhp();if(t!==void 0)e.freshInstallCached=t;return t??!1}function Vs(e=Lne){if(K3()==="local-agent")return!1;if(V.CLAUDE_CODE_SESSION_KIND==="bg")retu
+#### "function Npf" [308108462]
+--- 308108462 ---
+efusal:c?a:void 0}}}function ryS(e,t){if(e===void 0)return;let r=jir(t,ST());return r===null?void 0:{from:e,to:r}}async function Npf(e,t){let r=await e.delete(Pn.pluginCache(t.marketplace,t.plugin,t.version,[c9]));if(!r.ok)E(`Could not drop a stray orphan marker from the staged plugin: ${ai(r.error)}`,{level:"warn"})}function nyS(e){if(e.code!=="Failed"||!("telemetryCode"in e)||e.telemetryCode!==Y
+#### "function ckb" []
+#### "Ufn" [98314776,320432097,326461031,326549473,326883674]
+--- 98314776 ---
+BI..............	.......Aav.............	.......mx..............	.......N0f.............	.......hSg.............	.......Ufn.............	.......WCv.............	.......njg.............	.......Cqr.............	.......ygf.............	.......oau.............	.......V1w.............	.......cGb.............	.......BSy.............	.......cma.............	.......ju..............	.......Qf_.............
+--- 320432097 ---
+sages,a=new Set(s?.allUuids??s?.uuids??[]);for(let l of o)if(!a.has(l.uuid))yield l;return{reason:"completed"}}function Ufn({run:e,queryParams:t,commands:r=[],models:n=[],unavailableModels:o=[],agents:i=[],account:s={},outputStyle:a,availableOutputStyles:l,mcpServers:c=()=>[],mcpDelegate:u,excludeDynamicSections:d,settings:p=rf0(),authDelegate:f,mcpAuthDelegate:m,ambient:h,tools:g=[],skills:y=[],p
+#### "tengu_ochre_hollow" []
+#### "Try the new fullscreen" [198316496,326318118,326383526]
+--- 198316496 ---
+board..........................	.......Yes, try it.............	.......Not now.................................	... ...Try the new fullscreen renderer?........................................................................*............D!L..P>...z...u...E...........D......rL..P;..`E.......;...].......4..@cf......D..p4...c...4..p.......@E...... M.......4......p.......@E......p4.......4..@..I.....E
+--- 326318118 ---
+()=>tin()&&!bXm(Jo())&&!p4()&&!V.CLAUDE_CODE_REMOTE&&!V.isSSH()},{id:"no-flicker",providerAgnostic:!0,content:async()=>"Try the new fullscreen renderer \u2014 flicker-free output, mouse support, auto-copy on select \xB7 /tui fullscreen",cooldownSessions:10,advertisedCommand:"tui",isRelevant:async()=>!Vs()&&Jo().tui===void 0&&!Vfs()&&!jli(OQ())},{id:"console-api-key",content:async(e)=>`Build your A
+#### "fullscreen renderer?" [198316508,326383538]
+--- 198316508 ---
+...................	.......Yes, try it.............	.......Not now.................................	... ...Try the new fullscreen renderer?........................................................................*............D!L..P>...z...u...E...........D......rL..P;..`E.......;...].......4..@cf......D..p4...c...4..p.......@E...... M.......4......p.......@E......p4.......4..@..I.....E.......4..@c
+--- 326383538 ---
+S1s,YAn[13]=hPr,YAn[14]=Bfu;else Bfu=YAn[14];let _7A;if(YAn[15]!==hPr||YAn[16]!==Bfu)_7A=xpe.jsx(Vr,{title:"Try the new fullscreen renderer?",onCancel:hPr,children:Bfu}),YAn[15]=hPr,YAn[16]=Bfu,YAn[17]=_7A;else _7A=YAn[17];return _7A}var XAn,xpe,q1y;var K1y=A(()=>{tt();uVc();Srt();Nt();jt();su();uQ();Wn();mr();kUe();vh();A6t();Yfs();$r();Eie();dj();tot();Ho();ca();rs();bC();ec();XAn=P(Lt(),1),xpe=
+#### "FORCE_FULLSCREEN_UPSELL" [106496076,188771268,188771484,301307327,322215744,326380993]
+--- 106496076 ---
+....	.......CLAUDE_CODE_FORCE_BRIDGE........	...!...CLAUDE_CODE_FORCE_EVALUATE_MEMORY.2.............	...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL.............	.......CLAUDE_CODE_FORCE_FULL_LOGO.............	.......CLAUDE_CODE_FORCE_MEMORY_SURVEY.........	.......CLAUDE_CODE_FORCE_TIP_ID........	 2.....CLAUDE_CODE_GIT_BASH_PATH 2.............. 2. ...CLAUDE_CODE_GLOB_TIMEOUT_SECONDS........	!2. ...CLAU
+--- 188771268 ---
+....	.......CLAUDE_CODE_NO_FLICKER..........	...$...CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN............	...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL.....................0...............H...............p.......................	.......CLAUDE_CODE_NO_FLICKER..........	...$...CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN............	...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL.........................................
+#### "1.1*" [334463379,334464443]
+--- 334463379 ---
+.call(r7e,t.width).node().getBBox(),v=i.fontSize?.replace?i.fontSize.replace("px",""):i.fontSize;if(t.height=y.height+v*1.1*.5+t.padding,t.height=Math.max(t.height,t.maxHeight),t.width=t.width+2*t.padding,m.attr("transform","translate("+t.width/2+", "+t.padding/2+")"),u&&m.attr("transform",`translate(${t.width/2}, ${a?t.padding/2+3:t.padding})`),Kkt(p,t,d,n,i),l==="neo"&&(f.attr("data-look","neo")
+--- 334464443 ---
+r7e,t.width).node().getBBox(),s=r.fontSize?.replace?r.fontSize.replace("px",""):r.fontSize;return i.remove(),a.height+s*1.1*.5+t.padding},"getVirtualNodeHeight"),Kkt=o(function(e,t,r,i,n){let{theme:a}=n,s=a?.includes("redux")?0:5,l=5,u=s>0?`M0 ${t.height-l} v${-t.height+2*l} q0,-${s},${s},-${s} h${t.width-2*l} q${s},0,${s},${s} v${t.height-l} H0 Z`:`M0 ${t.height-l} v${-(t.height-l)} h${t.width} v
+#### "*1.1" [332066453,332516752,333135166,333135205,333135257,334463378,334464442]
+--- 332066453 ---
+rderRightWidth=It(i),r.style.borderTopWidth=It(n),r.style.bottom=It(a),r.width=i,r.height=n+a,r.depth=-a,r.maxFontSize=n*1.125*t.sizeMultiplier,r},mathmlBuilder(e,t){var r=Qi(e.width,t),i=Qi(e.height,t),n=e.shift?Qi(e.shift,t):0,a=t.color&&t.getColor()||"black",s=new Dt.MathNode("mspace");s.setAttribute("mathbackground",a),s.setAttribute("width",It(r)),s.setAttribute("height",It(i));var l=new Dt.M
+--- 332516752 ---
+2},...Bo(-d/2-d/2*.1,m/2,d/2+d/2*.1,m/2,p,.8),{x:d/2+d/2*.1,y:-m/2},{x:-d/2-d/2*.1,y:-m/2},{x:-d/2,y:-m/2},{x:-d/2,y:m/2*1.1},{x:-d/2,y:-m/2}],b=y.polygon(x.map(w=>[w.x,w.y]),v),T=l.insert(()=>b,":first-child");return T.attr("class","basic label-container outer-path"),g&&t.look!=="handDrawn"&&T.selectAll("path").attr("style",g),i&&t.look!=="handDrawn"&&T.selectAll("path").attr("style",i),T.attr("t
+#### "1.1x" []
+#### "US-only-inference" []
+#### "usOnlyInference" []
+#### "dataResidencyPremium" []
+#### "residencyPremium" []
+#### "inferencePremium" []
+#### "expandedTool" []
+#### "toolResultColor" []
+#### "ansi:cyanBright" [242907400,253590448,306391671,306392145,306392437,306393097,306394063,308703963]
+--- 242907400 ---
+ansi:green..............	.......ansi:red........	.......ansi:yellow.............	.......ansi:greenBright........	.......ansi:cyanBright.........	.......rgb(0,102,204)..........	.......rgb(255,153,51).........	.......rgb(255,183,101)........	.......rgb(51,102,255).........	.......rgb(101,152,255)........	.......rgb(51,102,102).........	.......rgb(0,102,153)..........	.......rgb(204,0,0)............
+--- 253590448 ---
+	.......ansi:yellowBright...............	.......ansi:blueBright.........	.......ansi:magentaBright..............	.......ansi:cyanBright.........	.......ansi:whiteBright
+...................................".............................`,......`,......`d.@ ...0......H.S...;...|.@ ...0......H.S...;...|.@ ...0......H.S...;...|..@.....K.....RT..p;X......|d................................{..............
+#### "darkAnsiTheme" []
+#### "35;150;7M" []
+#### "pendingSgr" []
+#### "incompleteCsi" []
+#### "[<35;" []
+#### "literal tag" []
+#### "<insight>" []
+#### "</insight>" []
+#### "empty tag" []
+#### "stripTags" []
+#### "JediTerm" [109028210,116665074,127762106,131250252,131569090,229653274,251787194,301277779]
+--- 109028210 ---
+..+...Iterator result interface is not an object......................	.......visualstudio............	.......JetBrains-JediTerm..............	.......pycharm.........	......xterm-ghostty...........	.......ghostty.........	.......kitty...................................	.......^devin([ -]desktop)?$...........	.......tmux............	.......screen..........	.......konsole.........	.......gnome-term
+--- 116665074 ---
+ublime........	.......vscode..........	.......xterm-256color..........	...	...alacritty...............	.......JetBrains-JediTerm..................-..............................4..P3...&.......4..C4...3...6..@........4..C4...3..QV..@........4..C4...3..pV.......4..C4...n.......4..C4..pn.......4..C4...m.......4..C4...m.......4..C4...m.......4..C4........!...I...............9...b.....................
+#### "isJetBrainsIdeTerminal" [99680440,131164680,308294338,308296216,308548371,308548893,316341898,320042536]
+--- 99680440 ---
+rains-plugin..............".....didStopImmediatePropagation.............	.".....stopImmediatePropagation........	.......isJetBrainsIdeTerminal..........	.".....isMicrosoftWindowsTerminal"...............".	...isGhostty.......................isMintty........	.......windowsConsoleSupportsVirtualTerminalSequences..........	.......hasGeometricShapesInkBleedBug...........	.......hasOsc52ClipboardUtf8Bug
+--- 131164680 ---
+................................................................................	...
+...syncOutput..............	.......isJetBrainsIdeTerminal................x...........x.......x...x......H..H........................B......................xB......h.......................................................................................................................................................
+#### "vimMode===" [312192647,322788012]
+--- 312192647 ---
+ursorOffset:null}})}function hyr(e){IW.setState((t)=>t.active===e?t:{...t,active:e})}function _bl(e){IW.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function cim(e){IW.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function uim(){return IW.getState().launchWarning}function nEt(e){IW.setState((t)=>t.launchWarning?.type===e.type&&t.launchWarning.prefillLength===e.prefillLengt
+--- 322788012 ---
+;else Ee("input_external_editor");if(Ro.content!==null&&Ro.content!==K)DI(K,ze,w),mt(Ro.content),We(ZW()&&IW.getState().vimMode==="NORMAL"?hTr(Ro.content.normalize("NFC"),Ro.content.length):Ro.content.length)}catch(Hr){if(Hr instanceof Error)Te(Hr);Pl({key:"external-editor-error",kind:"warning",text:`External editor failed: ${le(Hr)}`,color:"warning",priority:"high"}),pe("input_external_editor","s
+#### "agent view" [111228336,180223577,185141815,207225110,207225405,207225797,207226171,207226282]
+--- 111228336 ---
+on worktrees on this machine............	...*...Disable all hooks and statusLine execution..............	.......Disable agent view (`claude agents`, `--bg`, /background, the on-demand daemon). Typically set in managed settings. Equivalent to CLAUDE_CODE_DISABLE_AGENT_VIEW=1..............	.......Disable Remote Control (claude.ai/code, `claude remote-control`, `--remote-control`/`--rc`, auto-start, 
+--- 180223577 ---
+OpensAgents............	...... opens agents...................	.......defaultToAgentsView.............	.......Start in agent view......................................................... ....@p..U.. ...cl......i...........A....@...T.. ...`...............a...o...u.......................................pc........................%.....................`O*.....................0........................
+#### "ignoreNextClick" []
+#### "gained focus" []
+#### "transcriptPeek" []
+#### "MODAL_TRANSCRIPT" []
+#### "posix_spawn" [87652476]
+--- 87652476 ---
+fcopyfilerecvsendfilesendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollscandirkeventkqueueepoll_ctlkillwaitpidposix_spawnwritevpwritevreadvpreadvioctl_ficlonebind2connect2try_writesocketpairsetsockoptstatxuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfch
+#### "function dme" [304295810,337331314]
+--- 304295810 ---
+,Bya].filter((e)=>e.length>0),Cav=[P0a,D0a,M0a,O0a]});function Ow(e){return e==="completed"||e==="failed"||e==="killed"}function dme(){let e=V.CLAUDE_CODE_TMPDIR;if(e)return e;return L0a.tmpdir()}function WLt(e){let t=process.getuid?.();if(t===void 0)return;let r=e.replace(/[\/]+$/,"")||e,n="Set CLAUDE_CODE_TMPDIR to a directory you control, or ask an administrator to remove it.",o;try{o=i9.openSy
+--- 337331314 ---
+me(f),d())};s.addEventListener("pointermove",p),s.addEventListener("pointerup",m),s.addEventListener("pointercancel",m)}function dme({name:e,meta:t,cur:n,onChange:r}){let o=t.editor==="int",a=t.step??1;return(0,Bt.jsxs)("div",{className:"om-dc-num flex items-center box-border min-w-0 h-7 pl-2 border border-om-border-default rounded-md bg-om-bg-surface focus-within:border-om-border-strong",children
+#### "titleDedup" []
+#### "titleUpdate" []
+#### "organization policy" [185574005,321688044,326596774]
+--- 185574005 ---
+ed to install marketplaces.........	...+...Please install git and restart Claude Code......................	...B...Your organization policy does not allow any external marketplaces...............	.......Contact your administrator......................	...<...Your organization restricts which marketplaces can be added.............	...7...Switch to the Marketplaces tab to view allowed sources.......
+--- 321688044 ---
+se"all-blocked-by-policy":{let kJ;if(dbn[1]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization policy does not allow any external marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Contact your administrator."})]}),dbn[1]=kJ;else kJ=dbn[1];return kJ}case"policy-restricts-sources":{let kJ;if(dbn[2]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,chil
+#### "policy check" [120231848,206203704,206204248,206204320,303509832,305480326,328285489,328285847]
+--- 120231848 ---
+1...............	.......malformed request: .............	.......deny....................................	.......sandbox policy check failed: ...........	.......allow...........	.......[request-filter] allow .........	....... ......................................................."....@...G...@@......@ ..H...R.4.@PM.H...U.4...1C......<.....@`4.....@.<.@0............K.@.;.@`E.C.L..1l.@ -.E...@p4...K
+--- 206203704 ---
+........	.......n...............	.......policy webhook timed out........................	.......warn............	...&...policy check failed: webhook returned ..........	...'...policy webhook returned a non-OK status.................	.......object..................	...-...policy webhook returned a non-object decision...........	.......boolean.........	.......o...............	...2...policy webhook d
+#### "after compaction" [262946602,262947783,262953125,262954093,262956819,262957719,311964799,311965980]
+--- 262946602 ---
+formed, credential or secret handling rules). These MUST be preserved verbatim in the summary so they continue to apply after compaction.
+2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.
+
+Your summary should include the following sections:
+
+1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail
+2. Key Te
+--- 262947783 ---
+dback and changing intent. Preserve any security-relevant instructions or constraints verbatim so they remain in effect after compaction................. .O.n.l.y. .m.e.s.s.a.g.e.s. .t.h.a.t. .a.c.t.u.a.l.l.y. .c.a.m.e. .f.r.o.m. .t.h.e. .u.s.e.r. .(.u.s.e.r.-.r.o.l.e. .t.u.r.n.s.). .c.o.u.n.t. .a.s. .u.s.e.r. .m.e.s.s.a.g.e.s... .T.e.x.t. .i.n.s.i.d.e. .a.s.s.i.s.t.a.n.t. .m.e.s.s.a.g.e.s. .t.h.a
+#### "do not re-run" [230530532,303498015]
+--- 230530532 ---
+ncluding a duplicate of an earlier request) is denied with an error; the registration pipeline and DirectoryAdded hooks do not re-run.........................................`..........@ n.B....`m.....	!<.B.4..@m.....	!<.B.4..0m.....	!<.B.4.......l.....	.<.m.....L............................`.........................'......................Y......................`)+.....................h...........
+--- 303498015 ---
+ncluding a duplicate of an earlier request) is denied with an error; the registration pipeline and DirectoryAdded hooks do not re-run.")),V5b=ve(()=>_e({directory:L().describe("The registered root as a resolved absolute path.")}).describe("Success payload answering register_repo_root.")),Vha=ve(()=>_e({subtype:kt("set_cwd"),path:L().describe("Target directory. Tilde-expanded and realpath-canonical
+#### "keepAliveWhile" []
+#### "SessionStart" [99464015,102361472,106447299,106447339,106457035,106678974,106690727,107454735]
+--- 99464015 ---
+..`..
+...clientType...............a......replaceClientType...............	.......sessionStartType........	.......replaceSessionStartType.........	.......questionPreviewFormat...........	.......replaceQuestionPreviewFormat............	.......replConfigArgv..........	.......replaceReplConfigArgv............c......userMsgOptIn.............c......replaceUserMsgOptIn.............	.......searchToolsOptI
+--- 102361472 ---
+
+| PostCompact | "manual"/"auto" | After compaction (receives summary) |
+| UserPromptSubmit | - | When user submits |
+| SessionStart | - | When session starts |
+
+**Common tool matchers:** `Bash`, `Write`, `Edit`, `Read`, `Glob`, `Grep`
+
+### Hook Types
+
+**1. Command Hook** - Runs a shell command:
+```json
+{ "type": "command", "command": "prettier --write $FILE", "timeout": 30 }
+```
+
+**2. Prompt Hook
+#### "resume in the current" []
+#### "deleted directory" []
+#### "setMcpServers" [111238512,177557736,177732504,229939052,279659728,302078487,303334218,317674200]
+--- 111238512 ---
+tplaces. Pair with allowedMcpServers for per-server MCP control; this setting does not gate other MCP entry points (SDK setMcpServers, claude mcp add, .mcp.json). Also blocks surfaces that spawn the CLI with these flags internally (see settings documentation). Only honored from managed settings; ignored in user/project/local settings.........	...J...Marketplace names whose plugins may surface as c
+--- 177557736 ---
+........	.......mcpServerStatus.........	.......reconnectMcpServer..............	.......toggleMcpServer.........	......setMcpServers...........	......reloadPlugins...........	.......mcpAuthenticate.........	.......mcpClearAuth............	.......mcpSubmitOAuthCallbackUrl...............	.......getContextUsage.........	.......stopTask........	.......getSettings.............	.......generateSessionT
+#### "stuck in a failed" []
+#### "queued prompt" []
+#### "finish early" []
+#### "function loadCustomThemes" []
+#### "effortUltra" [179970768,242913992,306388909,306391211,306393591,306396029,306398501,306400981]
+--- 179970768 ---
+h...............x...............p...............................	.......theme...........	.......dark............	.......effortUltra.....
+...............	...	...ultracode...................
+....................@.....4..0........=...2..@>.@.........m........m........................A0......................8...............................................;0.........zZ.......*3..f..u....*3.v....*3.'+3.
+--- 242913992 ---
+Color...........	.......rate_limit_fill.........	.......rate_limit_empty........	.......fastModeShimmer.........	.......effortUltra.............	......briefLabelYou...........	.......briefLabelClaude........	.......rainbow_red.............	.......rainbow_orange..........	.......rainbow_yellow..........	......rainbow_green...........	.......rainbow_blue............	.......rainbow_indigo..........
+#### "You are sending to yourself" []
+#### "no agent named" [182281801,313694772,321115719]
+--- 182281801 ---
+ id; ignoring --session-id (use --resume <id> to continue an existing session)
+........................	.......warning: no agent named '...................#...'. ..  .s.p.a.w.n.i.n.g. .w.i.t.h. .d.e.f.a.u.l.t. .t.e.m.p.l.a.t.e.
+...........	.......................	.......fleet...........	.......spare...........	.......u.......................	.......c.......................	.......exec............	
+--- 313694772 ---
+' is reachable.${T}${C}${x}${R}${p.searchTruncated?rtn:""}${S!=="no"?Jen(e.to,g5(t)):""}
+${k}`,display:`Not sent \u2014 no agent named '${e.to}' is reachable.${p.closest.length>0?` Did you mean: ${p.closest.map((I)=>I.name).join(", ")}?`:""}${p.bridgeUnavailable||p.cloudUnavailable||p.localUnavailable?` Note: ${qAl(p)} \u2014 it may exist there; a retry searches again.`:""}${p.searchTruncated?` No

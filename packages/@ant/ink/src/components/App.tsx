@@ -44,6 +44,8 @@ import {
 } from '../core/jediTermInput.js';
 import {
   INITIAL_STATE,
+  isHeldSgrMousePrefix,
+  parkIncompleteMousePrefix,
   type ParsedInput,
   type ParsedKey,
   type ParsedMouse,
@@ -60,7 +62,13 @@ import {
 } from '../core/selection.js';
 import { isXtermJs, setXtversionName, supportsExtendedKeys } from '../core/terminal.js';
 import { _getClipboardHostPlatform, readNativeClipboard } from '../core/termio/osc.js';
-import { getTerminalFocused, getTerminalFocusState, setTerminalFocused } from '../core/terminal-focus-state.js';
+import type { MouseClickResult } from '../core/events/click-event.js';
+import {
+  getTerminalFocusGainedAt,
+  getTerminalFocused,
+  getTerminalFocusState,
+  setTerminalFocused,
+} from '../core/terminal-focus-state.js';
 import { TerminalQuerier, xtversion } from '../core/terminal-querier.js';
 import {
   DISABLE_KITTY_KEYBOARD,
@@ -122,7 +130,7 @@ type Props = {
   // onClick handlers. Returns true if a DOM handler consumed the click.
   // No-op (returns false) outside fullscreen mode (Ink.dispatchClick
   // gates on altScreenActive).
-  readonly onClickAt: (col: number, row: number) => boolean;
+  readonly onClickAt: (col: number, row: number, isWindowActivation?: boolean) => MouseClickResult;
   // Dispatch hover (onMouseEnter/onMouseLeave) as the pointer moves over
   // DOM elements. Called for mode-1003 motion events with no button held.
   // No-op outside fullscreen (Ink.dispatchHover gates on altScreenActive).
@@ -173,6 +181,8 @@ type Props = {
 // position tolerance allows for trackpad jitter between clicks.
 const MULTI_CLICK_TIMEOUT_MS = 500;
 const MULTI_CLICK_DISTANCE = 1;
+/** densable `yvf` — click-to-focus grace after `Jhf()`. */
+export const WINDOW_ACTIVATION_GRACE_MS = 400;
 
 type ErrorInfo = {
   readonly message: string;
@@ -232,10 +242,22 @@ export default class App extends PureComponent<Props, State> {
    * later unrelated key flushes Latin-1 garbage instead of `：`.
    */
   byteRunDeadlineAt: number | null = null;
+  /**
+   * densable mousePrefixDropAt — deadline to Jyf-park a Qpr incomplete
+   * SGR mouse prefix out of the tokenizer.
+   */
+  mousePrefixDropAt: number | null = null;
+  /**
+   * densable droppedPrefixDropAt — deadline to drop a parked
+   * droppedMousePrefix if no completing chunk arrives.
+   */
+  droppedPrefixDropAt: number | null = null;
   // Timeout durations for incomplete sequences (ms)
   readonly NORMAL_TIMEOUT = 50; // Short timeout for regular esc sequences
   // Official 2.1.210 uses 2000ms for open paste brackets.
   readonly PASTE_TIMEOUT = 2000;
+  /** densable MOUSE_PREFIX_TIMEOUT — hold split SGR mouse reports this long. */
+  readonly MOUSE_PREFIX_TIMEOUT = 2000;
 
   // Terminal query/response dispatch. Responses arrive on stdin (parsed
   // out by parse-keypress) and are routed to pending promise resolvers.
@@ -248,6 +270,12 @@ export default class App extends PureComponent<Props, State> {
   lastClickCol = -1;
   lastClickRow = -1;
   clickCount = 0;
+  /** densable `pressIsWindowActivation` — last left-press was click-to-focus. */
+  pressIsWindowActivation = false;
+  /** densable `windowActivationClickArmed` — next consume can mark activation. */
+  windowActivationClickArmed = true;
+  /** densable `lastActivationInputTime` — last latch consume / key (wall clock). */
+  lastActivationInputTime = Number.NEGATIVE_INFINITY;
   // Deferred hyperlink-open timer — cancelled if a second click arrives
   // within MULTI_CLICK_TIMEOUT_MS (so double-clicking a hyperlink selects
   // the word without also opening the browser). DOM onClick dispatch is
@@ -490,10 +518,23 @@ export default class App extends PureComponent<Props, State> {
       return;
     }
 
+    // densable Jyf: park Qpr incomplete SGR prefix after mousePrefixDropAt.
+    if (
+      this.mousePrefixDropAt !== null &&
+      performance.now() >= this.mousePrefixDropAt &&
+      this.keyParseState.mode !== 'IN_PASTE' &&
+      isHeldSgrMousePrefix(this.keyParseState.incomplete)
+    ) {
+      this.keyParseState = parkIncompleteMousePrefix(this.keyParseState);
+      this.mousePrefixDropAt = null;
+      this.droppedPrefixDropAt = performance.now() + this.MOUSE_PREFIX_TIMEOUT;
+    }
+
     // Official: if only an incomplete ESC sequence remains, recompute the
     // remaining timeout from lastStdinTime so a blocked event loop doesn't
     // flush early relative to the intended NORMAL/PASTE window.
-    if (hasIncomplete) {
+    // Re-read after Jyf — parked prefix must not re-arm the 50ms window.
+    if (this.keyParseState.incomplete) {
       const budget = this.keyParseState.mode === 'IN_PASTE' ? this.PASTE_TIMEOUT : this.NORMAL_TIMEOUT;
       const remaining = budget - (performance.now() - this.lastStdinTime);
       if (remaining > 0) {
@@ -509,6 +550,15 @@ export default class App extends PureComponent<Props, State> {
 
   // Process input through the parser and handle the results
   processInput = (input: string | Buffer | null): void => {
+    // densable: expire parked droppedMousePrefix after droppedPrefixDropAt.
+    if (
+      this.droppedPrefixDropAt !== null &&
+      performance.now() >= this.droppedPrefixDropAt &&
+      this.keyParseState.droppedMousePrefix
+    ) {
+      this.keyParseState = { ...this.keyParseState, droppedMousePrefix: '' };
+      this.droppedPrefixDropAt = null;
+    }
     // Parse input using our state machine
     const prevState = this.keyParseState;
     const [keys, newState] = parseMultipleKeypresses(this.keyParseState, input);
@@ -540,18 +590,42 @@ export default class App extends PureComponent<Props, State> {
       this.byteRunDeadlineAt = now + this.NORMAL_TIMEOUT;
     }
 
+    // densable: arm / extend mousePrefixDropAt while Qpr(incomplete).
+    if (this.keyParseState.mode !== 'IN_PASTE' && isHeldSgrMousePrefix(this.keyParseState.incomplete)) {
+      if (
+        !(
+          this.mousePrefixDropAt !== null &&
+          isHeldSgrMousePrefix(prevState.incomplete) &&
+          this.keyParseState.incomplete.startsWith(prevState.incomplete)
+        )
+      ) {
+        this.mousePrefixDropAt = now + this.MOUSE_PREFIX_TIMEOUT;
+      }
+    } else {
+      this.mousePrefixDropAt = null;
+    }
+    if (this.keyParseState.droppedMousePrefix) {
+      if (!prevState.droppedMousePrefix) {
+        this.droppedPrefixDropAt = now + this.MOUSE_PREFIX_TIMEOUT;
+      }
+    } else {
+      this.droppedPrefixDropAt = null;
+    }
+
     if (this.incompleteEscapeTimer) {
       clearTimeout(this.incompleteEscapeTimer);
       this.incompleteEscapeTimer = null;
     }
 
-    // Official densable App: arm NORMAL_TIMEOUT for incomplete ESC in the
-    // tokenizer buffer, PASTE_TIMEOUT for open bracketed paste.
+    // Official densable App: PASTE_TIMEOUT for open paste; Qpr incomplete
+    // waits until mousePrefixDropAt (not 50ms); else NORMAL_TIMEOUT.
     const incompleteOrPasteMs =
       this.keyParseState.incomplete || this.keyParseState.mode === 'IN_PASTE'
         ? this.keyParseState.mode === 'IN_PASTE'
           ? this.PASTE_TIMEOUT
-          : this.NORMAL_TIMEOUT
+          : this.mousePrefixDropAt !== null
+            ? Math.max(0, this.mousePrefixDropAt - now)
+            : this.NORMAL_TIMEOUT
         : null;
     // Don't race paste with a byte-run deadline (paste may legitimately
     // pause longer than NORMAL_TIMEOUT between high-byte fragments).
@@ -629,12 +703,22 @@ export default class App extends PureComponent<Props, State> {
     this.props.onExit(error);
   };
 
+  /**
+   * densable `consumeWindowActivationLatch` — records input time and
+   * consumes the one-shot armed flag. Returns true if this input may be
+   * the click that focused the window.
+   */
+  consumeWindowActivationLatch(now: number): boolean {
+    this.lastActivationInputTime = now;
+    if (!this.windowActivationClickArmed) return false;
+    this.windowActivationClickArmed = false;
+    return true;
+  }
+
   handleTerminalFocus = (isFocused: boolean): void => {
-    // densable 2.1.217 handleTerminalFocus (sr-isScreenReader extract, 1:1):
-    //   handleTerminalFocus=(e)=>{let t=xbe();if(pds(e),e&&t==="blurred")
-    //     bd.get(this.props.stdout)?.proactiveAtlasResetOnFocus();
-    //     if(e&&t!=="focused"&&CLAUDE_BG_BACKEND==="daemon"&&this.querier)
-    //       I4u(this.querier)};
+    // densable 2.1.239 handleTerminalFocus:
+    //   if(!e||Date.now()-lastActivationInputTime>=yvf) armed=true
+    //   OKa(e); blur→focus atlas; daemon attach probe
     // densable does NOT forceRedraw on focus — that erases the alt buffer and
     // can leave a black screen if paint is empty/delayed (WT/Windows Esc/focus
     // thrash). External wipe recovery is probeExternalClear (iTerm/Apple only).
@@ -645,6 +729,9 @@ export default class App extends PureComponent<Props, State> {
     //    densable-only blur→focus gate never fires — repaint on every FOCUS_IN.
     // 3) Still never forceRedraw here (no erase / black flash).
     const prev = getTerminalFocusState();
+    if (!isFocused || Date.now() - this.lastActivationInputTime >= WINDOW_ACTIVATION_GRACE_MS) {
+      this.windowActivationClickArmed = true;
+    }
     setTerminalFocused(isFocused);
     if (isFocused) {
       const ink = instances.get(this.props.stdout);
@@ -792,10 +879,12 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
       continue;
     }
 
-    // Failsafe: if we receive input, the terminal must be focused
+    // Failsafe: if we receive input, the terminal must be focused.
+    // densable: non-wheel/non-mouse also consumeWindowActivationLatch.
     if (!getTerminalFocused()) {
       setTerminalFocused(true);
     }
+    app.consumeWindowActivationLatch(Date.now());
 
     // Handle Ctrl+Z (suspend) using parsed key to support both raw (\x1a) and
     // CSI u format (\x1b[122;5u) from Kitty keyboard protocol terminals
@@ -875,6 +964,9 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     if (baseButton !== 0) {
       // Non-left press breaks the multi-click chain.
       app.clickCount = 0;
+      if ((m.button & 0x20) === 0) {
+        app.consumeWindowActivationLatch(Date.now());
+      }
       // densable mouse paste on press (not motion bit 0x20):
       // right(2) windows|wsl|linux: clear selection OR Ksn("clipboard") paste
       // middle(1) linux only: Ksn("primary") paste
@@ -921,14 +1013,21 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     // release, which meant (a) visible latency before the word highlights
     // and (b) double-click+drag fell through to char-mode selection.
     const now = Date.now();
-    const nearLast =
-      now - app.lastClickTime < MULTI_CLICK_TIMEOUT_MS &&
-      Math.abs(col - app.lastClickCol) <= MULTI_CLICK_DISTANCE &&
-      Math.abs(row - app.lastClickRow) <= MULTI_CLICK_DISTANCE;
-    app.clickCount = nearLast ? app.clickCount + 1 : 1;
-    app.lastClickTime = now;
-    app.lastClickCol = col;
-    app.lastClickRow = row;
+    // densable: pressIsWindowActivation = consumeLatch(now) && now-Jhf()<yvf
+    app.pressIsWindowActivation =
+      app.consumeWindowActivationLatch(now) && now - getTerminalFocusGainedAt() < WINDOW_ACTIVATION_GRACE_MS;
+    if (app.pressIsWindowActivation) {
+      app.clickCount = 0;
+    } else {
+      const nearLast =
+        now - app.lastClickTime < MULTI_CLICK_TIMEOUT_MS &&
+        Math.abs(col - app.lastClickCol) <= MULTI_CLICK_DISTANCE &&
+        Math.abs(row - app.lastClickRow) <= MULTI_CLICK_DISTANCE;
+      app.clickCount = nearLast ? app.clickCount + 1 : 1;
+      app.lastClickTime = now;
+      app.lastClickCol = col;
+      app.lastClickRow = row;
+    }
     if (app.clickCount >= 2) {
       // Cancel any pending hyperlink-open from the first click — this is
       // a double-click, not a single-click on a link.
@@ -980,7 +1079,12 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     // Single click: dispatch DOM click immediately (cursor repositioning
     // etc. are latency-sensitive). If no DOM handler consumed it, defer
     // the hyperlink check so a second click can cancel it.
-    if (!app.props.onClickAt(col, row)) {
+    const clickResult = app.props.onClickAt(col, row, app.pressIsWindowActivation);
+    if (clickResult === 'stray') {
+      app.clickCount = 0;
+      app.lastClickTime = 0;
+    }
+    if (clickResult === 'unhandled' && !app.pressIsWindowActivation) {
       // Resolve the hyperlink URL synchronously while the screen buffer
       // still reflects what the user clicked — deferring only the
       // browser-open so double-click can cancel it.

@@ -6,6 +6,7 @@ import { errorMessage, getErrnoCode, isENOENT } from '../errors.js'
 import { FRONTMATTER_REGEX } from '../frontmatterParser.js'
 import { jsonParse } from '../slowOperations.js'
 import { parseYaml } from '../yaml.js'
+import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
 import {
   PluginHooksSchema,
   PluginManifestSchema,
@@ -405,7 +406,9 @@ export async function validateMarketplaceManifest(
       plugins: z.array(PluginMarketplaceEntrySchema().strict()),
     })
     .strict()
-  const result = strictMarketplaceSchema.safeParse(parsed)
+  const result = strictMarketplaceSchema.safeParse(
+    applyMarketplacePluginRoot(parsed),
+  )
 
   if (!result.success) {
     errors.push(...formatZodErrors(result.error))

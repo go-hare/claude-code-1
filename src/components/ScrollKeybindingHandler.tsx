@@ -332,6 +332,61 @@ export function selectionFocusMoveForKey(key: Key): FocusMove | null {
   return null;
 }
 
+/** densable z2t — both virtual endpoints sit on the same side of the clamped rows. */
+export function isSelectionVirtuallyInverted(state: SelectionState): boolean {
+  if (!state.anchor || !state.focus || state.virtualAnchorRow === undefined || state.virtualFocusRow === undefined) {
+    return false;
+  }
+  return (
+    (state.virtualAnchorRow < state.anchor.row && state.virtualFocusRow < state.focus.row) ||
+    (state.virtualAnchorRow > state.anchor.row && state.virtualFocusRow > state.focus.row)
+  );
+}
+
+type ExtendSelectionApi = {
+  hasSelection: () => boolean;
+  getState: () => SelectionState | null;
+  moveFocus: (move: FocusMove) => void;
+};
+
+/**
+ * densable S() — `selection:extend*` handler.
+ * Official OEc (scope.node vs scroll DOM) is always true here: tip
+ * SelectionState has no scope, matching official `!r`.
+ */
+export function extendSelectionByKey(
+  move: FocusMove,
+  selection: ExtendSelectionApi,
+  scroll: ScrollBoxHandle | null,
+  lastCopiedRef: { current: string | null },
+  onScroll?: (sticky: boolean, handle: ScrollBoxHandle) => void,
+): boolean | undefined {
+  if (!selection.hasSelection()) return false;
+  const state = selection.getState();
+  if (state && isSelectionVirtuallyInverted(state)) return undefined;
+  if ((move === 'up' || move === 'down') && scroll && state?.anchor && state.focus) {
+    const top = scroll.getViewportTop();
+    const bottom = top + scroll.getViewportHeight() - 1;
+    const anchorInView = state.anchor.row >= top && state.anchor.row <= bottom;
+    const atTopEdge = anchorInView && move === 'up' && state.focus.row <= top;
+    const atBottomEdge = anchorInView && move === 'down' && state.focus.row >= bottom;
+    if (atTopEdge || atBottomEdge) {
+      const max = Math.max(0, scroll.getScrollHeight() - scroll.getViewportHeight());
+      const canScroll = atTopEdge ? scroll.getScrollTop() > 0 : scroll.getScrollTop() < max;
+      if (scroll.getPendingDelta() === 0 && canScroll) {
+        lastCopiedRef.current = null;
+        state.focus = { col: state.focus.col, row: atTopEdge ? top : bottom };
+        state.virtualFocusRow = atTopEdge ? top - 1 : bottom + 1;
+        scroll.scrollBy(atTopEdge ? -1 : 1);
+        onScroll?.(false, scroll);
+      }
+      return undefined;
+    }
+  }
+  selection.moveFocus(move);
+  return true;
+}
+
 export type WheelAccelState = {
   time: number;
   mult: number;
@@ -912,6 +967,37 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
   // densable 2.1.234 #2 / h8i — separate registration (also agents view).
   useSelectionClearKeybinding(selection, isActive);
 
+  // densable 2.1.239 #30 — S() named extend actions (not raw useInput).
+  useKeybindings(
+    {
+      'selection:extendLeft': () =>
+        extendSelectionByKey('left', selection, scrollRef.current, lastCopiedRef, notifyScroll) === false
+          ? false
+          : undefined,
+      'selection:extendRight': () =>
+        extendSelectionByKey('right', selection, scrollRef.current, lastCopiedRef, notifyScroll) === false
+          ? false
+          : undefined,
+      'selection:extendUp': () =>
+        extendSelectionByKey('up', selection, scrollRef.current, lastCopiedRef, notifyScroll) === false
+          ? false
+          : undefined,
+      'selection:extendDown': () =>
+        extendSelectionByKey('down', selection, scrollRef.current, lastCopiedRef, notifyScroll) === false
+          ? false
+          : undefined,
+      'selection:extendLineStart': () =>
+        extendSelectionByKey('lineStart', selection, scrollRef.current, lastCopiedRef, notifyScroll) === false
+          ? false
+          : undefined,
+      'selection:extendLineEnd': () =>
+        extendSelectionByKey('lineEnd', selection, scrollRef.current, lastCopiedRef, notifyScroll) === false
+          ? false
+          : undefined,
+    },
+    { context: 'Scroll', isActive },
+  );
+
   // scroll:halfPage*/fullPage* have no default key bindings — ctrl+u/d/b/f
   // all have real owners in normal mode (kill-line/exit/task:background/
   // kill-agents). Transcript mode gets them via the isModal raw useInput
@@ -1000,8 +1086,8 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
   // (\x03, shift is lost) and cmd+c never reaches the pty. Handled via raw
   // useInput so we can conditionally consume Ctrl+C only when a selection
   // exists. Other keys never stop propagation — observed to clear as a
-  // side-effect. selection:copy / selection:clear register above via
-  // useKeybindings and consume before reaching here.
+  // side-effect. selection:copy / selection:clear / selection:extend*
+  // register above via useKeybindings and consume before reaching here.
   useInput(
     (input, key, event) => {
       if (!selection.hasSelection()) return;
@@ -1016,12 +1102,6 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
         } else {
           copyAndToast();
         }
-        event.stopImmediatePropagation();
-        return;
-      }
-      const move = selectionFocusMoveForKey(key);
-      if (move) {
-        selection.moveFocus(move);
         event.stopImmediatePropagation();
         return;
       }

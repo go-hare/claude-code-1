@@ -814,6 +814,7 @@ export async function runAsyncAgentLifecycle({
   enableSummarization,
   getWorktreeResult,
   onRunSettled,
+  onTerminalSuccess,
 }: {
   taskId: string
   abortController: AbortController
@@ -836,6 +837,11 @@ export async function runAsyncAgentLifecycle({
    * release (2.1.217 #18 takeConcurrencySlot).
    */
   onRunSettled?: () => void
+  /**
+   * Official zqe `onTerminalSuccess` (`m`). Called after finalize/complete
+   * and before keepalive park. Swallow throws (official `try{m()}catch`).
+   */
+  onTerminalSuccess?: () => void
 }): Promise<{ finalText: string } | undefined> {
   let stopSummarization: (() => void) | undefined
   const agentMessages: MessageType[] = []
@@ -953,6 +959,16 @@ export async function runAsyncAgentLifecycle({
     // not gate the status transition (gh-20236).
     // skipJeo: Jeo already ran above for Z.
     completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true })
+    // Official zqe: if(m) try{m()}catch — before keepalive park.
+    if (onTerminalSuccess) {
+      try {
+        onTerminalSuccess()
+      } catch (err) {
+        logForDebugging(
+          `onTerminalSuccess threw: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    }
     // densable X8a finalText = md(result.content, "\n") — capture before park
     // so awaitCompletion does not race AppState task.result writes.
     settledFinalText = extractTextContent(agentResult.content, '\n')

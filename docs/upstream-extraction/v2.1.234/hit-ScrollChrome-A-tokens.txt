@@ -1,0 +1,10 @@
+176246720: useScrollChrome cannot be called outside of a <FullscreenLayout /> (it provides ScrollChromeContext to its scrollable slot)
+176266984: Cannot destructure property 'scrollable' from null or undefined value
+176267192: Cannot destructure property 'rows' from null or undefined value
+176267560: Cannot destructure property 'clearSelection' from null or undefined value
+176267752: clicked
+176268408: permission
+176275408: hideSticky
+176275504: setStickyPrompt
+176285120: Cannot destructure property 'scrollRef' from null or undefined value
+176285400: Cannot destructure property 'focusManager' from null or undefined value

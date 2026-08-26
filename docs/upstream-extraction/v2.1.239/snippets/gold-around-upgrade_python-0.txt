@@ -1,0 +1,47 @@
+# "upgrade python" offset=324943209
+
+ropic.Anthropic(timeout=20.0)\r
+client = anthropic.Anthropic(\r
+    timeout=anthropic.Timeout(60.0, read=5.0, write=10.0, connect=2.0),\r
+)\r
+\`\`\`\r
+\r
+\`anthropic\` 1.x is built on [\`httpx2\`](https://pypi.org/project/httpx2/), not \`httpx\`. \`anthropic.Timeout\` is \`httpx2.Timeout\`; if you import the HTTP library yourself, write \`import httpx2 as httpx\` \u2014 an object from the \`httpx\` package (\`httpx.Timeout\`, \`httpx.Client\`, transports, limits) is rejected or fails at request time. Existing \`httpx\`-era code is covered by the [v1 migration guide](https://github.com/anthropics/anthropic-sdk-python/blob/main/MIGRATION.md) and \`/claude-api upgrade python\`.\r
+\r
+### Retries\r
+\r
+The SDK auto-retries connection errors, 408, 409, 429, and \u2265500 with exponential backoff (default 2 retries). Set \`max_retries\` on the client or via \`with_options()\`; \`max_retries=0\` disables.\r
+\r
+### Async performance (aiohttp backend)\r
+\r
+For high-concurrency async workloads, install \`anthropic[aiohttp]\` and pass \`DefaultAioHttpClient\` instead of the default httpx2 backend:\r
+\r
+\`\`\`python\r
+from anthropic import AsyncAnthropic, DefaultAioHttpClient\r
+\r
+async with AsyncAnthropic(http_client=DefaultAioHttpClient()) as client:\r
+    ...\r
+\`\`\`\r
+\r
+### Custom HTTP client (proxy, base URL)\r
+\r
+Use \`DefaultHttpxClient\` / \`DefaultAsyncHttpxClient\` \u2014 not a raw \`httpx2.Client\` (and never a client from the \`httpx\` package) \u2014 so the SDK's default timeouts and connection limits are preserved:\r
+\r
+\`\`\`python\r
+from anthropic import Anthropic, DefaultHttpxClient\r
+\r
+client = Anthropic(\r
+    base_url="http://my.test.server.example.com:8083",  # or ANTHROPIC_BASE_URL env var\r
+    http_client=DefaultHttpxClient(proxy="http://my.test.proxy.example.com"),\r
+)\r
+\`\`\`\r
+\r
+### Logging\r
+\r
+Set \`ANTHROPIC_LOG=debug\` (or \`info\`) to enable SDK logging via the standard \`logging\` module.\r
+\r
+---\r
+\r
+## Basic Message Request\r
+\r
+\`\`\`pyth

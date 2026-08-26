@@ -6,7 +6,11 @@
  */
 import { Buffer } from 'buffer'
 import { FOCUS_IN, FOCUS_OUT, PASTE_END, PASTE_START } from './termio/csi.js'
-import { createTokenizer, type Tokenizer } from './termio/tokenize.js'
+import {
+  createTokenizer,
+  type Token,
+  type Tokenizer,
+} from './termio/tokenize.js'
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const META_KEY_CODE_RE = /^(?:\x1b)([a-zA-Z0-9])$/
@@ -69,12 +73,20 @@ const XTVERSION_RE = /^\x1bP>\|(.*?)(?:\x07|\x1b\\)$/s
 // Button 32=left-drag (0x20 | motion-bit). Plain 0/1/2 = left/mid/right click.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/
+// densable 2.1.239 Qpr / Xyf / mwS / hwS — split mouse reports across writes.
+// Incomplete ESC[ < digits;  prefix is held (not flushed as typed keys).
+// Completed prefix is dropped (changelog "35;150;7M"), not pendingSgr invent.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const INCOMPLETE_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;]*$/
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const COMPLETED_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;]*[Mm]/
+/** densable hwS — max length still treated as a held incomplete SGR prefix. */
+const HELD_SGR_MOUSE_PREFIX_MAX = 32
 // densable 2.1.228 kTd text-branch orphan mouse recovery (was ZXc):
 // whole-token only — not prefix peel, not multi-event burst, not embedded.
 //   /^\[<\d+;\d+;\d+[Mm]$/   SGR
 //   /^\[M[\x60-\x7f][\x20-\uffff]{2}$/  X10 wheel payload
-// Bursts / incomplete / param residue stay one text key. densable has no
-// pendingSgr / absorbMm / CSI-u orphan peel (SEA confirmed 228).
+// Bursts / incomplete / param residue stay one text key.
 const ORPHAN_SGR_WHOLE_TOKEN_RE = /^\[<\d+;\d+;\d+[Mm]$/
 const ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE = /^\[M[\u0060-\u007f][\u0020-\uffff]{2}$/
 
@@ -288,8 +300,13 @@ export type KeyParseState = {
    * or swallowed. See highByteFromExtendedKeySequence + reassemble below.
    */
   pendingByteEvents: PendingByteEvent[]
+  /**
+   * densable droppedMousePrefix — incomplete ESC[<… parked out of the
+   * tokenizer (too long for Qpr, or Jyf after mousePrefixDropAt).
+   */
+  droppedMousePrefix: string
   // Internal tokenizer instance — incomplete CSI stays in tokenizer.buffer()
-  // until App NORMAL_TIMEOUT flush (densable mbt/FDu + kTd incomplete field).
+  // until App NORMAL_TIMEOUT / mousePrefixDropAt flush (densable Qyf).
   _tokenizer?: Tokenizer
 }
 
@@ -298,6 +315,26 @@ export const INITIAL_STATE: KeyParseState = {
   incomplete: '',
   pasteBuffer: '',
   pendingByteEvents: [],
+  droppedMousePrefix: '',
+}
+
+/** densable Qpr */
+export function isHeldSgrMousePrefix(value: string): boolean {
+  return (
+    value.length <= HELD_SGR_MOUSE_PREFIX_MAX &&
+    INCOMPLETE_SGR_MOUSE_PREFIX_RE.test(value)
+  )
+}
+
+/**
+ * densable Jyf — park tokenizer buffer into droppedMousePrefix and reset.
+ * App calls this when mousePrefixDropAt expires so a late text chunk can
+ * still complete/drop the report instead of typing "35;150;7M".
+ */
+export function parkIncompleteMousePrefix(state: KeyParseState): KeyParseState {
+  const prefix = state._tokenizer?.buffer() ?? ''
+  state._tokenizer?.reset()
+  return { ...state, incomplete: '', droppedMousePrefix: prefix }
 }
 
 function inputToString(input: Buffer | string): string {
@@ -358,9 +395,24 @@ export function parseMultipleKeypresses(
   const isFlush = input === null
   const inputString = isFlush ? '' : inputToString(input)
 
-  // densable kTd: mbt({x10Mouse:!0})
+  // densable Qyf: mbt({x10Mouse:!0}) + droppedMousePrefix hold on flush
   const tokenizer = prevState._tokenizer ?? createTokenizer({ x10Mouse: true })
-  const tokens = isFlush ? tokenizer.flush() : tokenizer.feed(inputString)
+  let droppedMousePrefix = prevState.droppedMousePrefix ?? ''
+  let tokens: Token[]
+  if (isFlush && prevState.mode !== 'IN_PASTE') {
+    const held = tokenizer.buffer()
+    if (isHeldSgrMousePrefix(held)) {
+      tokens = []
+    } else if (INCOMPLETE_SGR_MOUSE_PREFIX_RE.test(held)) {
+      tokenizer.reset()
+      droppedMousePrefix = held
+      tokens = []
+    } else {
+      tokens = tokenizer.flush()
+    }
+  } else {
+    tokens = isFlush ? tokenizer.flush() : tokenizer.feed(inputString)
+  }
 
   const keys: ParsedInput[] = []
   let inPaste = prevState.mode === 'IN_PASTE'
@@ -432,6 +484,8 @@ export function parseMultipleKeypresses(
 
   for (const token of tokens) {
     if (token.type === 'sequence') {
+      // densable Qyf: any sequence clears droppedMousePrefix (comma).
+      droppedMousePrefix = ''
       if (token.value === PASTE_START) {
         flushPendingBytes()
         inPaste = true
@@ -493,20 +547,38 @@ export function parseMultipleKeypresses(
           flushPendingBytes()
         }
         // densable: incomplete CSI flush becomes a sequence → U_n (parseKeypress).
-        // Do NOT invent pendingSgrPrefix hold — SEA has none.
+        // Qpr hold is on flush (above), not here.
         keys.push(parseKeypress(token.value))
       }
     } else if (token.type === 'text') {
       // densable: d() before text.
       flushPendingBytes()
+      let text = token.value
+      if (!inPaste && droppedMousePrefix) {
+        const combined = droppedMousePrefix + text
+        const completed = COMPLETED_SGR_MOUSE_PREFIX_RE.exec(combined)
+        if (completed) {
+          droppedMousePrefix = ''
+          text = combined.slice(completed[0].length)
+          if (!text) continue
+        } else if (isHeldSgrMousePrefix(combined)) {
+          droppedMousePrefix = combined
+          continue
+        } else {
+          droppedMousePrefix = ''
+        }
+      } else if (!inPaste && isHeldSgrMousePrefix(text)) {
+        droppedMousePrefix = text
+        continue
+      }
       if (inPaste) {
-        pasteBuffer += token.value
+        pasteBuffer += text
       } else if (
-        ORPHAN_SGR_WHOLE_TOKEN_RE.test(token.value) ||
-        ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE.test(token.value)
+        ORPHAN_SGR_WHOLE_TOKEN_RE.test(text) ||
+        ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE.test(text)
       ) {
         // densable kTd: whole-token only re-ESC + CTd/U_n. No prefix peel.
-        const seq = '\x1b' + token.value
+        const seq = '\x1b' + text
         const mouse = parseMouseEvent(seq)
         keys.push(mouse ?? parseKeypress(seq))
       } else {
@@ -514,8 +586,8 @@ export function parseMultipleKeypresses(
         // Extra (local enter safety, not densable invent for mouse): if a large
         // batch still embeds CR/LF (buffer ≥64 / no peel), split + collapse
         // consecutive terminators so Enter is not lost / double-submit.
-        if ([...token.value].length > 1 && /[\r\n]/.test(token.value)) {
-          const chars = [...token.value]
+        if ([...text].length > 1 && /[\r\n]/.test(text)) {
+          const chars = [...text]
           for (let i = 0; i < chars.length; ) {
             const ch = chars[i]!
             if (ch === '\r' || ch === '\n') {
@@ -533,7 +605,7 @@ export function parseMultipleKeypresses(
             i++
           }
         } else {
-          keys.push(parseKeypress(token.value))
+          keys.push(parseKeypress(text))
         }
       }
     }
@@ -554,6 +626,7 @@ export function parseMultipleKeypresses(
     incomplete: tokenizer.buffer(),
     pasteBuffer,
     pendingByteEvents,
+    droppedMousePrefix,
     _tokenizer: tokenizer,
   }
 

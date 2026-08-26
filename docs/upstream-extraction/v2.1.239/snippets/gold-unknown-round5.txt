@@ -1,0 +1,100 @@
+
+==== Cnt @310729984 310729984 ====
+!0,r.onRetryStatus?.({kind:"low_priority_waiting",attempt:I.attempt,retryInMs:I.delayMs,deadline:Date.now()+I.delayMs}),await Pr(I.delayMs,r.signal,{abortError:ZQn}),T--;continue}if((G8f(x)||V8f(x)||!Cnt()&&xpl(x))&&r.fallbackModel&&r.fallbackModel!==r.model){let Q=G8f(x)?"model_not_found":V8f(x)?"permission_denied":"server_error";throw N("tengu_api_model_not_found_fallback_triggered",{original_model:r.model,fallback_model:r.fallbackModel,provider:Lfe(),reason:me(Q)}),new Zoe(r.model,r.fallbackModel,Q,x)}if(C&&!Cnt()&&x instanceof Os&&(x.status===429||Jle(x))){let Q=x.headers?.get("anthropic-ratelimit-unified-overage-disabled-reason");if(Q!==null&&Q!==void 0){aFd(Q),o.fastMode=!1;continue}le
+
+==== Cnt @310730301 310730301 ====
+:"server_error";throw N("tengu_api_model_not_found_fallback_triggered",{original_model:r.model,fallback_model:r.fallbackModel,provider:Lfe(),reason:me(Q)}),new Zoe(r.model,r.fallbackModel,Q,x)}if(C&&!Cnt()&&x instanceof Os&&(x.status===429||Jle(x))){let Q=x.headers?.get("anthropic-ratelimit-unified-overage-disabled-reason");if(Q!==null&&Q!==void 0){aFd(Q),o.fastMode=!1;continue}let Y=Mew(x);if(Y!==null&&Y<Pew){await Pr(Y,r.signal,{abortError:ZQn});continue}let G=Math.max(Y??Hew,Dew),q=Jle(x)?"overloaded":"rate_limit";if(oFd(Date.now()+G,q),Zu())o.fastMode=!1;continue}if(C&&e9f(x)){iFd(),o.fastMode=!1;continue}if(Jle(x)&&!fOt(r.querySource)&&!Cnt())throw N("tengu_api_529_background_dropped",{
+
+==== Cnt @310730751 310730751 ====
+);continue}let G=Math.max(Y??Hew,Dew),q=Jle(x)?"overloaded":"rate_limit";if(oFd(Date.now()+G,q),Zu())o.fastMode=!1;continue}if(C&&e9f(x)){iFd(),o.fastMode=!1;continue}if(Jle(x)&&!fOt(r.querySource)&&!Cnt())throw N("tengu_api_529_background_dropped",{query_source:r.querySource}),pe("api_request","api_request_overload_background_dropped"),new TW(x,o);let M=$o(r.model);if(Jle(x)&&(V.FALLBACK_FOR_ALL_PRIMARY_MODELS||r.fallbackModel!==void 0||!ls()&&(dLe(M)||QUr(M)||e2r(M)))){if(s++,s>=d1i){if(r.fallbackModel)throw N("tengu_api_opus_fallback_triggered",{original_model:r.model,fallback_model:r.fallbackModel,provider:Lfe()}),be("api_request","api_request_fallback_triggered"),new Zoe(r.model,r.fallb
+
+==== Cnt @310731295 310731295 ====
+riggered",{original_model:r.model,fallback_model:r.fallbackModel,provider:Lfe()}),be("api_request","api_request_fallback_triggered"),new Zoe(r.model,r.fallbackModel,"overloaded",x);if(!V.IS_SANDBOX&&!Cnt())throw N("tengu_api_custom_529_overloaded_error",{}),pe("api_request","api_request_overload_repeated"),new TW(Error(m1i,{cause:x}),o)}}let O=Cnt()&&J8f(x);if(T>n&&!O)throw pe("api_request","api_request_retry_exhausted"),new TW(x,o);if(JQn(x)){if(c>=cew)throw pe("api_request","api_request_ccr_auth_exhausted"),new TW(x,o);c++}if(!CXr()&&(Rpl(x,o.model)||Zri(x))){if(u>=few)throw pe("api_request","api_request_aws_auth_exhausted"),new TW(x,o);u++}if(!CXr()&&u1i(x)){if(d>=mew)throw pe("api_reques
+
+==== Cnt @310731441 310731441 ====
+el,r.fallbackModel,"overloaded",x);if(!V.IS_SANDBOX&&!Cnt())throw N("tengu_api_custom_529_overloaded_error",{}),pe("api_request","api_request_overload_repeated"),new TW(Error(m1i,{cause:x}),o)}}let O=Cnt()&&J8f(x);if(T>n&&!O)throw pe("api_request","api_request_retry_exhausted"),new TW(x,o);if(JQn(x)){if(c>=cew)throw pe("api_request","api_request_ccr_auth_exhausted"),new TW(x,o);c++}if(!CXr()&&(Rpl(x,o.model)||Zri(x))){if(u>=few)throw pe("api_request","api_request_aws_auth_exhausted"),new TW(x,o);u++}if(!CXr()&&u1i(x)){if(d>=mew)throw pe("api_request","api_request_gcp_auth_exhausted"),new TW(x,o);d++}if(x instanceof Os&&x.status===401&&id()&&tjr()&&n2n()!==null){if(m>=hew)throw pe("api_reques
+
+==== Cnt @310733278 310733278 ====
+Y,contextLimit:G,adjustedMaxTokens:U,attempt:T});continue}}let F=Z8f(x),B;if(O)l++,B=(x instanceof Os&&x.status===429?Oew(x):null)??Math.min(bZe(l,F,yew),X8f);else if(JQn(x))B=uew;else if(B=bZe(T,F),!Cnt()&&B>gew)throw N("tengu_api_retry_after_too_long",{delayMs:B,status:x.status,provider:Lfe()}),pe("api_request","api_request_retry_after_too_long"),new TW(x,o);let W=O?l:T;if(N("tengu_api_retry",{attempt:W,delayMs:B,error:x instanceof Os&&UFa(x)?b_t(xnt(x),x.status):iSe(le(x)),status:x.status,provider:Lfe(),attempt_duration_ms:Date.now()-k}),fr("warn","cli_api_retry",()=>({...izt(x,xnt(x)),attempt:W,delay_ms:B,attempt_duration_ms:Date.now()-k,model:gu(r.model)??null})),O){if(B>60000)N("tengu_
+
+==== Cnt @310737749 310737749 ====
+).includes("extra usage is required"))){let r=e.headers?.get("anthropic-ratelimit-unified-overage-disabled-reason");if(r!=="fetch_error"&&r!=="org_level_disabled_until")return!1}if(Rew(e))return!1;if(Cnt()&&J8f(e))return!0;if(JQn(e))return!0;if(e.message?.includes('"type":"overloaded_error"'))return!0;if(Q8f(e))return!0;if(qE()&&ma()?.accessToken&&(e.status===401||n5e(e)))return!0;if(!fve()&&GM()&&(e.status===401||n5e(e)))return!0;if(CXr()&&e.status===401)return!0;if(e.status===407&&brr())return ila(e.headers?.get("proxy-authenticate")??void 0),!0;let t=e.headers?.get("x-should-retry");if(t==="true"&&(!ls()||cjr()||K8f(e)))return!0;if(t==="false"){let r=e.status!==void 0&&e.status>=500;retur
+
+==== Cnt @310739018 310739018 ====
+ t=e.headers?.get?.(t5n);if(t&&(n9f.has(t)||!r5n(e)&&Y8f.has(t)))return!0;let r=e.message.includes("exceeded_limit")?xew.exec(e.message)?.[1]:void 0;return r!==void 0&&Y8f.has(r)}function Hpl(){let e=Cnt(),t=V.CLAUDE_CODE_MAX_RETRIES;if(t!==void 0&&Number.isFinite(t)&&t>=0){if(t>Cpl&&!e){if(OD().once("max_retries_clamp_warning"))E(`CLAUDE_CODE_MAX_RETRIES=${t} clamped to ${Cpl}`,{level:"warn"});return Cpl}return t}return e?lew:aew}function Iew(e){return e.maxRetries??Hpl()}function Mew(e){let t=Z8f(e);if(t){let r=parseInt(t,10);if(!isNaN(r))return r*1000}return null}function Oew(e){let t=e.headers?.get?.("anthropic-ratelimit-unified-reset");if(!t)return null;let r=Number(t);if(!Number.isFini
+
+#### "function TLe(" 1 [303702971] 
+
+==== function TLe( 303702971 ====
+}function lti(e,t){return e.find((r)=>r.name===t)??e.find((r)=>ALe(r.name)===t)}function TLe(e){let t=ALe(e);return t!==null&&!iBr(t)&&ELe(t)?t:null}function MFn(e){let t=ALe(e);return t!==null&&__a(t)&&Vu(t)!==dL?t:null}function __a(e){return!iBr(e)&&ELe(e)&&!e.includes("@")&&e!=="*"}function iBr(e){let t=Vu(e);return xD(e).scheme!=="other"||xD(t).scheme!=="other"||g_a(e)||g_a(t)}function pYb(e){let t=e.map((s)=>iti(s.kind,s.id)),r=A8.CLAUDE_CODE_MESSAGING_SOCKET,n=r===void 0?[]:[iti("session",r)],o=Gn([...t,...n]).sort(),i=new Map;for(let s=0;s<o.length;s++){let a=o[s],l=Math.max(s>0?rWd(a,o[s-1]):0,s+1<o.length?rWd(a,o[s+1]):0);i.set(a,Math.min(a.length,Math.max(sti,l+1)))}return e.map((s,a)=>{let l=t[a];return{...s,ref:l.slice(0,i.get(l))}})}function rWd(e,t){let r=0;while(r<e.length&&r<t.length&&e[r]===t[r])r++;return r}function iti(e,t){return String(iu(`${e}:${
+
+#### "TLe=" 1 [334829292] 
+
+==== TLe= 334829292 ====
+eData:n5t,getCurrentSets:o5t,getIndentMode:l5t,setIndentMode:c5t}});var f5t,bLe,TLe=z(()=>{"use strict";f5t=o(e=>`
+  .venn-title {
+    font-size: 32px;
+    fill: ${e.vennTitleTextColor};
+    font-family: ${e.fontFamily};
+  }
+
+  .venn-circle text {
+    font-size: 48px;
+    font-family: ${e.fontFamily};
+  }
+
+  .venn-intersection text {
+    font-size: 48px;
+    fill: ${e.vennSetTextColor};
+    font-family: ${e.fontFamily};
+  }
+
+  .venn-text-node {
+    font-family: ${e.fontFamily};
+    color: ${e.vennSetTextColor};
+  }
+`,"getStyles"),bLe=f5t});function L_(e,t){let r=m5t(e),i=r.filter(l=>p5t(l,e)),n=0,a=0,s=[];if(i.length>1){let l=SLe(i);for(let h=0;h<i.length;++h){let d=i[h];d.angle=Math.atan2(d.x-l.x,d.y-l.y)}i.sort((h,d)=>d.angle-h.angle);let u=i[i.length-1];for(let h=0;h<i.length;++h){let d=i[h];a+=(u.x+d.x)*(d.y-u.y);let f={x:(d.x+u.x)/2,y:(d.y+u.y)/2},p=null;for(let 
+
+#### "startsWith(\"/\")?void 0" 0 [] 
+
+#### "e.startsWith(\"/\")" 10 [85795361,300649815,300674439,300674785,301015764,301997671,302011488,304271329,305060270,305073070] 
+
+==== e.startsWith("/") 85795361 ====
+);if(e.endsWith(".bun"))return new URL("/"+e,globalThis.location.href).href;if(!e.startsWith("/")&&L){var r=e;e=L,L.endsWith("/")?e+=r:e+="/"+r}var o=`/src:${e}`;return o=le(o,t,n),new URL(o,globalThis.location.href).href},Te=class{constructor(t){this.runtimeType=t.runtime_type||0,this.runtimeTypeName=ht[this.runtimeType]||"undefined",this.message=t.message||"",this.explain="",this.normalize(t)}runtimeType;explain;runtimeTypeName;message;normalize(t){if(!t.message)return;let n=t.message.lastIndexOf(" is ");if(n===-1)return;let r=t.message.substring(n+4),o=/(["a-zA-Z0-9_\.]+)\)$/.exec(r);if(o&&o[0]){switch(this.runtimeTypeName=o[0],this.runtimeTypeName=this.runtimeTypeName.substring(0,this.runtimeTypeName.length-1),this.runtimeTypeName.toLowerCase()){case"undefined":{this.runtimeType=2;break}case"null":{this.runtimeType=4;break}case"string":{this.runtimeType=64;break}c
+
+#### "replace(/^\\/+/" 10 [301211558,306087254,306097714,306104930,306111137,306115778,306119694,307024544,307024658,309974444] 
+
+==== replace(/^\/+/ 301211558 ====
++\-.]*:)?\/\//i.test(e)}function rKs(e,t){return t?e.replace(/\/?\/$/,"")+"/"+t.replace(/^\/+/,""):e}function _er(e,t,r){let n=!tKs(t);if(e&&(n||r===!1))return rKs(e,t);return t}var A4o=()=>{};function tk_(e){try{return new URL(e)}catch{return null}}function XNu(e){var t=(typeof e==="string"?tk_(e):e)||{},r=t.protocol,n=t.host,o=t.port;if(typeof n!=="string"||!n||typeof r!=="string")return"";if(r=r.split(":",1)[0],n=n.replace(/:\d*$/,""),o=parseInt(o)||ek_[r]||0,!rk_(n,o))return"";var i=nKs(r+"_proxy")||nKs("all_proxy");if(i&&i.indexOf("://")===-1)i=r+"://"+i;return i}function rk_(e,t){var r=nKs("no_proxy").toLowerCase();if(!r)return!0;if(r==="*")return!1;return r.split(/[,\s]/).every(function(n){if(!n)return!0;var o=n.match(/^(.+):(\d+)$/),i=o?o[1]:n,s=o?parseInt(o[2]):0;if(s&&s!==t)return!0;if(!/^[.*]/.test(i))return e!==i;if(i.charAt(0)==="*")i=i.slice(1);return!e.
+
+#### "Voice mode is now available" 0 [] 
+
+#### "Ldo(" 4 [316284407,316295632,322499528,322499735] 
+
+==== Ldo( 316284407 ====
+ar yXm;var _Xm=A(()=>{yXm={isEnabled:()=>!1,isHidden:!0,name:"stub"}});function Ldo(e){return(e.voice?.enabled??e.voiceEnabled)===!0}function bXm(e){return e.voice?.enabled!==void 0||e.voiceEnabled!==void 0}function zXi(){try{if(!qE())return!1;return Vk()}catch{return!1}}function WXi(){return Ks("allow_voice_mode")}function tin(){return zXi()&&WXi()}var Ndo=A(()=>{hp();oi()});var EXm={};Et(EXm,{FINALIZE_TIMEOUTS_MS:()=>F$l,connectVoiceStream:()=>j$l,isTypedInterimsEnabled:()=>SXm,isVoiceStreamAvailable:()=>B$l,probeVoiceConnectivity:()=>U$l,sanitizeKeytermsForHeader:()=>wXm});function GXi(e,t,r){return typeof e==="number"&&Number.isInteger(e)&&e>=t&&e<=r?String(e):"unknown"}function wuE(e){return yf(e)?.toLowerCase()??"unknown"}async function U$l(){if(fa()||Jke())return"skipped_privacy";try{let e=await di.get(`${tl().BASE_API_URL}/api/hello`,{headers:{"User-Agent":sLe
+
+#### "voice?.enabled??" 1 [316284423] 
+
+==== voice?.enabled?? 316284423 ====
+(()=>{yXm={isEnabled:()=>!1,isHidden:!0,name:"stub"}});function Ldo(e){return(e.voice?.enabled??e.voiceEnabled)===!0}function bXm(e){return e.voice?.enabled!==void 0||e.voiceEnabled!==void 0}function zXi(){try{if(!qE())return!1;return Vk()}catch{return!1}}function WXi(){return Ks("allow_voice_mode")}function tin(){return zXi()&&WXi()}var Ndo=A(()=>{hp();oi()});var EXm={};Et(EXm,{FINALIZE_TIMEOUTS_MS:()=>F$l,connectVoiceStream:()=>j$l,isTypedInterimsEnabled:()=>SXm,isVoiceStreamAvailable:()=>B$l,probeVoiceConnectivity:()=>U$l,sanitizeKeytermsForHeader:()=>wXm});function GXi(e,t,r){return typeof e==="number"&&Number.isInteger(e)&&e>=t&&e<=r?String(e):"unknown"}function wuE(e){return yf(e)?.toLowerCase()??"unknown"}async function U$l(){if(fa()||Jke())return"skipped_privacy";try{let e=await di.get(`${tl().BASE_API_URL}/api/hello`,{headers:{"User-Agent":sLe()},timeout:EuE,
+
+#### "spend limit" 10 [99650835,124637086,124637304,163323296,163323608,163323768,176053782,176063464,176063552,183632049] 
+
+==== spend limit 99650835 ====
+ps://support.claude.com/en/articles/12429409.ffffff�?........	.......individual spend limit..........	$".....individual usage limit..........	.......isFromPreviousAccount...........�$".....isStaleObservation..............	.......resetCurrentLimits".............	.......emitStatusChange........I�
+.....probeQuotaStatus........�.......extractQuotaStatusFromHeaders...........I&".....resetGraceState.........�&".....resetNearLimitWrapUpState'".............�x......extractGraceStatusFromHeaders...........�j......consumePendingGraceWrapUpHint...........	:..!...consumePendingNearLimitWrapUpHint...............	.......extractQuotaStatusFromError.............	.......tengu_lantern_wick_mode.........�	......tengu_vellum_anchor.............�t..�...[Usage limit approaching. Checkpoint now: finish the current step, then list up to 3 short bullets of the most impactful remaining work. Do
+
+#### "out of credits" 0 [] 
+
+#### "out of extra usage" 3 [219233111,219233975,301751658] 
+
+==== out of extra usage 219233111 ====
+ to $0...........	.......Fable 5 requires usage credits..........	.......You're out of extra usage...............	...*...Your seat type doesn't include extra usage......................�...............�...............�...............................8...............h...............�...............�...............�............... ...............@...............`.......................	.......You've hit your.........	.......You've reached your.............	.......You're out of usage credits.............	...0...Your org is out of usage � add funds to continue........	...-...Your org is out of usage � contact your admin...........	...,...Your seat type doesn't include usage credits............	...$...Your seat type doesn't include usage............	...5...Your usage allocation has been disabled by your admin...........	...%...Your group's usage limit is set to $0..........
+
+#### "usage credits exhausted" 2 [112603157,303250088] 
+
+==== usage credits exhausted 112603157 ====
+...........�............... .......................	...,...Fast mode disabled � usage credits exhausted............	...B...Fast mode disabled � usage credits turned off by your organization..............	.../...Fast mode disabled � usage credit limit reached.........	...>...Fast mode disabled � usage credits turned off for your account..........	...>...Fast mode disabled � usage credits not available for your plan..........	...A...Fast mode requires usage credits � /usage-credits to turn them on...............	...0...Fast mode disabled � usage credits not available
+.......................................�@�.....................
+...................................�.(.!�..\...�.(.]..�	.(.e.(......H..H.......�������.�������.H�2������������.�������.0�2�����h.......�������.............��������....Xϩ������������.........�������.........�������.�������.............����.....

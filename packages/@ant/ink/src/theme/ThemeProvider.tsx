@@ -2,7 +2,7 @@ import { feature } from 'bun:bundle';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import useStdin from '../hooks/use-stdin.js';
 import { getSystemThemeName, type SystemTheme } from './systemTheme.js';
-import type { ThemeName, ThemeSetting } from './theme-types.js';
+import { isBuiltinThemeName, setCustomThemeOverrides, type ThemeName, type ThemeSetting } from './theme-types.js';
 
 // -- Config persistence injection --
 // Business layer provides these via setThemeConfigCallbacks().
@@ -10,14 +10,28 @@ import type { ThemeName, ThemeSetting } from './theme-types.js';
 
 let _loadTheme: () => ThemeSetting = () => 'dark';
 let _saveTheme: (setting: ThemeSetting) => void = () => {};
+/** densable d$e / vKn — resolve custom:slug → base + overrides. */
+let _resolveCustomTheme: (setting: string) => {
+  base: ThemeName;
+  overrides?: Record<string, unknown>;
+} = setting => ({
+  base: setting === 'auto' ? 'dark' : isBuiltinThemeName(setting) ? setting : 'dark',
+});
 
 /** Inject config persistence from the business layer. Call once at startup. */
 export function setThemeConfigCallbacks(opts: {
   loadTheme: () => ThemeSetting;
   saveTheme: (setting: ThemeSetting) => void;
+  resolveCustomTheme?: (setting: string) => {
+    base: ThemeName;
+    overrides?: Record<string, unknown>;
+  };
 }): void {
   _loadTheme = opts.loadTheme;
   _saveTheme = opts.saveTheme;
+  if (opts.resolveCustomTheme) {
+    _resolveCustomTheme = opts.resolveCustomTheme;
+  }
 }
 
 type ThemeContextValue = {
@@ -91,7 +105,12 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
     }
   }, [activeSetting, internal_querier]);
 
-  const currentTheme: ThemeName = activeSetting === 'auto' ? systemTheme : activeSetting;
+  const resolvedCustom = useMemo(() => _resolveCustomTheme(activeSetting), [activeSetting]);
+  const currentTheme: ThemeName = activeSetting === 'auto' ? systemTheme : resolvedCustom.base;
+
+  // Official src writes overrides during render so preview is not a frame late.
+  setCustomThemeOverrides(resolvedCustom.overrides);
+  useEffect(() => () => setCustomThemeOverrides(undefined), []);
 
   const value = useMemo<ThemeContextValue>(
     () => ({

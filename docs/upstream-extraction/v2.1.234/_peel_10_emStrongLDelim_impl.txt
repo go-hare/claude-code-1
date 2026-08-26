@@ -1,0 +1,3 @@
+OFFSET=293764685
+
+r=""){let n=this.rules.inline.emStrongLDelim.exec(e);if(!n)return;if(n[3]&&r.match(this.rules.other.unicodeAlphaNumeric))return;if(!(n[1]||n[2])||!r||this.rules.inline.punctuation.exec(r)){let i=[...n[0]].length-1,s,a,l=i,c=0,u=n[0][0]==="*"?this.rules.inline.emStrongRDelimAst:this.rules.inline.emStrongRDelimUnd;u.lastIndex=0,t=t.slice(-1*e.length+i);while((n=u.exec(t))!=null){if(s=n[1]||n[2]||n[3]||n[4]||n[5]||n[6],!s)continue;if(a=[...s].length,n[3]||n[4]){l+=a;continue}else if(n[5]||n[6]){if(i%3&&!((i+a)%3)){c+=a;continue

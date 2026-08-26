@@ -1,0 +1,46 @@
+==== deleteToLineStart(){ @318004627 ====
+deleteToLineStart(){if(this.offset>0&&this.text[this.offset-1]===`
+`)return{cursor:this.left().modifyText(this),killed:`
+`};let e=this.startOfLine();return this.killRange(e.offset,this.offset)}deleteToLineEnd(){if(this.text[this.offset]===`
+`)return{cursor:this.modifyText(this.right()),killed:`
+`};return this.killRange(this.offset,this.endOfLine().offset)}deleteToLogicalLineEnd(){if(this.text[this.offset]===`
+`)return this.modifyText(this.right());return this.killRange(this.offset,this.endOfLogi
+
+==== deleteToLineEnd(){ @318004820 ====
+deleteToLineEnd(){if(this.text[this.offset]===`
+`)return{cursor:this.modifyText(this.right()),killed:`
+`};return this.killRange(this.offset,this.endOfLine().offset)}deleteToLogicalLineEnd(){if(this.text[this.offset]===`
+`)return this.modifyText(this.right());return this.killRange(this.offset,this.endOfLogicalLine().offset).cursor}deleteWordBefore(){if(this.isAtStart())return{cursor:this,killed:""}
+
+==== SDK major-version upgrade guides @324963659 ====
+ght` / `mypy` output a good cross-check for the inventory below.\r\n\r\nThe SDK repository's `MIGRATION.md` is the authoritative change list \u2014 WebFetch it (URL in `shared/live-sources.md` \u2192 SDK major-version upgrade guides) when you can, and if it disagrees with this file, follow `MIGRATION.md` and say so in your report. The other Python files in this skill may still show 0.x-era details; for a project on 1.x, this file takes precedence.\r\n\r\n<!-- Maintenance: this file is the executable form of anthropic-sdk-python's MIGRATION.md. Re-check it against that file whenever .sdk-hashes.json moves the Python SDK pin across a 1.x release. Last reconciled with MIGRATION.md at the 1.0.0 release (2026-08-20): the `extra_body` note for sampling parameters, and the beta helpers no longer warning about `output_format=Model`. -->\r\n\r\n---\r\n\r\n## Step 0: Confirm scope, current version, and target\r\n\r\n**Scope \u2014 ask before editing unless it is already unambiguous.** Same rule 
+
+==== # Live Documentation Sources @325172852 ====
+# Live Documentation Sources\r
+\r
+This file contains WebFetch URLs for fetching current information from platform.claude.com and Agent SDK repositories. Use these when users need the latest data that may have changed since the cached content was last updated.\r
+\r
+## When to Use WebFetch\r
+\r
+- User explicitly asks for "latest" or "current" information\r
+- Cached data seems incorrect\r
+- User asks about features not covered in cached content\r
+- User needs specific API details or examples\r
+\r
+## Claude API Documentation URLs\r
+\r
+### Models & Pricing\r
+\r
+| Topic           | URL              
+
+==== until your limit resets @161832105 ====
+��..��.....��......�����.j��.i�`...............X...............x...............�...............�...............................................	... ...Continuing now at lower priority........	....... until your limit resets at ............	....... until your limit resets........	...b.... Your weekly limit still applies, and responses may pause while waiting for spare capacity. Run /..............	...	... to stop........................................���$�@ ����.�@�V�@.6�.���.�........$...3...6...�������.�������.��9������������.�������. U>�����@...�N......q.�.....�...Y.�.�..�}.�.�.�......H..H
+
+==== Remote Control isn't enabled for this account @115295264 ====
+Remote Control isn't enabled for this account. If you recently changed plans, run `claude auth logout` then `claude auth login` to refresh your entitlements, or `claude doctor` for details........................................B...................��p���.���`e��.����T��.����L��.�I.���.d��.�u.���.d��.��.���.d��.����Ta..���..i.���.L��.��.���.d��.��R!T�.���.\��.�$..���.��@p<�.��@.4��`=��.��@p<
+
+==== Please restart Claude from an existing directory @137614012 ====
+e isolation was lost..............��........����..��........	...+...Iterator result interface is not an object............��........	.......Working directory ".............	...E..." no longer exists. Please restart Claude from an existing directory..........��........	...$...[worktree] blocked shell exec: cwd "............	...B..." is gone and recovery targets the shared checkout; agentWorktree=..............	......worktree_gone...........	...'...This agent is isolated in the worktree .........	......., but its working directory "...............�...". .n.o. .l.o.n.g.e.r. .e.x.i.s.t.s. .a.n.d. .t.h.e. .o.n.l.y. .r.e.c.o.v.e.r.y. .t.a.r.g.e.t. .i.s. .t.h.e. .p.a.r.e.n.t. .s.e.s.s.i.o.n.'.s. .
+
+==== nextWord(){if(this.isAtEnd()) @317999277 ====
+nextWord(){if(this.isAtEnd())return this;let e=this.placeholderStartingAt(this.offset)??this.placeholderContaining(this.offset);if(e)return new Qp(this.measuredText,e.end);let t=this.measuredText.getWordBoundaries();for(let r of t)if(r.isWordLike&&r.start>this.offset){let n=this.snapOutOfPlaceholder(r.start,"end");return new Qp(this.measuredText,n)}return new Qp(this.measuredText,this.text.length)

@@ -1,0 +1,3 @@
+OFFSET=301638859
+
+()=>Promise.resolve().then(() => (w3f(),E3f)),userFacingName(){return"pause-memory"}},cJa=gAS});var yAS,uJa;var T3f=A(()=>{Th();yAS={type:"local-jsx",name:"help",description:"Show help and available commands",get immediate(){return Ns()},requires:{ink:!0}},uJa=yAS});var _AS,k3f;var x3f=A(()=>{_AS={type:"local-jsx",name:"ide",description:"Manage IDE integrations and show status",argumentHint:"[open]"},k3f=_AS});async function H3f(){let e=await C3f.access(R3f.join(Yt(),"CLAUDE.md")).then(()=>!0,()=>!1),t=await ocu(Yt());return[{key:"workspace",te

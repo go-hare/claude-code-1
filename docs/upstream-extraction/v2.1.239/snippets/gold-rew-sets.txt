@@ -1,0 +1,66 @@
+
+#### "var n9f=" 0 [] 
+
+#### "n9f=new Set" 1 [310740295] 
+
+==== n9f=new Set 310740295 ====
+401,407,429,404,403,413]),Eew=[xXr,Mhr,Dpl,f1i,e9f,eeo,__t];n9f=new Set(["org_spend_cap_reached","org_level_disabled_until"]),Y8f=new Set([...n9f,"out_of_credits","org_level_disabled","org_service_level_disabled"]),xew=/\\?"overageDisabledReason\\?":\s*\\?"([a-z_]+)\\?"/});function RXr(){bp.compactWarningSuppressed.setState(()=>!0)}function o9f(){bp.compactWarningSuppressed.setState(()=>!1)}var teo=A(()=>{_ee()});function Lpl(){return process.env.CLAUDE_CODE_ENTRYPOINT==="claude-desktop"}function hFe(){if(V.CLAUDE_CODE_IS_COWORK)return!0;return Lpl()}function azt(){return OD().promptCacheBreak}function l9f(){return V.CLAUDE_CODE_IS_COWORK||Lpl()}function c9f(){let e=m_(Vt());if(e===null)return null;return a9f.join(V4(),`cache-break-state-${e}.json`)}
+
+#### "Y8f=new Set" 1 [310740361] 
+
+==== Y8f=new Set 310740361 ====
+w Set(["org_spend_cap_reached","org_level_disabled_until"]),Y8f=new Set([...n9f,"out_of_credits","org_level_disabled","org_service_level_disabled"]),xew=/\\?"overageDisabledReason\\?":\s*\\?"([a-z_]+)\\?"/});function RXr(){bp.compactWarningSuppressed.setState(()=>!0)}function o9f(){bp.compactWarningSuppressed.setState(()=>!1)}var teo=A(()=>{_ee()});function Lpl(){return process.env.CLAUDE_CODE_ENTRYPOINT==="claude-desktop"}function hFe(){if(V.CLAUDE_CODE_IS_COWORK)return!0;return Lpl()}function azt(){return OD().promptCacheBreak}function l9f(){return V.CLAUDE_CODE_IS_COWORK||Lpl()}function c9f(){let e=m_(Vt());if(e===null)return null;return a9f.join(V4(),`cache-break-state-${e}.json`)}function g1i(e){return Object.hasOwn(Kfa,e)}function Npl(){let e=a
+
+#### "var Y8f=" 0 [] 
+
+#### "var t5n=" 0 [] 
+
+#### "t5n=" 1 [306412615] 
+
+==== t5n= 306412615 ====
+ive-claim",fyi="anthropic-ratelimit-unified-overage-status",t5n="anthropic-ratelimit-unified-overage-disabled-reason";function jFa(){let e=it(kWv,{});return typeof e==="object"&&e!==null&&!Array.isArray(e)?e:{}}function i5n(){return jFa().enabled===!0}function s5n(){let e=jFa().version;return typeof e==="number"&&Number.isFinite(e)?e:0}function o5n(e,t){return typeof e==="string"&&e.trim()!==""?e:t}function ENe(){let e=jFa();return{label:o5n(e.label,n5n.label),noticeLine:o5n(e.noticeLine,n5n.noticeLine),statusLine:o5n(e.statusLine,n5n.statusLine),waitBanner:o5n(e.waitBanner,n5n.waitBanner),budgetExhaustedCopy:o5n(e.budgetExhaustedCopy,n5n.budgetExhaustedCopy)}}var kWv="tengu_toasty_breeze",Slr="low-priority",n5n;var Y$t=A(()=>{bn();n5n={label:"Contin
+
+#### "var xew=" 0 [] 
+
+#### "xew=" 1 [310740450] 
+
+==== xew= 310740450 ====
+redits","org_level_disabled","org_service_level_disabled"]),xew=/\\?"overageDisabledReason\\?":\s*\\?"([a-z_]+)\\?"/});function RXr(){bp.compactWarningSuppressed.setState(()=>!0)}function o9f(){bp.compactWarningSuppressed.setState(()=>!1)}var teo=A(()=>{_ee()});function Lpl(){return process.env.CLAUDE_CODE_ENTRYPOINT==="claude-desktop"}function hFe(){if(V.CLAUDE_CODE_IS_COWORK)return!0;return Lpl()}function azt(){return OD().promptCacheBreak}function l9f(){return V.CLAUDE_CODE_IS_COWORK||Lpl()}function c9f(){let e=m_(Vt());if(e===null)return null;return a9f.join(V4(),`cache-break-state-${e}.json`)}function g1i(e){return Object.hasOwn(Kfa,e)}function Npl(){let e=azt();if(e.hydrationAttempted||!l9f())return;e.hydrationAttempted=!0;let t=e.previousState
+
+#### "service_spend_limit_reached" 2 [142747296,310738776] 
+
+==== service_spend_limit_reached 142747296 ====
+....�.......................�.....��................	.......service_spend_limit_reached.............
+...............	.......exceeded_limit........��............(...................�@�<�G..�.�3�@�5�H..�I�4���L�@.g�H..�E�L���L�.ă�@�d��`.��.��@`4���.���T�@ ����.���T��.��@`4���.�@Pe�H..�I�4���L��`U��.��@p4�H..�.�3�C�T�@0��.�.���<��.��@`4���.............,.......Y...\..._...�...�...�...�...�...................:...�������.�������.�.�������������.�������.X��������������.�������.���������������.�������.�C�������������.�������.�.e������������.�������.�*b������������.�������.��U������������.�������.p��������������.�������.��`������������.�������.�Za������������.�������.�>]������������.�������.X.������....�.......�V�.Gb..�...�V�.�..��V�.�W�......H..H.......����
+
+#### "voiceEnabled:!0" 1 [316297078] 
+
+==== voiceEnabled:!0 316297078 ====
+="tap"?o:r.voice?.mode??"hold";if((await ga("userSettings",{voiceEnabled:!0,voice:{...r.voice,enabled:!0,mode:d}},void 0,t.storageV5)).error)return{type:"text",value:"Failed to update settings. Check your settings file for syntax errors."};N("tengu_voice_toggled",{enabled:!0,tap_mode:d==="tap"});let f=s2("voice:pushToTalk","Chat","space"),m=d==="tap"?`Tap ${f} (with input empty) to start, tap again to send.`:`Hold ${f} to record.`,h=EMr(r.language),g=cr(),y=g.voiceLangHintLastLanguage!==h.code,_=y?0:g.voiceLangHintShownCount??0,b=!h.fellBackFrom&&_<BuE,S="";if(h.fellBackFrom)S=` Note: "${h.fellBackFrom}" is not a supported dictation language; using English. Change it via /config.`;else if(b)S=` Dictation language: ${h.code} (/config to change).`;if(y
+
+#### "voice:{...r.voice,enabled:!0" 1 [316297094] 
+
+==== voice:{...r.voice,enabled:!0 316297094 ====
+?.mode??"hold";if((await ga("userSettings",{voiceEnabled:!0,voice:{...r.voice,enabled:!0,mode:d}},void 0,t.storageV5)).error)return{type:"text",value:"Failed to update settings. Check your settings file for syntax errors."};N("tengu_voice_toggled",{enabled:!0,tap_mode:d==="tap"});let f=s2("voice:pushToTalk","Chat","space"),m=d==="tap"?`Tap ${f} (with input empty) to start, tap again to send.`:`Hold ${f} to record.`,h=EMr(r.language),g=cr(),y=g.voiceLangHintLastLanguage!==h.code,_=y?0:g.voiceLangHintShownCount??0,b=!h.fellBackFrom&&_<BuE,S="";if(h.fellBackFrom)S=` Note: "${h.fellBackFrom}" is not a supported dictation language; using English. Change it via /config.`;else if(b)S=` Dictation language: ${h.code} (/config to change).`;if(y||b)await ln((T)
+
+#### "enabled:!0" 6 [306165306,306376387,306376936,306908377,310196899,310197714] 
+
+==== enabled:!0 306165306 ====
+||V.CLAUDE_CODE_WALNUT_SPIRE}function Yhi(){if(aGn())return{enabled:!0,text:"`claude plugin eval` is ENABLED in this session. Enablement variable for machines that cannot receive the per-organization rollout (Bedrock/Vertex/Foundry, LLM gateways, telemetry-disabled clients, CI runners): `CLAUDE_CODE_WALNUT_SPIRE=1`, set in the shell, in `~/.claude/settings.json` under `env`, or in managed settings `env`. Do not rely on a repository's `.claude/settings.json` (or `settings.local.json`) `env` for it \u2014 the Availability section of the plugin-eval reference explains why a committed value normally leaves the command gated off."+""};return{enabled:!1,text:'`claude plugin eval` is NOT enabled in this session (early access, enabled per organization): it e
+
+#### "BedrockUnexpectedContentType" 6 [123486760,142743280,246189056,306408059,306956182,306956750] 
+
+==== BedrockUnexpectedContentType 123486760 ====
+ection lost while your computer was asleep..........	.......BedrockUnexpectedContentType............	...	...ETIMEDOUT...............	...D...Request timed out. Check your internet connection and proxy settings............	.......o...............	...m...Unable to connect to API: SSL certificate verification failed. Check your proxy or corporate SSL certificates...........	...5...Unable to connect to API: SSL certificate has expired...........	...:...Unable to connect to API: SSL certificate has been revoked..............	...j...Unable to connect to API: Self-signed certificate detected. Check your proxy or corporate SSL certificates..............	...;...Unable to connect to API: SSL certificate hostname mismatch.............	...:...Unable to connect to
+
+#### "voice:{...r.voice,enabled:!0}" 0 [] 
+
+#### "voiceEnabled:!0,voice:" 1 [316297078] 
+
+==== voiceEnabled:!0,voice: 316297078 ====
+="tap"?o:r.voice?.mode??"hold";if((await ga("userSettings",{voiceEnabled:!0,voice:{...r.voice,enabled:!0,mode:d}},void 0,t.storageV5)).error)return{type:"text",value:"Failed to update settings. Check your settings file for syntax errors."};N("tengu_voice_toggled",{enabled:!0,tap_mode:d==="tap"});let f=s2("voice:pushToTalk","Chat","space"),m=d==="tap"?`Tap ${f} (with input empty) to start, tap again to send.`:`Hold ${f} to record.`,h=EMr(r.language),g=cr(),y=g.voiceLangHintLastLanguage!==h.code,_=y?0:g.voiceLangHintShownCount??0,b=!h.fellBackFrom&&_<BuE,S="";if(h.fellBackFrom)S=` Note: "${h.fellBackFrom}" is not a supported dictation language; using English. Change it via /config.`;else if(b)S=` Dictation language: ${h.code} (/config to change).`;if(y
+
+==== voice enable write 316295900 ====
+e:"Failed to update settings. Check your settings file for syntax errors."};return N("tengu_voice_toggled",{enabled:!1}),{type:"text",value:"Voice mode disabled."}}let{isVoiceStreamAvailable:i}=await Promise.resolve().then(() => (z$l(),EXm)),{checkRecordingAvailability:s}=await Promise.resolve().then(() => (KXi(),qXi)),a=await s(t.session.host,{probeForwarded:!0});if(!a.available)return{type:"text",value:a.reason??"Voice mode is not available in this environment."};if(!i())return{type:"text",value:"Voice mode requires a Claude.ai account. Please run /login to sign in."};let{checkVoiceDependencies:l,requestMicrophonePermission:c}=await Promise.resolve().then(() => (KXi(),qXi)),u=await l(t.session.host);if(!u.available)return{type:"text",value:`No audio recording tool found.${u.installCommand?`
+Install audio recording tools? Run: ${u.installCommand}`:`
+Install SoX manually for audio recording.`}`};if(!await c(t.session.host)){let T;return T="Settings \u2192 Privacy \u2192 Microphone",{type:"text",value:`Microphone access is denied. To enable it, go to ${T}, then run /voice again.`}}let d=o==="hold"||o==="tap"?o:r.voice?.mode??"hold";if((await ga("userSettings",{voiceEnabled:!0,voice:{...r.voice,enabled:!0,mode:d}},void 0,t.storageV5)).error)return{type:"text",value:"Failed to update settings. Check your settings file for syntax errors."};N("tengu_voice_toggled",{enabled:!0,tap_mode:d==="tap"});let f=s2("voice:pushToTalk","Chat","space"),m=d==="tap"?`Tap ${f} (with input empty) to start, tap again to send.`:`Hold ${f} to record.`,h=EMr(r.language),g=cr(),y=g.voiceLangHintLastLanguage!==h.code,_=y?0:g.voiceLangHintShownCount??0,b=!h.fellBackFrom&&_<BuE,S="";if(h.fellBackFrom)S=` Note: "${h.fellBackFrom}" is not a supported dictation language; using English. Change it via /c

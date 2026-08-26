@@ -1,0 +1,63 @@
+=== bash command @288486919 ===
+Zqt,"f")}async exec(e,t={}){if(Kr(this,Zqt,"f"))throw new qs("bash session terminated");let r=t.timeoutMs??T9c,n=t.signal;if(n?.aborted)throw new qs("bash command aborted");Aa(this,sge,"","f"),Aa(this,lgn,!1,"f");let o=`__ANT_CMD_${w9c.randomUUID()}_DONE__`,i=`${o.slice
+
+=== bash command @288487336 ===
+t{promise:p,resolve:f}=x0r();Aa(this,yHe,{sentinel:o,resolve:f},"f");let m,h;try{await Promise.race([p,new Promise((g,y)=>{m=setTimeout(()=>y(new qs(`bash command timed out after ${r}ms`)),r)}),new Promise((g,y)=>{if(!n)return;h=()=>y(new qs("bash command aborted")),n.a
+
+=== bash command @288487429 ===
+e.race([p,new Promise((g,y)=>{m=setTimeout(()=>y(new qs(`bash command timed out after ${r}ms`)),r)}),new Promise((g,y)=>{if(!n)return;h=()=>y(new qs("bash command aborted")),n.addEventListener("abort",h,{once:!0})})])}finally{if(m)clearTimeout(m);if(h&&n)n.removeEventLi
+
+=== bash command @300895758 ===
+ou to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive
+
+1. Run the following bash commands in parallel, each using the ${_i} tool:
+  - Run a git status command to see all untracked files. IMPORTANT
+
+=== bash command @300897402 ===
+ due to pre-commit hook: fix the issue and create a NEW commit
+
+Important notes:
+- NEVER run additional commands to read or explore code, besides git bash commands
+- NEVER use the ${n} or ${di} tools
+- DO NOT push to the remote repository unless the user explicitly asks
+
+=== bash command @300898496 ===
+mmand to get the information needed.
+
+IMPORTANT: When the user asks you to create a pull request, follow these steps carefully:
+
+1. Run the following bash commands in parallel using the ${_i} tool, in order to understand the current state of the branch since it diverged
+
+=== Bash command @301005595 ===
+",message:`Permission to use ${e} has been denied: this agent carries a per-spawn bashCommandClamp, which scopes shell `+"execution to a fixed set of Bash command forms \u2014 this surface "+"cannot match them. Use the clamped Bash forms instead.",decisionReason:{type:"
+
+=== Bash command @301473627 ===
+((d)=>!!d&&!xES(d));return LD("Recent usage in this project (names only)",[`Transcripts scanned: ${r.length-i}${i?` (${i} skipped as oversized)`:""}; Bash commands seen: ${n.length}`,a.length?`
+#### Hosts contacted
+${a.map(([d,p])=>`- ${d} (${p}\xD7)`).join(`
+`)}`:"",l.
+
+=== Bash command @301483462 ===
++Math.max(250,c-Date.now())),z=W||k>T.length,X=Plr(Y,ave*2);return LD(_Vr,[`Transcripts scanned: ${x} of ${w.length} selected (from ${y} enumerated); Bash commands seen: ${k}`,y>n.statCap?`
+_Enumeration cap reached \u2014 the ${n.statCap} first-enumerated of ${y} transc
+
+=== shell commands @297366286 ===
+ier "full". The keys would go to this app's text fields or integrated terminal. To type into a different app, click it first to bring it forward. For shell commands, use the Bash tool.`+Sor,"tier_insufficient");return Id(`"${o.displayName}" is granted at tier "click" \u
+
+=== shell commands @297375441 ===
+editor are off-limits to keyboard input. Right-click (context-menu Paste) and dragging text onto ${n.length===1?"it":"them"} require tier "full". For shell commands, use the Bash tool.`)}if(o.length===0)return"";return o.join(`
+
+`)+Sor}function yOa(e){let t=e.map((n)=>`
+
+=== shell commands @297525552 ===
+f(typeof l==="string"){if(t.name===_i?await LPv(l,e):OPv(l,e))return{behavior:"allow",updatedInput:r}}}let s=t.name===_i;return Odi(t,`Only read-only shell commands and ${s?"rm (no flags except -f)":"Remove-Item"} of .md files under ${e} (not protected subdirectories li
+
+=== shell commands @303705067 ===
+etry verbatim.
+ - ${xgm(t,"lean")} Hooks may intercept tool calls; treat hook output as user feedback.
+ - Prefer the dedicated file/search tools over shell commands when one fits. Independent tool calls can run in parallel in one response.
+ - Reference code as \`file_pa
+
+=== Ran N @311054627 ===
+ hook is live (or needs \`/hooks\`/restart per the watcher caveat). Point them at \`/hooks\` to review, edit, or disable it later. The UI only shows "Ran N hooks" if a hook errors or is slow \u2014 silent success is invisible by design.
+`,Lh0;var x0g=A(()=>{Vn();wMs();H

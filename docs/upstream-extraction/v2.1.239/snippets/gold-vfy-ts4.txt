@@ -1,0 +1,2 @@
+ue;o[s]={path:l,branch:a}}return o}function Nue(e){let t=Wt();return t==="windows"||t==="macos"?dP(e):e}function Isn(e){return Wt()==="windows"&&/^[\\/]{2}/.test(e)}async function c4i(e,{requireManage
+dLocation:t,requireCwdInsideRepo:r=!1}){let n=Oc.win32.normalize(e);if(Isn(n)||eN(n,!0))throw new rw(`Cannot enter worktree: ${e} is a UNC network path.`);let o=rr();if(LY(e,o)||LY(Oc.resolve(o,e),o))

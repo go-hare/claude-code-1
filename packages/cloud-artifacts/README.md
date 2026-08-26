@@ -51,7 +51,7 @@ curl "https://cloud-artifacts.claude-code-best.win/7d/V1StGXR8_Z5jdHi6B-myT.html
 - **POST /upload**：Bearer 鉴权 → text/html 校验 → 10MB 上限 → ttl ∈ {7,30} → R2 put
 - **GET /<7d\|30d>/<id>.html**：Worker 从 R2 读 → 返回 `text/html; charset=utf-8` + `Cache-Control: public, max-age=86400`
 - **TTL**：R2 prefix + lifecycle rule 实现，Worker 不参与过期处理（零额外代码）
-- **覆盖**：指定 `?hash=` 时，先删 `7d/<hash>.html` 和 `30d/<hash>.html` 旧 key，再写新 key
+- **覆盖**：指定 `?hash=` 时，先读并校验 body（`byteLength === 0` → `{error:empty_body}` 400，不删不写），PUT 新 `${ttl}d/<hash>.html`，成功后再删**另一个** TTL prefix 的旧 key（同 TTL 为原地 PUT，不先删自己）
 - **ID**：默认 `nanoid(21)`（126 bit 熵），可指定 `?hash=<custom-id>`
 
 ## 为什么套一层 Deno Deploy
@@ -90,6 +90,7 @@ curl "https://cloud-artifacts.claude-code-best.win/7d/V1StGXR8_Z5jdHi6B-myT.html
 |--------|------------|----------|
 | 400 | `invalid_ttl` | `ttl` 非 7 或 30 |
 | 400 | `invalid_hash` | `hash` 不匹配 `^[A-Za-z0-9_-]{1,128}$` |
+| 400 | `empty_body` | body 长度为 0（含 `?hash=` 覆盖路径；**不会**删旧对象） |
 | 401 | `unauthorized` | 缺 Authorization / token 不匹配 |
 | 404 | `not_found` | 非 `/upload` 路径或 GET 路径不匹配 `/<7d\|30d>/<id>.html` |
 | 413 | `payload_too_large` | body > 10MB |
@@ -125,11 +126,12 @@ curl "https://cloud-artifacts.claude-code-best.win/7d/V1StGXR8_Z5jdHi6B-myT.html
 指定 `?hash=` 时：
 
 1. 校验 hash 字符集（`^[A-Za-z0-9_-]{1,128}$`）
-2. 删除 `7d/<hash>.html` 和 `30d/<hash>.html` 两个 key（R2 delete 不存在的 key 不报错，零成本）
-3. 按 `?ttl=` 写入新 key
-4. 返回新的 `expiresAt`
+2. 读完整 body；`byteLength === 0` 返回 `{error:empty_body}` 400，**不删不写**
+3. 先 PUT 到 `${ttl}d/<hash>.html`（同 TTL 覆盖是原地 PUT，不先删自己）
+4. PUT 成功后再删**另一个** TTL prefix 下的旧 key（R2 delete 不存在的 key 不报错）
+5. 返回新的 `expiresAt`
 
-不指定 `?hash=` 时：用 `nanoid(21)` 随机 ID，几乎不可能碰撞，不做碰撞检查。
+不指定 `?hash=` 时：用 `nanoid(21)` 随机 ID，几乎不可能碰撞，不做碰撞检查。空 body 同样 400 `empty_body`，不会 PUT。
 
 ## 部署
 
@@ -152,7 +154,7 @@ bun run deploy
 
 ## 测试
 
-`scripts/test.sh` 覆盖 7 个错误用例 + 3 个成功用例 + R2 写入验证。**支持双模式**：直连 Worker 时按 HTTP status code 断言；经 Deno Deploy 代理（status 抹平为 200）时自动按 body 的 `error` 字段断言（标记 `[via body]`）。
+`scripts/test.sh` 覆盖错误用例（含 `empty_body` / 空覆盖不得抹旧对象）+ 成功上传/覆盖 + R2 写入验证。**支持双模式**：直连 Worker 时按 HTTP status code 断言；经 Deno Deploy 代理（status 抹平为 200）时自动按 body 的 `error` 字段断言（标记 `[via body]`）。单元测试：`bun test packages/cloud-artifacts/src/__tests__/handleUpload.test.ts`。
 
 ```bash
 WORKER_URL=https://cloud-artifacts.claude-code-best.win \

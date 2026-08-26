@@ -1,0 +1,1112 @@
+# offset=324962783
+
+## BEFORE
+
+ entry in response.usage.iterations or []\r
+)\r
+if fallback_ran and response.stop_reason != "refusal":\r
+    print(f"Served by {response.model}")\r
+\`\`\`\r
+\r
+A \`stop_reason: "refusal"\` on the final response means the whole chain refused. The header must be exactly \`server-side-fallback-2026-06-01\` **for this array form**; the newer \`fallbacks: "default"\` scalar form uses \`server-side-fallback-2026-07-01\` instead (see \`shared/model-migration.md\` \u2192 Migrating to {{OPUS_NAME}} \u2192 New API features), and pairing either header with the other form returns a 400. The parameter is rejected on the Batches API and unavailable on Amazon Bedrock, Vertex AI, and Microsoft Foundry \u2014 register the client-side \`BetaRefusalFallbackMiddleware\` on the client there instead. Full semantics (sticky routing, billing, streaming, echoing fallback turns back): \`shared/model-migration.md\` \u2192 Migrating to {{FABLE_NAME}} \u2192 \`refusal\` stop reason.\r
+\r
+---\r
+\r
+## Cost Optimization Strategies\r
+\r
+### 1. Use Prompt Caching for Repeated Context\r
+\r
+\`\`\`python\r
+# Automatic caching (simplest \u2014 caches the last cacheable block)\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    cache_control={"type": "ephemeral"},\r
+    system=large_document_text,  # e.g., 50KB of context\r
+    messages=[{"role": "user", "content": "Summarize the key points"}]\r
+)\r
+\r
+# First request: full cost\r
+# Subsequent requests: ~90% cheaper for cached portion\r
+\`\`\`\r
+\r
+### 2. Choose the Right Model\r
+\r
+\`\`\`python\r
+# Default to Opus for most tasks\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",  # $5.00/$25.00 per 1M tokens\r
+    max_tokens=16000,\r
+    messages=[{"role": "user", "content": "Explain quantum computing"}]\r
+)\r
+\r
+# Use Sonnet for high-volume production workloads\r
+standard_response = client.messages.create(\r
+    model="{{SONNET_ID}}",  # $3.00/$15.00 per 1M tokens\r
+    max_tokens=16000,\r
+    messages=[{"role": "user", "content": "Summarize this document"}]\r
+)\r
+\r
+# Use Haiku only for simple, speed-critical tasks\r
+simple_response = client.messages.create(\r
+    model="{{HAIKU_ID}}",  # $1.00/$5.00 per 1M tokens\r
+    max_tokens=256,\r
+    messages=[{"role": "user", "content": "Classify this as positive or negative"}]\r
+)\r
+\`\`\`\r
+\r
+### 3. Use Token Counting Before Requests\r
+\r
+\`\`\`python\r
+count_response = client.messages.count_tokens(\r
+    model="{{OPUS_ID}}",\r
+    messages=messages,\r
+    system=system\r
+)\r
+\r
+estimated_input_cost = count_response.input_tokens * 0.000005  # $5/1M tokens\r
+print(f"Estimated input cost: \${estimated_input_cost:.4f}")\r
+\`\`\`\r
+\r
+---\r
+\r
+## Retry with Exponential Backoff\r
+\r
+> **Note:** The Anthropic SDK automatically retries rate limit (429) and server errors (5xx) with exponential backoff. You can configure this with \`max_retries\` (default: 2). Only implement custom retry logic if you need behavior beyond what the SDK provides.\r
+\r
+\`\`\`python\r
+import time\r
+import random\r
+import anthropic\r
+\r
+def call_with_retry(\r
+    client: anthropic.Anthropic,\r
+    max_retries: int = 5,\r
+    base_delay: float = 1.0,\r
+    max_delay: float = 60.0,\r
+    **kwargs\r
+):\r
+    """Call the API with exponential backoff retry."""\r
+    last_exception = None\r
+\r
+    for attempt in range(max_retries):\r
+        try:\r
+            return client.messages.create(**kwargs)\r
+        except anthropic.RateLimitError as e:\r
+            last_exception = e\r
+        except anthropic.APIStatusError as e:\r
+            if e.status_code >= 500:\r
+                last_exception = e\r
+            else:\r
+                raise  # Client errors (4xx except 429) should not be retried\r
+\r
+        delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)\r
+        print(f"Retry {attempt + 1}/{max_retries} after {delay:.1f}s")\r
+        time.sleep(delay)\r
+\r
+    raise last_exception\r
+\`\`\`\r
+`;var W0y=()=>{};var q0y="
+
+## AFTER
+
+# Upgrading the `anthropic` Python SDK: 0.x \u2192 1.x\r\n\r\n> **If you arrived via `/claude-api upgrade`:** this is the right file. Execute the steps below in order \u2014 do not summarize them back to the user. Start with Step 0 before touching any file.\r\n\r\n`anthropic` 1.x is deliberately a small step from the last 0.x release: no method was restructured and no new pattern is required. Long-deprecated surface was removed, the HTTP layer moved from `httpx` to its maintained fork `httpx2`, and the minimum Python version is now 3.10. Almost every required edit is mechanical, and a type checker flags nearly all of them once 1.x is installed \u2014 which makes `pyright` / `mypy` output a good cross-check for the inventory below.\r\n\r\nThe SDK repository's `MIGRATION.md` is the authoritative change list \u2014 WebFetch it (URL in `shared/live-sources.md` \u2192 SDK major-version upgrade guides) when you can, and if it disagrees with this file, follow `MIGRATION.md` and say so in your report. The other Python files in this skill may still show 0.x-era details; for a project on 1.x, this file takes precedence.\r\n\r\n<!-- Maintenance: this file is the executable form of anthropic-sdk-python's MIGRATION.md. Re-check it against that file whenever .sdk-hashes.json moves the Python SDK pin across a 1.x release. Last reconciled with MIGRATION.md at the 1.0.0 release (2026-08-20): the `extra_body` note for sampling parameters, and the beta helpers no longer warning about `output_format=Model`. -->\r\n\r\n---\r\n\r\n## Step 0: Confirm scope, current version, and target\r\n\r\n**Scope \u2014 ask before editing unless it is already unambiguous.** Same rule as model migration: if the request does not name an exact file, a specific directory, or an explicit file list, ask one question offering (1) the whole working directory, (2) a specific subdirectory, (3) specific files \u2014 and wait. `upgrade`, `upgrade python`, \"move my project to anthropic v1\" are all scope-ambiguous. A trailing path in the subcommand (`upgrade python src/`) is a scope. Dependency manifests and lockfiles at the project root (`pyproject.toml`, `requirements*.txt`, `setup.py`/`setup.cfg`, `Pipfile`, `uv.lock`, `poetry.lock`) count as in scope whenever any code under them is \u2014 say so when you confirm the scope.\r\n\r\n**Current version.** Read the declared requirement (`anthropic...` in the manifests above) and, if a project environment is available, the installed one (`python -c \"import anthropic; print(anthropic.__version__)\"`). If the project is already on 1.x, skip the dependency bump and treat this as a call-site cleanup. If nothing in scope declares the dependency (a bare scripts directory, or `anthropic` arrives transitively), don't invent a manifest \u2014 upgrade the code and put the install command in the report.\r\n\r\n**Target version.** Before writing any pin, confirm a 1.x release is actually published: `pip index versions anthropic` (or `curl -s https://pypi.org/pypi/anthropic/json` and read `info.version`). Use the newest 1.x you find. If no 1.x release exists yet, stop and tell the user \u2014 do not write an uninstallable requirement. If you cannot check (no network), proceed with `>=1,<2` and list the unverified pin in your report.\r\n\r\nIf the scope is under git, check `git status` before editing \u2014 unexpected modifications mean a concurrent process; stop and investigate before proceeding.\r\n\r\n## Step 1: Inventory the call sites\r\n\r\nSearch the scope for each signal below (`rg -n -F` for the literal strings; exclude virtualenvs, `.git`, build output and vendored code) and keep the hit list \u2014 it is your checklist and, re-run at the end, your verification.\r\n\r\n| Signal | What it finds | Section |\r\n|---|---|---|\r\n| `requires-python`, `python_requires`, `python-version`, `py39`, `3.9` in manifests, CI config, `tox.ini`, `noxfile.py`, `.python-version`, `Dockerfile` | a Python 3.9 floor | Step 2 |\r\n| `anthropic` entries in manifests / lockfiles; `httpx-aiohttp`, `httpx_aiohttp` | the pins to change | Step 2 |\r\n| `import httpx`, `from httpx` | modules that may hand `httpx` objects to the SDK | Step 3 |\r\n| `respx`, `pytest_httpx` / `httpx_mock`, `vcr`, `MockTransport`; `HTTPXClientInstrumentor` / `opentelemetry.instrumentation.httpx`, `HttpxIntegration` (Sentry) | HTTP mocking and tracing / APM instrumentation that patch `httpx` and silently stop seeing SDK traffic | Step 3 |\r\n| `with_raw_response` | raw-response call sites | Step 4 |\r\n| `LegacyAPIResponse`, `_legacy_response` | annotations / imports of the removed class | Step 4 |\r\n| `completions.create`, `HUMAN_PROMPT`, `AI_PROMPT`, `max_tokens_to_sample` | the removed Text Completions API | Step 5 |\r\n| `temperature`, `top_p`, `top_k` (keyword arguments and quoted dict keys) | removed sampling parameters \u2014 only hits that feed Anthropic SDK calls count | Step 6 |\r\n| `output_format` | raw `output_format={...}` dicts vs the unchanged `output_format=Model` helper argument | Step 6 |\r\n| `BetaBase64PDFBlockParam`, `READ_MAX_BYTES`, `ProxiesTypes` / `Transport` imported from `anthropic`, `AsyncTransport` / `ProxiesDict` imported from `anthropic._types` | renamed / removed exports | Step 7 |\r\n| `.parse(` calls that pass `stream=` | `messages.parse(stream=...)` | Step 8 |\r\n| `compaction_control` | client-side tool-runner compaction | Step 8 |\r\n| `body=` on `client.get` / `post` / `put` / `patch` / `delete` calls whose value is `bytes` (`b\"...\"`, `.encode()`, a bytes variable) | raw bytes passed as `body=` | Step 8 |\r\n| `isinstance(` checks against `Stream` / `AsyncStream` | checks aimed at message streams | Step 8 |\r\n| `default_headers`, `extra_headers`, `ANTHROPIC_CUSTOM_HEADERS` | header maps to check for duplicate casings / `bytes` values | Step 9 |\r\n| `AnthropicBedrock(`, `AsyncAnthropicBedrock(` | Bedrock clients that may rely on the old region fallback | Step 10 |\r\n\r\nClassify each hit before editing: **SDK call site** (edit), **unrelated use of the same name** (leave \u2014 e.g. `httpx` calls to other services, `urllib.parse`, a pydantic `.parse_obj`, a `temperature` variable for a thermostat), **test** (edit, and keep the test meaningful), **docs / README snippet or notebook inside the scope** (edit \u2014 for `.ipynb`, the greps match inside the JSON cell sources; edit the source strings, `%pip install` lines included, and keep the JSON valid). Never touch installed packages or vendored third-party code.\r\n\r\n## Step 2: Environment \u2014 Python \u2265 3.10 and the dependency pins\r\n\r\n- **[DECIDE] Python floor.** 1.x requires Python 3.10+. If the project still declares or tests 3.9 (`requires-python = \">=3.9\"`, trove classifiers, a `3.9` CI matrix entry, tox/nox envs, a `python:3.9` base image), that is the user's decision, not a silent edit: propose the floor bump and the CI-matrix change as their own hunk and call it out in the report. On 3.9, `pip` simply keeps resolving the last 0.x release, so nothing breaks until they move.\r\n- **[BREAKS] The `anthropic` requirement.** Rewrite it in the file's existing style \u2014 `anthropic>=1,<2` for a range, `anthropic~=1.0` / Poetry `^1.0` for compatible-release styles, `anthropic==<latest 1.x from Step 0>` where the project pins exactly. Extras (`anthropic[bedrock]`, `[vertex]`, `[aiohttp]`) are unchanged. Regenerate the lockfile with the project's own tool (`uv lock`, `poetry lock`, `pip-compile`, `pipenv lock`) if you can run it; otherwise give the user the exact command.\r\n- **`httpx-aiohttp`.** If it is pinned only so `DefaultAioHttpClient()` works, remove it \u2014 the aiohttp transport now ships inside the SDK and the `aiohttp` extra installs only `aiohttp`.\r\n- **`httpx2` / `httpx`.** After Step 3, if any project module imports `httpx2` directly, add `httpx2` to the declared dependencies (it arrives transitively with `anthropic`, but direct imports should be declared). `httpx2` has its own version line starting at 2.0 \u2014 write `httpx2>=2.0` (or match what `anthropic` resolved: `pip index versions httpx2`), never a specifier copied from the old `httpx` pin such as `>=0.27`. Keep `httpx` declared only if the project still uses it for something other than the SDK.\r\n\r\nPydantic v1 and v2 both remain supported; nothing else about the environment changes.\r\n\r\n## Step 3: `httpx` \u2192 `httpx2`, only where objects cross the SDK boundary\r\n\r\n`httpx2` is the API-compatible, maintained fork of `httpx` (same classes, same behaviour). The change only matters for `httpx` objects handed **to** the SDK or received **from** it; plain values (`timeout=30.0`, `max_retries=3`) need nothing.\r\n\r\n- **[BREAKS] Objects passed in.** `httpx.Timeout`, `httpx.Limits`, transports (`httpx.HTTPTransport(...)`, `AsyncHTTPTransport`, `MockTransport`), and whole clients (`httpx.Client` / `AsyncClient` as `http_client=`) must come from `httpx2`. An old-`httpx` client passed as `http_client=` raises `TypeError` at construction. This includes the project's own middleware, not just the outermost object handed to `Anthropic(...)`: a `class TracingTransport(httpx.BaseTransport)` subclass, the inner `httpx.HTTPTransport()` a wrapper delegates to, an `httpx.Auth` flow, and the annotations on `event_hooks` callables all re-base onto `httpx2` \u2014 a wrapper left delegating to an old-`httpx` transport hands the SDK `httpx.Response` objects. If the module uses `httpx` only for the SDK, alias the import (`import httpx2 as httpx`) and nothing else changes; if it also talks to other services with `httpx`, import both and switch only the SDK-bound objects to `httpx2`. Prefer the SDK's own re-exports where they let you drop the import entirely: `anthropic.Timeout`, `anthropic.DefaultHttpxClient`, `anthropic.DefaultAsyncHttpxClient`, `anthropic.DefaultAioHttpClient` (all already `httpx2`-based, all unchanged).\r\n\r\n  ```python\r\n  # Before\r\n  import httpx\r\n  from anthropic import Anthropic, DefaultHttpxClient\r\n\r\n  client = Anthropic(\r\n      timeout=httpx.Timeout(60.0, connect=5.0),\r\n      http_client=DefaultHttpxClient(proxy=\"http://proxy.example\", transport=httpx.HTTPTransport(retries=1)),\r\n  )\r\n\r\n  # After\r\n  import httpx2 as httpx\r\n  from anthropic import Anthropic, DefaultHttpxClient\r\n\r\n  client = Anthropic(\r\n      timeout=httpx.Timeout(60.0, connect=5.0),\r\n      http_client=DefaultHttpxClient(proxy=\"http://proxy.example\", transport=httpx.HTTPTransport(retries=1)),\r\n  )\r\n  ```\r\n\r\n- **[DECIDE] Or alias process-wide, for applications.** `httpx2.alias_httpx()` makes `import httpx` / `import httpcore` resolve to `httpx2` / `httpcore2` for the whole process, so nothing else needs editing. Reach for it instead of the import edits when the scope is an **application** that shares clients, transports or exception types between the SDK and other `httpx` code, or that relies on tooling which patches `httpx` itself (tracing / APM instrumentation, HTTP mocking \u2014 see **Instrumentation and tests** below). Two hard rules: it must run before anything imports `httpx` or `httpcore` (otherwise it raises `RuntimeError`; calling it twice is a no-op), so it goes at the very top of the entry point; and it is for applications only \u2014 never add it to a **library's** import path on behalf of that library's users (edit the imports there instead). Say which you chose and why in the report.\r\n\r\n  ```python\r\n  # the very first lines of the application's entry point\r\n  import httpx2\r\n\r\n  httpx2.alias_httpx()\r\n\r\n  import httpx  # now the httpx2 module: httpx.Client is httpx2.Client\r\n  ```\r\n\r\n- **[BREAKS] Objects coming out.** `APIStatusError.response`, `APIConnectionError.request`, `.http_response` / `.headers` / `.url` on raw and streaming responses, the `request` / `response` arguments your `http_client` event hooks receive, and `cast_to=httpx.Response` on the low-level `client.get/post/...` methods are now `httpx2` types with identical attributes. Only `isinstance` checks and annotations naming `httpx.Response` / `httpx.Request` / `httpx.Headers` / `httpx.URL` change (`httpx2.Response`, \u2026).\r\n- **Removed re-exports.** `anthropic.Transport` and `anthropic.ProxiesTypes` (and `AsyncTransport` / `ProxiesDict` from `anthropic._types`) are gone; use `httpx2.BaseTransport`, `httpx2.AsyncBaseTransport`, `httpx2.Proxy` (or a proxy URL string).\r\n- **Instrumentation and tests.** Libraries that observe or stub HTTP by patching `httpx` \u2014 OpenTelemetry's `HTTPXClientInstrumentor`, Sentry's `httpx` integration, `respx`, `pytest-httpx`, `vcrpy` \u2014 keep importing fine but silently stop seeing the SDK's requests, so nothing fails loudly. The fix is the same `httpx2.alias_httpx()` call \u2014 not swapping in some `*-httpx2` instrumentation package (verify any such name is a real, populated release before depending on it) \u2014 made before any of them (or `httpx`) is imported: at the top of the application entry point for instrumentation, and under pytest as an early plugin so it runs before `respx` / `pytest-httpx` and the test modules load:\r\n\r\n  ```python\r\n  # tests/_alias_httpx.py\r\n  import httpx2\r\n\r\n  httpx2.alias_httpx()  # `import httpx` / `import httpcore` now resolve to httpx2 / httpcore2\r\n  ```\r\n\r\n  ```toml\r\n  # pyproject.toml\r\n  [tool.pytest.ini_options]\r\n  addopts = \"-p tests._alias_httpx\"\r\n  pythonpath = [\".\"]\r\n  ```\r\n\r\n  Merge into an existing `addopts` rather than replacing it (`pytest.ini` / `setup.cfg` / `tox.ini` equivalents work the same way). Transport-level fakes (`httpx2.Client(transport=httpx2.MockTransport(handler))`, a handler typed `httpx2.Request -> httpx2.Response`) only need the import swap.\r\n\r\n## Step 4: `.with_raw_response` returns `APIResponse` / `AsyncAPIResponse`\r\n\r\n`.with_raw_response` used to return `LegacyAPIResponse` on both clients; it now returns the same classes `.with_streaming_response` already used. Two consequences:\r\n\r\n- **[BREAKS] On async clients, reading the body is awaited** \u2014 `parse()`, `json()`, `text()`, `read()` are coroutines. Decide sync vs async from the client the accessor hangs off (`AsyncAnthropic` and the other `Async*` platform clients) or an `await` on the `.with_raw_response...(...)` call itself \u2014 not from the enclosing function alone.\r\n- **[BREAKS] `.text` and `.content` are methods now, on the sync client too:** `.text` \u2192 `.text()`, `.content` \u2192 `.read()`. The new classes also expose `json()` and the `iter_bytes()` / `iter_text()` / `iter_lines()` iterators directly; 0.x code reached those through `r.http_response`, which still works and need not be rewritten.\r\n\r\n| 0.x (`LegacyAPIResponse`) | 1.x sync (`APIResponse`) | 1.x async (`AsyncAPIResponse`) |\r\n|---|---|---|\r\n| `r.parse()` | `r.parse()` | `await r.parse()` |\r\n| `r.text` | `r.text()` | `await r.text()` |\r\n| `r.content` | `r.read()` | `await r.read()` |\r\n| \u2014 (only `r.http_response.json()`) | `r.json()` | `await r.json()` |\r\n| \u2014 (only `r.http_response.iter_bytes()` \u2026) | `r.iter_bytes()` / `.iter_text()` / `.iter_lines()` | `async for chunk in r.iter_bytes():` \u2026 |\r\n| `.headers`, `.status_code`, `.url`, `.request_id`, `.retries_taken`, `.http_response`, `.elapsed` | unchanged | unchanged (plain attributes \u2014 never awaited) |\r\n\r\n```python\r\n# Before (async client)\r\nraw = await client.messages.with_raw_response.create(...)\r\nprint(raw.headers[\"request-id\"], raw.text)\r\nmessage = raw.parse()\r\n\r\n# After\r\nraw = await client.messages.with_raw_response.create(...)\r\nprint(raw.headers[\"request-id\"], await raw.text())\r\nmessage = await raw.parse()\r\n```\r\n\r\nAnchor every edit on a value that demonstrably comes from a `.with_raw_response.` call (follow it through variables, return values and fixtures); do not touch `.parse()` / `.text` on unrelated objects, and do not double-await. Annotations and imports of `anthropic._legacy_response.LegacyAPIResponse` become `anthropic.APIResponse` / `anthropic.AsyncAPIResponse`. `.with_streaming_response` code is unchanged.\r\n\r\n## Step 5: Text Completions \u2192 Messages (the one non-mechanical change)\r\n\r\n**[BREAKS]** `client.completions.create()` (`/v1/complete`), the `Completion` types, and the `anthropic.HUMAN_PROMPT` / `anthropic.AI_PROMPT` constants are removed (also from `AnthropicBedrock`). Port each call to `client.messages.create()`:\r\n\r\n- the `f\"{HUMAN_PROMPT} \u2026{AI_PROMPT}\"` prompt string becomes `messages=[{\"role\": \"user\", \"content\": \"\u2026\"}]`; text that preceded the first `HUMAN_PROMPT` as instructions becomes `system=`; alternating `HUMAN_PROMPT`/`AI_PROMPT` turns become alternating `user`/`assistant` messages;\r\n- `max_tokens_to_sample=` \u2192 `max_tokens=`; `stop_sequences=` carries over; drop `temperature`/`top_p`/`top_k` (Step 6);\r\n- `completion.completion` \u2192 the text blocks of `message.content` (`\"\".join(b.text for b in message.content if b.type == \"text\")`); `stop_reason` values carry over (`\"stop_sequence\"`, `\"max_tokens\"`), with `\"end_turn\"` as the new normal-completion value;\r\n- `stream=True` completions \u2192 `client.messages.stream(...)` and its `text_stream`.\r\n\r\n```python\r\n# Before\r\nfrom anthropic import AI_PROMPT, HUMAN_PROMPT\r\n\r\ncompletion = client.completions.create(\r\n    model=\"claude-2.1\",\r\n    max_tokens_to_sample=256,\r\n    prompt=f\"{HUMAN_PROMPT} Why is the sky blue?{AI_PROMPT}\",\r\n)\r\nprint(completion.completion)\r\n\r\n# After\r\nmessage = client.messages.create(\r\n    model=\"{{OPUS_ID}}\",\r\n    max_tokens=256,\r\n    messages=[{\"role\": \"user\", \"content\": \"Why is the sky blue?\"}],\r\n)\r\nprint(\"\".join(block.text for block in message.content if block.type == \"text\"))\r\n```\r\n\r\n**[DECIDE] The model.** Code still on Text Completions usually pins a retired model (`claude-2.x`, `claude-instant-*`), which 404s regardless of SDK version. Keep a model that is still served; otherwise switch to `{{OPUS_ID}}` so the code runs, say so prominently in the report, and point the user at `/claude-api migrate` for validating prompts against the new model \u2014 a completions-era prompt is exactly what `shared/prompt-audit.md` exists for.\r\n\r\n## Step 6: Removed request parameters\r\n\r\n- **[BREAKS] `temperature`, `top_p`, `top_k`** are no longer accepted by `messages.create()` / `.stream()` / `.parse()`, their `beta.messages` counterparts, or `beta.messages.tool_runner()` (passing them is a `TypeError`), and are gone from the per-request `params` TypedDict of `messages.batches.create()` (a type checker flags the key; at runtime the SDK still forwards it). Delete them \u2014 they are gone from the 1.x signatures, not from the API, and whether a model still honours them is a model question (`shared/model-migration.md`): Opus 4.7 and later return a 400 for any request that carries one (the default value included), {{SONNET_NEXT_NAME}} rejects non-default values, and every still-served model before those accepts them \u2014 the Claude 4.6 / 4.5 line (Opus 4.6, Sonnet 4.6, Opus 4.5, Sonnet 4.5, Haiku 4.5) and the deprecated-but-still-served Claude 4 models (`shared/models.md` \u2192 Deprecated Models). So **[DECIDE]** when the call pins one of those accepting models and visibly depends on the setting (a documented determinism requirement, an A/B on temperature), move it into `extra_body` instead of deleting it \u2014 `extra_body={\"temperature\": 0.2}` is merged into the request JSON as-is \u2014 and for a `messages.batches.create()` request leave the key in that request's `params` dict (it is forwarded, see above). A call that pins a retired model (`shared/models.md` \u2192 Retired Models) is the `migrate` flow's problem first: it needs a replacement model, and the replacement decides whether the setting survives. Say which calls kept a setting this way in the report. When a test existed only to assert that these parameters pass through, keep it meaningful by asserting on parameters that still exist (`stop_sequences`, `metadata`, `service_tier`, `max_tokens`) rather than deleting it.\r\n\r\n  ```python\r\n  # Before\r\n  client.messages.create(..., model=\"claude-sonnet-4-6\", temperature=0.2)\r\n\r\n  # After (only when the pinned model accepts it and the code depends on it)\r\n  client.messages.create(..., model=\"claude-sonnet-4-6\", extra_body={\"temperature\": 0.2})\r\n  ```\r\n\r\n- **[BREAKS] `output_format={...}` as a raw dict/TypedDict** \u2014 on `beta.messages.create()`, `beta.messages.count_tokens()` and batch params (where the parameter is gone) and on the `messages.stream()` / `messages.count_tokens()` / `beta.messages.stream()` helpers (which used to accept a dict as well and now raise `TypeError` for one) \u2192 `output_config={\"format\": {...}}` (merge into an existing `output_config` if one is already passed, e.g. alongside `effort`). **Leave `output_format=SomeModel` alone** when the value is a *type* (a Pydantic model / class passed to the `parse()`, `stream()` or `tool_runner()` helpers, or to the non-beta `messages.count_tokens()`) \u2014 that is the one form the helpers still take (`beta.messages.count_tokens()` only ever took the dict form, and has no `output_format` at all now). Tell them apart by the value: dict literal / `{\"type\": \"json_schema\", ...}` \u2192 migrate; a class name \u2192 keep.\r\n\r\n  ```python\r\n  # Before\r\n  client.beta.messages.create(..., temperature=0.2, output_format={\"type\": \"json_schema\", \"schema\": Order.model_json_schema()})\r\n\r\n  # After\r\n  client.beta.messages.create(..., output_config={\"format\": {\"type\": \"json_schema\", \"schema\": Order.model_json_schema()}})\r\n  # or, usually better: client.beta.messages.parse(..., output_format=Order)\r\n  ```\r\n\r\n## Step 7: Renamed and removed names (pure renames)\r\n\r\n**[BREAKS]** Replace imports and every reference; the replacement types are identical.\r\n\r\n| Removed | Replacement |\r\n|---|---|\r\n| `anthropic.types.beta.BetaBase64PDFBlockParam` | `anthropic.types.beta.BetaRequestDocumentBlockParam` |\r\n| `anthropic.Transport` / `anthropic.ProxiesTypes` (and `anthropic._types.AsyncTransport` / `ProxiesDict`) | `httpx2.BaseTransport` / `httpx2.Proxy` (`httpx2.AsyncBaseTransport`) |\r\n| `anthropic.HUMAN_PROMPT` / `anthropic.AI_PROMPT` | none \u2014 Step 5 |\r\n| `anthropic.lib.tools.agent_toolset.READ_MAX_BYTES` | `anthropic.lib.tools.agent_toolset.DEFAULT_MAX_FILE_BYTES` |\r\n\r\n## Step 8: Removed helper arguments and behaviour\r\n\r\n- **[BREAKS] `messages.parse(..., stream=True)`** (and `beta.messages.parse`): the argument is gone (it never streamed). Use the streaming helper, which supports the same structured-output types:\r\n\r\n  ```python\r\n  # Before\r\n  result = client.messages.parse(..., output_format=Order, stream=True)\r\n\r\n  # After\r\n  with client.messages.stream(..., output_format=Order) as stream:\r\n      order = stream.get_final_message().parsed_output\r\n  ```\r\n\r\n  A `parse(..., stream=False)` just loses the argument.\r\n- **[BREAKS] `tool_runner(compaction_control=...)`** \u2014 client-side compaction is removed in favour of server-side compaction. Carry the old `context_token_threshold` over as the trigger value (the API minimum is 50,000; raise smaller values to that and mention it):\r\n\r\n  ```python\r\n  # Before\r\n  runner = client.beta.messages.tool_runner(..., compaction_control={\"enabled\": True, \"context_token_threshold\": 100_000})\r\n\r\n  # After\r\n  runner = client.beta.messages.tool_runner(\r\n      ...,\r\n      betas=[\"compact-2026-01-12\"],\r\n      context_management={\"edits\": [{\"type\": \"compact_20260112\", \"trigger\": {\"type\": \"input_tokens\", \"value\": 100_000}}]},\r\n  )\r\n  ```\r\n\r\n  If the loop around the runner rebuilds `messages` itself, make sure it appends the full `message.content` (compaction blocks included) \u2014 see the Compaction section of `python/claude-api/README.md`.\r\n- **[BREAKS] Raw `bytes` as `body=`** on `client.get/post/put/patch/delete`: `body=` is always JSON-serialised now; raw payloads (and iterators, for streaming uploads) go through `content=`:\r\n\r\n  ```python\r\n  # Before\r\n  client.post(\"/v1/example\", body=b\"raw payload\", cast_to=httpx.Response)\r\n\r\n  # After\r\n  client.post(\"/v1/example\", content=b\"raw payload\", cast_to=httpx2.Response)\r\n  ```\r\n\r\n- **[BREAKS] `isinstance(x, anthropic.Stream)` / `AsyncStream` meant to match `client.messages.stream()` objects** now returns `False` (the compatibility shim and its `DeprecationWarning` are gone). Check for `anthropic.lib.streaming.MessageStream` / `AsyncMessageStream` instead; keep `Stream` only where the value really is a raw `create(stream=True)` stream.\r\n\r\n## Step 9: Header names are matched case-insensitively\r\n\r\nUsually nothing to edit. The SDK now merges `default_headers`, `extra_headers`, `with_options(default_headers=...)` and `ANTHROPIC_CUSTOM_HEADERS` case-insensitively: a later entry replaces an earlier header of the same name whatever its casing (including headers the SDK sets itself), and `omit` removes one the same way. Scan the Step 1 hits for two things and fix only those: **[DECIDE]** the same header name spelled with two casings where the code relied on both lines being sent (send one comma-joined value instead), and **[BREAKS]** `bytes` header values, which now raise \u2014 `.decode()` them.\r\n\r\n## Step 10: Bedrock \u2014 a region is required\r\n\r\n**[DECIDE]** `AnthropicBedrock()` / `AsyncAnthropicBedrock()` used to warn and fall back to `us-east-1` when no region was configured; they now raise `ValueError` at construction. Resolution order: `aws_region=` \u2192 `AWS_REGION` / `AWS_DEFAULT_REGION` \u2192 the region configured for the boto3 session / `aws_profile` (the profile is now honoured for region lookup). For each construction without `aws_region=`, check whether the deployment provides a region (env files, Dockerfiles, deployment manifests, AWS profile config in the repo). If it demonstrably does, nothing to do; if you cannot tell, do **not** invent a region \u2014 list the call site in the report as needing `aws_region=` or `AWS_REGION`, and only hardcode `\"us-east-1\"` if the user confirms that the old implicit default is what they were actually using.\r\n\r\nStreaming from Bedrock also changes: event types the SDK does not know are now skipped instead of yielded \u2014 the only known case is the `amazon-bedrock-invocationMetrics` frame. Code that filtered those frames out can be deleted; code that *consumed* invocation metrics loses them on 1.x \u2014 **[DECIDE]** list it in the report (the SDK asks such users to open an issue).\r\n\r\n## Step 11: Verify\r\n\r\n1. Re-run the Step 1 greps over the scope. Every remaining hit needs a reason (unrelated `httpx` use, `Raw*` names, helper `output_format=Model`, \u2026) \u2014 put the reasons in the report.\r\n2. `python -m compileall -q <scope>` must pass. If the project has a type checker configured, run it \u2014 nearly every missed call site is a type error on 1.x. Run the test suite if it is runnable without credentials.\r\n3. If 1.x is installed in the environment: `python -c \"import anthropic, httpx2; print(anthropic.__version__)\"`.\r\n\r\n## Step 12: Report\r\n\r\nLead with the outcome, then:\r\n\r\n- what changed, grouped by the steps above, with file counts and the notable files;\r\n- **decisions the user owns** \u2014 Python floor / CI matrix (Step 2), import edits vs `alias_httpx()` (Step 3), sampling-parameter reliance (Step 6), the model chosen for ported completions calls (Step 5), duplicate-casing headers (Step 9), Bedrock regions and invocation metrics (Step 10);\r\n- if you introduced `httpx2` anywhere, one provenance line, because reviewers and supply-chain scanners flag unfamiliar package names as possible typosquats: it is the SDK's own HTTP dependency, the maintained fork of `httpx` by its original author, published by Pydantic (`github.com/pydantic/httpx2`), version line 2.x;\r\n- what you could not verify (offline PyPI check, no type checker, tests not runnable, pre-commit hooks that need the new packages installed) and the exact commands to finish: the install / lock command and, if relevant, `pip uninstall httpx-aiohttp`.\r\n\r\n## Checklist\r\n\r\n- [ ] **[BREAKS]** `anthropic` requirement moved to 1.x in the project's pin style; lockfile regenerated or command given\r\n- [ ] **[DECIDE]** Python \u2265 3.10 floor and CI matrix proposed as a separate hunk\r\n- [ ] **[BREAKS]** `httpx` objects passed to / received from the SDK (custom transports, auth flows and event hooks included) come from `httpx2` \u2014 or **[DECIDE]** `httpx2.alias_httpx()` at the top of an application entry point; `httpx`-patching instrumentation / mocking (`respx`, `pytest-httpx`, `vcrpy`, OpenTelemetry, Sentry) covered by the alias; `httpx-aiohttp` dropped; `httpx2>=2.0` declared if imported\r\n- [ ] **[BREAKS]** async `.with_raw_response`: `await` on `parse()/json()/text()/read()`; `.text` \u2192 `.text()`, `.content` \u2192 `.read()` everywhere; `LegacyAPIResponse` annotations replaced\r\n- [ ] **[BREAKS]** `completions.create` / `HUMAN_PROMPT` / `AI_PROMPT` ported to Messages; **[DECIDE]** model choice surfaced\r\n- [ ] **[BREAKS]** `temperature` / `top_p` / `top_k` removed from SDK calls \u2014 or, **[DECIDE]**, moved to `extra_body` only where the call pins an older model *and* visibly depends on the setting; raw `output_format={...}` \u2192 `output_config={\"format\": ...}` everywhere (helpers included); helper `output_format=Model` untouched\r\n- [ ] **[BREAKS]** `BetaBase64PDFBlockParam` \u2192 `BetaRequestDocumentBlockParam`; `Transport`/`AsyncTransport`/`ProxiesTypes` \u2192 `httpx2` names; `READ_MAX_BYTES` \u2192 `DEFAULT_MAX_FILE_BYTES`\r\n- [ ] **[BREAKS]** `parse(stream=)` \u2192 `messages.stream()`; `compaction_control` \u2192 server-side compaction; `body=bytes` \u2192 `content=`; `Stream` isinstance checks retargeted\r\n- [ ] **[DECIDE]** duplicate-casing headers joined; **[BREAKS]** `bytes` header values decoded\r\n- [ ] **[DECIDE]** Bedrock constructions without a discoverable region listed, not guessed; invocation-metrics consumers flagged\r\n- [ ] Step 11 verification run and Step 12 report written\r\n";var V0y=()=>{};var Y0y=`# Streaming \u2014 Python\r
+\r
+## Quick Start\r
+\r
+\`\`\`python\r
+with client.messages.stream(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=64000,\r
+    messages=[{"role": "user", "content": "Write a story"}]\r
+) as stream:\r
+    for text in stream.text_stream:\r
+        print(text, end="", flush=True)\r
+\`\`\`\r
+\r
+### Async\r
+\r
+\`\`\`python\r
+async with async_client.messages.stream(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=64000,\r
+    messages=[{"role": "user", "content": "Write a story"}]\r
+) as stream:\r
+    async for text in stream.text_stream:\r
+        print(text, end="", flush=True)\r
+\`\`\`\r
+\r
+### Low-level: \`stream=True\`\r
+\r
+\`messages.stream()\` (above) is the recommended helper \u2014 it accumulates state and exposes \`text_stream\` / \`get_final_message()\`. If you only need the raw event iterator and want lower memory use, pass \`stream=True\` to \`messages.create()\` instead:\r
+\r
+\`\`\`python\r
+for event in client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=64000,\r
+    messages=[{"role": "user", "content": "Write a story"}],\r
+    stream=True,\r
+):\r
+    print(event.type)\r
+\`\`\`\r
+\r
+No final-message accumulation is done for you in this form.\r
+\r
+---\r
+\r
+## Handling Different Content Types\r
+\r
+Claude may return text, thinking blocks, or tool use. Handle each appropriately:\r
+\r
+> **Fable 5 / {{OPUS_NAME}} / Opus 4.8 / Opus 4.7 / Opus 4.6:** Use \`thinking: {type: "adaptive"}\`. On {{OPUS_NAME}} adaptive is also what you get by omitting \`thinking\` entirely. On older models, use \`thinking: {type: "enabled", budget_tokens: N}\` instead.\r
+\r
+\`\`\`python\r
+with client.messages.stream(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=64000,\r
+    thinking={"type": "adaptive", "display": "summarized"},  # display opt-in: default is omitted (empty thinking text) on Fable 5 / Mythos 5 / {{OPUS_NAME}} / Opus 4.8 / 4.7\r
+    messages=[{"role": "user", "content": "Analyze this problem"}]\r
+) as stream:\r
+    for event in stream:\r
+        if event.type == "content_block_start":\r
+            if event.content_block.type == "thinking":\r
+                print("\\n[Thinking...]")\r
+            elif event.content_block.type == "text":\r
+                print("\\n[Response:]")\r
+\r
+        elif event.type == "content_block_delta":\r
+            if event.delta.type == "thinking_delta":\r
+                print(event.delta.thinking, end="", flush=True)\r
+            elif event.delta.type == "text_delta":\r
+                print(event.delta.text, end="", flush=True)\r
+\`\`\`\r
+\r
+---\r
+\r
+## Streaming with Tool Use\r
+\r
+The Python tool runner supports streaming: pass \`stream=True\` to \`client.beta.messages.tool_runner(...)\` and each iteration yields a stream you consume event-by-event, with \`get_final_message()\` for the accumulated message per turn (see \`shared/tool-use-concepts.md\` \u2192 Tool Runner vs Manual Loop). Use the manual-loop pattern below only when you're not using the tool runner and need per-token streaming with tools:\r
+\r
+\`\`\`python\r
+with client.messages.stream(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=64000,\r
+    tools=tools,\r
+    messages=messages\r
+) as stream:\r
+    for text in stream.text_stream:\r
+        print(text, end="", flush=True)\r
+\r
+    response = stream.get_final_message()\r
+    # Continue with tool execution if response.stop_reason == "tool_use"\r
+\`\`\`\r
+\r
+---\r
+\r
+## Getting the Final Message\r
+\r
+\`\`\`python\r
+with client.messages.stream(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=64000,\r
+    messages=[{"role": "user", "content": "Hello"}]\r
+) as stream:\r
+    for text in stream.text_stream:\r
+        print(text, end="", flush=True)\r
+\r
+    # Get full message after streaming\r
+    final_message = stream.get_final_message()\r
+    print(f"\\n\\nTokens used: {final_message.usage.output_tokens}")\r
+\`\`\`\r
+\r
+---\r
+\r
+## Streaming with Progress Updates\r
+\r
+\`\`\`python\r
+def stream_with_progress(client, **kwargs):\r
+    """Stream a response with progress updates."""\r
+    total_tokens = 0\r
+    content_parts = []\r
+\r
+    with client.messages.stream(**kwargs) as stream:\r
+        for event in stream:\r
+            if event.type == "content_block_delta":\r
+                if event.delta.type == "text_delta":\r
+                    text = event.delta.text\r
+                    content_parts.append(text)\r
+                    print(text, end="", flush=True)\r
+\r
+            elif event.type == "message_delta":\r
+                if event.usage and event.usage.output_tokens is not None:\r
+                    total_tokens = event.usage.output_tokens\r
+\r
+        final_message = stream.get_final_message()\r
+\r
+    print(f"\\n\\n[Tokens used: {total_tokens}]")\r
+    return "".join(content_parts)\r
+\`\`\`\r
+\r
+---\r
+\r
+## Error Handling in Streams\r
+\r
+\`\`\`python\r
+try:\r
+    with client.messages.stream(\r
+        model="{{OPUS_ID}}",\r
+        max_tokens=64000,\r
+        messages=[{"role": "user", "content": "Write a story"}]\r
+    ) as stream:\r
+        for text in stream.text_stream:\r
+            print(text, end="", flush=True)\r
+except anthropic.APIConnectionError:\r
+    print("\\nConnection lost. Please retry.")\r
+except anthropic.RateLimitError:\r
+    print("\\nRate limited. Please wait and retry.")\r
+except anthropic.APIStatusError as e:\r
+    print(f"\\nAPI error: {e.status_code}")\r
+\`\`\`\r
+\r
+---\r
+\r
+## Stream Event Types\r
+\r
+| Event Type            | Description                 | When it fires                     |\r
+| --------------------- | --------------------------- | --------------------------------- |\r
+| \`message_start\`       | Contains message metadata   | Once at the beginning             |\r
+| \`content_block_start\` | New content block beginning | When a text/tool_use block starts |\r
+| \`content_block_delta\` | Incremental content update  | For each token/chunk              |\r
+| \`content_block_stop\`  | Content block complete      | When a block finishes             |\r
+| \`message_delta\`       | Message-level updates       | Contains \`stop_reason\`, usage     |\r
+| \`message_stop\`        | Message complete            | Once at the end                   |\r
+\r
+## Best Practices\r
+\r
+1. **Always flush output** \u2014 Use \`flush=True\` to show tokens immediately\r
+2. **Handle partial responses** \u2014 If the stream is interrupted, you may have incomplete content\r
+3. **Track token usage** \u2014 The \`message_delta\` event contains usage information\r
+4. **Use timeouts** \u2014 Set appropriate timeouts for your application\r
+5. **Default to streaming** \u2014 Use \`.get_final_message()\` to get the complete response even when streaming, giving you timeout protection without needing to handle individual events\r
+6. **Large \`max_tokens\` without streaming raises \`ValueError\`** \u2014 The SDK refuses non-streaming requests it estimates will exceed ~10 minutes (idle connections drop). Pass \`stream=True\` / use \`messages.stream()\`, or explicitly override \`timeout\`, to suppress the guard.\r
+`;var K0y=()=>{};var J0y=`# Tool Use \u2014 Python\r
+\r
+For conceptual overview (tool definitions, tool choice, tips), see [shared/tool-use-concepts.md](../../shared/tool-use-concepts.md).\r
+\r
+## Tool Runner (Recommended)\r
+\r
+**Beta:** The tool runner is in beta in the Python SDK.\r
+\r
+Use the \`@beta_tool\` decorator to define tools as typed functions, then pass them to \`client.beta.messages.tool_runner()\`:\r
+\r
+\`\`\`python\r
+import anthropic\r
+from anthropic import beta_tool\r
+\r
+client = anthropic.Anthropic()\r
+\r
+@beta_tool\r
+def get_weather(location: str, unit: str = "celsius") -> str:\r
+    """Get current weather for a location.\r
+\r
+    Args:\r
+        location: City and state, e.g., San Francisco, CA.\r
+        unit: Temperature unit, either "celsius" or "fahrenheit".\r
+    """\r
+    # Your implementation here\r
+    return f"72\xB0F and sunny in {location}"\r
+\r
+# The tool runner handles the agentic loop automatically\r
+runner = client.beta.messages.tool_runner(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    tools=[get_weather],\r
+    messages=[{"role": "user", "content": "What's the weather in Paris?"}],\r
+)\r
+\r
+# Each iteration yields a BetaMessage; iteration stops when Claude is done\r
+for message in runner:\r
+    print(message)\r
+\`\`\`\r
+\r
+For async usage, use \`@beta_async_tool\` with \`async def\` functions.\r
+\r
+**Key benefits of the tool runner:**\r
+\r
+- No manual loop \u2014 the SDK handles calling tools and feeding results back\r
+- Type-safe tool inputs via decorators\r
+- Tool schemas are generated automatically from function signatures\r
+- Iteration stops automatically when Claude has no more tool calls\r
+\r
+### Server tools with the tool runner\r
+\r
+The runner's \`tools\` list accepts raw server-tool definitions (\`web_search_20260209\`, \`web_fetch_20260209\`, code execution) alongside decorated tools \u2014 pass the literal tool dict; server tools run on Anthropic's servers, so there is no function to implement.\r
+\r
+**Caution \u2014 the runner does not auto-resume \`pause_turn\` (as of \`anthropic\` 0.116.0).** A long-running server-tool turn can stop with \`stop_reason: "pause_turn"\`. The runner only continues after a client tool produces a result, so a paused turn ends the loop and is returned as the final message \u2014 no error, no warning, just a silently truncated answer. Unlike the TypeScript runner, the Python runner cannot be resumed mid-loop: it exits unconditionally when no client tool ran, and \`runner.append_messages(...)\` does not prevent the exit. To handle \`pause_turn\`, mirror the conversation history as you iterate, then restart the runner with the paused turn appended:\r
+\r
+\`\`\`python\r
+messages = [{"role": "user", "content": user_input}]\r
+\r
+max_restarts = 5  # cap pause_turn restarts, mirroring max_continuations advice\r
+restarts = 0\r
+while True:\r
+    runner = client.beta.messages.tool_runner(\r
+        model="{{OPUS_ID}}",\r
+        max_tokens=16000,\r
+        tools=tools,  # may mix @beta_tool functions and server-tool definitions\r
+        messages=messages,\r
+    )\r
+    last = None\r
+    for message in runner:\r
+        last = message\r
+        # Mirror the history \u2014 the runner keeps its own copy and does not expose it\r
+        messages.append({"role": "assistant", "content": message.content})\r
+        tool_response = runner.generate_tool_call_response()  # cached; tools still run once\r
+        if tool_response is not None:\r
+            messages.append(tool_response)\r
+    if last is None or last.stop_reason != "pause_turn":\r
+        break\r
+    restarts += 1\r
+    if restarts > max_restarts:\r
+        raise RuntimeError("giving up: turn still paused after max_restarts")\r
+    # Paused mid-turn: \`messages\` already ends with the paused assistant\r
+    # turn, so the next runner resumes it\r
+\`\`\`\r
+\r
+Alternatively, use the manual loop below, which handles \`pause_turn\` explicitly.\r
+\r
+---\r
+\r
+## MCP Tool Conversion Helpers\r
+\r
+**Beta.** Convert [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) tools, prompts, and resources to Anthropic API types for use with the tool runner. Requires \`pip install anthropic[mcp]\` (Python 3.10+).\r
+\r
+> **Note:** The Claude API also supports an \`mcp_servers\` parameter that lets Claude connect directly to remote MCP servers. Use these helpers instead when you need local MCP servers, prompts, resources, or more control over the MCP connection.\r
+\r
+### MCP Tools with Tool Runner\r
+\r
+\`\`\`python\r
+from anthropic import AsyncAnthropic\r
+from anthropic.lib.tools.mcp import async_mcp_tool\r
+from mcp import ClientSession\r
+from mcp.client.stdio import stdio_client, StdioServerParameters\r
+\r
+client = AsyncAnthropic()\r
+\r
+async with stdio_client(StdioServerParameters(command="mcp-server")) as (read, write):\r
+    async with ClientSession(read, write) as mcp_client:\r
+        await mcp_client.initialize()\r
+\r
+        tools_result = await mcp_client.list_tools()\r
+        # tool_runner is sync \u2014 returns the runner, not a coroutine\r
+        runner = client.beta.messages.tool_runner(\r
+            model="{{OPUS_ID}}",\r
+            max_tokens=16000,\r
+            messages=[{"role": "user", "content": "Use the available tools"}],\r
+            tools=[async_mcp_tool(t, mcp_client) for t in tools_result.tools],\r
+        )\r
+        async for message in runner:\r
+            print(message)\r
+\`\`\`\r
+\r
+For sync usage, use \`mcp_tool\` instead of \`async_mcp_tool\`.\r
+\r
+### MCP Prompts\r
+\r
+\`\`\`python\r
+from anthropic.lib.tools.mcp import mcp_message\r
+\r
+prompt = await mcp_client.get_prompt(name="my-prompt")\r
+response = await client.beta.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[mcp_message(m) for m in prompt.messages],\r
+)\r
+\`\`\`\r
+\r
+### MCP Resources as Content\r
+\r
+\`\`\`python\r
+from anthropic.lib.tools.mcp import mcp_resource_to_content\r
+\r
+resource = await mcp_client.read_resource(uri="file:///path/to/doc.txt")\r
+response = await client.beta.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{\r
+        "role": "user",\r
+        "content": [\r
+            mcp_resource_to_content(resource),\r
+            {"type": "text", "text": "Summarize this document"},\r
+        ],\r
+    }],\r
+)\r
+\`\`\`\r
+\r
+### Upload MCP Resources as Files\r
+\r
+\`\`\`python\r
+from anthropic.lib.tools.mcp import mcp_resource_to_file\r
+\r
+resource = await mcp_client.read_resource(uri="file:///path/to/data.json")\r
+uploaded = await client.beta.files.upload(file=mcp_resource_to_file(resource))\r
+\`\`\`\r
+\r
+Conversion functions raise \`UnsupportedMCPValueError\` if an MCP value cannot be converted (e.g., unsupported content types like audio, unsupported MIME types).\r
+\r
+---\r
+\r
+## Manual Agentic Loop\r
+\r
+Prefer the tool runner above. Drop to a manual loop only when you need control the runner does not expose (e.g., a custom transport, request shapes the SDK cannot build, or avoiding a beta dependency \u2014 the runner is beta). Human-in-the-loop approval does *not* require a manual loop \u2014 gate inside the tool function (return a "user declined" result) or inspect pending \`tool_use\` blocks in the \`for message in runner:\` body and call \`runner.set_messages_params()\`.\r
+\r
+If you do need a manual loop:\r
+\r
+\`\`\`python\r
+import anthropic\r
+\r
+client = anthropic.Anthropic()\r
+tools = [...]  # Your tool definitions\r
+messages = [{"role": "user", "content": user_input}]\r
+\r
+# Agentic loop: keep going until Claude stops calling tools\r
+while True:\r
+    response = client.messages.create(\r
+        model="{{OPUS_ID}}",\r
+        max_tokens=16000,\r
+        tools=tools,\r
+        messages=messages\r
+    )\r
+\r
+    # If Claude is done (no more tool calls), break\r
+    if response.stop_reason == "end_turn":\r
+        break\r
+\r
+    # Server-side tool hit iteration limit; re-send to continue\r
+    if response.stop_reason == "pause_turn":\r
+        messages = [\r
+            {"role": "user", "content": user_input},\r
+            {"role": "assistant", "content": response.content},\r
+        ]\r
+        continue\r
+\r
+    # Extract tool use blocks from the response\r
+    tool_use_blocks = [b for b in response.content if b.type == "tool_use"]\r
+\r
+    # Append assistant's response (including tool_use blocks)\r
+    messages.append({"role": "assistant", "content": response.content})\r
+\r
+    # Execute each tool and collect results\r
+    tool_results = []\r
+    for tool in tool_use_blocks:\r
+        result = execute_tool(tool.name, tool.input)  # Your implementation\r
+        tool_results.append({\r
+            "type": "tool_result",\r
+            "tool_use_id": tool.id,  # Must match the tool_use block's id\r
+            "content": result\r
+        })\r
+\r
+    # Append tool results as a user message\r
+    messages.append({"role": "user", "content": tool_results})\r
+\r
+# Final response text\r
+final_text = next(b.text for b in response.content if b.type == "text")\r
+\`\`\`\r
+\r
+---\r
+\r
+## Handling Tool Results\r
+\r
+\`\`\`python\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    tools=tools,\r
+    messages=[{"role": "user", "content": "What's the weather in Paris?"}]\r
+)\r
+\r
+for block in response.content:\r
+    if block.type == "tool_use":\r
+        tool_name = block.name\r
+        tool_input = block.input\r
+        tool_use_id = block.id\r
+\r
+        result = execute_tool(tool_name, tool_input)\r
+\r
+        followup = client.messages.create(\r
+            model="{{OPUS_ID}}",\r
+            max_tokens=16000,\r
+            tools=tools,\r
+            messages=[\r
+                {"role": "user", "content": "What's the weather in Paris?"},\r
+                {"role": "assistant", "content": response.content},\r
+                {\r
+                    "role": "user",\r
+                    "content": [{\r
+                        "type": "tool_result",\r
+                        "tool_use_id": tool_use_id,\r
+                        "content": result\r
+                    }]\r
+                }\r
+            ]\r
+        )\r
+\`\`\`\r
+\r
+---\r
+\r
+## Multiple Tool Calls\r
+\r
+\`\`\`python\r
+tool_results = []\r
+\r
+for block in response.content:\r
+    if block.type == "tool_use":\r
+        result = execute_tool(block.name, block.input)\r
+        tool_results.append({\r
+            "type": "tool_result",\r
+            "tool_use_id": block.id,\r
+            "content": result\r
+        })\r
+\r
+# Send all results back at once\r
+if tool_results:\r
+    followup = client.messages.create(\r
+        model="{{OPUS_ID}}",\r
+        max_tokens=16000,\r
+        tools=tools,\r
+        messages=[\r
+            *previous_messages,\r
+            {"role": "assistant", "content": response.content},\r
+            {"role": "user", "content": tool_results}\r
+        ]\r
+    )\r
+\`\`\`\r
+\r
+---\r
+\r
+## Error Handling in Tool Results\r
+\r
+\`\`\`python\r
+tool_result = {\r
+    "type": "tool_result",\r
+    "tool_use_id": tool_use_id,\r
+    "content": "Error: Location 'xyz' not found. Please provide a valid city name.",\r
+    "is_error": True\r
+}\r
+\`\`\`\r
+\r
+---\r
+\r
+## Tool Choice\r
+\r
+\`\`\`python\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    tools=tools,\r
+    tool_choice={"type": "tool", "name": "get_weather"},  # Force specific tool\r
+    messages=[{"role": "user", "content": "What's the weather in Paris?"}]\r
+)\r
+\`\`\`\r
+\r
+---\r
+\r
+## Code Execution\r
+\r
+### Basic Usage\r
+\r
+\`\`\`python\r
+import anthropic\r
+\r
+client = anthropic.Anthropic()\r
+\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{\r
+        "role": "user",\r
+        "content": "Calculate the mean and standard deviation of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]"\r
+    }],\r
+    tools=[{\r
+        "type": "code_execution_20260120",\r
+        "name": "code_execution"\r
+    }]\r
+)\r
+\r
+for block in response.content:\r
+    if block.type == "text":\r
+        print(block.text)\r
+    elif block.type == "bash_code_execution_tool_result":\r
+        print(f"stdout: {block.content.stdout}")\r
+\`\`\`\r
+\r
+### Upload Files for Analysis\r
+\r
+\`\`\`python\r
+# 1. Upload a file\r
+uploaded = client.beta.files.upload(file=open("sales_data.csv", "rb"))\r
+\r
+# 2. Pass to code execution via container_upload block\r
+# Code execution is GA; Files API is still beta (pass via extra_headers)\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    extra_headers={"anthropic-beta": "files-api-2025-04-14"},\r
+    messages=[{\r
+        "role": "user",\r
+        "content": [\r
+            {"type": "text", "text": "Analyze this sales data. Show trends and create a visualization."},\r
+            {"type": "container_upload", "file_id": uploaded.id}\r
+        ]\r
+    }],\r
+    tools=[{"type": "code_execution_20260120", "name": "code_execution"}]\r
+)\r
+\`\`\`\r
+\r
+### Retrieve Generated Files\r
+\r
+\`\`\`python\r
+import os\r
+\r
+OUTPUT_DIR = "./claude_outputs"\r
+os.makedirs(OUTPUT_DIR, exist_ok=True)\r
+\r
+for block in response.content:\r
+    if block.type == "bash_code_execution_tool_result":\r
+        result = block.content\r
+        if result.type == "bash_code_execution_result" and result.content:\r
+            for file_ref in result.content:\r
+                if file_ref.type == "bash_code_execution_output":\r
+                    metadata = client.beta.files.retrieve_metadata(file_ref.file_id)\r
+                    file_content = client.beta.files.download(file_ref.file_id)\r
+                    # Use basename to prevent path traversal; validate result\r
+                    safe_name = os.path.basename(metadata.filename)\r
+                    if not safe_name or safe_name in (".", ".."):\r
+                        print(f"Skipping invalid filename: {metadata.filename}")\r
+                        continue\r
+                    output_path = os.path.join(OUTPUT_DIR, safe_name)\r
+                    file_content.write_to_file(output_path)\r
+                    print(f"Saved: {output_path}")\r
+\`\`\`\r
+\r
+### Container Reuse\r
+\r
+\`\`\`python\r
+# First request: set up environment\r
+response1 = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{"role": "user", "content": "Install tabulate and create data.json with sample data"}],\r
+    tools=[{"type": "code_execution_20260120", "name": "code_execution"}]\r
+)\r
+\r
+# Get container ID from response\r
+container_id = response1.container.id\r
+\r
+# Second request: reuse the same container\r
+response2 = client.messages.create(\r
+    container=container_id,\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{"role": "user", "content": "Read data.json and display as a formatted table"}],\r
+    tools=[{"type": "code_execution_20260120", "name": "code_execution"}]\r
+)\r
+\`\`\`\r
+\r
+### Response Structure\r
+\r
+\`\`\`python\r
+for block in response.content:\r
+    if block.type == "text":\r
+        print(block.text)  # Claude's explanation\r
+    elif block.type == "server_tool_use":\r
+        print(f"Running: {block.name} - {block.input}")  # What Claude is doing\r
+    elif block.type == "bash_code_execution_tool_result":\r
+        result = block.content\r
+        if result.type == "bash_code_execution_result":\r
+            if result.return_code == 0:\r
+                print(f"Output: {result.stdout}")\r
+            else:\r
+                print(f"Error: {result.stderr}")\r
+        else:\r
+            print(f"Tool error: {result.error_code}")\r
+    elif block.type == "text_editor_code_execution_tool_result":\r
+        print(f"File operation: {block.content}")\r
+\`\`\`\r
+\r
+---\r
+\r
+## Memory Tool\r
+\r
+### Basic Usage\r
+\r
+\`\`\`python\r
+import anthropic\r
+\r
+client = anthropic.Anthropic()\r
+\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{"role": "user", "content": "Remember that my preferred language is Python."}],\r
+    tools=[{"type": "memory_20250818", "name": "memory"}],\r
+)\r
+\`\`\`\r
+\r
+### SDK Memory Helper\r
+\r
+Subclass \`BetaAbstractMemoryTool\`:\r
+\r
+\`\`\`python\r
+from anthropic.lib.tools import BetaAbstractMemoryTool\r
+\r
+class MyMemoryTool(BetaAbstractMemoryTool):\r
+    def view(self, command): ...\r
+    def create(self, command): ...\r
+    def str_replace(self, command): ...\r
+    def insert(self, command): ...\r
+    def delete(self, command): ...\r
+    def rename(self, command): ...\r
+\r
+memory = MyMemoryTool()\r
+\r
+# Use with tool runner\r
+runner = client.beta.messages.tool_runner(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    tools=[memory],\r
+    messages=[{"role": "user", "content": "Remember my preferences"}],\r
+)\r
+\r
+for message in runner:\r
+    print(message)\r
+\`\`\`\r
+\r
+For full implementation examples, use WebFetch:\r
+\r
+- \`https://github.com/anthropics/anthropic-sdk-python/blob/main/examples/memory/basic.py\`\r
+\r
+---\r
+\r
+## Structured Outputs\r
+\r
+### JSON Outputs (Pydantic \u2014 Recommended)\r
+\r
+\`\`\`python\r
+from pydantic import BaseModel\r
+from typing import List\r
+import anthropic\r
+\r
+class ContactInfo(BaseModel):\r
+    name: str\r
+    email: str\r
+    plan: str\r
+    interests: List[str]\r
+    demo_requested: bool\r
+\r
+client = anthropic.Anthropic()\r
+\r
+response = client.messages.parse(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{\r
+        "role": "user",\r
+        "content": "Extract: Jane Doe (jane@co.com) wants Enterprise, interested in API and SDKs, wants a demo."\r
+    }],\r
+    output_format=ContactInfo,\r
+)\r
+\r
+# response.parsed_output is a validated ContactInfo instance\r
+contact = response.parsed_output\r
+print(contact.name)           # "Jane Doe"\r
+print(contact.interests)      # ["API", "SDKs"]\r
+\`\`\`\r
+\r
+### Raw Schema\r
+\r
+\`\`\`python\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{\r
+        "role": "user",\r
+        "content": "Extract info: John Smith (john@example.com) wants the Enterprise plan."\r
+    }],\r
+    output_config={\r
+        "format": {\r
+            "type": "json_schema",\r
+            "schema": {\r
+                "type": "object",\r
+                "properties": {\r
+                    "name": {"type": "string"},\r
+                    "email": {"type": "string"},\r
+                    "plan": {"type": "string"},\r
+                    "demo_requested": {"type": "boolean"}\r
+                },\r
+                "required": ["name", "email", "plan", "demo_requested"],\r
+                "additionalProperties": False\r
+            }\r
+        }\r
+    }\r
+)\r
+\r
+import json\r
+# output_config.format guarantees the first block is text with valid JSON\r
+text = next(b.text for b in response.content if b.type == "text")\r
+data = json.loads(text)\r
+\`\`\`\r
+\r
+### Strict Tool Use\r
+\r
+\`\`\`python\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{"role": "user", "content": "Book a flight to Tokyo for 2 passengers on March 15"}],\r
+    tools=[{\r
+        "name": "book_flight",\r
+        "description": "Book a flight to a destination",\r
+        "strict": True,\r
+        "input_schema": {\r
+            "type": "object",\r
+            "properties": {\r
+                "destination": {"type": "string"},\r
+                "date": {"type": "string", "format": "date"},\r
+                "passengers": {"type": "integer", "enum": [1, 2, 3, 4, 5, 6, 7, 8]}\r
+            },\r
+            "required": ["destination", "date", "passengers"],\r
+            "additionalProperties": False\r
+        }\r
+    }]\r
+)\r
+\`\`\`\r
+\r
+### Using Both Together\r
+\r
+\`\`\`python\r
+response = client.messages.create(\r
+    model="{{OPUS_ID}}",\r
+    max_tokens=16000,\r
+    messages=[{"role": "user", "content": "Plan a trip to Paris next month"}],\r
+    output_config={\r
+        "format": {\r
+            "type": "json_schema",\r
+            "schema": {\r
+                "type": "object",\r
+                "properties": {\r
+                    "summary": {"type": "string"},\r
+                    "next_steps": {"type": "array", "items": {"type": "string"}}\r
+                },\r
+                "required": ["summary", "next_steps"],\r
+                "additionalProperties": False\r
+            }\r
+        }\r
+    },\r
+    tools=[{\r
+        "name": "search_flights",\r
+        "description": "Search for available flights",\r
+        "strict": True,\r
+        "input_schema": {\r
+            "type": "object",\r
+            "properties": {\r
+                "destination": {"type": "string"},\r
+                "date": {"type": "string", "format": "date"}\r
+            },\r
+            "required": ["destination", "date"],\r
+            "additionalProperties": False\r
+        }\r
+    }]\r
+)\r
+\`\`\`\r
+`;var X0y=()=>{};var Q0y="# Managed Agents \u2014 Python\r\n\r\n> **Bindings not shown here:** This README covers the most common managed-agents flows for Python. If you need a class, method, namespace, field, or behavior that isn't shown, WebFetch the Python SDK repo **or the relevant docs page** from `shared/live-sources.md` rather than guess. Do not extrapolate from cURL shapes or another language's SDK.\r\n\r\n> **Agents are persistent \u2014 create once, reference by ID.** Store the agent ID returned by `agents.create` and pass it to every subsequent `sessions.create`; do not call `agents.create` in the request path. **Recommended:** define agents and environments as version-controlled YAML applied with the `ant` CLI \u2014 see `shared/anthropic-cli.md` (its live-docs URL is in `shared/live-sources.md`). The CLI owns the control plane (create/update); your code owns the data plane (sessions with the stored ID). The examples below show in-code creation for when you must provision programmatically; in production the create call belongs in setup, not in the request path.\r\n\r\n## Installation\r\n\r\n```bash\r\npip install anthropic\r\n```\r\n\r\n## Client Initialization\r\n\r\n```python\r\nimport anthropic\r\n\r\n# Default \u2014 resolves credentials from the environment:\r\n# ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN, or an `ant auth login` profile.\r\n# Prefer this for local dev; don't hardcode a key.\r\nclient = anthropic.Anthropic()\r\n\r\n# Explicit API key (only when you must inject a specific key)\r\nclient = anthropic.Anthropic(api_key=\"your-api-key\")\r\n```\r\n\r\n---\r\n\r\n## Create an Environment\r\n\r\n```python\r\nenvironment = client.beta.environments.create(\r\n    name=\"my-dev-env\",\r\n    config={\r\n        \"type\": \"cloud\",\r\n        \"networking\": {\"type\": \"unrestricted\"},\r\n    },\r\n)\r\nprint(environment.id)  # env_...\r\n```\r\n\r\n---\r\n\r\n## Create an Agent (required first step)\r\n\r\n> \u26A0\uFE0F **There is no inline agent config.** `model`/`system`/`tools` live on the agent object, not the session. Always start with `agents.create()` \u2014 the session only takes `agent={\"type\": \"agent\", \"id\": agent.id}`.\r\n\r\n### Minimal\r\n\r\n```python\r\n# 1. Create the agent (reusable, versioned)\r\nagent = client.beta.agents.create(\r\n    name=\"Coding Assistant\",\r\n    model=\"{{OPUS_ID}}\",\r\n    tools=[{\"type\": \"agent_toolset_20260401\", \"default_config\": {\"enabled\": True}}],\r\n)\r\n\r\n# 2. Start a session\r\nsession = client.beta.sessions.create(\r\n    agent={\"type\": \"agent\", \"id\": agent.id, \"version\": agent.version},\r\n    environment_id=environment.id,\r\n)\r\nprint(session.id, session.status)\r\nprint(f\"Trace: https://platform.claude.com/workspaces/default/sessions/{session.id}\")  # swap 'default' for your workspace ID if the API key is not in the Default workspace\r\n```\r\n\r\n### With system prompt and custom tools\r\n\r\n```python\r\nimport os\r\n\r\nagent = client.beta.agents.create(\r\n    name=\"Code Reviewer\",\r\n    model=\"{{OPUS_ID}}\",\r\n    system=\"You are a senior code reviewer.\",\r\n    tools=[\r\n        {\"type\": \"agent_toolset_20260401\"},\r\n        {\r\n            \"type\": \"custom\",\r\n            \"name\": \"run_tests\",\r\n            \"description\": \"Run the test suite\",\r\n            \"input_schema\": {\r\n                \"type\": \"object\",\r\n                \"properties\": {\r\n                    \"test_path\": {\"type\": \"string\", \"description\": \"Path to test file\"}\r\n                },\r\n                \"required\": [\"test_path\"],\r\n            },\r\n        },\r\n    ],\r\n)\r\n\r\nsession = client.beta.sessions.create(\r\n    agent={\"type\": \"agent\", \"id\": agent.id, \"version\": agent.version},\r\n    environment_id=environment.id,\r\n    title=\"Code review session\",\r\n    resources=[\r\n        {\r\n            \"type\": \"github_repository\",\r\n            \"url\": \"https://github.com/owner/repo\",\r\n            \"mount_path\": \"/workspace/repo\",\r\n            \"authorization_token\": os.environ[\"GITHUB_TOKEN\"],\r\n            \"branch\": \"main\",\r\n        }\r\n    ],\r\n)\r\n```\r\n\r\n---\r\n\r\n## Send a User Message\r\n\r\n```python\r\nclient.beta.sessions.events.send(\r\n    session_id=session.id,\r\n    events=[\r\n        {\r\n            \"type\": \"user.message\",\r\n            \"content\": [{\"type\": \"text\", \"text\": \"Review the auth module\"}],\r\n        }\r\n    ],\r\n)\r\n```\r\n\r\n> \uD83D\uDCA1 **Stream-first:** Open the stream *before* (or concurrently with) sending the message. The stream only delivers events that occur after it opens \u2014 stream-after-send means early events arrive buffered in one batch. See [Steering Patterns](../../shared/managed-agents-events.md#steering-patterns).\r\n\r\n---\r\n\r\n## Stream Events (SSE)\r\n\r\n```python\r\nimport json\r\n\r\n# Stream-first: open stream, then send while stream is live\r\nwith client.beta.sessions.events.stream(\r\n    session_id=session.id,\r\n) as stream:\r\n    client.beta.sessions.events.send(\r\n        session_id=session.id,\r\n        events=[{\"type\": \"user.message\", \"content\": [{\"type\": \"text\", \"text\": \"...\"}]}],\r\n    )\r\n    for event in stream:\r\n        ...  # process events\r\n\r\n# Standalone stream iteration:\r\nwith client.beta.sessions.events.stream(\r\n    session_id=session.id,\r\n) as stream:\r\n    for event in stream:\r\n        if event.type == \"agent.message\":\r\n            for block in event.content:\r\n                if block.type == \"text\":\r\n                    print(block.text, end=\"\", flush=True)\r\n        elif event.type == \"agent.custom_tool_use\":\r\n            # Custom tool invocation \u2014 session is now idle\r\n            print(f\"\\nCustom tool call: {event.name}\")\r\n            print(f\"Input: {json.dumps(event.input)}\")\r\n            # Send result back (see below)\r\n        elif event.type == \"session.status_idle\":\r\n            print(\"\\n--- Agent idle ---\")\r\n        elif event.type == \"session.status_terminated\":\r\n            print(\"\\n--- Session terminated ---\")\r\n            break\r\n```\r\n\r\n---\r\n\r\n## Provide Custom Tool Result\r\n\r\n```python\r\nclient.beta.sessions.events.send(\r\n    session_id=session.id,\r\n    events=[\r\n        {\r\n            \"type\": \"user.custom_tool_result\",\r\n            \"custom_tool_use_id\": \"sevt_abc123\",\r\n            \"content\": [{\"type\": \"text\", \"text\": \"All 42 tests passed.\"}],\r\n        }\r\n    ],\r\n)\r\n```\r\n\r\n---\r\n\r\n## Poll Events\r\n\r\n```python\r\nevents = client.beta.sessions.events.list(\r\n    session_id=session.id,\r\n)\r\nfor event in events.data:\r\n    print(f\"{event.type}: {event.id}\")\r\n```\r\n\r\n> \u26A0\uFE0F **Prefer the SDK over raw `requests`/`httpx`.** If you hand-roll a poll loop, don't assume `timeout=(5, 60)` or `httpx.Timeout(120)` caps total call duration \u2014 both are **per-chunk** read timeouts (reset on every byte), so a trickling response can block forever. For a hard wall-clock deadline, track `time.monotonic()` at the loop level and bail explicitly, or wrap with `asyncio.wait_for()`. See [Receiving Events](../../shared/managed-agents-events.md#receiving-events).\r\n\r\n---\r\n\r\n## Full Streaming Loop with Custom Tools\r\n\r\n```python\r\nimport json\r\n\r\n\r\ndef run_custom_tool(tool_name: str, tool_input: dict) -> str:\r\n    \"\"\"Execute a custom tool and return the result.\"\"\"\r\n    if tool_name == \"run_tests\":\r\n        # Your tool implementation here\r\n        return \"All tests passed.\"\r\n    return f\"Unknown tool: {tool_name}\"\r\n\r\n\r\ndef run_session(client, session_id: str):\r\n    \"\"\"Stream events and handle custom tool calls.\"\"\"\r\n    while True:\r\n        with client.beta.sessions.events.stream(\r\n            session_id=session_id,\r\n        ) as stream:\r\n            tool_calls = []\r\n            for event in stream:\r\n                if event.type == \"agent.message\":\r\n                    for block in event.content:\r\n                        if block.type == \"text\":\r\n                            print(block.text, end=\"\", flush=True)\r\n                elif event.type == \"agent.custom_tool_use\":\r\n                    tool_calls.append(event)\r\n                elif event.type == \"session.status_idle\":\r\n                    break\r\n                elif event.type == \"session.status_terminated\":\r\n                    return\r\n\r\n        if not tool_calls:\r\n            break\r\n\r\n        # Process custom tool calls\r\n        results = []\r\n        for call in tool_calls:\r\n            result = run_custom_tool(call.name, call.input)\r\n            results.append({\r\n                \"type\": \"user.custom_tool_result\",\r\n                \"custom_tool_use_id\": call.id,\r\n                \"content\": [{\"type\": \"text\", \"text\": result}],\r\n            })\r\n\r\n        client.beta.sessions.events.send(\r\n            session_id=session_id,\r\n            events=results,\r\n        )\r\n```\r\n\r\n---\r\n\r\n## Upload a File\r\n\r\n```python\r\nwith open(\"data.csv\", \"rb\") as f:\r\n    file = client.beta.files.upload(\r\n        file=f,\r\n    )\r\n\r\n# Use in a session\r\nsession = client.beta.sessions.create(\r\n    agent={\"type\": \"agent\", \"id\": agent.id, \"version\": agent.version},\r\n    environment_id=environment.id,\r\n    resources=[{\"type\": \"file\", \"file_id\": file.id, \"mount_path\": \"/workspace/data.csv\"}],\r\n)\r\n```\r\n\r\n---\r\n\r\n## List and Download Session Files\r\n\r\nList files the agent wrote to `/mnt/session/outputs/` during a session, then download them.\r\n\r\n```python\r\n# List files associated with a session\r\nfiles = client.beta.files.list(\r\n    scope_id=session.id,\r\n    betas=[\"managed-agents-2026-04-01\"],\r\n)\r\nfor f in files.data:\r\n    print(f.filename, f.size_bytes)\r\n    # Download each file and save to disk\r\n    file_content = client.beta.files.download(f.id)\r\n    file_content.write_to_file(f.filename)\r\n```\r\n\r\n> \uD83D\uDCA1 There's a brief indexing lag (~1\u20133s) between `session.status_idle` and output files appearing in `files.list`. Retry once or twice if the list is empty.\r\n\r\n---\r\n\r\n## Session Management\r\n\r\n```python\r\n# Get session details\r\nsession = client.beta.sessions.retrieve(session_id=\"sesn_011CZxAbc123Def456\")\r\nprint(session.status, session.usage)\r\n\r\n# List sessions\r\nsessions = client.beta.sessions.list()\r\n\r\n# Delete a session\r\nclient.beta.sessions.delete(session_id=\"sesn_011CZxAbc123Def456\")\r\n\r\n# Archive a session\r\nclient.beta.sessions.archive(session_id=\"sesn_011CZxAbc123Def456\")\r\n```\r\n\r\n---\r\n\r\n## MCP Server Integration\r\n\r\n```python\r\n# Agent declares MCP server (no auth here \u2014 auth goes in a vault)\r\nagent = client.beta.agents.create(\r\n    name=\"MCP Agent\",\r\n    model=\"{{OPUS_ID}}\",\r\n    mcp_servers=[\r\n        {\"type\": \"url\", \"name\": \"my-tools\", \"url\": \"https://my-mcp-server.example.com/sse\"},\r\n    ],\r\n    tools=[\r\n        {\"type\": \"agent_toolset_20260401\", \"default_config\": {\"enabled\": True}},\r\n        {\"type\": \"mcp_toolset\", \"mcp_server_name\": \"my-tools\"},\r\n    ],\r\n)\r\n\r\n# Session attaches vault(s) containing credentials for those MCP server URLs\r\nsession = client.beta.sessions.create(\r\n    agent=agent.id,\r\n    environment_id=environment.id,\r\n    vault_ids=[vault.id],\r\n)\r\n```\r\n\r\nSee `shared/managed-agents-tools.md` \xA7Vaults for creating vaults and adding credentials.\r\n";var Z0y=()=>{};var tAy=`# Claude API \u2014 Ruby\r
+\r
+> **Note:** The Ruby SDK supports the Claude API. A tool runner is available in beta via \`client.beta.messages.tool_runner()\`. Agent SDK is not yet available for Ruby.\r
+\r
+## Installation\r
+\r
+\`\`\`bash\r
+gem install anthropic\r
+\`\`\`\r
+\r
+## Client Initialization\r
+\r
+\`\`\`ruby\r
+require "anthropic"\r
+\r
+# Default (uses ANTHROPIC_API_KEY env var)\r
+client = Anthropic::Client.new\r
+\r
+# Explicit API key\r
+client = Anthropic::Client.new(api_key: "your-api-key")\r
+\`\`\`\r
+\r
+---\r
+\r
+## Basic Message Request\r
+\r
+\`\`\`ruby\r
+message = client.messages.create(\r
+  model: :"{{OPUS_ID}}",\r
+  max_tokens: 16000,\r
+  messages: [\r
+    { role: "user", content: "What is the capital of France?" }\r
+  ]\r
+)\r
+# content is an array of polymorphic block objects (TextBlock, ThinkingBlock,\r
+# ToolUseBlock, ...). .type is a Symbol \u2014 compare with :text, not "text".\r
+# .text raises NoMethodError on non-TextBlock entries.\r
+message.content.each do |block|\r
+  puts block.text if block.type == :text\r
+end\r
+\`\`\`\r
+\r
+---\r
+\r
+## Extended Thinking\r
+\r
+> **Fable 5, {{OPUS_NAME}}, Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6:** Use adaptive thinking. \`budget_tokens\` is removed on Fable 5, {{OPUS_NAME}}, Opus 4.8, and 4.7 (400 if sent); deprecated on Opus 4.6 and Sonnet 4.6.\r
+> **{{OPUS_NAME}}:** thinking is on by default \u2014 omitting \`thinking:\` runs adaptive (\`{ type: "adaptive" }\` is equivalent), unlike Opus 4.8/4.7 where omitting it meant no thinking. \`{ type: "disabled" }\` is accepted only at effort \`high\` or lower; pairing it with \`xhigh\`/\`max\` returns a 400.\r
+> **Older models:** Use \`thinking: { type: "enabled", budget_tokens: N }\` (must be < \`max_tokens\`, min 1024).\r
+\r
+\`\`\`ruby\r
+message = client.messages.create(\r
+  model: :"{{OPUS_ID}}",\r
+  max_tokens: 16000,\r
+  thinking: { type: "adaptive" },\r
+  messages: [{ role: "user", content: "Solve: 27 * 453" }]\r
+)\r
+\r
+message.content.each do |block|\r
+  case block.type\r
+  when :thinking then puts "Thinking: #{block.thinking}"\r
+  when :text then puts "Response: #{block.text}"\r
+  end\r
+end\r
+\`\`\`\r
+\r
+---\r
+\r
+## Prompt Caching\r
+\r
+\`system_:\` (trailing underscore \u2014 avoids shadowing \`Kernel#system\`) takes an array of text blocks; set \`cache_control\` on the last block. Plain hashes work via the \`OrHash\` type alias. For placement patterns and the silent-invalidator audit checklist, see \`shared/prompt-caching.md\`.\r
+\r
+\`\`\`ruby\r
+message = client.messages.create(\r
+  model: :"{{OPUS_ID}}",\r
+  max_tokens: 16000,\r
+  system_: [\r
+    { type: "text", text: long_system_prompt, cache_control: { type: "ephemeral" } }\r
+  ],\r
+  messages: [{ role: "user", content: "Summarize the key points" }]\r
+)\r
+\`\`\`\r
+\r
+For 1-hour TTL: \`cache_control: { type: "ephemeral", ttl: "1h" }\`. There's also a top-level \`cache_control:\` on \`messages.create\` that auto-places on the last cacheable block.\r
+\r
+Verify hits via \`message.usage.cache_creation_input_tokens\` / \`message.usage.cache_read_input_tokens\`.\r
+\r
+---\r
+\r
+## Stop Details\r
+\r
+When \`stop_reason\` is \`:refusal\`, the response includes structured \`stop_details\`:\r
+\r
+\`\`\`ruby\r
+if message.stop_reason == :refusal && message.stop_details\r
+  puts "Category: #{message.stop_details.category}"     # e.g. :cyber, :bio, :reasoning_extraction, :frontier_llm, or nil \u2014 see docs for the full set\r
+  puts "Explanation: #{message.stop_details.explanation}"\r
+end\r
+\`\`\`\r
+\r
+**Refusal fallbacks ({{FABLE_NAME}}) \u2014 opt in by default.** Fallbacks are opt-in: without them a refused request simply stops. New \`{{FABLE_ID}}\` code should include the server-side \`fallbacks\` parameter (beta header \`server-side-fallback-2026-06-01\`, \`fallbacks: [{model: "{{PREV_OPUS_ID}}"}]\` on the beta messages call) by default. The exact Ruby binding (and the client-side middleware for providers without server-side support) is not documented here \u2014 WebFetch the Ruby SDK repo's \`examples/\` from \`shared/live-sources.md\`; full semantics in \`shared/model-migration.md\` \u2192 Migrating to {{FABLE_NAME}} \u2192 \`refusal\` stop reason.\r
+\r
+---\r
+\r
+## Beta Features\r
+\r
+\`betas:\` is only valid on \`client.beta.messages.create\`, not the non-beta path.\r
+\r
+### Task budgets\r
+\r
+\`\`\`ruby\r
+response = client.beta.messages.create(\r
+  model: :"{{OPUS_ID}}",\r
+  max_tokens: 16000,\r
+  output_config: { task_budget: { type: :tokens, total: 64_000 } },\r
+  tools: [...],\r
+  messages: [...],\r
+  betas: ["task-budgets-2026-03-13"]\r
+)\r
+\`\`\`\r
+\r
+---\r
+\r
+## Error Type\r
+\r
+\`APIStatusError\` exposes a \`.type\` field for programmatic error classification:\r
+\r
+\`\`\`ruby\r
+begin\r
+  client.messages.create(...)\r
+rescue Anthropic::Errors::APIStatusError => e\r
+  puts e.type  # :rate_limit_error, :overloaded_error, etc.\r
+end\r
+\`\`\`\r
+`;var eAy=()=>{};var nAy=`# Streaming \u2014 Ruby\r
+\r
+## Streaming\r
+\r
+\`\`\`ruby\r
+stream = client.messages.stream(\r
+  model: :"{{OPUS_ID}}",\r
+  max_tokens: 64000,\r
+  messages: [{ role: "user", content: "Write a haiku" }]\r
+)\r
+\r
+stream.text.each { |text| print(text) }\r
+\`\`\`\r
+\r
+---\r
+\r
+`;var rAy=()=>{};var iAy=`# Tool Use \u2014 Ruby\r
+\r
+For conceptual overview (tool definitions, tool choice, tips), see [shared/tool-use-concepts.md](../../shared/tool-use-concepts.md).\r
+\r
+## Tool Use\r
+\r
+The Ruby SDK supports tool use via raw JSON schema definitions and also provides a beta tool runner for automatic tool execution.\r
+\r
+### Tool Runner (Beta)\r
+\r
+\`\`\`ruby\r
+class GetWeatherInput < Anthropic::BaseModel\r
+  required :location, String, doc: "City and state, e.g. San Francisco, CA"\r
+end\r
+\r
+class GetWeather < Anthropic::BaseTool\r
+  doc "Get the current weather for a location"\r
+\r
+  input_schema GetWeatherInput\r
+\r
+  def call(input)\r
+    "The weather in #{input.location} is sunny and 72\xB0F."\r
+  end\r
+end\r
+\r
+client.beta.messages.tool_runner(\r
+  model: :"{{OPUS_ID}}",\r
+  max_tokens: 16000,\r
+  tools: [GetWeather.new],\r
+  messages: [{ role: "user", content: "What's the weather in San Francisco?" }]\r
+).each_message do |message|\r
+  puts message.content\r
+end\r
+\`\`\`\r
+\r
+### Manual Loop\r
+\r
+See the [shared tool use concepts](../../shared/tool-use-concepts.md) for the tool definition format and agentic loop pattern.\r
+\r
+---\r
+\r
+`;var oAy=()=>{};var aAy="# Managed Agents \u2014 Ruby\r\n\r\n> **Bindings not shown here:** This README covers the most common managed-agents flows for Ruby. If you need a class, method, namespace, field, or behavior that isn't shown, WebFetch the Ruby SDK repo **or the relevant docs page** from `shared/live-sources.md` rather than guess. Do not extrapolate from cURL shapes or another language's SDK.\r\n\r\n> **Agents are persistent \u2014 create once, reference by ID.** Store the agent ID returned by `client.beta.agents.create` and pass it to every subsequent `client.beta.sessions.create`; do not call `agents.create` in the request path. **Recommended:** define agents and environments as version-controlled YAML applied with the `ant` CLI \u2014 see `shared/anthropic-cli.md` (its live-docs URL is in `shared/live-sources.md`). The CLI owns the control plane (create/update); your code owns the data plane (sessions with the stored ID). The examples below show in-code creation for when you must provision programmatically; in production the create call belongs in setup, not in the request path.\r\n\r\n## Installation\r\n\r\n```bash\r\ngem install anthropic\r\n```\r\n\r\n## Client Initialization\r\n\r\n```ruby\r\nrequire \"anthropic\"\r\n\r\n# Default (uses ANTHROPIC_API_KEY env var)\r\nclient = Anthropic::Client.new\r\n\r\n# Explicit API key\r\nclient = Anthropic::Client.new(api_key: \"your-api-key\")\r\n```\r\n\r\n> \u26A0\uFE0F **Trailing underscores:** The Ruby SDK uses `system_:` and `send_(` (trailing underscore) to avoid shadowing `Kernel#system` and `Kernel#send`. Use these forms throughout managed-agents code.\r\n\r\n---\r\n\r\n## Create an Environment\r\n\r\n```ruby\r\nenvironment = client.beta.environments.create(\r\n  name: \"my-dev-env\",\r\n  config: {\r\n    type: \"cloud\",\r\n    networking: {type: \"unrestricted\"}\r\n  }\r\n)\r\nputs \"Environment ID: #{environment.id}\" # env_...\r\n```\r\n\r\n---\r\n\r\n## Create an Agent (required first step)\r\n\r\n> \u26A0\uFE0F **There is no inline agent config.** `model`/`system_`/`tools` live on the agent object, not the session. Always start with `client.beta.agents.create()` \u2014 the session takes either `agent: agent.id` or the typed hash form `agent: {type: \"agent\", id: agent.id, version: agent.version}`.\r\n\r\n### Minimal\r\n\r\n```ruby\r\n# 1. Create the agent (reusable, versioned)\r\nagent = client.beta.agents.create(\r\n  name: \"Coding Assistant\",\r\n  model: :\"{{OPUS_ID}}\",\r\n  system_: \"You are a helpful coding assistant.\",\r\n  tools: [{type: \"agent_toolset_20260401\"}]\r\n)\r\n\r\n# 2. Start a session\r\nsession = client.beta.sessions.create(\r\n  agent: {type: \"agent\", id: agent.id, version: agent.version},\r\n  environment_id: environment.id,\r\n  title: \"Quickstart session\"\r\n)\r\nputs \"Session ID: #{session.id}\"\r\nputs \"Trace: https://platform.claude.com/workspaces/default/sessions/#{session.id}\"  # swap 'default' for your workspace ID if the API key is not in the Default workspace\r\n```\r\n\r\n### Updating an Agent\r\n\r\nUpdates create new versions; the agent object is immutable per version.\r\n\r\n```ruby\r\nupdated_agent = client.beta.agents.update(\r\n  agent.id,\r\n  version: agent.version,\r\n  system_: \"You are a helpful coding agent. Always write tests.\"\r\n)\r\nputs \"New version: #{updated_agent.version}\"\r\n\r\n# List all versions\r\nclient.beta.agents.versions.list(agent.id).auto_paging_each do |version|\r\n  puts \"

@@ -1,0 +1,4 @@
+offset=297265520
+needle=b'Network access'
+window=
+e artifact itself is fine \u2014 the permission check passed). To allow artifact reads here, add ${v} to the environment's allowed domains: environment settings \u2192 Code \u2192 Network access \u2192 Custom \u2192 Allowed domains. An admin can add the same entry to a shared environment from admin settings \u2192 Cloud environments; sessions that run in that environment get the access.`,status:40

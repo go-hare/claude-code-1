@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'crypto'
 import { createConnection, type Socket } from 'net'
-import { readdir, readFile } from 'fs/promises'
+import { lstat, readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { logForDebugging } from './debug.js'
@@ -31,7 +31,7 @@ import {
   shouldPaceOutboundSend,
   type ReserveResult,
 } from './udsOutboundPacer.js'
-import { attachUdsResponseReader, getChunkBytes } from './udsResponseReader.js'
+import { attachUdsResponseReader } from './udsResponseReader.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -177,27 +177,229 @@ export async function listPeers(): Promise<PeerSession[]> {
   )
 }
 
-async function findAuthTokenForSocketPath(
+/** densable 2.1.239 IWd kinds — token / no-key / unusable / dead-owner. */
+async function resolveCapabilityForSocket(
   socketPath: string,
-): Promise<string | undefined> {
-  const { readUdsCapabilityToken } = await import('./udsMessaging.js')
-  return readUdsCapabilityToken(socketPath)
+): Promise<
+  | { kind: 'token'; token: string }
+  | { kind: 'no-key' }
+  | { kind: 'unusable' }
+  | { kind: 'dead-owner' }
+> {
+  const { isMessagingLiveOwnerRequired, resolveMessagingCapability } =
+    await import('./udsMessaging.js')
+  // densable cmp: IWd(e, { requireLiveOwner: mti() }) — mti is Windows-only.
+  return resolveMessagingCapability(socketPath, {
+    requireLiveOwner: isMessagingLiveOwnerRequired(),
+  })
+}
+
+/** Official `_1e` — cmp control-plane refuse kinds. */
+export class UdsControlSendError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'UdsControlSendError'
+    this.code = code
+  }
 }
 
 /**
- * densable ULu-lite for go-hare's messaging-capabilities store.
- * Full densable uses per-PID `.${hash}.key` under sessions/ with dead-owner
- * ranking; we map missing capability → no-key for the same fail-closed surface
- * without inventing that key layout.
+ * Official `mli` — `Bun.ant.getPeerPid` on the connected fd.
+ * Windows returns undefined (cmp skips expectPeerPid there).
  */
-async function resolveCapabilityForSocket(
-  socketPath: string,
-): Promise<{ kind: 'token'; token: string } | { kind: 'no-key' }> {
-  const token = await findAuthTokenForSocketPath(socketPath)
-  if (typeof token === 'string' && token.length > 0) {
-    return { kind: 'token', token }
+export function readConnectedPeerPid(socket: Socket): number | undefined {
+  if (process.platform === 'win32') return undefined
+  const handle = (socket as { _handle?: { fd?: number } })._handle
+  const fd = typeof handle?.fd === 'number' ? handle.fd : -1
+  try {
+    const getPeerPid = (
+      globalThis as {
+        Bun?: { ant?: { getPeerPid?: (fd: number) => number | null } }
+      }
+    ).Bun?.ant?.getPeerPid
+    const pid = fd < 0 ? null : (getPeerPid?.(fd) ?? null)
+    if (pid !== null && pid > 0) return pid
+    logForDebugging(`[peer-cred] peer pid unavailable (fd=${fd}, got=${pid})`)
+    return undefined
+  } catch (err) {
+    logForDebugging(`[peer-cred] peer pid lookup failed: ${errorMessage(err)}`)
+    return undefined
   }
-  return { kind: 'no-key' }
+}
+
+/** Official cmp `noFollowSymlink` arm. `lr` is ENOENT-only. */
+async function vetReplyTargetNotSymlink(path: string): Promise<void> {
+  try {
+    const st = await lstat(path)
+    if (st.isSymbolicLink()) {
+      throw new UdsControlSendError(
+        'symlink',
+        'Refusing to send: reply target is a symlink',
+      )
+    }
+  } catch (err) {
+    if (err instanceof UdsControlSendError) throw err
+    if (getErrnoCode(err) === 'ENOENT') throw err
+    logForDebugging(
+      `[uds-client] reply target unvettable: ${errorMessage(err) || 'lstat failed'}`,
+    )
+    throw new UdsControlSendError(
+      'unvettable',
+      'Refusing to send: cannot vet reply target',
+    )
+  }
+}
+
+export type SendUdsControlOpts = {
+  /** Official Tli `expectPeerPid` — Unix connect-time SO_PEERCRED check. */
+  expectPeerPid?: number
+}
+
+/**
+ * Official `Tli` / `T4r` — control frame through `cmp`.
+ * Always `noFollowSymlink:true`. Token optional after no-key+rvv voucher.
+ */
+export async function sendUdsControl(
+  targetSocketPath: string,
+  fields: Record<string, unknown>,
+  opts?: SendUdsControlOpts,
+): Promise<void> {
+  const {
+    isLocalSocketAddress,
+    isMessagingLiveOwnerRequired,
+    hasLiveRegisteredInbox,
+    parseWindowsNamedPipeName,
+  } = await import('./udsMessaging.js')
+
+  // Official cmp: ELe, not TSe.
+  if (!isLocalSocketAddress(targetSocketPath)) {
+    throw new UdsControlSendError(
+      'non-local',
+      `Refusing to connect to non-local IPC path: ${targetSocketPath}`,
+    )
+  }
+
+  const cap = await resolveCapabilityForSocket(targetSocketPath)
+  let authToken: string | undefined =
+    cap.kind === 'token' ? cap.token : undefined
+  if (isMessagingLiveOwnerRequired() && cap.kind !== 'token') {
+    if (
+      !(
+        cap.kind === 'no-key' &&
+        (await hasLiveRegisteredInbox(targetSocketPath))
+      )
+    ) {
+      throw new UdsUnvouchedPipeError(targetSocketPath, cap.kind)
+    }
+    authToken = undefined
+  }
+
+  const skipSymlinkVet =
+    process.platform === 'win32' &&
+    parseWindowsNamedPipeName(targetSocketPath) !== undefined
+  if (!skipSymlinkVet) {
+    await vetReplyTargetNotSymlink(targetSocketPath)
+  }
+
+  const action = typeof fields.action === 'string' ? fields.action : 'control'
+  logForDebugging(
+    `[uds-client] Sending control:${action} to ${targetSocketPath}`,
+  )
+
+  // Official Tli: `{type:"control", ...t, ...q3e()}`. q3e is `{msgV:1, msg_id}`.
+  // Keep caller `msg_id` when present — local subscribeToPeerIdle reuses this
+  // sender; official T4r callers (receipt / idle notice) omit msg_id.
+  const outbound: Record<string, unknown> = {
+    ...fields,
+    type: 'control',
+    msgV: 1,
+    msg_id:
+      typeof fields.msg_id === 'string' && fields.msg_id.length > 0
+        ? fields.msg_id
+        : randomUUID(),
+  }
+  if (authToken !== undefined) {
+    const meta =
+      outbound.meta &&
+      typeof outbound.meta === 'object' &&
+      !Array.isArray(outbound.meta)
+        ? { ...(outbound.meta as Record<string, unknown>) }
+        : {}
+    meta.authToken = authToken
+    outbound.meta = meta
+  }
+
+  const wire = `${jsonStringify(outbound)}\n`
+  const expectPeerPid = opts?.expectPeerPid
+
+  // Official cmp: write, macos delayed end, else end, resolve on close.
+  const MACOS_UDS_CONTROL_END_DELAY_MS = 150
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+    let conn: ReturnType<typeof createConnection>
+    const finish = (error?: Error): void => {
+      if (settled) return
+      settled = true
+      if (error) {
+        conn.destroy(error)
+        reject(error)
+      } else {
+        resolve()
+      }
+    }
+
+    conn = createConnection(targetSocketPath, () => {
+      if (expectPeerPid !== undefined && process.platform !== 'win32') {
+        const pid = readConnectedPeerPid(conn)
+        if (pid === undefined) {
+          finish(
+            new UdsControlSendError(
+              'endpoint-unverifiable',
+              'Refusing to send: connected endpoint identity could not be read',
+            ),
+          )
+          return
+        }
+        if (pid !== expectPeerPid) {
+          logForDebugging(
+            `[uds-client] connected endpoint is pid ${pid}, expected ${expectPeerPid} — refusing to write`,
+          )
+          finish(
+            new UdsControlSendError(
+              'wrong-endpoint',
+              'Refusing to send: connected endpoint is not the expected process',
+            ),
+          )
+          return
+        }
+      }
+      conn.write(wire, err => {
+        if (err) {
+          finish(err)
+          return
+        }
+        if (process.platform === 'darwin') {
+          setTimeout(() => {
+            if (!conn.destroyed) conn.end()
+          }, MACOS_UDS_CONTROL_END_DELAY_MS)
+        } else {
+          conn.end()
+        }
+      })
+    })
+    conn.on('error', err => finish(err))
+    conn.on('close', () => {
+      if (!settled) {
+        logForDebugging(`[uds-client] Sent to ${targetSocketPath}`)
+        finish()
+      }
+    })
+    conn.setTimeout(5000, () => {
+      finish(new Error(`Timed out sending to ${targetSocketPath}`))
+    })
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -205,69 +407,29 @@ async function resolveCapabilityForSocket(
 // ---------------------------------------------------------------------------
 
 /**
- * Probe a UDS socket to check if a server is listening (ping/pong).
- * Returns true if the peer responds within the timeout.
+ * Official `ump` — 250ms bare connect. No capability file, no ping/pong.
+ * Connect success or EBUSY (Windows named-pipe full) is alive.
  */
 export async function isPeerAlive(
   socketPath: string,
-  timeoutMs = 3000,
-  authToken?: string,
+  timeoutMs = 250,
+  _authToken?: string,
 ): Promise<boolean> {
-  const token = authToken ?? (await findAuthTokenForSocketPath(socketPath))
-  if (!token) return false
+  const { isLocalSocketAddress } = await import('./udsMessaging.js')
+  if (!isLocalSocketAddress(socketPath)) return false
 
   return new Promise<boolean>(resolve => {
-    const conn = createConnection(socketPath, () => {
-      const ping: UdsMessage = {
-        type: 'ping',
-        ts: new Date().toISOString(),
-        meta: { authToken: token },
-      }
-      conn.write(jsonStringify(ping) + '\n')
-    })
-
-    let resolved = false
-
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        conn.destroy()
-        resolve(false)
-      }
-    }, timeoutMs)
-
-    let buffer = ''
-    conn.on('data', chunk => {
-      if (
-        Buffer.byteLength(buffer, 'utf8') + getChunkBytes(chunk) >
-        MAX_UDS_FRAME_BYTES
-      ) {
-        if (!resolved) {
-          resolved = true
-          clearTimeout(timer)
-          conn.destroy()
-          resolve(false)
-        }
-        return
-      }
-      buffer += chunk.toString()
-      if (buffer.includes('"pong"')) {
-        if (!resolved) {
-          resolved = true
-          clearTimeout(timer)
-          conn.end()
-          resolve(true)
-        }
-      }
-    })
-
-    conn.on('error', () => {
-      if (!resolved) {
-        resolved = true
-        clearTimeout(timer)
-        resolve(false)
-      }
-    })
+    let settled = false
+    const conn = createConnection(socketPath)
+    const done = (alive: boolean): void => {
+      if (settled) return
+      settled = true
+      conn.destroy()
+      resolve(alive)
+    }
+    conn.on('connect', () => done(true))
+    conn.on('error', err => done(getErrnoCode(err) === 'EBUSY'))
+    conn.setTimeout(timeoutMs, () => done(false))
   })
 }
 
@@ -305,21 +467,35 @@ export async function sendToUdsSocket(
       : timeoutMsOrOpts
   const timeoutMs = opts.timeoutMs ?? 5000
 
-  const { parseUdsTarget, isLocalIpcPath } = await import('./udsMessaging.js')
+  const {
+    parseUdsTarget,
+    isLocalSocketAddress,
+    isMessagingLiveOwnerRequired,
+    hasLiveRegisteredInbox,
+  } = await import('./udsMessaging.js')
   const target = parseUdsTarget(targetSocketPath)
-  // densable TSe / WOd: refuse non-local IPC paths before any connect.
-  if (!isLocalIpcPath(target.socketPath)) {
+  // Official cmp: ELe (`isLocalSocketAddress`), not the old double-slash gate.
+  if (!isLocalSocketAddress(target.socketPath)) {
     throw new Error(
       `Refusing to connect to non-local IPC path: ${target.socketPath}`,
     )
   }
   const cap = await resolveCapabilityForSocket(target.socketPath)
-  if (cap.kind !== 'token') {
-    // densable: No running session has registered an inbox at … (ENOINBOX: kind)
-    // — refusing to send to an unvouched pipe / code "no live inbox…"
-    throw new UdsUnvouchedPipeError(target.socketPath, cap.kind)
+  // densable cmp: Sli only when mti() && kind!==token && !(no-key && rvv).
+  // Unix leaves requireLiveOwner off and does not throw here.
+  let authToken: string | undefined =
+    cap.kind === 'token' ? cap.token : undefined
+  if (isMessagingLiveOwnerRequired() && cap.kind !== 'token') {
+    if (
+      !(
+        cap.kind === 'no-key' &&
+        (await hasLiveRegisteredInbox(target.socketPath))
+      )
+    ) {
+      throw new UdsUnvouchedPipeError(target.socketPath, cap.kind)
+    }
+    authToken = undefined
   }
-  const authToken = cap.token
 
   const rawBody = typeof message === 'string' ? message : jsonStringify(message)
 
@@ -354,7 +530,7 @@ export async function sendToUdsSocket(
     from: ownSocket,
     msg_id: msgId,
     meta: {
-      authToken,
+      ...(authToken !== undefined ? { authToken } : {}),
       msg_id: msgId,
       ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
       ...(opts.selfSent === true ? { selfSent: true } : {}),

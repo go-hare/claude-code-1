@@ -1,0 +1,11 @@
+#### "function uq(" 3 [304988790, 334532139, 336823648]
+of(ar().host).hasObserved}function O4r(e){return Yxa.of(ar().host).subscribe(e)}function uq(e=Lne){return fD()&&Vs(e)}async function Uhp(e=Lne){if(!V.TMUX)return null;if(!uq(e)||X3e(e))return null;if(e.checkedTmuxMouseHint)return null;e.checkedTmuxMouseHint=!0;let t=await Uli(e,"mouse");if(t===null||t==="on")return null;return"tmux detected \xB7 scroll with PgUp/PgDn \xB7 or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll"}function Uli(e,t){let{cacheKey:r,args:n}=rEv[t];return e[r]??=yo("tmux",[...n],{useCwd:!1,timeout:2000}).then(({stdout:o,code:i})=>i===0?o.trim():null),e[r]}function Bhp(e=Lne){if(!V.TMUX||Dhp())return;Uli(e,"mouse"),Uli(e,"focus-events")}async f
+---
+t){return t-1-e.height}function iC(e,t){return e.sourceLinks.length?e.depth:t-1}function uq(e){return e.targetLinks.length?e.depth:e.sourceLinks.length?Dy(e.sourceLinks,Ywt)-1:0}var hq=z(()=>{"use strict";oq();o(Ywt,"targetDepth");o(lq,"left");o(cq,"right");o(iC,"justify");o(uq,"center")});function Ly(e){return function(){return e}}var iDe=z(()=>{"use strict";o(Ly,"constant")});function nDe(e,t){return g_(e.source,t.source)||e.index-t.index}function aDe(e,t){return g_(e.target,t.target)||e.index-t.index}function g_(e,t){return e.y0-t.y0}function dq(e){return e.value}function jwt(e){return e.index}function Xwt(e){return e.nodes}function Kwt(e){return e.links}function sDe(e
+---
+removeEventListener("message",s),o.delete(i))}else t.removeEventListener(a,i)}}}function uq(e){return typeof e!="string"?null:/^\d{1,4}(\.\d{1,6})?px$/.test(e)?e:null}var dq="chat-column-overlay-actions-slot";function hde(e){if(typeof e=="object"&&e!==null&&"code"in e){let t=e.code;if(typeof t=="string")return t}return""}async function jg(e,t){let n=globalThis,r=n.claude?.downloads?.save;if(typeof r!="function")return"unsupported";try{let o=e instanceof Blob?e:new Uint8Array(e).buffer;return await r.call(n.claude.downloads,{filename:t,data:o}),"saved"}catch(o){return hde(o)==="declined"?"declined":"unsupported"}}function p1(e){return"unknown"}function gde(e,t){return Math
+---
+#### "uq=function" 0 []
+#### ",uq=()=>" 0 []
+#### "let uq=" 0 []
+#### "uq(){" 0 []

@@ -1,0 +1,30 @@
+OFFSET=305006732
+
+nt?
+tools:
+  - Read
+  - Grep
+---
+
+TODO: system prompt for the subagent.
+`}function gwE(){return Ie({hooks:{SessionStart:[{hooks:[{type:"command",command:"bun ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/on-session-start.ts"}]}]}},null,2)+`
+`}function ywE(){return`#!/usr/bin/env bun
+// SessionStart hook handler. Reads the event from stdin, writes a JSON result
+// to stdout. Swap "bun" for "node" or "python3" in hooks/hooks.json if your
+// users' environment lacks bun.
+const input = await new Response(Bun.stdin.stream()).text()
+const event = JSON.parse(input)
+process.stdout.write(JSON.stringify({}))
+`}function _wE(){return Ie({mcpServers:{"example-remote":{type:"http",url:"https://example.com/mcp"},"example-local":{command:"npx",args:["<your-mcp-server-package>"]}}},null,2)+`
+`}function bwE(){return Ie({example:{command:"example-language-server",args:["--stdio"],extensionToLanguage:{".example":"example"}}},null,2)+`
+`}function vwE(e){return`---
+name: ${e}
+description: TODO \u2014 one line shown in the Output style picker in /config
+force-for-plugin: true
+keep-coding-instructions: true
+---
+
+TODO: the style prompt. This is appended to Claude's system prompt while the
+style is active. With force-for-plugin: true, the style applies automatically
+when this plugin is enabled.
+`}function SwE(e){r

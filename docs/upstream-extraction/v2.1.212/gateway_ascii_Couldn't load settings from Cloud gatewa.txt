@@ -1,0 +1,14 @@
+offset=161444272 needle=b"Couldn't load settings from Cloud gateway"
+count=11
+
+Cannot destructure property 'initSinks' from null or undefined value
+preAction: --plugin-dir-no-mcp inline plugins
+preAction: --plugin-url inline plugins
+gateway
+Couldn't load settings from Cloud gateway 
+. Check your network connection, or run `claude auth login` to re-authenticate.
+--plugin-url
+--plugin-url
+Iterator result interface is not an object.
+preAction_after_remote_settings
+preAction_after_settings_sync

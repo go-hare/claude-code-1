@@ -1,0 +1,434 @@
+#### "falling back to" count=12 [87136470,87136555,89561541,89585055,89585148,89585233]
+--- 87136470 ---
+ide value for "..".Missing resolution package nameBun currently does not support nested "resolutions".Invalid package name "..".resolutionBun currently does not support patched package "resolutions"&Expected string value for resolution "..".optionalpeerDependenciesMeta9warn: CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+..J.[33mwarn.[0m.[2m:.[0m CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+../Refusing to install package with invalid name ".."..Refusing to install "..": tarball root directory ".." is not a valid folder name.Tried to delete root and stopped it."package.json" for ".." failed to resolve: ..."package.json" for ".." failed to open: ..!failed to resolve cache dir for "..": .. failed to verify cache dir for "..": ...moving ".." to cache dir failed
+.	
+  From: .	
+    To: ...moving ".." to cache dir failed
+..
+ From: ..
+   To: .. 
+	@airbnb/node-memwatch
+@anthropic-ai/claude-code
+@apollo/protobufjs
+@apollo/rover
+@appsignal/nodejs
+@arkweid/lefthook
+@aws-amplify/cli
+@bahmutov/add-typescript-to-cypress
+@bazel/concatjs
+@bazel/cypress
+@bazel/esbuild
+@bazel/hide-bazel-files
+@bazel/jasmine
+@bazel/protractor
+@bazel/rollup
+@bazel/terser
+@bazel/typescript
+@bufbuild/buf
+@cdktf/node-pty-prebuilt-multiarch
+@ckeditor/ckeditor5-vue
+@cloudflare/wrangler
+@contrast/fn-inspect
+@cubejs-backend/cubestore
+@cubejs-backend/native
+@cypress/snapshot
+@danmarshall/deckgl-typings
+@datadog/mobile-react-native
+@discordjs/opus
+@eversdk/lib-node
+@evilmartians/lefthook
+@ffmpeg-
+--- 87136555 ---
+ed "resolutions".Invalid package name "..".resolutionBun currently does not support patched package "resolutions"&Expected string value for resolution "..".optionalpeerDependenciesMeta9warn: CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+..J.[33mwarn.[0m.[2m:.[0m CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+../Refusing to install package with invalid name ".."..Refusing to install "..": tarball root directory ".." is not a valid folder name.Tried to delete root and stopped it."package.json" for ".." failed to resolve: ..."package.json" for ".." failed to open: ..!failed to resolve cache dir for "..": .. failed to verify cache dir for "..": ...moving ".." to cache dir failed
+.	
+  From: .	
+    To: ...moving ".." to cache dir failed
+..
+ From: ..
+   To: .. 
+	@airbnb/node-memwatch
+@anthropic-ai/claude-code
+@apollo/protobufjs
+@apollo/rover
+@appsignal/nodejs
+@arkweid/lefthook
+@aws-amplify/cli
+@bahmutov/add-typescript-to-cypress
+@bazel/concatjs
+@bazel/cypress
+@bazel/esbuild
+@bazel/hide-bazel-files
+@bazel/jasmine
+@bazel/protractor
+@bazel/rollup
+@bazel/terser
+@bazel/typescript
+@bufbuild/buf
+@cdktf/node-pty-prebuilt-multiarch
+@ckeditor/ckeditor5-vue
+@cloudflare/wrangler
+@contrast/fn-inspect
+@cubejs-backend/cubestore
+@cubejs-backend/native
+@cypress/snapshot
+@danmarshall/deckgl-typings
+@datadog/mobile-react-native
+@discordjs/opus
+@eversdk/lib-node
+@evilmartians/lefthook
+@ffmpeg-installer/darwin-arm64
+@ffmpeg-installer/darwin-x64
+@ffmpeg-installer/linux-arm
+@ffmp
+#### "not found, falling" count=0 []
+#### "cwd not found" count=0 []
+#### "safeCwd" count=0 []
+#### "hookCwd" count=0 []
+#### "project root" count=12 [87169546,87268324,111249909,219256380,230513978,239155758]
+--- 87169546 ---
+PATH%
+
+
+
+Please run the following command, or double check %PATH% is right.
+
+    powershell -c "irm bun.sh/install.ps1|iex"
+
+Bun failed to remap this bin to its proper location within node_modules.
+This is an indication of a corrupted node_modules directory.
+
+Please run 'bun install --force' in the project root and try
+it again. If this message persists, please open an issue:
+https://github.com/oven-sh/bun/issues
+
+..............................@.......@.......@....r...............~.......................5...&......~...7.~......Mw.j........*....#......RSDS[6V.}j.SLLD PDB.....bun_shim_impl.pdb....#...........%..`$..($...........%...$.......................$.......$.......$.......$.......$...............%......&%......8%......N%......^%......p%...............$.......$.......$.......$.......$...............%......&%......8%......N%......^%......p%................NtClose. .NtCreateFile....NtReadFile....NtWriteFile...RtlExitUserProcess....CreateProcessW..%.GetConsoleMode..g.GetExitCodeProcess....GetLastError..?.SetConsoleMode..%.WaitForSingleObject.ntdll.dll.KERNEL32.dll.........b...!..!h. ..)@.0.P
+p	`.............B.......b.0.`...........	..	B.0.p.`.........r.0
+p	`.............p.`...................................................................................................................................................................................................................................................................................................................
+--- 87268324 ---
+evation
+
+Please run the following command, or double check %PATH% is right.
+
+    powershell -c "irm bun.sh/install.ps1|iex"
+
+Bun failed to remap this bin to its proper location within node_modules.
+This is an indication of a corrupted node_modules directory.
+
+Please run 'bun install --force' in the project root and try
+it again. If this message persists, please open an issue:
+https://github.com/oven-sh/bun/issues
+
+.................................A....P..A....@..A...............................A.......A.......A............................`..A.......A.......A...............................A............................0|.@...............................@.......@....................`.QA...............................A............................0.TA....from_libuv......4. E.............K.E..............3E....
+.......1..E............-. E.............. E............patch-commitInvalidLockfileVersionUnknownLockfileVersionInvalidConfigVersionInvalidPatchedDependenciesInvalidWorkspaceObjectInvalidPackagesObjectInvalidPackageKeyInvalidPackageInfoInvalidSemverInvalidPackagesTreeInvalidTrustedDependenciesSetInvalidOverridesObjectInvalidCatalogObjectInvalidCatalogsObjectInvalidDependencyVersionInvalidPackageResolutionUnexpectedResolution.....4.@............@..........A.......A.......A....p..A.......A.......A.......A.......A.......A....p..A.......A.......A....`..A....P..A.... ..A.......A....`..A....`..A.......A....p..A....init_with_runtime returns the holder::RAW_PTR singleton............
+#### "homedir()" count=12 [70478635,85949532,85953212,300675219,300676938,300712642]
+--- 70478635 ---
+ if (typeof context._writeToOutput === "function") {
+      if (context._writeToOutput(message), typeof context._refreshLine === "function")
+        context._refreshLine();
+    }
+  }
+  [kResolveHistoryPath]() {
+    if (!this[kHistoryPath])
+      try {
+        return this[kHistoryPath] = path.join(os.homedir(), ".node_repl_history"), this[kHistoryPath];
+      } catch (err) {
+        return debug(err.stack), null;
+      }
+    return this[kHistoryPath];
+  }
+  [kHasWritePermission]() {
+    return !(permission.isEnabled() && permission.has("fs.write", this[kHistoryPath]) === !1);
+  }
+  [kValidateOptions](options) {
+    if (typeof options.history < "u")
+      validateArray(options.history, "history");
+    if (typeof options.size < "u")
+      validateNumber(options.size, "size", 0);
+  }
+  async[kInitializeHistory](onReadyCallback) {
+    try {
+      await (await fs.promises.open(this[kHistoryPath], "a+", 384)).close();
+      let data;
+      try {
+        data = await fs.promises.readFile(this[kHistoryPath], "utf8");
+      } catch (err) {
+        return this[kHandleHistoryInitError](err, onReadyCallback);
+      }
+      if (data)
+        this[kHistory] = RegExpPrototypeSymbolSplit(/\r?\n+/, data, this[kSize]);
+      else
+        this[kHistory] = [];
+      validateArray(this[kHistory], "history");
+      let handle = await fs.promises.open(this[kHistoryPath], "r+");
+      this[kHistoryHandle] = handle, await handle.truncate(0), this[kContext].on("line", this[kOnLine].bind(this)), this[kCo
+--- 85949532 ---
+ Show this help message and exit`,N=`${B}Examples${H}
+  bun feedback "Love the new release!"
+  bun feedback report.txt details.log
+  echo "please document X" | bun feedback --email you@example.com`;console.log([J,"",Q,"",q,"",N].join(`
+`))}async function Xq(){let J=process.env.BUN_INSTALL??j.join(C.homedir(),".bun"),Q=j.join(J,"feedback");try{let N=(await I.readFile(Q,"utf8")).trim();return N.length>0?N:void 0}catch(q){if(q.code!=="ENOENT")console.warn(`Unable to read ${Q}:`,q.message);return}}async function Zq(J){let Q=process.env.BUN_INSTALL;if(!Q)return;let q=j.join(Q,"feedback");try{await I.mkdir(j.dirname(q),{recursive:!0}),await I.writeFile(q,`${J.trim()}
+`,"utf8")}catch(N){console.warn(`Unable to persist email to ${q}:`,N.message)}}function $q(){let J=s("git",["config","user.email"],{encoding:"utf8",stdio:["ignore","pipe","ignore"]});if(J.status!==0)return;let Q=J.stdout.trim();return Q.length>0?Q:void 0}async function Hq(J,Q){if(!J)return Q&&S(Q)?Q:void 0;let q=Q;for(;;){let N=await Oq(J,q);if(typeof N==="string"&&S(N))return N.trim();J.output.write(`${P.cross} Please provide a valid email address containing "@" and ".".
+`),q=void 0}}async function Oq(J,Q){let{input:q,output:N}=J;l.emitKeypressEvents(q);let Y=typeof q.isRaw==="boolean"?q.isRaw:void 0;if(typeof q.setRawMode==="function")q.setRawMode(!0);if(typeof q.resume==="function")q.resume();let _=Q??"",W=_.length>0,U="",M=!1,z=()=>{N.write(`\r\x1B[2K${P.question} ${B}Email${H}: `);let D;if(W&&(D=_.length)>0)N.writ
+#### "os.homedir" count=1 [70478632]
+--- 70478632 ---
+    if (typeof context._writeToOutput === "function") {
+      if (context._writeToOutput(message), typeof context._refreshLine === "function")
+        context._refreshLine();
+    }
+  }
+  [kResolveHistoryPath]() {
+    if (!this[kHistoryPath])
+      try {
+        return this[kHistoryPath] = path.join(os.homedir(), ".node_repl_history"), this[kHistoryPath];
+      } catch (err) {
+        return debug(err.stack), null;
+      }
+    return this[kHistoryPath];
+  }
+  [kHasWritePermission]() {
+    return !(permission.isEnabled() && permission.has("fs.write", this[kHistoryPath]) === !1);
+  }
+  [kValidateOptions](options) {
+    if (typeof options.history < "u")
+      validateArray(options.history, "history");
+    if (typeof options.size < "u")
+      validateNumber(options.size, "size", 0);
+  }
+  async[kInitializeHistory](onReadyCallback) {
+    try {
+      await (await fs.promises.open(this[kHistoryPath], "a+", 384)).close();
+      let data;
+      try {
+        data = await fs.promises.readFile(this[kHistoryPath], "utf8");
+      } catch (err) {
+        return this[kHandleHistoryInitError](err, onReadyCallback);
+      }
+      if (data)
+        this[kHistory] = RegExpPrototypeSymbolSplit(/\r?\n+/, data, this[kSize]);
+      else
+        this[kHistory] = [];
+      validateArray(this[kHistory], "history");
+      let handle = await fs.promises.open(this[kHistoryPath], "r+");
+      this[kHistoryHandle] = handle, await handle.truncate(0), this[kContext].on("line", this[kOnLine].bind(this)), this[
+#### "getProjectRoot" count=2 [106445992,300700999]
+--- 106445992 ---
+ermissionPromptToolName.............	.......getPlanSlugCache........	..."...getPolicyPredicateTelemetryEmitted0.............I~0.....getPrCounter.............~0.....getPrintOutputFormat............	.......getProactivitySelectorGate..............	... ...getProactivitySelectorGateEverOn........	.......getProjectRoot..........	.......getPromptCache1hAllowlist...............	.......getPromptId.............	.......getPromptIndex..........	... ...getProposeGoalAvailabilityLogged........	.......getQuestionPreviewFormat.........e..&...getRefusalFallbackLatchOriginRequestId..........	.......getRefusalFallbackModelLatch............	.......getRegisteredHooks0...............0.....getRendererModeForAnalytics...............0.....getReplConfigArgv...............	.......getResolvedOrgDefault...........I.0.....getRootSession..........I.......getRvSupervisorLinkLive.........	.......getScheduledTasksEnabled........I.0.#...getSdkAgentProgressSummariesEnabled.............	.......getSdkBetas.............	.......getSdkDialogCapabilitySource............	.......getSdkOAuthTokenRefreshCallback.........	.......getSdkSupportedDialogKinds..............	.......getSearchToolsOptIn.............	... ...getServedModelsForRequestedModel................getSessionApprovedMcpServers..............	.....getSessionBypassPermissionsMode...........0.....getSessionCounter...............	.......getSessionCreatedTeams............0.....getSessionCronTasks.............	.......getSessionId............	.......getSessionIngres
+--- 300700999 ---
+ionId:()=>xHt,getPendingBranchLinks:()=>nRn,getPendingPrLinks:()=>jBo,getPermissionPromptToolName:()=>Tke,getPlanSlugCache:()=>_ft,getPolicyPredicateTelemetryEmitted:()=>yGs,getPrCounter:()=>oQt,getPrintOutputFormat:()=>s3s,getProactivitySelectorGate:()=>Jm_,getProactivitySelectorGateEverOn:()=>Zm_,getProjectRoot:()=>pl,getPromptCache1hAllowlist:()=>HGs,getPromptId:()=>Sft,getPromptIndex:()=>dRn,getProposeGoalAvailabilityLogged:()=>vGs,getQuestionPreviewFormat:()=>kBo,getRefusalFallbackLatchOriginRequestId:()=>IWs,getRefusalFallbackModelLatch:()=>eXe,getRegisteredHooks:()=>wre,getRendererModeForAnalytics:()=>Dxn,getReplConfigArgv:()=>Gze,getResolvedOrgDefault:()=>Sxn,getRootSession:()=>ar,getRvSupervisorLinkLive:()=>d3s,getScheduledTasksEnabled:()=>KMr,getSdkAgentProgressSummariesEnabled:()=>LHt,getSdkBetas:()=>jR,getSdkDialogCapabilitySource:()=>MWs,getSdkOAuthTokenRefreshCallback:()=>rQt,getSdkSupportedDialogKinds:()=>eQt,getSearchToolsOptIn:()=>T3s,getServedModelsForRequestedModel:()=>OGs,getSessionApprovedMcpServers:()=>gxn,getSessionBypassPermissionsMode:()=>Yze,getSessionCounter:()=>KWs,getSessionCreatedTeams:()=>BBo,getSessionCronTasks:()=>n$,getSessionId:()=>Vt,getSessionIngressToken:()=>L3s,getSessionProjectDir:()=>MB,getSessionSkillAllowlist:()=>Ike,getSessionStartTime:()=>GZt,getSessionStartType:()=>R3s,getSessionTrustAccepted:()=>rXe,getSkillsSyncVetoed:()=>RV,getSlowOperations:()=>IRu,getStartupPolicySnapshot:()=>G3s,getStatsStore:()=>HHt,getStickyBetas:()=>IM,ge
+#### "spawn(command" count=0 []
+#### "ENOENT after" count=0 []
+#### "working directory was deleted" count=2 [85698698,85698854]
+--- 85698698 ---
+0m ...{..: .....[31m...[0m.[2m:.[0m ....warn: .....[0m.[33mwarn.[0m.[2m:.[0m ...set abovecast_sliceinput.byteLengthExpected a string to parse.. HM.toJSONHeaders ..Timeout.. ..(#....
+, repeats)....Timeout.. ..(#.....)...	Immediate.. ..(#.....)...[0mHeaders .[0m.[34m.[0m.[2m.[33m...error: The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again.......[0m.[31merror.[0m.[2m:.[0m The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again...SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)..a.[0m.[31merror.[0m: bun ran out of file descriptors .[2m(.[31mProcessFdQuotaExceeded.[0m.[2m).[0m.."error: An unknown error occurred (..)..@.[0m.[31merror.[0m.[2m:.[0m An unknown error occurred .[2m(.[31m..[0m.[2m).[0m..ENOENTBun could not find a file, and the code that produces this error is missing a better error.MissingPackageJSON=error: Bun could not find a package.json file to install from..R.[0m.[31merror.[0m.[2m:.[0m Bun could not find a package.json file to install from..,note: Run "bun init" to initialize a project..=.[34mnote.[0m.[2m:.[0m Run "bun init" to initialize a project..#error: An internal error occurred (..)..=.[0m.
+--- 85698854 ---
+ders ..Timeout.. ..(#....
+, repeats)....Timeout.. ..(#.....)...	Immediate.. ..(#.....)...[0mHeaders .[0m.[34m.[0m.[2m.[33m...error: The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again.......[0m.[31merror.[0m.[2m:.[0m The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again...SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)..a.[0m.[31merror.[0m: bun ran out of file descriptors .[2m(.[31mProcessFdQuotaExceeded.[0m.[2m).[0m.."error: An unknown error occurred (..)..@.[0m.[31merror.[0m.[2m:.[0m An unknown error occurred .[2m(.[31m..[0m.[2m).[0m..ENOENTBun could not find a file, and the code that produces this error is missing a better error.MissingPackageJSON=error: Bun could not find a package.json file to install from..R.[0m.[31merror.[0m.[2m:.[0m Bun could not find a package.json file to install from..,note: Run "bun init" to initialize a project..=.[34mnote.[0m.[2m:.[0m Run "bun init" to initialize a project..#error: An internal error occurred (..)..=.[0m.[31merror.[0m.[2m:.[0m An internal error occurred (.[31m...[0m)..An error occurred while parsing codeA.......C.......E.......G.......I.......K.......M......
+#### "SessionStart" count=12 [99464015,102361472,106447299,106447339,106457035,106678974]
+--- 99464015 ---
+orSession............I.......rendererMode............I`......replaceRendererMode.............	.......strictToolResultPairing.........	a......replaceStrictToolResultPairing...........`..
+...clientType...............a......replaceClientType...............	.......sessionStartType........	.......replaceSessionStartType.........	.......questionPreviewFormat...........	.......replaceQuestionPreviewFormat............	.......replConfigArgv..........	.......replaceReplConfigArgv............c......userMsgOptIn.............c......replaceUserMsgOptIn.............	.......searchToolsOptIn........	.......replaceSearchToolsOptIn.........	.......todoToolsOptIn..........	.......replaceTodoToolsOptIn...........	.......wizardOperatorToolsEnabled..............	...!...replaceWizardOperatorToolsEnabledf......................pollEventIngressWired...........	.......markPollEventIngressWired...............	... ...sdkAgentProgressSummariesEnabled........	...'...replaceSdkAgentProgressSummariesEnabled.................sessionPersistenceDisabled...............g..!...replaceSessionPersistenceDisabled...............	.......sessionBypassPermissionsMode............	...#...replaceSessionBypassPermissionsMode..............i......disableSlashCommands............	.......replaceDisableSlashCommands.............	.......scheduledTasksEnabled............j......replaceScheduledTasksEnabled............I.......initJsonSchema..........I.......replaceInitJsonSchema...........	.......cliSessionConfigCarried..........j.....
+--- 102361472 ---
+tification | Notification type | Run on notifications |
+| Stop | - | Run when Claude stops (including clear, resume, compact) |
+| PreCompact | "manual"/"auto" | Before compaction |
+| PostCompact | "manual"/"auto" | After compaction (receives summary) |
+| UserPromptSubmit | - | When user submits |
+| SessionStart | - | When session starts |
+
+**Common tool matchers:** `Bash`, `Write`, `Edit`, `Read`, `Glob`, `Grep`
+
+### Hook Types
+
+**1. Command Hook** - Runs a shell command:
+```json
+{ "type": "command", "command": "prettier --write $FILE", "timeout": 30 }
+```
+
+**2. Prompt Hook** - Evaluates a condition with LLM:
+```json
+{ "type": "prompt", "prompt": "Is this safe? $ARGUMENTS" }
+```
+Only available for tool events: PreToolUse, PostToolUse, PermissionRequest.
+
+**3. Agent Hook** - Runs an agent with tools:
+```json
+{ "type": "agent", "prompt": "Verify tests pass: $ARGUMENTS" }
+```
+Only available for tool events: PreToolUse, PostToolUse, PermissionRequest.
+
+### Hook Input (stdin JSON)
+```json
+{
+  "session_id": "abc123",
+  "tool_name": "Write",
+  "tool_input": { "file_path": "/path/to/file.txt", "content": "..." },
+  "tool_response": { "success": true }  // PostToolUse only
+}
+```
+
+### Hook JSON Output
+
+Hooks can return JSON to control behavior:
+
+```json
+{
+  "systemMessage": "Warning shown to user in UI",
+  "continue": false,
+  "stopReason": "Message shown when blocking",
+  "suppressOutput": false,
+  "decision": "block",
+  "reason": "Explanation for decision",
+  "hookSpecificOutput": {
+
+#### "keep-alive" count=12 [71225377,71265795,71268959,71296275,71319916,71320649]
+--- 71225377 ---
+("free");
+}
+Agent.prototype.keepSocketAlive = function keepSocketAlive(socket) {
+  socket.setKeepAlive(!0, this.keepAliveMsecs), socket.unref();
+  let agentTimeout = this.options.timeout || 0, canKeepSocketAlive = !0, res = socket._httpMessage?.res;
+  if (res) {
+    let keepAliveHint = res.headers["keep-alive"];
+    if (keepAliveHint) {
+      let hint = /^timeout=(\d+)/.exec(keepAliveHint)?.[1];
+      if (hint) {
+        let serverHintTimeout = Number.parseInt(hint) * 1000 - this.agentKeepAliveTimeoutBuffer;
+        if (serverHintTimeout = serverHintTimeout > 0 ? serverHintTimeout : 0, serverHintTimeout === 0)
+          canKeepSocketAlive = !1;
+        else if (serverHintTimeout < agentTimeout)
+          agentTimeout = serverHintTimeout;
+      }
+    }
+  }
+  if (socket.timeout !== agentTimeout)
+    socket.setTimeout(agentTimeout);
+  return canKeepSocketAlive;
+};
+Agent.prototype.reuseSocket = function reuseSocket(socket, req) {
+  socket.removeListener("error", freeSocketErrorListener), req.reusedSocket = !0, socket.ref();
+};
+Agent.prototype.destroy = function destroy() {
+  let sets = [this.freeSockets, this.sockets];
+  for (let s = 0;s < sets.length; s++) {
+    let set = sets[s], keys = Object.keys(set);
+    for (let v = 0;v < keys.length; v++) {
+      let setName = set[keys[v]];
+      for (let n = 0;n < setName.length; n++)
+        setName[n].destroy();
+    }
+  }
+};
+function setRequestSocket(agent, req, socket) {
+  req.onSocket(socket);
+  let agentTimeout = agent.options.timeo
+--- 71265795 ---
+on) {
+    let shouldSendKeepAlive = this.shouldKeepAlive && (state.contLen || this.useChunkedEncodingByDefault || this.agent);
+    if (shouldSendKeepAlive && this.maxRequestsOnConnectionReached)
+      header += `Connection: close\r
+`;
+    else if (shouldSendKeepAlive) {
+      header += `Connection: keep-alive\r
+`;
+      let keepAliveTimeout = this._keepAliveTimeout;
+      if (keepAliveTimeout && this._defaultKeepAlive) {
+        let timeoutSeconds = MathFloor(keepAliveTimeout / 1000), max = "", maxRequestsPerSocket = this._maxRequestsPerSocket;
+        if (~~maxRequestsPerSocket > 0)
+          max = `, max=${maxRequestsPerSocket}`;
+        header += `Keep-Alive: timeout=${timeoutSeconds}${max}\r
+`;
+      }
+    } else
+      this._last = !0, header += `Connection: close\r
+`;
+  }
+  if (!state.contLen && !state.te)
+    if (!this._hasBody)
+      this.chunkedEncoding = !1;
+    else if (!this.useChunkedEncodingByDefault)
+      this._last = !0;
+    else {
+      let contentLength;
+      if (!state.trailer && !this._removedContLen && typeof (contentLength = this._contentLength) === "number")
+        header += "Content-Length: " + contentLength + `\r
+`;
+      else if (!this._removedTE)
+        header += `Transfer-Encoding: chunked\r
+`, this.chunkedEncoding = !0;
+      else
+        this._last = !0;
+    }
+  if (this.chunkedEncoding !== !0 && state.trailer)
+    throw @makeErrorWithCode(75);
+  if (this._header = header + `\r
+`, this._headerSent = !1, state.expect)
+    this._send("");
+}
+func
+#### "KeepAlive" count=12 [70230093,71012686,71012710,71012766,71012802,71020775]
+--- 70230093 ---
+== "boolean")
+    return wState?.closed || rState?.closed;
+  let _closed = stream._closed;
+  if (typeof _closed === "boolean" && isOutgoingMessage(stream))
+    return _closed;
+  return null;
+}
+function isOutgoingMessage(stream) {
+  return typeof stream._closed === "boolean" && typeof stream._defaultKeepAlive === "boolean" && typeof stream._removedConnection === "boolean" && typeof stream._removedContLen === "boolean";
+}
+function isServerResponse(stream) {
+  return typeof stream._sent100 === "boolean" && isOutgoingMessage(stream);
+}
+function isServerRequest(stream) {
+  return typeof stream._consuming === "boolean" && typeof stream._dumped === "boolean" && stream.req?.upgradeOrConnect === @undefined;
+}
+function willEmitClose(stream) {
+  if (!isNodeStream(stream))
+    return null;
+  let { _writableState: wState, _readableState: rState } = stream, state = wState || rState;
+  return !state && isServerResponse(stream) || !!(state?.autoDestroy && state.emitClose && state.closed === !1);
+}
+function isDisturbed(stream) {
+  return !!(stream && (stream[kIsDisturbed] ?? (stream.readableDidRead || stream.readableAborted)));
+}
+function isErrored(stream) {
+  return !!(stream && (stream[kIsErrored] ?? stream.readableErrored ?? stream.writableErrored ?? stream._readableState?.errorEmitted ?? stream._writableState?.errorEmitted ?? stream._readableState?.errored ?? stream._writableState?.errored));
+}
+$ = {
+  kOnConstructed,
+  isDestroyed,
+  kIsDestroyed,
+  isDisturbed,
+  isErrored,
+  isReadable
+--- 71012686 ---
+ bunTLSConnectOptions = Symbol.for("::buntlsconnectoptions::"), kNativeSecureContextCtor = Symbol.for("::buntlsnativesecurecontextctor::"), kReinitializeHandle = Symbol("kReinitializeHandle"), kRealListen = Symbol("kRealListen"), kSetNoDelay = Symbol("kSetNoDelay"), kSetTOS = Symbol("kSetTOS"), kSetKeepAlive = Symbol("kSetKeepAlive"), kSyncWriteFd = Symbol("kSyncWriteFd"), kSetKeepAliveInitialDelay = Symbol("kSetKeepAliveInitialDelay"), kConnectOptions = Symbol("connect-options"), kAttach = Symbol("kAttach"), kCloseRawConnection = Symbol("kCloseRawConnection"), kupgraded = Symbol("kupgraded"), kAdoptedTLSRaw = Symbol("kAdoptedTLSRaw"), ksocket = Symbol("ksocket"), khandlers = Symbol("khandlers"), kclosed = Symbol("closed"), kended = Symbol("ended"), kpendingSession = Symbol("pendingSession"), kSNIError = Symbol("kSNIError"), kALPNError = Symbol("kALPNError"), kPerfHooksNetConnectContext = Symbol("kPerfHooksNetConnectContext"), khandshakeTimer = Symbol("khandshakeTimer"), kerrorEmitted = Symbol("kerrorEmitted"), kUserUnrefed = Symbol("kUserUnrefed"), kPausedUnref = Symbol("kPausedUnref"), kOnreadDeliver = Symbol("kOnreadDeliver");
+function noop() {}
+function onUpgradeAttachedWrite(chunk, encoding, callback, onClose) {
+  this.off("close", onClose), this._write(chunk, encoding, callback);
+}
+function onUpgradeWriteClose(callback) {
+  if (this[kwriteCallback] !== callback)
+    return;
+  this[kwriteCallback] = null, callback(@makeErrorWithCode(225));
+}
+var kUpgradeAttached = Symbol
+#### "vimMode===" count=2 [312192647,322788012]
+--- 312192647 ---
+{IW.setState((t)=>{if(t.value===e)return t;if(t.launchWarning!==null&&t.value!==""&&e==="")return{...t,value:e,launchWarning:null,savedCursorOffset:null};return{...t,value:e,savedCursorOffset:null}})}function hyr(e){IW.setState((t)=>t.active===e?t:{...t,active:e})}function _bl(e){IW.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function cim(e){IW.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function uim(){return IW.getState().launchWarning}function nEt(e){IW.setState((t)=>t.launchWarning?.type===e.type&&t.launchWarning.prefillLength===e.prefillLength?t:{...t,launchWarning:e})}var yhw,IW;var Dqe=A(()=>{VRe();yhw={value:"",active:!1,launchWarning:null,vimMode:"INSERT",savedCursorOffset:null},IW=yP({...yhw})});class dim{resolver=null;registerResolver(e){this.resolver=e}}function IZr(e,t){pim.of(e).registerResolver(t)}function fim(e,t){return pim.of(e).resolver?.(t)??!1}var pim;var bbl=A(()=>{pim=new Ar(()=>new dim)});var FUi={};Et(FUi,{RendezvousServer:()=>Sbl,clearCommandParkBlocked:()=>Abl,clearStartupDialogBlocked:()=>Thw,disarmStartupWedgeWatchdog:()=>wbl,markCommandParkBlocked:()=>Ebl,markReplayNoOp:()=>Tbl,markStartupDialogBlocked:()=>Ahw,rendezvousBindings:()=>yim,sendRv:()=>Mqe,startRendezvousServer:()=>bhw,stopRendezvousServer:()=>vhw});class Sbl{server;current=void 0;heartbeat;wedgeTimer=void 0;wedgeDisarmed=!1;authToken;currentAuthed=!1;unauthedDrops=0;gateReported=!1;nativeBrowserEnv;pendingInteractiveMarks;storageV5;constructor(e,t,r,n,o){th
+--- 322788012 ---
+ 0:void 0,Ro=await Gge(K,w,Hr);if(Ro.error)Pl({key:"external-editor-error",kind:"warning",text:Ro.error,color:"warning",priority:"high"}),be("input_external_editor","editor_error");else Ee("input_external_editor");if(Ro.content!==null&&Ro.content!==K)DI(K,ze,w),mt(Ro.content),We(ZW()&&IW.getState().vimMode==="NORMAL"?hTr(Ro.content.normalize("NFC"),Ro.content.length):Ro.content.length)}catch(Hr){if(Hr instanceof Error)Te(Hr);Pl({key:"external-editor-error",kind:"warning",text:`External editor failed: ${le(Hr)}`,color:"warning",priority:"high"}),pe("input_external_editor","spawn_failed")}finally{ei(!1)}},[K,ze,w,a,DI,mt,Pl]),$E=qs.useCallback(()=>{if(K.trim()===""&&g!==void 0){if(mt(g.text),We(g.cursorOffset),T(g.pastedContents),g.launchWarning)nEt(g.launchWarning);y(void 0),Ee("input_stash")}else if(K.trim()!=="")y({text:K,cursorOffset:ze,pastedContents:w,launchWarning:uim()??void 0}),mt(""),We(0),T({}),ln((Hr)=>{if(Hr.hasUsedStash)return Hr;return{...Hr,hasUsedStash:!0}},Bt),Ee("input_stash")},[K,ze,g,mt,y,w,T,Bt]),[cA,qT]=qs.useState(0);qs.useLayoutEffect(()=>{if(cA===0)return;Yp.get(process.stdout)?.forceRedraw()},[cA]),ziy();let b1=qs.useCallback(()=>{qT((Hr)=>Hr+1)},[]),uA=qs.useCallback(()=>{if(!wa())return!1;return Pl({key:"remote-inference-config-unavailable",kind:"feedback",text:"Fast mode switching in cloud sessions is coming soon \u2014 set at session creation for now",priority:"medium"}),!0},[Pl]),cZ=qs.useCallback(()=>{if(wa()){if(o||s||m!=="prompt"||Ki.current){
+#### "vimMode==" count=2 [312192647,322788012]
+--- 312192647 ---
+{IW.setState((t)=>{if(t.value===e)return t;if(t.launchWarning!==null&&t.value!==""&&e==="")return{...t,value:e,launchWarning:null,savedCursorOffset:null};return{...t,value:e,savedCursorOffset:null}})}function hyr(e){IW.setState((t)=>t.active===e?t:{...t,active:e})}function _bl(e){IW.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function cim(e){IW.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function uim(){return IW.getState().launchWarning}function nEt(e){IW.setState((t)=>t.launchWarning?.type===e.type&&t.launchWarning.prefillLength===e.prefillLength?t:{...t,launchWarning:e})}var yhw,IW;var Dqe=A(()=>{VRe();yhw={value:"",active:!1,launchWarning:null,vimMode:"INSERT",savedCursorOffset:null},IW=yP({...yhw})});class dim{resolver=null;registerResolver(e){this.resolver=e}}function IZr(e,t){pim.of(e).registerResolver(t)}function fim(e,t){return pim.of(e).resolver?.(t)??!1}var pim;var bbl=A(()=>{pim=new Ar(()=>new dim)});var FUi={};Et(FUi,{RendezvousServer:()=>Sbl,clearCommandParkBlocked:()=>Abl,clearStartupDialogBlocked:()=>Thw,disarmStartupWedgeWatchdog:()=>wbl,markCommandParkBlocked:()=>Ebl,markReplayNoOp:()=>Tbl,markStartupDialogBlocked:()=>Ahw,rendezvousBindings:()=>yim,sendRv:()=>Mqe,startRendezvousServer:()=>bhw,stopRendezvousServer:()=>vhw});class Sbl{server;current=void 0;heartbeat;wedgeTimer=void 0;wedgeDisarmed=!1;authToken;currentAuthed=!1;unauthedDrops=0;gateReported=!1;nativeBrowserEnv;pendingInteractiveMarks;storageV5;constructor(e,t,r,n,o){th
+--- 322788012 ---
+ 0:void 0,Ro=await Gge(K,w,Hr);if(Ro.error)Pl({key:"external-editor-error",kind:"warning",text:Ro.error,color:"warning",priority:"high"}),be("input_external_editor","editor_error");else Ee("input_external_editor");if(Ro.content!==null&&Ro.content!==K)DI(K,ze,w),mt(Ro.content),We(ZW()&&IW.getState().vimMode==="NORMAL"?hTr(Ro.content.normalize("NFC"),Ro.content.length):Ro.content.length)}catch(Hr){if(Hr instanceof Error)Te(Hr);Pl({key:"external-editor-error",kind:"warning",text:`External editor failed: ${le(Hr)}`,color:"warning",priority:"high"}),pe("input_external_editor","spawn_failed")}finally{ei(!1)}},[K,ze,w,a,DI,mt,Pl]),$E=qs.useCallback(()=>{if(K.trim()===""&&g!==void 0){if(mt(g.text),We(g.cursorOffset),T(g.pastedContents),g.launchWarning)nEt(g.launchWarning);y(void 0),Ee("input_stash")}else if(K.trim()!=="")y({text:K,cursorOffset:ze,pastedContents:w,launchWarning:uim()??void 0}),mt(""),We(0),T({}),ln((Hr)=>{if(Hr.hasUsedStash)return Hr;return{...Hr,hasUsedStash:!0}},Bt),Ee("input_stash")},[K,ze,g,mt,y,w,T,Bt]),[cA,qT]=qs.useState(0);qs.useLayoutEffect(()=>{if(cA===0)return;Yp.get(process.stdout)?.forceRedraw()},[cA]),ziy();let b1=qs.useCallback(()=>{qT((Hr)=>Hr+1)},[]),uA=qs.useCallback(()=>{if(!wa())return!1;return Pl({key:"remote-inference-config-unavailable",kind:"feedback",text:"Fast mode switching in cloud sessions is coming soon \u2014 set at session creation for now",priority:"medium"}),!0},[Pl]),cZ=qs.useCallback(()=>{if(wa()){if(o||s||m!=="prompt"||Ki.current){
+#### "setVimMode" count=0 []
+#### "organization policy check" count=0 []
+#### "rejected by an organization" count=0 []

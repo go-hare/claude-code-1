@@ -47,7 +47,7 @@ import { useAppState, useSetAppState, useAppStateStore } from '../../state/AppSt
 import { ModelPicker } from '../ModelPicker.js';
 import { getMainLoopModel, modelDisplayString, isOpus1mMergeEnabled } from '../../utils/model/model.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
-import { ClaudeMdExternalIncludesDialog } from '../ClaudeMdExternalIncludesDialog.js';
+import { ClaudeMdExternalIncludesDialog, recordExternalIncludesDecision } from '../ClaudeMdExternalIncludesDialog.js';
 import { ChannelDowngradeDialog, type ChannelDowngradeChoice } from '../ChannelDowngradeDialog.js';
 import { Dialog } from '@anthropic/ink';
 import { Select } from '../CustomSelect/index.js';
@@ -166,6 +166,10 @@ type Setting =
       options: string[];
       onChange(value: string): void;
       type: 'enum';
+      // densable: only crossSessionInbound sets pickToCommit; opens EnumPicker.
+      pickToCommit?: boolean;
+      // densable row flag; panel does not consume it (CLI key=value host does).
+      consentGated?: boolean;
     })
   | (SettingBase & {
       // For enums that are set by a custom component, we don't need to pass options,
@@ -182,7 +186,8 @@ type SubMenu =
   | 'OutputStyle'
   | 'ChannelDowngrade'
   | 'Language'
-  | 'EnableAutoUpdates';
+  | 'EnableAutoUpdates'
+  | 'EnumPicker';
 export function Config({
   onClose,
   context,
@@ -286,6 +291,23 @@ export function Config({
   const isDirty = React.useRef(false);
   const [showThinkingWarning, setShowThinkingWarning] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState<SubMenu | null>(null);
+  // densable Ye/Fe — setting id for EnumPicker (pickToCommit enums).
+  const [enumPickerId, setEnumPickerId] = useState<string | null>(null);
+  // densable Pe / w0t — tengu_maple_sundial (default false).
+  const mapleSundial = getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false);
+  // densable w/T — Lf().hasClaudeMdExternalIncludesApproved === true.
+  const [externalIncludesApproved, setExternalIncludesApproved] = useState(
+    () => getCurrentProjectConfig().hasClaudeMdExternalIncludesApproved === true,
+  );
+  // densable Jr — Pe && managedEnum && showExternalIncludesDialog && w.
+  const isMapleJrExternalIncludes = useCallback(
+    (setting: Setting) =>
+      mapleSundial &&
+      setting.type === 'managedEnum' &&
+      setting.id === 'showExternalIncludesDialog' &&
+      externalIncludesApproved,
+    [mapleSundial, externalIncludesApproved],
+  );
   // densable sda: measure keyboard-hint footer after paint so maxVisible can
   // reserve its rows (flexShrink:0 alone isn't enough when list height is
   // computed up-front).
@@ -1079,6 +1101,7 @@ export function Config({
           {
             id: 'dialogExpiry',
             label: 'Dialog expiry',
+            consentGated: true,
             value: settingsData?.dialogExpiry ?? 'default',
             options: ['default', '60s', '5m', '10m', 'never'],
             type: 'enum' as const,
@@ -1108,6 +1131,8 @@ export function Config({
           {
             id: 'crossSessionInbound',
             label: 'Messages from your other sessions',
+            consentGated: true,
+            pickToCommit: true,
             value: settingsData?.crossSessionInbound ?? 'default',
             options: ['default', 'accept', 'hold', 'refuse'],
             type: 'enum' as const,
@@ -1439,6 +1464,18 @@ export function Config({
     });
   }, [settingsItems, searchQuery]);
 
+  // densable Kr — EnumPicker looks up Ye on the unfiltered settings list (Dt).
+  const enumPickerSetting = React.useMemo(() => {
+    const found = settingsItems.find(item => item.id === enumPickerId);
+    return found && found.type === 'enum' ? found : undefined;
+  }, [settingsItems, enumPickerId]);
+
+  const closeEnumPicker = useCallback(() => {
+    setEnumPickerId(null);
+    setShowSubmenu(null);
+    setTabsHidden(false);
+  }, [setTabsHidden]);
+
   // Adjust selected index when filtered list shrinks, and keep the selected
   // item visible when maxVisible changes (e.g., terminal resize).
   React.useEffect(() => {
@@ -1732,6 +1769,13 @@ export function Config({
       return;
     }
 
+    // densable Jr(Rn) → phn(false, "config_toggle") then T(false); no submenu.
+    if (isMapleJrExternalIncludes(setting)) {
+      recordExternalIncludesDecision(false, 'config_toggle', context);
+      setExternalIncludesApproved(false);
+      return;
+    }
+
     if (
       setting.id === 'theme' ||
       setting.id === 'model' ||
@@ -1796,6 +1840,13 @@ export function Config({
       return;
     }
 
+    if (setting.type === 'enum' && setting.pickToCommit) {
+      setEnumPickerId(setting.id);
+      setShowSubmenu('EnumPicker');
+      setTabsHidden(true);
+      return;
+    }
+
     if (setting.type === 'enum') {
       isDirty.current = true;
       const currentIndex = setting.options.indexOf(setting.value);
@@ -1806,6 +1857,7 @@ export function Config({
   }, [
     autoUpdaterDisabledReason,
     filteredSettingsItems,
+    isMapleJrExternalIncludes,
     selectedIndex,
     settingsData?.autoUpdatesChannel,
     setTabsHidden,
@@ -2058,6 +2110,31 @@ export function Config({
             </Byline>
           </Text>
         </>
+      ) : showSubmenu === 'EnumPicker' && enumPickerSetting ? (
+        <>
+          <Dialog title={enumPickerSetting.label} onCancel={closeEnumPicker} hideBorder hideInputGuide>
+            <Select
+              options={enumPickerSetting.options.map(option => ({
+                label: option,
+                value: option,
+              }))}
+              defaultValue={String(enumPickerSetting.value)}
+              defaultFocusValue={String(enumPickerSetting.value)}
+              onChange={(value: string) => {
+                closeEnumPicker();
+                isDirty.current = true;
+                enumPickerSetting.onChange(value);
+              }}
+              onCancel={closeEnumPicker}
+            />
+          </Dialog>
+          <Text dimColor>
+            <Byline>
+              <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+              <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
+            </Byline>
+          </Text>
+        </>
       ) : showSubmenu === 'EnableAutoUpdates' ? (
         <Dialog
           title="Enable Auto-Updates"
@@ -2227,6 +2304,17 @@ export function Config({
                               {setting.value.toString()}
                             </Text>
                           )}
+                          {mapleSundial &&
+                            ((setting.type === 'enum' && setting.pickToCommit === true) ||
+                              (setting.type === 'managedEnum' &&
+                                !isMapleJrExternalIncludes(setting) &&
+                                (setting.id !== 'autoUpdatesChannel' ||
+                                  autoUpdaterDisabledReason !== null ||
+                                  (settingsData?.autoUpdatesChannel ?? 'latest') === 'latest'))) && (
+                              <Text color={isSelected ? 'suggestion' : 'permission'} dimColor>
+                                {` ${figures.pointerSmall}`}
+                              </Text>
+                            )}
                         </Box>
                       </Box>
                     </React.Fragment>

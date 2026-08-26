@@ -26,7 +26,11 @@ describe('densable 2.1.232 #3 SendMessage bare name', () => {
   })
 
   test('ListAgents-oriented worker rows present', () => {
-    expect(promptSrc).toContain('Any agent from \\`ListAgents\\`')
+    // densable 2.1.239 BEm interpolates e_ (LIST_AGENTS_TOOL_NAME), not a
+    // hardcoded ListAgents token in the template.
+    expect(promptSrc).toContain('Any agent from \\`')
+    expect(promptSrc.includes('$' + '{listAgents}')).toBe(true)
+    expect(promptSrc).toContain('LIST_AGENTS_TOOL_NAME')
     expect(promptSrc).toContain('worker [3fa9c1]')
   })
 

@@ -1,0 +1,3 @@
+nction kti(e){return e!==void 0&&e.agentType==="subagent"&&e.isAsync===!1}function dQ(e){return e.agentType==="subagent"}function MZe(e){return dQ(e)&&!e.isMainSession}function q_a(e){if(!dQ(e)||!e.su
+bagentName)return;return e.isBuiltIn?e.subagentName:"user-defined"}function eLt(e){try{if(!dQ(e))return{};let t=q_a(e);if(t===void 0)return{};return{subagent_type:t,is_built_in_agent:e.isBuiltIn??!1}}
+catch{return{}}}function QFn(e){if(!e||!dQ(e)||!e.workflowRunId)return{};return{"workflow.run_id":e.

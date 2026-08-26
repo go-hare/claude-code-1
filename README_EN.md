@@ -43,7 +43,24 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 18 / N/A 1**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.45**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 pack HAVE 45 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 18 / N/A 1** + **236 HAVE 20 / PARTIAL 12** + **237 HAVE 3** + **238 HAVE 34 / PARTIAL 5**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.46**; trust `package.json` / npm) and may not match git tags.
+
+#### densable 2.1.236–2.1.238 alignment (2.7.46)
+
+Sources of truth:
+
+- `docs/upstream-extraction/v2.1.236/official-236-checklist.md` (**HAVE 20 / PARTIAL 12 / N/A 1**)
+- `docs/upstream-extraction/v2.1.237/official-237-checklist.md` (**HAVE 3**)
+- `docs/upstream-extraction/v2.1.238/official-238-checklist.md` (**HAVE 34 / PARTIAL 5 / GAP 0**)
+
+Stacked on **2.7.45** (235 + 234 quota). **2.7.46** ships **236–238** CLI product surface and restores **234 leftovers** still present in official 238 SEA (stale Enter `qvm`/`hSl`, SendMessage `to` 300/`searchTruncated`, sessionRestore `GGc`, session persist, markdown `d0l`, marketplace allowlist).
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **236** | `ANTHROPIC_DEFAULT_MODEL`, SendMessage `notify_when_idle`, sandbox `**/.env` deny, fullscreen single-fail fallback to classic, goal idle check-in, `/model` `LFh`/`sgM` | gold-weak / live E2E stay PARTIAL; **#33 VSCode host a11y N/A** |
+| **237** | gateway/custom baseURL `canMarkApiSystem`; built-in **Concise** output style; `isOutputLineTruncated` `r7` typeof+wrap | **no** Proactive invent |
+| **238** | `keybindingFlavor` readline, marketplace/MCP `headersHelper`, runner defer-shutdown / Proxy-Authorization, isolation `work-tree-elsewhere`, RC Stop/sign-out/403, update check 10s, 34 HAVE | PARTIAL: #4 live ceiling, #16 live discover, #18 user-visible isolation, #24 chrome UI, #25 live remint. **no** leftover #3 `identity_changed` / G0S / storageV5 |
+| **234 leftover** | stale Enter resume, `to` single-line+300, `searchTruncated`, UNC/NT refuse chdir, session persist + `permissionRecheck`, markdown href/table/HR | no G0S unknowable-rescan invent |
 
 #### densable 2.1.234–2.1.235 alignment (2.7.45)
 
@@ -219,10 +236,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.45)
+### Recent updates (2.7.5 → 2.7.46)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.46** | **densable 2.1.236–2.1.238**: 236 HAVE 20 / PARTIAL 12 (`ANTHROPIC_DEFAULT_MODEL`, `notify_when_idle`, sandbox deny, fullscreen fallback, goal check-in, `/model` `LFh`/`sgM`); 237 HAVE 3 (`canMarkApiSystem`, Concise, `r7` truncate); 238 HAVE 34 / PARTIAL 5 (`keybindingFlavor`, marketplace/MCP `headersHelper`, runner defer-shutdown / Proxy-Authorization, isolation pin, RC Stop/sign-out/403, update check 10s). Restores **234 leftovers** still in official 238 SEA (stale Enter, SendMessage `to`/truncated, `GGc`, session persist, markdown `d0l`). No leftover #3 / G0S / chrome UI invent. |
 | **2.7.45** | **densable 2.1.235 (HAVE 18 / N/A 1)** + tip **2.1.234** quota auto-resume: spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP gate / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX gate**; CLI IDE bridge `uSm`; quota rearm `HEv=2`. **#19 VSCode host focus N/A**. |
 | **2.7.44** | **teammate default model follows leader**: unset/null `teammateDefaultModel` resolves via leader → `mainLoopModel` / `ANTHROPIC_MODEL`, with hardcoded Opus only as last resort; Config/ModelPicker copy aligned; forward `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_*_MODEL` to teammates. |
 | **2.7.43** | **densable 1:1 review close-out + compat PTL**: credit session cost before thinking-only re-stream; clear G7 mint-time `cse_*` on abandon/teardown (keep on reattach); `epoch_stale`-only Ot (`epoch_conflict` does not enter Ba remint); OpenAI/Grok/Gemini catch via `getAssistantMessageFromError` so `maximum prompt length` reaches reactive compact. |

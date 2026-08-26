@@ -45,6 +45,12 @@ export type LogOption = {
   gitBranch?: string // Git branch at the end of the session
   projectPath?: string // Original project directory path
   /**
+   * densable 2.1.239 #17 — git worktree paths for the listing cwd.
+   * Used by `cNr` so a session recorded under an own worktree is kept
+   * even when its slug collides with `projectPath`.
+   */
+  ownWorktrees?: string[]
+  /**
    * densable 2.1.223 #8 — last mid-session `/cd` relocated stamp
    * (`type:"relocated"`). When set, preferred over first-message cwd for
    * resume listing / restoreSessionMetadata cache.

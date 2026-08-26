@@ -1,0 +1,53 @@
+
+##### needle="function DHm("
+--- @314384662 ---
+function DHm(e=!1){let t=EQe(),r=MFn(QV()?.name);if(!t||r===null)return null;return{name:r,token:`${r} [${sBr("session",t)}]`,callerIsSubagent:e}}function G1w(e){if(!e)return null;return e.callerIsSubagent?`This process's main session is ${e.token} \u2014 the name OTHER sessions use to message it (it is not listed below; from inside this process, address the main conversation as "${dL}").`:`This session is ${e.token} \u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateCont
+(shown 1)
+
+##### needle="function G1w("
+--- @314384808 ---
+function G1w(e){if(!e)return null;return e.callerIsSubagent?`This process's main session is ${e.token} \u2014 the name OTHER sessions use to message it (it is not listed below; from inside this process, address the main conversation as "${dL}").`:`This session is ${e.token} \u2014 the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:
+(shown 1)
+
+##### needle="function MFn("
+--- @303703040 ---
+function MFn(e){let t=ALe(e);return t!==null&&__a(t)&&Vu(t)!==dL?t:null}function __a(e){return!iBr(e)&&ELe(e)&&!e.includes("@")&&e!=="*"}function iBr(e){let t=Vu(e);return xD(e).scheme!=="other"||xD(t).scheme!=="other"||g_a(e)||g_a(t)}function pYb(e){let t=e.map((s)=>iti(s.kind,s.id)),r=A8.CLAUDE_CODE_MESSAGING_SOCKET,n=r===void 0?[]:[iti("session",r)],o=Gn([...t,...n]).sort(),i=new Map;for(let s=0;s<o.length;s++){let a=o[s],l=Math.max(s>0?rWd(a,o[s-1]):0,s+1<o.length?rWd(a,o[s+1]):0);i.set(a,Math.min(a.length,Math.max(sti,l+1)))}return e.map((s,a)=>{let l=t[a];return{...s,ref:l.slice(0,i.get(l))}})}function rWd(e,t){let r=0;while(r<e.length&&r<t.length&&e[r]===t[r])r++;return r}function iti(e,t){return String(iu(`${e}:${t}`))}function sBr(e,t){return iti(e,t).slice(0,sti)}function v_a(e,t
+(shown 1)
+
+##### needle="function lRw("
+--- @313577351 ---
+function lRw(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t(),n=WCe(e);return r!==void 0&&n!==null&&v_a(n.ref,"session",r)}function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to send to.)`}function Kwm(e){return`Not sent \u2014 '${e}' is t
+(shown 1)
+
+##### needle="function Jio("
+--- @313577475 ---
+function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to send to.)`}function Kwm(e){return`Not sent \u2014 '${e}' is this session's own name and ref, but another session record on this machine claims it.`}function qEt(e){return`'${e}' is this
+(shown 1)
+
+##### needle="function VEt("
+--- @313577260 ---
+function VEt(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&eti(e,r)}function lRw(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t(),n=WCe(e);return r!==void 0&&n!==null&&v_a(n.ref,"session",r)}function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claim
+(shown 1)
+
+##### needle="function Xen("
+--- @313577169 ---
+function Xen(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&HFn(e,r)}function VEt(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&eti(e,r)}function lRw(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t(),n=WCe(e);return r!==void 0&&n!==null&&v_a(n.ref,"session",r)}function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u20
+(shown 1)
+
+##### needle="function v_a("
+--- @303703824 ---
+function v_a(e,t,r){return e.length>=sti&&iti(t,r).startsWith(e)}function aBr(e){return new Set(e.flatMap((t)=>t.bridgeSessionId?[Mf(t.bridgeSessionId)]:[]))}function OFn(e,t){let r=Mf(t);return e.some((n)=>n.bridgeSessionId!==void 0&&Mf(n.bridgeSessionId)===r)}var nWd,sti=6,b_a=12,Xnr,uYb,dYb;var Q
+(shown 1)
+
+##### needle="function sBr("
+--- @303703777 ---
+function sBr(e,t){return iti(e,t).slice(0,sti)}function v_a(e,t,r){return e.length>=sti&&iti(t,r).startsWith(e)}function aBr(e){return new Set(e.flatMap((t)=>t.bridgeSessionId?[Mf(t.bridgeSessionId)]:[]))}function OFn(e,t){let r=Mf(t);return e.some((n)=>n.bridgeSessionId!==void 0&&Mf(n.bridgeSession
+(shown 1)
+
+##### needle="function iti("
+--- @303703728 ---
+function iti(e,t){return String(iu(`${e}:${t}`))}function sBr(e,t){return iti(e,t).slice(0,sti)}function v_a(e,t,r){return e.length>=sti&&iti(t,r).startsWith(e)}function aBr(e){return new Set(e.flatMap((t)=>t.bridgeSessionId?[Mf(t.bridgeSessionId)]:[]))}function OFn(e,t){let r=Mf(t);return e.some((n
+(shown 1)
+
+##### needle="var sti"
+(shown 0)

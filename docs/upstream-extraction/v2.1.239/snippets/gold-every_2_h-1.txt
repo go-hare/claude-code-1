@@ -1,0 +1,32 @@
+# offset=324740634 (0x135b261a) kw="every 2 h"
+
+ask-notification>\`** rather than this prompt: handle the event in the context of the loop task, then make the same decision. If the loop should continue, call ${vv} again with the same \`prompt\` and the same 1200\u20131800s \`delaySeconds\` from step 4 (the ${kA} remains the wake signal; the new wakeup is only the fallback heartbeat). If the event means the work is finished, stop (step 6).
+6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${vv} with \`stop: true\` (no other fields) and ${iW} any ${kA} you armed (use ${b9} to find the task ID if it is no longer in context). Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.${FEy()}`;return`# /loop \u2014 schedule a recurring or self-paced prompt
+
+Parse the input below into \`[interval] <prompt\u2026>\` and schedule it.
+
+## Parsing (in priority order)
+
+1. **Leading token**: if the first whitespace-delimited token matches \`^\\d+[smhd]$\` (e.g. \`5m\`, \`2h\`), that's the interval; the rest is the prompt.
+2. **Trailing "every" clause**: otherwise, if the input ends with \`every <N><unit>\` or \`every <N> <unit-word>\` (e.g. \`every 20m\`, \`every 5 minutes\`, \`every 2 hours\`), extract that as the interval and strip it from the prompt. Only match when what follows "every" is a time expression \u2014 \`check every PR\` has no interval.
+3. **No interval**: otherwise, the entire input is the prompt and you'll self-pace dynamically (see "Dynamic mode" below).
+
+If the resulting prompt is empty, show usage \`/loop [interval] <prompt>\` and stop.
+
+Examples:
+- \`5m /babysit-prs\` \u2192 interval \`5m\`, prompt \`/babysit-prs\` (rule 1)
+- \`check the deploy every 20m\` \u2192 interval \`20m\`, prompt \`check the deploy\` (rule 2)
+- \`run tests every 5 minutes\` \u2192 interval \`5m\`, prompt \`run tests\` (rule 2)
+- \`check the deploy\` \u2192 no interval \u2192 dynamic mode, prompt \`check the deploy\` (rule 3)
+- \`check every PR\` \u2192 no interval \u2192 dynamic mode, prompt \`check every PR\` (rule 3 \u2014 "every" not followed by time)
+- \`5m\` \u2192 empty prompt \u2192 show usage
+${UEy()}
+## Fixed-interval mode (rules 1 and 2)
+
+Convert the interval to a cron expression:
+
+${kWA}
+
+Then:
+1. Call ${iP} with: \`cron\` (the expression above), \`prompt\` (the parsed prompt verbatim), \`recurring: true\`.
+2. Briefly confirm: what's scheduled, the cron expression, the human-readable cadence, that

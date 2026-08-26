@@ -1,0 +1,711 @@
+--- needle=b'function Tbv' hits=1 ---
+
+=== b'function Tbv' hit#1 @296102481 ===
+:return K.ANTHROPIC_AWS_BASE_URL;case"anthropicGoogleCloud":return K.ANTHROPIC_GOOGLE_CLOUD_BASE_URL;case"vertex":return K.ANTHROPIC_VERTEX_BASE_URL;case"foundry":return K.ANTHROPIC_FOUNDRY_BASE_URL}}function Tbv({data:e,status:t,headers:r,originating:n}){try{let o=tHa(t,r),i=Sbv(e),s=typeof e==="string"?Buffer.byteLength(e,"utf8"):i==="empty"?0:o.content_length,a=[` Response: content-type ${o.content_type}`,Abv[i],s===null?"size unknown":`${s} bytes`,`request-id ${o.request_id??(o.request_id_header==="other"?"present but not Anthropic-issued":"absent")}`,...o.server==="absent"?[]:[`server ${o.server}`],...o.intermediary_headers.length>0?[`intermediary headers ${o.intermediary_headers.join(" ")}`]:[]].join(", "),l=n?[n.cause,n.errorName,n.connectionCode].filter((p)=>p&&p!=="Error").join(", "):"",c=n?.stall,u=c?`; ${[`${c.events_received} stream ${Rt(c.events_received,"event")} received`,...c.ms_to_first_event===null?[]:[`first after ${c.ms_to_first_event} ms`],...c.ms_since_last_event=
+
+--- needle=b'Tbv=function' hits=0 ---
+--- needle=b'bodyKind' hits=4 ---
+
+=== b'bodyKind' hit#1 @131255312 ===
+................................................h9..............	...
+...cause_name..............	.......api_error_type..........	.......connection_code.........	...	...ssl_error...............	.......bodyKind........	...	...body_kind...............	...	...bodyBytes...............	...
+...body_bytes....................x..1........x./.....x...x......H..H.....................................................h.......................................X"..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...(...(...(...(...(...(...(...(...(...(...(...X...X...X...X...X...................................................................................................................................H.......................................................................................................................................^.......................................................
+
+
+=== b'bodyKind' hit#2 @296101684 ===
+:e instanceof Error?lue(e.cause)??null:null,api_error_type:o?.type?rHa(o.type):null,connection_code:oTo(n?.code)??null,ssl_error:n?.isSSLError??!1,...e instanceof Pai?{response:e.response,body_kind:e.bodyKind,body_bytes:e.bodyBytes}:{response:i!==void 0||s?tHa(i,s):null}}}function Iai(){let e=Yn(),t=wbv(e);return{provider:e,base_url:!t?"default":DAr(t)?"anthropic":"custom",base_url_gateway:Cai({baseUrl:t})??null,https_proxy:Rkt()!==void 0,custom_headers:Boolean(K.ANTHROPIC_CUSTOM_HEADERS),extra_ca_certs:Boolean(K.NODE_EXTRA_CA_CERTS),client_cert:Boolean(K.CLAUDE_CODE_CLIENT_CERT)}}function wbv(e){switch(e){case"firstParty":case"gateway":return K.ANTHROPIC_BASE_URL;case"bedrock":return K.ANTHROPIC_BEDROCK_BASE_URL;case"mantle":return K.ANTHROPIC_BEDROCK_MANTLE_BASE_URL;case"anthropicAws":return K.ANTHROPIC_AWS_BASE_URL;case"anthropicGoogleCloud":return K.ANTHROPIC_GOOGLE_CLOUD_BASE_URL;case"vertex":return K.ANTHROPIC_VERTEX_BASE_URL;case"foundry":return K.ANTHROPIC_FOUNDRY_BASE_URL}}fun
+
+
+=== b'bodyKind' hit#3 @296103523 ===
+_last_event} ms`]].join(", ")}`:"",d=n?` This was the non-streaming retry of streaming request ${n.requestId??"(no Anthropic request-id)"}, which failed with: ${l}${u}.`:"";return{summary:`${a}.${d}`,bodyKind:i,bodyBytes:s,response:o}}catch(o){return E(`unexpected-response description failed: ${ue(o)}`,{level:"error"}),{summary:"",bodyKind:"other",bodyBytes:null,response:tHa(void 0,void 0)}}}var rzp,lbv,cbv,dbv,fbv,mbv,hbv,_bv,bbv,vbv,Ebv,Abv,Pai;var Dai=A(()=>{g5();cr();Ze();pt();ws();gy();jr();Qh();yAt();qse();rzp={litellm:{prefixes:["x-litellm-"]},helicone:{prefixes:["helicone-"]},portkey:{prefixes:["x-portkey-"]},"cloudflare-ai-gateway":{prefixes:["cf-aig-"]},kong:{prefixes:["x-kong-"]},braintrust:{prefixes:["x-bt-"]}},lbv={databricks:[".cloud.databricks.com",".azuredatabricks.net",".gcp.databricks.com"]};cbv=["invalid_request_error","authentication_error","billing_error","permission_error","not_found_error","request_too_large","rate_limit_error","timeout_error","api_error","overlo
+
+
+=== b'bodyKind' hit#4 @296103656 ===
+id)"}, which failed with: ${l}${u}.`:"";return{summary:`${a}.${d}`,bodyKind:i,bodyBytes:s,response:o}}catch(o){return E(`unexpected-response description failed: ${ue(o)}`,{level:"error"}),{summary:"",bodyKind:"other",bodyBytes:null,response:tHa(void 0,void 0)}}}var rzp,lbv,cbv,dbv,fbv,mbv,hbv,_bv,bbv,vbv,Ebv,Abv,Pai;var Dai=A(()=>{g5();cr();Ze();pt();ws();gy();jr();Qh();yAt();qse();rzp={litellm:{prefixes:["x-litellm-"]},helicone:{prefixes:["helicone-"]},portkey:{prefixes:["x-portkey-"]},"cloudflare-ai-gateway":{prefixes:["cf-aig-"]},kong:{prefixes:["x-kong-"]},braintrust:{prefixes:["x-bt-"]}},lbv={databricks:[".cloud.databricks.com",".azuredatabricks.net",".gcp.databricks.com"]};cbv=["invalid_request_error","authentication_error","billing_error","permission_error","not_found_error","request_too_large","rate_limit_error","timeout_error","api_error","overloaded_error"];dbv=[["cloudflare",/cloudflare/],["envoy",/envoy|istio/],["nginx",/nginx|openresty/],["apigee",/apigee/],["akamai",/akam
+
+--- needle=b'bodyBytes' hits=4 ---
+
+=== b'bodyBytes' hit#1 @131255368 ===
+........	...
+...cause_name..............	.......api_error_type..........	.......connection_code.........	...	...ssl_error...............	.......bodyKind........	...	...body_kind...............	...	...bodyBytes...............	...
+...body_bytes....................x..1........x./.....x...x......H..H.....................................................h.......................................X"..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...(...(...(...(...(...(...(...(...(...(...(...X...X...X...X...X...................................................................................................................................H.......................................................................................................................................^...............................................................!...
+.....G.....F'..........................H...
+
+
+=== b'bodyBytes' hit#2 @295262455 ===
+r
+`),DHp=Buffer.alloc(0);vAa=class vAa extends yni.AbstractMessageReader{readable;onProtocolViolation;callback;stopped=!1;headerChunks=[];headerBytes=0;headerTail=DHp;expectedBodyLength;bodyChunks=[];bodyBytes=0;onData=(e)=>this.handleData(e);onStreamError=(e)=>this.fireError(e);onStreamClose=()=>this.fireClose();constructor(e,t){super();this.readable=e;this.onProtocolViolation=t}listen(e){return this.callback=e,this.readable.on("data",this.onData),this.readable.on("error",this.onStreamError),this.readable.on("close",this.onStreamClose),yni.Disposable.create(()=>this.detach())}dispose(){this.detach(),super.dispose()}detach(){this.stopped=!0,this.readable.removeListener("data",this.onData),this.readable.removeListener("error",this.onStreamError),this.readable.removeListener("close",this.onStreamClose),this.resetHeader(),this.bodyChunks=[],this.bodyBytes=0,this.expectedBodyLength=void 0}handleData(e){if(this.stopped)return;let t=typeof e==="string"?Buffer.from(e,"utf8"):e;while(t&&t.leng
+
+
+=== b'bodyBytes' hit#3 @295263110 ===
+eadable.removeListener("data",this.onData),this.readable.removeListener("error",this.onStreamError),this.readable.removeListener("close",this.onStreamClose),this.resetHeader(),this.bodyChunks=[],this.bodyBytes=0,this.expectedBodyLength=void 0}handleData(e){if(this.stopped)return;let t=typeof e==="string"?Buffer.from(e,"utf8"):e;while(t&&t.length>0&&!this.stopped){let r=this.expectedBodyLength;t=r===void 0?this.consumeHeader(t):this.consumeBody(t,r)}}consumeHeader(e){let t=this.headerTail.length===0?e:Buffer.concat([this.headerTail,e]),r=t.indexOf(bAa);if(r===-1){if(this.headerChunks.push(e),this.headerBytes+=e.length,this.headerTail=t.subarray(Math.max(0,t.length-(bAa.length-1))),this.headerBytes>qtv)this.protocolViolation(Error("LSP server exceeded the header size limit without a message header \u2014 it is likely printing logs or other non-protocol output to stdout instead of stderr"));return}let n=r-this.headerTail.length+bAa.length,o=this.headerBytes-this.headerTail.length+r;this.h
+
+
+=== b'bodyBytes' hit#4 @295264203 ===
+ng("latin1"),s=e.subarray(n);this.resetHeader();let a=Ztv(i);if(a instanceof Error){this.protocolViolation(a);return}return this.expectedBodyLength=a,s.length>0?s:void 0}consumeBody(e,t){let r=t-this.bodyBytes;if(e.length<r){this.bodyChunks.push(e),this.bodyBytes+=e.length;return}this.bodyChunks.push(e.length===r?e:e.subarray(0,r));let n=e.length>r?e.subarray(r):void 0,o=Buffer.concat(this.bodyChunks,t);return this.bodyChunks=[],this.bodyBytes=0,this.expectedBodyLength=void 0,this.deliver(o),n}deliver(e){let t;try{t=vC(e.toString("utf8"))}catch(r){E(`LSP: dropped unparseable message body: ${r}`,{level:"warn"});return}if(!Ytv(t)){E("LSP: dropped message body that is not an object",{level:"warn"});return}try{this.callback?.(t)}catch(r){this.fireError(r)}}resetHeader(){this.headerChunks=[],this.headerBytes=0,this.headerTail=DHp}protocolViolation(e){if(this.stopped)return;this.stopped=!0,this.detach(),this.fireError(e);try{this.onProtocolViolation(e)}catch(t){this.fireError(t)}}};Xtv=/^([!
+
+--- needle=b'body is unrecognized' hits=4 ---
+
+=== b'body is unrecognized' hit#1 @244143880 ===
+body is an HTML page............	.......body is an XML document.........	...1...body is JSON served under a non-JSON content-type...............	.......body is JSON but not a Message..........	.......body is unrecognized text...............	.......body is unrecognized............................	...$...The superclass is not a constructor.....0...............	.......constructor.....Y...............	...	...prototype.......J.......
+...........................................................................................................................................................................................................N.....................p.......P,......P,......P,......P,......P,......P,......P,......`,......`,......`d...............|...|X......|...,.......|........1......|...,...~...T.......|...To......|...............;.......|.D.............4.E....T<...T..`:~......D.......|...4...}...Tv......|d.......m......|..P5,.............$........T....................................
+
+
+=== b'body is unrecognized' hit#2 @244143928 ===
+an XML document.........	...1...body is JSON served under a non-JSON content-type...............	.......body is JSON but not a Message..........	.......body is unrecognized text...............	.......body is unrecognized............................	...$...The superclass is not a constructor.....0...............	.......constructor.....Y...............	...	...prototype.......J.......
+...........................................................................................................................................................................................................N.....................p.......P,......P,......P,......P,......P,......P,......P,......`,......`,......`d...............|...|X......|...,.......|........1......|...,...~...T.......|...To......|...............;.......|.D.............4.E....T<...T..`:~......D.......|...4...}...Tv......|d.......m......|..P5,.............$........T......................................J.....................x.O.....................
+
+
+=== b'body is unrecognized' hit#3 @296107832 ===
+ a stream)",html:"body is an HTML page",xml:"body is an XML document","json-text":"body is JSON served under a non-JSON content-type","json-not-message":"body is JSON but not a Message","other-text":"body is unrecognized text",other:"body is unrecognized"};Pai=class Pai extends wt{name="UnexpectedApiResponseError";bodyKind;bodyBytes;response;constructor(e){let t=Tbv(e);super(`API returned an empty or malformed response (HTTP ${e.status??"unknown"}) \u2014 check for a proxy or gateway intercepting the request.${t.summary}`,"API returned an empty or malformed response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function YXe(){return K.CLAUDE_CODE_RETRY_WATCHDOG}function uzp(e){return bbe(e)||e instanceof Es&&e.status===429}function L2n(e){return K.CLAUDE_CODE_REMOTE&&e instanceof Es&&(e.status===401||e.status===403)}function $bv(e){if(!(e instanceof uk))return!1;let t=lF(e);return t!==null&&Vse.has(t.code)}function Fbv(e){if(!(e instanceof uk))retur
+
+
+=== b'body is unrecognized' hit#4 @296107866 ===
+page",xml:"body is an XML document","json-text":"body is JSON served under a non-JSON content-type","json-not-message":"body is JSON but not a Message","other-text":"body is unrecognized text",other:"body is unrecognized"};Pai=class Pai extends wt{name="UnexpectedApiResponseError";bodyKind;bodyBytes;response;constructor(e){let t=Tbv(e);super(`API returned an empty or malformed response (HTTP ${e.status??"unknown"}) \u2014 check for a proxy or gateway intercepting the request.${t.summary}`,"API returned an empty or malformed response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function YXe(){return K.CLAUDE_CODE_RETRY_WATCHDOG}function uzp(e){return bbe(e)||e instanceof Es&&e.status===429}function L2n(e){return K.CLAUDE_CODE_REMOTE&&e instanceof Es&&(e.status===401||e.status===403)}function $bv(e){if(!(e instanceof uk))return!1;let t=lF(e);return t!==null&&Vse.has(t.code)}function Fbv(e){if(!(e instanceof uk))return!1;let t=lF(e);if(t===null)return
+
+--- needle=b'UnexpectedApiResponseError' hits=2 ---
+
+=== b'UnexpectedApiResponseError' hit#1 @244148984 ===
+........................................................................................................'...........
+........
+........
+........
+.....i.. ...............@.......................	.......UnexpectedApiResponseError......
+...............................................................8........................`E......................`E..................... _..................a.y..{......=.y.
+...a.y.j.y......D..H.................................................O.....h.......................................(...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h.......................................................................................................................................................................................................................................................................................................................
+
+
+=== b'UnexpectedApiResponseError' hit#2 @296107920 ===
+is JSON served under a non-JSON content-type","json-not-message":"body is JSON but not a Message","other-text":"body is unrecognized text",other:"body is unrecognized"};Pai=class Pai extends wt{name="UnexpectedApiResponseError";bodyKind;bodyBytes;response;constructor(e){let t=Tbv(e);super(`API returned an empty or malformed response (HTTP ${e.status??"unknown"}) \u2014 check for a proxy or gateway intercepting the request.${t.summary}`,"API returned an empty or malformed response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function YXe(){return K.CLAUDE_CODE_RETRY_WATCHDOG}function uzp(e){return bbe(e)||e instanceof Es&&e.status===429}function L2n(e){return K.CLAUDE_CODE_REMOTE&&e instanceof Es&&(e.status===401||e.status===403)}function $bv(e){if(!(e instanceof uk))return!1;let t=lF(e);return t!==null&&Vse.has(t.code)}function Fbv(e){if(!(e instanceof uk))return!1;let t=lF(e);if(t===null)return!1;let{code:r}=t;return Vse.has(r)||r==="EPROTO"||r===
+
+--- needle=b'check for a proxy or gateway' hits=1 ---
+
+=== b'check for a proxy or gateway' hit#1 @296108092 ===
+=class Pai extends wt{name="UnexpectedApiResponseError";bodyKind;bodyBytes;response;constructor(e){let t=Tbv(e);super(`API returned an empty or malformed response (HTTP ${e.status??"unknown"}) \u2014 check for a proxy or gateway intercepting the request.${t.summary}`,"API returned an empty or malformed response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function YXe(){return K.CLAUDE_CODE_RETRY_WATCHDOG}function uzp(e){return bbe(e)||e instanceof Es&&e.status===429}function L2n(e){return K.CLAUDE_CODE_REMOTE&&e instanceof Es&&(e.status===401||e.status===403)}function $bv(e){if(!(e instanceof uk))return!1;let t=lF(e);return t!==null&&Vse.has(t.code)}function Fbv(e){if(!(e instanceof uk))return!1;let t=lF(e);if(t===null)return!1;let{code:r}=t;return Vse.has(r)||r==="EPROTO"||r==="FailedToOpenSocket"||r.startsWith("ERR_OSSL_")||r.startsWith("ERR_SSL_")}async function Ubv(e){if(!K.CLAUDE_CODE_CLIENT_CERT||K.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CO
+
+--- needle=b'setup-token' hits=4 ---
+
+=== b'setup-token' hit#1 @114126312 ===
+SDK getOAuthToken callback failed: .....................	.......OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login..................	...#...tengu_oauth_401_recovered_from_disk.............	.......oauth_401_disk_read_failed......................	..."...OAuth 401 recovery: waiting up to ..............	.......ms for a rotated env token......................	...'...tengu_oauth_401_recovered_from_rotation.........	... ...oauth_401_skipped_user_env_token........	...$...oauth_401_no_refresh_token_bg_worker............	...&...oauth_401_no_refresh_token_interactive..........	.......exit............	.......tengu_oauth_401_zombie_exit.................}...O.A.u.t.h. .4.0.1. .u.n.r.e.c.o.v.e.r.e.d. .p.a.s.t. .C.L.A.U.D.E._.C.O.D.E._.A.U.T.H._.F.A.I.L._.E.X.I.T._.M.S. ..  .e.x.i.t.i.n.g. .s.o. .t.h.e. .r.u.n.n.e.r. .r.e.c.y.c.l.e.s. .t.h.i.s. .s.
+
+
+=== b'setup-token' hit#2 @114468362 ===
+..4...Remote Control requires claude.ai subscription auth.............	.......to use Remote Control...........	.......Remote Control requires a full-scope login token. Long-lived tokens (from `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) are limited to inference-only for security reasons. Run `claude auth login` to use Remote Control............	.......Unable to determine your organization for Remote Control eligibility. Run `claude auth login` to refresh your account information...............................	.......unavailable.............	...e...Couldn't verify your organization's Remote Control policy. Retry, or run `claude doctor` for details............	.......denied..................	...S...Remote Control isn't available for your organization due to its compliance policy (.............	......., ..............	.......)...............	...e...Remote Control is disabled by your organization's policy. Contact your organization admin for access............	...K...Remote Control req
+
+
+=== b'setup-token' hit#3 @166709864 ===
+	.......string..........................	.......n...............	.......about_to_retry..................	.......confirm:yes.............	.......Confirmation............	.......success.........	.......setup-token.............	.......gateway_done............	.......bedrock_done............	.......vertex_done.............	.......aws_refresh_done........	.......error...........	.......o...............	.......t.......................	.......e...............	.......column..........	.......waiting_for_login.......................	...1...Browser didn't open? Use the url below to sign in...............	....... ....................... ...............X.......................	...1...Browser didn't open? Use the url below to sign in...............	....... ...............	...	...(Copied!)...............	.......c...............	.......copy............	...	...urlToCopy...................7....' .L.o.n.g.-.l.i.v.e.d. .a.u.t.h.e.n.t.i.c.a.t.i.o.n. .t.o.k.e.n. .c.r.e.a.t.e.d. .s.u.c.c.e.s.s.f.u.l.l.y.!...
+
+
+=== b'setup-token' hit#4 @166720008 ===
+.........H..!...
+.....i.!...
+.....i.............................................................................................................................................................	.......setup-token.............	.......n...............	.......ready_to_start..........	.......claudeai........	.......h...............	.......console.........	.......g...............	......gateway_setup...........	.......idle.............................................@..#....@@..@..#....@..........$...;...R...^...t.........................o...............................................p.......................p..................................................D..H.......................................................h.......................................`...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h.......................................................................
+
+--- needle=b'allowExcessArguments' hits=4 ---
+
+=== b'allowExcessArguments' hit#1 @198605152 ===
+................................................(
+.......................(..............................................._......................................	...
+...parseAsync..............	.......allowExcessArguments............@.......(.......h.......P...............0-.......0......pC......@Y.......n......X~......(...............................p......................h........*.......8......8F.......T......Hd......ph......@............,..m...U...m...V....,...,.......D..H...............................................@9..............................................@.......................................................................@t........................%.....8...............p........{..........................................................	.......................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...........................................(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...........
+
+
+=== b'allowExcessArguments' hit#2 @268699560 ===
+n...............	...	..._optionEx...............	.......option..........	.......requiredOption..........	.......combineFlagAndOptionalValue.............	.......allowUnknownOption..............	.......allowExcessArguments............	.......enablePositionalOptions.........	.......passThroughOptions..............	......._checkForBrokenPassThrough..............	.......storeOptionsAsProperties........	.......getOptionValue..........	.......setOptionValue..........	.......setOptionValueWithSource........	.......getOptionValueSource............	.......getOptionValueSourceWithGlobals.........	......._prepareUserArgs........	.......parse...........	...
+...parseAsync..............	......._executeSubCommand..............	......._dispatchSubcommand.............	......._dispatchHelpCommand............	......._checkNumberOfArguments.........	......._processArguments...............	......._chainOrCall............	......._chainOrCallHooks...............	......._chainOrCallSubCommandHook..............
+
+
+=== b'allowExcessArguments' hit#3 @268708921 ===
+helpCommand............	......._helpConfiguration..............	......_exitCallback...........	......._storeOptionsAsProperties...............	......._combineFlagAndOptionalValue............	......._allowExcessArguments...........	......._enablePositionalOptions........	......._showHelpAfterError.............	......._showSuggestionAfterError...................7......:......;...N............L..H...............................................p...............................................H.......................................................................	......._getCommandAndAncestors.............................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................................................................................................................................................(........................................................................................................
+
+
+=== b'allowExcessArguments' hit#4 @304272517 ===
+E}=_dl(),{Option:L0m,DualOptions:uoE}=vdl(),{suggestSimilar:N0m}=O0m();class Adl extends soE{constructor(e){super();this.commands=[],this.options=[],this.parent=null,this._allowUnknownOption=!1,this._allowExcessArguments=!0,this.registeredArguments=[],this._args=this.registeredArguments,this.args=[],this.rawArgs=[],this.processedArgs=[],this._scriptPath=null,this._name=e||"",this._optionValues={},this._optionValueSources={},this._storeOptionsAsProperties=!1,this._actionHandler=null,this._executableHandler=!1,this._executableFile=null,this._executableDir=null,this._defaultCommandName=null,this._exitCallback=null,this._aliases=[],this._combineFlagAndOptionalValue=!0,this._description="",this._summary="",this._argsDescription=void 0,this._enablePositionalOptions=!1,this._passThroughOptions=!1,this._lifeCycleHooks={},this._showHelpAfterError=!1,this._showSuggestionAfterError=!0,this._outputConfiguration={writeOut:(t)=>aW.stdout.write(t),writeErr:(t)=>aW.stderr.write(t),getOutHelpWidth:()=>
+
+--- needle=b'unknown command' hits=4 ---
+
+=== b'unknown command' hit#1 @86026045 ===
+<blue>default-trusted<r>      print the default trusted dependencies list
+
+Learn more about these at <magenta>https://bun.com/docs/cli/pm<r>.
+....... E............pmLockfile not foundpkg	
+error: ".." unknown command
+...
+.[31merror.[0m: ".." unknown command
+..bun.lock.bun.lockb.(error: could not find any other lockfile..5.[0m.[31merror.[0m: could not find any other lockfile..internal error: entered unreachable code: LoadResult::ok_mut on non-Ok variant=error: bun.lockb already exists
+run with --force to overwrite..J.[0m.[31merror.[0m: bun.lockb already exists
+run with --force to overwrite..<error: bun.lock already exists
+run with --force to overwrite..I.[0m.[31merror.[0m: bun.lock already exists
+run with --force to overwrite..--trusted...T. E....	.......-A......p. E............W..E............Y..E.............. node_modules (..).
+......... ..@..
+....[2m..........[0m .	.[0m.[2m@...[0m
+..
+......... ..@..
+....[2m..........[0m .	.[0m.[2m@...[0m
+.... getting cache directory..Could not delete
+
+
+=== b'unknown command' hit#2 @86026086 ===
+efault trusted dependencies list
+
+Learn more about these at <magenta>https://bun.com/docs/cli/pm<r>.
+....... E............pmLockfile not foundpkg	
+error: ".." unknown command
+...
+.[31merror.[0m: ".." unknown command
+..bun.lock.bun.lockb.(error: could not find any other lockfile..5.[0m.[31merror.[0m: could not find any other lockfile..internal error: entered unreachable code: LoadResult::ok_mut on non-Ok variant=error: bun.lockb already exists
+run with --force to overwrite..J.[0m.[31merror.[0m: bun.lockb already exists
+run with --force to overwrite..<error: bun.lock already exists
+run with --force to overwrite..I.[0m.[31merror.[0m: bun.lock already exists
+run with --force to overwrite..--trusted...T. E....	.......-A......p. E............W..E............Y..E.............. node_modules (..).
+......... ..@..
+....[2m..........[0m .	.[0m.[2m@...[0m
+..
+......... ..@..
+....[2m..........[0m .	.[0m.[2m@...[0m
+.... getting cache directory..Could not delete {s}.Cleared 'bun install' cache...bunx-.
+
+
+=== b'unknown command' hit#3 @193013585 ===
+........l.............. .......	........l......)........l..............(l......I.......
+.......................	... ...tengu_unknown_command_suggestion........................	...............	....... unknown command "..............	......."...............	.......  ..............	....... ...............	......Did you mean ...........	.......claude .........	.......?...............	.......Run ............	......claude --help...........	....... to list commands, or ..........	.......claude -p ".............	....... to send as a prompt............	.......
+...................................................Q....................@...I.....4.dtT.HM>.`.T.@@>.L...B.4.@`<.@@......@.$.I...@.4.....@PT..@,.@ ..@ ..D...QAT...;.@.>...-....7.........s4...4......p4.......3.@.V.......6.. ........L..........@n.....@.M..AS..........AL...<......A4..RL..`:...6......AL...8O......4......A4.@PM...........<o......4......AL.......<.	.....|......PL......<.......,....!...................................$...*....
+
+
+=== b'unknown command' hit#4 @268861511 ===
+.p.......................................................................................................	...............(...................
+.....................X.....	...............	.......error: unknown command '........	.......'...............	.......commander.unknownCommand
+..........................................|.CR4...M.@...@.4...\...4.P$<.F.M..i<...T.../.@ ..@ ....K.@.n.@PL..ql.@.4...k....'.............................z.....................X.........................X..............................................G........................Z......................}.......................^d.....................X.Z.............................w...5...w...6................D..H...............................................................................................@...............................................................P.Z...............X.....................................................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h..
+
+--- needle=b'too many arguments' hits=4 ---
+
+=== b'too many arguments' hit#1 @85805624 ===
+ktoo many braces in brace expansion%unexpected error from Braces.expand: ........too many brace expansions (.. > ..)..no matches found: ...not a directory: ..
+.file name too long
+..: ..
+.HOME not set
+too many arguments
+Invalid state for "Cp": idle, this indicates a bug in Bun. Please file a GitHub issueunknown error.. is not a directory
+...: No such file or directory
+.pwd: too many arguments
+YesTask set in start()y
+exit: numeric argument required
+exit: too many arguments
+.. not found
+.internal error: entered unreachable code: Dirname.onIOWriterChunk: idleusage: dirname string
+internal error: entered unreachable code: Basename.onIOWriterChunk: idleaborted: sibling worker panickedfailed to respawn test workerno live workersfailed to spawn test worker.... .. (worker crashed: ..)
+...[0m.[31m....[0m .[1m...[0m .[2m(worker crashed: ..).[0m
+.::group::.
+...:
+.reap_pending set only after exit_status.... .. (..)
+...[0m.[31m....[0m .[1m.
+.[0m .[2m(..).[0m
+.+
+error: a test worker process crashed w
+
+
+=== b'too many arguments' hit#2 @85805800 ===
+ng
+..: ..
+.HOME not set
+too many arguments
+Invalid state for "Cp": idle, this indicates a bug in Bun. Please file a GitHub issueunknown error.. is not a directory
+...: No such file or directory
+.pwd: too many arguments
+YesTask set in start()y
+exit: numeric argument required
+exit: too many arguments
+.. not found
+.internal error: entered unreachable code: Dirname.onIOWriterChunk: idleusage: dirname string
+internal error: entered unreachable code: Basename.onIOWriterChunk: idleaborted: sibling worker panickedfailed to respawn test workerno live workersfailed to spawn test worker.... .. (worker crashed: ..)
+...[0m.[31m....[0m .[1m...[0m .[2m(worker crashed: ..).[0m
+.::group::.
+...:
+.reap_pending set only after exit_status.... .. (..)
+...[0m.[31m....[0m .[1m.
+.[0m .[2m(..).[0m
+.+
+error: a test worker process crashed with .. while running .V.
+This indicates a bug in Bun or in a native addon, not in the test itself. Aborting.
+.8
+.[31merror.[0m: a test worker process crashed with .[1m...[0m wh
+
+
+=== b'too many arguments' hit#3 @85805881 ===
+icates a bug in Bun. Please file a GitHub issueunknown error.. is not a directory
+...: No such file or directory
+.pwd: too many arguments
+YesTask set in start()y
+exit: numeric argument required
+exit: too many arguments
+.. not found
+.internal error: entered unreachable code: Dirname.onIOWriterChunk: idleusage: dirname string
+internal error: entered unreachable code: Basename.onIOWriterChunk: idleaborted: sibling worker panickedfailed to respawn test workerno live workersfailed to spawn test worker.... .. (worker crashed: ..)
+...[0m.[31m....[0m .[1m...[0m .[2m(worker crashed: ..).[0m
+.::group::.
+...:
+.reap_pending set only after exit_status.... .. (..)
+...[0m.[31m....[0m .[1m.
+.[0m .[2m(..).[0m
+.+
+error: a test worker process crashed with .. while running .V.
+This indicates a bug in Bun or in a native addon, not in the test itself. Aborting.
+.8
+.[31merror.[0m: a test worker process crashed with .[1m...[0m while running .[1m.Z.[0m.
+This indicates a bug in Bun or in a native addon, not in 
+
+
+=== b'too many arguments' hit#4 @92084614 ===
+ take a reject function.Cannot parse body of this function.Cannot parse this function.'%s' is not declared as function.async generator function.in a generator function.Allocating a generator function.too many arguments to function.too few arguments to function.Expected callee to be mock function.Cannot parse static block function.First argument must be a string specifying the hash function.branch out of function.statement expression outside of function.The queuing strategy of a readable byte stream cannot have a size function.executor did not take a resolve function.Failed to compile function.' as it shadows the name of a strict mode function.mock(module, fn) requires a module and function.Argument 0 must be a WebAssembly exported function.must be a wasm exported function.imported function.Cannot parse this async function.Cannot use 'await' as a parameter name in an async function.Allocating an async function.Cannot parse the body of async function.Cannot parse the async function.|reje
+
+--- needle=b'extra arguments' hits=4 ---
+
+=== b'extra arguments' hit#1 @89569682 ===
+[48;5;14m.[38;5;14m.[48;5;13m.[38;5;13m.[48;5;11m.[38;5;11m.[48;5;15m.[38;5;15mvalid UTF-8 capture namefewer than u32::MAX flags"similar flags that are available: ...failed to initialize logger: ..no extra arguments found from configuration fileripgrep::flags::parsenot reading config files because --no-config is presentRIPGREP_CONFIG_PATH.%: arguments loaded from config file: ..ripgrep::flags::config..:..
+.:failed to read the file specified in RIPGREP_CONFIG_PATH: ..
+.)failed to get current working directory: ..
+did your CWD get deleted?.pattern contains "\0"....
+
+Consider enabling text mode with the --text flag (or -a for short). Otherwise,
+binary detection is enabled and matching a NUL byte is impossible..backreferenceslook-around.a
+
+Consider enabling PCRE2 with the --pcre2 flag, which can handle backreferences
+and look-around..got hostname .., but it's not valid UTF-8..could not get hostname: ..the literalnot allowed....
+
+Consider enabling multiline mode with the --multiline flag (
+
+
+=== b'extra arguments' hit#2 @106922685 ===
+.d. .d.e.e.p.-.l.i.n.k. .i.n.v.o.c.a.t.i.o.n. ..  .u.n.e.x.p.e.c.t.e.d. .a.r.g.u.m.e.n.t.s. .a.f.t.e.r. .t.h.e. .U.R.I...
+.........	.......The OS protocol handler passes exactly `--handle-uri <uri>`; extra arguments indicate argument injection via the URL. If invoking --handle-uri manually, place other flags before it.....................................@.$.H...P.L.@P=.@.$.@ ......E.3.@`].G...@.,..`....4..0%........*...,...;...C...................X...........
+...................z...........=........H..H........................)y.....................p)y.....h........................................k..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...(...(...(...(...(...(...(...(...(...(...(...8...8...8...8...8...8...8...8...8...8...8...8...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...................................P.......................	............
+
+
+=== b'extra arguments' hit#3 @175358417 ===
+.......-d..............	.......--debug-to-stderr...............	.......-d2e............	.......--debug=........	......--debug-file=...........	.......--debug-file....................	..."...warning: extra arguments ignored: ..............	....... ...............	.......
+...................................3......................=.....@P?.G.....+.@.$.C...@pL.D...@`4.C...F.3.@...@ ..G.....+.@pM.@ ..C...@.4.@.$.@.$.@.%.@.$.K.....L.@.T.K.....L.@.U.@@%.....@.5.G....p*.@.O.E...@p4....,....@.D.@ ..G.....+.....@.$.G..D....@.t.E....QL......../...8...Q...S...e...t...x...|...............................................a.......................PV.......................3.......................o.......................Q...................................Y.......W%.....@....W%.A...&W%.fW%......H..H........................}f......................}f.....h........................................*..................................................................................................
+............
+
+
+=== b'extra arguments' hit#4 @199498481 ===
+.......-d..............	.......--debug-to-stderr...............	.......-d2e............	.......--debug=........	......--debug-file=...........	.......--debug-file....................	..."...warning: extra arguments ignored: ..............	....... .......
+...........................-....................@.m.@ ..G.....+.@pM.@ ..C...@.4.I...@.4.....@.U.@.$.@.$.@.%.@.$.K.....L.@.T.K.....L.@.U.@@%.....@.5.G....p*.@.O.E...@p4.........@.D.@ ..G.....+.....@.D.G.....+...$.@p..E....QL..@q............7...;...?...C...G...]...s...w.....................................................|.......................{.......................z.....................X........................P{.....................n............................H..H.......................p.......................X.......h.........................................z.........................................................................................
+....................................................................................
+
+--- needle=b'rejected deep-link' hits=1 ---
+
+=== b'rejected deep-link' hit#1 @288183337 ===
+===!0;if(NEo===void 0)return NEo=t,"pinned";return NEo===t?"unchanged":"conflict"}var NEo;function $Eo(e){let t=e.indexOf("--handle-uri");if(t===-1||!e[t+1])return null;if(e.length>t+2)return`claude: rejected deep-link invocation \u2014 unexpected arguments after the URI.
+`+"The OS protocol handler passes exactly `--handle-uri <uri>`; extra arguments indicate argument injection via the URL. If invoking --handle-uri manually, place other flags before it.";return null}function wA(){return`claude-code/${{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.234",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-17T01:20:38Z",GIT_SHA:"7215ba60b06dff03b3e75825084c7038a013d0b0",DD_SOURCEMAP_GROUP:"win32"}.VERSION}`}function v2(){switch(process.env.CLAUDE_CODE_ENTRYPOINT){case"claude-vscode":return"claude_code_vscode
+
+--- needle=b'renameSync' hits=4 ---
+
+=== b'renameSync' hit#1 @70819439 ===
+Sync = fs.readdirSync.bind(fs), readFileSync = fs.readFileSync.bind(fs), fdatasyncSync = fs.fdatasyncSync.bind(fs), writeFileSync = fs.writeFileSync.bind(fs), readlinkSync = fs.readlinkSync.bind(fs), renameSync = fs.renameSync.bind(fs), statSync = fs.statSync.bind(fs), statfsSync = fs.statfsSync.bind(fs), symlinkSync = fs.symlinkSync.bind(fs), truncateSync = fs.truncateSync.bind(fs), unlinkSync = fs.unlinkSync.bind(fs), utimesSync = fs.utimesSync.bind(fs), lutimesSync = fs.lutimesSync.bind(fs), rmSync = function rmSync2(path, options) {
+  if (typeof options === "object" && options !== null)
+    options = { ...options };
+  if (!options?.recursive) {
+    let stats;
+    try {
+      stats = fs.lstatSync(path);
+    } catch {}
+    if (stats?.isDirectory())
+      throw (@getInternalField(@internalModuleRegistry, 25) || @createInternalModuleById(25)).fsEisdirError({
+        code: "EISDIR",
+        message: "is a directory",
+        path,
+        syscall: "rm",
+        errno: @processBindingCon
+
+
+=== b'renameSync' hit#2 @70819455 ===
+rSync.bind(fs), readFileSync = fs.readFileSync.bind(fs), fdatasyncSync = fs.fdatasyncSync.bind(fs), writeFileSync = fs.writeFileSync.bind(fs), readlinkSync = fs.readlinkSync.bind(fs), renameSync = fs.renameSync.bind(fs), statSync = fs.statSync.bind(fs), statfsSync = fs.statfsSync.bind(fs), symlinkSync = fs.symlinkSync.bind(fs), truncateSync = fs.truncateSync.bind(fs), unlinkSync = fs.unlinkSync.bind(fs), utimesSync = fs.utimesSync.bind(fs), lutimesSync = fs.lutimesSync.bind(fs), rmSync = function rmSync2(path, options) {
+  if (typeof options === "object" && options !== null)
+    options = { ...options };
+  if (!options?.recursive) {
+    let stats;
+    try {
+      stats = fs.lstatSync(path);
+    } catch {}
+    if (stats?.isDirectory())
+      throw (@getInternalField(@internalModuleRegistry, 25) || @createInternalModuleById(25)).fsEisdirError({
+        code: "EISDIR",
+        message: "is a directory",
+        path,
+        syscall: "rm",
+        errno: @processBindingConstants.os.errno.
+
+
+=== b'renameSync' hit#3 @70837366 ===
+DisposableSync,
+  open,
+  openSync,
+  read,
+  readFile,
+  readFileSync,
+  readSync,
+  readdir,
+  readdirSync,
+  readlink,
+  readlinkSync,
+  readv,
+  readvSync,
+  realpath,
+  realpathSync,
+  rename,
+  renameSync,
+  rm,
+  rmSync,
+  rmdir,
+  rmdirSync,
+  stat,
+  statfs,
+  statSync,
+  statfsSync,
+  symlink,
+  symlinkSync,
+  truncate,
+  truncateSync,
+  unlink,
+  unlinkSync,
+  unwatchFile,
+  utimes,
+  utimesSync,
+  watch,
+  watchFile,
+  write,
+  writeFile,
+  writeFileSync,
+  writeSync,
+  writev,
+  writevSync,
+  _toUnixTimestamp,
+  openAsBlob,
+  Dirent,
+  opendir,
+  opendirSync,
+  F_OK: 0,
+  R_OK: 4,
+  W_OK: 2,
+  X_OK: 1,
+  constants,
+  Dir,
+  Stats,
+  get ReadStream() {
+    return exports.ReadStream = (@getInternalField(@internalModuleRegistry, 28) || @createInternalModuleById(28)).ReadStream;
+  },
+  set ReadStream(value) {
+    Object.defineProperty(exports, "ReadStream", {
+      value,
+      writable: !0,
+      configurable: !0
+    });
+  },
+  get WriteStream() {
+    return exports.WriteStre
+
+
+=== b'renameSync' hit#4 @70841495 ===
+tName(readlinkSync, "readlinkSync");
+setName(readv, "readv");
+setName(readvSync, "readvSync");
+setName(realpath, "realpath");
+setName(realpathSync, "realpathSync");
+setName(rename, "rename");
+setName(renameSync, "renameSync");
+setName(rm, "rm");
+setName(rmSync, "rmSync");
+setName(rmdir, "rmdir");
+setName(rmdirSync, "rmdirSync");
+setName(stat, "stat");
+setName(statfs, "statfs");
+setName(statSync, "statSync");
+setName(statfsSync, "statfsSync");
+setName(symlink, "symlink");
+setName(symlinkSync, "symlinkSync");
+setName(truncate, "truncate");
+setName(truncateSync, "truncateSync");
+setName(unlink, "unlink");
+setName(unlinkSync, "unlinkSync");
+setName(unwatchFile, "unwatchFile");
+setName(utimes, "utimes");
+setName(utimesSync, "utimesSync");
+setName(watch, "watch");
+setName(watchFile, "watchFile");
+setName(write, "write");
+setName(writeFile, "writeFile");
+setName(writeFileSync, "writeFileSync");
+setName(writeSync, "writeSync");
+setName(writev, "writev");
+setName(writevSync, "writevSync");
+setN
+
+--- needle=b'EPERM' hits=4 ---
+
+=== b'EPERM' hit#1 @17190189 ===
+.ENAMETOOL1.H..LONGH	........#........D..I.EHOSTUNRI1.H..EACHL	.......D..I.EDESTADDL1.H..RREQH	...O....V........H.DPIPE...I9.......H.EBADE...I9.......H.ETIME...I9........;....g...H.DLOOP...I9.......H.EPERM...I9...T...H.ENXIO...I9.............$...H.ELIBEXECI9.../...H.EL2NSYNCI9........+........H.ENOTCONNI9...	...H.ENETDOWNI9...i....b.........{...E...I.ECANCELEI1.I..DM	.......A...I.ENOMEDIUL1.H..MH	........y....y....`....o....\....e.........[....~....Q....c....G....}....=....q....3...H.DNOSYS..I9.......H.ENOSYS..I9.......H.ENONET..I9...Y...H.EL2HLT..I9........1........H.DNOENT..I9.......H.ENOENT..I9.......H.ESRMNT..I9...6...H.EBFONT..I9...,....8........H.DSPIPE..I9.......H.ESPIPE..I9...U...H.ENOPKG..I9.......H.ECHRNG..I9........*....1...H.DISNAM..I9.......H.EISNAM..I9.......H.ENOMEM..I9.......H.EAGAIN..I9........
+........H.EBADRQC.I9.......H.ELIBBAD.I9...t...H.EREMOTE.I9...=....?........H.ENOTBLK.I9...v...H.EDEADLK.I9...;...H.ENOLINK.I9........@....U...H.EUCLEAN.I9...[...H.ELIBSCN.I9...4
+
+
+=== b'EPERM' hit#2 @20904761 ===
+L1.H5LONGH	.M.........#........D..I..I.EHOSTUNRM1.H5EACHL	... ...D..I.EDESTADDL1.H5RREQH	.M....H....V....2...H.DPIPE...H9.......H.EBADE...H9.......M..H.ETIME...H9........;........H.DLOOP...H9.......H.EPERM...H9.......M..H.ENXIO...H9.................H.ELIBEXECH9..._...M..H.EL2NSYNCH9........+....s...H.ENOTCONNH9...6...M..H.ENETDOWNH9...V....b....@....{...E...I..I.ECANCELEM1.I..DM	.......A...I.ENOMEDIUL1.H..MH	.M.........y.........`.........\...................~.........c.........}.........q........H.DNOSYS..H9.......H.ENOSYS..H9.......H.ENONET..H9.......M..H.EL2HLT..H9...f....1....P...H.DNOENT..H9.......H.ENOENT..H9.......H.ESRMNT..H9...{...M..H.EBFONT..H9.......8........H.DSPIPE..H9.......H.ESPIPE..H9.......H.ENOPKG..H9...|...M..H.ECHRNG..H9........*........H.DISNAM..H9.......H.EISNAM..H9...r...H.ENOMEM..H9...-...M..H.EAGAIN..H9...[....
+....E...H.EBADRQC.H9.......H.ELIBBAD.H9.......M..H.EREMOTE.H9........?........H.ENOTBLK.H9.......H.EDEADLK.H9...k...M..H.ENOLINK.H9........@........H.
+
+
+=== b'EPERM' hit#3 @28335786 ===
+....H.ENAMETOOH1.H5LONGH	........#..........I.EHOSTUNRI1.H5EACHL	.........H.EDESTADDH1.H5RREQH	........V........H.DPIPE...H9.......H.EBADE...H9.......H.ETIME...H9...Z....;....f...H.DLOOP...H9.......H.EPERM...H9...S...H.ENXIO...H9.............#...H.ELIBEXECH9.......H.EL2NSYNCH9........+........H.ENOTCONNH9.......H.ENETDOWNH9........b.........{...D...I.ECANCELEI1.I..DM	..........H.ENOMEDIUH1.H..MH	...m....y....y....`....o....\....e.........[....~....Q....c....G....}....=....q....3...H.DNOSYS..H9.......H.ENOSYS..H9.......H.ENONET..H9...Y...H.EL2HLT..H9........1........H.DNOENT..H9.......H.ENOENT..H9.......H.ESRMNT..H9...6...H.EBFONT..H9...{....8........H.DSPIPE..H9.......H.ESPIPE..H9...U...H.ENOPKG..H9.......H.ECHRNG..H9...%....*....1...H.DISNAM..H9.......H.EISNAM..H9.......H.ENOMEM..H9.......H.EAGAIN..H9........
+........H.EBADRQC.H9.......H.ELIBBAD.H9...t...H.EREMOTE.H9........?........H.ENOTBLK.H9...v...H.EDEADLK.H9...;...H.ENOLINK.H9...I....@....U...H.EUCLEAN.H9...[...H.ELIBSCN.H9...4.
+
+
+=== b'EPERM' hit#4 @70237869 ===
+a directory",
+  ENOTEMPTY: "directory not empty",
+  ENOTSOCK: "socket operation on non-socket",
+  ENOTSUP: "operation not supported on socket",
+  EOVERFLOW: "value too large for defined data type",
+  EPERM: "operation not permitted",
+  EPIPE: "broken pipe",
+  EPROTO: "protocol error",
+  EPROTONOSUPPORT: "protocol not supported",
+  EPROTOTYPE: "protocol wrong type for socket",
+  ERANGE: "result too large",
+  EROFS: "read-only file system",
+  ESHUTDOWN: "cannot send after transport endpoint shutdown",
+  ESPIPE: "invalid seek",
+  ESRCH: "no such process",
+  ETIMEDOUT: "connection timed out",
+  ETXTBSY: "text file is busy",
+  EXDEV: "cross-device link not permitted",
+  UNKNOWN: "unknown error",
+  EOF: "end of file",
+  ENXIO: "no such device or address",
+  EMLINK: "too many links",
+  EHOSTDOWN: "host is down",
+  EREMOTEIO: "remote I/O error",
+  ENOTTY: "inappropriate ioctl for device",
+  EFTYPE: "inappropriate file type or format",
+  EILSEQ: "illegal byte sequence",
+  ESOCKTNOSUPPORT: "sock
+
+--- needle=b'EROFS' hits=4 ---
+
+=== b'EROFS' hit#1 @17188630 ===
+I..(H.	1.I.DNETUNREI9.A.ACH.M....:...A..A......I.EKEYREVOI1.I..KED.M	.......A..A......I.EKEYEXPII1.I..RED.M	...w.........I.EMEDIUMTL1.H..YPE.H	...6....z........H.DNOSR...I9.......H.DROFS...I9...1
+..H.EROFS...I9.......H.EXDEV...I9...}...H.EBUSY...I9.............(...H.DNOTUNIQI9...!...H.ENOTUNIQI9...>
+..H.ERESTARTI9...?
+...p...I.EALREADYM9.......m...A..A......I.ENETUNREI1.I..ACH.M	...Z...A..A......I.EINPROGRI1.I..ESS.M	...G.........I.ENOPROTOL1.H..OPT.H	........Y....W..H.DLNRNG..I9.......H.DMFILE..I9.......H.DCHILD..I9.......H.ECHILD..I9.......H.ERANGE..I9.......H.ESTALE..I9........r........H.DREMCHG.I9.......H.DBADRQC.I9.......H.ENODATA.I9...u...H.ELIBACC.I9...D...H.ENOEXEC.I9.............r...H.DHWPOISOH9..N...L........A...I.EHWPOISOI1.H..NL	.......A...I.EHOSTDOWI1.H..NL	...u...A...I.ESHUTDOWL1.H..NH	........j........H.DCONNABOH9..RTEDL........D..I.ECONNREFI1.H..USEDL	.......D..I.EKEYREJEL1.H..CTEDH	...3.............D...I.EOWNERDEI1.I..AD..M	..........I.EPROTOTYL1.H..PE..H	........X..
+
+
+=== b'EROFS' hit#2 @20903140 ===
+REI9.A.ACH.M....Q...A..A......I..I.EKEYREVOM1.I..KED.M	.......A..A......I..I.EKEYEXPIM1.I..RED.M	.............I.EMEDIUMTL1.H..YPE.H	.M....r....z....\...M...`...H.DNOSR...H9...U...H.DROFS...H9....
+..H.EROFS...H9.......H.EXDEV...H9.......M..H.EBUSY...H9.................H.DNOTUNIQH9...b...H.ENOTUNIQH9....
+..H.ERESTARTH9....
+...p...M..I.EALREADYL9............A..A......I..I.ENETUNREM1.I..ACH.M	.......A..A......I..I.EINPROGRM1.I..ESS.M	.............I.ENOPROTOL1.H..OPT.H	.M....!....Y........H.DLNRNG..H9.......H.DMFILE..H9.......H.DCHILD..H9.......H.ECHILD..H9......H.ERANGE..H9...V..M..H.ESTALE..H9........r........H.DREMCHG.H9.......H.DBADRQC.H9...!...H.ENODATA.H9.......H.ELIBACC.H9.......M..H.ENOEXEC.H9...6......... ...H.DHWPOISOH9..N...L........A...I..I.EHWPOISOM1.H..NL	...
+	..A...I..I.EHOSTDOWM1.H..NL	.......A...I.ESHUTDOWL1.H..NH	.M.........j........H.DCONNABOH9..RTEDL........D..I..I.ECONNREFM1.H5USEDL	.......D..I.EKEYREJEL1.H5CTEDH	.M....E........./...D...I..I.EOWNERDEM1.I..AD..M	...0..
+
+
+=== b'EROFS' hit#3 @28334250 ===
+..H..(H..(H..I.DNETUNREI9.A.ACH.I....6...........I.EKEYREVOI1.H..KED.L	...p...........I.EKEYEXPII1.H..RED.L	..._.........H.EMEDIUMTH1.H..YPE.H	...m....z....y...H.DNOSR...H9.......H.DROFS...H9....
+..H.EROFS...H9.......H.EXDEV...H9...e...H.EBUSY...H9.................H.DNOTUNIQH9...
+...H.ENOTUNIQH9...&
+..H.ERESTARTH9...'
+...p...H.EALREADYH9...................I.ENETUNREI1.H..ACH.L	...D...........I.EINPROGRI1.H..ESS.L	...3.........H.ENOPROTOH1.H..OPT.H	...7....Y....C..H.DLNRNG..H9.......H.DMFILE..H9.......H.DCHILD..H9....
+..H.ECHILD..H9.......H.ERANGE..H9.......H.ESTALE..H9........r........H.DREMCHG.H9.......H.DBADRQC.H9.......H.ENODATA.H9...a...H.ELIBACC.H9...0...H.ENOEXEC.H9...R.........^...H.DHWPOISOH9..N...H...........I.EHWPOISOI1.H..NL	..........I.EHOSTDOWI1.H..NL	...c......H.ESHUTDOWH1.H..NH	........j........H.DCONNABOH9..RTEDH..........I.ECONNREFI1.H5USEDL	.........H.EKEYREJEH1.H5CTEDH	...u................I.EOWNERDEI1.H..AD..L	..........H.EPROTOTYH1.H..PE..H	...+....X....7.... ....
+
+
+=== b'EROFS' hit#4 @70238080 ===
+ration not permitted",
+  EPIPE: "broken pipe",
+  EPROTO: "protocol error",
+  EPROTONOSUPPORT: "protocol not supported",
+  EPROTOTYPE: "protocol wrong type for socket",
+  ERANGE: "result too large",
+  EROFS: "read-only file system",
+  ESHUTDOWN: "cannot send after transport endpoint shutdown",
+  ESPIPE: "invalid seek",
+  ESRCH: "no such process",
+  ETIMEDOUT: "connection timed out",
+  ETXTBSY: "text file is busy",
+  EXDEV: "cross-device link not permitted",
+  UNKNOWN: "unknown error",
+  EOF: "end of file",
+  ENXIO: "no such device or address",
+  EMLINK: "too many links",
+  EHOSTDOWN: "host is down",
+  EREMOTEIO: "remote I/O error",
+  ENOTTY: "inappropriate ioctl for device",
+  EFTYPE: "inappropriate file type or format",
+  EILSEQ: "illegal byte sequence",
+  ESOCKTNOSUPPORT: "socket type not supported",
+  ENODATA: "no data available",
+  EUNATCH: "protocol driver not attached",
+  ENOEXEC: "exec format error"
+}, uvErrmap;
+function getUvErrmap() {
+  if (uvErrmap === @undefined) {
+    uvErrm
+
+--- needle=b'read-only' hits=4 ---
+
+=== b'read-only' hit#1 @70238088 ===
+ot permitted",
+  EPIPE: "broken pipe",
+  EPROTO: "protocol error",
+  EPROTONOSUPPORT: "protocol not supported",
+  EPROTOTYPE: "protocol wrong type for socket",
+  ERANGE: "result too large",
+  EROFS: "read-only file system",
+  ESHUTDOWN: "cannot send after transport endpoint shutdown",
+  ESPIPE: "invalid seek",
+  ESRCH: "no such process",
+  ETIMEDOUT: "connection timed out",
+  ETXTBSY: "text file is busy",
+  EXDEV: "cross-device link not permitted",
+  UNKNOWN: "unknown error",
+  EOF: "end of file",
+  ENXIO: "no such device or address",
+  EMLINK: "too many links",
+  EHOSTDOWN: "host is down",
+  EREMOTEIO: "remote I/O error",
+  ENOTTY: "inappropriate ioctl for device",
+  EFTYPE: "inappropriate file type or format",
+  EILSEQ: "illegal byte sequence",
+  ESOCKTNOSUPPORT: "socket type not supported",
+  ENODATA: "no data available",
+  EUNATCH: "protocol driver not attached",
+  ENOEXEC: "exec format error"
+}, uvErrmap;
+function getUvErrmap() {
+  if (uvErrmap === @undefined) {
+    uvErrmap = /* 
+
+
+=== b'read-only' hit#2 @71545408 ===
+= options;
+    let anonymous = filename === "" || filename === ":memory:";
+    if (anonymous && (flags & constants.SQLITE_OPEN_READONLY) !== 0)
+      throw Error("Cannot open an anonymous database in read-only mode.");
+    if (!SQL)
+      initializeSQL();
+    this.#handle = SQL.open(anonymous ? ":memory:" : filename, flags, this), this.filename = filename;
+  }
+  #internalFlags = 0;
+  #handle;
+  #queryCache = /* @__PURE__ */ new Map;
+  filename;
+  get handle() {
+    return this.#handle;
+  }
+  get inTransaction() {
+    return SQL.isInTransaction(this.#handle);
+  }
+  static open(filename, options) {
+    return new Database(filename, options);
+  }
+  loadExtension(name, entryPoint) {
+    return SQL.loadExtension(this.#handle, name, entryPoint);
+  }
+  serialize(optionalName) {
+    return SQL.serialize(this.#handle, optionalName || "main");
+  }
+  static #deserialize(serialized, openFlags, deserializeFlags) {
+    if (!SQL)
+      initializeSQL();
+    return SQL.deserialize(serialized, openFlags
+
+
+=== b'read-only' hit#3 @86473346 ===
+e descriptorWriting to an empty blob is not implemented yet...................................new File(bits, name) expects at least 2 argumentsCannot write to a Blob backed by bytes, which are always read-onlyCannot write to a detached Bloboptions.type%0D%0AFailed to stream bytes from s3 bucketFailed to stream bytes to s3 bucketfetch() failedInvalid URLInvalid portURL must be HTTP or HTTPSfetch.preconnectfetch() expects a string, but received Undefinedfetch() expects a string, but received Nullfetch() expects a string, but received Stringfetch() expects a string, but received Objectfetch() expects a string, but received BigIntfetch() expects a string, but received Symbolfetch() expects a string, but received Numberfetch() expects a string, but received BooleanThe "name" argument must be specifiedEncoding must be one of base64, base64url, hex, or bufferInvalid UUID format for namespaceNamespace must be exactly 16 bytesThe "namespace" argument must be a string or bufferThe "name" argumen
+
+
+=== b'read-only' hit#4 @86550671 ===
+be an object or undefinedBlob.global_this set at constructionoptions.contentEncodingoptions.contentDisposition----WebKitFormBoundary--
+multipart/form-data; boundary=chunkSize must be a numberBlob is read-onlyBlob.onStructuredCloneDeserialize failedblob.write(pathOrFdOrBlob, blob) expects a Blob-y thing to writeFormData missing boundary	FormData ..Tag start should be set at this pointDecompression failedThe file read did not complete before its thread stoppedM_SEARCH.......................... ..@....Alloc...........................@8.@............................ _.A....Core.............................{3A....MaxPathExceeded..........................l3A....Sys[dir]/[name].[ext]./[name]-[hash].[ext]((napi_env)&Bun__thisFFIModuleNapiEnv)...asNapiValue.'box', 'bilinear', 'linear', 'lanczos3', 'mitchell', 'nearest', 'cubic', 'lanczos2', 'mks2013' or 'mks2021'.           . ..(...: ..function call threw an error: ..<incomplete call>.....
+.......
+.......
+................Scrypt failed: ..IdleS
+
+--- needle=b'claude.json.tmp' hits=0 ---
+--- needle=b'.claude.json' hits=4 ---
+
+=== b'.claude.json' hit#1 @99342160 ===
+arted...........	......syncerStopped...................armLateStart............	......./mnt/user-data/working..........	.......synced_file_limit_exceeded..............	........env.....................claude.json............	].......git............	.......config..................	.......Claude's conflicted copy...............120000..........	.......S.	.....`...............	.......tree....................	...^...File sync stopped for this session: this directory has more files than per-turn sync can track..........	...l...File sync is off for this session: the commit the cloud session started from cannot be read in this checkout............	...v...File sync is off for this session: the repository the cloud session cloned has more files than per-turn sync can track..............P...File sync is off for this session: the session's file budget was already used up........	...F...File sync stopped: its local record for this session could not be read..........	.......publish.................
+
+
+=== b'.claude.json' hit#2 @114013079 ===
+.	.......SIGTERM.........	...b...AWS auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal...............	...=...Error running awsAuthRefresh (in settings or ~/.claude.json):...............................!....................@...@`$.k...@...R....$M.@`,.D...@.m.I...@ }.@.D.@0....$....f.....ALi......L....A.....ALF....@.<.........@.4.C...@P,.R....$M.@`,.D..............U...v...y...................................%...S.......................xi.....................XZ...............................................Z......................hx......................0H.......................q......................P......................0........................+..........a.......a.0..'......O.0.....s.0...0.....	H..H........................Z.......................Z......h.......................................@9..........................................................................$...............................................h...h...h...h...h...h...h..
+
+
+=== b'.claude.json' hit#3 @114018121 ===
+tructure...............	...2...AWS credentials retrieved from awsCredentialExport..............	.......string..........	...W...Error getting AWS credentials from awsCredentialExport (in settings or ~/.claude.json):.....................................Y............................@.<..0-.......T......pT.....@.lG...}........N...@.........<.@0......@`/.n...@...i...../.@ ....k?....I.....3.@ %.G...@1M.t....O?.....@ ..G....r4.BS4.. ;..p=.@ ......@.<.@..E....@..P......<.@ ..v...@./.K....P5...=.....@.4......pL.@P..L...@.e.P...@.e.M.....e.....@.4.....@PT........[.....AL`....@.<.@...E.....\.....@.4.@ ..H...M.3...=.....@.4.@ ..E.......@@.........,.......m...v...|...............X...h...............,...M...O...Q...].......C...............w................................................>.......................1...............................................~...............................................................................................i...............................................
+
+
+=== b'.claude.json' hit#4 @114052767 ===
+.	.......SIGTERM.........	...b...GCP auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal...............	...=...Error running gcpAuthRefresh (in settings or ~/.claude.json):...........
+................................................@...@`$.k...@...R....$M.@`,.D...@.U...$....f.....ALi......L....A.....ALI......<.....@.4.C...@P,.R....$M.@`,.D..........U...\...~...............S.......................................................................(.......................H.......................P.
+......................Y......................0......................X...........a.......j"0..8......R"0.....v"0.."0......H..H.......................................................h...................................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h..............................
+
+--- needle=b'config write failed' hits=4 ---
+
+=== b'config write failed' hit#1 @192712474 ===
+..............................	...1...[default]
+s3 =
+  payload_signing_enabled = false
+...............	.......wx......................................	.......EEXIST..........	...'...[agent-proxy] aws config write failed: .........	.......warn...............................................l.......4.....@p4.....)...........@.4Ll...............@ ......@pm.@...@...E...@p\.H.....D.@ .....cL...@........ .&t.................x...........................	...?...Y...o...q............................Nf.....................0	........................f.....................H.......................@fm......................................................................	.......................,........................a.......................\.............................................H...............................................0[.......................G..........T.........z.{.........z.~.....z.'.z.....	H..H.........................`.......................`.....h.................................
+
+
+=== b'config write failed' hit#2 @200730730 ===
+..............x.......................................	.......git proxy: 'git config .........	.......' in ...........	....... exited ........	.......: ..............	...-...git proxy: repo-local git config write failed...............	........................@...@...@...E...@.d.G..v.....A.....................................................(.i............................................ Hj.......................b.................U.......;...C...<...g...........	H..H........................j.......................i......h.........................................h.........................................................................$...............................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...............................................................................................................................................(.......................(.......	...............	.................................
+
+
+=== b'config write failed' hit#3 @312952613 ===
+.mkdir(KZ.join(e,".."),{recursive:!0,mode:448}),await MB.writeFile(e,`[default]
+s3 =
+  payload_signing_enabled = false
+`,{flag:"wx",mode:384})}catch(t){if(xt(t)==="EEXIST")return;E(`[agent-proxy] aws config write failed: ${t instanceof Error?t.message:String(t)}`,{level:"warn"})}}var R$g,ous,MB,ldn,KZ,H$g="/run/ccr/session_token",I$g,aLc,iLc,nC0,P$g,Tce,M$g,C$g="# >>> claude agent-proxy governed-git (auto-generated; do not edit) >>>",nLc="# <<< claude agent-proxy governed-git <<<",lC0,O$g="/v1/code/agent-proxy",fC0=1048576,hC0;var F$g=A(()=>{tr();E_();xm();Ze();cr();lo();pt();gc();yx();b9();$Ke();Z4();Yhi();x8s();_$g();k$g();R$g=require("child_process"),ous=require("fs"),MB=require("fs/promises"),ldn=require("os"),KZ=require("path"),I$g=["/etc/ssl/certs/ca-certificates.crt","/etc/pki/tls/certs/ca-bundle.crt","/etc/ssl/cert.pem"],aLc=["localhost","127.0.0.1","::1","127.0.0.0/8","0.0.0.0/8","::","169.254.0.0/16","anthropic.com",".anthropic.com","*.anthropic.com","registry.npmjs.org","jsr
+
+
+=== b'config write failed' hit#4 @315156364 ===
+SS_TOKEN")],["--add"]]];for(let[[s,a],l]of i)await iiy(["-C",e,"config","--local",...l,s,a],(c)=>new wt(`git proxy: 'git config ${s}' in ${e} exited ${c.code}: ${c.stderr}`,"git proxy: repo-local git config write failed"),n);r(`[runner:session] git proxy: wired repo-local credential helper for ${o} in ${e}`)}async function iiy(e,t,r,n=TFe.spawn,o=DVt){await new Promise((i,s)=>{let a=!1,l="",c=(f)=>{if(a)return;if(a=!0,clearTimeout(p),r?.removeEventListener("abort",d),f)s(f);else i()},u=n("git",e,{cwd:void 0,stdio:["ignore","ignore","pipe"],windowsHide:!0});u.stderr?.on("data",(f)=>l+=String(f));let d=()=>{u.kill("SIGKILL"),c(t({code:null,stderr:l.trim()}))},p=setTimeout((f,m)=>{f.kill("SIGKILL"),m(t({code:null,stderr:l.trim()}))},o,u,c);if(r?.aborted)d();else r?.addEventListener("abort",d,{once:!0});u.on("close",(f)=>c(f===0?void 0:t({code:f,stderr:l.trim()}))),u.on("error",(f)=>c(f))})}async function roA(e,t,r,n){await iiy(["-C",e,...sve,"remote","set-url","origin","--",t],(o)=>new wt
+
+--- needle=b'Unable to write' hits=0 ---
+--- needle=b'Config file is read-only' hits=0 ---
+--- needle=b'renamed' hits=4 ---
+
+=== b'renamed' hit#1 @85538310 ===
+italgrounds), and percentit fromclosingcontainInsteadfifteenas well.yahoo.respondfighterobscurereflectorganic= Math.editingonline paddinga wholeonerroryear ofend of barrierwhen itheader home ofresumedrenamedstrong>heatingretainscloudfrway of March 1knowingin partBetweenlessonsclosestvirtuallinks">crossedEND -->famous awardedLicenseHealth fairly wealthyminimalAfricancompetelabel">singingfarmersBrasil)discussreplaceGregoryfont copursuedappearsmake uproundedboth ofblockedsaw theofficescoloursif(docuwhen heenforcepush(fuAugust UTF-8">Fantasyin mostinjuredUsuallyfarmingclosureobject defenceuse of Medical<body>
+evidentbe usedkeyCodesixteenIslamic#000000entire widely active (typeofone cancolor =speakerextendsPhysicsterrain<tbody>funeralviewingmiddle cricketprophetshifteddoctorsRussell targetcompactalgebrasocial-bulk ofman and</td>
+ he left).val()false);logicalbankinghome tonaming Arizonacredits);
+});
+founderin turnCollinsbefore But thechargedTitle">CaptainspelledgoddessTag -->Adding:but wasRe
+
+
+=== b'renamed' hit#2 @85583624 ===
+plain thediv></div>
+However thelead to the	<a href="/was grantedpeople havecontinuallywas seen asand relatedthe role ofproposed byof the besteach other.Constantinepeople fromdialects ofto revisionwas renameda source ofthe initiallaunched inprovide theto the westwhere thereand similarbetween twois also theEnglish andconditions,that it wasentitled tothemselves.quantity ofransparencythe same asto join thecountry andthis is theThis led toa statementcontrast tolastIndexOfthrough hisis designedthe term isis providedprotect theng</a></li>The currentthe site ofsubstantialexperience,in the Westthey shouldsloven..inacomentariosuniversidadcondicionesactividadesexperienciatecnolog..aproducci..npuntuaci..naplicaci..ncontrase..acategor..asregistrarseprofesionaltratamientoreg..stratesecretar..aprincipalesprotecci..nimportantesimportanciaposibilidadinteresantecrecimientonecesidadessuscribirseasociaci..ndisponiblesevaluaci..nestudiantesresponsableresoluci..nguadalajararegistradosoportunidadcomercialesf
+
+
+=== b'renamed' hit#3 @85995600 ===
+framework-react/server.tsx.git..t-.E.............C E...............E...............E............bun-framework-react/ssr.tsxFramework::reactNwarn: deprecation notice: 'react-server-components' will be renamed to 'react'.._.[33mwarn.[0m.[2m:.[0m deprecation notice: 'react-server-components' will be renamed to 'react'..serverEntryPointywarn: deprecation notice: 'framework.serverEntryPoint' has been replaced with 'fileSystemRouterTypes[n].serverEntryPoint'......[33mwarn.[0m.[2m:.[0m deprecation notice: 'framework.serverEntryPoint' has been replaced with 'fileSystemRouterTypes[n].serverEntryPoint'..clientEntryPointywarn: deprecation notice: 'framework.clientEntryPoint' has been replaced with 'fileSystemRouterTypes[n].clientEntryPoint'......[33mwarn.[0m.[2m:.[0m deprecation notice: 'framework.clientEntryPoint' has been replaced with 'fileSystemRouterTypes[n].clientEntryPoint'..'framework.reactFastRefresh' is missing 'importSource''framework.reactFastRefresh' must be an object or 'true'server
+
+
+=== b'renamed' hit#4 @85995698 ===
+n-framework-react/ssr.tsxFramework::reactNwarn: deprecation notice: 'react-server-components' will be renamed to 'react'.._.[33mwarn.[0m.[2m:.[0m deprecation notice: 'react-server-components' will be renamed to 'react'..serverEntryPointywarn: deprecation notice: 'framework.serverEntryPoint' has been replaced with 'fileSystemRouterTypes[n].serverEntryPoint'......[33mwarn.[0m.[2m:.[0m deprecation notice: 'framework.serverEntryPoint' has been replaced with 'fileSystemRouterTypes[n].serverEntryPoint'..clientEntryPointywarn: deprecation notice: 'framework.clientEntryPoint' has been replaced with 'fileSystemRouterTypes[n].clientEntryPoint'......[33mwarn.[0m.[2m:.[0m deprecation notice: 'framework.clientEntryPoint' has been replaced with 'fileSystemRouterTypes[n].clientEntryPoint'..'framework.reactFastRefresh' is missing 'importSource''framework.reactFastRefresh' must be an object or 'true'serverComponentsseparateSSRGraphMissing 'framework.serverComponents.separateSSRGraph'serverRuntimeImport
+
+--- needle=b'atomic write' hits=2 ---
+
+=== b'atomic write' hit#1 @110091258 ===
+...........................!...
+.....
+.....
+.	...
+.
+........F.s.i.....F.......`...............X...............x...............................................................
+...............	....... (atomic write failed first: ...........	.......)...............	.......cause....................................................@...@...E...@.\.....C...@p\.@@... ..@p'.F...@.U.H.....N.@ ............7.....@.5.@.U....N....@.<................7...;...E.......................4.......7........................k......................x.O.............................................8........................:U.....................`...............................................................................................8........................n......P...............(...[
+......\
+...............H..H........................ZW......................ZW.....h...................................................................................................................................(...........?.
+
+
+=== b'atomic write' hit#2 @289355446 ===
+ry{return await t.read()===null}finally{await t.close().catch(()=>{})}}catch(t){return ar(t)}}function icu(e,t){if(e instanceof Error&&!(e instanceof Eoe)&&e!==t)try{if(e.cause===void 0)e.message+=` (atomic write failed first: ${ue(t)})`,Object.defineProperty(e,"cause",{value:t,writable:!0,configurable:!0,enumerable:!1})}catch{}throw e}function OIs(e,t,r={encoding:"utf-8"}){let n=br(),o=(r.allowSymlink,0),i=e,s,a=!1;if(r.allowSymlink)try{let d=n.readlinkSync(e);i=ph.isAbsolute(d)?d:ph.resolve(qg(n,ph.dirname(e)).resolvedPath,d),E(`Writing through symlink: ${e} -> ${i}`)}catch{}else{r.checkParentDir;try{let d=n.lstatSync(e);if(d.isSymbolicLink())throw new Eoe(`Refusing to write through symlink: ${e}. Resolve the symlink and pass the real target path explicitly.`);s=d.mode,a=!0}catch(d){if(!ar(d))throw d}}let l=`.tmp.${process.pid}.${RIs.randomBytes(6).toString("hex")}`,c=ecu(r.stagingDir,i,l,r.allowSymlink??!1),u=!1;if(r.allowSymlink&&!a)try{s=n.statSync(i).mode,a=!0}catch(d){if(!ar(d))

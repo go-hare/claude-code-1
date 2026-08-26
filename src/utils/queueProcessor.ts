@@ -1,9 +1,11 @@
 import type { QueuedCommand } from '../types/textInputTypes.js'
 import {
+  clearInFlightDrainBatch,
   dequeue,
   dequeueAllMatching,
   hasCommandsInQueue,
   peek,
+  setInFlightDrainBatch,
 } from './messageQueueManager.js'
 
 type ProcessQueueParams = {
@@ -68,7 +70,7 @@ export function processQueueIfReady({
     require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
   const isMainThread = (cmd: QueuedCommand) => isMainThreadQueuedCommand(cmd)
 
-  const next = peek(isMainThread)
+  const next = peek(cmd => isMainThread(cmd) && cmd.passive !== true)
   if (!next) {
     return { processed: false }
   }
@@ -76,21 +78,29 @@ export function processQueueIfReady({
   // Slash commands and bash-mode commands are processed individually.
   // Bash commands need per-command error isolation, exit codes, and progress UI.
   if (isSlashCommand(next) || next.mode === 'bash') {
-    const cmd = dequeue(isMainThread)!
-    void executeInput([cmd])
+    const cmd = dequeue(cmd => cmd === next)!
+    const batch = [cmd]
+    setInFlightDrainBatch(batch)
+    void executeInput(batch).finally(() => clearInFlightDrainBatch(batch))
     return { processed: true }
   }
 
   // Drain all non-slash-command items with the same mode at once.
+  // Official Cuy: skip passive wake/receipt rows (they are not a user turn).
   const targetMode = next.mode
   const commands = dequeueAllMatching(
-    cmd => isMainThread(cmd) && !isSlashCommand(cmd) && cmd.mode === targetMode,
+    cmd =>
+      isMainThread(cmd) &&
+      !isSlashCommand(cmd) &&
+      cmd.passive !== true &&
+      cmd.mode === targetMode,
   )
   if (commands.length === 0) {
     return { processed: false }
   }
 
-  void executeInput(commands)
+  setInFlightDrainBatch(commands)
+  void executeInput(commands).finally(() => clearInFlightDrainBatch(commands))
   return { processed: true }
 }
 

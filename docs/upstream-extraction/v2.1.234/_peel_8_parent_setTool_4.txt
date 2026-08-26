@@ -1,0 +1,6 @@
+OFFSET=297879657
+NEEDLE=b'setToolPermissionContext'
+
+}:r),c=!BH("hooks")||cBe(e.source);if(e.hooks&&c){let w=Vt();jQp(r.setAppState,w,e.hooks,e.name,e.type==="prompt"?e.skillRoot:void 0)}let u=e.source?`${e.source}:${e.name}`:e.name,d=l.filter((w)=>w.type==="text").map((w)=>w.text).join(`
+
+`);Kst(e.name,u,d,r.agentId??null);let p=wjr(e.name);if(p)r.applyAttributionOp({kind:"recordVerification",method:p});r.options.activeSkill=y6(e);let f=cef(e,t),m=SR(await e.getAllowedTools?.()??e.allowedTools??[]),h=SR(e.disallowedTools??[]);if(h.length>0)vfi(r.setToolPermissionContext,h,"union");let g=e$a(o,n,l),b=jRt(e)?[]:await vBr(yLt(l.filter((w)=>w.type==="text").map((w)=>w.text).join(" "),r,null,[],{now:()=>new Date().toISOString(),uuid:()=>Jmt.randomUUID()},r.messages,"repl_main_thread",{planSlugSeed:t})),v=await Qjn(e,Ya(),r);return{messages:[yn({content:f,uuid:i}),yn({content:g,isMeta:!0}),...v?[v]:[],...b,...s,yc({type:"command_permissions",allowedTools:m,model:e.model})],shouldQuery:!0,allowedTools:m,disallowedTools:h,model:e.model,effort:e.getEffort?.(t,r)??e.getDefaultEffort?.(t,r)?.value??e.effort,command:e}}function e$a(e,t,r){return e.length>0||t.length>0?[...e,...t,...r]:r}var Jmt,_1v,uef=5;var BLt=A(()=>{pt();bt();w4e();bt();vg();bt();f4e();xy();pfi();O3();tr();Ut();rf();hJe();Fbe();Eir();Jjn();_ke();fJe();qNa();wir();FOe();$h();cI();W7t();ih();BPe();

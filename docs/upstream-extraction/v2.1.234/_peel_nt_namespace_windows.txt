@@ -1,0 +1,23 @@
+--- 115764918
+...%.............. %......i.......8%..............xj..............8%......).......H%...............$......I...................................Y...Network (UNC, NT-namespace, or automount) paths are not allowed for workflow scriptPath: ...............................................Workflow script file ................... exceeds ....................... bytes
+
+--- 127651242
+..........................4...shell cwd read-back contains a dot-segment; ignoring....................warn........................<...shell cwd read-back is an NT-namespace device path; ignoring................/...shell cwd read-back is a network path; ignoring.............>...shell cwd read-back crosses a foreign automount host; ignoring..............+...It
+
+--- 170696843
+.......B.....I.........<.....).........B...............B.....I.........B.............................................read denied: ...............>...read_file: NT-namespace path rejected before filesystem access..........................read................+...Iterator result interface is not an object......................................r..................
+
+--- 291667130
+workflow script to ${i}: ${c}`,{level:"warn"})}})(),i}async function s7t(e){let t=wKe.resolve(Yt(),e);if(su(e)||Jw(e)||bu(e)||bu(t))return{error:`Network (UNC, NT-namespace, or automount) paths are not allowed for workflow scriptPath: ${e}`};try{let r=await br().readFileBytes(t,D1+1);if(r.byteLength>D1)return{error:`Workflow script file ${t} exceeds ${D1} by
+
+--- 295442211
+/^\/+/,"/");for(let i of[e,t]){if(yR(i)){E("shell cwd read-back contains a dot-segment; ignoring",{level:"warn"});return}if(Jw(i)){E("shell cwd read-back is an NT-namespace device path; ignoring",{level:"warn"});return}if(o&&qh(i)&&wwr(i,r)){E("shell cwd read-back is a network path; ignoring",{level:"warn"});return}if(Q8(i,r)){E("shell cwd read-back crosses 
+
+--- 299532836
+ng reads file contents.",decisionReason:{type:"rule",rule:g}};o=!0}let y=_s(e.file_path);if(Yhe(y)||Jw(y))return{behavior:"deny",message:"file_path: device- or NT-namespace paths cannot be published \u2014 spell the path plainly",decisionReason:{type:"other",reason:"Device-namespace publish sources cannot be safely classified"}};if(U9v(y)||B9v(y))return{beha
+
+--- 306717589
+S:()=>C5i,readFileForRemote:()=>gno});async function gno(e,t,r,n="utf-8",o){try{let i=_s(e);if(Jw(e.trim())||Jw(i))throw new wt(`read denied: ${e}`,"read_file: NT-namespace path rejected before filesystem access");for(let u of W_(i))if(!HYe(u,r,"read").allowed)throw Error(`read denied: ${e}`);let s=Math.min(t&&t>0?t:azE,C5i),a=await xih.open(i,"r"),l,c;try{l
+
+--- 309179079
+e worktree's git metadata may need repair.`}function k0c(e){if(qh(e)||Jw(e)||Jw(L5t.win32.normalize(e)))return E("[sessionRestore] transcript path is a network/NT-namespace path \u2014 not chdir-ing",{level:"warn"}),!0;return!1}function $5t(e,t,r,n){let o=an0(t,r,n);return e.record(o),o}function an0(e,t,r){let n=$b();if(n&&r?.preserveBinding!==!0)return Gte(

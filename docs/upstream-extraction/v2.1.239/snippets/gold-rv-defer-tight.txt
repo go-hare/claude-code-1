@@ -1,0 +1,1055 @@
+
+#### deferred_tool_use count=10
+--- 177665416 ---
+....................................................................`........................q......................p...............................................................
+................................................................................._......................._........................c.....................@.}.....................h...
+............................................hz......................(.......................h.......................................................................................
+................................................................................................................................P...................................................
+....................`.......................estimated_tokens_delta..................compact_result..................compact_error...................api_error_status................
+deferred_tool_use.......H................................#......`&......@*.......-.......1..................2M..o.......o.......2M..IM.......D..H...................................
+............XR..............................................@....................................................................... ............... .......".......P.......(a......
+8a......H.......(.......PZ......8.......@.......@........P......@.......`.......H.......p........[.......(......X.......h........P..............09......8.......`...............8...
+....HN.......................P......P........P...............A...............A.......[..................................................................h...h...h...h...h...h...h...
+h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................................H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H.......
+--- 230293981 ---
+...............................................0................................................................................!...................................................
+...........................................................................................................................................i.......0...............@................
+...............................attachment......................Internal Attachment discriminated union (at-mentioned files, IDE selections, pasted images, structured output, deferr
+ed tool-use). Wire shape pending a dedicated SDKAttachment schema..............l...@internal Emitted when the engine yields an AttachmentMessage into the turn stream. Carries user-
+attached content (at-mentioned files, IDE selections, pasted media) and loop-attached data (structured output, deferred tool-use payloads). SDKResultMessage.structured_output and .
+deferred_tool_use are derived from these frames. From internal QueryEvent 'attachment'.......................................`............m......!<.....@.L.....@.l.B.....l.....@.l.
+B.........l.......<p.#....L............................(."......................k+...............................................+.....................x.......................(....
+................................................................... .(......................a............................................*...................*.g.*......D..H........
+...............................................h....................................................................................................................................
+...............................h...h...h...h...h...h...h...h...h...h...h...............................................................................H............................
+--- 303388630 ---
+ or refuses a subagent. A remote (isolation: remote) launch counts as spawned but never reports an outcome. Per-subagent detail is on the task_started / task_notification events.")
+),xGb=ve(()=>_e({type:kt("result"),subtype:kt("success"),duration_ms:Xe().int(),duration_api_ms:Xe().int(),ttft_ms:Xe().int().optional(),ttft_stream_ms:Xe().int().optional(),time_t
+o_request_ms:Xe().int().optional(),user_message_uuid:L().optional(),request_sent_wall_ms:Xe().optional(),time_to_request_from_spawn_ms:Xe().int().optional(),warm_spare_claimed:Ut()
+.optional(),time_origin_ms:Xe().optional(),is_error:Ut(),api_error_status:Xe().int().nullable().optional(),num_turns:Xe().int(),result:L(),stop_reason:L().nullable(),total_cost_usd
+:Xe().describe(zUd),usage:OUd(),modelUsage:oo(L(),KZo()).describe(BUd),subagent_stats:UUd().optional().describe(jUd),permission_denials:ft($Ud()),structured_output:Hn().optional(),
+deferred_tool_use:CGb().optional(),terminal_reason:FUd().optional(),fast_mode_state:w$n().optional(),fast_mode_disabled_reason:E$n().optional(),origin:cha().optional(),uuid:sd(),se
+ssion_id:L()})),RGb=ve(()=>_e({type:kt("result"),subtype:Or(["error_during_execution","error_max_turns","error_max_budget_usd","error_max_structured_output_retries"]),duration_ms:X
+e().int(),duration_api_ms:Xe().int(),is_error:Ut(),num_turns:Xe().int(),stop_reason:L().nullable(),total_cost_usd:Xe().describe(zUd),usage:OUd(),modelUsage:oo(L(),KZo()).describe(B
+Ud),subagent_stats:UUd().optional().describe(jUd),permission_denials:ft($Ud()),errors:ft(L()),terminal_reason:FUd().optional(),fast_mode_state:w$n().optional(),fast_mode_disabled_r
+eason:E$n().optional(),origin:cha().optional(),uuid:sd(),session_id:L()})),IGb=ve(()=>Es([xGb(),RGb()]).describe(`The outcome of a turn. The CLI emits exactly one result message pe
+--- 303428824 ---
+k decisions \u2014 are not covered here, and neither is the MCP --permission-prompt-tool surface (the prompt tool is the host there).")),u5b=ve(()=>_e({type:kt("prompt_suggestion")
+,suggestion:L(),uuid:sd(),session_id:L()}).describe("Predicted next user prompt, emitted after each turn when promptSuggestions is enabled.")),HoC=ve(()=>_e({type:kt("attachment"),
+attachment:Hn().describe("Internal Attachment discriminated union (at-mentioned files, IDE selections, pasted images, structured output, deferred tool-use). Wire shape pending a de
+dicated SDKAttachment schema."),timestamp:L(),uuid:sd(),session_id:L()}).describe("@internal Emitted when the engine yields an AttachmentMessage into the turn stream. Carries user-
+attached content (at-mentioned files, IDE selections, pasted media) and loop-attached data (structured output, deferred tool-use payloads). SDKResultMessage.structured_output and .
+deferred_tool_use are derived from these frames. From internal QueryEvent 'attachment'.")),PoC=ve(()=>_e({type:kt("tombstone"),message:Hn().describe("The internal Message being tom
+bstoned. Wire shape pending a dedicated schema."),uuid:sd(),session_id:L()}).describe("@internal Emitted when a previously-yielded message is superseded or removed from the transcr
+ipt (e.g., streaming\u2192non-streaming fallback removes a partial orphan). Consumers that render or persist the stream should remove the referenced message. From internal QueryEve
+nt 'tombstone'.")),d5b=ve(()=>_e({type:kt("conversation_reset"),new_conversation_id:sd(),uuid:sd(),session_id:L()}).describe("Emitted by /clear, plan-mode exit, and fresh-session f
+lows. The surface should mount a fresh transcript under new_conversation_id and reset any cached session title. From internal QueryEvent 'conversation_reset'.")),DoC=ve(()=>_e({typ
+--- 320446313 ---
+on_denials:Gt,terminal_reason:en,fast_mode_state:ie(C),fast_mode_disabled_reason:ie(x),origin:bt.origin,subagent_stats:m5(xt.toolUseContext?.session)},Kr=en==="budget_exhausted"?{.
+..$5({startedAt:Rt,common:{...Jt,is_error:!0,num_turns:et},variant:{subtype:"error_max_budget_usd",errors:[SPi(cn)]}}),...yt}:ke===null&&jr===void 0&&nt?{...$5({startedAt:Rt,common
+:{...Jt,is_error:!0,num_turns:nt.turnCount},variant:{subtype:"error_max_turns",errors:[`Reached maximum number of turns (${nt.maxTurns})`]}}),...yt}:Jr!==null?{...$5({startedAt:Rt,
+common:{...Jt,is_error:!0,num_turns:et},variant:{subtype:"error_during_execution",errors:Jr}}),...yt}:{...$5({startedAt:Rt,common:{...Jt,...jr!==void 0&&{stop_reason:"tool_deferred
+"},is_error:_t,num_turns:et},variant:{subtype:"success",api_error_status:Ft,result:Xn,structured_output:zt.at(-1)?.data,ttft_ms:!_t&&fn!==null?Math.max(0,Math.round(fn-Rt)):void 0,
+deferred_tool_use:jr}}),...yt},Nn;if(bt.uuid!==void 0)Nn=Ye(bt.uuid,ke!==null?"cancelled":yls(en,Pe)),W=null;if(yield*Be(),ze())ge.push(Kr);else yield*je(),yield Kr;if(Nn)yield ne(
+Nn)}while(ge.length>0&&!Y?.signal.aborted&&ze())yield*Be(),await Pr(100);if(ge.length>0&&Y?.signal.aborted&&de?.toolUseContext?.taskRegistry){let{taskRegistry:bt,setAppState:Rt,sto
+rageV5:yt}=de.toolUseContext;een({taskRegistry:bt,setAppState:Rt,storageV5:yt})}await uZn(),yield*Be(),yield*je()}async function*De(){try{yield*We()}finally{if(W!==null)Re(W,"cance
+lled"),W=null;for(let at of B)if(at.uuid!==void 0)Re(at.uuid,"discarded");B.length=0}}function Ge(at){switch(at.type){case"turn":if(he){E("[engine] dropped turn intent received aft
+er close()",{level:"warn"});break}if(B.push(at),at.uuid!==void 0)Ie.push(Ye(at.uuid,"queued"));F.enqueue(at);break;case"interrupt":{if(Y?.abort(at.reason!==void 0?new DOMException(
+--- 326822028 ---
+.CLAUDE_CODE_TRANSCRIPT_LOCAL_GC??it("tengu_transcript_local_gc",!1)}var f_u=A(()=>{bn();mr()});function PWy(e,t={},r={}){let n=EOt(new HWy.URL(e.href));return n.pathname=n.pathnam
+e.replace(/\/$/,"")+"/worker/events/stream",new Hio(n,t,r)}var HWy;var DWy=A(()=>{Pio();yZe();HWy=require("url")});function VnT(e){let r=e.split(`.`).filter((n)=>{let o;try{o=er(LM
+(n))}catch{return!0}let i=typeof o==="object"&&o!==null?o.type:void 0;if(typeof i==="string"&&vAl.has(i))return fr("warn","cli_stdin_server_only_type_dropped",{payload_type:i}),E(`
+[remote-io] dropped a ${i} frame from the stdin lane (server-authored-only type; SSE is its only ingress)`,{level:"warn"}),!1;return!0});return r.length===0?void 0:r.join(`.`)}func
+tion qnT(e){let t=e,r=t.subtype;if(e.type==="result"||e.type==="system"&&r==="init")return e.type==="result"?{...e,result:void 0,permission_denials:void 0,structured_output:void 0,
+deferred_tool_use:void 0,errors:void 0,subagent_stats:void 0}:e;if(e.type==="system"&&r==="task_started")return{type:"system",subtype:r,task_id:t.task_id,task_type:t.task_type,owne
+d_by_subagent:t.owned_by_subagent};if(e.type==="system"&&r==="task_updated"){let n=t.patch;return{type:"system",subtype:r,task_id:t.task_id,patch:{status:n?.status,is_backgrounded:
+n?.is_backgrounded}}}if(e.type==="system"&&r==="task_notification")return{type:"system",subtype:r,task_id:t.task_id,status:t.status};if(e.type==="system"&&r==="background_tasks_cha
+nged"){let n=t.tasks;return{type:"system",subtype:r,tasks:Array.isArray(n)?n.map((o)=>({task_id:o?.task_id})):[]}}if(e.type==="system"&&r==="hook_response")return{type:"system",sub
+type:r,hook_event:t.hook_event,outcome:t.outcome};if(e.type==="user")return{type:e.type,subtype:r,...m_u(t)};if(e.type==="assistant"){let n=t.message?.content;if(Array.isArray(n)){
+--- 326848001 ---
+ength}),e.push(...a.preserved),a=null}return{record:l,evict:c,flushBeforeCompactBoundary:u,applyCompactBoundary:d,settlePreservedTail:p,flushUnanchoredPreservedTail:f}}var T_u=A(()
+=>{jt();Lhr();Fl()});async function*JNs({orphanedPermission:e,deferredToolUse:t,tools:r,mutableMessages:n,processUserInputContext:o,canUseTool:i,persistSession:s,earlyResult:a}){if
+(e)h7n(),G_a(),yield*P8f(e,r,n,o);if(!t)return!1;h7n(),G_a();let l=(u,d)=>$5({startedAt:a.startedAt,common:{is_error:d,duration_api_ms:0,num_turns:n.length,stop_reason:d?"tool_defe
+rred_unavailable":"tool_deferred",session_id:Vt(),total_cost_usd:ww(),usage:a.usage,modelUsage:pD(),permission_denials:a.permissionDenials,...d&&{terminal_reason:"tool_deferred_una
+vailable"},fast_mode_state:cG(a.mainLoopModel,a.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:a.origin,subagent_stats:m5(o.session)},variant:{subtype:"success",result:"",
+deferred_tool_use:{id:u.toolUseID,name:u.toolName,input:u.toolInput}}});if(!Ld(r,t.toolName,o.options.toolAliases))return E(`Deferred tool resume: tool '${t.toolName}' is no longer
+ available (MCP server disconnected or tool removed)`,{level:"warn"}),yield l(t,!0),!0;let c=yield*H8f(t,i,n,o);if(!c)return!1;if(s)await K9(n,void 0,void 0,void 0,o.storageV5);ret
+urn yield l(c,!1),!0}var k_u=A(()=>{tt();z9();L0r();mSt();Is();b4t();qe();pT();wwt();Fl();JFn()});async function ZNs(e){R2("before_skills_plugins");let t=performance.now(),r=await 
+Promise.all([k4t(rr(),e),J_(e)]);return Lh("qe_plugin_skills_load_ms",performance.now()-t,t),R2("after_skills_plugins"),r}function QNs({shouldQuery:e,fromUserInput:t,fromOptions:r}
+){R2("system_message_yielded"),fr("info","cli_ask_should_query_resolved",{should_query:e,from_user_input:t,from_options:r})}var C_u=A(()=>{$g();Xi();gg();pZr();vE();n6()});function
+--- 326849931 ---
+e,t,r,{replayUserMessages:n,includePartialMessages:o}){switch(e.type){case"assistant":if(!("parent_tool_use_id"in e))yield*a3y(e,t,r());return;case"user":case"progress":yield*a3y(e
+,t,r());return;case"system":switch(e.subtype){case"status":if(e.status!=="requesting"||o)yield e;return;case"model_refusal_fallback":{let{provisional:i,...s}=e;yield s;return}case"
+init":case"notification":case"api_retry":case"model_refusal_no_fallback":case"memory_recall":case"thinking_tokens":case"compact_boundary":yield e;return;case"model_fallback":case"m
+odel_consent_fallback":yield e;return;default:return}case"tool_use_summary":yield e;return;case"attachment":if(n&&e.attachment.type==="queued_command"){yield{...VQn(e.attachment,e)
+,session_id:e.session_id};return}yield*PTn([e],e.session_id);return;case"result":{let{parent_tool_use_id:i,priority:s,shouldQuery:a,timestamp:l,...c}=e;if(c.subtype==="success"&&c.
+deferred_tool_use!==void 0){let{api_error_status:u,structured_output:d,...p}=c;yield{...p,is_error:!1,stop_reason:"tool_deferred",result:""};return}yield c;return}case"stream_event
+":if(o)yield WNs(e,e);return;case"tombstone":case"stream_request_start":case"tool_progress":case"command_lifecycle":case"auth_status":case"prompt_suggestion":case"rate_limit_event"
+:case"sdk_status":case"compact_progress":case"stream_mode":case"response_length":case"set_expanded_view":case"post_turn_summary":case"active_goal":case"set_in_progress_tool_use_ids
+":case"conversation_reset":case"hint_clears":case"interruptible_tool_in_progress":case"api_metrics":case"os_notification":case"open_message_selector":case"apply_flag_settings":case
+"refusal_continuation":case"query_model_change":return;default:}}function s3y(e){return e.includes(`<${tL}>`)||e.includes(`<${WY}>`)}function u3y(e,t){return{type:"user",message:{.
+--- 326876816 ---
+riant:{subtype:"error_max_structured_output_retries",errors:[aji(Jt,dr)]}});return}}}}finally{Kt.flushUnanchoredPreservedTail();try{let vr=lsn(this.mutableMessages,B,0,!0);if(vr!==
+this.mutableMessages)for(let Ur=0;Ur<vr.length;Ur++)this.mutableMessages[Ur]=vr[Ur]}catch(vr){Te(vr)}}yield*et.takePendingClose(),yield*nt("turn_end");let fn=ot.findLast((vr)=>vr.t
+ype==="assistant"||vr.type==="user"),jr=fn;if(Y){if(await Kt.record(!0),V.CLAUDE_CODE_EAGER_FLUSH||V.CLAUDE_CODE_IS_COWORK)await ow()}if(ke){yield $5({startedAt:G,common:{is_error:
+!1,duration_api_ms:w1(),num_turns:Gt,stop_reason:"tool_deferred",session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:Ft.v
+alue?.reason,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"success",result:"",
+deferred_tool_use:ke}});return}if(Qe){yield $5({startedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns:Qe.turnCount,stop_reason:Pe,session_id:Vt(),total_cost_usd:ww(),usage
+:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:Ft.value?.reason,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,sub
+agent_stats:m5(this.config.session)},variant:{subtype:"error_max_turns",errors:[`Reached maximum number of turns (${Qe.maxTurns})`]}});return}if(!QLi(fn,Pe)){yield $5({startedAt:G,
+common:{is_error:!0,duration_api_ms:w1(),num_turns:Gt,stop_reason:Pe,session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:
+Ft.value?.reason,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"error_during_ex
+--- 326893931 ---
+back"){Kr=!1;let xn=GLi(Jr);if(I(xn,bt,re),yield*ct.onRefusalFallbackBanner(xn.direction,Ft),DX())yield*l$o(Pe.accept(xn),Vt())}else if(R(Jr),Jr.subtype==="model_refusal_no_fallbac
+k")yield*et("exhausted");else if(Jr.subtype==="model_fallback")yield*et("availability_switch");if(Jr.subtype==="compact_boundary"){let xn=WLi(Jr);if(re)await Rt.flushBeforeCompactB
+oundary(xn);if(bt.push(xn),re)await Rt.record();n.push(xn),Rt.applyCompactBoundary(xn)}break;case"post_turn_summary":r((xn)=>xn.postTurnSummary===Jr.value?xn:{...xn,postTurnSummary
+:Jr.value});break;case"active_goal":r((xn)=>xn.activeGoal===Jr.value?xn:{...xn,activeGoal:Jr.value});break;case"result":{vr=!0,Ur=!0,x(Rt,W);let xn=_();if(xn!==void 0)throw xn.erro
+r;if(Jr.permission_denials.unshift(...oe),yield*ct.takePendingClose(),yield*et("turn_end"),re){if(await Rt.record(!0),yt)await ow()}let Dn=Jr.subtype==="success"&&!Jr.is_error&&Jr.
+deferred_tool_use===void 0;if(j!==void 0&&Dn&&nt.length===0&&Ct>0){N("tengu_structured_output_retraction_exhausted",{tombstoned_calls:Ct,num_turns:Jr.num_turns}),yield $5({startedA
+t:de,common:{is_error:!0,duration_api_ms:Jr.duration_api_ms,num_turns:Jr.num_turns,stop_reason:Qe,session_id:Vt(),total_cost_usd:Jr.total_cost_usd,usage:B,modelUsage:Jr.modelUsage,
+permission_denials:Jr.permission_denials,terminal_reason:mLe(Jr.terminal_reason)?Jr.terminal_reason:"structured_output_retry_exhausted",fast_mode_state:Jr.fast_mode_state,fast_mode
+_disabled_reason:Jr.fast_mode_disabled_reason,origin:D?.origin,subagent_stats:m5(e.session)},variant:{subtype:"error_max_structured_output_retries",errors:[sji]}});return}if(Dn&&zt
+)N("tengu_sdk_ttft",{ttft_ms:c$o(de,zt),model:gu(Mt)});let gr=Dn?G4i():void 0,Br=bt.findLast((ri)=>ri.type==="assistant"||ri.type==="user"),Rn=Br?.type==="assistant"?e1i(Br,dr.get(
+
+#### hook_deferred_tool count=22
+--- 142543640 ---
+................................?...Deferred tool resume: permissionMode mismatch (deferred under '.................', resuming under '.................F...'.)... .-.-.r.e.s.u.m.e.
+ .d.o.e.s. .n.o.t. .r.e.s.t.o.r.e. .p.e.r.m.i.s.s.i.o.n.M.o.d.e. ..  .p.a.s.s. .-.-.p.e.r.m.i.s.s.i.o.n.-.m.o.d.e. ..................... to match.......................warn........
+............assistant.......................Deferred tool resume: tool_use ................. not found in transcript............"...Deferred tool resume: re-emitting ..............
+........ (......................) through PreToolUse....................................progress....................................+...Iterator result interface is not an object..
+................R...The iterator, to which yield* delegated iteration, does not have a 'throw' method...............................................attachment......................
+hook_deferred_tool......................user....2.......................1.......!.......$.......(.......,.......................................................................3...
+...........;...4.@ ......E1<.@.4.@@..O.....3.@`%D....@...O...@`fO....@.L.O.......@.......@.,.I.........T.....@.<.@0..E.....3.@.%.@@..J..X....@..g....@.<.H...H.4.E.4..UT.@@?.@.,.@p.
+.I...@.d.J..W....@..a......,.@ ..L.....3..P=.@0..@@L.@0L.@ ...@...A=.......3..iM.@.9G........@ ....;Y....E...@0M.F.....4.@ ......@.U.H...@.d.E...@p4.H.....3.@.,.....@ ..@p..J....p2
+G....H...E.4...U.@ ..H...@.4.H...U.4.@p5.H...M.4...L.@PT.H...F.4V,.....4Y......;Y......LY.......YL......Yl......Y.......g....@...H...E.4.@pU.H...K.4...4.@.V.H...K.4.@05.H...E.4.. U
+.@ ..H.....3.@.}.H.....K...=.....@...G.....+.@.]...b.....@...G.L...d.........@.-.G.L...d[....@..v....@P......@..2....@p.....1...3.......,...p...............3...9...$...l...r.......
+--- 147273288 ---
+........................................................................................................h...h...h...h...h...h...h...h...h...h...h...................................
+................................p...p...p....................................................................................................................................... ...
+............(............... .............................................................................................................................H.........................
+........O...i.............Q............................F+............Q............................i.....p...............h...............p...............................x...........
+............................................................at......................attachment..............................hook_stopped_continuation...............................
+hook_deferred_tool.........................................$..0........<..0............5.......3..06.....E.4..`V.......F.....E.4...U........!...:...D...F...V...q...................
+............0}...............................................#......................HQ...............................................#.......................#......@...........<...
+................D...A........D..H.................................................w.....h....................................... ...................................................
+........................................................................h...h.......................................................................................................
+............(...................................................................................................................P...............................p...............h...
+--- 155718544 ---
+tError......................<tool_use_error>................Error: .................object.................._simulatedSedEdit...................L...Cannot destructure property '_si
+mulatedSedEdit' from null or undefined value....................progress................command.................durationMs......................pre_tool_hook_duration_ms...........
+............Hook ...............[... returned permissionDecision=defer in interactive mode; ignoring (defer is print-mode only).....................warn........................'...
+ returned permissionDecision=defer but .............c... .t.o.o.l. .c.a.l.l.s. .a.r.e. .i.n. .t.h.i.s. .b.a.t.c.h.;. .i.g.n.o.r.i.n.g. .(.d.e.f.e.r. .i.s. .s.o.l.o.-.o.n.l.y. ..  .
+s.i.b.l.i.n.g.s. .w.o.u.l.d. .b.e. .o.r.p.h.a.n.e.d. .o.n. .r.e.s.u.m.e.)...................cancelled...............................tengu_pre_tool_hook_deferred....................
+hook_deferred_tool......................PreToolUse......................Execution stopped by hook...................+...Iterator result interface is not an object..................
+............Slow PreToolUse hooks: .................ms for ................. (...................... hooks).................info....................file_path.......................
+........allow...................server_fallback_tombstone.......................permission..............................auto....................Slow permission decision: ..........
+............ (mode=................., behavior=.....................).......................ask.....................accept..................reject..................tool_decision...
+................hook....................PermissionRequest.......................hook_permission_decision................ tool permission denied.................unknown.............
+--- 163479728 ---
+............................................................8...............P...............P.......................................................................................
+...................H..................G..................G..................G..................G..................G..................G..................G..................G........
+..........i................................................................................................. ...............8...............P...............p.......................
+........attachment......................hook_blocking_error.....................hook_cancelled..................hook_error_during_execution.....................hook_non_blocking_er
+ror.................hook_success....................hook_system_message.....................hook_additional_context.................hook_stopped_continuation.......................
+hook_deferred_tool...............................................@...E...@.m.K.....4.@.n.K.....4.@.m.K.....4.@.n.K.....4.@@n.K.....4.@.m.K.....4.@.n.K.....4.@@n.K.....4.@`n.K.....4
+........1...D...W...j...}...............................................................................US......R$..k.......:$......^$..&*.......H..H.......................X.*.....
+................@.*.....h...............................................................................................................................................C...........
+........h...h...h...................................................................`...`...`....... ... ... ... ....+..........P/..01..01..01..@1..H1..H1..H1..H1..H1..H1..H1..H1..
+H1..H1..H1..H1..H1..H1..H1..H1..................................(.......n...............................................................................%...........................
+--- 165032497 ---
+....".F....Q.".....#....F.....U..O.}.G..i...#....$......$j...............%.V..-\z&...&.....'.........(.H..i.......).R...i.F.i.i.....F......P........................................
+....................................................................................................................................................................................
+...................................................................................(...............8.......................(........................................................
+.......i.......(...............@...............(.......).......8...........................................................................................................B...Canno
+t destructure property 'content' from null or undefined value......................a.......................l.......................c..............................................."
+hook_deferred_tool"....................attachment......................hook_deferred_tool......................"tool_use_id":"................."...................................R
+............................@PT.....@ ..@....@....<..eTI....@.M.....@ %.H...F.4..cL.@p<.D...@`L.F....a4.....@ .....?....@ ..F.4..aL.@p<.@ ......@P$.F....a4.@.u.G.....+.@.4.....@.e.
+@ ..C....14.BR4.@.<.I.....L...V.@ ......@.<.F...@.}.K.....L.@ ~.K...@.4Q....@.D.........@.D.@`F.J...@.......@P4.@ ..G.....+.@05.@ ..C....14.@.4.C...@ z.@ ..G.....+.@p'.....@0......
+...J...O...............................7...@...F...O...........................'...2...7...\...y....................................................................................
+...............X........................e......................p7..............................................................................................x....................
+--- 165032568 ---
+..%.V..-\z&...&.....'.........(.H..i.......).R...i.F.i.i.....F......P...............................................................................................................
+....................................................................................................................................................................................
+............(...............8.......................(...............................................................i.......(...............@...............(.......).......8.......
+....................................................................................................B...Cannot destructure property 'content' from null or undefined value..........
+............a.......................l.......................c..............................................."hook_deferred_tool"....................attachment......................
+hook_deferred_tool......................"tool_use_id":"................."...................................R............................@PT.....@ ..@....@....<..eTI....@.M.....@ %
+.H...F.4..cL.@p<.D...@`L.F....a4.....@ .....?....@ ..F.4..aL.@p<.@ ......@P$.F....a4.@.u.G.....+.@.4.....@.e.@ ..C....14.BR4.@.<.I.....L...V.@ ......@.<.F...@.}.K.....L.@ ~.K...@.4
+Q....@.D.........@.D.@`F.J...@.......@P4.@ ..G.....+.@05.@ ..C....14.@.4.C...@ z.@ ..G.....+.@p'.....@0.........J...O...............................7...@...F...O...................
+........'...2...7...\...y...................................................................................................X........................e......................p7......
+........................................................................................x................................................5......................0...................
+--- 176695904 ---
+.....$........:.....>0......`.................:......P......x........................................-...............6..............2=..............9................>..............
+.N..............R,........:.....O...............e"......................hook_blocking_error.....................already_read_file.......................hook_error_during_execution.
+....................audio_transcript................selected_lines_in_diff..................nested_memory...................compact_file_reference..................command_permissi
+ons.....................goal_status.....................teammate_shutdown_batch.................hook_cancelled..................hook_system_message.....................dynamic_skil
+l...................selected_lines_in_ide...................hook_non_blocking_error.................hook_stopped_continuation.......................pdf_reference...................
+hook_deferred_tool......................hook_permission_decision................plan_file_reference..............V.......p..........................................................
+..L..t..............................!............Q......F..............................H...........Q..........................................&..............Q..'&.........$.......Q
+...&........O..............................................................Q......F.......................................................G......$.......H.%........................
+........F9......................." .....!..............."......#..............$.'...............$..%....'........'.....'. ...'.!...'."...'.#...F.&.. &.&..!'.&.."(.&..#)............
+...*.O...i....&..$+.Q...&..%,.Q...&..&-.O..N..................../....!....................0.'.$...'.%...'.&...'.'...F.&..'1.i........2._...............3...............4.....5......
+--- 177645048 ---
+....abort...................[engine] turn .................. start..................ee......................e.......................G.......................R.......................
+q.......................j.......................U.......................model...................permission_mode.................max_thinking_tokens.....................flag_setting
+s...................................T.......................user....................tombstone...............(.......................................................................
+assistant...............(.......................................X.......................(.......................................................................text................
+....stream_event....................message_delta...................attachment......................structured_output.......................max_turns_reached.......................
+hook_deferred_tool......................se......Z.......\.......`.......d.......h.......n.......p.......t.......x.......|.......................re......................system......
+............thinking_tokens.....................*...[engine] yield-twin system/thinking_tokens......................[engine] yield ................./.......................subtype.
+................-.......................command_lifecycle...............................notification............................sdk_status......................status..............
+............stream_request_start....................requesting..............................compact_boundary........................model_refusal_fallback..........................
+model_refusal_no_fallback...............................model_fallback..........................model_consent_fallback..........................tool_use_summary....................
+--- 293733168 ---
+............................agent_listing_delta.....................agent_mention...................peer_mention....................already_read_file.......................attentio
+n_budget................audio_transcript................auto_mode.......................auto_mode_exit..................budget_usd......................command_permissions.........
+............compact_file_reference..................context_efficiency......................critical_system_reminder................date_change.....................deferred_tools_d
+elta....................diagnostics.....................directory.......................dynamic_skill...................edited_image_file.......................edited_text_file....
+............file....................goal_status.....................hook_additional_context.................hook_blocking_error.....................hook_cancelled..................
+hook_deferred_tool......................hook_error_during_execution.....................hook_non_blocking_error.................hook_permission_decision................hook_plugin_
+listing.....................hook_stopped_continuation.......................hook_success....................hook_system_message.....................invoked_skills..................
+max_turns_reached.......................mcp_instructions_delta..................mcp_dropped_tools_delta.................inlined_image_paths.....................mcp_resource........
+............memory_update...................nested_memory...................opened_file_in_ide......................output_style....................output_token_usage..............
+........pdf_reference...................plan_file_reference.....................plan_mode.......................plan_mode_exit..................plan_mode_reentry...................
+--- 293737008 ---
+............................agent_listing_delta.....................agent_mention...................peer_mention....................already_read_file.......................attentio
+n_budget................audio_transcript................auto_mode.......................auto_mode_exit..................budget_usd......................command_permissions.........
+............compact_file_reference..................context_efficiency......................critical_system_reminder................date_change.....................deferred_tools_d
+elta....................diagnostics.....................directory.......................dynamic_skill...................edited_image_file.......................edited_text_file....
+............file....................goal_status.....................hook_additional_context.................hook_blocking_error.....................hook_cancelled..................
+hook_deferred_tool......................hook_error_during_execution.....................hook_non_blocking_error.................hook_permission_decision................hook_plugin_
+listing.....................hook_stopped_continuation.......................hook_success....................hook_system_message.....................invoked_skills..................
+max_turns_reached.......................mcp_instructions_delta..................mcp_dropped_tools_delta.................inlined_image_paths.....................mcp_resource........
+............memory_update...................nested_memory...................opened_file_in_ide......................output_style....................output_token_usage..............
+........pdf_reference...................plan_file_reference.....................plan_mode.......................plan_mode_exit..................plan_mode_reentry...................
+--- 294260288 ---
+........................................................!...tengu_structured_output_retracted...............................stream_error............................................
+................Q...............................................................refusal.................served......................................................................
+............................interrupted..................... .......$.......(...............0.......4.......8.......<.......B.......D.......H.......L.......P.......................
+message_start...................message_delta...V.......X.......\.......`.......d.......................message_stop....................Jr......................thinking_tokens.i...
+....m.......................relevant_memories.......q.......................structured_output...................,...tengu_structured_output_late_retraction_drop....................
+hook_deferred_tool......................max_turns_reached.......................hook_system_message.....v.......x.......|.......................................queued_command......
+....................requesting..............................notification............................model_refusal_fallback..............%...tengu_refusal_fallback_entry_recorded...
+........................api_error.......................api_retry...............................................................................................................mode
+l_refusal_no_fallback.......................exhausted.......................................................................model_fallback..................availability_switch.....
+................................................................model_consent_fallback..........................................................................turn_end............
+--- 310706034 ---
+"});let a=r.findLast((d)=>d.type==="assistant"&&Array.isArray(d.message.content)&&d.message.content.some((p)=>p.type==="tool_use"&&p.id===e.toolUseID));if(!a||a.type!=="assistant")
+{E(`Deferred tool resume: tool_use ${e.toolUseID} not found in transcript`,{level:"warn"});return}let l=a.message.content.find((d)=>d.type==="tool_use"&&d.id===e.toolUseID);if(!l)r
+eturn;E(`Deferred tool resume: re-emitting ${e.toolName} (${e.toolUseID}) through PreToolUse`);let c=Zrp(e.traceparent),u=ppl([l],[a],t,n)[Symbol.asyncIterator]();try{while(!0){let
+ d=await Qrp(c,()=>u.next());if(d.done)break;let p=d.value;if(nue(p))continue;if(p.message){if(r.push(p.message),o)await K9(r,void 0,void 0,void 0,n.storageV5);if(p.message.type===
+"progress"){yield*lqe(p.message,n.session.toolProgressThrottle,n.options.refreshTools?.()??n.options.tools);continue}if(p.message.type==="attachment"&&p.message.attachment.type==="
+hook_deferred_tool")i=p.message.attachment;let f=p.message.type==="user"?AXr(p.message):[];yield{...p.message,session_id:Vt(),parent_tool_use_id:null,...f.length>0&&{tool_result_me
+ta:f}}}}}catch(d){try{await u.return?.(void 0)}catch{}throw d}finally{await u.return?.(void 0)}return i}async function*P8f(e,t,r,n){let o=!vre(),{permissionResult:i,assistantMessag
+e:s}=e,{toolUseID:a}=i;if(!a){E("handleOrphanedPermission: dropping orphaned permission \u2014 permissionResult is missing toolUseID",{level:"warn"});return}let l=s.message.content
+,c;if(Array.isArray(l)){for(let y of l)if(y.type==="tool_use"&&y.id===a){c=y;break}}if(!c){E(`handleOrphanedPermission: dropping orphaned permission for toolUseID=${a} \u2014 assis
+tant message ${s.message.id} has no matching tool_use block`,{level:"warn"});return}let u=c.name,d=Ld(t,u,n.options.toolAliases);if(!d){E(`handleOrphanedPermission: dropping orphan
+--- 312267435 ---
+ntext.abortController.signal.aborted){X9r(te);let de=re.map((oe)=>ic(oe,m));for(let oe of de)yield oe;X.remove(te),y={...y,messages:[...y.messages,...de]}}else if(!y.toolUseContext
+.abortController.signal.aborted)E(`[query] turn-start passive fold emitted ${re.length} of ${te.length} \u2014 leaving them queued`,{level:"warn"})}}catch(te){if(!jl(te))Te(te)}}le
+t T=!1,k=0,C=!1,x=!1,R,I=!1,M=Array.isArray(a)?a:a!==void 0?[a]:[],O=cO(e.toolUseContext),D=O,F=t$n(O,M),B=0,W,Q,Y,G=zi(),q=h,j=l==="side_question"||e.forkOrigin==="btw",U=VM(l),Z=
+U==="main"||U==="subagent",K=e.stickyBetas??(U==="main"||U===void 0?void 0:U==="subagent"?RMe():rU(IM())),ne=U==="main"||U===void 0,ie;while(!0){let xt=function(Ir){let no=Mnm(Ir);
+if(no)at.toolRequestedEndTurn=no;if(Ir.type!=="attachment")return;if(Ir.attachment.type==="hook_stopped_continuation")at.shouldPreventContinuation=!0;else if(Ir.attachment.type==="
+hook_deferred_tool")at.toolWasDeferred=!0},lt=function(Ir,no){if(Ir.type==="attachment"){Rt.push(Ir);return}if(r4t(Ir))return;let Sr=qq([Ir],no.options.refreshTools?.()??no.options
+.tools,X.options.mainLoopModel);CFi(Sr,ew(X.options.mainLoopModel).maxBase64Size),Rt.push(...Sr.filter((Yr)=>Yr.type==="user"))},en=function(Ir,no,Sr){return{type:"system",subtype:
+"model_refusal_fallback",direction:"retry",scope:"session",content:tyr(Ir.originModel,Ir.servingModel,Ir.apiRefusalCategory),level:"warning",trigger:"refusal",originalModel:Ir.orig
+inModel,fallbackModel:Ir.servingModel,requestId:Ir.requestId,apiRefusalCategory:Ir.apiRefusalCategory,apiRefusalExplanation:null,retractedMessageUuids:[...Ir.retractedMessageUuids]
+,refusedUserMessageUuid:Ir.refusedUserMessageUuid,...Ir.sawCyberRefusal&&{sawCyberRefusal:!0},isMeta:!1,timestamp:m.now(),uuid:no,...Sr&&{provisional:Sr}}};if(ne&&y.toolUseContext.
+--- 314450355 ---
+X.message);break;case"defer":{if(HHt()?.observe("pre_tool_hook_duration_ms",Date.now()-M),!n.options.isNonInteractiveSession){E(`Hook ${X.hookName} returned permissionDecision=defe
+r in interactive mode; ignoring (defer is print-mode only)`,{level:"warn"});break}let te=Array.isArray(i.message.content)?tr(i.message.content,(de)=>de.type==="tool_use"):1;if(te>1
+){E(`Hook ${X.hookName} returned permissionDecision=defer but ${te} tool calls are in this batch; ignoring (defer is solo-only \u2014 siblings would be orphaned on resume)`,{level:
+"warn"});break}if(n.abortController.signal.aborted)return S.push({message:Cn({content:[Iao(t)],toolUseResult:mj,toolDenialKind:"cancelled",sourceToolAssistantUUID:i.uuid,now:d})}),
+S;N("tengu_pre_tool_hook_deferred",{toolName:Rl(e.name),queryChainId:dn(n.queryTracking?.chainId),queryDepth:n.queryTracking?.depth});let re=r1t();return S.push({message:ic({type:"
+hook_deferred_tool",toolUseID:t,toolName:e.name,toolInput:w,hookName:X.hookName,hookEvent:"PreToolUse",permissionMode:gn(n).mode,...re&&{traceparent:re}})}),S}case"stop":{HHt()?.ob
+serve("pre_tool_hook_duration_ms",Date.now()-M);let te=Iao(t);if(X.stopReason)te.content=X.stopReason;let re=X.stopReason??x;if(S.push({message:Cn({content:[te],toolUseResult:re?`E
+rror: ${re}`:mj,toolDenialKind:X.stopReason?void 0:"cancelled",sourceToolAssistantUUID:i.uuid,now:d})}),C&&X.stopReason&&!n.abortController.signal.aborted)Rao(S,{toolName:e.name,to
+olUseID:t,message:re||"Execution stopped by hook"});return S}}let O=Date.now()-M;if(HHt()?.observe("pre_tool_hook_duration_ms",O),O>=ORl)E(`Slow PreToolUse hooks: ${O}ms for ${e.na
+me} (${I.length} hooks)`,{level:"info"});let D={};if(w&&typeof w==="object"){if(e.name===Ts&&"file_path"in w&&hS())D.file_path=String(w.file_path);else if((e.name===xl||e.name===Eu
+--- 316820954 ---
+Cah(i)){let s=i.message.content[0]?.id;if(s&&!o.has(s)){o.add(s);let a=r.get(s);if(a&&a.toolUse){if(n.push(a.toolUse),n.push(...a.preHooks),a.toolResult)n.push(a.toolResult);n.push
+(...a.postHooks)}}continue}if(Fpo(i)&&(i.attachment.hookEvent==="PreToolUse"||i.attachment.hookEvent==="PostToolUse"))continue;if(i.type==="user"&&i.message.content[0]?.type==="too
+l_result")continue;if(i.type==="system"&&i.subtype==="api_error")continue;n.push(i)}for(let i of t)n.push(i);return n}function Fpo(e){return e.type==="attachment"&&(e.attachment.ty
+pe==="hook_blocking_error"||e.attachment.type==="hook_cancelled"||e.attachment.type==="hook_error_during_execution"||e.attachment.type==="hook_non_blocking_error"||e.attachment.typ
+e==="hook_success"||e.attachment.type==="hook_system_message"||e.attachment.type==="hook_additional_context"||e.attachment.type==="hook_stopped_continuation"||e.attachment.type==="
+hook_deferred_tool")}function Xah(e,t){let r=new Map,n=new Map,o=new Map;for(let m of t)if(m.type==="assistant"){let h=m.message.id,g=r.get(h);if(!g)g=new Set,r.set(h,g);for(let y 
+of m.message.content)if(y.type==="tool_use")g.add(y.id),n.set(y.id,h),o.set(y.id,y)}let i=new Map;for(let[m,h]of n)i.set(m,r.get(h));let s=new Map,a=new Map,l=new Map,c=new Map,u=n
+ew Map,d=new Set,p=new Set;for(let m of e){if(m.type==="progress"){if(m.data.type==="tool_heartbeat")continue;let h=m.parentToolUseID,g=s.get(h);if(g)g.push(m);else s.set(h,[m]);if
+(m.data.type==="hook_progress"){let y=m.data.hookEvent,_=a.get(h);if(!_)_=new Map,a.set(h,_);_.set(y,(_.get(y)??0)+1)}}if(m.type==="user"){for(let h of m.message.content)if(h.type=
+=="tool_result"){if(c.set(h.tool_use_id,m),d.add(h.tool_use_id),h.is_error)p.add(h.tool_use_id)}}if(m.type==="assistant")for(let h of m.message.content){if(h.type==="text"&&!u.has(
+--- 316921568 ---
+nderType:e})=>o_([Cn({content:e==="full"?"Ultracode is on: optimize for the most exhaustive, correct answer \u2014 not the fastest or cheapest. Use the Workflow tool on every subst
+antive task; token cost is not a constraint. See the Workflow tool's **Ultracode** section and quality patterns. Solo only on conversational/trivial turns.":"Ultracode is still on 
+\u2014 use the Workflow tool; see its Ultracode section.",isMeta:!0})]),ultra_effort_exit:()=>o_([Cn({content:"Ultracode is off \u2014 the Workflow tool's standard opt-in rule appl
+ies again.",isMeta:!0})]),workflow_size_guideline_change:({size:e})=>o_([Cn({content:Lpm(e),isMeta:!0})]),already_read_file:()=>[],batching_reminder_sent:()=>[],command_permissions
+:()=>[],edited_image_file:()=>[],hook_cancelled:()=>[],hook_error_during_execution:()=>[],hook_non_blocking_error:()=>[],hook_system_message:()=>[],hook_permission_decision:()=>[],
+hook_deferred_tool:()=>[],goal_status:()=>[],structured_output:()=>[],max_turns_reached:()=>[],teammate_shutdown_batch:()=>[]};XvE={dream:"Background memory consolidation"}});funct
+ion UBl(e){return $t()?e:void 0}async function Hlh(e,t,r={},n){if(!GR(e))throw Error(`Invalid sessionId: ${e}`);if(!t.trim())throw Error("title must be non-empty");let o=He({type:"
+custom-title",customTitle:t.trim(),sessionId:e})+`.`;await Olh(e,o,r,UBl(n))}async function Plh(e,t,r={},n){if(!GR(e))throw Error(`Invalid sessionId: ${e}`);if(t!==null){let i=I8(t
+).trim();if(!i)throw Error("tag must be non-empty (use null to clear)");t=i}let o=He({type:"tag",tag:t??"",sessionId:e})+`.`;await Olh(e,o,r,UBl(n))}async function Dlh(e,t={},r){if
+(!GR(e))throw Error(`Invalid sessionId: ${e}`);let n=UBl(r);for(let o of await oSE(t,n)){if($t()&&n!==void 0){let a=rmt(o,n.isKeySegment);if(a!==void 0){if(await nSE(a,e,n))return;
+--- 317070161 ---
+if(Array.isArray(o)){for(let i of o)if(i.type==="tool_result"&&i.tool_use_id===t)return null}}return r}async function YQi(e,t){let r;try{r=Yv();let n=gC(r,t),{messages:o}=await PUe
+(r,n&&{storageV5:n}),i=huh(o.values(),e);if(!i)E(`findUnresolvedToolUse: no unresolved tool_use ${e} \u2014 not found in transcript or already resolved by a tool_result (${r}, ${o.
+size} messages)`,{level:"warn"});return i}catch(n){return E(`findUnresolvedToolUse: failed to read transcript${r?` ${r}`:""} for tool_use ${e}: ${n}`,{level:"warn"}),null}}async fu
+nction $2l(e,t){try{let r=!$t()||t===void 0?void 0:await RQi(e,1048576,t).catch(()=>{return});if(r===null)return null;let n;if(r!==void 0){if(n=r.content.split(`.`),r.cut)n.shift()
+}else{let{content:a,bytesRead:l,bytesTotal:c}=await eL(e,1048576);if(n=a.split(`.`),l<c)n.shift()}let o=null,i=-1;for(let a=n.length-1;a>=0;a--){let l=n[a].trim();if(!l.includes('"
+hook_deferred_tool"'))continue;let c=er(l);if(c?.type==="attachment"&&c.attachment?.type==="hook_deferred_tool"){o=c.attachment,i=a;break}}if(!o)return null;let s=`"tool_use_id":"$
+{o.toolUseID}"`;for(let a=i+1;a<n.length;a++)if(n[a].includes(s))return null;return o}catch{return null}}async function guh(e,t){let r=new Map;try{return(await zf((o)=>e.listEntrie
+s({namespace:"transcript",projectKey:t},{skipScopeStats:!0,...o!==void 0&&{cursor:o}}),(o)=>{for(let i of o){if(i.kind!=="key"||i.key.namespace!=="transcript"||i.key.projectKey!==t
+||i.key.agentId!==void 0||i.key.agentRelPath!==void 0||i.mtimeMs===void 0)continue;let s=m_(i.key.sessionId);if(s===null||r.has(s))continue;let a=fsn(Pn.transcript(t,s));if(a===voi
+d 0)continue;r.set(s,{key:a,mtimeMs:i.mtimeMs,createdMs:i.createdMs,size:i.size})}},{maxPages:duh})).status==="done"?r:void 0}catch{return}}async function MwE(e,t){let r=Sm.basenam
+--- 317070253 ---
+}}return r}async function YQi(e,t){let r;try{r=Yv();let n=gC(r,t),{messages:o}=await PUe(r,n&&{storageV5:n}),i=huh(o.values(),e);if(!i)E(`findUnresolvedToolUse: no unresolved tool_
+use ${e} \u2014 not found in transcript or already resolved by a tool_result (${r}, ${o.size} messages)`,{level:"warn"});return i}catch(n){return E(`findUnresolvedToolUse: failed t
+o read transcript${r?` ${r}`:""} for tool_use ${e}: ${n}`,{level:"warn"}),null}}async function $2l(e,t){try{let r=!$t()||t===void 0?void 0:await RQi(e,1048576,t).catch(()=>{return}
+);if(r===null)return null;let n;if(r!==void 0){if(n=r.content.split(`.`),r.cut)n.shift()}else{let{content:a,bytesRead:l,bytesTotal:c}=await eL(e,1048576);if(n=a.split(`.`),l<c)n.sh
+ift()}let o=null,i=-1;for(let a=n.length-1;a>=0;a--){let l=n[a].trim();if(!l.includes('"hook_deferred_tool"'))continue;let c=er(l);if(c?.type==="attachment"&&c.attachment?.type==="
+hook_deferred_tool"){o=c.attachment,i=a;break}}if(!o)return null;let s=`"tool_use_id":"${o.toolUseID}"`;for(let a=i+1;a<n.length;a++)if(n[a].includes(s))return null;return o}catch{
+return null}}async function guh(e,t){let r=new Map;try{return(await zf((o)=>e.listEntries({namespace:"transcript",projectKey:t},{skipScopeStats:!0,...o!==void 0&&{cursor:o}}),(o)=>
+{for(let i of o){if(i.kind!=="key"||i.key.namespace!=="transcript"||i.key.projectKey!==t||i.key.agentId!==void 0||i.key.agentRelPath!==void 0||i.mtimeMs===void 0)continue;let s=m_(
+i.key.sessionId);if(s===null||r.has(s))continue;let a=fsn(Pn.transcript(t,s));if(a===void 0)continue;r.set(s,{key:a,mtimeMs:i.mtimeMs,createdMs:i.createdMs,size:i.size})}},{maxPage
+s:duh})).status==="done"?r:void 0}catch{return}}async function MwE(e,t){let r=Sm.basename(e);if(Sm.dirname(e)!==TA()||!yl(r))return;let n=await guh(t,r);if(n===void 0)return;let o=
+--- 320269953 ---
+a0}`:"";let nm;if(ru[191]!==Lo.hookName||ru[192]!==vu)nm=_o.jsxs(oy,{color:"error",dimColor:!1,children:[Lo.hookName," hook timed out",vu,` \u2014 output discarded. Raise the hook'
+s "timeout" to allow more time.`]}),ru[191]=Lo.hookName,ru[192]=vu,ru[193]=nm;else nm=ru[193];return nm}case"hook_error_during_execution":{if(Lo.hookEvent==="Stop"||Lo.hookEvent===
+"SubagentStop"){return null}let Wa;if(ru[194]!==Lo.hookName)Wa=_o.jsxs(oy,{children:[Lo.hookName," hook warning"]}),ru[194]=Lo.hookName,ru[195]=Wa;else Wa=ru[195];return Wa}case"ho
+ok_success":{return null}case"hook_stopped_continuation":{if(Lo.hookEvent==="Stop"||Lo.hookEvent==="SubagentStop"){return null}let Wa;if(ru[196]!==Lo.hookName||ru[197]!==Lo.message
+)Wa=_o.jsxs(oy,{color:"warning",children:[Lo.hookName," hook stopped continuation: ",Lo.message]}),ru[196]=Lo.hookName,ru[197]=Lo.message,ru[198]=Wa;else Wa=ru[198];return Wa}case"
+hook_deferred_tool":{let Wa;if(ru[199]!==Lo.hookName||ru[200]!==Lo.toolName)Wa=_o.jsxs(oy,{color:"warning",children:[Lo.hookName," deferred ",Lo.toolName," \xB7 resume with -p --re
+sume to continue"]}),ru[199]=Lo.hookName,ru[200]=Lo.toolName,ru[201]=Wa;else Wa=ru[201];return Wa}case"goal_status":{if(Lo.sentinel){return null}let D2e=Lo.failed===!0;let TSo;if(r
+u[202]!==Lo.durationMs||ru[203]!==Lo.iterations||ru[204]!==Lo.met||ru[205]!==Lo.tokens||ru[206]!==D2e){TSo=[];if(Lo.met||D2e){if(Lo.durationMs!==void 0){let Wa;if(ru[208]!==Lo.dura
+tionMs)Wa=Bs(Lo.durationMs,{mostSignificantOnly:!0}),ru[208]=Lo.durationMs,ru[209]=Wa;else Wa=ru[209];TSo.push(Wa)}if(Lo.iterations!==void 0){const Wa=Lo.iterations;let vu;if(ru[21
+0]!==Lo.iterations)vu=At(Lo.iterations,"turn"),ru[210]=Lo.iterations,ru[211]=vu;else vu=ru[211];TSo.push(`${Wa} ${vu}`)}if(Lo.tokens!==void 0){let Wa;if(ru[212]!==Lo.tokens)Wa=nc(L
+--- 320439179 ---
+gr(Br))}}}Ct="",_t=!1,Ft=null,Qe=""}else if(sr.type==="assistant"){if(fn??=performance.now(),Ke.push(sr),sr.message.stop_reason!=null)ct=sr.message.stop_reason;_t=sr.isApiErrorMess
+age===!0,Ft=sr.apiErrorStatus??null;let qr=Qae(sr.message.content),xn=qr?.type==="text"?qr.text:"";if(_t)Qe=Ewt.has(xn)?"":lP(xn),Ct="";else Ct=Ewt.has(xn)?"":lP(xn)}else if(sr.typ
+e==="stream_event"&&sr.event.type==="message_delta"&&sr.event.delta.stop_reason!=null)ct=sr.event.delta.stop_reason;else if(sr.type==="attachment"&&sr.attachment.type==="structured
+_output"){if(!(sr.attachment.toolUseID!==void 0?qt.has(sr.attachment.toolUseID):qt.size>0))zt=[...zt,{toolUseID:sr.attachment.toolUseID,data:sr.attachment.data}]}else if(sr.type===
+"attachment"&&sr.attachment.type==="max_turns_reached")nt={turnCount:sr.attachment.turnCount,maxTurns:sr.attachment.maxTurns};else if(sr.type==="attachment"&&sr.attachment.type==="
+hook_deferred_tool")jr={id:sr.attachment.toolUseID,name:sr.attachment.toolName,input:sr.attachment.toolInput};if(se.length>0)yield*we();if(Ie.length>0)yield*Fe();if(sr.type==="stre
+am_event"){let qr=jfs(re,sr.event);if(re=qr.estimate,qr.emission)yield ne({type:"system",subtype:"thinking_tokens",estimated_tokens:qr.emission.estimatedTokens,estimated_tokens_del
+ta:qr.emission.estimatedTokensDelta}),E("[engine] yield-twin system/thinking_tokens",T9e)}if(E(`[engine] yield ${sr.type}/${"subtype"in sr?sr.subtype:"-"}`,T9e),sr.type==="command_
+lifecycle")yield ne(Ye(sr.uuid,sr.state));else if(sr.type==="notification"){let qr=sr.notification;yield ne({type:"system",subtype:"notification",key:qr.key,text:qr.text,priority:q
+r.priority,...qr.color!==void 0&&{color:qr.color},...qr.timeoutMs!==void 0&&{timeout_ms:qr.timeoutMs}})}else if(sr.type==="sdk_status")yield ne({type:"system",subtype:"status",stat
+--- 326784757 ---
+a===!0&&i.promptSource!==void 0)return{ok:!1,reason:`range contains a system-injected turn prompt; ${hdt(i,o)}`};if(i.isMeta===!0)continue;return{ok:!1,reason:`range contains a use
+r entry not attributable to the declared turn; ${hdt(i,o)}`}}default:return{ok:!1,reason:`range contains an unrecognized entry; ${hdt(i,o)}`}}}return{ok:!0}}var iWy="Resume rejecte
+d by --resume-drops-turn:",sWy,EnT,knT,xnT;var cWy=A(()=>{toe();ci();G4();sWy=new Set(["agent_listing_delta","agent_mention","peer_mention","already_read_file","attention_budget","
+audio_transcript","auto_mode","auto_mode_exit","budget_usd","command_permissions","compact_file_reference","context_efficiency","critical_system_reminder","date_change","deferred_t
+ools_delta","diagnostics","directory","dynamic_skill","edited_image_file","edited_text_file","file","goal_status","hook_additional_context","hook_blocking_error","hook_cancelled","
+hook_deferred_tool","hook_error_during_execution","hook_non_blocking_error","hook_permission_decision","hook_plugin_listing","hook_stopped_continuation","hook_success","hook_system
+_message","invoked_skills","max_turns_reached","mcp_instructions_delta","mcp_dropped_tools_delta","inlined_image_paths","mcp_resource","memory_update","nested_memory","opened_file_
+in_ide","output_style","output_token_usage","pdf_reference","plan_file_reference","plan_mode","plan_mode_exit","plan_mode_reentry","proactivity","read_truncation_notice","bash_outp
+ut_audience_note","relevant_memories","selected_lines_in_diff","selected_lines_in_ide","silent_turn_reminder","skill_listing","structured_output","task_reminder","team_context","te
+ammate_shutdown_batch","todo_reminder","token_usage","tool_search_usage_reminder","total_tokens_reminder","batching_reminder","batching_reminder_sent","ultra_effort_enter","ultra_e
+--- 326871696 ---
+ge_stop")this.totalUsage=DJr(this.totalUsage,vt);let Jr=jfs(this.thinkingTokenEstimate,vr.event);if(this.thinkingTokenEstimate=Jr.estimate,Jr.emission)yield{type:"system",subtype:"
+thinking_tokens",estimated_tokens:Jr.emission.estimatedTokens,estimated_tokens_delta:Jr.emission.estimatedTokensDelta,uuid:LPr.randomUUID(),session_id:Vt()};if(x)yield WNs(vr,{uuid
+:LPr.randomUUID(),session_id:Vt()});break;case"attachment":if(this.mutableMessages.push(vr),Y)ot.push(vr),Kt.record();if(vr.attachment.type==="relevant_memories"){let Xn=_ls(vr.att
+achment.memories);if(Xn)yield Xn}else if(vr.attachment.type==="structured_output")if(vr.attachment.toolUseID!==void 0?ur.has(vr.attachment.toolUseID):ur.size>0)Kt.evict(vr.uuid),N(
+"tengu_structured_output_late_retraction_drop",{});else hr=[...hr,{toolUseID:vr.attachment.toolUseID,attachmentUuid:vr.uuid,data:vr.attachment.data}];else if(vr.attachment.type==="
+hook_deferred_tool")ke={id:vr.attachment.toolUseID,name:vr.attachment.toolName,input:vr.attachment.toolInput};else if(vr.attachment.type==="max_turns_reached"){Qe={turnCount:vr.att
+achment.turnCount,maxTurns:vr.attachment.maxTurns};continue}else if(vr.attachment.type==="hook_system_message")yield*PTn([vr],Vt());else if(C&&vr.attachment.type==="queued_command"
+)yield VQn(vr.attachment,vr);break;case"stream_request_start":if(x)yield{type:"system",subtype:"status",status:"requesting",uuid:LPr.randomUUID(),session_id:Vt()};break;case"notifi
+cation":{let Xn=vr.notification;yield{type:"system",subtype:"notification",key:Xn.key,text:Xn.text,priority:Xn.priority,...Xn.color!==void 0&&{color:Xn.color},...Xn.timeoutMs!==voi
+d 0&&{timeout_ms:Xn.timeoutMs},uuid:LPr.randomUUID(),session_id:Vt()};break}case"set_expanded_view":break;case"post_turn_summary":this.config.setAppState((Xn)=>Xn.postTurnSummary==
+
+#### tool_deferred count=25
+--- 113060984 ---
+....................................................................................................................................................................................
+................................................................................................ .......................0...............h...............`...........................
+....................................................................................`...............................................................................................
+........ ...................!...........0...............@...............P...............`...........................................................................................
+....................................................(...............8...............H...............`...............x...............................................................
+tool_deferred...................max_turns.......................budget_exhausted................malformed_tool_use_exhausted....................api_error.......................comp
+leted...................!...structured_output_retry_exhausted.......................image_error.....................model_error.....................blocking_limit..................
+aborted_streaming.......................rapid_refill_breaker....................hook_stopped....................aborted_tools...................turn_setup_failed...................
+....background_requested....................prompt_too_long.................stop_hook_prevented.....................tool_deferred_unavailable........................Q...i._..i.i.i.
+i.......0...............(............... ........................................................................@...@.5............................................0/).T...P..../).
+--- 113061640 ---
+....................................................................................................................(...............8...............H...............`...............
+x...............................................................tool_deferred...................max_turns.......................budget_exhausted................malformed_tool_use_e
+xhausted....................api_error.......................completed...................!...structured_output_retry_exhausted.......................image_error.....................
+model_error.....................blocking_limit..................aborted_streaming.......................rapid_refill_breaker....................hook_stopped....................abor
+ted_tools...................turn_setup_failed.......................background_requested....................prompt_too_long.................stop_hook_prevented.....................
+tool_deferred_unavailable........................Q...i._..i.i.i.i.......0...............(............... ........................................................................@..
+.@.5............................................0/).T...P..../).Q...</)../)......H..H.........................$.......................$.....h.......................................
+............................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...
+h...h...h...h...h...h...h...h.......................................................................................................................................................
+................................(............... ...............................H.......................................................+..............Q............L........j...F..
+--- 147195032 ---
+ok blocked the turn from ending ................1... .c.o.n.s.e.c.u.t.i.v.e. .t.i.m.e.s. ..  .o.v.e.r.r.i.d.i.n.g. .a.n.d. .e.n.d.i.n.g. .t.u.r.n... .......................For Stop
+/SubagentStop hooks, check stop_hook_active in the input and return success while it's true. Set CLAUDE_CODE_STOP_HOOK_BLOCK_CAP to raise this limit....U.......................comp
+leted.......X.......................stop_hook_blocking......\.......................query_tool_execution_start......`...............(........................................-......
+I........-...............-..............................summary.................headline................bg......e.......i.......l.......p.......................query_tool_execution
+_end........(........................................,..............v.......x.......|.......................................................aborted_tools...........................
+tool_deferred...........................hook_stopped....................................................................(........................................+..................
+........#...tengu_loop_dynamic_wakeup_ends_turn.....................................................................tengu_post_autocompact_turn.....................tengu_query_befo
+re_attachments..................PostToolBatch...........(........................................*..............................hook-...................tool_result.................
+....attachment......................hook_blocking_error.............................hook_additional_context.....................................5...PostToolBatch hooks cancelled (c
+ontrol stream closed)...........................................................................hook_stopped_continuation...................'...Execution stopped by PostToolBatch h
+--- 177647504 ---
+................+...[engine] yield-twin tool_progress repl_call.....................tool_heartbeat......................+...[engine] yield-twin tool_progress heartbeat.............
+........agent_api_retry.....................0...[engine] yield-twin tool_progress subagent_retry............ ...[engine] yield sdk-queue system/........................compact_prog
+ress................stream_mode.....................response_length.................budget_exhausted........................shoji_engine............................ end (turns=....
+................ usage in=...................... out=................... cost=$......................... api=...................ms stop=................ resultLen=.................
+....).......................I.......................error_max_budget_usd....................error_max_turns.............!...Reached maximum number of turns (.......................
+tool_deferred...................success.............................................................................................................................................
+.... .......d.......$...................G...Cannot destructure property 'taskRegistry' from null or undefined value.................bt......................Rt......................
+yt......(...............0.......4.......8.......<.......B.......D.......H.......L.......P...........................................................................................
+..................................................................................................................................................../...............#.....0....d.@.D
+.B.....<.@ ..f........0................L........ .....@....d.@.D.B.....<.@ ..h...../..0....................;...L%.......................4.......(.............R=......C4...].......e
+--- 201831000 ---
+....................................(...............................................=........................!..................................!...................................
+..........H.....F..................................................................................................................................................................H
+..!..........................................................................................................................L......................................................
+................................................!...............!...... ....!......"....#......$ ...%.....&.....'........!.i........................................................
+............................................................................................................................a...............................n.......................
+tool_deferred_unavailable.......................tool_deferred...1...............................o.......................success.....................................,...............
+.........@...J...@...@.e.G...@P]..........@m.....@.l.F....@e.....@pm.R...@pe....C......,.@ ..N...@.5.I.....2...o.....@0..G.....e.@ ..H.....3I....@...J...@.e.I...@.e.J..............
+....e...j...m.....................................................Y...............................................k..............................................pX.................
+..............................k.....................p........................>..............................................h...............................................`.......
+................p:^......................I..............................................X................................................D......................hD..................
+--- 201831048 ---
+....................................=........................!..................................!.............................................H.....F...............................
+...................................................................................................................................H..!.............................................
+.............................................................................L......................................................................................................
+!...............!...... ....!......"....#......$ ...%.....&.....'........!.i........................................................................................................
+............................................................................a...............................n.......................tool_deferred_unavailable.......................
+tool_deferred...1...............................o.......................success.....................................,........................@...J...@...@.e.G...@P]..........@m....
+.@.l.F....@e.....@pm.R...@pe....C......,.@ ..N...@.5.I.....2...o.....@0..G.....e.@ ..H.....3I....@...J...@.e.I...@.e.J..................e...j...m...................................
+..................Y...............................................k..............................................pX...............................................k.................
+....p........................>..............................................h...............................................`.......................p:^......................I......
+........................................X................................................D......................hD........................k.....................x...................
+--- 201845208 ---
+......h.....I.........b.....).........b...............h.....................................................parent_tool_use_id..........................+...Iterator result interfac
+e is not an object..................R...The iterator, to which yield* delegated iteration, does not have a 'throw' method.......................requesting......................o...
+................................F...Cannot destructure property 'provisional' from null or undefined value..1.......................s...............................................
+........n.......................queued_command..2...................................M...Cannot destructure property 'parent_tool_use_id' from null or undefined value...............
+....success.................c...................K...Cannot destructure property 'api_error_status' from null or undefined value.....................p...............................
+tool_deferred.......................................................................................g....................@...E...@@O.......<.@ ..@ ..@ ..B.....;...;...L\...........
+..../.......+.....p..@ ..@ ..@ ..B.....;...;...L\.............../.......+....@...H...@.M.G.....3.@.%.@..*....@..)........@.E9....@..A....@..&....@P.$....@...@0..K.....4..`V.@ ..K..
+.@.4.......S.@@>.K.. ........@0..@0..K.....3...;...L\.............../.......pD...@..;...@.......G....@.D.H...@pU.R.....2g....@.l%....-...@.G...3G....@...@.......@ ..@ .............
+........................2.......................)...?...P...V...X...e...n.......................L...O...^...i...........................................(...2...4...6...R...v.......
+....................................................................................W...Z...i...t.......................................U...........................................
+--- 229870856 ---
+....?.......................e.....................................$....................................................................i%...`...............p.......................
+........................................................................................................................(...............8...............H...............X...........
+....p...............................................................................................................................................blocking_limit..................
+rapid_refill_breaker....................prompt_too_long.................image_error.....................model_error.....................api_error.......................malformed_to
+ol_use_exhausted....................aborted_streaming.......................aborted_tools...................stop_hook_prevented.....................hook_stopped....................
+tool_deferred...................max_turns.......................background_requested....................completed...................................................................
+....(...............8...............H...............X...............x...............................................................................................................
+................................blocking_limit..................rapid_refill_breaker....................prompt_too_long.................image_error.....................model_error.
+....................api_error.......................malformed_tool_use_exhausted....................aborted_streaming.......................aborted_tools...................stop_hoo
+k_prevented.....................hook_stopped....................tool_deferred...................max_turns.......................background_requested....................completed...
+--- 229871640 ---
+............aborted_tools...................stop_hook_prevented.....................hook_stopped....................tool_deferred...................max_turns.......................
+background_requested....................completed.......................................................................(...............8...............H...............X...........
+....x...............................................................................................................................................blocking_limit..................
+rapid_refill_breaker....................prompt_too_long.................image_error.....................model_error.....................api_error.......................malformed_to
+ol_use_exhausted....................aborted_streaming.......................aborted_tools...................stop_hook_prevented.....................hook_stopped....................
+tool_deferred...................max_turns.......................background_requested....................completed.......................budget_exhausted............!...structured_o
+utput_retry_exhausted.......................tool_deferred_unavailable.......................turn_setup_failed.......................@...............P...............x...............
+................................budget_exhausted............!...structured_output_retry_exhausted.......................tool_deferred_unavailable.......................turn_setup_f
+ailed..................................................................D...,.......|...,m......|..................@C........................0.5.....................P...............
+..........9.................v1).........R1).....v1)..1)......D..H.......................................................h........................................n..................
+--- 229871864 ---
+leted.......................................................................(...............8...............H...............X...............x.......................................
+........................................................................................................blocking_limit..................rapid_refill_breaker....................prom
+pt_too_long.................image_error.....................model_error.....................api_error.......................malformed_tool_use_exhausted....................aborted_
+streaming.......................aborted_tools...................stop_hook_prevented.....................hook_stopped....................tool_deferred...................max_turns...
+....................background_requested....................completed.......................budget_exhausted............!...structured_output_retry_exhausted.......................
+tool_deferred_unavailable.......................turn_setup_failed.......................@...............P...............x...............................................budget_exhau
+sted............!...structured_output_retry_exhausted.......................tool_deferred_unavailable.......................turn_setup_failed.......................................
+...........................D...,.......|...,m......|..................@C........................0.5.....................P.........................9.................v1).........R1).
+....v1)..1)......D..H.......................................................h........................................n..............................................................
+............................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p...p...
+--- 229872120 ---
+............................blocking_limit..................rapid_refill_breaker....................prompt_too_long.................image_error.....................model_error.....
+................api_error.......................malformed_tool_use_exhausted....................aborted_streaming.......................aborted_tools...................stop_hook_pr
+evented.....................hook_stopped....................tool_deferred...................max_turns.......................background_requested....................completed.......
+................budget_exhausted............!...structured_output_retry_exhausted.......................tool_deferred_unavailable.......................turn_setup_failed...........
+............@...............P...............x...............................................budget_exhausted............!...structured_output_retry_exhausted.......................
+tool_deferred_unavailable.......................turn_setup_failed..................................................................D...,.......|...,m......|..................@C....
+....................0.5.....................P.........................9.................v1).........R1).....v1)..1)......D..H.......................................................
+h........................................n..........................................................................................................................h...h...h...h...
+h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p...p...............................................................................
+....................................................................................................................................................................................
+--- 294261656 ---
+....................................................................model_refusal_no_fallback.......................exhausted.......................................................
+................model_fallback..................availability_switch.....................................................................model_consent_fallback......................
+....................................................turn_end................................ .......$.......(.......................budget_exhausted................error_max_budget
+_usd....-.......0.......4.......:.......<.......@.......D.......H.......N.......P.......T.......X.......\...................!...structured_output_retry_exhausted...................
+#...error_max_structured_output_retries.....a.......d.......h.......n.......p.......t.......x.......|...............................................................................
+tool_deferred...........................error_max_turns.............!...Reached maximum number of turns (.......................)...............................error_during_executi
+on......................,...tengu_structured_output_retraction_exhausted............................tengu_sdk_ttft..................................................................
+....................................................................................................................................................................................
+............................................................................/...............L..............4.....@...@ ... L...T..r4.@.2.@.E.. L...T..r4...L.@ ...Q4..r4.. 3.../..r4
+...........,.......;..B.......C4J........@ ....3.....@p..B.4...?.@`..@.M.V....e5.@`eU......L].........r4..P3...&..Q...r4..@3.Fv=..gT...M..r4.@.e...}.@1N.E...@p4.V....e5...5.B^4..b8
+--- 303323086 ---
+ionKey=${e}`},r=process.env.CLAUDE_CODE_ORGANIZATION_UUID;if(r)t["X-Organization-Uuid"]=r;return t}return Zma(e)}function Zma(e){return e?{Authorization:`Bearer ${e}`}:{}}function 
+GZo(e){process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN=e}var uG=A(()=>{tt();u2r();qe();st();Ju()});function yUd(e){return Qma.some((t)=>t===e)}function _Ud(e){VZo++,eha={reason:e,gene
+ration:VZo}}function bUd(){VZo++,eha=void 0}function tha(){return eha}function y$n(){return VZo}var Qma,VZo=0,eha;var _$n=A(()=>{Qma=["signed_out","identity_changed","transient","r
+efresh_failed"]});function mLe(e){return e==="aborted_streaming"||e==="aborted_tools"}function b$n(e){if(e===void 0)return!1;switch(e){case"blocking_limit":case"rapid_refill_breake
+r":case"prompt_too_long":case"image_error":case"model_error":case"api_error":case"malformed_tool_use_exhausted":case"budget_exhausted":case"structured_output_retry_exhausted":case"
+tool_deferred_unavailable":case"turn_setup_failed":return!0;case"aborted_streaming":case"aborted_tools":case"stop_hook_prevented":case"hook_stopped":case"tool_deferred":case"max_tu
+rns":case"background_requested":case"completed":return!1;default:return!1}}function SUd(e){return e.reason==="api_error"?`api_error_${e.errorKind??"unknown"}`:e.reason}function qZo
+(e){return mLe(e)||b$n(e)}var YWb,XWb,vUd;var _Ze=A(()=>{YWb=["blocking_limit","rapid_refill_breaker","prompt_too_long","image_error","model_error","api_error","malformed_tool_use_
+exhausted","aborted_streaming","aborted_tools","stop_hook_prevented","hook_stopped","tool_deferred","max_turns","background_requested","completed"],XWb=["budget_exhausted","structu
+red_output_retry_exhausted","tool_deferred_unavailable","turn_setup_failed"],vUd=[...YWb,...XWb]});var wUd;var EUd=A(()=>{wUd=["user-rejected","permission-rule","automode-blocked",
+--- 303323240 ---
+Bearer ${e}`}:{}}function GZo(e){process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN=e}var uG=A(()=>{tt();u2r();qe();st();Ju()});function yUd(e){return Qma.some((t)=>t===e)}function _Ud(e
+){VZo++,eha={reason:e,generation:VZo}}function bUd(){VZo++,eha=void 0}function tha(){return eha}function y$n(){return VZo}var Qma,VZo=0,eha;var _$n=A(()=>{Qma=["signed_out","identi
+ty_changed","transient","refresh_failed"]});function mLe(e){return e==="aborted_streaming"||e==="aborted_tools"}function b$n(e){if(e===void 0)return!1;switch(e){case"blocking_limit
+":case"rapid_refill_breaker":case"prompt_too_long":case"image_error":case"model_error":case"api_error":case"malformed_tool_use_exhausted":case"budget_exhausted":case"structured_out
+put_retry_exhausted":case"tool_deferred_unavailable":case"turn_setup_failed":return!0;case"aborted_streaming":case"aborted_tools":case"stop_hook_prevented":case"hook_stopped":case"
+tool_deferred":case"max_turns":case"background_requested":case"completed":return!1;default:return!1}}function SUd(e){return e.reason==="api_error"?`api_error_${e.errorKind??"unknow
+n"}`:e.reason}function qZo(e){return mLe(e)||b$n(e)}var YWb,XWb,vUd;var _Ze=A(()=>{YWb=["blocking_limit","rapid_refill_breaker","prompt_too_long","image_error","model_error","api_e
+rror","malformed_tool_use_exhausted","aborted_streaming","aborted_tools","stop_hook_prevented","hook_stopped","tool_deferred","max_turns","background_requested","completed"],XWb=["
+budget_exhausted","structured_output_retry_exhausted","tool_deferred_unavailable","turn_setup_failed"],vUd=[...YWb,...XWb]});var wUd;var EUd=A(()=>{wUd=["user-rejected","permission
+-rule","automode-blocked","automode-unavailable","automode-parsing-error","interrupted","cancelled"]});var KZo,JWb,uoC,ZWb,doC,QWb,poC,foC,e3b,t3b,r3b,moC,oha,YZo,TUd,n3b,kUd,o3b,i
+--- 303323711 ---
+}function b$n(e){if(e===void 0)return!1;switch(e){case"blocking_limit":case"rapid_refill_breaker":case"prompt_too_long":case"image_error":case"model_error":case"api_error":case"mal
+formed_tool_use_exhausted":case"budget_exhausted":case"structured_output_retry_exhausted":case"tool_deferred_unavailable":case"turn_setup_failed":return!0;case"aborted_streaming":c
+ase"aborted_tools":case"stop_hook_prevented":case"hook_stopped":case"tool_deferred":case"max_turns":case"background_requested":case"completed":return!1;default:return!1}}function S
+Ud(e){return e.reason==="api_error"?`api_error_${e.errorKind??"unknown"}`:e.reason}function qZo(e){return mLe(e)||b$n(e)}var YWb,XWb,vUd;var _Ze=A(()=>{YWb=["blocking_limit","rapid
+_refill_breaker","prompt_too_long","image_error","model_error","api_error","malformed_tool_use_exhausted","aborted_streaming","aborted_tools","stop_hook_prevented","hook_stopped","
+tool_deferred","max_turns","background_requested","completed"],XWb=["budget_exhausted","structured_output_retry_exhausted","tool_deferred_unavailable","turn_setup_failed"],vUd=[...
+YWb,...XWb]});var wUd;var EUd=A(()=>{wUd=["user-rejected","permission-rule","automode-blocked","automode-unavailable","automode-parsing-error","interrupted","cancelled"]});var KZo,
+JWb,uoC,ZWb,doC,QWb,poC,foC,e3b,t3b,r3b,moC,oha,YZo,TUd,n3b,kUd,o3b,i3b,s3b,XZo,a3b,l3b,iha,hoC,d2r,rha,c3b,nha,v$n,AUd,CUd,CWe,u3b,xUd,YH,d3b,p3b,f3b,m3b,h3b,g3b,y3b,_3b,b3b,v3b,S
+3b,w3b,RUd,IUd,E3b,A3b,T3b,k3b,C3b,x3b,R3b,I3b,H3b,P3b,D3b,M3b,O3b,L3b,N3b,$3b,F3b,U3b,B3b,j3b,z3b,W3b,G3b,V3b,q3b,HUd,K3b,Y3b,X3b,J3b,Z3b,Q3b,eGb,tGb,rGb,nGb,oGb,iGb,sGb,aGb,lGb,c
+Gb,uGb,dGb,pGb,fGb,mGb,hGb,PUd,S$n,sha,JZo,DUd,gGb,MUd,goC,yoC,aha="Count of tracked files NOT restored or deleted because a symlink, hard link, or other non-regular file was detec
+--- 303323835 ---
+"image_error":case"model_error":case"api_error":case"malformed_tool_use_exhausted":case"budget_exhausted":case"structured_output_retry_exhausted":case"tool_deferred_unavailable":ca
+se"turn_setup_failed":return!0;case"aborted_streaming":case"aborted_tools":case"stop_hook_prevented":case"hook_stopped":case"tool_deferred":case"max_turns":case"background_requeste
+d":case"completed":return!1;default:return!1}}function SUd(e){return e.reason==="api_error"?`api_error_${e.errorKind??"unknown"}`:e.reason}function qZo(e){return mLe(e)||b$n(e)}var
+ YWb,XWb,vUd;var _Ze=A(()=>{YWb=["blocking_limit","rapid_refill_breaker","prompt_too_long","image_error","model_error","api_error","malformed_tool_use_exhausted","aborted_streaming
+","aborted_tools","stop_hook_prevented","hook_stopped","tool_deferred","max_turns","background_requested","completed"],XWb=["budget_exhausted","structured_output_retry_exhausted","
+tool_deferred_unavailable","turn_setup_failed"],vUd=[...YWb,...XWb]});var wUd;var EUd=A(()=>{wUd=["user-rejected","permission-rule","automode-blocked","automode-unavailable","autom
+ode-parsing-error","interrupted","cancelled"]});var KZo,JWb,uoC,ZWb,doC,QWb,poC,foC,e3b,t3b,r3b,moC,oha,YZo,TUd,n3b,kUd,o3b,i3b,s3b,XZo,a3b,l3b,iha,hoC,d2r,rha,c3b,nha,v$n,AUd,CUd,
+CWe,u3b,xUd,YH,d3b,p3b,f3b,m3b,h3b,g3b,y3b,_3b,b3b,v3b,S3b,w3b,RUd,IUd,E3b,A3b,T3b,k3b,C3b,x3b,R3b,I3b,H3b,P3b,D3b,M3b,O3b,L3b,N3b,$3b,F3b,U3b,B3b,j3b,z3b,W3b,G3b,V3b,q3b,HUd,K3b,Y
+3b,X3b,J3b,Z3b,Q3b,eGb,tGb,rGb,nGb,oGb,iGb,sGb,aGb,lGb,cGb,uGb,dGb,pGb,fGb,mGb,hGb,PUd,S$n,sha,JZo,DUd,gGb,MUd,goC,yoC,aha="Count of tracked files NOT restored or deleted because a
+ symlink, hard link, or other non-regular file was detected at the tracked path, its parent directory no longer resolves to where it pointed when the checkpoint was taken, or its b
+--- 303433305 ---
+rate dup-over-loss for exactly-once resenders, so a fold answered earlier in a failed turn may be re-sent (a per-fold ledger refinement is tracked separately) \u2014 but resenders 
+must not blindly resend on 'cancelled': user-requested removals arrive as the same state, so correlate against your own cancel_async_message responses AND against any interrupt rec
+eipt's `cancelled` list (interrupt_cancel_queued_v1) and resend only cancels neither source accounts for; 'discarded' \u2014 the session ended (end_session) with the command still 
+queued, or with a peer message still held by the receive-side policy (not preceded by 'queued' then); 'refused' \u2014 declined by the session's receive-side policy before entering
+ the queue (outright, or after being held): not preceded by 'queued', and it will not run in this session. Known gap: folds consumed by turns ending via max_turns / hook_stopped / 
+tool_deferred / background_requested report 'completed' even though their content may only be answered on continuation/resume. 'completed' means the consuming turn ended, not that 
+the result frame was delivered. Ordering relative to the result frame is per-path: a command that starts a fresh turn emits 'completed' AFTER that turn's result frame (later still 
+when the result is held back for background tasks); a command folded into an already-in-flight turn emits 'completed' BEFORE that turn's result frame. Not a strict pairing: a termi
+nal state may arrive for a command_uuid that never emitted 'started' (control-request ACKs, duplicate deliveries); internally-enqueued commands (cron triggers, teammate shutdown pr
+ompts, deferred-turn resume) mint a fresh uuid at enqueue and emit started/terminal without 'queued'; a turn that fails by throwing can leave 'started' without a terminal state; an
+--- 312241909 ---
+();ubl();ayr();su();yu();mr();bo();J9();G4();agw=(Ero(),pn(ibl)),Mbl=(Pro(),pn(Hro)),lgw=(MZr(),pn(Dro)),Vim=(Ege(),pn(OFe)),Lro=(iQ(),pn(WOt))});function*esm(e,t,r,n){try{if(!it("
+tengu_quartz_pipit",!0)||!e||t.agentId||t.abortController.signal.aborted||VM(r)!=="main")return;let o=dgw(n);if(o===null)return;let{label:i,errorCode:s}=cgw[o];t.sessionHooksRegist
+ry.remove(Vt(),"Stop",{type:"prompt",prompt:e.condition}),HFe(e,o==="context_limit"?"context_limit":"api_error"),pe("goal_met",s),yield{type:"active_goal",value:void 0},yield mUi(!
+0,e.condition),yield oot(`Goal cleared after an unrecoverable error (${i}): "${Wl(e.condition,ugw,!0)}". Run /goal again to continue.`,"warning")}catch(o){Te(o)}}function dgw(e){sw
+itch(e.reason){case"image_error":case"model_error":case"malformed_tool_use_exhausted":case"aborted_streaming":case"aborted_tools":case"stop_hook_prevented":case"hook_stopped":case"
+tool_deferred":case"max_turns":case"background_requested":case"completed":return null;case"blocking_limit":case"prompt_too_long":case"rapid_refill_breaker":return"context_limit";ca
+se"api_error":if(e.isTransient)return null;switch(e.errorKind){case"overloaded":case"server_error":case"max_output_tokens":case"rate_limit":case"invalid_request":case"unknown":case
+ void 0:return null;case"authentication_failed":case"oauth_org_not_allowed":return V.CLAUDE_CODE_REMOTE||cU()||rQt()!==null?null:"auth";case"account_on_hold":return"auth";case"bill
+ing_error":return"billing";case"model_not_found":return"model_unavailable"}}}var cgw,ugw=80;var tsm=A(()=>{tt();Qwt();yZr();W8();Zt();bn();W_();mr();$r();mZr();D0();cgw={auth:{labe
+l:"authentication failed",errorCode:"cleared_auth"},billing:{label:"credit balance too low",errorCode:"cleared_billing"},context_limit:{label:"context limit reached",errorCode:"cle
+--- 312314286 ---
+==Er.id)),po=On?.type==="user"&&Array.isArray(On.message.content)?On.message.content.find((Un)=>Un.type==="tool_result"&&Un.tool_use_id===Er.id):void 0;return{name:Er.name,input:Er
+.input,output:po&&"content"in po?po.content:null}});qr=qtm({tools:Yr,signal:X.abortController.signal,isNonInteractiveSession:X.options.isNonInteractiveSession,lastAssistantText:no,
+agentContext:X.agentContext,credentials:X.credentials}).then((Er)=>{if(Er)return pam(Er,Sr);return null}).catch(()=>null)}if(X.abortController.signal.aborted){if(!X.agentId)try{yie
+ld*Pzt(X)}catch{}if(!S3e(X.abortController.signal.reason))yield hue({toolUse:!0,interruptedMessageId:Wro(X),interruptedByShutdown:Tne(X.abortController.signal),now:m.now,uuidFn:m.u
+uid});let Ir=we+1;if(u&&Ir>u)yield ic({type:"max_turns_reached",maxTurns:u,turnCount:Ir},m);return aot(X,l),{reason:"aborted_tools"}}if(at.toolWasDeferred)return aot(X,l),{reason:"
+tool_deferred"};if(at.shouldPreventContinuation)return aot(X,l),{reason:"hook_stopped"};if(at.toolRequestedEndTurn)return yield*$gw({endTurnSource:at.toolRequestedEndTurn,messagesF
+orQuery:Ye,assistantMessages:bt,toolResults:Rt,toolUseBlocks:yt,systemPrompt:n,userContext:o,systemContext:i,toolUseContext:X,updatedToolUseContext:Xn,querySource:l,stopHookActive:
+he,stickyBetas:K,queryChainIdForAnalytics:$e,queryDepth:Re.depth,deps:m}),{reason:"completed"};if(yt.length===1&&yt[0].name===vv&&CQe($o(X.options.mainLoopModel))){let Ir=yt[0].inp
+ut.prompt;if(n$().some((no)=>no.kind==="loop"&&no.prompt===Ir))return N("tengu_loop_dynamic_wakeup_ends_turn",{queryChainId:$e,queryDepth:Re.depth}),aot(X,l),yield*Obl(Ye,bt,Rt,n,o
+,i,X,l,he,K,iEt(X)),{reason:"completed"}}if(Be?.compacted)Be.turnCounter++,N("tengu_post_autocompact_turn",{turnId:dn(Be.turnId),turnCounter:Be.turnCounter,queryChainId:$e,queryDep
+--- 320446120 ---
+t?Qe:Ct;if(Xn===""){let Mr=zt.at(-1)?.data;if(Mr!==void 0)Xn=JSON.stringify(Mr)}let Jt={duration_api_ms:w1(),stop_reason:ct,session_id:Z,total_cost_usd:ww(),usage:zfs(),modelUsage:
+pD(),permission_denials:Gt,terminal_reason:en,fast_mode_state:ie(C),fast_mode_disabled_reason:ie(x),origin:bt.origin,subagent_stats:m5(xt.toolUseContext?.session)},Kr=en==="budget_
+exhausted"?{...$5({startedAt:Rt,common:{...Jt,is_error:!0,num_turns:et},variant:{subtype:"error_max_budget_usd",errors:[SPi(cn)]}}),...yt}:ke===null&&jr===void 0&&nt?{...$5({starte
+dAt:Rt,common:{...Jt,is_error:!0,num_turns:nt.turnCount},variant:{subtype:"error_max_turns",errors:[`Reached maximum number of turns (${nt.maxTurns})`]}}),...yt}:Jr!==null?{...$5({
+startedAt:Rt,common:{...Jt,is_error:!0,num_turns:et},variant:{subtype:"error_during_execution",errors:Jr}}),...yt}:{...$5({startedAt:Rt,common:{...Jt,...jr!==void 0&&{stop_reason:"
+tool_deferred"},is_error:_t,num_turns:et},variant:{subtype:"success",api_error_status:Ft,result:Xn,structured_output:zt.at(-1)?.data,ttft_ms:!_t&&fn!==null?Math.max(0,Math.round(fn
+-Rt)):void 0,deferred_tool_use:jr}}),...yt},Nn;if(bt.uuid!==void 0)Nn=Ye(bt.uuid,ke!==null?"cancelled":yls(en,Pe)),W=null;if(yield*Be(),ze())ge.push(Kr);else yield*je(),yield Kr;if
+(Nn)yield ne(Nn)}while(ge.length>0&&!Y?.signal.aborted&&ze())yield*Be(),await Pr(100);if(ge.length>0&&Y?.signal.aborted&&de?.toolUseContext?.taskRegistry){let{taskRegistry:bt,setAp
+pState:Rt,storageV5:yt}=de.toolUseContext;een({taskRegistry:bt,setAppState:Rt,storageV5:yt})}await uZn(),yield*Be(),yield*je()}async function*De(){try{yield*We()}finally{if(W!==nul
+l)Re(W,"cancelled"),W=null;for(let at of B)if(at.uuid!==void 0)Re(at.uuid,"discarded");B.length=0}}function Ge(at){switch(at.type){case"turn":if(he){E("[engine] dropped turn intent
+--- 326847632 ---
+r((b)=>b!==void 0).map(lzt);a=h&&g.length>0?{preserved:g,anchorUuid:h.anchorUuid}:null;let y=e.length-1;if(y>0)e.splice(0,y);p(m.uuid);let _=t.length-1;if(_>0)t.splice(0,_),o=t.len
+gth,s=t.length}function p(m){if(a!==null&&a.anchorUuid===m)e.push(...a.preserved),a=null}function f(){if(a===null)return;N("tengu_compact_preserved_unanchored",{preservedCount:a.pr
+eserved.length}),e.push(...a.preserved),a=null}return{record:l,evict:c,flushBeforeCompactBoundary:u,applyCompactBoundary:d,settlePreservedTail:p,flushUnanchoredPreservedTail:f}}var
+ T_u=A(()=>{jt();Lhr();Fl()});async function*JNs({orphanedPermission:e,deferredToolUse:t,tools:r,mutableMessages:n,processUserInputContext:o,canUseTool:i,persistSession:s,earlyResu
+lt:a}){if(e)h7n(),G_a(),yield*P8f(e,r,n,o);if(!t)return!1;h7n(),G_a();let l=(u,d)=>$5({startedAt:a.startedAt,common:{is_error:d,duration_api_ms:0,num_turns:n.length,stop_reason:d?"
+tool_deferred_unavailable":"tool_deferred",session_id:Vt(),total_cost_usd:ww(),usage:a.usage,modelUsage:pD(),permission_denials:a.permissionDenials,...d&&{terminal_reason:"tool_def
+erred_unavailable"},fast_mode_state:cG(a.mainLoopModel,a.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:a.origin,subagent_stats:m5(o.session)},variant:{subtype:"success",r
+esult:"",deferred_tool_use:{id:u.toolUseID,name:u.toolName,input:u.toolInput}}});if(!Ld(r,t.toolName,o.options.toolAliases))return E(`Deferred tool resume: tool '${t.toolName}' is 
+no longer available (MCP server disconnected or tool removed)`,{level:"warn"}),yield l(t,!0),!0;let c=yield*H8f(t,i,n,o);if(!c)return!1;if(s)await K9(n,void 0,void 0,void 0,o.stora
+geV5);return yield l(c,!1),!0}var k_u=A(()=>{tt();z9();L0r();mSt();Is();b4t();qe();pT();wwt();Fl();JFn()});async function ZNs(e){R2("before_skills_plugins");let t=performance.now()
+--- 326847660 ---
+a=h&&g.length>0?{preserved:g,anchorUuid:h.anchorUuid}:null;let y=e.length-1;if(y>0)e.splice(0,y);p(m.uuid);let _=t.length-1;if(_>0)t.splice(0,_),o=t.length,s=t.length}function p(m)
+{if(a!==null&&a.anchorUuid===m)e.push(...a.preserved),a=null}function f(){if(a===null)return;N("tengu_compact_preserved_unanchored",{preservedCount:a.preserved.length}),e.push(...a
+.preserved),a=null}return{record:l,evict:c,flushBeforeCompactBoundary:u,applyCompactBoundary:d,settlePreservedTail:p,flushUnanchoredPreservedTail:f}}var T_u=A(()=>{jt();Lhr();Fl()}
+);async function*JNs({orphanedPermission:e,deferredToolUse:t,tools:r,mutableMessages:n,processUserInputContext:o,canUseTool:i,persistSession:s,earlyResult:a}){if(e)h7n(),G_a(),yiel
+d*P8f(e,r,n,o);if(!t)return!1;h7n(),G_a();let l=(u,d)=>$5({startedAt:a.startedAt,common:{is_error:d,duration_api_ms:0,num_turns:n.length,stop_reason:d?"tool_deferred_unavailable":"
+tool_deferred",session_id:Vt(),total_cost_usd:ww(),usage:a.usage,modelUsage:pD(),permission_denials:a.permissionDenials,...d&&{terminal_reason:"tool_deferred_unavailable"},fast_mod
+e_state:cG(a.mainLoopModel,a.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:a.origin,subagent_stats:m5(o.session)},variant:{subtype:"success",result:"",deferred_tool_use:{
+id:u.toolUseID,name:u.toolName,input:u.toolInput}}});if(!Ld(r,t.toolName,o.options.toolAliases))return E(`Deferred tool resume: tool '${t.toolName}' is no longer available (MCP ser
+ver disconnected or tool removed)`,{level:"warn"}),yield l(t,!0),!0;let c=yield*H8f(t,i,n,o);if(!c)return!1;if(s)await K9(n,void 0,void 0,void 0,o.storageV5);return yield l(c,!1),!
+0}var k_u=A(()=>{tt();z9();L0r();mSt();Is();b4t();qe();pT();wwt();Fl();JFn()});async function ZNs(e){R2("before_skills_plugins");let t=performance.now(),r=await Promise.all([k4t(rr
+--- 326847804 ---
+,o=t.length,s=t.length}function p(m){if(a!==null&&a.anchorUuid===m)e.push(...a.preserved),a=null}function f(){if(a===null)return;N("tengu_compact_preserved_unanchored",{preservedCo
+unt:a.preserved.length}),e.push(...a.preserved),a=null}return{record:l,evict:c,flushBeforeCompactBoundary:u,applyCompactBoundary:d,settlePreservedTail:p,flushUnanchoredPreservedTai
+l:f}}var T_u=A(()=>{jt();Lhr();Fl()});async function*JNs({orphanedPermission:e,deferredToolUse:t,tools:r,mutableMessages:n,processUserInputContext:o,canUseTool:i,persistSession:s,e
+arlyResult:a}){if(e)h7n(),G_a(),yield*P8f(e,r,n,o);if(!t)return!1;h7n(),G_a();let l=(u,d)=>$5({startedAt:a.startedAt,common:{is_error:d,duration_api_ms:0,num_turns:n.length,stop_re
+ason:d?"tool_deferred_unavailable":"tool_deferred",session_id:Vt(),total_cost_usd:ww(),usage:a.usage,modelUsage:pD(),permission_denials:a.permissionDenials,...d&&{terminal_reason:"
+tool_deferred_unavailable"},fast_mode_state:cG(a.mainLoopModel,a.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:a.origin,subagent_stats:m5(o.session)},variant:{subtype:"su
+ccess",result:"",deferred_tool_use:{id:u.toolUseID,name:u.toolName,input:u.toolInput}}});if(!Ld(r,t.toolName,o.options.toolAliases))return E(`Deferred tool resume: tool '${t.toolNa
+me}' is no longer available (MCP server disconnected or tool removed)`,{level:"warn"}),yield l(t,!0),!0;let c=yield*H8f(t,i,n,o);if(!c)return!1;if(s)await K9(n,void 0,void 0,void 0
+,o.storageV5);return yield l(c,!1),!0}var k_u=A(()=>{tt();z9();L0r();mSt();Is();b4t();qe();pT();wwt();Fl();JFn()});async function ZNs(e){R2("before_skills_plugins");let t=performan
+ce.now(),r=await Promise.all([k4t(rr(),e),J_(e)]);return Lh("qe_plugin_skills_load_ms",performance.now()-t,t),R2("after_skills_plugins"),r}function QNs({shouldQuery:e,fromUserInput
+--- 326850046 ---
+))yield*a3y(e,t,r());return;case"user":case"progress":yield*a3y(e,t,r());return;case"system":switch(e.subtype){case"status":if(e.status!=="requesting"||o)yield e;return;case"model_
+refusal_fallback":{let{provisional:i,...s}=e;yield s;return}case"init":case"notification":case"api_retry":case"model_refusal_no_fallback":case"memory_recall":case"thinking_tokens":
+case"compact_boundary":yield e;return;case"model_fallback":case"model_consent_fallback":yield e;return;default:return}case"tool_use_summary":yield e;return;case"attachment":if(n&&e
+.attachment.type==="queued_command"){yield{...VQn(e.attachment,e),session_id:e.session_id};return}yield*PTn([e],e.session_id);return;case"result":{let{parent_tool_use_id:i,priority
+:s,shouldQuery:a,timestamp:l,...c}=e;if(c.subtype==="success"&&c.deferred_tool_use!==void 0){let{api_error_status:u,structured_output:d,...p}=c;yield{...p,is_error:!1,stop_reason:"
+tool_deferred",result:""};return}yield c;return}case"stream_event":if(o)yield WNs(e,e);return;case"tombstone":case"stream_request_start":case"tool_progress":case"command_lifecycle"
+:case"auth_status":case"prompt_suggestion":case"rate_limit_event":case"sdk_status":case"compact_progress":case"stream_mode":case"response_length":case"set_expanded_view":case"post_
+turn_summary":case"active_goal":case"set_in_progress_tool_use_ids":case"conversation_reset":case"hint_clears":case"interruptible_tool_in_progress":case"api_metrics":case"os_notific
+ation":case"open_message_selector":case"apply_flag_settings":case"refusal_continuation":case"query_model_change":return;default:}}function s3y(e){return e.includes(`<${tL}>`)||e.in
+cludes(`<${WY}>`)}function u3y(e,t){return{type:"user",message:{...e.message,content:vs(t)},session_id:Vt(),parent_tool_use_id:null,uuid:e.uuid,timestamp:e.timestamp,isReplay:!e.is
+--- 326876506 ---
+(),num_turns:Gt,stop_reason:Pe,session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:"structured_output_retry_exhausted",fa
+st_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"error_max_structured_output_retrie
+s",errors:[aji(Jt,dr)]}});return}}}}finally{Kt.flushUnanchoredPreservedTail();try{let vr=lsn(this.mutableMessages,B,0,!0);if(vr!==this.mutableMessages)for(let Ur=0;Ur<vr.length;Ur+
++)this.mutableMessages[Ur]=vr[Ur]}catch(vr){Te(vr)}}yield*et.takePendingClose(),yield*nt("turn_end");let fn=ot.findLast((vr)=>vr.type==="assistant"||vr.type==="user"),jr=fn;if(Y){i
+f(await Kt.record(!0),V.CLAUDE_CODE_EAGER_FLUSH||V.CLAUDE_CODE_IS_COWORK)await ow()}if(ke){yield $5({startedAt:G,common:{is_error:!1,duration_api_ms:w1(),num_turns:Gt,stop_reason:"
+tool_deferred",session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:Ft.value?.reason,fast_mode_state:cG(bt,X.fastMode),fas
+t_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"success",result:"",deferred_tool_use:ke}});return}if(Qe){yield $5({st
+artedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns:Qe.turnCount,stop_reason:Pe,session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permission_denial
+s:K,terminal_reason:Ft.value?.reason,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},variant:{subt
+ype:"error_max_turns",errors:[`Reached maximum number of turns (${Qe.maxTurns})`]}});return}if(!QLi(fn,Pe)){yield $5({startedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns
+
+#### permissionDecision count=36
+--- 102363151 ---
+": "/path/to/file.txt", "content": "..." },.  "tool_response": { "success": true }  // PostToolUse only.}.```..### Hook JSON Output..Hooks can return JSON to control behavior:..```
+json.{.  "systemMessage": "Warning shown to user in UI",.  "continue": false,.  "stopReason": "Message shown when blocking",.  "suppressOutput": false,.  "decision": "block",.  "re
+ason": "Explanation for decision",.  "hookSpecificOutput": {.    "hookEventName": "PostToolUse",.    "additionalContext": "Context injected back to model".  }.}.```..**Fields:**.- 
+`systemMessage` - Display a message to the user (all hooks).- `continue` - Set to `false` to block/stop (default: true).- `stopReason` - Message shown when `continue` is false.- `s
+uppressOutput` - Hide stdout from transcript (default: false).- `decision` - "block" for PostToolUse/Stop/UserPromptSubmit hooks (deprecated for PreToolUse, use hookSpecificOutput.
+permissionDecision instead).- `reason` - Explanation for decision.- `hookSpecificOutput` - Event-specific output (must include `hookEventName`):.  - `additionalContext` - Text inje
+cted into model context.  - `permissionDecision` - "allow", "deny", or "ask" (PreToolUse only).  - `permissionDecisionReason` - Reason for the permission decision (PreToolUse only)
+.  - `updatedInput` - Modified tool input (PreToolUse only)..### Common Patterns..**Auto-format after writes:**.```json.{.  "hooks": {.    "PostToolUse": [{.      "matcher": "Write
+|Edit",.      "hooks": [{.        "type": "command",.        "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; prettier --write \"$f\"; } 2>/dev/n
+ull || true".      }].    }].  }.}.```..**Log all bash commands:**.```json.{.  "hooks": {.    "PreToolUse": [{.      "matcher": "Bash",.      "hooks": [{.        "type": "command",
+--- 102363360 ---
+rning shown to user in UI",.  "continue": false,.  "stopReason": "Message shown when blocking",.  "suppressOutput": false,.  "decision": "block",.  "reason": "Explanation for decis
+ion",.  "hookSpecificOutput": {.    "hookEventName": "PostToolUse",.    "additionalContext": "Context injected back to model".  }.}.```..**Fields:**.- `systemMessage` - Display a m
+essage to the user (all hooks).- `continue` - Set to `false` to block/stop (default: true).- `stopReason` - Message shown when `continue` is false.- `suppressOutput` - Hide stdout 
+from transcript (default: false).- `decision` - "block" for PostToolUse/Stop/UserPromptSubmit hooks (deprecated for PreToolUse, use hookSpecificOutput.permissionDecision instead).-
+ `reason` - Explanation for decision.- `hookSpecificOutput` - Event-specific output (must include `hookEventName`):.  - `additionalContext` - Text injected into model context.  - `
+permissionDecision` - "allow", "deny", or "ask" (PreToolUse only).  - `permissionDecisionReason` - Reason for the permission decision (PreToolUse only).  - `updatedInput` - Modifie
+d tool input (PreToolUse only)..### Common Patterns..**Auto-format after writes:**.```json.{.  "hooks": {.    "PostToolUse": [{.      "matcher": "Write|Edit",.      "hooks": [{.   
+     "type": "command",.        "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; prettier --write \"$f\"; } 2>/dev/null || true".      }].    }].
+  }.}.```..**Log all bash commands:**.```json.{.  "hooks": {.    "PreToolUse": [{.      "matcher": "Bash",.      "hooks": [{.        "type": "command",.        "command": "jq -r '.
+tool_input.command' >> ~/.claude/bash-log.txt".      }].    }].  }.}.```..**Stop hook that displays message to user:**..Command must output JSON with `systemMessage` field:.```bash
+--- 102363431 ---
+ge shown when blocking",.  "suppressOutput": false,.  "decision": "block",.  "reason": "Explanation for decision",.  "hookSpecificOutput": {.    "hookEventName": "PostToolUse",.   
+ "additionalContext": "Context injected back to model".  }.}.```..**Fields:**.- `systemMessage` - Display a message to the user (all hooks).- `continue` - Set to `false` to block/s
+top (default: true).- `stopReason` - Message shown when `continue` is false.- `suppressOutput` - Hide stdout from transcript (default: false).- `decision` - "block" for PostToolUse
+/Stop/UserPromptSubmit hooks (deprecated for PreToolUse, use hookSpecificOutput.permissionDecision instead).- `reason` - Explanation for decision.- `hookSpecificOutput` - Event-spe
+cific output (must include `hookEventName`):.  - `additionalContext` - Text injected into model context.  - `permissionDecision` - "allow", "deny", or "ask" (PreToolUse only).  - `
+permissionDecisionReason` - Reason for the permission decision (PreToolUse only).  - `updatedInput` - Modified tool input (PreToolUse only)..### Common Patterns..**Auto-format afte
+r writes:**.```json.{.  "hooks": {.    "PostToolUse": [{.      "matcher": "Write|Edit",.      "hooks": [{.        "type": "command",.        "command": "jq -r '.tool_response.fileP
+ath // .tool_input.file_path' | { read -r f; prettier --write \"$f\"; } 2>/dev/null || true".      }].    }].  }.}.```..**Log all bash commands:**.```json.{.  "hooks": {.    "PreTo
+olUse": [{.      "matcher": "Bash",.      "hooks": [{.        "type": "command",.        "command": "jq -r '.tool_input.command' >> ~/.claude/bash-log.txt".      }].    }].  }.}.``
+`..**Stop hook that displays message to user:**..Command must output JSON with `systemMessage` field:.```bash.# Example command that outputs: {"systemMessage": "Session complete!"}
+--- 155718050 ---
+d_valid...................coerced_still_invalid.......................................#...tengu_deferred_tool_schema_not_sent..................... tool input error: ...............
+..............ZOD_VALIDATION..................,.......................InputValidationError: .............. ...tengu_mcp_input_missing_required2.....................................
+..validate_input.................. tool validation error: ................tool_validate_input_rejected....................ValidateInputError......................<tool_use_error>..
+..............Error: .................object.................._simulatedSedEdit...................L...Cannot destructure property '_simulatedSedEdit' from null or undefined value..
+..................progress................command.................durationMs......................pre_tool_hook_duration_ms.......................Hook ...............[... returned 
+permissionDecision=defer in interactive mode; ignoring (defer is print-mode only).....................warn........................'... returned permissionDecision=defer but .......
+......c... .t.o.o.l. .c.a.l.l.s. .a.r.e. .i.n. .t.h.i.s. .b.a.t.c.h.;. .i.g.n.o.r.i.n.g. .(.d.e.f.e.r. .i.s. .s.o.l.o.-.o.n.l.y. ..  .s.i.b.l.i.n.g.s. .w.o.u.l.d. .b.e. .o.r.p.h.a.
+n.e.d. .o.n. .r.e.s.u.m.e.)...................cancelled...............................tengu_pre_tool_hook_deferred....................hook_deferred_tool......................PreToo
+lUse......................Execution stopped by hook...................+...Iterator result interface is not an object..............................Slow PreToolUse hooks: ...........
+......ms for ................. (...................... hooks).................info....................file_path...............................allow...................server_fallbac
+--- 155718194 ---
+.. tool input error: .............................ZOD_VALIDATION..................,.......................InputValidationError: .............. ...tengu_mcp_input_missing_required2.
+......................................validate_input.................. tool validation error: ................tool_validate_input_rejected....................ValidateInputError....
+..................<tool_use_error>................Error: .................object.................._simulatedSedEdit...................L...Cannot destructure property '_simulatedSed
+Edit' from null or undefined value....................progress................command.................durationMs......................pre_tool_hook_duration_ms.....................
+..Hook ...............[... returned permissionDecision=defer in interactive mode; ignoring (defer is print-mode only).....................warn........................'... returned 
+permissionDecision=defer but .............c... .t.o.o.l. .c.a.l.l.s. .a.r.e. .i.n. .t.h.i.s. .b.a.t.c.h.;. .i.g.n.o.r.i.n.g. .(.d.e.f.e.r. .i.s. .s.o.l.o.-.o.n.l.y. ..  .s.i.b.l.i.
+n.g.s. .w.o.u.l.d. .b.e. .o.r.p.h.a.n.e.d. .o.n. .r.e.s.u.m.e.)...................cancelled...............................tengu_pre_tool_hook_deferred....................hook_defer
+red_tool......................PreToolUse......................Execution stopped by hook...................+...Iterator result interface is not an object............................
+..Slow PreToolUse hooks: .................ms for ................. (...................... hooks).................info....................file_path...............................al
+low...................server_fallback_tombstone.......................permission..............................auto....................Slow permission decision: ....................
+--- 155721001 ---
+.s.u.e. .i.n. .y.o.u.r. .c.a.n.U.s.e.T.o.o.l. .c.a.l.l.b.a.c.k.,. .P.e.r.m.i.s.s.i.o.n.R.e.q.u.e.s.t. .h.o.o.k.,. .o.r. .p.e.r.m.i.s.s.i.o.n.-.p.r.o.m.p.t. .t.o.o.l. ..  .u.p.d.a.t
+.e.d.I.n.p.u.t. .m.u.s.t. .s.a.t.i.s.f.y. .t.h.e. .t.o.o.l.'.s. .i.n.p.u.t. .s.c.h.e.m.a... .T.h.e. .t.o.o.l. .i.n.p.u.t. .f.r.o.m. .t.h.e. .m.o.d.e.l. .w.a.s. .v.a.l.i.d..........
+....... ...permission_updated_input_invalid............$...Permission handler updatedInput for .................... failed schema validation (.................%...tool_permission_u
+pdated_input_invalid...................PERMISSION_UPDATED_INPUT............H...InputValidationError: permission handler updatedInput failed schema for ................pre_call.....
+...................set_in_progress_tool_use_ids....................add.................!...[Stall] tool_dispatch_start tool=....................... toolUseId=..................... 
+permissionDecisionMs=..........(........................................*...............*...............................................)......................I........)......I....
+...p)...............)..............................tool_exec...............................[Stall] tool_dispatch_end tool=................. outcome=ok durationMs=.................t
+ext....................structuredPatch.................content.................stdout..................tool.output.....................eventCount......................number.......
+...........poll_events.....................poll_tool.......................structured_output.......................string..................notebook_path...................report_va
+lidate.................tengu_tool_use_success..........................................\bgit\s+commit\b................true....................sdk.................H...Cannot destru
+--- 165390264 ---
+.....@.$.E....Q4.@.<.K.....L.@.T.}..J....@.L...t.@ ......@.=.A...@.<.@...P.....f.............@.t.@ ..C...@.M.@ 5.@0m.@...m`Q.@.O........*...N...u...w...............................
+@................................................i..............................................@)...............................................Y..................................
+............(...............................................................................................P.......................x.......................P.......................
+X.......................@.}.....................P.........................L.....................H.......................@wk.....................8.......................H...........
+............P.......................`.........................}.....................plainText.......................suppressOutput..................terminalSequence................
+permissionDecision......................permissionDecisionReason................for PreToolUse..................for UserPromptSubmit....................for PostToolUse.............
+....for PostToolBatch.......................for Stop / SubagentStop......T..................}....................H..H.......................................................h.......
+.................................Y..........................................................................................................................h...h...h...h...h...h...
+h...h...h...h...h...............................................(...H...H...H...H...................................................................................................
+................................................................................................................x...................................................................
+--- 165390304 ---
+.@.L...t.@ ......@.=.A...@.<.@...P.....f.............@.t.@ ..C...@.M.@ 5.@0m.@...m`Q.@.O........*...N...u...w...............................@.......................................
+.........i..............................................@)...............................................Y..............................................(...........................
+....................................................................P.......................x.......................P.......................X.......................@.}.............
+........P.........................L.....................H.......................@wk.....................8.......................H.......................P.......................`...
+......................}.....................plainText.......................suppressOutput..................terminalSequence................permissionDecision......................
+permissionDecisionReason................for PreToolUse..................for UserPromptSubmit....................for PostToolUse.................for PostToolBatch...................
+....for Stop / SubagentStop......T..................}....................H..H.......................................................h........................................Y......
+....................................................................................................................h...h...h...h...h...h...h...h...h...h...h.......................
+........................(...H...H...H...H...........................................................................................................................................
+........................................................................x...........................................................................................................
+--- 165399341 ---
+...........................................................................................................?...Cannot destructure property 'json' from null or undefined value......
+...........e.......................................approve.................block...................allow...................deny....................Blocked by hook.................t
+.......................Unknown hook decision type: ................!.... Valid types are: approve, block...............................Hook ...................r....................
+... (......................o.......................) returned a terminalSequence that was rejected by the allowlist (only OSC 0/1/2/9/99/777 and BEL are permitted, and OSC 9 bodies
+ may not begin with a digit unless in the 9;4 progress form)...................PreToolUse..............................ask.....................defer...............&...Unknown hook 
+permissionDecision type: ..............*.... Valid types are: allow, deny, ask, defer......................i.......................Hook returned incorrect event name: expected '...
+...............' but got '.....................'. Full stdout: ........................watchPaths......................decline.................Elicitation denied by hook...........
+......."...Elicitation result blocked by hook......2.......................hook_blocking_error.....................n.......................hook_success.............................
+.......s.......................a.......................l.......................c....................................................................................@...@P4.I...@@U.
+W...@.5.K...@.L.@...K...X03.@.5.I...@ M.I...@...[...@.F.Z...@.5.@.=.G...@@.D....@.L^....@.D.@...I..N....@..Y......<.@P..N...@.M.@...N...^.3.@06.Q.....e.@ ..Q.....3.@.=.....@.$.@0..
+--- 165581491 ---
+.(.......................................(...............................P.......I...............I.......................................P..........................................
+.............t.......................o.......................:.......................Skipping ....................... hook execution - workspace trust not accepted.................
+.a.......................l.......................e.......................p.......................................i.......................d.......................tengu_run_hook..1..
+.................+...Iterator result interface is not an object..................?...Cannot destructure property 'hook' from null or undefined value.................callback.......
+.........ie......................n...............................:Callback.......................deny....................Hook ................... (..................#...) returned 
+permissionDecision: deny..................... (reason: ......................)...............................................-.......................additionalContext..............
+.........................hook_system_message.....................systemMessage...........................................hook_duration_ms................tengu_repl_hook_finished...
+.............[]......................hook_execution_start....................policySettings..................merged..................progress................hook_progress..........
+.........q.......................prompt..!...............(.......................................@*S.........................+...Cannot access property of undefined or null........
+.............attachment......................hook_success....................hookSuccessStdoutChars..................) replaced tool output..%...................-...) replaced tool
+--- 165583331 ---
+.-.......................) provided classifierContext (.................. chars after cap).......................classifierContextChars..................direct..................leg
+acy_mcp......................suppressed......................none....1.......................) requested preventContinuation.........5.......9.......=.......................Stop...
+.A.......................systemMessageChars......D.......I.......................additionalContextChars..................) provided additionalContext (.................. chars).L..
+.....Q.......................initialUserMessageChars.................) provided initialUserMessage (.................initialUserMessage......T.......Y.......................) provi
+ded ..................... watchPaths.....].......................) requested reloadSkillsa.......................) provided sessionTitle (.......e.......................) returned 
+permissionDecision: .................defer...................ask.....................allow...................) modified tool input keys: [..................., .....................
+.].......i.......m.......q.......u.......y.......}.......................success.............$...Session hook success callback failed................................?...Cannot dest
+ructure property 'name' from null or undefined value.................tengu_hook_plugin_injected......................U.......................Z.......................hook_execution_
+complete.................hook_non_blocking_error.................hook_cancelled.....................................................................................................
+.....................................................d.....p......@.e.P...@.3.@`E.@P..@P|.....@@..@.K..pE.....@PT.@.... .N....@.<.@ ..L...B.4.@@L.. ....d.@ ...@..@ ..@ ..@ L.C.....
+--- 303348613 ---
+s since the prior flush. Always whole lines, except on the final flush which may end mid-line. The delta of the final flush is empty when the message ends on a newline; treat final
+ as the end-of-message signal regardless.")})).describe("Hook input for the MessageDisplay event. Fired with each batch of newly completed lines while an assistant message streams.
+ Display-only: the stored message and what the model sees are untouched.")),G3b=["clear","resume","logout","prompt_input_exit","other"],V3b=ve(()=>Or(G3b)),q3b=ve(()=>YH().and(_e({
+hook_event_name:kt("SessionEnd"),reason:V3b()}))),HUd=ve(()=>Es([d3b(),f3b(),m3b(),g3b(),y3b(),_3b(),b3b(),v3b(),S3b(),q3b(),E3b(),A3b(),T3b(),k3b(),C3b(),x3b(),p3b(),w3b(),R3b(),I
+3b(),H3b(),P3b(),D3b(),O3b(),$3b(),F3b(),U3b(),B3b(),j3b(),z3b(),W3b()])),K3b=ve(()=>_e({async:kt(!0),asyncTimeout:Xe().optional()})),Y3b=ve(()=>_e({hookEventName:kt("PreToolUse"),
+permissionDecision:c3b().optional(),permissionDecisionReason:L().optional(),updatedInput:oo(L(),Hn()).optional(),additionalContext:L().optional()})),X3b=ve(()=>_e({hookEventName:kt
+("UserPromptSubmit"),additionalContext:L().optional(),sessionTitle:L().optional(),suppressOriginalPrompt:Ut().optional().describe('When decision is "block", omit the original promp
+t from the block message')})),J3b=ve(()=>_e({hookEventName:kt("UserPromptExpansion"),additionalContext:L().optional(),suppressOriginalPrompt:Ut().optional().describe('When decision
+ is "block", omit the original prompt from the block message')})),Z3b=ve(()=>_e({hookEventName:kt("SessionStart"),additionalContext:L().optional(),initialUserMessage:L().optional()
+,sessionTitle:L().optional(),watchPaths:ft(L()).optional(),reloadSkills:Ut().optional().describe("Re-scan skill and command directories after SessionStart hooks complete, so skills
+--- 303348649 ---
+e lines, except on the final flush which may end mid-line. The delta of the final flush is empty when the message ends on a newline; treat final as the end-of-message signal regard
+less.")})).describe("Hook input for the MessageDisplay event. Fired with each batch of newly completed lines while an assistant message streams. Display-only: the stored message an
+d what the model sees are untouched.")),G3b=["clear","resume","logout","prompt_input_exit","other"],V3b=ve(()=>Or(G3b)),q3b=ve(()=>YH().and(_e({hook_event_name:kt("SessionEnd"),rea
+son:V3b()}))),HUd=ve(()=>Es([d3b(),f3b(),m3b(),g3b(),y3b(),_3b(),b3b(),v3b(),S3b(),q3b(),E3b(),A3b(),T3b(),k3b(),C3b(),x3b(),p3b(),w3b(),R3b(),I3b(),H3b(),P3b(),D3b(),O3b(),$3b(),F
+3b(),U3b(),B3b(),j3b(),z3b(),W3b()])),K3b=ve(()=>_e({async:kt(!0),asyncTimeout:Xe().optional()})),Y3b=ve(()=>_e({hookEventName:kt("PreToolUse"),permissionDecision:c3b().optional(),
+permissionDecisionReason:L().optional(),updatedInput:oo(L(),Hn()).optional(),additionalContext:L().optional()})),X3b=ve(()=>_e({hookEventName:kt("UserPromptSubmit"),additionalConte
+xt:L().optional(),sessionTitle:L().optional(),suppressOriginalPrompt:Ut().optional().describe('When decision is "block", omit the original prompt from the block message')})),J3b=ve
+(()=>_e({hookEventName:kt("UserPromptExpansion"),additionalContext:L().optional(),suppressOriginalPrompt:Ut().optional().describe('When decision is "block", omit the original promp
+t from the block message')})),Z3b=ve(()=>_e({hookEventName:kt("SessionStart"),additionalContext:L().optional(),initialUserMessage:L().optional(),sessionTitle:L().optional(),watchPa
+ths:ft(L()).optional(),reloadSkills:Ut().optional().describe("Re-scan skill and command directories after SessionStart hooks complete, so skills installed by the hook are available
+--- 314449612 ---
+k=e.backfillObservableInput&&typeof w==="object"&&w!==null?{...w}:null;if(k)e.backfillObservableInput(k),w=k;let C=!1,x,R,I=[],M=Date.now();for await(let X of Noo(n,e,w,t,i.message
+.id,a,l,c))switch(X.type){case"message":if(X.message.message.type==="progress")p(X.message.message);else{S.push(X.message);let te=X.message.message.attachment;if(te&&"command"in te
+&&te.command!==void 0&&"durationMs"in te&&te.durationMs!==void 0)I.push({command:te.command,durationMs:te.durationMs})}break;case"hookPermissionResult":R=X.hookPermissionResult;bre
+ak;case"hookUpdatedInput":w=X.updatedInput;break;case"preventContinuation":C=X.shouldPreventContinuation;break;case"stopReason":x=X.stopReason;break;case"additionalContext":if(!gb(
+n.agentContext))S.push(X.message);break;case"defer":{if(HHt()?.observe("pre_tool_hook_duration_ms",Date.now()-M),!n.options.isNonInteractiveSession){E(`Hook ${X.hookName} returned 
+permissionDecision=defer in interactive mode; ignoring (defer is print-mode only)`,{level:"warn"});break}let te=Array.isArray(i.message.content)?tr(i.message.content,(de)=>de.type=
+=="tool_use"):1;if(te>1){E(`Hook ${X.hookName} returned permissionDecision=defer but ${te} tool calls are in this batch; ignoring (defer is solo-only \u2014 siblings would be orpha
+ned on resume)`,{level:"warn"});break}if(n.abortController.signal.aborted)return S.push({message:Cn({content:[Iao(t)],toolUseResult:mj,toolDenialKind:"cancelled",sourceToolAssistan
+tUUID:i.uuid,now:d})}),S;N("tengu_pre_tool_hook_deferred",{toolName:Rl(e.name),queryChainId:dn(n.queryTracking?.chainId),queryDepth:n.queryTracking?.depth});let re=r1t();return S.p
+ush({message:ic({type:"hook_deferred_tool",toolUseID:t,toolName:e.name,toolInput:w,hookName:X.hookName,hookEvent:"PreToolUse",permissionMode:gn(n).mode,...re&&{traceparent:re}})}),
+--- 314449848 ---
+sage.type==="progress")p(X.message.message);else{S.push(X.message);let te=X.message.message.attachment;if(te&&"command"in te&&te.command!==void 0&&"durationMs"in te&&te.durationMs!
+==void 0)I.push({command:te.command,durationMs:te.durationMs})}break;case"hookPermissionResult":R=X.hookPermissionResult;break;case"hookUpdatedInput":w=X.updatedInput;break;case"pr
+eventContinuation":C=X.shouldPreventContinuation;break;case"stopReason":x=X.stopReason;break;case"additionalContext":if(!gb(n.agentContext))S.push(X.message);break;case"defer":{if(
+HHt()?.observe("pre_tool_hook_duration_ms",Date.now()-M),!n.options.isNonInteractiveSession){E(`Hook ${X.hookName} returned permissionDecision=defer in interactive mode; ignoring (
+defer is print-mode only)`,{level:"warn"});break}let te=Array.isArray(i.message.content)?tr(i.message.content,(de)=>de.type==="tool_use"):1;if(te>1){E(`Hook ${X.hookName} returned 
+permissionDecision=defer but ${te} tool calls are in this batch; ignoring (defer is solo-only \u2014 siblings would be orphaned on resume)`,{level:"warn"});break}if(n.abortControll
+er.signal.aborted)return S.push({message:Cn({content:[Iao(t)],toolUseResult:mj,toolDenialKind:"cancelled",sourceToolAssistantUUID:i.uuid,now:d})}),S;N("tengu_pre_tool_hook_deferred
+",{toolName:Rl(e.name),queryChainId:dn(n.queryTracking?.chainId),queryDepth:n.queryTracking?.depth});let re=r1t();return S.push({message:ic({type:"hook_deferred_tool",toolUseID:t,t
+oolName:e.name,toolInput:w,hookName:X.hookName,hookEvent:"PreToolUse",permissionMode:gn(n).mode,...re&&{traceparent:re}})}),S}case"stop":{HHt()?.observe("pre_tool_hook_duration_ms"
+,Date.now()-M);let te=Iao(t);if(X.stopReason)te.content=X.stopReason;let re=X.stopReason??x;if(S.push({message:Cn({content:[te],toolUseResult:re?`Error: ${re}`:mj,toolDenialKind:X.
+--- 314457516 ---
+uuid,now:d})}),C&&!n.abortController.signal.aborted)Rao(S,{toolName:e.name,toolUseID:t,message:x||"Execution stopped by hook"});return S}w=bzf(e.name,Y.updatedInput,w)}else w=Ajt(e
+.name,w);let q=v3d(w),j=rUn(e.name,w,e.userFacingName?.(void 0),e.mcpInfo),U=n.toolDecisions?.[t];_Bn(U?.decision||"unknown",U?.source||"unknown"),Xrp(t);let Z=Date.now(),K=process
+.memoryUsage();if(k&&w!==T&&typeof w==="object"&&w!==null&&"file_path"in w&&"file_path"in T&&w.file_path===k.file_path)T={...w,file_path:T.file_path};else if(w!==k)T=w;if(w3e(n.abo
+rtController.signal))return E5i({phase:"pre_call",tool:e,toolUseID:t,toolUseContext:n,assistantMessage:i,mcpServerType:l,mcpServerBaseUrl:c,mcpNameLoggable:u,requestId:a,now:d});if
+(um()&&!n.abortController.signal.aborted)await cL();p({type:"set_in_progress_tool_use_ids",op:{action:"add",ids:[t]}}),E(`[Stall] tool_dispatch_start tool=${e.name} toolUseId=${t} 
+permissionDecisionMs=${G}`,{level:"info"});let ne=!1,ie=Tti(n.agentContext)??(n.isBackgroundAgent?n.agentId:void 0);try{ihr("tool_exec",ie);let X=n.agentId?()=>{}:v8f({toolName:e.n
+ame,toolUseID:t,abortSignal:n.abortController.signal,onProgress:p}),te;try{te=await Sii(e).execute(T,{...n,toolUseId:t,userModified:Y.userModified??!1},o,i,p)}finally{X()}let re=Da
+te.now()-Z,de=process.memoryUsage();if(dBo(re),E(`[Stall] tool_dispatch_end tool=${e.name} toolUseId=${t} outcome=ok durationMs=${re}`,{level:"info"}),ne=!0,te.data&&typeof te.data
+==="object"){let Rt={};if(e.name===Ts){let yt=te.data;if(yt.type==="text"){if(hS()&&"file_path"in w)Rt.file_path=String(w.file_path);Rt.content=yt.file.content}}if((e.name===xl||e.
+name===Eu)&&"file_path"in w){if(hS())Rt.file_path=String(w.file_path);if(hS()&&e.name===xl&&"structuredPatch"in te.data)Rt.diff=He(te.data.structuredPatch);if(hS()&&e.name===Eu&&"c
+--- 316643701 ---
+8e(e){return"async"in e&&e.async===!0}var $gE,FgE,aAt;var AZi=A(()=>{qn();Sn();Phr();$gE=ve(()=>Or(["allow","deny","ask","defer"])),FgE=ve(()=>_e({continue:Ut().describe("Whether C
+laude should continue after hook (default: true)").optional(),suppressOutput:Ut().describe("Hide stdout from transcript (default: false)").optional(),stopReason:L().describe("Messa
+ge shown when continue is false").optional(),decision:Or(["approve","block"]).optional(),reason:L().describe("Explanation for the decision").optional(),systemMessage:L().describe("
+Warning message shown to the user").optional(),terminalSequence:L().describe("A terminal escape sequence (e.g. OSC 9 / OSC 777 desktop-notification) for Claude Code to emit on your
+ behalf. Only notification/title OSCs (0, 1, 2, 9, 99, 777) and BEL are permitted; anything else is dropped.").optional(),hookSpecificOutput:Es([_e({hookEventName:kt("PreToolUse"),
+permissionDecision:$gE().optional(),permissionDecisionReason:L().optional(),updatedInput:oo(L(),Hn()).optional(),additionalContext:L().optional()}),_e({hookEventName:kt("UserPrompt
+Submit"),additionalContext:L().optional(),sessionTitle:L().describe("Set the session title").optional(),suppressOriginalPrompt:Ut().describe('When decision is "block", omit the ori
+ginal prompt from the block message').optional()}),_e({hookEventName:kt("UserPromptExpansion"),additionalContext:L().optional(),suppressOriginalPrompt:Ut().describe('When decision 
+is "block", omit the original prompt from the block message').optional()}),_e({hookEventName:kt("SessionStart"),additionalContext:L().optional(),initialUserMessage:L().optional(),s
+essionTitle:L().describe("Set the session title").optional(),watchPaths:ft(L()).describe("Absolute paths to watch for FileChanged hooks").optional(),reloadSkills:Ut().describe("Re-
+--- 316643737 ---
+0}var $gE,FgE,aAt;var AZi=A(()=>{qn();Sn();Phr();$gE=ve(()=>Or(["allow","deny","ask","defer"])),FgE=ve(()=>_e({continue:Ut().describe("Whether Claude should continue after hook (de
+fault: true)").optional(),suppressOutput:Ut().describe("Hide stdout from transcript (default: false)").optional(),stopReason:L().describe("Message shown when continue is false").op
+tional(),decision:Or(["approve","block"]).optional(),reason:L().describe("Explanation for the decision").optional(),systemMessage:L().describe("Warning message shown to the user").
+optional(),terminalSequence:L().describe("A terminal escape sequence (e.g. OSC 9 / OSC 777 desktop-notification) for Claude Code to emit on your behalf. Only notification/title OSC
+s (0, 1, 2, 9, 99, 777) and BEL are permitted; anything else is dropped.").optional(),hookSpecificOutput:Es([_e({hookEventName:kt("PreToolUse"),permissionDecision:$gE().optional(),
+permissionDecisionReason:L().optional(),updatedInput:oo(L(),Hn()).optional(),additionalContext:L().optional()}),_e({hookEventName:kt("UserPromptSubmit"),additionalContext:L().optio
+nal(),sessionTitle:L().describe("Set the session title").optional(),suppressOriginalPrompt:Ut().describe('When decision is "block", omit the original prompt from the block message'
+).optional()}),_e({hookEventName:kt("UserPromptExpansion"),additionalContext:L().optional(),suppressOriginalPrompt:Ut().describe('When decision is "block", omit the original prompt
+ from the block message').optional()}),_e({hookEventName:kt("SessionStart"),additionalContext:L().optional(),initialUserMessage:L().optional(),sessionTitle:L().describe("Set the se
+ssion title").optional(),watchPaths:ft(L()).describe("Absolute paths to watch for FileChanged hooks").optional(),reloadSkills:Ut().describe("Re-scan skill and command directories a
+--- 317121713 ---
+)return e;let o=await Nrt(e,`hook-${t}-${r}`,N7());if($rt(o))return N("tengu_hook_output_persisted",{source:me(r),originalSizeBytes:e.length,persistedSizeBytes:0,truncatedFallback:
+!0}),`${e.slice(0,n)}..[Hook ${r} truncated at ${n} chars \u2014 persist-to-disk failed: ${o.error}]`;let i=_Bt(o);return N("tengu_hook_output_persisted",{source:me(r),originalSize
+Bytes:o.originalSize,persistedSizeBytes:i.length,truncatedFallback:!1}),i}function les(e){let t=e.trim();if(!t.startsWith("{"))return E("Hook output does not start with {, treating
+ as plain text"),{plainText:e};try{let r=odh(t);if("json"in r)return r;let n=`${r.validationError}..Expected schema:.${He({continue:"boolean (optional)",suppressOutput:"boolean (op
+tional)",stopReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"string (optional)",terminalSequence:"string (optional)",
+permissionDecision:'"allow" | "deny" | "ask" (optional)',hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (
+optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for UserPromptSubmit":{hookEventName:'"UserPromptSubmit"',ad
+ditionalContext:"string (required)"},"for PostToolUse":{hookEventName:'"PostToolUse"',additionalContext:"string (optional)"},"for PostToolBatch":{hookEventName:'"PostToolBatch"',ad
+ditionalContext:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversat
+ion continues so the model can act on it"}}},null,2)}`;return E(n),{plainText:e,validationError:n}}catch(r){return E(`Failed to parse hook output as JSON: ${r}`),{plainText:e}}}fun
+--- 317121837 ---
+zeBytes:e.length,persistedSizeBytes:0,truncatedFallback:!0}),`${e.slice(0,n)}..[Hook ${r} truncated at ${n} chars \u2014 persist-to-disk failed: ${o.error}]`;let i=_Bt(o);return N(
+"tengu_hook_output_persisted",{source:me(r),originalSizeBytes:o.originalSize,persistedSizeBytes:i.length,truncatedFallback:!1}),i}function les(e){let t=e.trim();if(!t.startsWith("{
+"))return E("Hook output does not start with {, treating as plain text"),{plainText:e};try{let r=odh(t);if("json"in r)return r;let n=`${r.validationError}..Expected schema:.${He({c
+ontinue:"boolean (optional)",suppressOutput:"boolean (optional)",stopReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"
+string (optional)",terminalSequence:"string (optional)",permissionDecision:'"allow" | "deny" | "ask" (optional)',hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',
+permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for 
+UserPromptSubmit":{hookEventName:'"UserPromptSubmit"',additionalContext:"string (required)"},"for PostToolUse":{hookEventName:'"PostToolUse"',additionalContext:"string (optional)"}
+,"for PostToolBatch":{hookEventName:'"PostToolBatch"',additionalContext:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"s
+tring (optional) - Feedback for the model; the conversation continues so the model can act on it"}}},null,2)}`;return E(n),{plainText:e,validationError:n}}catch(r){return E(`Failed
+ to parse hook output as JSON: ${r}`),{plainText:e}}}function idh(e){let t=e.trim();if(t===""){let r=aAt().safeParse({});if(r.success)return E("HTTP hook returned empty body, treat
+--- 317121904 ---
+lice(0,n)}..[Hook ${r} truncated at ${n} chars \u2014 persist-to-disk failed: ${o.error}]`;let i=_Bt(o);return N("tengu_hook_output_persisted",{source:me(r),originalSizeBytes:o.ori
+ginalSize,persistedSizeBytes:i.length,truncatedFallback:!1}),i}function les(e){let t=e.trim();if(!t.startsWith("{"))return E("Hook output does not start with {, treating as plain t
+ext"),{plainText:e};try{let r=odh(t);if("json"in r)return r;let n=`${r.validationError}..Expected schema:.${He({continue:"boolean (optional)",suppressOutput:"boolean (optional)",st
+opReason:"string (optional)",decision:'"approve" | "block" (optional)',reason:"string (optional)",systemMessage:"string (optional)",terminalSequence:"string (optional)",permissionD
+ecision:'"allow" | "deny" | "ask" (optional)',hookSpecificOutput:{"for PreToolUse":{hookEventName:'"PreToolUse"',permissionDecision:'"allow" | "deny" | "ask" | "defer" (optional)',
+permissionDecisionReason:"string (optional)",updatedInput:"object (optional) - Modified tool input to use"},"for UserPromptSubmit":{hookEventName:'"UserPromptSubmit"',additionalCon
+text:"string (required)"},"for PostToolUse":{hookEventName:'"PostToolUse"',additionalContext:"string (optional)"},"for PostToolBatch":{hookEventName:'"PostToolBatch"',additionalCon
+text:"string (optional)"},"for Stop / SubagentStop":{hookEventName:'"Stop" | "SubagentStop"',additionalContext:"string (optional) - Feedback for the model; the conversation continu
+es so the model can act on it"}}},null,2)}`;return E(n),{plainText:e,validationError:n}}catch(r){return E(`Failed to parse hook output as JSON: ${r}`),{plainText:e}}}function idh(e
+){let t=e.trim();if(t===""){let r=aAt().safeParse({});if(r.success)return E("HTTP hook returned empty body, treating as empty JSON object"),{json:r.data}}if(!t.startsWith("{")){let
+--- 317124237 ---
+hookEvent:o,expectedHookEvent:i,stdout:s,stderr:a,exitCode:l,durationMs:c}){let u={},d=e;if(d.continue===!1){if(u.preventContinuation=!0,d.stopReason)u.stopReason=d.stopReason}if(e
+.decision)switch(e.decision){case"approve":u.permissionBehavior="allow";break;case"block":u.permissionBehavior="deny",u.blockingError={blockingError:e.reason||"Blocked by hook",com
+mand:t};break;default:throw Error(`Unknown hook decision type: ${e.decision}. Valid types are: approve, block`)}if(e.systemMessage)u.systemMessage=e.systemMessage;if(e.terminalSequ
+ence){let p=Fjl(e.terminalSequence);if(p!==null)u.terminalSequence=p;else E(`Hook ${r} (${o}) returned a terminalSequence that was rejected by the allowlist (only OSC 0/1/2/9/99/77
+7 and BEL are permitted, and OSC 9 bodies may not begin with a digit unless in the 9;4 progress form)`)}if(e.hookSpecificOutput?.hookEventName==="PreToolUse"&&e.hookSpecificOutput.
+permissionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingEr
+ror:e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break;default:throw Error(`Unknown hook permiss
+ionDecision type: ${e.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.hookPermissionDecisio
+nReason=e.reason;if(e.hookSpecificOutput){if(i&&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '${e.hookSpecificOut
+put.hookEventName}'. Full stdout: ${He(e,null,2)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutp
+--- 317124284 ---
+:a,exitCode:l,durationMs:c}){let u={},d=e;if(d.continue===!1){if(u.preventContinuation=!0,d.stopReason)u.stopReason=d.stopReason}if(e.decision)switch(e.decision){case"approve":u.pe
+rmissionBehavior="allow";break;case"block":u.permissionBehavior="deny",u.blockingError={blockingError:e.reason||"Blocked by hook",command:t};break;default:throw Error(`Unknown hook
+ decision type: ${e.decision}. Valid types are: approve, block`)}if(e.systemMessage)u.systemMessage=e.systemMessage;if(e.terminalSequence){let p=Fjl(e.terminalSequence);if(p!==null
+)u.terminalSequence=p;else E(`Hook ${r} (${o}) returned a terminalSequence that was rejected by the allowlist (only OSC 0/1/2/9/99/777 and BEL are permitted, and OSC 9 bodies may n
+ot begin with a digit unless in the 9;4 progress form)`)}if(e.hookSpecificOutput?.hookEventName==="PreToolUse"&&e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.
+permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.reason||"Blocked by hook",command:t};brea
+k;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break;default:throw Error(`Unknown hook permissionDecision type: ${e.hookSpecificOutput.permis
+sionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.hookPermissionDecisionReason=e.reason;if(e.hookSpecificOutput){if(i&
+&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '${e.hookSpecificOutput.hookEventName}'. Full stdout: ${He(e,null,2
+)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.permission
+--- 317124590 ---
+ok",command:t};break;default:throw Error(`Unknown hook decision type: ${e.decision}. Valid types are: approve, block`)}if(e.systemMessage)u.systemMessage=e.systemMessage;if(e.termi
+nalSequence){let p=Fjl(e.terminalSequence);if(p!==null)u.terminalSequence=p;else E(`Hook ${r} (${o}) returned a terminalSequence that was rejected by the allowlist (only OSC 0/1/2/
+9/99/777 and BEL are permitted, and OSC 9 bodies may not begin with a digit unless in the 9;4 progress form)`)}if(e.hookSpecificOutput?.hookEventName==="PreToolUse"&&e.hookSpecific
+Output.permissionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blo
+ckingError:e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break;default:throw Error(`Unknown hook 
+permissionDecision type: ${e.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.hookPermission
+DecisionReason=e.reason;if(e.hookSpecificOutput){if(i&&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '${e.hookSpec
+ificOutput.hookEventName}'. Full stdout: ${He(e,null,2)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch(e.hookSpeci
+ficOutput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.hookSpecificOutput.permissionDe
+cisionReason||e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break}if(u.hookPermissionDecisionReas
+--- 317124638 ---
+n hook decision type: ${e.decision}. Valid types are: approve, block`)}if(e.systemMessage)u.systemMessage=e.systemMessage;if(e.terminalSequence){let p=Fjl(e.terminalSequence);if(p!
+==null)u.terminalSequence=p;else E(`Hook ${r} (${o}) returned a terminalSequence that was rejected by the allowlist (only OSC 0/1/2/9/99/777 and BEL are permitted, and OSC 9 bodies
+ may not begin with a digit unless in the 9;4 progress form)`)}if(e.hookSpecificOutput?.hookEventName==="PreToolUse"&&e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificO
+utput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.reason||"Blocked by hook",command:t
+};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break;default:throw Error(`Unknown hook permissionDecision type: ${e.hookSpecificOutput.
+permissionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.hookPermissionDecisionReason=e.reason;if(e.hookSpecificOutput)
+{if(i&&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '${e.hookSpecificOutput.hookEventName}'. Full stdout: ${He(e,
+null,2)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.perm
+issionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.hookSpecificOutput.permissionDecisionReason||e.reason||"Blocked by hook",comman
+d:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break}if(u.hookPermissionDecisionReason=e.hookSpecificOutput.permissionDecisionReason
+--- 317125093 ---
+ntName==="PreToolUse"&&e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissio
+nBehavior="deny",u.blockingError={blockingError:e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";bre
+ak;default:throw Error(`Unknown hook permissionDecision type: ${e.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 
+0&&e.reason!==void 0)u.hookPermissionDecisionReason=e.reason;if(e.hookSpecificOutput){if(i&&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: 
+expected '${i}' but got '${e.hookSpecificOutput.hookEventName}'. Full stdout: ${He(e,null,2)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.
+permissionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingEr
+ror:e.hookSpecificOutput.permissionDecisionReason||e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";
+break}if(u.hookPermissionDecisionReason=e.hookSpecificOutput.permissionDecisionReason,e.hookSpecificOutput.updatedInput)u.updatedInput=e.hookSpecificOutput.updatedInput;u.additiona
+lContext=e.hookSpecificOutput.additionalContext;break;case"UserPromptSubmit":u.additionalContext=e.hookSpecificOutput.additionalContext,u.sessionTitle=e.hookSpecificOutput.sessionT
+itle,u.suppressOriginalPrompt=e.hookSpecificOutput.suppressOriginalPrompt;break;case"UserPromptExpansion":u.additionalContext=e.hookSpecificOutput.additionalContext,u.suppressOrigi
+--- 317125140 ---
+missionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError
+:e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break;default:throw Error(`Unknown hook permission
+Decision type: ${e.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.hookPermissionDecisionRe
+ason=e.reason;if(e.hookSpecificOutput){if(i&&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '${e.hookSpecificOutput
+.hookEventName}'. Full stdout: ${He(e,null,2)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.
+permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.hookSpecificOutput.permissionDecisionReas
+on||e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break}if(u.hookPermissionDecisionReason=e.hookS
+pecificOutput.permissionDecisionReason,e.hookSpecificOutput.updatedInput)u.updatedInput=e.hookSpecificOutput.updatedInput;u.additionalContext=e.hookSpecificOutput.additionalContext
+;break;case"UserPromptSubmit":u.additionalContext=e.hookSpecificOutput.additionalContext,u.sessionTitle=e.hookSpecificOutput.sessionTitle,u.suppressOriginalPrompt=e.hookSpecificOut
+put.suppressOriginalPrompt;break;case"UserPromptExpansion":u.additionalContext=e.hookSpecificOutput.additionalContext,u.suppressOriginalPrompt=e.hookSpecificOutput.suppressOriginal
+--- 317125298 ---
+ngError={blockingError:e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break;default:throw Error(`U
+nknown hook permissionDecision type: ${e.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.ho
+okPermissionDecisionReason=e.reason;if(e.hookSpecificOutput){if(i&&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '
+${e.hookSpecificOutput.hookEventName}'. Full stdout: ${He(e,null,2)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch
+(e.hookSpecificOutput.permissionDecision){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.hookSpecificOutput.
+permissionDecisionReason||e.reason||"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break}if(u.hookPermission
+DecisionReason=e.hookSpecificOutput.permissionDecisionReason,e.hookSpecificOutput.updatedInput)u.updatedInput=e.hookSpecificOutput.updatedInput;u.additionalContext=e.hookSpecificOu
+tput.additionalContext;break;case"UserPromptSubmit":u.additionalContext=e.hookSpecificOutput.additionalContext,u.sessionTitle=e.hookSpecificOutput.sessionTitle,u.suppressOriginalPr
+ompt=e.hookSpecificOutput.suppressOriginalPrompt;break;case"UserPromptExpansion":u.additionalContext=e.hookSpecificOutput.additionalContext,u.suppressOriginalPrompt=e.hookSpecificO
+utput.suppressOriginalPrompt;break;case"SessionStart":if(u.additionalContext=e.hookSpecificOutput.additionalContext,u.initialUserMessage=e.hookSpecificOutput.initialUserMessage,u.s
+--- 317125514 ---
+ ${e.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.hookPermissionDecisionReason=e.reason;
+if(e.hookSpecificOutput){if(i&&e.hookSpecificOutput.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '${e.hookSpecificOutput.hookEventName
+}'. Full stdout: ${He(e,null,2)}`);switch(e.hookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.permissionDeci
+sion){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.hookSpecificOutput.permissionDecisionReason||e.reason||
+"Blocked by hook",command:t};break;case"ask":u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break}if(u.hookPermissionDecisionReason=e.hookSpecificOutput.
+permissionDecisionReason,e.hookSpecificOutput.updatedInput)u.updatedInput=e.hookSpecificOutput.updatedInput;u.additionalContext=e.hookSpecificOutput.additionalContext;break;case"Us
+erPromptSubmit":u.additionalContext=e.hookSpecificOutput.additionalContext,u.sessionTitle=e.hookSpecificOutput.sessionTitle,u.suppressOriginalPrompt=e.hookSpecificOutput.suppressOr
+iginalPrompt;break;case"UserPromptExpansion":u.additionalContext=e.hookSpecificOutput.additionalContext,u.suppressOriginalPrompt=e.hookSpecificOutput.suppressOriginalPrompt;break;c
+ase"SessionStart":if(u.additionalContext=e.hookSpecificOutput.additionalContext,u.initialUserMessage=e.hookSpecificOutput.initialUserMessage,u.sessionTitle=e.hookSpecificOutput.ses
+sionTitle,"watchPaths"in e.hookSpecificOutput&&e.hookSpecificOutput.watchPaths)u.watchPaths=e.hookSpecificOutput.watchPaths;u.reloadSkills=e.hookSpecificOutput.reloadSkills;break;c
+--- 317146210 ---
+(h,qSt(a,f,e.id),f,t,a?.options?.tools,{managedHooksOnly:p});if(g.length===0)return;if(i?.aborted)return;let y=g.filter((q)=>!ldh(q));if(y.length>0){if(!d){let q=Xjl(y),j=ddh(y),U=
+tr(y,(Z)=>Z.matcherIsMatchAll);N("tengu_run_hook",{hookName:m,numCommands:y.length,numMatchAllMatchers:U,numSpecificMatchers:y.length-U,hookTypeCounts:He(j),...q&&{pluginHookCounts
+:He(q)}})}}else{let q=Date.now(),j=0,U=a?{getAppState:a.getAppState,applyAttributionOp:a.applyAttributionOp,session:a.session,storageV5:a.storageV5}:void 0;for(let[K,ne]of g.entrie
+s()){let{hook:ie}=ne;if(ie.type!=="callback")continue;let X=await ie.callback(t,n,i,K,U);if(t8e(X)||Object.keys(X).length===0)continue;let te=ufo({json:X,command:"callback",hookNam
+e:`${f}:Callback`,toolUseID:n,hookEvent:f,expectedHookEvent:f,stdout:void 0,stderr:void 0,exitCode:void 0});if(te.permissionBehavior==="deny")j++,E(`Hook ${f} (${KX(ie)}) returned 
+permissionDecision: deny${te.hookPermissionDecisionReason?` (reason: ${te.hookPermissionDecisionReason})`:""}`),yield{permissionBehavior:"deny",hookPermissionDecisionReason:te.hook
+PermissionDecisionReason,hookSource:ne.hookSource};if(te.additionalContext)yield{additionalContexts:[await hAt(te.additionalContext,`${n}-${K}`,"additionalContext")]};if(te.systemM
+essage)yield{message:ic({type:"hook_system_message",content:await hAt(te.systemMessage,`${n}-${K}`,"systemMessage"),hookName:m,toolUseID:n,hookEvent:f})}}let Z=Date.now()-q;HHt()?.
+observe("hook_duration_ms",Z),N("tengu_repl_hook_finished",{hookName:m,numCommands:g.length,numSuccess:g.length-j,numBlocking:j,numNonBlockingError:0,numCancelled:0,totalDurationMs
+:Z});return}let _=yj()&&hS(),b=_||YLe()?He(gEE(g)):"[]",S=hdh(f,o);if(!d)Kd("hook_execution_start",{hook_event:f,hook_name:S,num_hooks:String(g.length),managed_only:String(_3e()),h
+--- 317161570 ---
+Context.length} chars)`),yield{additionalContexts:[await hAt(q.additionalContext,`${n}-${Q}`,"additionalContext")]};if(q.initialUserMessage)O.initialUserMessageChars+=q.initialUser
+Message.length,W(q.hook,"initialUserMessageChars",q.initialUserMessage.length),E(`Hook ${f} (${KX(q.hook)}) provided initialUserMessage (${q.initialUserMessage.length} chars)`),yie
+ld{initialUserMessage:await hAt(q.initialUserMessage,`${n}-${Q}`,"initialUserMessage")};if(q.watchPaths&&q.watchPaths.length>0)E(`Hook ${f} (${KX(q.hook)}) provided ${q.watchPaths.
+length} watchPaths`),yield{watchPaths:q.watchPaths};if(q.reloadSkills)E(`Hook ${f} (${KX(q.hook)}) requested reloadSkills`),yield{reloadSkills:!0};if(q.sessionTitle)E(`Hook ${f} ($
+{KX(q.hook)}) provided sessionTitle (${[...q.sessionTitle].length} chars)`),yield{sessionTitle:q.sessionTitle};if(q.permissionBehavior)switch(E(`Hook ${f} (${KX(q.hook)}) returned 
+permissionDecision: ${q.permissionBehavior}${q.hookPermissionDecisionReason?` (reason: ${q.hookPermissionDecisionReason})`:""}`),q.permissionBehavior){case"deny":Y="deny";break;cas
+e"defer":if(Y!=="deny")Y="defer";break;case"ask":if(Y!=="deny"&&Y!=="defer")Y="ask";break;case"allow":if(!Y)Y="allow";break;case"passthrough":break}if(q.permissionBehavior&&Y===q.p
+ermissionBehavior){let U=q.updatedInput&&(q.permissionBehavior==="allow"||q.permissionBehavior==="ask")?q.updatedInput:void 0;if(U)E(`Hook ${f} (${KX(q.hook)}) modified tool input 
+keys: [${Object.keys(U).join(", ")}]`);yield{permissionBehavior:Y,hookPermissionDecisionReason:q.hookPermissionDecisionReason,hookSource:g.find((Z)=>Z.hook===q.hook)?.hookSource,up
+datedInput:U}}if(q.updatedInput&&q.permissionBehavior===void 0)E(`Hook ${f} (${KX(q.hook)}) modified tool input keys: [${Object.keys(q.updatedInput).join(", ")}]`),yield{updatedInp
+--- 324592277 ---
+ "content": "..." },.  "tool_response": { "success": true }  // PostToolUse only.}.\`\`\`..### Hook JSON Output..Hooks can return JSON to control behavior:..\`\`\`json.{.  "systemM
+essage": "Warning shown to user in UI",.  "continue": false,.  "stopReason": "Message shown when blocking",.  "suppressOutput": false,.  "decision": "block",.  "reason": "Explanati
+on for decision",.  "hookSpecificOutput": {.    "hookEventName": "PostToolUse",.    "additionalContext": "Context injected back to model".  }.}.\`\`\`..**Fields:**.- \`systemMessag
+e\` - Display a message to the user (all hooks).- \`continue\` - Set to \`false\` to block/stop (default: true).- \`stopReason\` - Message shown when \`continue\` is false.- \`supp
+ressOutput\` - Hide stdout from transcript (default: false).- \`decision\` - "block" for PostToolUse/Stop/UserPromptSubmit hooks (deprecated for PreToolUse, use hookSpecificOutput.
+permissionDecision instead).- \`reason\` - Explanation for decision.- \`hookSpecificOutput\` - Event-specific output (must include \`hookEventName\`):.  - \`additionalContext\` - T
+ext injected into model context.  - \`permissionDecision\` - "allow", "deny", or "ask" (PreToolUse only).  - \`permissionDecisionReason\` - Reason for the permission decision (PreT
+oolUse only).  - \`updatedInput\` - Modified tool input (PreToolUse only)..### Common Patterns..**Auto-format after writes:**.\`\`\`json.{.  "hooks": {.    "PostToolUse": [{.      
+"matcher": "Write|Edit",.      "hooks": [{.        "type": "command",.        "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; prettier --write \
+\"$f\\"; } 2>/dev/null || true".      }].    }].  }.}.\`\`\`..**Log all bash commands:**.\`\`\`json.{.  "hooks": {.    "PreToolUse": [{.      "matcher": "Bash",.      "hooks": [{. 
+--- 324592495 ---
+,.  "continue": false,.  "stopReason": "Message shown when blocking",.  "suppressOutput": false,.  "decision": "block",.  "reason": "Explanation for decision",.  "hookSpecificOutpu
+t": {.    "hookEventName": "PostToolUse",.    "additionalContext": "Context injected back to model".  }.}.\`\`\`..**Fields:**.- \`systemMessage\` - Display a message to the user (a
+ll hooks).- \`continue\` - Set to \`false\` to block/stop (default: true).- \`stopReason\` - Message shown when \`continue\` is false.- \`suppressOutput\` - Hide stdout from transc
+ript (default: false).- \`decision\` - "block" for PostToolUse/Stop/UserPromptSubmit hooks (deprecated for PreToolUse, use hookSpecificOutput.permissionDecision instead).- \`reason
+\` - Explanation for decision.- \`hookSpecificOutput\` - Event-specific output (must include \`hookEventName\`):.  - \`additionalContext\` - Text injected into model context.  - \`
+permissionDecision\` - "allow", "deny", or "ask" (PreToolUse only).  - \`permissionDecisionReason\` - Reason for the permission decision (PreToolUse only).  - \`updatedInput\` - Mo
+dified tool input (PreToolUse only)..### Common Patterns..**Auto-format after writes:**.\`\`\`json.{.  "hooks": {.    "PostToolUse": [{.      "matcher": "Write|Edit",.      "hooks"
+: [{.        "type": "command",.        "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; prettier --write \\"$f\\"; } 2>/dev/null || true".      
+}].    }].  }.}.\`\`\`..**Log all bash commands:**.\`\`\`json.{.  "hooks": {.    "PreToolUse": [{.      "matcher": "Bash",.      "hooks": [{.        "type": "command",.        "com
+mand": "jq -r '.tool_input.command' >> ~/.claude/bash-log.txt".      }].    }].  }.}.\`\`\`..**Stop hook that displays message to user:**..Command must output JSON with \`systemMes
+--- 324592568 ---
+suppressOutput": false,.  "decision": "block",.  "reason": "Explanation for decision",.  "hookSpecificOutput": {.    "hookEventName": "PostToolUse",.    "additionalContext": "Conte
+xt injected back to model".  }.}.\`\`\`..**Fields:**.- \`systemMessage\` - Display a message to the user (all hooks).- \`continue\` - Set to \`false\` to block/stop (default: true)
+.- \`stopReason\` - Message shown when \`continue\` is false.- \`suppressOutput\` - Hide stdout from transcript (default: false).- \`decision\` - "block" for PostToolUse/Stop/UserP
+romptSubmit hooks (deprecated for PreToolUse, use hookSpecificOutput.permissionDecision instead).- \`reason\` - Explanation for decision.- \`hookSpecificOutput\` - Event-specific o
+utput (must include \`hookEventName\`):.  - \`additionalContext\` - Text injected into model context.  - \`permissionDecision\` - "allow", "deny", or "ask" (PreToolUse only).  - \`
+permissionDecisionReason\` - Reason for the permission decision (PreToolUse only).  - \`updatedInput\` - Modified tool input (PreToolUse only)..### Common Patterns..**Auto-format a
+fter writes:**.\`\`\`json.{.  "hooks": {.    "PostToolUse": [{.      "matcher": "Write|Edit",.      "hooks": [{.        "type": "command",.        "command": "jq -r '.tool_response
+.filePath // .tool_input.file_path' | { read -r f; prettier --write \\"$f\\"; } 2>/dev/null || true".      }].    }].  }.}.\`\`\`..**Log all bash commands:**.\`\`\`json.{.  "hooks"
+: {.    "PreToolUse": [{.      "matcher": "Bash",.      "hooks": [{.        "type": "command",.        "command": "jq -r '.tool_input.command' >> ~/.claude/bash-log.txt".      }]. 
+   }].  }.}.\`\`\`..**Stop hook that displays message to user:**..Command must output JSON with \`systemMessage\` field:.\`\`\`bash.# Example command that outputs: {"systemMessage"
+--- 326899693 ---
+rt(){if(n)clearTimeout(n),n=null;if(r)o=Date.now(),n=setTimeout(()=>{let i=Date.now()-o;if(e()&&i>=t)E(`Exiting after ${t}ms of idle time`),Nd()},t)},stop(){if(n)clearTimeout(n),n=
+null}}}var I3y=A(()=>{qe();mr();K_()});function O_u(){let e=it("tengu_hearth_resolved_rows","off");return e==="full"||e==="model_only"?e:"off"}var H3y=A(()=>{bn()});function P3y(e,
+t,r,n,o){let i=new ePr,s;return async(a)=>{let l=t();if(s!==l)i.clear(),s=l;switch(JNr(l.mode,l.isBypassPermissionsModeAvailable)){case"allow":return!0;case"deny":return!1;case"cla
+ssify":{let u=r();return i.getOrClassify(a.host,a.port,SAn(u),()=>Prn(a.host,a.port,u,n(),l,new AbortController().signal,{isSubagentLoop:HZe(void 0),recordPresumed:!0,credentials:o
+}))}case"ask":return e(a)}}}var D3y=A(()=>{jS();Kce();yLs();yg()});function O3y(e){switch(e.hook_event_name){case"PreToolUse":return{hookSpecificOutput:{hookEventName:"PreToolUse",
+permissionDecision:"deny",permissionDecisionReason:uoT}};case"UserPromptSubmit":return{decision:"block",reason:M3y,hookSpecificOutput:{hookEventName:"UserPromptSubmit",suppressOrig
+inalPrompt:!0}};case"UserPromptExpansion":return{decision:"block",reason:M3y,hookSpecificOutput:{hookEventName:"UserPromptExpansion",suppressOriginalPrompt:!0}};default:return{}}}f
+unction L_u(e,t){let r={};for(let[o,i]of Object.entries(e)){if(i.length===0)continue;r[o]=i.map((s)=>({matcher:s.matcher??void 0,hooks:s.hookCallbackIds.map((a)=>t(a,s.timeout)),or
+igin:"sdkHost"}))}let n=wre();if(n){let o={},i=!1;for(let[s,a]of Object.entries(n)){let l=a.filter((c)=>!(("origin"in c)&&c.origin==="sdkHost"));if(i||=l.length!==a.length,l.length
+>0)o[s]=l}if(i){if(mGs(),Object.keys(o).length>0)DMe(o)}}if(Object.keys(r).length>0)DMe(r)}function L3y(e,t){return t.hostOwnsStdinOrigin?e.hooks:void 0}var uoT="The SDK host recon
+--- 326899719 ---
+n=null;if(r)o=Date.now(),n=setTimeout(()=>{let i=Date.now()-o;if(e()&&i>=t)E(`Exiting after ${t}ms of idle time`),Nd()},t)},stop(){if(n)clearTimeout(n),n=null}}}var I3y=A(()=>{qe()
+;mr();K_()});function O_u(){let e=it("tengu_hearth_resolved_rows","off");return e==="full"||e==="model_only"?e:"off"}var H3y=A(()=>{bn()});function P3y(e,t,r,n,o){let i=new ePr,s;r
+eturn async(a)=>{let l=t();if(s!==l)i.clear(),s=l;switch(JNr(l.mode,l.isBypassPermissionsModeAvailable)){case"allow":return!0;case"deny":return!1;case"classify":{let u=r();return i
+.getOrClassify(a.host,a.port,SAn(u),()=>Prn(a.host,a.port,u,n(),l,new AbortController().signal,{isSubagentLoop:HZe(void 0),recordPresumed:!0,credentials:o}))}case"ask":return e(a)}
+}}var D3y=A(()=>{jS();Kce();yLs();yg()});function O3y(e){switch(e.hook_event_name){case"PreToolUse":return{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
+permissionDecisionReason:uoT}};case"UserPromptSubmit":return{decision:"block",reason:M3y,hookSpecificOutput:{hookEventName:"UserPromptSubmit",suppressOriginalPrompt:!0}};case"UserP
+romptExpansion":return{decision:"block",reason:M3y,hookSpecificOutput:{hookEventName:"UserPromptExpansion",suppressOriginalPrompt:!0}};default:return{}}}function L_u(e,t){let r={};
+for(let[o,i]of Object.entries(e)){if(i.length===0)continue;r[o]=i.map((s)=>({matcher:s.matcher??void 0,hooks:s.hookCallbackIds.map((a)=>t(a,s.timeout)),origin:"sdkHost"}))}let n=wr
+e();if(n){let o={},i=!1;for(let[s,a]of Object.entries(n)){let l=a.filter((c)=>!(("origin"in c)&&c.origin==="sdkHost"));if(i||=l.length!==a.length,l.length>0)o[s]=l}if(i){if(mGs(),O
+bject.keys(o).length>0)DMe(o)}}if(Object.keys(r).length>0)DMe(r)}function L3y(e,t){return t.hostOwnsStdinOrigin?e.hooks:void 0}var uoT="The SDK host reconnected before its PreToolU
+
+#### Valid types are: allow count=2
+--- 165399386 ---
+..............................................................?...Cannot destructure property 'json' from null or undefined value.................e.................................
+......approve.................block...................allow...................deny....................Blocked by hook.................t.......................Unknown hook decision 
+type: ................!.... Valid types are: approve, block...............................Hook ...................r....................... (......................o.................
+......) returned a terminalSequence that was rejected by the allowlist (only OSC 0/1/2/9/99/777 and BEL are permitted, and OSC 9 bodies may not begin with a digit unless in the 9;4
+ progress form)...................PreToolUse..............................ask.....................defer...............&...Unknown hook permissionDecision type: ..............*.... 
+Valid types are: allow, deny, ask, defer......................i.......................Hook returned incorrect event name: expected '..................' but got '...................
+..'. Full stdout: ........................watchPaths......................decline.................Elicitation denied by hook.................."...Elicitation result blocked by hook
+......2.......................hook_blocking_error.....................n.......................hook_success....................................s.......................a.............
+..........l.......................c....................................................................................@...@P4.I...@@U.W...@.5.K...@.L.@...K...X03.@.5.I...@ M.I...@
+...[...@.F.Z...@.5.@.=.G...@@.D....@.L^....@.D.@...I..N....@..Y......<.@P..N...@.M.@...N...^.3.@06.Q.....e.@ ..Q.....3.@.=.....@.$.@0..S...@.E.@...@`d.....@.......@.,.S....5M.@.~.S
+--- 317124659 ---
+ ${e.decision}. Valid types are: approve, block`)}if(e.systemMessage)u.systemMessage=e.systemMessage;if(e.terminalSequence){let p=Fjl(e.terminalSequence);if(p!==null)u.terminalSequ
+ence=p;else E(`Hook ${r} (${o}) returned a terminalSequence that was rejected by the allowlist (only OSC 0/1/2/9/99/777 and BEL are permitted, and OSC 9 bodies may not begin with a
+ digit unless in the 9;4 progress form)`)}if(e.hookSpecificOutput?.hookEventName==="PreToolUse"&&e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.permissionDecis
+ion){case"allow":u.permissionBehavior="allow";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.reason||"Blocked by hook",command:t};break;case"ask":u.p
+ermissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break;default:throw Error(`Unknown hook permissionDecision type: ${e.hookSpecificOutput.permissionDecision}. 
+Valid types are: allow, deny, ask, defer`)}if(u.permissionBehavior!==void 0&&e.reason!==void 0)u.hookPermissionDecisionReason=e.reason;if(e.hookSpecificOutput){if(i&&e.hookSpecific
+Output.hookEventName!==i)throw Error(`Hook returned incorrect event name: expected '${i}' but got '${e.hookSpecificOutput.hookEventName}'. Full stdout: ${He(e,null,2)}`);switch(e.h
+ookSpecificOutput.hookEventName){case"PreToolUse":if(e.hookSpecificOutput.permissionDecision)switch(e.hookSpecificOutput.permissionDecision){case"allow":u.permissionBehavior="allow
+";break;case"deny":u.permissionBehavior="deny",u.blockingError={blockingError:e.hookSpecificOutput.permissionDecisionReason||e.reason||"Blocked by hook",command:t};break;case"ask":
+u.permissionBehavior="ask";break;case"defer":u.permissionBehavior="defer";break}if(u.hookPermissionDecisionReason=e.hookSpecificOutput.permissionDecisionReason,e.hookSpecificOutput

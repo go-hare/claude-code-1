@@ -1,0 +1,126 @@
+OFFSET=298096000
+
+t=!1,r=!1;return{resolve(n){if(r)return;r=!0,t=!0,e(n)},isResolved(){return t},claim(){if(t)return!1;return t=!0,!0}}}function m4n(e,t,r,n,o,i,s){let a=n.message.id,l=un(r).mode;function c(d,p){Udp({tool:e,input:p?.input??t,toolUseContext:r,messageId:a,toolUseID:o,permissionMode:l},d,p?.permissionPromptStartTimeMs)}return Object.freeze({tool:e,input:t,toolUseContext:r,assistantMessage:n,messageId:a,toolUseID:o,setClassifierApprovals:i,permissionMode:l,logDecision:c,logCancelled(){L("tengu_tool_use_cancelled",{messageID:Qr(a),toolName:Hl(e.name)})},persistPermissions(d){if(d.length===0)return!1;if(zAe(d,r.storageV5).catch(xe),s!==void 0)s(Bie(Ina(un(r)),d));else r.setSessionToolPermissionContext((p)=>Bie(p,d)),setImmediate(()=>{n3e.emit()});return d.some((p)=>Fna(p.destination))},setModeFromBridge(d){return lfe(d,un(r),r.setToolPermissionContext)},resolveIfAborted(d){if(!r.abortController.signal.aborted)return!1;return this.logCancelled(),d(this.cancelAndAbort(void 0,!0)),!0},cancelAndAbort(d,p,f,m){let h=!!r.agentId,g=d?`${h?Umi:c3e}${d}`:h?zOe:Mte,y=h?g:nLt(g);if(p||Lmi({feedback:d,contentBlocks:f,isSubagent:h}))E(`Aborting: tool=${e.name} isAbort=${p} hasFeedback=${!!d} isSubagent=${h}`),r.abortController.abort();return{behavior:"ask",message:y,contentBlocks:f,...m?.feedbackIsFromUser&&d&&{userFeedback:d}}},async runHooks(d,p,f,m){for await(let h of Opt(e.name,o,t,r,d,p,r.abortController.signal))if(h.permissionRequestResult){let g=h.permissionRequestResult;if(g.behavior==="allow"){let y=g.updatedInput??f??t;if(!g.updatedInput&&e.requiresUserInteraction?.())return null;if(g.updatedInput){let b=e3r(await l1t(e,y,{...r,toolUseId:o},{hookUpdatedInput:g.updatedInput}),e.name);if(b?.behavior==="deny")return this.logDecision({decision:"reject",source:"config"},{input:y,permissionPromptStartTimeMs:m}),{...b,decideLocation:"ask-path"};if(b?.behavior==="ask")return{reprompted:b,finalInput:y}}return this.handleHookAllow(y,g.updatedPermissions??[],m)}else if(g.behavior==="deny"){if(this.logDecision({decision:"reject",source:{type:"hook"}},{permissionPromptStartTimeMs:m}),g.interrupt)E(`Hook interrupt: tool=${e.name} hookMessage=${g.message}`),r.abortController.abort();return this.buildDeny(g.message||"Permission denied by hook",{type:"hook",hookName:"PermissionRequest",reason:g.message})}}return null},buildAllow(d,p){return{behavior:"allow",updatedInput:d,userModified:p?.userModified??!1,...p?.decisionReason&&{decisionReason:p.decisionReason},...p?.acceptFeedback&&{acceptFeedback:p.acceptFeedback},...p?.contentBlocks&&p.contentBlocks.length>0&&{contentBlocks:p.contentBlocks},...p?.matchedAskRule&&{matchedAskRule:p.matchedAskRule}}},buildDeny(d,p){return{behavior:"deny",message:d,decisionReason:p,decideLocation:"ask-path"}},handleUserAllow(d,p,f){let m=e.suppressesAlwaysAllowRule?.(t)===!0||f?.askSuppressesAlwaysAllowRule===!0?T4e(p,e,un(r)):p,h=this.persistPermissions(m);Nmi(m),this.logDecision({decision:"accept",source:{type:"user",permanent:h}},{input:d,permissionPromptStartTimeMs:f?.permissionPromptStartTimeMs});let g=e.inputsEquivalent?!e.inputsEquivalent(t,d):!1,y=f?.feedback?.trim();return this.buildAllow(d,{userModified:g,decisionReason:f?.decisionReason,acceptFeedback:y||void 0,contentBlocks:f?.contentBlocks,matchedAskRule:f?.matchedAskRule})},handleHookAllow(d,p,f){let m=this.persistPermissions(p);return this.logDecision({decision:"accept",source:{type:"hook",permanent:m}},{input:d,permissionPromptStartTimeMs:f}),this.buildAllow(d,{decisionReason:{type:"hook",hookName:"PermissionRequest"}})}})}function $rf(e){let t=e.input;if(e.tool.name===eg)return Ydi(t);if(e.tool.name===m3)return{text:"approve plan"};let r=e.tool.userFacingName(e.input).trim(),n=typeof t?.command==="string"?t.command:typeof t?.file_path==="string"?t.file_path:typeof t?.url==="string"?t.url:"",o=r||e.tool.name;return{text:n&&!o.includes(n)?dLt(`approve ${o}: ${n}`):`approve ${o}`}}var h4n=A(()=>{Ut();Dir();rf();h3();Jc();Ze();Mg();Vr();ri();dU();gP();ty();$mi();fya();Qor()});function t3r(e){return!!e?.experimental?.["claude/channel"]}var Frf={};yt(Frf,{getChannelAllowlist:()=>Bmi,isChannelAllowlisted:()=>ZFa,isChannelsEnabled:()=>QJe});function Bmi(){let e=tt("tengu_harbor_ledger",[]),t=L$v().safeParse(e);return t.success?t.data:[]}function QJe(){return tt("tengu_harbor",!1)}function ZFa(e){if(!e)return!1;let{name:t,marketplace:r}=$s(e);if(!r)return!1;return Bmi().some((n)=>n.plugin===t&&n.marketplace===r)}var L$v;var r3r=A(()=>{Vn();wn();k_();cn();L$v=Se(()=>_t(ye({marketplace:F(),plugin:F()})))});var Brf={};yt(Brf,{CHANNEL_PERMISSION_METHOD:()=>jmi,CHANNEL_PERMISSION_REQUEST_METHOD:()=>e2a,ChannelMessageNotificationSchema:()=>n3r,ChannelPermissionNotificationSchema:()=>QFa,findChannelEntry:()=>c1t,gateChannelServer:()=>i3r,getEffectiveChannelAllowlist:()=>g4n,isChannelGateHardRevocation:()=>t2a,isChannelsPolicyBlocked:()=>Kir,wrapChannelMessage:()=>o3r});function o3r(e,t,r){let n=Object.entries(r??{}),[o,i]=N$v(n,([l])=>Urf.test(l));if(i.length>0)E(`[channel] ${e}: dropped ${i.length} meta key(s) that don't match ${Urf.source}: ${i.map(([l])=>l).join(", ")}`,{level:"warn"});let s=o.map(([l,c])=>` ${l}="${pd(c)}"`).join(""),a=yHr(cAt,t);return`<${cAt} source="${pd(e)}"${s}>
+${a}
+</${cAt}>`}function N$v(e,t){let r=[],n=[];for(let o of e)(t(o)?r:n).push(o);return[r,n]}function g4n(e){if(e)return{entries:e,source:"org"};return{entries:Bmi(),source:"ledger"}}function t2a(e){return e==="provider"||e==="disabled"||e==="capability"||e==="era"}function Kir(e){if(Yi()){let t=uc();return(t==="team"||t==="enterprise")&&e?.channelsEnabled!==!0}return e!==null&&e.channelsEnabled!==!0}function c1t(e,t){let r=e.split(":");return t.find((n)=>n.kind==="server"?e===n.name:r[0]==="plugin"&&r[1]===n.name)}function i3r(e,t,r,n){if(!t3r(t))return{action:"skip",kind:"capability",reason:"server did not declare claude/channel capability"};if(n==="modern")return{action:"skip",kind:"era",reason:"connection negotiated a modern protocol revision with no unsolicited notification path"};if(Yn()!=="firstParty")return{action:"skip",kind:"provider",reason:"channels are not available on third-party providers"};if(!QJe())return{action:"skip",kind:"disabled",reason:"channels feature is not currently available"};let o=ln("policySettings");if(Kir(o))return{action:"skip",kind:"policy",reason:"channels not enabled by org policy (set channelsEnabled: true in managed settings)"};let i=c1t(e,YP());if(!i)return{action:"skip",kind:"session",reason:`server ${e} not in --channels list for this session`};if(i.kind==="plugin"){let s=r?$s(r).marketplace:void 0;if(s!==i.marketplace)return{action:"skip",kind:"marketplace",reason:`you asked for plugin:${i.name}@${i.marketplace} but the installed ${i.name} plugin is from ${s??"an unknown source"}`};if(!i.dev){let{entries:a,source:l}=g4n(o?.allowedChannelPlugins);if(!a.some((c)=>c.plugin===i.name&&c.marketplace===i.marketplace))return{action:"skip",kind:"allowlist",reason:l==="org"?`plugin ${i.name}@${i.marketplace} is not on your org's approved channels list (set allowedChannelPlugins in managed settings)`:`plugin ${i.name}@${i.marketplace} is not on the approved channels allowlist (use --dangerously-load-development-channels for local dev)`}}}else if(!i.dev)return{action:"skip",kind:"allowlist",reason:`server ${i.name} is not on the approved channels allowlist (use --dangerously-load-development-channels for local dev)`};return{action:"register"}}var n3r,jmi="notifications/claude/channel/permission",QFa,e2a="notifications/claude/channel/permission_request",Urf;var Yir=A(()=>{Vn();bt();xy();Zo();Ze();wn();ws();k_();To();Nb();r3r();n3r=Se(()=>ye({method:Ct("notifications/claude/channel"),params:ye({content:F(),meta:ho(F(),F()).optional()})})),QFa=Se(()=>ye({method:Ct(jmi),params:ye({request_id:F(),behavior:Mr(["allow","deny"])})})),Urf=/^[a-zA-Z_][a-zA-Z0-9_]*$/});function Vrf(){return tt("tengu_harbor_permissions",!1)}function jrf(e){let t=2166136261;for(let n=0;n<e.length;n++)t^=e.charCodeAt(n),t=Math.imul(t,16777619);t=t>>>0;let r="";for(let n=0;n<5;n++)r+=$$v[t%25],t=Math.floor(t/25);return r}function qrf(e){let t=jrf(e);for(let r=0;r<10;r++){if(!F$v.some((n)=>t.includes(n)))return t;t=jrf(`${e}:${r}`)}return t}function i2a(e){return s2a(Xir(e).replace(/\s+/g," ").trim())}function s2a(e){let t=Array.from(e);if(t.length<=U$v)return e;let r=t.length-y4n-_4n;return t.slice(0,y4n).join("")+`
+\u22EF ${r} ${Rt(r,"code point")} elided \u22EF
+`+t.slice(t.length-_4n).join("")}function Xir(e){return Array.from(Qwe(e),(t)=>uq(t.codePointAt(0)??0)?" ":t).join("").replace(kxt,"\xB7").replace(B$v,"\xB7").replace(j$v,"\xB7").replace(qIe," ")}function r2a(e){return o2a(Ie(e)).replace(/\s/g," ")}function n2a(e,t,r){let n=e,o=r2a(e);if(t.has(o)){let i=o,s=r.get(i)??2;n=`${e}#${s}`,o=r2a(n);while(t.has(o))s++,n=`${e}#${s}`,o=r2a(n);r.set(i,s+1)}return t.add(o),n}function zmi(e){if(Array.isArray(e))return e.map(zmi);if(e!==null&&typeof e==="object"){let t=Object.create(null),r=new Set,n=new Map;for(let[o,i]of Object.entries(e))t[n2a(tAt(o),r,n)]=zmi(i);return t}return e}function Grf(e){if(e===null||typeof e!=="object")return!1;let t=W$v,r=[{node:e,depth:1}];while(r.length>0){let n=r.pop(),o=n.depth,i=n.node;if(o>=z$v)return!0;if(typeof i.toJSON==="function"){if(t-=1,t<0)return!0;let a;try{a=i.toJSON()}catch{return!0}if(a===null||typeof a!=="object")continue;i=a}if(Array.isArray(i)){if(t-=i.length,t<0)return!0}for(let a of Object.keys(i)){if(!Array.isArray(i)){if(t-=1,t<0)return!0}let l=i[a];if(l!==null&&typeof l==="object")r.push({node:l,depth:o+1})}}return!1}function Krf(e){try{if(e!==null&&typeof e==="object"&&!Array.isArray(e)){let o=[],i=0,s=[],a=new Set,l=new Map;for(let u of Object.keys(e)){let d,p,f=!1;try{if(d=e[u],Grf(d))f=!0;else p=Ie(d)}catch{f=!0}if(p===void 0){if(!f)continue;let v=n2a(tAt(u),a,l);E("truncateForPreview: field serialization threw (depth) \u2014 rendering a loud unserializable marker",{level:"error"});let S=Xir(Ie(v)).replace(/\s+/g," "),w=ZS(S,50),T=w.length<S.length?w+"\u2026":w;if(i>=zrf){s.push(T);continue}let k=`${T}: (value unserializable)`;i+=Array.from(k).length,o.push(k);continue}let m=n2a(tAt(u),a,l);if(i>=zrf){let v=Xir(Ie(m)).replace(/\s+/g," "),S=ZS(v,50);s.push(S.length<v.length?S+"\u2026":S);continue}let h,g=!1;try{h=Ie(zmi(SHe({[u]:Xt(p)},tAt)[u]))}catch{g=!0}if(h===void 0)if(g)E(`truncateForPreview: redaction round-trip threw for field ${Ie(m)} \u2014 rendering unredacted`,{level:"error"});else E(`truncateForPreview: redaction round-trip yielded no text for field ${Ie(m)} \u2014 rendering unredacted`,{level:"error"}),xe(Error("truncateForPreview: redaction round-trip yielded no text for a field \u2014 rendering unredacted"));let y=h===void 0?p:h,b=`${o2a(Ie(m))}: ${o2a(y)}`;i+=Array.from(b).length,o.push(b)}let c="";if(s.length>0){let d=Math.floor(Wrf/10);if(s.length<=d){let p=Math.max(8,Math.floor(Wrf/s.length)-2),f=s.map((m)=>{let h=ZS(m,p);return h.length<m.length?h+"\u2026":h});c=`
+\u22EF ${s.length} ${Rt(s.length,"field")} elided: ${f.join(", ")} \u22EF
+`}else c=`
+\u22EF ${s.length} ${Rt(s.length,"field")} elided (count exceeds the ${d}-name bound \u2014 refuse) \u22EF
+`}return`{ ${o.join(", ")} }${c}`}let t;try{if(Grf(e))return E("truncateForPreview: non-object input exceeds the serialization depth probe \u2014 rendering a loud unserializable marker",{level:"error"}),"(value unserializable)";t=Ie(e)}catch{return E("truncateForPreview: non-object input serialization threw \u2014 rendering a loud unserializable marker",{level:"error"}),"(value unserializable)"}if(t===void 0)return"(unserializable)";let r,n=!1;try{r=Ie(zmi(SHe(Xt(t),tAt)))}catch{n=!0}if(r===void 0){if(n)E("truncateForPreview: non-object redaction round-trip threw \u2014 rendering unredacted",{level:"error"});else E("truncateForPreview: non-object redaction round-trip failed \u2014 rendering unredacted",{level:"error"}),xe(Error("truncateForPreview: non-object redaction round-trip failed \u2014 rendering unredacted"));r=t}return s2a(Xir(r).replace(/\s{2,}/g," "))}catch{return"(unserializable)"}}function o2a(e){if(e.length<=1e5)return s2a(Xir(e).replace(/\s{2,}/g," "));let t=0;for(let s of e)t++;let r=Xir(ZS(e.slice(0,y4n*2+1),y4n)).replace(/\s{2,}/g," "),n=Array.from(Qwe(e.slice(-(_4n*2+1)))),o=Xir(n.slice(-_4n).join("")).replace(/\s{2,}/g," "),i=t-y4n-_4n;return r+`
+\u22EF ${i} ${Rt(i,"code point")} elided \u22EF
+`+o}function s3r(e,t){return!!e?.experimental?.[t]}function Yrf(e,t,r){return e.filter((n)=>n.type==="connected"&&t(n.name)&&s3r(n.capabilities,"claude/channel")&&s3r(n.capabilities,"claude/channel/permission")&&r(n.name)&&n.protocolEra!=="modern")}function Xrf(e){let t=new Map;return{isServerRegistered:e,onResponse(r,n){let o=r.toLowerCase();return t.set(o,n),()=>{t.delete(o)}},resolve(r,n,o){let i=r.toLowerCase(),s=t.get(i);if(!s)return!1;return t.delete(i),s({behavior:n,fromServer:o}),!0}}}var $$v="abcdefghijkmnopqrstuvwxyz",F$v,U$v=3500,y4n=2000,_4n=1500,zrf=15000,Wrf=30000,B$v,j$v,z$v=32000,W$v=2000000;var Wmi=A(()=>{Gy();jr();Ze();Vr();pk();vr();cn();F$v=["fuck","shit","cunt","cock","dick","twat","piss","crap","bitch","whore","ass","tit","cum","fag","dyke","nig","kike","rape","nazi","damn","poo","pee","wank","anus"];B$v=/[\u2018\u2019\u201A\u201B\u00B4\u02B9\u02BB\u02BC\u02BD\u02BE\u02BF\u02C0\u02C8\u02CA\u02CB\u02F4\u0374\u0384\u055A\u055D\u05F3\u07F4\u07F5\u1FBD\u1FBF\u1FEF\u1FFD\u1FFE\u2032\u2035\u275B\u275C\u275F\uA78B\uA78C\uFF07\uFF40]/g,j$v=/[\u02C2\u02C3\uFE64\uFE65\uFF1C\uFF1E]/g});function Zrf(e){Jrf=e}function Qrf(){return Jrf}var Jrf=null;function G$v(e,t){if(t.length===0)return;let r=[];for(let n of t)if(n.type==="setMode"){let o=e.setModeFromBridge(n.mode);if(!o.ok)E(`bridge setMode '${n.mode}' rejected (${o.error}); falling back to 'default'`),e.setModeFromBridge("default")}else r.push(n);if(r.length>0)e.persistPermissions(r)}function tnf(e){let{ctx:t,description:r,result:n,displayInput:o,permissionPromptStartTimeMs:i,awaitAutomatedChecksBeforeDialog:s,bridgeCallbacks:a,channelCallbacks:l,claim:c,isResolved:u,onWin:d,onReprompt:p}=e,f=n.localDisplayOnly?void 0:a,m=n.localDisplayOnly?void 0:l,{setClassifierApprovals:h}=t,g=f?enf.randomUUID():void 0,y,b,v;function S(x){if(f&&g){if(x)f.sendResponse(g,x);f.cancelRequest(g)}y?.(),b?.()}if(f&&g){let x="";if(t.tool.name!==_i&&t.tool.name!==js)try{x=t.tool.getToolUseSummary?.(o)??t.tool.getActivityDescription?.(o)??""}catch{x=""}f.sendRequest(g,t.tool.name,o,t.toolUseID,i2a(pp(x)),n.suggestions,n.blockedPath,t.tool.requiresUserInteraction?.());let C=t.toolUseContext.abortController.signal;y=f.onResponse(g,t.tool.name,(I)=>{if(!c())return;if(I.updatedPermissionsDropped)we("permission_bridge_relay","updated_permissions_malformed");else _e("permission_bridge_relay");if(y)C.removeEventListener("abort",y);if(_Je(h,t.toolUseID),b?.(),I.behavior==="allow"){let P=t.tool.suppressesAlwaysAllowRule?.(o)===!0||n.suppressAlwaysAllowRule===!0?T4e(I.updatedPermissions??[],t.tool,un(t.toolUseContext)):I.updatedPermissions??[];if(G$v(t,P),P.length)Nmi(P);t.logDecision({decision:"accept",source:{type:"user",permanent:!!P.length}},{input:I.updatedInput??o,permissionPromptStartTimeMs:i}),d(t.buildAllow(I.updatedInput??o))}else t.logDecision({decision:"reject",source:{type:"user_reject",hasFeedback:!!I.message}},{permissionPromptStartTimeMs:i}),d(t.cancelAndAbort(I.message,void 0,void 0,{feedbackIsFromUser:!0}))}),C.addEventListener("abort",y,{once:!0})}if(m&&!t.tool.requiresUserInteraction?.()){let x=qrf(t.toolUseID),C=YP(),I=Yrf(t.toolUseContext.getMcp().clients,(P)=>c1t(P,C)!==void 0,(P)=>m.isServerRegistered(P));if(I.length>0){let P={request_id:x,tool_name:t.tool.name,description:i2a(tAt(r)),input_preview:Krf(o)};for(let D of I){if(D.type!=="connected")continue;nnf(D,{method:e2a,params:P}).catch((U)=>{pe("permission_channel_relay","permission_channel_relay_send_failed"),E(`Channel permission_request failed for ${D.name}: ${ue(U)}`,{level:"error"})})}let O=t.toolUseContext.abortController.signal,M=m.onResponse(x,(D)=>{if(!c())return;if(_e("permission_channel_relay"),b?.(),_Je(h,t.toolUseID),f&&g)f.cancelRequest(g);if(y?.(),D.behavior==="allow")t.logDecision({decision:"accept",source:{type:"user",permanent:!1}},{permissionPromptStartTimeMs:i}),d(t.buildAllow(o));else t.logDecision({decision:"reject",source:{type:"user_reject",hasFeedback:!1}},{permissionPromptStartTimeMs:i}),d(t.cancelAndAbort(`Denied via channel ${D.fromServer}`))});b=()=>{M(),O.removeEventListener("abort",b)},O.addEventListener("abort",b,{once:!0})}}let w=n.serverApprovalWatch,T=w?Qrf():null,k=w&&T?.isEnabled()?T.createObserver(w):null;if(w&&k){let x=t.toolUseContext.abortController.signal,C=!1;v=()=>{C=!0},(async()=>{let I=await k.poll(),P=3000,O=15000;while(!I&&!u()&&!x.aborted&&!C){if(await xr(P,x),u()||x.aborted||C)return;if(I=await k.poll(),!I){P=Math.min(Math.round(P*1.5),O);continue}if(un(t.toolUseContext).mode==="plan"){E("Server approval observed but parked: session is in plan mode"),I=!1,P=Math.min(Math.round(P*1.5),O);continue}if(C||!c())return;if(_Je(h,t.toolUseID),f&&g)f.cancelRequest(g);y?.(),b?.(),_e("permission_server_approval_watch"),t.logDecision({decision:"accept",source:{type:"user",permanent:!1}},{permissionPromptStartTimeMs:i}),d(t.buildAllow({...n.updatedInput??o,__projectGrantServerObserved:!0}));return}})().catch((I)=>{pe("permission_server_approval_watch","watcher_stopped"),E(`Server-approval watcher stopped (${ue(I)})`)})}if(!s)(async()=>{if(u())return;let x=await t.runHooks(un(t.toolUseContext).mode,n.suggestions,n.updatedInput,i);if(x&&"reprompted"in x){if(u())return;if(_Je(h,t.toolUseID),f&&g)f.cancelRequest(g),g=void 0;y?.(),b?.(),v?.(),p(x.finalInput,x.reprompted.decisionReason,x.reprompted);return}if(!x||!c())return;if(f&&g)f.cancelRequest(g);y?.(),b?.(),d(x)})().catch((x)=>{if(x instanceof sw){E("PermissionRequest hooks cancelled (control stream closed)");return}xe(x)});return{notifyBridgeAndTeardown:S}}var enf;var rnf=A(()=>{bt();tr();Yir();IG();Wmi();Jc();Ze();pt();Vr();ty();$mi();pk();enf=require("crypto")});function onf(e,t,r){Yp().bundledWorkflows.push({source:"built-in",...t,script:e,disableModelInvocation:r?.disableModelInvocation})}function b4n(){if(xX())return[];return Yp().bundledWorkflows}var Gmi=A(()=>{See();CKe()});function inf(e,{apply:t}){if(!Si(e))return null;let r=e.args;if(typeof r!=="string")return null;let o=r.trimStart()[0];if(o!=="{"&&o!=="[")return null;let i;try{i=Xt(r)}catch{return null}if(i===null||typeof i!=="object")return null;let s=typeof e.name==="string"?"_named":"",a=Array.isArray(i)?"args_json_string_to_array":"args_json_string_to_object";if(!t)return{input:e,shapeClass:`${a}${s}_detect_only`};return{input:{...e,args:i},shapeClass:`${a}${s}`}}var snf=A(()=>{vr()});var ufe=4096;function u1t(e,t){if(t!=null)return{timeout:t};return{timeout:e}}function Jir(e){WOe.runInContext(`(() => {
+    Object.defineProperty(Error, 'prepareStackTrace', {
+      value: (err, sites) => String(err.stack ?? err),
+      writable: false, configurable: false,
+    });
+    // Delete globals with no REPL use case that either run callbacks on the
+    // host event loop outside any try/catch (FinalizationRegistry \u2014 same
+    // DoS shape as a throwing setTimeout callback) or expose shared-memory
+    // primitives (Atomics/SharedArrayBuffer \u2014 no cross-realm use, pure
+    // attack-surface reduction).
+    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',
+                     'WeakRef', 'Atomics', 'SharedArrayBuffer',
+                     'queueMicrotask',
+                     // eval is NOT deleted here \u2014 hardenVMIntrinsics is
+                     // shared with REPLTool (codeGeneration:{strings:true}).
+                     // WorkflowTool blocks eval via codeGeneration:false.
+                     // JSC debug/shell globals \u2014 present only if
+                     // JSC_useDollarVM=1 or similar, but $vm is a full
+                     // escape (createGlobalObject, addressOf, runScript).
+                     '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile',
+                     'Loader']) {
+      delete globalThis[g];
+    }
+    // SES-style enable-property-override: convert common shadowed data props
+    // to accessors whose setter defineProperty's onto the receiver. Otherwise
+    // freezing makes them non-writable, and [[Set]] on an instance (e.g.
+    // "this.name='X'" in an Error subclass ctor) throws in strict / no-ops in
+    // sloppy \u2014 the TC39 "override mistake".
+    function enableOverride(proto, key) {
+      const d = Object.getOwnPropertyDescriptor(proto, key);
+      if (!d || 'get' in d) return;
+      const v = d.value;
+      Object.defineProperty(proto, key, {
+        get() { return v },
+        set(nv) {
+          if (this === proto) return;
+          Object.defineProperty(this, key, { value: nv, writable: true, enumerable: true, configurable: true });
+        },
+        enumerable: d.enumerable, configurable: true,
+      });
+    }
+    const errorCtors = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, globalThis.SuppressedError].filter(Boolean);
+    const errorProtos = errorCtors.map(C => C.prototype);
+    for (const [proto, keys] of [
+      // All Object.prototype data props \u2014 Object.assign({}, {propertyIsEnumerable:x})
+      // and friends would otherwise throw post-freeze. Accessor props (__proto__,
+      // __define/lookupGetter__) are skipped by the 'get' in d guard above.
+      [Object.prototype, Object.getOwnPropertyNames(Object.prototype)],
+      [Function.prototype, ['toString', 'constructor', 'name', 'length']],
+      [Array.prototype, ['toString', 'constructor']],
+      [Date.prototype, ['toString', 'toLocaleString', 'valueOf', 'constructor']],
+      ...errorProtos.map(p => [p, ['name', 'message', 'toString', 'constructor']]),
+    ]) for (const k of keys) enableOverride(proto, k);
+    // Error subclasses each have their own .prototype; freezing only Error
+    // leaves TypeError.prototype.then etc. writable. SuppressedError is
+    // from the explicit-resource-management proposal (bun/JSC ship it).
+    for (const C of [Promise, Object, Array, Function, globalThis.Iterator,
+                     Map, Set, WeakMap, WeakSet,
+                     String, Number, Boolean, Symbol, BigInt,
+                     Date, RegExp, ArrayBuffer, DataView,
+                     ...errorCtors,
+                     typeof URL !== 'undefined' ? URL : undefined,
+                    ].filter(Boolean)) {
+      Object.freeze(C);
+      Object.freeze(C.prototype);
+    }
+    // %TypedArray% (shared prototype of all typed arrays) + each concrete.
+    for (const C of [Object.getPrototypeOf(Int8Array),
+                     Int8Array, Uint8Array, Uint8ClampedArray,
+                     Int16Array, Uint16Array, Int32Array, Uint32Array,
+                     globalThis.Float16Array, Float32Array, Float64Array,
+                     BigInt64Array, BigUint64Array].filter(Boolean)) {
+      Object.freeze(C);
+      Object.freeze(C.prototype);
+    }
+    // %AsyncFunction%, %GeneratorFunction%, %AsyncGeneratorFunction% and
+    // their .prototype are not reachable as globals \u2014 walk from instances.
+    for (const f of [async()=>{}, function*(){}, async function*(){}]) {
+      Object.freeze(f.constructor);
+      Object.freeze(f.constructor.prototype);
+    }
+    for (const C of [globalThis.DisposableStack, globalThis.AsyncDisposableStack,
+                     globalThis.Intl].filter(Boolean)) {
+      Object.freeze(C);
+      if (C.prototype) Object.freeze(C.prototype);
+    }
+    // Namespace objects (no .prototype) \u2014 VM code could otherwise set
+    // JSON.then/Math.then/Reflect.then and any host await on the namespace
+    // object (or on a VM value that aliases it) becomes a thenable escape.
+    // Proxy has no .prototype but freeze closes Proxy.revocable tampering.
+    for (const ns of [JSON, Math, Reflect, Proxy]) Object.freeze(ns);
+    // globalThis can't be frozen (populateContext writes to it), but pinning
+    // .then as non-configurable undefined prevents the sandbox object itself
+    // from becoming a thenable via direct assignment, defineProperty, or
+    // registerTool('then',...).
+    Object.defineProperty(globalThis, 'then', {
+      value: undefined, writable: false, configurable: false,
+    });
+    // Intl.* sub-constructors each have their own .prototype \u2014 freezing the
+    // Intl namespace above does NOT freeze Intl.Collator.prototype etc.
+    // Same own-property-.then escape shape as Promise.prototype.then if any
+    // host code ever awaits an Intl.* instance.
+    if (typeof Intl !== 'undefined') {
+      for (const k of Object.getOwnPropertyNames(Intl)) {
+        const C = Intl[k];
+        if (typeof C === 'function') {
+          Object.freeze(C);
+          if (C.prototype) Object.freeze(C.prototype);
+        }
+      }
+    }
+    for (const it of [
+      [][Symbol.iterator](),
+      ''

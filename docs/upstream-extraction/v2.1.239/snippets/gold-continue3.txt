@@ -1,0 +1,101 @@
+
+#### "function NMt(" 1 [302737710] 
+
+==== function NMt( 302737710 ====
+WS_ENDPOINT_URL_STS||V.AWS_ENDPOINT_URL||`https://sts.${e}.amazonaws.com`}async function NMt(e){let t=await Gmt(e);if(!t)return{};let{defaultProvider:r}=await Promise.resolve().then(() => (_rr(),tmd));return{requestHandler:t,credentials:r({clientConfig:{requestHandler:t},parentClientConfig:{requestHandler:t,...e.region!==void 0&&{region:e.region}}})}}async function Gmt(e){let t=FV();if(!t||e.url&&NZ(e.url))return null;let r=omd(t);return new rmd.NodeHttpHandler({httpAgent:r,httpsAgent:r,...e.requestTimeoutMs!==void 0&&{requestTimeout:e.requestTimeoutMs}})}function FJe(){nla.cache.clear?.(),E("Cleared proxy agent cache")}var rmd,Jaa,ela=!1,U_b,Zaa,nla,j_b=300000,AFr,DMt=null,I9o,R9o,Xaa=!1;var my=A(()=>{Fv();r$();tt();EJe();tLn();qe();Pa();bo();eG();Ztr();x8();rmd=P(wCe(),1),Jaa=require("net");U_b=["https_proxy","HTTPS_PROXY","http_proxy","HTTP_PROXY"];Zaa=new Set;nla=pp((e)=>{let t=require("undici"),r=$V(),n=ene(),o={httpProxy:e,httpsProxy:e,noProxy:V.NO_PROXY||V.no
+
+#### "async function NMt(" 1 [302737704] 
+
+==== async function NMt( 302737704 ====
+rn V.AWS_ENDPOINT_URL_STS||V.AWS_ENDPOINT_URL||`https://sts.${e}.amazonaws.com`}async function NMt(e){let t=await Gmt(e);if(!t)return{};let{defaultProvider:r}=await Promise.resolve().then(() => (_rr(),tmd));return{requestHandler:t,credentials:r({clientConfig:{requestHandler:t},parentClientConfig:{requestHandler:t,...e.region!==void 0&&{region:e.region}}})}}async function Gmt(e){let t=FV();if(!t||e.url&&NZ(e.url))return null;let r=omd(t);return new rmd.NodeHttpHandler({httpAgent:r,httpsAgent:r,...e.requestTimeoutMs!==void 0&&{requestTimeout:e.requestTimeoutMs}})}function FJe(){nla.cache.clear?.(),E("Cleared proxy agent cache")}var rmd,Jaa,ela=!1,U_b,Zaa,nla,j_b=300000,AFr,DMt=null,I9o,R9o,Xaa=!1;var my=A(()=>{Fv();r$();tt();EJe();tLn();qe();Pa();bo();eG();Ztr();x8();rmd=P(wCe(),1),Jaa=require("net");U_b=["https_proxy","HTTPS_PROXY","http_proxy","HTTP_PROXY"];Zaa=new Set;nla=pp((e)=>{let t=require("undici"),r=$V(),n=ene(),o={httpProxy:e,httpsProxy:e,noProxy:V.NO_PROXY
+
+#### "function LMt(" 1 [302737604] 
+
+==== function LMt( 302737604 ====
+dici");n.setGlobalDispatcher(new n.Agent),Xaa=!1}if(r)di.defaults.httpsAgent=r}}function LMt(e){return V.AWS_ENDPOINT_URL_STS||V.AWS_ENDPOINT_URL||`https://sts.${e}.amazonaws.com`}async function NMt(e){let t=await Gmt(e);if(!t)return{};let{defaultProvider:r}=await Promise.resolve().then(() => (_rr(),tmd));return{requestHandler:t,credentials:r({clientConfig:{requestHandler:t},parentClientConfig:{requestHandler:t,...e.region!==void 0&&{region:e.region}}})}}async function Gmt(e){let t=FV();if(!t||e.url&&NZ(e.url))return null;let r=omd(t);return new rmd.NodeHttpHandler({httpAgent:r,httpsAgent:r,...e.requestTimeoutMs!==void 0&&{requestTimeout:e.requestTimeoutMs}})}function FJe(){nla.cache.clear?.(),E("Cleared proxy agent cache")}var rmd,Jaa,ela=!1,U_b,Zaa,nla,j_b=300000,AFr,DMt=null,I9o,R9o,Xaa=!1;var my=A(()=>{Fv();r$();tt();EJe();tLn();qe();Pa();bo();eG();Ztr();x8();rmd=P(wCe(),1),Jaa=require("net");U_b=["https_proxy","HTTPS_PROXY","http_proxy","HTTP_PROXY"];Zaa=new Se
+
+#### "function Gmt(" 1 [302737989] 
+
+==== function Gmt( 302737989 ====
+lientConfig:{requestHandler:t,...e.region!==void 0&&{region:e.region}}})}}async function Gmt(e){let t=FV();if(!t||e.url&&NZ(e.url))return null;let r=omd(t);return new rmd.NodeHttpHandler({httpAgent:r,httpsAgent:r,...e.requestTimeoutMs!==void 0&&{requestTimeout:e.requestTimeoutMs}})}function FJe(){nla.cache.clear?.(),E("Cleared proxy agent cache")}var rmd,Jaa,ela=!1,U_b,Zaa,nla,j_b=300000,AFr,DMt=null,I9o,R9o,Xaa=!1;var my=A(()=>{Fv();r$();tt();EJe();tLn();qe();Pa();bo();eG();Ztr();x8();rmd=P(wCe(),1),Jaa=require("net");U_b=["https_proxy","HTTPS_PROXY","http_proxy","HTTP_PROXY"];Zaa=new Set;nla=pp((e)=>{let t=require("undici"),r=$V(),n=ene(),o={httpProxy:e,httpsProxy:e,noProxy:V.NO_PROXY||V.no_proxy};if(r||n){let i={...r&&{cert:r.cert,key:r.key,passphrase:r.passphrase},...n&&{ca:n}};o.connect=i,o.requestTls=i}return new t.EnvHttpProxyAgent(o)});AFr={helper:void 0,fromProjectOrLocal:!1,trustAccepted:()=>!1}});var amd,qOe,r1n;var P9o=A(()=>{amd=["claude-3-5-haiku","cla
+
+#### "function qY(" 3 [301718320,331845478,337238788] 
+
+==== function qY( 301718320 ====
+redConfigRegions.set(e,t),t},pZs)}function W3u(){return F9_.of(ar().host)}async function qY(){let e=fZs();if(e)return e;return await W3u().readAwsSharedConfigRegion()||qer()}function vGo(){return mZs().region}function mZs(){let e=fZs();if(e)return{region:e,source:"env"};let t=W3u().resolvedSharedConfigRegions.get(pZs());if(t)return{region:t,source:"shared-config"};let r=!!(V.AWS_REGION||V.AWS_DEFAULT_REGION);return{region:qer(),source:r?"env-invalid":"default"}}var F9_;var Yft=A(()=>{r$();tt();fRn();mr();F9_=new Ar(()=>new z3u)});function _fe(e){let t=Promise.resolve();return(...r)=>{let n=t.then(()=>e(...r));return t=n.catch(()=>{}),n}}function W1r(){let e=Promise.resolve();return{acquire(){let t=()=>{},r=new Promise((o)=>{t=o}),n=e;return e=r,n.then(()=>t)}}}function c$(){let e=new Map;return{run(t,r){let o=(e.get(t)??Promise.resolve()).then(()=>r()),i=o.then(()=>{},()=>{});return e.set(t,i),i.then(()=>{if(e.get(t)===i)e.delete(t)}),o},has(t){return e.has(t)},get 
+
+#### "kind:\"main\"" 3 [303699705,313589123,313598375] 
+
+==== kind:"main" 303699705 ====
+ t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.type==="local_agent"?h:void 0;r.push({name:f,id:m,kind:"subagent",where:"in-process",lastActive:g?.startTime,sock:void 0})}for(let f of t.teamFile?.members??[]){if(n.has(f.agentId))continue;n.add(f.agentId),r.push({name:f.name,id:f.agentId,kind:"teammate",where:"this-machine",lastActive:void 0,sock:void 0})}for(let f of t.sessions)r.push({name:f.name||nWd.basename(f.cwd),id:f.sock,kind:"session",where:"this-machine",lastActive:f.statusUpdatedAt,sock:f.sock});let o=new Map;for(let f of t.sessions)if(f.bridgeSessionId!==void 0){let m=Mf(f.bridgeSessionId);o.set(m,[...o.get(m)??[],f.sock])}let i=[];f
+
+#### "kind:\"teammate\"" 3 [303699876,303700241,326194543] 
+
+==== kind:"teammate" 303699876 ====
+ Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.type==="local_agent"?h:void 0;r.push({name:f,id:m,kind:"subagent",where:"in-process",lastActive:g?.startTime,sock:void 0})}for(let f of t.teamFile?.members??[]){if(n.has(f.agentId))continue;n.add(f.agentId),r.push({name:f.name,id:f.agentId,kind:"teammate",where:"this-machine",lastActive:void 0,sock:void 0})}for(let f of t.sessions)r.push({name:f.name||nWd.basename(f.cwd),id:f.sock,kind:"session",where:"this-machine",lastActive:f.statusUpdatedAt,sock:f.sock});let o=new Map;for(let f of t.sessions)if(f.bridgeSessionId!==void 0){let m=Mf(f.bridgeSessionId);o.set(m,[...o.get(m)??[],f.sock])}let i=[];for(let f of t.cloud??[]){if(OFn(t.sessions,f.id)){i.push({rawName:f.title||"untitled",socks:o.get(Mf(f.id))??[]});continue}r.push({name:f.title||"untitled",id:f.id,kind:"c
+
+#### "function GCe(" 2 [303699654,333413410] 
+
+==== function GCe( 303699654 ====
+-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.type==="local_agent"?h:void 0;r.push({name:f,id:m,kind:"subagent",where:"in-process",lastActive:g?.startTime,sock:void 0})}for(let f of t.teamFile?.members??[]){if(n.has(f.agentId))continue;n.add(f.agentId),r.push({name:f.name,id:f.agentId,kind:"teammate",where:"this-machine",lastActive:void 0,sock:void 0})}for(let f of t.sessions)r.push({name:f.name||nWd.basename(f.cwd),id:f.sock,kind:"session",where:"this-machine",lastActive:f.statusUpdatedAt,sock:f.sock});let o=new Map;for(let f of t.sessions)if(f.bridgeSessionId!==void 0){let m=Mf(f.bridgeSess
+
+#### "var dL=" 1 [303685521] 
+
+==== var dL= 303685521 ====
+"}});function kFn(e,t){return`<${ier} from="${Od(e)}">
+${Tve(ier,t)}
+</${ier}>`}var dL="main";var jCe=A(()=>{qg();hb()});function O4d(){if(!o_a)o_a=new Intl.DisplayNames(["en"],{type:"language"});return o_a}function V_(){if(!r_a)r_a=new Intl.Segmenter(void 0,{granularity:"grapheme"});return r_a}function Knr(e){if(!e)return"";return V_().segment(e)[Symbol.iterator]().next().value?.segment??""}function Jfe(e){if(!e)return"";let t="";for(let{segment:r}of V_().segment(e))t=r;return t}function zCe(e){if(!e)return 0;let t=0;for(let r of V_().segment(e))t++;return t}function CZe(e){if(!e)return[];return Array.from(V_().segment(e),(t)=>t.segment)}function s_a(){if(!n_a)n_a=new Intl.Segmenter(void 0,{granularity:"word"});return n_a}function L4d(e){let t=e.trim();if(t==="")return 0;let r=t.split(/\s+/).length,n=0;for(let o of s_a().segment(t))if(o.isWordLike)n++;return Math.max(r,n)}function a_a(e,t){let r=`${e}:${t}`,n=H4d.get(r);if(!n)n=new Intl.RelativeTimeFormat("en",{sty
+
+#### "dL=" 6 [303685525,321392410,321392738,321392755,321393174,321393941] 
+
+==== dL= 303685525 ====
+;function kFn(e,t){return`<${ier} from="${Od(e)}">
+${Tve(ier,t)}
+</${ier}>`}var dL="main";var jCe=A(()=>{qg();hb()});function O4d(){if(!o_a)o_a=new Intl.DisplayNames(["en"],{type:"language"});return o_a}function V_(){if(!r_a)r_a=new Intl.Segmenter(void 0,{granularity:"grapheme"});return r_a}function Knr(e){if(!e)return"";return V_().segment(e)[Symbol.iterator]().next().value?.segment??""}function Jfe(e){if(!e)return"";let t="";for(let{segment:r}of V_().segment(e))t=r;return t}function zCe(e){if(!e)return 0;let t=0;for(let r of V_().segment(e))t++;return t}function CZe(e){if(!e)return[];return Array.from(V_().segment(e),(t)=>t.segment)}function s_a(){if(!n_a)n_a=new Intl.Segmenter(void 0,{granularity:"word"});return n_a}function L4d(e){let t=e.trim();if(t==="")return 0;let r=t.split(/\s+/).length,n=0;for(let o of s_a().segment(t))if(o.isWordLike)n++;return Math.max(r,n)}function a_a(e,t){let r=`${e}:${t}`,n=H4d.get(r);if(!n)n=new Intl.RelativeTimeFormat("en",{style:e
+
+#### "sending to this session" 0 [] 
+
+#### "that is you" 2 [174910439,318846132] 
+
+==== that is you 318846132 ====
+ file path
+`:`Error: --json output path must end in .json (got '${t.json}'). If that is your eval target, put it before --json.
+`),process.exit(1);if(t.report==="")process.stderr.write(`Error: --report requires a non-empty file path
+`),process.exit(1);if(t.publish===!1&&t.publishReport)process.stderr.write(`Error: --no-publish and --publish-report are contradictory \u2014 pass at most one.
+`),process.exit(1);if(t.maxCostUsd!==void 0&&(!Number.isFinite(t.maxCostUsd)||t.maxCostUsd<0))process.stderr.write(`Error: --max-cost-usd must be a non-negative number
+`),process.exit(1);let s=f_o(),a;try{a=await m9E(o,i,s)}catch(M){return Y2(`Error: ${le(M)}`),await Ac("cli_plugin_eval",M instanceof gt?"target_refused":"exception"),Oy(1)}let{targetDir:l,pluginRoot:c,untrustedManifestDir:u,targetResolved:d,enclosingVerdict:p,targetIsCaseFile:f}=a,m=d&&c===null&&u===null&&!i&&p!==null?p:{adopted:null,refused:null,namedOnly:null},h=m.adopted??(f?null:m.namedOnly),g=m.refused,y=f?m.n
+
+#### "this is you" 6 [167009587,172308221,317378132,318486103,328290674,328304338] 
+
+==== this is you 317378132 ====
+and that you are logged into claude.ai with the same account as Claude Code. If this is your first time connecting to Chrome, you may need to restart Chrome for the installation to take effect. If you continue to experience issues, please report a bug: ${lfh}`},onExtensionPaired:(f,m)=>{if(r)OHf();ln((h)=>{if(h.chromeExtension?.pairedDeviceId===f&&h.chromeExtension?.pairedDeviceName===m)return h;return{...h,chromeExtension:{pairedDeviceId:f,pairedDeviceName:m}}},n),i.info(`Paired with "${m}" (${f.slice(0,8)})`)},getPersistedDeviceId:()=>cr().chromeExtension?.pairedDeviceId,askUserToolName:gy,...a!==void 0&&{getScreenshotSaveDir:()=>a},bridgeConfig:{url:l,getUserId:async()=>{let f=cr().oauthAccount?.accountUuid||process.env.CLAUDE_CODE_ACCOUNT_UUID;if(ao()!=="firstParty")return u=!1,f;await Hb({credentials:o}).catch(()=>{});let m=ma()?.accessToken;if(!m)return u=!1,f;if(c?.token!==m){let y=await uor(m).catch(()=>{return});if(!y?.account_uuid)return u=!1,f;c={token:m,
+
+#### "you are this" 0 [] 
+
+#### "cannot SendMessage to yourself" 0 [] 
+
+#### "to yourself" 4 [314385192,317261058,324406361,324624164] 
+
+==== to yourself 314385192 ====
+s use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(t.appState,{teamFile:t.teamFile,sessions:c,cloud:u,bridge:o?[]:e.flatMap((b)=>b.transport==="bridge"?[b.session]:[])}),p=new Map(d.candidates.map((b)=>[`${b.kind}\x00${b.id}`,b])),f=MHm(t.appState),m=OHm(t.appState,t.teamFile,t.callerTeammateId),h=e.flatMap((b)=>b.transport==="bridge"?[b]:[]),g=e.flatMap((b)=>b.transport==="did"?[b.
+
+#### "var iYb=" 0 [] 
+
+#### "var sYb=" 0 [] 
+
+#### "var aYb=" 0 [] 
+
+#### "iYb=" 1 [303699049] 
+
+==== iYb= 303699049 ====
+ki();RZe=require("path"),oYb=new RegExp(`^(?:uds|bridge|did):[${Yei}]{1,200}$`);iYb=/^\/\S*\.sock$/,sYb=/^[\\/]{2}[.?][\\/]pipe[\\/]/i,aYb=/^\/\S*\.sock/;cYb=new RegExp(`^(?:${rti}\\\\)?${tti}[0-9a-f]{32}$`,"i"),Q4d=new RegExp(`^${tti}[0-9a-f]{32}$`,"i")});function nti(e){let t=typeof e==="string"?e.trim():"",r=ALe(t);return!t||!r||r==="untitled session"&&t.toLowerCase()!=="untitled session"}function PFn(e){return e.environmentKind!==void 0&&e.environmentKind!=="bridge"}function Vu(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(le
+
+#### "sYb=" 1 [303699069] 
+
+==== sYb= 303699069 ====
+th"),oYb=new RegExp(`^(?:uds|bridge|did):[${Yei}]{1,200}$`);iYb=/^\/\S*\.sock$/,sYb=/^[\\/]{2}[.?][\\/]pipe[\\/]/i,aYb=/^\/\S*\.sock/;cYb=new RegExp(`^(?:${rti}\\\\)?${tti}[0-9a-f]{32}$`,"i"),Q4d=new RegExp(`^${tti}[0-9a-f]{32}$`,"i")});function nti(e){let t=typeof e==="string"?e.trim():"",r=ALe(t);return!t||!r||r==="untitled session"&&t.toLowerCase()!=="untitled session"}function PFn(e){return e.environmentKind!==void 0&&e.environmentKind!=="bridge"}function Vu(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentName
+
+#### "aYb=" 1 [303699104] 
+
+==== aYb= 303699104 ====
+|did):[${Yei}]{1,200}$`);iYb=/^\/\S*\.sock$/,sYb=/^[\\/]{2}[.?][\\/]pipe[\\/]/i,aYb=/^\/\S*\.sock/;cYb=new RegExp(`^(?:${rti}\\\\)?${tti}[0-9a-f]{32}$`,"i"),Q4d=new RegExp(`^${tti}[0-9a-f]{32}$`,"i")});function nti(e){let t=typeof e==="string"?e.trim():"",r=ALe(t);return!t||!r||r==="untitled session"&&t.toLowerCase()!=="untitled session"}function PFn(e){return e.environmentKind!==void 0&&e.environmentKind!=="bridge"}function Vu(e){return e.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.typ

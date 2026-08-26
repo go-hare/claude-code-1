@@ -13,11 +13,12 @@ import App from '../components/App.js';
 import type { CursorDeclaration, CursorDeclarationSetter } from '../components/CursorDeclarationContext.js';
 import { FRAME_INTERVAL_MS } from './constants.js';
 import * as dom from './dom.js';
+import { ClickEvent, type MouseClickResult } from './events/click-event.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
 import { PasteEvent } from './events/paste-event.js';
 import { FocusManager } from './focus.js';
 import { emptyFrame, type Diff, type Frame, type FrameEvent } from './frame.js';
-import { dispatchClick, dispatchHover } from './hit-test.js';
+import { bubbleClick, dispatchHover } from './hit-test.js';
 import instances from './instances.js';
 import { LogUpdate } from './log-update.js';
 import { nodeCache } from './node-cache.js';
@@ -2195,9 +2196,21 @@ export default class Ink {
    * nodeCache rects map 1:1 to terminal cells (no scrollback offset).
    */
   dispatchClick(col: number, row: number): boolean {
-    if (!this.altScreenActive) return false;
+    return this.dispatchMouseClick(col, row, false) !== 'unhandled';
+  }
+
+  /**
+   * densable `dispatchMouseClick` — returns stray | handled | unhandled.
+   * `stray` wins even if a handler fired (Button/Select dropAsStray).
+   */
+  dispatchMouseClick(col: number, row: number, isWindowActivation = false): MouseClickResult {
+    if (!this.altScreenActive) return 'unhandled';
     const blank = isEmptyCellAt(this.frontFrame.screen, col, row);
-    return dispatchClick(this.rootNode, col, row, blank);
+    const hyperlinkUrl = this.getHyperlinkAt(col, row);
+    const event = new ClickEvent(col, row, blank, hyperlinkUrl, isWindowActivation);
+    const handled = bubbleClick(this.rootNode, event);
+    if (event.droppedAsStray) return 'stray';
+    return handled ? 'handled' : 'unhandled';
   }
 
   dispatchHover(col: number, row: number): void {
@@ -2446,7 +2459,7 @@ export default class Ink {
         terminalRows={this.terminalRows}
         selection={this.selection}
         onSelectionChange={this.notifySelectionChange}
-        onClickAt={this.dispatchClick}
+        onClickAt={this.dispatchMouseClick}
         onHoverAt={this.dispatchHover}
         getHyperlinkAt={this.getHyperlinkAt}
         onOpenHyperlink={this.openHyperlink}

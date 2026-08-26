@@ -1,0 +1,10 @@
+OFFSET=298424280
+
+o?.status}"`);return}r.update(e,(i)=>({...i,pendingUserMessages:[...i.pendingUserMessages,{text:t,origin:n}]})),r.updateTranscript(e,(i)=>({...i,messages:$Mt(i.messages,yn({content:t,origin:n}))}))}function j2a(e,t,r){let n=dht(lze(t,r),e);if(n?.status==="running")n.retryWake?.emit()}var ssr=A(()=>{cP();Ze();ri();U4n();_3r();U4n()});function Vhi(e,t){return{behavior:"deny",message:`Permission for ${e} requires the user to read a consent disclosure before approving, and ${t} cannot display it. The user can run this from an interactive Claude Code session, where the permission dialog renders the full disclosure.`,decisionReason:{type:"other",reason:`localDisplayOnly ask not forwarded: ${t} cannot render the consent disclosure the approval depends on`}}}class sif{permissionContextSetter=null;registerSetter(e){this.permissionContextSetter=e}unregisterSetter(){this.permissionContextSetter=null}}var qhi;var z2a=A(()=>{qhi=new YA(()=>new sif)});var aif={};yt(aif,{TEAMMATE_SYSTEM_PROMPT_ADDENDUM:()=>W2a});var W2a=`
+# Agent Teammate Communication
+
+IMPORTANT: You are running as an agent in a team. To communicate with anyone on your team, use the SendMessage tool with \`to: "<name>"\` to send messages to specific teammates.
+
+Just writing a response in text is not visible to others on your team - you MUST use the SendMessage tool.
+
+The user interacts primarily with the team lead. Your work

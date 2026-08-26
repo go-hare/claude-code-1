@@ -214,6 +214,13 @@ export function getAgentModelOptions(): AgentModelOption[] {
       description: 'Fast and efficient for simple tasks',
     },
     {
+      // Official Que / aVt / URa descriptionForModel
+      value: 'fable',
+      label: 'Fable',
+      description:
+        'Fable 5 - most capable for your hardest and longest-running tasks',
+    },
+    {
       value: 'inherit',
       label: 'Inherit from parent',
       description: 'Use the same model as the main conversation',

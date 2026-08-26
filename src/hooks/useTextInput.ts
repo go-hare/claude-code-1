@@ -39,6 +39,20 @@ function mapInput(input_map: Array<[string, InputHandler]>): InputMapper {
   }
 }
 
+/** densable cns: double-Esc history only when historyOnClear && mask==="" && trim. */
+export function shouldRecordClearedInputInHistory(
+  mask: string,
+  historyOnClear: boolean,
+  value: string,
+): boolean {
+  return historyOnClear && mask === '' && value.trim() !== ''
+}
+
+/** densable Se: masked fields dispatch interrupt, not kill — nothing enters the ring. */
+export function shouldPushKilledTextToRing(mask: string): boolean {
+  return mask === ''
+}
+
 export type UseTextInputProps = {
   value: string
   onChange: (value: string) => void
@@ -53,6 +67,8 @@ export type UseTextInputProps = {
   onClearInput?: () => void
   focus?: boolean
   mask?: string
+  /** densable historyOnClear — default true. Masked fields still skip history. */
+  historyOnClear?: boolean
   multiline?: boolean
   cursorChar: string
   highlightPastedText?: boolean
@@ -95,6 +111,7 @@ export function useTextInput({
   onHistoryReset,
   onClearInput,
   mask = '',
+  historyOnClear = true,
   multiline = false,
   cursorChar,
   invert,
@@ -192,9 +209,10 @@ export function useTextInput({
       removeNotification('escape-again-to-clear')
       onClearInput?.()
       if (originalValue) {
-        // Track double-escape usage for feature discovery
-        // Save to history before clearing
-        if (originalValue.trim() !== '') {
+        // densable cns: s && p==="" && trim — skip history for masked fields
+        if (
+          shouldRecordClearedInputInHistory(mask, historyOnClear, originalValue)
+        ) {
           addToHistory(originalValue)
         }
         onChange('')
@@ -229,29 +247,52 @@ export function useTextInput({
     return cursor.del()
   }
 
+  function recordKill(killed: string, direction: 'append' | 'prepend'): void {
+    if (shouldPushKilledTextToRing(mask)) {
+      pushToKillRing(killed, direction)
+    }
+    announceDeletedText(killed, mask)
+  }
+
   function killToLineEnd(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteToLineEnd()
-    pushToKillRing(killed, 'append')
-    // densable Ozs: SR announce deleted text (word/line kills)
-    announceDeletedText(killed, mask)
+    recordKill(killed, 'append')
     return newCursor
   }
 
   function killToLineStart(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteToLineStart()
-    pushToKillRing(killed, 'prepend')
-    // densable Ozs
-    announceDeletedText(killed, mask)
+    recordKill(killed, 'prepend')
     return newCursor
   }
 
-  // densable 2.1.238 — Meta/Ctrl+Backspace always classic word delete.
+  const readline = getKeybindingFlavor() === 'readline'
+
+  function moveForwardWord(): Cursor {
+    return readline ? cursor.forwardWord() : cursor.nextWord()
+  }
+
+  function moveBackwardWord(): Cursor {
+    return readline ? cursor.backwardWord() : cursor.prevWord()
+  }
+
+  // densable 2.1.239 Re() — readline backwardKillWord, classic deleteWordBefore.
   function killWordBefore(): Cursor {
-    const { cursor: newCursor, killed } = cursor.deleteWordBefore()
-    pushToKillRing(killed, 'prepend')
-    // densable Ozs
-    announceDeletedText(killed, mask)
+    const { cursor: newCursor, killed } = readline
+      ? cursor.backwardKillWord()
+      : cursor.deleteWordBefore()
+    recordKill(killed, 'prepend')
     return newCursor
+  }
+
+  // densable 2.1.239 Ie() — readline Meta+d killWord; classic deleteWordAfter.
+  function killWordAfter(): Cursor {
+    if (readline) {
+      const { cursor: newCursor, killed } = cursor.killWord()
+      recordKill(killed, 'append')
+      return newCursor
+    }
+    return cursor.deleteWordAfter()
   }
 
   // densable 2.1.238 SEA Ctrl+W: readline → WORD (whitespace), classic → word.
@@ -260,8 +301,7 @@ export function useTextInput({
       getKeybindingFlavor() === 'readline'
         ? cursor.deleteWORDBefore()
         : cursor.deleteWordBefore()
-    pushToKillRing(killed, 'prepend')
-    announceDeletedText(killed, mask)
+    recordKill(killed, 'prepend')
     return newCursor
   }
 
@@ -308,9 +348,9 @@ export function useTextInput({
   ])
 
   const handleMeta = mapInput([
-    ['b', () => cursor.prevWord()],
-    ['f', () => cursor.nextWord()],
-    ['d', () => cursor.deleteWordAfter()],
+    ['b', moveBackwardWord],
+    ['f', moveForwardWord],
+    ['d', killWordAfter],
     ['y', handleYankPop],
   ])
 
@@ -401,9 +441,9 @@ export function useTextInput({
           return cursor
         }
       case key.leftArrow && (key.ctrl || key.meta || key.fn):
-        return () => cursor.prevWord()
+        return moveBackwardWord
       case key.rightArrow && (key.ctrl || key.meta || key.fn):
-        return () => cursor.nextWord()
+        return moveForwardWord
       case key.backspace:
         return key.meta || key.ctrl
           ? killWordBefore
@@ -506,7 +546,14 @@ export function useTextInput({
     if (key.ctrl && (input === 'k' || input === 'u' || input === 'w')) {
       return true
     }
-    if (key.meta && (key.backspace || key.delete)) {
+    // densable 2.1.239 ot() — readline Meta+d is a kill; Ctrl/Meta+Backspace too.
+    if (readline && key.meta && !key.ctrl && input === 'd') {
+      return true
+    }
+    if (key.backspace && (key.meta || key.super || key.ctrl)) {
+      return true
+    }
+    if (key.delete && (key.meta || key.super)) {
       return true
     }
     return false

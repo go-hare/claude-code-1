@@ -1,0 +1,20 @@
+ction Gv(){return VWe().currentSession}function pBr(e){VWe().setCurrentSession(e)}function VWd(){return VWe().getResumeHintWorktreeName()}function KCe(){VWe().clearResumeHintWorktreeName()}function aj
+(){return VWe().bgTakeover}function hti(e){VWe().agentIsolationEvidence.recordSpawned(e)}function L_a(e){return VWe().agentIsolationEvidence.spawned.has(e)}function qWd(e){VWe().agentIsolationEvidence
+.recordCleanlyRemoved(e)}function KWd(e){return VWe().agentIsolationEvidence.cleanlyRemoved.has(e)}function YWd(e){return VWe().isolationUnavailableCwd===e}function XWd(e){VWe().markIsolationUnavailab
+le(e)}var $Yb;var uQ=A(()=>{tt();$Yb=new Ar(()=>new GWd)});var XFn={};Et(XFn,{FORMER_NAME_HINT_TTL_MS:()=>N_a,MAX_FORMER_NAMES:()=>_ti,NOTIFY_IDLE_PEER_FEATURE:()=>vti,PEER_FEATURES:()=>ZWd,PEER_PROTO
+COL:()=>bti,SessionRegistryState:()=>$_a,clearFleetViewHeartbeat:()=>B_a,clearSessionParked:()=>wti,countConcurrentSessions:()=>mBr,envSessionKind:()=>KWe,getBgJobDir:()=>PZe,getHeldSessionNames:()=>U
+Yb,getRegisteredSessionName:()=>QV,getSessionRegistryState:()=>Rve,isActingAsBgJob:()=>Xk,isBeingWatched:()=>VFn,isBeingWatchedV5:()=>qFn,isBgSession:()=>As,isDaemonBgWorker:()=>DZe,isRegistrySweepPer
+mitted:()=>fBr,isUnattendedBgSession:()=>XM,isUnattendedInteractiveSession:()=>QOt,markSessionParked:()=>z_a,markSpareClaimed:()=>o3d,registerSession:()=>j_a,sessionRegistryStates:()=>e3d,touchFleetVi
+ewHeartbeat:()=>U_a,updateSessionActivity:()=>YFn,updateSessionBridgeId:()=>KFn,updateSessionMessagingSocketPath:()=>zYb,updateSessionName:()=>YCe,updateSessionStripCapability:()=>WYb,whenSessionRegis
+tered:()=>GFn});class $_a{uncleanExitsScanned=!1;reportedUncleanExitPaths=new Set;watchedCache=void 0;pidFileWriteChain=Promise.resolve();registeredName=void 0;formerNames=[];heldNames=new Map;registe
+red=!1;bornSpare=!1;spareClaimPoll=void 0;registration=void 0;registrySweepPermitted=void 0;setRegisteredName(e,t){let r=this.registeredName,n=Date.now(),o=Vu(e);if(r&&Vu(r.name)===o){this.registeredN
+ame={name:e,source:t,since:r.since};return}if(r)this.heldNames.set(Vu(r.name),r.source);if(this.heldNames.delete(o),this.formerNames=this.formerNames.filter((i)=>Vu(i.name)!==o),r&&r.source!=="derived
+"&&n-r.since>=FYb){let i=Vu(r.name);this.formerNames=[{name:r.name,until:n},...this.formerNames.filter((s)=>Vu(s.name)!==i)].slice(0,_ti)}this.registeredName={name:e,source:t,since:n}}setUncleanExitsS
+canned(e){this.uncleanExitsScanned=e}markUncleanExitReported(e){this.reportedUncleanExitPaths.add(e)}setWatchedCache(e){this.watchedCache=e}setPidFileWriteChain(e){this.pidFileWriteChain=e}isRegistryS
+weepPermitted(){return this.registrySweepPermitted??=this.probeRegistrySweepPermitted(),this.registrySweepPermitted}async probeRegistrySweepPermitted(){if(!fD()||Wt()==="wsl")return!1;if(aG.getIsBubbl
+ewrapSandbox()||Vn(V.IS_SANDBOX)||await aG.getIsDocker())return!1;return E_a()}}function Rve(){return e3d.of(ar().host)}function UYb(){return Rve().heldNames}function QV(){return Rve().registeredName}
+function GFn(){let e=Rve();return e.registration??Promise.resolve(e.registered)}function KWe(){let e=V.CLAUDE_CODE_SESSION_KIND;if(e==="bg"||e==="daemon"||e==="daemon-worker")return e;return}function 
+As(){return KWe()==="bg"}function QOt(){return Cx()||As()||Kxn()!==void 0}function XM(){return As()&&!dA()}function Xk(){return As()||aj()!==null}function PZe(){return aj()?.jobDir??V.CLAUDE_JOB_DIR}f
+unction DZe(){return V.CLAUDE_BG_BACKEND==="daemon"}function F_a(){return Pn.session(Sti)}function gti(){return Pn.session(`${process.pid}.json`)}async function U_a(e){if(e){try{let t=await e.write(F_
+a(),String(Date.now()),{publishDiscipline:"inPlace"});if(!t.ok&&!cmt(t.error))E(`[concurrentSessions] heartbeat touch failed: ${ai(t.error)}`)}catch(t){E(`[concurrentSessions] heartbeat touch failed: 
+${le(t)}`)}return}try{await X8.writeFile(qWe.join(kLe(),Sti),String(Date.now()))}catch{}}async funct

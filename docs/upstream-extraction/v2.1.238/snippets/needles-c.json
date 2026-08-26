@@ -1,0 +1,8 @@
+[
+  { "name": "psr-consent", "needle": "remote_policy_unconsented", "before": 3000, "after": 3000, "occ": 0 },
+  { "name": "psr-consent2", "needle": "remote_policy_unconsented", "before": 3000, "after": 3000, "occ": 1 },
+  { "name": "entry-helper-deferred", "needle": "entry_helper_deferred", "before": 3000, "after": 3000, "occ": 0 },
+  { "name": "mint-helper", "needle": "headersHelper", "before": 3000, "after": 3000, "occ": 0 },
+  { "name": "abort-not-run", "needle": "Aborted \u2014 the command was not run.", "before": 3000, "after": 2000, "occ": 0 },
+  { "name": "marketplace-mint-exec", "needle": "CLAUDE_CODE_MARKETPLACE_URL", "before": 3000, "after": 3000, "occ": 0 }
+]

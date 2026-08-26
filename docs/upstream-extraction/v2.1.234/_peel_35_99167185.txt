@@ -1,0 +1,3 @@
+OFFSET=99167185
+
+.t. .p.r.o.v.i.d.e. .c.l.a.u.d.e...a.i. .c.r.e.d.e.n.t.i.a.l.s.....................Artifacts need a claude.ai login, and this remote session authenticates through the machine that launched it, which is not signed in to claude.ai. Sign in to claude.ai on that machine (/login, "Claude account with subscription"), then reconnect this session...............I.......Artifacts need a claude.ai login, but this session authenticates with a credential injected by its host environment, which takes preceden

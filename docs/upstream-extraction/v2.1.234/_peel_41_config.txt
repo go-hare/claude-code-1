@@ -1,0 +1,4 @@
+OFFSET=301632151
+
+o,t)).map((s)=>s.message).join(`
+`)}}var u3f=A(()=>{xy();Ixi()});var dAS,rJa,d3f;var p3f=A(()=>{bt();Wlr();dAS={aliases:["settings"],type:"local-jsx",name:"config",description:"Open settings",argumentHint:"[key=value]",immediate:(e)=>e.trim()!==""?X3e():RVr(),getArgumentCompletions:(e,t)=>Promise.resolve().then(() => (Ixi(),l3f)).then((r)=>r.getConfigArgumentCompletions(e,t))},rJa={type:"local",name:"config",aliases:["settings"],supportsNonInteractive:!0,description:"Set a setting by key",argumentHint:"key=value",isEnabled:()=>xn(),get isHidden

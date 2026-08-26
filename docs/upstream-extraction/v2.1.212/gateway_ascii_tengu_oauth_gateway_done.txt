@@ -1,0 +1,17 @@
+offset=134379592 needle=b'tengu_oauth_gateway_done'
+count=14
+
+setup-token
+tengu_oauth_claudeai_forced
+tengu_oauth_console_forced
+setup-token
+tengu_oauth_gateway_forced
+about_to_retry
+gateway_done
+tengu_oauth_gateway_done
+tengu_oauth_success
+report the issue at https://github.com/anthropics/claude-code/issues
+https://code.claude.com/docs/en/overview
+https://github.com/anthropics/claude-code/issues
+platform_setup
+about_to_retry

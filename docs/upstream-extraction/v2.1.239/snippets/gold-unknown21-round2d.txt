@@ -1,0 +1,22 @@
+#### "_bl("NORMAL")" count=0 []
+#### "_bl("INSERT")" count=1 [322766727]
+--- 322766727 ---
+fect(()=>(W($e),()=>W(!1)),[$e,W]),qs.useEffect(()=>{if(!ge)_bl("INSERT")},[ge]);let[Ye,Fe]=qs.useState(!1),[Be,je]=qs.useState({show:!1}),[ze,We]=qs.useState(()=>{let Hr=IW.getState().savedCursorOffset,Ro=Hr!==null&&Hr<=K.length?Hr:K.length;return ge&&VxA(ee)==="NORMAL"?hTr(K.normalize("NFC"),Ro):Ro}),De=qs.useRef(ze);De.current=ze,qs.useEffect(()=>()=>cim(De.current),[]);let Ge=qs.useRef(w);Ge.current=w;let Ze=qs.useRef(Promise.resolve()),ot=qs.useRef(K),Kt=qs.useRef(!1);if(K!==ot.current)We(ge&&ee==="NORMAL"?hTr(K.normalize("NFC"),K.length):K.length),
+#### "uAl(" count=2 [313436369,317578106]
+--- 313436369 ---
+,"bridge_session_patch_http_error"),"failed"}async function uAl(e,t,r){return gSm(e,{title:t},"title",r)}async function dAl(e,t,r,n){let o=t==="default",i=r.filter((a)=>o||a!==t).map((a)=>cAl+a),s=o?void 0:[cAl+t];await gSm(e,{add_tags:s,remove_tags:i},"color tag",n)}async function DCw(e,t,r){return!1}var cAl="color:";var Lot=A(()=>{Zt();qe();st();lFe();KV();cQo();lAl()});async function _Sm(){if(fa())return!1;let{getFeatureValue_CACHED_MAY_BE_STALE:e}=await Promise.resolve().then(() => (bn(),$Le));return e("tengu_bridge_placeholder_sweep",!0)}function bS
+--- 317578106 ---
+after coalescing ${r.suppressed} update(s)`),r.suppressed=0;uAl(t,o,i).then((l)=>{if(l==="landed")r.lastSentTitle=o,r.lastSentOk=!0;else if(r.lastSentTitle===o)r.lastSentOk=!1;if(e.entries.get(t)!==r)return;if(l==="failed"&&!a&&!r.retryTimer&&!r.pending)r.retryTimer=setTimeout(ExE,e.retryMs,e,t,o,i),r.retryTimer.unref?.()},(l)=>{E(`[bridge] title write failed: ${le(l)}`)}).finally(()=>{r.inFlight=!1,yts(s),bts(e,t)})}function wxE(e,t){let r=e.entries.get(t);if(r)r.timer=void 0,bts(e,t)}function ExE(e,t,r,n){let o=e.entries.get(t);if(!o)return;if(o.retryT
+#### "lastSyncedTitle" count=0 []
+#### "titleSyncAt" count=0 []
+#### "peekRows" count=0 []
+#### "TRANSCRIPT_PEEK" count=0 []
+#### "cd into a deleted" count=0 []
+#### "resume in the current" count=0 []
+#### "abortOnEscape" count=0 []
+#### "queuedCommands" count=4 [176918328,320307255,320307668,320307808]
+--- 176918328 ---
+............@.......................H...............	.......queuedCommands..........	......pendingAgents...........	.......pendingWorkflows.....................V,.:...Z...:...[....V,.$W,......D..H...............................................................................................@............................................................... ................A.......q..............................................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................8...
+--- 320307255 ---
+t=A(()=>{Dl();NA();I2();poc();p0t()});function cfn({tasks:e,queuedCommands:t=[]}){let r=new Set,n=new Set,o=(i)=>{if(DW(i)&&i.isBackgrounded)r.add(i.id);else if(i.type==="local_workflow")n.add(i.id)};for(let i of Object.values(e))if(i.status==="running"||Ow(i.status)&&!i.notified)o(i);for(let i of t){if(i.mode!=="task-notification"||!dC(i)||i.taskId===void 0)continue;let s=e[i.taskId];if(s)o(s)}return{pendingAgents:r.size,pendingWorkflows:n.size}}function AQh({tasks:e,queuedCommands:t=[],turnDurationMs:r,turnStartTime:n,now:o,backgroundWaitStartTime:i}){

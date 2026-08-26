@@ -30,6 +30,19 @@ describe('goalCheckin densable 2.1.234 (#43)', () => {
     expect(
       getGoalCheckinIntervalMs({}, { isFeatureEnabled: () => false }),
     ).toBe(0)
+    // densable Y_l bare ??: empty string disables; non-numeric is NaN
+    expect(
+      getGoalCheckinIntervalMs(
+        { CLAUDE_CODE_GOAL_CHECKIN_MINUTES: '' },
+        { isFeatureEnabled: () => true },
+      ),
+    ).toBe(0)
+    expect(
+      getGoalCheckinIntervalMs(
+        { CLAUDE_CODE_GOAL_CHECKIN_MINUTES: 'abc' },
+        { isFeatureEnabled: () => true },
+      ),
+    ).toBeNaN()
   })
 
   test('DMv / listGoalDeferringTasks filters observer + main-session + terminal', () => {

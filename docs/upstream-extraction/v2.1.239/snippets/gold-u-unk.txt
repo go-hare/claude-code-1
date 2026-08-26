@@ -1,0 +1,64 @@
+#### "queuedCommands" count=6 [176918328,320307255,320307668,320307808,320317698,322377886]
+--- 176918328 ---
+.HK.....................................................................@.......................H...............	.......queuedCommands..........	......pendingAgents...........	.......pendingWorkflows.....................V,.:...Z...:...[....V,.$W,......D..H...............................................................................................@............................................................... ................A.......q..............................................................
+...h...h...h...
+#### "commandQueue" count=0 []
+#### "abortOnEscape" count=0 []
+#### "escapeQueued" count=0 []
+#### "PreToolUse" count=6 [100779304,100779488,102361000,102361892,102362090,102363116]
+--- 100779304 ---
+IM......flag:idle-window................	...7...The message for the user. Supports markdown formatting..........	.......PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...................0............... .......K.......`.......
+#### "pre_tool_use" count=0 []
+#### "deferred tool" count=6 [99574968,99621956,151712066,163787054,163787425,163787769]
+--- 99574968 ---
+........	) .
+...ToolSearch..............Id......DeferredToolPlaceholder.........	...S...Reserved placeholder that keeps deferred tool loading active; never call this tool..............Im..
+...entriesFor .............I,......auto memory.....................	...!...<!--claude-mermaid-runtime-begin:+ ..............+ .!...<!--claude-mermaid-runtime-end-->...............	.......<!--claude-hljs-runtime-begin:..........	.......<!--claude-hljs-runtime-end-->..........	.......<!-- chart-runtime -->..........I- .....<!-- /ch
+#### "resumeSpan" count=0 []
+#### "vimMode" count=6 [146118360,189262072,289352016,289352392,312192647,312192667]
+--- 146118360 ---
+.........@`..H...@.4.@ ..@`,.....@.<............ ...@................... .........................;.............	.......vimMode.@...(<......
+..../..J.......K.......`........H..H.........................,.......................,.....h........................................j..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...............
+#### "posix_spawn" count=1 [87652476]
+--- 87652476 ---
+fcopyfilerecvsendfilesendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollscandirkeventkqueueepoll_ctlkillwaitpidposix_spawnwritevpwritevreadvpreadvioctl_ficlonebind2connect2try_writesocketpairsetsockoptstatxuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfchownatioctlgetrlimitsetrlimitclone3....%E..............9E............y..E............?..E..............9E..............9E
+#### "HOOKS_CWD" count=0 []
+#### "falling back to" count=6 [87136470,87136555,89561541,89585055,89585148,89585233]
+--- 87136470 ---
+kage "resolutions"&Expected string value for resolution "..".optionalpeerDependenciesMeta9warn: CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+..J.[33mwarn.[0m.[2m:.[0m CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+../Refusing to install package with invalid name ".."..Refusing to install "..": tarball root directory ".." is not a valid folder name.Tried to delete root and stopped it."package.json" for ".." failed to resolve: ..."package.json" for ".." failed to open: ..!failed to resolve c
+#### "organization_policy" count=0 []
+#### "policy_blocked" count=6 [139598416,139637808,161129368,173033716,173152503,173152668]
+--- 139598416 ---
+(.......................................(y......	.......................	.......allow_remote_sessions...........	.......policy_blocked..........	.......bg_remote_eligibility_check.............	.......n...............	.......t...............................	...+...Iterator result interface is not an object......................	......not_logged_in...........	.......r.......................	.......e...............	.......tengu_ccr_bundle_seed_enabled...........................	.......not_in_git_repo.........	......
+#### "SessionStart" count=6 [99464015,102361472,106447299,106447339,106457035,106678974]
+--- 99464015 ---
+..`..
+...clientType...............a......replaceClientType...............	.......sessionStartType........	.......replaceSessionStartType.........	.......questionPreviewFormat...........	.......replaceQuestionPreviewFormat............	.......replConfigArgv..........	.......replaceReplConfigArgv............c......userMsgOptIn.............c......replaceUserMsgOptIn.............	.......searchToolsOptIn........	.......replaceSearchToolsOptIn.........	.......todoToolsOptIn..........	.......replaceTodoToolsOptIn..........
+#### "keep-alive" count=6 [71225377,71265795,71268959,71296275,71319916,71320649]
+--- 71225377 ---
+imeout || 0, canKeepSocketAlive = !0, res = socket._httpMessage?.res;
+  if (res) {
+    let keepAliveHint = res.headers["keep-alive"];
+    if (keepAliveHint) {
+      let hint = /^timeout=(\d+)/.exec(keepAliveHint)?.[1];
+      if (hint) {
+        let serverHintTimeout = Number.parseInt(hint) * 1000 - this.agentKeepAliveTimeoutBuffer;
+        if (serverHintTimeout = serverHintTimeout > 0 ? serverHintTimeout : 0, serverHintTimeout === 0)
+          canKeepSocketAlive = !1;
+        else if (serverHintTimeout < agentTimeo
+#### "keepalive" count=6 [72590121,85706167,85856019,85938583,93029538,112107344]
+--- 72590121 ---
+ redirect: followRedirects ? "follow" : "manual",
+    maxRedirects: followRedirects ? maxRedirections : @undefined,
+    keepalive: !reset
+  }), { status: statusCode, headers, trailers } = resp;
+  if (throwOnError && statusCode >= 400 && statusCode < 600)
+    throw Error(`Request failed with status code ${statusCode}`);
+  let body = resp.body ? new BodyReadable(resp) : null;
+  return { statusCode, headers: headers.toJSON(), body, trailers, opaque: kEmptyObject, context: kEmptyObject };
+}
+function stream() {
+  notImp

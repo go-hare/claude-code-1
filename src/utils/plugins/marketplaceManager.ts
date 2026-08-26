@@ -87,6 +87,7 @@ import {
 } from './pluginDirectories.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import { deletePluginOptions } from './pluginOptionsStorage.js'
+import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
 import { collectMarketplaceHeadersHelperAdvisories } from './marketplaceHeadersHelper.js'
 import {
   isLocalMarketplaceSource,
@@ -1625,7 +1626,9 @@ async function cacheMarketplaceFromUrl(
 
   safeCallProgress(onProgress, 'Validating marketplace data')
   // Validate the response is a valid marketplace
-  const result = PluginMarketplaceSchema().safeParse(response.data)
+  const result = PluginMarketplaceSchema().safeParse(
+    applyMarketplacePluginRoot(response.data),
+  )
   if (!result.success) {
     logPluginFetch(
       'marketplace_url',
@@ -1694,6 +1697,7 @@ async function parseFileWithSchema<T>(
       }
     }
   },
+  preprocess?: (data: unknown) => unknown,
 ): Promise<T> {
   const fs = getFsImplementation()
   const content = await fs.readFile(filePath, { encoding: 'utf-8' })
@@ -1707,7 +1711,7 @@ async function parseFileWithSchema<T>(
       content,
     )
   }
-  const result = schema.safeParse(data)
+  const result = schema.safeParse(preprocess ? preprocess(data) : data)
   if (!result.success) {
     throw new ConfigParseError(
       `Invalid schema: ${filePath} ${result.error?.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`,
@@ -2038,6 +2042,7 @@ async function loadAndCacheMarketplace(
       marketplace = await parseFileWithSchema(
         marketplacePath,
         PluginMarketplaceSchema(),
+        applyMarketplacePluginRoot,
       )
     } catch (e) {
       if (isENOENT(e)) {
@@ -2418,13 +2423,21 @@ async function readCachedMarketplace(
   // (ENOTDIR) or the nested file is simply missing (ENOENT).
   const nestedPath = join(installLocation, '.claude-plugin', 'marketplace.json')
   try {
-    return await parseFileWithSchema(nestedPath, PluginMarketplaceSchema())
+    return await parseFileWithSchema(
+      nestedPath,
+      PluginMarketplaceSchema(),
+      applyMarketplacePluginRoot,
+    )
   } catch (e) {
     if (e instanceof ConfigParseError) throw e
     const code = getErrnoCode(e)
     if (code !== 'ENOENT' && code !== 'ENOTDIR') throw e
   }
-  return await parseFileWithSchema(installLocation, PluginMarketplaceSchema())
+  return await parseFileWithSchema(
+    installLocation,
+    PluginMarketplaceSchema(),
+    applyMarketplacePluginRoot,
+  )
 }
 
 /**

@@ -87,6 +87,71 @@ export function buildPluginId(name: string, marketplace?: string): string {
 }
 
 /**
+ * densable `iN` — sentinel marketplace for plugins synced from claude.ai.
+ * Display / enable / disable use `{name}@synced`. Not a real marketplace.
+ */
+export const SYNCED_MARKETPLACE_NAME = 'synced'
+
+/** densable `pluginId.endsWith('@'+iN)`. */
+export function isSyncedPluginId(pluginId: string): boolean {
+  return pluginId.endsWith(`@${SYNCED_MARKETPLACE_NAME}`)
+}
+
+/**
+ * densable `G$` — marketplace suffix after the **last** `@`.
+ * Empty suffix is treated as missing (same as no `@`).
+ */
+export function marketplaceSuffixFromSource(
+  source: string,
+): string | undefined {
+  const at = source.lastIndexOf('@')
+  if (at < 0) {
+    return undefined
+  }
+  const suffix = source.slice(at + 1)
+  return suffix === '' ? undefined : suffix
+}
+
+/** densable `zD` — NFC-fold + lowercase for synced name matching. */
+export function foldPluginName(name: string): string {
+  return name.normalize('NFC').toLowerCase()
+}
+
+/**
+ * densable `I9a` — enabled local (non-`@synced`) copy of the same folded name.
+ * Disabled locals do not shadow.
+ */
+export function localCopyShadowingSynced<
+  T extends { name: string; source: string; enabled?: boolean },
+>(name: string, plugins: readonly T[]): T | undefined {
+  const folded = foldPluginName(name)
+  return plugins.find(
+    plugin =>
+      plugin.enabled !== false &&
+      marketplaceSuffixFromSource(plugin.source) !== SYNCED_MARKETPLACE_NAME &&
+      foldPluginName(plugin.name) === folded,
+  )
+}
+
+/**
+ * densable `f3a` for `@synced`: no settings row → `defaultEnabled !== false`;
+ * a present row is opt-in (`=== true`, official `AKp` for `iN`).
+ */
+export function isSyncedPluginEnabled(
+  pluginId: string,
+  defaultEnabled: boolean | undefined,
+  // Settings schema allows string[] values (per-marketplace lists); only
+  // `=== true` opts in, so wider values are safely treated as not opted in.
+  enabledPlugins: Record<string, boolean | string[] | undefined> | undefined,
+): boolean {
+  const setting = enabledPlugins?.[pluginId]
+  if (setting === undefined) {
+    return defaultEnabled !== false
+  }
+  return setting === true
+}
+
+/**
  * Check if a marketplace name is an official (Anthropic-controlled) marketplace.
  * Used for telemetry redaction — official plugin identifiers are safe to log to
  * general-access additional_metadata; third-party identifiers go only to the

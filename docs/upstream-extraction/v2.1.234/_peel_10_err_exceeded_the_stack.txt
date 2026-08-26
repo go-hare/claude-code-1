@@ -1,0 +1,9 @@
+OFFSET=85942544
+
+reConcurrency",String(navigator.hardwareConcurrency)),O.append("bunVersion",Bun.version),O.append("bunBuild",j.basename(process.release.sourceUrl,j.extname(process.release.sourceUrl))),O.append("availableMemory",String(process.availableMemory())),O.append("totalMemory",String(C.totalmem())),O.append("osVersion",String(C.version())),O.append("osRelease",String(C.release())),O.append("id",h),!1)O.append("docker","true");let F="none",T="none";try{let $=Object.entries(C.networkInterfaces()||{});for(let[a,u]of $)for(let V of u||[])if(V.family==="IPv4")if(V.internal)T=v(V,T);else F=v(V,F);else if(V.family==="IPv6")if(V.internal)T=v(V,T);else F=v(V,F)}catch{}if(O.append("localIPSupport",T),O.append("remoteIPSupport",F),d)O.append("projectId",d);let A=await fetch(o,{method:"POST",body:O}),m;if(!A.ok||(m=A.status)!==200){let $=await A.text().catch(()=>"");if(L(`Failed to send feedback (${m??A.status} ${A.statusText}).`),$)process.stderr.write(`${$}
+`);W(1)}let y="";if(x)y=`
+${w}ID: ${h}${H}`;else y=`
+ID: ${h}`;process.stdout.write(`${P.check} Feedback sent.
+${y}${Nq}
+`)}finally{Q?.cleanup()}}await Kq().catch((J)=>{let Q=J instanceof Error?J.message:String(J);L(`Unexpected error while sending feedback: ${Q}`),process.exit(1)});
+....U@.......................@.......@....p-.A.......@.......@....https://.png.jpg.gif.webp.bin.bun-md-...COLUMNS....................![Kerror: markdown rendering exceeded the stack ... input is too deeply nested..X.[0m.[31merror.[0m: markdown rendering exceeded 

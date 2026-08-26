@@ -1,0 +1,30 @@
+
+==== "var ebt=" -1 ====
+
+==== "ebt=" 306964565 ====
+ebt={five_hour:"session limit",seven_day:"weekly limit",seven_day_opus:"Opus limit",seven_day_sonnet:"Sonnet limit",seven_day_overage_included:"Fable 5 limit",overage:"usage credit limit"}});function FWa(e){return ebt[e]||e}function OZv(e,t){let r=Date.now()/1000,n=e-t,o=r-n;return Math.max(0,Math.min(1,o/t))}function S9p(e){let t=e.headers?.get?.(cNp),r=e.headers?.get?.(fyi);if(!t&&!r)return null;let n={status:"rejected",unifiedRateLimitFallbackAvailable:!1,isUsingOverage:!1},o=e.headers?.get?.("anthropic-ratelimit-unified-reset");if(o)n.resetsAt=Math.round(Number(o));if(t)n.rateLimitType=t;i
+
+==== "function $Wa(" 306964106 ====
+function $Wa(){let e=cc();return e==="pro"||e==="enterprise"?ebt.seven_day:ebt.seven_day_sonnet}function itt(e,t,r,n){let o=n?.progressSavedSuffix?" \xB7 progress saved":"";return`You've hit your ${e}${t}${o}`}var kVr,m9p="individual spend limit",kZv="individual usage limit",CZv,ebt;var Bcr=A(()=>{oi();Hle();Dh();mr();Rs();vxe();Li();j4r();bn();Let();$Zs();kVr=new Set(["org_level_disabled_until","org_spend_cap_reached"]);CZv=[...DDn,...ODn,...LDn,...MDn];ebt={five_hour:"session limit",seven_day:"weekly limit",seven_day_opus:"Opus limit",seven_day_sonnet:"Sonnet limit",seven_day_overage_include
+
+==== "session limit" 306964581 ====
+session limit",seven_day:"weekly limit",seven_day_opus:"Opus limit",seven_day_sonnet:"Sonnet limit",seven_day_overage_included:"Fable 5 limit",overage:"usage credit limit"}});function FWa(e){return ebt[e]||e}function OZv(e,t){let r=Date.now()/1000,n=e-t,o=r-n;return Math.max(0,Math.min(1,o/t))}function S9p(e){let t=e.headers?.get?.(cNp),r=e.headers?.get?.(fyi);if(!t&&!r)return null;let n={status:"rejected",unifiedRateLimitFallbackAvailable:!1,isUsingOverage:!1},o=e.headers?.get?.("anthropic-ratelimit-unified-reset");if(o)n.resetsAt=Math.round(Number(o));if(t)n.rateLimitType=t;if(r)n.overageSta
+
+==== "Strip leading" -1 ====
+
+==== "dirPortion.startsWith" -1 ====
+
+==== "startsWith(\"./\")" 301995927 ====
+startsWith("./")}function Xre(e){return e.source==="file"||e.source==="directory"}function tQ_(e){let t=yOn();return e.flatMap((r,n)=>{let o=t.safeParse(r);if(o.success){let a=o.data.source;if(typeof a==="object"&&a.source==="unsupported"&&a.error!==void 0)return[{...o.data,source:{source:"unsupported"}}];return[o.data]}let i=eQ_().safeParse(r).data?.name,s=o.error.issues.map((a)=>`${a.path.join(".")}: ${a.message}`).join(", ");if(i){E(`Stubbing unparseable marketplace plugin entry (${i}): ${s}`,{level:"warn"});let a=MVo(jo(r)?r.source:void 0)?lQ_:Ota(r)?void 0:nQ_(o.error.issues)??DVo(o.error
+
+==== "charCodeAt(0)===65279" 301165465 ====
+charCodeAt(0)===65279)e=e.slice(1);return e},H0_=(e,t,r,n)=>{e.prototype=Object.create(t.prototype,n),Object.defineProperty(e.prototype,"constructor",{value:e,writable:!0,enumerable:!1,configurable:!0}),Object.defineProperty(e,"super",{value:t.prototype}),r&&Object.assign(e.prototype,r)},P0_=(e,t,r,n)=>{let o,i,s,a={};if(t=t||{},e==null)return t;do{o=Object.getOwnPropertyNames(e),i=o.length;while(i-- >0)if(s=o[i],(!n||n(s,e,t))&&!a[s])t[s]=e[s],a[s]=!0;e=r!==!1&&s4o(e)}while(e&&(!r||r(e,t))&&e!==Object.prototype);return t},D0_=(e,t,r)=>{if(e=String(e),r===void 0||r>e.length)r=e.length;r-=t.len
+
+==== ".replace(/^\\uFEFF" 304534008 ====
+.replace(/^\uFEFF/,"")}Gap.exports={stringify:ypv,stripBom:_pv}});var rka=ae(function(NUC,Kap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.parse(o,t?t.reviver:null)}catch(s){if(n)throw s.message=`${e}: ${s.message}`,s;else return null}return i}var vpv=eai.fromPromise(bpv);function Spv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:
+
+==== "startsWith(\"/\")" 300649817 ====
+startsWith("/"))return!1;if(e.includes(".."))return!1;if(e.split("/").some((t)=>t==="."||t===""))return!1;return/^[a-zA-Z0-9/._+@-]+$/.test(e)}function xi(){let e=new Set;return{subscribe(t){let r=wMr(t);return e.add(r),()=>{e.delete(r)}},emit(...t){let r;for(let n of e)try{n(...t)}catch(o){(r??=[]).push(o)}if(r)throw r.length===1?r[0]:AggregateError(r,"Signal listener(s) threw")},clear(){e.clear()}}}var cxu=A(()=>{Xzs()});function EMr(e){if(!e)return{code:"en"};let t=e.toLowerCase().trim();if(!t)return{code:"en"};if(uxu.has(t))return{code:t};let r=Ff_[t];if(r)return{code:r};let n=t.split("-")
+
+==== "untitled" 303672093 ====
+untitled","document"])});var Ni="Bash";var WOt={};Et(WOt,{BRIEF_ENFORCE_SENTINEL:()=>Bya,BRIEF_PROACTIVE_SECTION:()=>IKb,BRIEF_TOOL_NAME:()=>XV,BRIEF_TOOL_PROMPT:()=>zya,DESCRIPTION:()=>jya,LEGACY_BRIEF_TOOL_NAME:()=>EFn,PEWTER_OWL_TOOL_PROMPT:()=>Wya});var XV="SendUserMessage",EFn="Brief",Bya="You ended the turn without calling SendUserMessage.",jya="Send a message to the user",zya="Send a message the user will read. Text outside this tool is visible in the detail view, but most won't open it \u2014 the answer lives here.\n\n`message` supports markdown. `attachments` accepts two forms per ent

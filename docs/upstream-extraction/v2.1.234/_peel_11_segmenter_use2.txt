@@ -1,0 +1,41 @@
+hable from any other path.
+        Iterator.from({next:()=>({done:true})}),
+      ] : []),
+      (function*(){})(),
+      (async function*(){})(),
+      // %SegmentsPrototype% + %SegmentIteratorPrototype% \u2014 host for..of on a
+      // VM Segments object would otherwise see a writable .then on the chain.
+      ...(typeof Intl !== 'undefined' && Intl.Segmenter ? (s => [s, s[Symbol.iterator]()])(new Intl.Segmenter().segment('a')) : []),
+    ]) {
+      for (let p = Object.getPrototypeOf(it); p; p = Object.getPrototypeOf(p)) {
+        Object.freeze(p);
+      }
+    }
+    })()`,e)}function a3r(e){return WOe.runInContext("(async v => ({__proto__: null, v: await v}))",e)}function cnf(e){return WOe.runInContext("((fn, ...args) => fn(...args))",e)}function Vmi(e){return WOe.runInContext(`(e => {
+      let name = 'Error', message = '', stack = ''
+      try { const v = e?.name; if (typeof v === 'string') name = v } catch {}
+      try {
+        const v = e?.message
+        if (typeof v === 'string') message = v
+        else if (typeof e === 'string') message = e
+        else if (typeof e === 'number' || typeof e === 'boolean' || typeof e === 'bigint') {
+          const s = \`\${e}\`
+          if (typeof s === 'string') message = s
+        }
+      } catch {}
+      try { const v = e?.stack; if (typeof v === 'string') stack = v } catch {}
+      return { __proto__: null, name, message, stack }
+    })`,e)}function qmi(e){return WOe.runInContext(`(() => {
+      const _WeakMap = WeakMap, _WeakSet = WeakSet, _isArray = Array.isArray,
+            _keys = Object.keys, _defineProperty = Object.defineProperty,
+            _Error = Error, _isSafeInteger = Number.isSafeInteger
+      // Closure-private registry of clone-created boundary-cap errors, so
+      // the per-element/per-key catch blocks below can tell them apart from
+      // an INCIDENTAL throw (a hostile getter / Proxy trap on a single
+      // value). The cap error must propagate out of the whole clone at any
+      // nesting depth; incidental throws still degrade that one slot to
+      // undefined. Membership, NOT a tag property: childWorkflow feeds this
+      // cloner parent-VM (attacker-reachable) values as childArgs, and a
+      // thrown Proxy whose get trap answers true for any key would
+      // fake-match a property-based check \u2014 the walker would then rethrow
+      // the ATTACKER'S object to the host, wh

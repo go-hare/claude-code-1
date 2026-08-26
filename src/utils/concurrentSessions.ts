@@ -5,19 +5,22 @@ import {
   mkdir,
   readdir,
   readFile,
+  readlink,
   unlink,
   writeFile,
 } from 'fs/promises'
 import { join } from 'path'
 import {
   getAttacherCaps,
+  getIsInteractive,
   getOriginalCwd,
   getSessionId,
   onSessionSwitch,
 } from '../bootstrap/state.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
+import { envDynamic } from './envDynamic.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { errorMessage, isFsInaccessible } from './errors.js'
 import {
   buildProcessStartIdentityFields,
@@ -27,6 +30,17 @@ import {
 import { getPlatform } from './platform.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import { getAgentId } from './teammate.js'
+import { isDeadMessagingPid } from './udsMessaging.js'
+
+/** densable Vu / kp — same fold as `normalizeSessionNameKey` (no import cycle). */
+function vu(name: string): string {
+  return name
+    .normalize('NFKC')
+    .replace(/[\p{Cc}\p{Cf}]/gu, ch => (/\s/.test(ch) ? ch : ''))
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+}
 
 export type SessionKind = 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
 export type SessionStatus = 'busy' | 'idle' | 'waiting'
@@ -65,6 +79,56 @@ let sessionBornSpare = false
 
 function getSessionsDir(): string {
   return join(getClaudeConfigHomeDir(), 'sessions')
+}
+
+/** densable wYb — E_a requires this many /proc pid dirs. */
+const PROC_SWEEP_MIN_PIDS = 16
+
+/** densable $_a.registrySweepPermitted — first probe wins for the process. */
+let registrySweepPermitted: Promise<boolean> | undefined
+
+/**
+ * densable E_a — /proc is a real pid namespace (linux/wsl only).
+ * Other platforms return true; a missing or foreign /proc/self fails closed.
+ */
+async function hasUsableProcMount(): Promise<boolean> {
+  const platform = getPlatform()
+  if (platform !== 'linux' && platform !== 'wsl') return true
+  const self = await readlink('/proc/self').catch(() => null)
+  if (self === null || self !== String(process.pid)) return false
+  const entries = await readdir('/proc', { withFileTypes: true }).catch(
+    () => null,
+  )
+  if (!entries) return false
+  return (
+    entries.filter(entry => /^\d+$/.test(entry.name)).length >=
+    PROC_SWEEP_MIN_PIDS
+  )
+}
+
+/**
+ * densable $_a.probeRegistrySweepPermitted.
+ * Interactive + not WSL + not sandbox/docker + E_a.
+ */
+async function probeRegistrySweepPermitted(): Promise<boolean> {
+  if (!getIsInteractive() || getPlatform() === 'wsl') return false
+  if (
+    envDynamic.getIsBubblewrapSandbox() ||
+    isEnvTruthy(process.env.IS_SANDBOX) ||
+    (await envDynamic.getIsDocker())
+  ) {
+    return false
+  }
+  return hasUsableProcMount()
+}
+
+/** densable fBr / $_a.isRegistrySweepPermitted. */
+export function isRegistrySweepPermitted(): Promise<boolean> {
+  return (registrySweepPermitted ??= probeRegistrySweepPermitted())
+}
+
+export function _resetRegistrySweepPermittedForTests(): void {
+  registrySweepPermitted = undefined
 }
 
 /**
@@ -231,9 +295,8 @@ async function updatePidFile(patch: Record<string, unknown>): Promise<void> {
       unknown
     >
     const next: Record<string, unknown> = { ...data, ...patch }
-    // densable zMn — first busy clears spare (JSON omit).
-    if (Object.hasOwn(patch, 'spare') && patch.spare === undefined) {
-      delete next.spare
+    for (const key of Object.keys(patch)) {
+      if (patch[key] === undefined) delete next[key]
     }
     await writeFile(pidFile, jsonStringify(next))
   } catch (e) {
@@ -246,20 +309,99 @@ async function updatePidFile(patch: Record<string, unknown>): Promise<void> {
 /** densable pid registry `nameSource` for uniqueness / Bid. */
 export type SessionNameSource = 'user' | 'collision' | 'derived' | 'auto'
 
+/** densable `$_a.registeredName` / `QV()`. */
+export type RegisteredSessionName = {
+  name: string
+  source: SessionNameSource
+  since: number
+}
+
+/** densable `$_a.formerNames` row (`$Hm` listing hint). */
+export type FormerSessionName = {
+  name: string
+  until: number
+}
+
+/** densable FYb — name must be held this long before it becomes former. */
+export const FORMER_NAME_MIN_HOLD_MS = 10_000
+/** densable `_ti` / MAX_FORMER_NAMES. */
+export const MAX_FORMER_NAMES = 3
+
+let registeredName: RegisteredSessionName | undefined
+let formerNames: FormerSessionName[] = []
+/** densable `$_a.heldNames` — Vu(name) → last source. */
+const heldNames = new Map<string, SessionNameSource>()
+
 /**
- * densable `JEe` subset — persist session display name into the PID registry
- * so ListAgents / uniqueness see the claim. Optional `nameSource` + `nameSince`
- * align densable 2.1.232 #4.
+ * densable `$_a.setRegisteredName`.
+ * Same-key rename keeps `since` and does not push held/former.
+ */
+export function setRegisteredName(
+  name: string,
+  source: SessionNameSource,
+): void {
+  const prev = registeredName
+  const now = Date.now()
+  const key = vu(name)
+  if (prev && vu(prev.name) === key) {
+    registeredName = { name, source, since: prev.since }
+    return
+  }
+  if (prev) heldNames.set(vu(prev.name), prev.source)
+  heldNames.delete(key)
+  formerNames = formerNames.filter(entry => vu(entry.name) !== key)
+  if (
+    prev &&
+    prev.source !== 'derived' &&
+    now - prev.since >= FORMER_NAME_MIN_HOLD_MS
+  ) {
+    const prevKey = vu(prev.name)
+    formerNames = [
+      { name: prev.name, until: now },
+      ...formerNames.filter(entry => vu(entry.name) !== prevKey),
+    ].slice(0, MAX_FORMER_NAMES)
+  }
+  registeredName = { name, source, since: now }
+}
+
+/** densable `QV`. */
+export function getRegisteredSessionName(): RegisteredSessionName | undefined {
+  return registeredName
+}
+
+/** densable `UYb`. */
+export function getHeldSessionNames(): ReadonlyMap<string, SessionNameSource> {
+  return heldNames
+}
+
+export function getFormerSessionNames(): readonly FormerSessionName[] {
+  return formerNames
+}
+
+export function __resetRegisteredSessionNameForTests(): void {
+  registeredName = undefined
+  formerNames = []
+  heldNames.clear()
+}
+
+/**
+ * densable `YCe` — `setRegisteredName` then pid-file `jht`.
+ * Disk `nameSource` is only `derived` / `collision` (official omit user/auto).
  */
 export async function updateSessionName(
   name: string | undefined,
-  source?: SessionNameSource,
+  source: SessionNameSource = 'user',
 ): Promise<void> {
   if (!name) return
+  setRegisteredName(name, source)
+  const persistSource =
+    source === 'derived' || source === 'collision' ? source : undefined
   await updatePidFile({
     name,
-    nameSince: Date.now(),
-    ...(source !== undefined ? { nameSource: source } : {}),
+    nameSource: persistSource,
+    formerNames: formerNames.length > 0 ? formerNames : undefined,
+    nameSince: registeredName?.since ?? Date.now(),
+    updatedAt: Date.now(),
   })
 }
 
@@ -391,12 +533,14 @@ export async function listLiveSessionRecords(): Promise<LiveSessionRecord[]> {
   }
 
   const live: LiveSessionRecord[] = []
+  // densable b1e: sweep only when fBr && b7 (ESRCH). EPERM stays listed.
+  const sweepPermitted = await isRegistrySweepPermitted()
   for (const file of files) {
     if (!/^\d+\.json$/.test(file)) continue
     const pid = parseInt(file.slice(0, -5), 10)
     if (Number.isNaN(pid)) continue
-    if (pid !== process.pid && !isProcessRunning(pid)) {
-      if (getPlatform() !== 'wsl') {
+    if (pid !== process.pid && isDeadMessagingPid(pid)) {
+      if (sweepPermitted) {
         void unlink(join(dir, file)).catch(() => {})
       }
       continue
@@ -480,6 +624,8 @@ export async function countConcurrentSessions(): Promise<number> {
   }
 
   let count = 0
+  // densable mBr: qS counts; !b7 skip; !fBr skip; else unlink.
+  const sweepPermitted = await isRegistrySweepPermitted()
   for (const file of files) {
     // Strict filename guard: only `<pid>.json` is a candidate. parseInt's
     // lenient prefix-parsing means `2026-03-14_notes.md` would otherwise
@@ -493,14 +639,11 @@ export async function countConcurrentSessions(): Promise<number> {
     }
     if (isProcessRunning(pid)) {
       count++
-    } else if (getPlatform() !== 'wsl') {
-      // Stale file from a crashed session — sweep it. Skip on WSL: if
-      // ~/.claude/sessions/ is shared with Windows-native Claude (symlink
-      // or CLAUDE_CONFIG_DIR), a Windows PID won't be probeable from WSL
-      // and we'd falsely delete a live session's file. This is just
-      // telemetry so conservative undercount is acceptable.
-      void unlink(join(dir, file)).catch(() => {})
+      continue
     }
+    if (!isDeadMessagingPid(pid)) continue
+    if (!sweepPermitted) continue
+    void unlink(join(dir, file)).catch(() => {})
   }
   return count
 }

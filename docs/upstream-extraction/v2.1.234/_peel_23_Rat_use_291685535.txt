@@ -1,0 +1,3 @@
+OFFSET=291685535
+
+d,e)||hxn(d,n)||hxn(p,e)||hxn(p,n))continue;let f=tJ_(d);if(f===null||f===d)continue;if(f===e||await mxn(f)===n)u.push(d)}return u}function eJ_(e){if(Rat(e)===e)return!0;return f$().rootByPath.delete(e),Yc(e)===e}function tJ_(e){let t=bd(e);if(t!==null&&t!==e)return t;return f$().canonicalRootByRoot.delete(e),bd(e)}function xSd(){return!0}function hxn(e,t){let r=xSd(),n=r?WH(e):e,o=r?WH(t):t;if(n===o)return!0;let i=wq.relative(n,o);return i!==""&&i!==".."&&!i.startsWith(`..${wq.sep}`)&&!wq.isAbsolute(i)}function ASd(e,t){let r=xSd(),n=(i)=>r?WH

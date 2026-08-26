@@ -1,0 +1,185 @@
+#### "JetBrains IDE" count=2 [181189330,320961318]
+--- 181189330 ---
+ntextual..............	...	...immediate...............	...m...Scroll support in JetBrains IDE 2025.2 terminals is experimental . upgrade to 2025.3+ for the best experience...........	...
+...suggestion.......:......
+........................................@@$.i..........................................(................................................
+.....................(Y......................h.......................`^......................P....................... ...................RR6.....B.......C...RR6..R6......D..H.......................................................h.......................................`...........................................................................................................................h...h...h...h...h...h...h...h...h.
+--- 320961318 ---
+term-scroll-bug",kind:"contextual",priority:"immediate",text:"Scroll support in JetBrains IDE 2025.2 terminals is experimental \xB7 upgrade to 2025.3+ for the best experience",color:"suggestion",timeoutMs:15000})};return Yhn.on("arrow-burst",$Ec),Yhn.on("jediterm-scroll-bug",FEc),()=>{Yhn.off("arrow-burst",$Ec),Yhn.off("jediterm-scroll-bug",FEc)}},zR0=[Yhn,N_s,NEc],CzO[0]=N_s,CzO[1]=NEc,CzO[2]=Yhn,CzO[3]=jR0,CzO[4]=zR0;else jR0=CzO[3],zR0=CzO[4];Flt.useEffect(jR0,zR0)}var Flt,b_g,u_g=40,GR0=0.3,VR0=6,qR0=3,KR0=200,YR0=15,XR0=15,JR0=3,ZR0=1500,d_g=150,QR0=7,p_g=5,eI0=80,tI0=3,rI0=36,nI0=500,iI0=0.35,sI0=0.008,aI0=0.4,lI0=4,h_g="auto-copy-config-hint",uI0=10,g_g=5;var $_s=A(()=>{AE();jL();DEc();MEc();iBt();gKn();ffr();T2t();cYn();IA();Nt();wee();bl();jt();ca();oin();Wn();
+#### "jetbrains plugin is connected" count=0 []
+#### "isJetBrainsIde" count=6 [99680440,131164680,308294338,308296216,308548371,308548893]
+--- 99680440 ---
+mmediatePropagation.............	.".....stopImmediatePropagation........	.......isJetBrainsIdeTerminal..........	.".....isMicrosoftWindowsTerminal"...............".	...isGhostty.......................isMintty........	.......windowsConsoleSupportsVirtualTerminalSequences..........	.......hasGeometricShapesInkBleedBug...........	.......hasOsc52ClipboardUtf8Bug........	.".'...macCmdClickArrivesWithoutSgrModifierBit.........	.......customThemeBase.........	.......addCustomThemeBases.....................commitUserThemes..........".....cachedUserThemes........I.".....cachedSystemTheme...............	.......setSystemTheme...........s.....custom:.........	.......probe...........I......recordAddonWrite........	.".....beginWaylandCopy........I.".....isLatestWaylandCopy.....L...
+--- 131164680 ---
+........................................	...
+...syncOutput..............	.......isJetBrainsIdeTerminal................x...........x.......x...x......H..H........................B......................xB......h...................................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................................0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...0...................................................P...............................x......................................................................................................................Q...i
+#### "CLAUDE_CODE_PLUGIN" count=6 [106482016,106482064,106482128,106482176,106497840,106497888]
+--- 106482016 ---
+ER_OWL_TOOL.............	.......CLAUDE_CODE_PLAN_MODE_REQUIRED..........	... ...CLAUDE_CODE_PLUGIN_BINARY_ASSETS........	.......CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE..........	.......CLAUDE_CODE_PLUGIN_PREFER_HTTPS.........	... ...CLAUDE_CODE_PLUGIN_USE_ZIP_CACHE........	.......CLAUDE_CODE_POLL_EVENTS.........	.1./...CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY.........	.......CLAUDE_CODE_PRINT_ENGINE_LOOP...................CLAUDE_CODE_PROACTIVE...........	...!...CLAUDE_CODE_PROPAGATE_TRACEPARENT.1...............1.&...CLAUDE_CODE_REFUSAL_FALLBACK_CATCH_ALL..........	.......CLAUDE_CODE_REPORT_FINDINGS.............	.......CLAUDE_CODE_SEND_FEEDBACK...............	... ...CLAUDE_CODE_SILENT_TURN_REMINDER........	...%...CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT.......
+--- 106482064 ---
+_MODE_REQUIRED..........	... ...CLAUDE_CODE_PLUGIN_BINARY_ASSETS........	.......CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE..........	.......CLAUDE_CODE_PLUGIN_PREFER_HTTPS.........	... ...CLAUDE_CODE_PLUGIN_USE_ZIP_CACHE........	.......CLAUDE_CODE_POLL_EVENTS.........	.1./...CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY.........	.......CLAUDE_CODE_PRINT_ENGINE_LOOP...................CLAUDE_CODE_PROACTIVE...........	...!...CLAUDE_CODE_PROPAGATE_TRACEPARENT.1...............1.&...CLAUDE_CODE_REFUSAL_FALLBACK_CATCH_ALL..........	.......CLAUDE_CODE_REPORT_FINDINGS.............	.......CLAUDE_CODE_SEND_FEEDBACK...............	... ...CLAUDE_CODE_SILENT_TURN_REMINDER........	...%...CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT.............	.&...CLAUDE_CODE_SILENT_TURN_REMINDER_TUR
+#### "ideSelection" count=6 [177364048,191961485,286048601,286170033,319839098,320404810]
+--- 177364048 ---
+.........F..............................................................	.......ideSelection............	.......setUserInputOnProcessing........	.......isAlreadyProcessing.............	.......bridgeOrigin............	.......skipAttachments.........	.......skipSubmissionHooks.............	.......pollEventProvenance...........................-.............n.....-...-......D..H.................................................K.............................................@.......@............................................................... ........................x.......3......@........4.......4......@........4......(4......84......X........#.......#......04.......#......h4......x4......P.......h.......(,......h3......h:......8........;^.....x#.......C......0........3..
+--- 191961485 ---
+...p.......................2...............	...G...Cannot destructure property 'ideSelection' from null or undefined value.
+.......................	.......boy.....................	...A...Cannot destructure property 'status' from null or undefined value.......................	......._oy.....................	.......Soy.....................	...B...Cannot destructure property 'columns' from null or undefined value..............................	.......Eoy.....................	.......hipaa...................	.......tengu_copper_thistle....................	...............	.......DHs.....
+...............	.......voy....................................	.......XDo.....................................................................	...
+...permission..............	.......truncate.
+#### "ide_connected" count=6 [131991392,257252687,257834663,308750495,309504112,309678180]
+--- 131991392 ---
+i...............................).......................
+...............	......ide_connected.......................................P............@.\.M............C.P.......^...d................................................R.......................c.......................~~.......................|......................F......@...........,.{.\...<.....{.=...8.{.t.{......H..H.......................p.......................X.......h................W......................X...................P.......................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...............................................................................
+--- 257252687 ---
+...j........i.... ...............P.......................	...+...Failed to send ide_connected notification: .....
+............................................@ ........P........................8........................<......@................9..z....9..{................D..H...............................................p.......h........................................U..................................................................................................
+.......................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...................................(...................................................................................................................h............... ..................................
+#### "FileEditTool" count=6 [137129440,194589456,278981536,309894543,317500888,323137048]
+--- 137129440 ---
+ite_claudemd............	.......S...............	.......edit............	.......FileEditTool............	.......tengu_edit_string_lengths...............	.......d...............	.......utf8............	.......p...............	.......f.......................	.......tengu_tool_use_diff_computed....................	......._...............	.......s...............	.......w.......1...............	.......T.......................................................	................$...@.......@...@0u.@.u.@.t.....@.."....@...@.t.@.....D.....@.;...D.@ ....3.@.;...D.@ ..@ ....K.@.;...E.@ ...0L.@ ........;..pU..@.......T<.@`..S.....M.@ ..H...E.4.@p4.@ L...2{........@P4.H.....3.Q.<.@05...Ku....@ ..@ 4.@ 4.@ L.E.....3p........@ .V......ks...\............@p<..@..@ ..H...@.4..@K...-.@ ..H..
+--- 194589456 ---
+....
+...................H_......	.......................................	.......FileEditToolDiff: fs error computing diff for ..........	.......: ..............	.......error............................................@...G...-rT.@.?.G...@.L.C...@.\.@...@`..@0..K.....4...,..P...`&.@ ..@0....K.@.e.....@0=.D...OAT...^.@...@...@.....1.. o.@ ......@.m.@`......@ ..@ .......PM.@ .....Z..... %.@ ..@ ......@...@0..K.......@ .....Q....@ E.. m.@ ..@ ......@.|.D...OAT...^.@...@...@.|...1.. o.@ ....K.@.m.....@ ..@ ..K.....4....;....J...@.L.H.....U.@ ..@0....K...}.@ ..H...@.4..@...0=.@...@...H...@.e..@y@......\.@ ..@ ..K.....3...3.@.m.K.... U.@ ..H.....3.@...H...@...F....a4]..... ..@ ......@PT.@0..@`..H..T....@p.\......<.@ ........,.@ ..@ .....2....@..C....@`.C....@..........E...H...
+#### "notifyOnFileChange" count=0 []
+#### "diagnosticFiles" count=0 []
+#### "deduplicateDiagnostic" count=4 [99694496,258008544,309732082,309732941]
+--- 99694496 ---
+fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFile...........	.......clearPendingForFile..............+#.....pendingCount....................	.......diff............	,#.....diffWithOptionsObj..............	...	...addToPath...............	......extractCommon...........	.......equals..........I-#.....removeEmpty.................	...castInput-#..............-#.....tokenize........	.......join............I......buildValues...............#.g...a-zA-Z0-9_\u{AD}\u{C0}-\u{D6}\u{D8}-\u{F6}\u{F8}-\u{2C6}\u{2C8}-\u{2D7}\u{2DE}-\u{2FF}\u{1E00}-\u{1EFF}.........	...X...Fable 5 as the advisor bills to usage credits, which need to
+--- 258008544 ---
+0.......................................................................	.......deduplicateDiagnosticFiles...............P..................,.......L...................J...h...h...h...............................................h...h...h...h...h...............`...`...`...`...`.......@...@...........H...H...X...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...........................X......................................(..............(...............0	..............8	..................................................................................................................................................................................J...z...\..............._.......*.......^.......:......._...:...V.......^.......................................
+#### "queuedCommands" count=6 [176918328,320307255,320307668,320307808,320317698,322377886]
+--- 176918328 ---
+................................@.......................H...............	.......queuedCommands..........	......pendingAgents...........	.......pendingWorkflows.....................V,.:...Z...:...[....V,.$W,......D..H...............................................................................................@............................................................... ................A.......q..............................................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................8...........H...................................................................................................................................................0...............(...........................
+--- 320307255 ---
+s_teammate"))}var Qat=A(()=>{Dl();NA();I2();poc();p0t()});function cfn({tasks:e,queuedCommands:t=[]}){let r=new Set,n=new Set,o=(i)=>{if(DW(i)&&i.isBackgrounded)r.add(i.id);else if(i.type==="local_workflow")n.add(i.id)};for(let i of Object.values(e))if(i.status==="running"||Ow(i.status)&&!i.notified)o(i);for(let i of t){if(i.mode!=="task-notification"||!dC(i)||i.taskId===void 0)continue;let s=e[i.taskId];if(s)o(s)}return{pendingAgents:r.size,pendingWorkflows:n.size}}function AQh({tasks:e,queuedCommands:t=[],turnDurationMs:r,turnStartTime:n,now:o,backgroundWaitStartTime:i}){let{pendingAgents:s,pendingWorkflows:a}=cfn({tasks:e,queuedCommands:t});if(s>0||a>0)return{durationMs:r,pendingBackgroundAgentCount:s>0?s:void 0,pendingWorkflowCount:a>0?a:void 0,backgroundWaitStartTi
+#### "cancelRequest" count=6 [109357784,258404474,301617703,301617719,305026746,305027084]
+--- 109357784 ---
+........	.......isRemoteMode............	.......sendMessage.............	......cancelRequest...........	...
+...disconnect..............	.......sendControlRequest...........................(......	.......
+....(...(.......D..H.......................................................h.......................................xV..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...................(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(.......................................................................................................................................
+--- 258404474 ---
+.....................
+.....i.. ...............0.......................	.......$/cancelRequest.
+........................................@P............e.p0:....................................................H............................................{......H.......I....{../|.......D..H.......................................................h........................................-..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h.........................................................................................................................................................................................................................................
+#### "abortController" count=6 [72480668,72480776,72480820,72480876,72483895,72483992]
+--- 72480668 ---
+lWarningEmitted = !1;
+  }
+  return rootNode;
+}
+
+class TestContext {
+  #node;
+  #abortController;
+  #assert;
+  constructor(node) {
+    this.#node = node;
+  }
+  get signal() {
+    if (this.#abortController === @undefined)
+      this.#abortController = new AbortController;
+    return this.#abortController.signal;
+  }
+  get name() {
+    return this.#node.name;
+  }
+  get fullName() {
+    return this.#node.fullName;
+  }
+  get filePath() {
+    return this.#node.filePath;
+  }
+  get error() {
+    return this.#node.error;
+  }
+  get passed() {
+    return this.#node.passed;
+  }
+  get attempt() {
+    return 0;
+  }
+  get workerId() {
+    return Number(process.env.NODE_TEST_WORKER_ID) || @undefined;
+  }
+  get tags() {
+    return this.#node.tags;
+  }
+  diagnostic(message) {
+    console
+--- 72480776 ---
+  constructor(node) {
+    this.#node = node;
+  }
+  get signal() {
+    if (this.#abortController === @undefined)
+      this.#abortController = new AbortController;
+    return this.#abortController.signal;
+  }
+  get name() {
+    return this.#node.name;
+  }
+  get fullName() {
+    return this.#node.fullName;
+  }
+  get filePath() {
+    return this.#node.filePath;
+  }
+  get error() {
+    return this.#node.error;
+  }
+  get passed() {
+    return this.#node.passed;
+  }
+  get attempt() {
+    return 0;
+  }
+  get workerId() {
+    return Number(process.env.NODE_TEST_WORKER_ID) || @undefined;
+  }
+  get tags() {
+    return this.#node.tags;
+  }
+  diagnostic(message) {
+    console.log(message);
+  }
+  plan(count, options = kEmptyObject) {
+    let node = this.#node;
+    if (node.plan !== 
+#### "escapeQueued" count=0 []
+#### "prompt was queued" count=0 []
+#### "hasQueued" count=6 [99508376,112569880,147262928,303243925,303244480,312103635]
+--- 99508376 ---
+ueueOrNull..............	.......evictKey................enqueue.........	...	...hasQueued...............	.......drain...........	.......drainForSession.........Iy......cli.............	......enterCooldown...........	......clearCooldown...........	.......markCooldownExpiryLogged........I1......replaceOrgStatus........	.......claimCreditsExhaustedNotice.............I.......rearmCreditsExhaustedNotice.............	.......beginPrefetchWindow.............	.......trackInflightPrefetch...................clearInflightPrefetch..........?................	.......opus46...........=......sonnet45........	.......haiku45.................opus5...........	.......fable5..@.......}......@B..............	.......registerAttributor.....................registerChild...................samp
+--- 112569880 ---
+................................H.0.....................................	...	...hasQueued...................0.'.T.........'.....<.'.S.'......H..H.......................(o'......................o'.....h........................................S..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...X...X...X...h...........................................................................................................................................................................................................................................................'...........................................
+#### "cd into" count=6 [85698765,85698921,160962658,161056055,165814770,316315652]
+--- 85698765 ---
+ The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again.......[0m.[31merror.[0m.[2m:.[0m The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again...SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)..a.[0m.[31merror.[0m: bun ran out of file descriptors .[2m(.[31mProcessFdQuotaExceeded.[0m.[2m).[0m.."error: An unknown error occurred (..)..@.[0m.[31merror.[0m.[2m:.[0m An unknown error occurred .[2m(.[31m..[0m
+--- 85698921 ---
+ The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again...SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)..a.[0m.[31merror.[0m: bun ran out of file descriptors .[2m(.[31mProcessFdQuotaExceeded.[0m.[2m).[0m.."error: An unknown error occurred (..)..@.[0m.[31merror.[0m.[2m:.[0m An unknown error occurred .[2m(.[31m..[0m.[2m).[0m..ENOENTBun could not find a file, and the code that produces this error is missing a better error.MissingPackageJSON=error: Bun could not find a p
+#### "crossProject" count=0 []
+#### "allProjects" count=6 [158587144,315066032,315066095,315066158,315066220,315066326]
+--- 158587144 ---
+........8.......................@.......................H...............	.......allProjects.............I.......shellHistoryP...........	...	...homeRepos.).P........J......i^..!..."...Q^..#...u^...^.......H..H.......................@.n.....................(.n.....h...................................P...X(..........................................................P............................................................................................................................................................................................Px.P...P.:.........P.....}.......R.P....X>......................w..P.....=..................................... ...................................................................................................................
+--- 315066032 ---
+!=="project")return kqi;let t=e.scope==="all";switch(e.depth){case"both":return{allProjects:t,shellHistory:!0,homeRepos:!0};case"shell":return{allProjects:t,shellHistory:!0,homeRepos:!1};case"repos":return{allProjects:t,shellHistory:!1,homeRepos:!0};case"here":return{allProjects:t,shellHistory:!1,homeRepos:!1};default:return kqi}}var kqi;var Hlo=A(()=>{kqi=Object.freeze({allProjects:!1,shellHistory:!1,homeRepos:!1})});function bPl(e){return e==="windows"?8000:4000}function VNm(e){let t=new Set,r=[];for(let n of e3w){let o=n.resolve(e);if(o===void 0)continue;let i=b0t(e.platform).resolve(o.path),s=e.platform==="windows"?i.toLowerCase():i;if(t.has(s))continue;t.add(s),r.push({label:n.label,path:o.path,format:o.format??n.format})}return r}function qNm(e,t,r){let n=[],o=r&&
+#### "projectPath" count=6 [110224000,115616440,301824093,301824192,302036171,304173136]
+--- 110224000 ---
+.H......................0...............	.......storedBytes.............	.......projectPath.............H.......(...................4P......P.......Q...4P...P.......D..H...............................................................................................@.......................................................................h...................................................................................................h...h...h...h...h...h...h...h...h...h...h...................................................................(...(...(...8...P...P...P...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...p...................................................................(............... ...............................H...........................
+--- 115616440 ---
+................................`$......................0...............	.......projectPathForConfig............	.......setProjectPathForConfig...............7.....#.....7.$.....7...7......H..H.......................H.......................0.......h.........................................{.........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...................................................................................................................................................................................................................................................................
+#### "session.project" count=2 [314595605,314745132]
+--- 314595605 ---
+nterrupted&&Jjr(b);if(h.interrupted&&b==="background")throw new ra;let T="",k=t.session.project.cwd;if(d){if(mDi(t.session,gn(t)))T=fDi("")}let C=h.backgroundTaskId!==void 0&&kti(t.agentContext)?!0:void 0;if(h.backgroundTaskId){let G=vBn(h.stdout||"",e.command);if(d&&G.hints.length>0)for(let q of G.hints)Hao(q,t.session.pendingHint);return{data:{stdout:G.stripped,stderr:[h.stderr||"",T].filter(Boolean).join(`
+`),interrupted:!1,backgroundTaskId:h.backgroundTaskId,backgroundedByUser:h.backgroundedByUser,timedOutAfterMs:h.timedOutAfterMs,backgroundEndsWithFinalResponse:C}}}let x=new dHn,R=(h.stdout||"").trimEnd();x.append(R+GDm);let I=OPm(e.command,h.code,R,h.stderr||""),M=cDi(x.toString()),O=vBn(M,e.command);if(M=O.stripped,d&&O.hints.length>0)for(let G of O.hints)Hao(G,t
+--- 314745132 ---
+or",{});if(m.isError&&!de){if(_.code!==0)d.append(`Exit code ${_.code}`)}if(f=t.session.project.cwd,!w){let Se=a();if(mDi(t.session,Se.toolPermissionContext))p=fDi("")}let ee=_.stdout||"",se=x?gi.annotateStderrWithSandboxFailures(t.toolUseId??e.command,ee):ee;if(y=se!==ee,_.preSpawnError){if(/null bytes/.test(_.preSpawnError))throw new gt(_.preSpawnError,"Bash: command contained null bytes (argv echo redacted)");throw new gt(_.preSpawnError,"Bash: pre-spawn error (cwd/argv redacted)")}if(m.isError&&!de)throw N("tengu_bash_tool_command_failed",{command_type:slo(e.command),stdout_length:ee.length,stderr_length:0,exit_code:_.code,interrupted:_.interrupted,executor_shell:await msl(),executor_shell_overridden:Boolean(process.env.CLAUDE_CODE_SHELL),sandboxed:x,sandbox_enabled
+#### "cwdExists" count=0 []
+#### "ENOENT" count=6 [7195698,17194247,20908533,28339539,70252107,70396542]
+--- 7195698 ---
+.....H...p..H......H....I.H......H..t...L................H...<.......N.H.. H	.H.ENOENT..H9.uQH..H..0.....*....t>....t(.........H..Hz..H......H..:.I.H......H...2..L.......b...H......H......L..........s(...uKH......H......H....x.H......H..-o..H......H....I.H......H...4..L..........H......H......H....x.H......H...n..H......H....I.H......H...4..L..........H......H.......W...H.............H......H.E.........)E.H.E.H......H.E.H......H......H..........r(.........H......H......H....x.H......H..-n..H......H....I.H......H...........H..i.......H...m..H......H....I.H......H..["..L...........H......H......H...=..H......H..^x..H......H..P.I.H......H...!..L.......x...H..p...H......H......H......H......H.E.....q(.....{...H......H....x.H......H..4m..H......H....I.H......H...!..L.....
+--- 17194247 ---
+..I9.......H.ENONET..I9...Y...H.EL2HLT..I9........1........H.DNOENT..I9.......H.ENOENT..I9.......H.ESRMNT..I9...6...H.EBFONT..I9...,....8........H.DSPIPE..I9.......H.ESPIPE..I9...U...H.ENOPKG..I9.......H.ECHRNG..I9........*....1...H.DISNAM..I9.......H.EISNAM..I9.......H.ENOMEM..I9.......H.EAGAIN..I9........
+........H.EBADRQC.I9.......H.ELIBBAD.I9...t...H.EREMOTE.I9...=....?........H.ENOTBLK.I9...v...H.EDEADLK.I9...;...H.ENOLINK.I9........@....U...H.EUCLEAN.I9...[...H.ELIBSCN.I9...4...H.EISCONN.I9........h........H.ENOTSUP.I9...@...H.ENOTDIR.I9...#...H.ENOBUFS.I9...t....g........H.EPIPE...I9.......H.EBADF...I9...D.............H.ELOOP...I9.......H.EBADR...I9........3....o........H.E2BIG...I9...W...H.EFBIG...I9.............:...H.ENOSR...I9...}...H.EINTR...I9.............
+.

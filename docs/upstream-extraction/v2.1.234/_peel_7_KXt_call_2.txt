@@ -1,0 +1,2 @@
+offset=312890126
+m[0].hostPattern,onUserResponse:(Lt)=>{let{allow:Rr,persistToSettings:Rn}=Lt,Po=$m[0];if(!Po)return;let Vo=Po.hostPattern.host;if(Rn){let rs={type:"addRules",rules:[{toolName:Xf,ruleContent:`domain:${KXt(Vo)}`}],behavior:Rr?"allow":"deny",destination:"localSettings"};if(Je((wc)=>({...wc,toolPermissionContext:WA(wc.toolPermissionContext,rs)})),Rr)oi.addSessionAllowedHost(Vo);_De(rs).then(()=>oi.refreshConfig()).catch(xe)}else if(Rr)oi.addSessionAl

@@ -1,0 +1,33 @@
+s36>-<rand>".
+// Never a slash, a backslash, a leading dot or "..".
+const ARTBOARD_RE = /^[A-Za-z0-9_][A-Za-z0-9 _.-]{0,80}\\.dc\\.html$/
+const IMAGE_STEM_RE = /^[A-Za-z0-9_-][A-Za-z0-9 _.-]{0,80}$/
+// Windows resolves a reserved device stem (CON, NUL, COM1, \u2026) to the device
+// itself whatever follows the first dot, so such names are never sane.
+const DOS_DEVICE_RE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9]) *(\\.|$)/i
+function saneName(name){ return !name.includes('..') && !/[\\/\\\\]/.test(name) && !DOS_DEVICE_RE.test(name) }
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.svg'])
+const CANVAS_FILE = 'canvas.json'
+// The editor's own load-time limits (its state parser silently DROPS anything
+// past them, and the next Save republishes without it): at most 200 files
+// entries, each value at most 2 MiB of UTF-8, names at most 300 chars (the
+// name grammars above are far tighter). Its entry artboard is Main.dc.html when
+// present, else the first .dc.html by name \u2014 a canvas whose Main was deleted in
+// the GUI is valid editor output.
+const MAX_FILES = 200
+const MAX_ENTRY_BYTES = 2 * 1024 * 1024
+// canvas.json, mirrored from the editor's loader so nothing seeded is silently
+// lost or rewritten at load (a later Save republishes only what loaded):
+//  - annotations: must be an array (anything else is ignored wholesale); at
+//    most 200 (the rest are dropped); each an object whose id is
+//    /^[A-Za-z0-9_-]{1,40}$/ and unique (a bad or repeated id drops the note);
+//    text must be a present string (anything else loads as an EMPTY note) of at most
+//    5000 chars (the rest is cut); x/y/w, when given, must be numbers (anything
+//    else becomes the default) \u2014 values are then clamped (x/y to \xB11e6, w to
+//    120\u2013960), which loses nothing.
+//  - artboards: each listed file must be a seeded artboard, listed once (a
+//    repeat is dropped; unlisted artboards are appended automatically); x/y/w/h,
+//    when given, must be numbers (else defaults; then clamped, w/h to 120\u20138000);
+//    title, when given, a string of at most 120 chars (else dropped/cut);
+//    expand "fit" (the default) or "fill", print "fixed" (the default) or
+//    "flow" \u2014 the loader stores only fill/flow, and a default literal 

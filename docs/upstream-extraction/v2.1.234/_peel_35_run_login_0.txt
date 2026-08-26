@@ -1,0 +1,3 @@
+OFFSET=290871960
+
+ lazy enrollment); caller will retry"),t}async function tHr(e,t){let r=await $Kt(e);if(!r)return;return t(r)}function Z0n(){if(N9e())return LKt;return"this device is not enrolled as a trusted device; run /login to enroll"}async function q3s(){if(!await J0n())return;if(N9e())return;E("[trusted-device] Not enrolled, attempting lazy enrollment with OAuth token"),await Q0n()}function K3s(){let{isClaudeAISubscriber:e}=(Zo(),on(Gue));if(!vd()||!e())return;if(N9e())return;_xt.cache?.clear?.(),al().mutate((t)=>t.trustedDeviceToken?{...t,trustedDeviceToken:void 0}:t).catch(()=>{})}async function Q0n({serverRequested:e=!1}={}){let{isClaudeAISubscriber:t,getClaudeAIOAuthTokens:r,checkAndRefreshOAuthTok

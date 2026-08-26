@@ -1,0 +1,24 @@
+offset=134374024 needle=b'gateway_setup'
+count=21
+
+urlOutdent
+oauthStatus
+gatewayUnsupportedWarning
+gatewayScreenLocked
+setLoginWithClaudeAi
+Iterator result interface is not an object.
+Invalid code. Please make sure the full code was copied
+waiting_for_login
+tengu_oauth_manual_entry
+setup-token
+gateway_setup
+setup-token
+tengu_oauth_claudeai_forced
+tengu_oauth_console_forced
+setup-token
+tengu_oauth_gateway_forced
+about_to_retry
+gateway_done
+tengu_oauth_gateway_done
+tengu_oauth_success
+report the issue at https://github.com/anthropics/claude-code/issues

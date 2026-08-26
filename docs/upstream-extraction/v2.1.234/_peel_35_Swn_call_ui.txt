@@ -1,0 +1,3 @@
+OFFSET=301236735
+
+tanceof V1r)return qd({error:"authentication_failed",content:xn()?"Failed to authenticate: OAuth session expired and could not be refreshed":lbS});if(oRr(e))return qd({error:"invalid_request",content:Swn()?ubS:cbS});if(k4e(e))return qd({error:"authentication_failed",content:mbS()});if(HUf(e))return qd({error:"oauth_org_not_allowed",content:hbS()});if(e instanceof Es&&e.status===403&&e.message.toLowerCase().includes("api key authentication is disabled")){let{source:i}=Aj();if(i==="ANTHROPIC_API_KEY"&&K.ANTHROPIC_API_KEY)return qd({error:"invalid_request",content:Sx()?obS:ibS});if(i==="apiKeyHelper")return qd({error:"invalid_request",content:sbS});if(i==="/login managed key")return qd({error:"

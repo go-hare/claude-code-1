@@ -1,11 +1,24 @@
 /**
- * densable WorkflowDetailDialog (fv_) — host live monitor for local_workflow.
+ * densable WorkflowDetailDialog (fv_ / oSn) — host live monitor for local_workflow.
  * Data source: task.workflowProgress (tm8), NOT WorkflowService progress store.
+ *
+ * densable 2.1.239 #35: computeVisibleWindow (mYe) + tTe hint keep the header
+ * visible when the phase/agent lists overflow a mid-turn / modal reply slot.
+ * Do not invent official oSn extras (agent drill-down, status filter, g6t).
  */
 
+import figures from 'figures';
 import React, { useMemo, useState } from 'react';
 import type { DeepImmutable } from 'src/types/utils.js';
-import { Box, Text, type KeyboardEvent, useAnimationFrame } from '@anthropic/ink';
+import {
+  Box,
+  Text,
+  type KeyboardEvent,
+  useAnimationFrame,
+  useIsInsideModal,
+  useModalOrTerminalSize,
+  useTerminalSize,
+} from '@anthropic/ink';
 import type { Theme } from '@anthropic/ink';
 import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js';
 import type { SdkWorkflowAgentProgress } from '../../types/workflowProgress.js';
@@ -25,7 +38,52 @@ type Props = {
   onRetryAgent?: (agentId: string) => void;
   onPause?: () => void;
   initialPhaseIndex?: number;
+  /** densable oSn promptVisibleBelow — reserve reply rows when not in a modal. */
+  promptVisibleBelow?: boolean;
 };
+
+export type VisibleWindow = {
+  from: number;
+  to: number;
+  above: number;
+  below: number;
+};
+
+/** densable mYe — focus-centered slice so overflowing lists do not clip the header. */
+export function computeVisibleWindow(focus: number, total: number, visible: number): VisibleWindow {
+  if (total <= visible) {
+    return { from: 0, to: total, above: 0, below: 0 };
+  }
+  const half = Math.floor(visible / 2);
+  const from = Math.max(0, Math.min(focus - half, total - visible));
+  const to = from + visible;
+  return { from, to, above: from, below: total - to };
+}
+
+/** densable tTe — `↑ 2–5 of 12 ↓` (en-dash). */
+export function formatVisibleWindowHint(win: VisibleWindow, total: number): string {
+  const up = win.from > 0 ? figures.arrowUp : ' ';
+  const down = win.to < total ? figures.arrowDown : ' ';
+  return `${up} ${win.from + 1}\u2013${win.to} of ${total} ${down}`;
+}
+
+/**
+ * densable oSn list budgets: `pr` / `Mt` / `vt` / `Gt`.
+ * `availableRows` is gfs().availableRows (modal rows, or rows-9 when
+ * promptVisibleBelow, min Drg=12).
+ */
+export function workflowDetailListBudgets(
+  availableRows: number,
+  phaseCount: number,
+): { tight: boolean; phaseViewport: number; agentViewport: number } {
+  const tight = availableRows < 18;
+  const usable = availableRows - (tight ? 8 : 11);
+  const phaseCap = Math.max(1, usable - 3);
+  const phasesOverflow = phaseCount > phaseCap;
+  const phaseViewport = phasesOverflow ? Math.max(1, phaseCap - 1) : phaseCount;
+  const agentViewport = Math.max(1, usable - phaseViewport - (phasesOverflow ? 1 : 0));
+  return { tight, phaseViewport, agentViewport };
+}
 
 function clamp(n: number, lo: number, hi: number): number {
   if (hi < lo) return lo;
@@ -113,8 +171,19 @@ export function WorkflowDetailDialog({
   onRetryAgent,
   onPause,
   initialPhaseIndex,
+  promptVisibleBelow = false,
 }: Props): React.ReactNode {
   const running = task.status === 'running';
+  const terminalSize = useTerminalSize();
+  const modalSize = useModalOrTerminalSize(terminalSize);
+  const insideModal = useIsInsideModal();
+  // densable gfs: modal rows as-is; else promptVisibleBelow → max(Drg=12, rows-Two=9).
+  const availableRows = insideModal
+    ? modalSize.rows
+    : promptVisibleBelow
+      ? Math.max(12, modalSize.rows - 9)
+      : modalSize.rows;
+  const panelWidth = Math.max(24, terminalSize.columns - 6);
   const { phases, finishedAgents, totalAgents } = useMemo(
     () =>
       foldWorkflowPhases(
@@ -136,6 +205,13 @@ export function WorkflowDetailDialog({
   const agents = phase?.agents ?? [];
   const safeAgent = clamp(agentIdx, 0, Math.max(0, agents.length - 1));
   const selectedAgent = agents[safeAgent];
+  const { tight, phaseViewport, agentViewport } = workflowDetailListBudgets(availableRows, phases.length);
+  const phaseWin = computeVisibleWindow(safePhase, phases.length, phaseViewport);
+  const agentWin = computeVisibleWindow(safeAgent, agents.length, agentViewport);
+  const phaseHint = phases.length > phaseViewport ? formatVisibleWindowHint(phaseWin, phases.length) : null;
+  const agentHint = agents.length > agentViewport ? formatVisibleWindowHint(agentWin, agents.length) : null;
+  const minHeight = Math.max(tight ? 8 : 12, Math.min(availableRows - 1, modalSize.rows - 6));
+  const maxHeight = Math.max(tight ? 8 : 11, availableRows - 1);
 
   const [clockRef, now] = useAnimationFrame(running ? 1000 : null);
   const elapsed = Math.max(0, (task.endTime ?? now) - task.startTime);
@@ -228,7 +304,18 @@ export function WorkflowDetailDialog({
   const title = task.workflowName || task.description || 'workflow';
 
   return (
-    <Box ref={clockRef} flexDirection="column" tabIndex={0} autoFocus borderStyle="round" onKeyDown={handleKeyDown}>
+    <Box
+      ref={clockRef}
+      flexDirection="column"
+      tabIndex={0}
+      autoFocus
+      borderStyle="round"
+      onKeyDown={handleKeyDown}
+      width={panelWidth}
+      minHeight={minHeight}
+      maxHeight={maxHeight}
+      overflowY="hidden"
+    >
       <Dialog
         title={title}
         subtitle={
@@ -267,7 +354,8 @@ export function WorkflowDetailDialog({
               <Text bold color={focus === 'phases' ? 'claude' : 'subtle'}>
                 Phases
               </Text>
-              {phases.map((p, i) => {
+              {phases.slice(phaseWin.from, phaseWin.to).map((p, visibleIdx) => {
+                const i = phaseWin.from + visibleIdx;
                 const selected = i === safePhase && focus === 'phases';
                 const { mark, color } = phaseMark(p.status);
                 return (
@@ -281,6 +369,12 @@ export function WorkflowDetailDialog({
                   </Box>
                 );
               })}
+              {phaseHint ? (
+                <Text dimColor wrap="truncate-end">
+                  {'  '}
+                  {phaseHint}
+                </Text>
+              ) : null}
             </Box>
             <Text color="subtle">│</Text>
             <Box flexGrow={1} flexDirection="column">
@@ -290,24 +384,33 @@ export function WorkflowDetailDialog({
               {agents.length === 0 ? (
                 <Text color="subtle">(no agents in this phase)</Text>
               ) : (
-                agents.map((a, i) => {
-                  const selected = i === safeAgent && focus === 'agents';
-                  const { mark, color } = agentMark(a, running, spinner);
-                  const label = (a.label ?? `agent-${a.index}`).slice(0, 28);
-                  return (
-                    <Box
-                      key={a.index}
-                      backgroundColor={selected ? 'selectionBg' : undefined}
-                      justifyContent="space-between"
-                    >
-                      <Box>
-                        <Text color={color as keyof Theme}>{mark}</Text>
-                        <Text> {label}</Text>
+                <>
+                  {agents.slice(agentWin.from, agentWin.to).map((a, visibleIdx) => {
+                    const i = agentWin.from + visibleIdx;
+                    const selected = i === safeAgent && focus === 'agents';
+                    const { mark, color } = agentMark(a, running, spinner);
+                    const label = (a.label ?? `agent-${a.index}`).slice(0, 28);
+                    return (
+                      <Box
+                        key={a.index}
+                        backgroundColor={selected ? 'selectionBg' : undefined}
+                        justifyContent="space-between"
+                      >
+                        <Box>
+                          <Text color={color as keyof Theme}>{mark}</Text>
+                          <Text> {label}</Text>
+                        </Box>
+                        <Text color="subtle">{agentMeta(a, running)}</Text>
                       </Box>
-                      <Text color="subtle">{agentMeta(a, running)}</Text>
-                    </Box>
-                  );
-                })
+                    );
+                  })}
+                  {agentHint ? (
+                    <Text dimColor wrap="truncate-end">
+                      {'  '}
+                      {agentHint}
+                    </Text>
+                  ) : null}
+                </>
               )}
             </Box>
           </Box>

@@ -1,0 +1,4 @@
+OFFSET=291944884
+
+thropic contact.'}}var VBe=A(()=>{cn();cr()});var Srb,ZTd;var QTd=A(()=>{Th();Srb={type:"local-jsx",name:"add-dir",description:"Add a new working directory",argumentHint:"<path>",immediate:(e)=>e.trim()!==""||Ns()},ZTd=Srb});function NCn(e){if(e.startsWith(ZDr))return e;return`${ZDr}${e}`}function fXs(e){if(e.startsWith(Erb)&&e.endsWith(ekd))return e;let t=e.replaceAll(/<\s*\/\s*system-reminder\s*>/gi,"&lt;/system-reminder&gt;");return`<system-reminder>
+${NCn(t)}${ekd}`}function $Cn(e){if(e.star

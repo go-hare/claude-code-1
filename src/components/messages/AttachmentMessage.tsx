@@ -388,6 +388,8 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
           {attachment.hookName} hook stopped continuation: {attachment.message}
         </Line>
       );
+    case 'hook_deferred_tool':
+      return null;
     case 'hook_system_message':
       return (
         <Line>

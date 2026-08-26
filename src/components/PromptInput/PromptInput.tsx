@@ -957,10 +957,11 @@ function PromptInput({
   }, [cursorOffset, imageRefPositions, setCursorOffset]);
 
   // densable 2.1.235 #1 — underline misspellings (aspell/hunspell/ispell).
+  // Gold UI: active only in prompt mode (not bash/slash) and when no modal overlay.
   const spellcheckHighlights = useSpellcheckHighlights({
     text: input,
     cursorOffset,
-    active: !isModalOverlayActive,
+    active: mode === 'prompt' && !isModalOverlayActive,
     placeholders: imageRefPositions.map(ref => ({
       index: ref.start,
       match: input.slice(ref.start, ref.end),

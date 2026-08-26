@@ -1,0 +1,3 @@
+OFFSET=306361433
+
+","contour","alacritty"])});function l0l(e){let t=kPE.exec(e)?.[1]?.length??0;return t===0?e:e.slice(0,e.length-t)}function kXr(e){if(!e.includes("\x1B]8;"))return e;let t=[],r=null;for(let a of e.matchAll(xPE)){let l=a.index+a[0].length;if(r!==null)t.push({href:r.href,openEnd:r.openEnd,closeStart:a.index,closeEnd:l}),r=null;let c=a[1]??"";if(c!=="")r={href:c,openEnd:l}}if(r!==null)t.push({href:r.href,openEnd:r.openEnd,closeStart:e.length,closeEn

@@ -320,6 +320,22 @@ export type DispatchMentionTarget = {
   name: string
 }
 
+/**
+ * Official JIy Esc: `d!==void 0 && p && (d!=="NORMAL" || query!=="")`
+ * → vim handler (INSERT→NORMAL, keep text) instead of `ee("")` clear.
+ */
+export function shouldFleetViewVimHandleEscape(
+  vimMode: 'INSERT' | 'NORMAL' | undefined,
+  dispatchInputActive: boolean,
+  query: string,
+): boolean {
+  return (
+    vimMode !== undefined &&
+    dispatchInputActive &&
+    (vimMode !== 'NORMAL' || query !== '')
+  )
+}
+
 export function parseDispatch(
   input: string,
   templates: readonly DispatchMentionTarget[] = [],

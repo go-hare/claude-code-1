@@ -249,17 +249,14 @@ export function ResumeConversation({
     const resumeStart = performance.now();
 
     try {
-      const crossProjectCheck = checkCrossProjectResume(log, showAllProjects, worktreePaths);
-      if (crossProjectCheck.isCrossProject) {
-        if (!crossProjectCheck.isSameRepoWorktree) {
-          const cmd = (crossProjectCheck as { command: string }).command;
-          const raw = await setClipboard(cmd);
-          if (raw) process.stdout.write(raw);
-          setCrossProjectCommand(cmd);
-          selectingRef.current = false;
-          setResuming(false);
-          return;
-        }
+      const command = await checkCrossProjectResume(log, showAllProjects, worktreePaths);
+      if (command) {
+        const raw = await setClipboard(command);
+        if (raw) process.stdout.write(raw);
+        setCrossProjectCommand(command);
+        selectingRef.current = false;
+        setResuming(false);
+        return;
       }
     } catch (e) {
       // densable pre-load failed → sticky error (not hang)

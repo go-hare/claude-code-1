@@ -90,6 +90,25 @@ export function clampVisualScrollTop(
 }
 
 /**
+ * Virtual-list mounted-range clamp (ScrollBox.scrollClampMin/Max).
+ * Skip when sticky: leftover bounds from a prior scrolled-up range would
+ * paint into topSpacer while isSticky() is still true (no Jump-to-bottom
+ * pill) — empty transcript with the logo pinned at y=0.
+ */
+export function applyVirtualScrollRangeClamp(
+  visualScrollTop: number,
+  clampMin: number | undefined,
+  clampMax: number | undefined,
+  sticky: boolean,
+): number {
+  if (sticky) return visualScrollTop
+  if (clampMin === undefined || clampMax === undefined) {
+    return visualScrollTop
+  }
+  return Math.max(clampMin, Math.min(visualScrollTop, clampMax))
+}
+
+/**
  * scrollBy base: clamp scrollTop to current content max before accumulating
  * pending delta (official pQe). Prevents double-overscroll when HWM held
  * stored scrollTop above content.

@@ -1184,7 +1184,8 @@ function isHookAttachmentMessage(
       message.attachment?.type === 'hook_success' ||
       message.attachment?.type === 'hook_system_message' ||
       message.attachment?.type === 'hook_additional_context' ||
-      message.attachment?.type === 'hook_stopped_continuation')
+      message.attachment?.type === 'hook_stopped_continuation' ||
+      message.attachment?.type === 'hook_deferred_tool')
   )
 }
 
@@ -3445,7 +3446,11 @@ export function getToolUseID(message: NormalizedMessage): string | null {
   }
 }
 
-export function filterUnresolvedToolUses(messages: Message[]): Message[] {
+export function filterUnresolvedToolUses(
+  messages: Message[],
+  /** Official `utn` second arg — `$2l` deferred tool_use IDs stay unresolved. */
+  preserveToolUseIds?: Set<string>,
+): Message[] {
   // Collect all tool_use IDs and tool_result IDs directly from message content blocks.
   // This avoids calling normalizeMessages() which generates new UUIDs — if those
   // normalized messages were returned and later recorded to the transcript JSONL,
@@ -3473,7 +3478,9 @@ export function filterUnresolvedToolUses(messages: Message[]): Message[] {
   }
 
   const unresolvedIds = new Set(
-    [...toolUseIds].filter(id => !toolResultIds.has(id)),
+    [...toolUseIds].filter(
+      id => !toolResultIds.has(id) && !preserveToolUseIds?.has(id),
+    ),
   )
 
   if (unresolvedIds.size === 0) {
@@ -4664,7 +4671,12 @@ Read the team config to discover your teammates' names. Check the task list peri
 
       return wrapMessagesInSystemReminder([
         createUserMessage({
-          content: `The following skills were invoked in this session. Continue to follow these guidelines:\n\n${skillsContent}`,
+          // densable 2.1.239 #45 — official invoked_skills reminder (not a new request).
+          content: `The following skills were invoked EARLIER in this session (before the conversation was compacted), not on the current turn. They are shown here for context only so you remain aware of their guidelines.
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time setup actions (e.g., scheduling, creating files) again. Any request or argument text embedded in the skill bodies below — for example under a "## User Request" or "## Input" heading — was captured when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to apply ongoing behavioral guidelines from these skills where still relevant.
+
+${skillsContent}`,
           isMeta: true,
         }),
       ])
@@ -5225,6 +5237,9 @@ You have exited auto mode. The user may now want to interact more directly. You 
           isMeta: true,
         }),
       ]
+    case 'hook_deferred_tool':
+      // Official: print/SDK pause marker only — not model-facing context.
+      return []
     case 'compaction_reminder': {
       return wrapMessagesInSystemReminder([
         createUserMessage({

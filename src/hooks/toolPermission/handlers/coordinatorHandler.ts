@@ -14,6 +14,8 @@ type CoordinatorPermissionParams = {
   updatedInput: Record<string, unknown> | undefined
   suggestions: PermissionUpdate[] | undefined
   permissionMode: string | undefined
+  /** densable 2.1.235 #12 — ask-side suppress for hook accept-path strip */
+  suppressAlwaysAllowRule?: boolean
 }
 
 /**
@@ -37,6 +39,10 @@ async function handleCoordinatorPermission(
       permissionMode,
       suggestions,
       updatedInput,
+      undefined,
+      {
+        askSuppressesAlwaysAllowRule: params.suppressAlwaysAllowRule === true,
+      },
     )
     // Still-ask after hook rewrite is not a final decision — fall through
     // so the interactive dialog rebuilds with finalInput.

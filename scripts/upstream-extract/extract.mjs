@@ -8,7 +8,7 @@
 
 import { readFileSync, writeFileSync, statSync } from 'node:fs'
 
-const BIN = String.raw`C:\Users\Administrator\AppData\Local\Temp\pkg-latest\package\claude.exe`
+const BIN = String.raw`C:\Users\Administrator\AppData\Local\Temp\official-239\package\claude.exe`
 
 const args = process.argv.slice(2)
 let outFile = null

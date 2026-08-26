@@ -826,7 +826,7 @@ export function useTypeahead({
         const word = value.slice(wordStart, effectiveCursorOffset);
         if (word && isPathLikeToken(word)) {
           latestPathTokenRef.current = word;
-          const pathSuggestions = await getPathCompletions(word, { maxResults: 10 });
+          const pathSuggestions = await getPathCompletions(word, { maxResults: 10, keepDotPrefix: true });
           if (latestPathTokenRef.current !== word) {
             return;
           }

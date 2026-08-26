@@ -48,7 +48,6 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
         isNonInteractiveOrDemo: false,
         isFullscreenAlready: true,
         hasExplicitTuiSetting: true,
-        gbOchreHollow: false,
         seenCount: 99,
       }),
     ).toBe(true)
@@ -58,7 +57,6 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
     expect(
       shouldShowFullscreenUpsell({
         isNonInteractiveOrDemo: true,
-        gbOchreHollow: true,
         seenCount: 0,
         isFullscreenAlready: false,
         hasExplicitTuiSetting: false,
@@ -72,7 +70,6 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
         isNonInteractiveOrDemo: false,
         isFullscreenAlready: true,
         hasExplicitTuiSetting: false,
-        gbOchreHollow: true,
         seenCount: 0,
       }),
     ).toBe(false)
@@ -85,7 +82,6 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
         isFullscreenAlready: false,
         isHardDisabled: true,
         hasExplicitTuiSetting: false,
-        gbOchreHollow: true,
         seenCount: 0,
       }),
     ).toBe(false)
@@ -97,19 +93,6 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
         isNonInteractiveOrDemo: false,
         isFullscreenAlready: false,
         hasExplicitTuiSetting: true,
-        gbOchreHollow: true,
-        seenCount: 0,
-      }),
-    ).toBe(false)
-  })
-
-  test('GB off skips', () => {
-    expect(
-      shouldShowFullscreenUpsell({
-        isNonInteractiveOrDemo: false,
-        isFullscreenAlready: false,
-        hasExplicitTuiSetting: false,
-        gbOchreHollow: false,
         seenCount: 0,
       }),
     ).toBe(false)
@@ -122,20 +105,18 @@ describe('shouldShowFullscreenUpsell Npf densable', () => {
         isFullscreenAlready: false,
         isHardDisabled: false,
         hasExplicitTuiSetting: false,
-        gbOchreHollow: true,
         seenCount: FULLSCREEN_UPSELL_MAX_SEEN,
       }),
     ).toBe(false)
   })
 
-  test('eligible when GB on and under max', () => {
+  test('eligible when under max (no GB required)', () => {
     expect(
       shouldShowFullscreenUpsell({
         isNonInteractiveOrDemo: false,
         isFullscreenAlready: false,
         isHardDisabled: false,
         hasExplicitTuiSetting: false,
-        gbOchreHollow: true,
         seenCount: 0,
       }),
     ).toBe(true)

@@ -61,11 +61,8 @@ import {
   isCseShimEnabled,
   isEnvLessBridgeEnabled,
 } from './bridgeEnabled.js'
-import {
-  archiveBridgeSession,
-  createBridgeSession,
-  updateBridgeSessionTitle,
-} from './createSession.js'
+import { archiveBridgeSession, createBridgeSession } from './createSession.js'
+import { createTitleWriteScheduler } from './titleWriteScheduler.js'
 import { getPersistedBridgeSession } from './bridgeSessionMeta.js'
 import { logBridgeSkip } from './debugUtils.js'
 import { checkEnvLessBridgeMinVersion } from './envLessBridgeConfig.js'
@@ -453,6 +450,11 @@ export async function initReplBridge(
   let userMessageCount = 0
   let lastBridgeSessionId: string | undefined
   let genSeq = 0
+  // densable 2.1.239 #39 `_ts` — coalesce + rate-limit title PATCH.
+  const ownTitles = new Set<string>(title ? [title] : [])
+  const titleWriter = createTitleWriteScheduler({
+    isOwnTitle: (_sessionId, ownTitle) => ownTitles.has(ownTitle),
+  })
   const patch = (
     derived: string,
     bridgeSessionId: string,
@@ -460,13 +462,16 @@ export async function initReplBridge(
   ): void => {
     hasTitle = true
     title = derived
+    ownTitles.add(derived)
     logForDebugging(
       `[bridge:repl] derived title from message ${atCount}: ${derived}`,
     )
-    void updateBridgeSessionTitle(bridgeSessionId, derived, {
-      baseUrl,
-      getAccessToken: getBridgeAccessToken,
-    }).catch(() => {})
+    void titleWriter
+      .update(bridgeSessionId, derived, {
+        baseUrl,
+        getAccessToken: getBridgeAccessToken,
+      })
+      .catch(() => {})
   }
   // Fire-and-forget Haiku generation with post-await guards. Re-checks /rename
   // (sessionStorage), v1 env-lost (lastBridgeSessionId), and same-session

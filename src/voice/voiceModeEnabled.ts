@@ -6,6 +6,35 @@ import {
 } from '../utils/auth.js'
 
 /**
+ * densable 2.1.239 Ldo — user intent is `voice.enabled` (nested) falling
+ * back to legacy flat `voiceEnabled`. Changelog #31: setting the nested
+ * key must hide the /voice startup tip.
+ */
+export function isVoiceSettingEnabled(settings: {
+  voiceEnabled?: unknown
+  voice?: unknown
+}): boolean {
+  const nested =
+    settings.voice !== null &&
+    typeof settings.voice === 'object' &&
+    'enabled' in settings.voice
+      ? (settings.voice as { enabled?: unknown }).enabled
+      : undefined
+  return (nested ?? settings.voiceEnabled) === true
+}
+
+/** densable /voice write: spread existing `voice` object then set `enabled`. */
+export function withVoiceEnabledFlag(
+  voice: unknown,
+  enabled: boolean,
+): { enabled: boolean } {
+  return {
+    ...(voice !== null && typeof voice === 'object' ? voice : {}),
+    enabled,
+  }
+}
+
+/**
  * Kill-switch check for voice mode. Returns true unless the
  * `tengu_amber_quartz_disabled` GrowthBook flag is flipped on (emergency
  * off). Default `false` means a missing/stale disk cache reads as "not

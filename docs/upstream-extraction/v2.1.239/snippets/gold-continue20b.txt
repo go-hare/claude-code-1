@@ -1,0 +1,121 @@
+#### "function HG(" [305142102]
+--- 305142102 ---
+contentNotInModelContext}function P1e(e,t){if(e.contentHash!==void 0)return e.contentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this.cache=new Mx({max:e,maxSize:t,sizeCalculation:(r)=>Math.max(1,Buffer.byteLength(r.content))})}g
+#### "function L7(" [305142161]
+--- 305142161 ---
+!==void 0)return e.contentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this.cache=new Mx({max:e,maxSize:t,sizeCalculation:(r)=>Math.max(1,Buffer.byteLength(r.content))})}get(e){return this.cache.get(Gzn.normalize(e))}set(e,t){let 
+#### "HG(e)" [305142111,305142183,305146389,318708949]
+--- 305142111 ---
+tInModelContext}function P1e(e,t){if(e.contentHash!==void 0)return e.contentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this.cache=new Mx({max:e,maxSize:t,sizeCalculation:(r)=>Math.max(1,Buffer.byteLength(r.content))})}get(e){ret
+--- 305142183 ---
+tentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this.cache=new Mx({max:e,maxSize:t,sizeCalculation:(r)=>Math.max(1,Buffer.byteLength(r.content))})}get(e){return this.cache.get(Gzn.normalize(e))}set(e,t){let r=Gzn.normalize(e),n=t
+--- 305146389 ---
+trimEnd().replace(/"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'/g,"");if(/^#|[ \t]#/.test(i))t.push(n)}function bf(e,t,r){let n=e;e=HG(e);let o=e.match(Dme);if(!o)return{frontmatter:{},content:n};let i=o[1]||"",s=e.slice(o[0].length),a=(h)=>h,l={},c,u;if(r?.quoteLossyValues){let h=e.match(xsr),g=h?.[1]??"";if(i.trim()!==""||g.trim()!==""){if(h===null||g.trim()!==i.trim())u='the closing --- is ambiguous (a val
+#### "L7(e)" [305142170]
+--- 305142170 ---
+)return e.contentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this.cache=new Mx({max:e,maxSize:t,sizeCalculation:(r)=>Math.max(1,Buffer.byteLength(r.content))})}get(e){return this.cache.get(Gzn.normalize(e))}set(e,t){let r=Gzn.nor
+#### "FRONTMATTER" [325982019]
+--- 325982019 ---
+rors you actually encountered.>\r
+\r
+- **<exact error message or symptom>**: <cause>. <fix>.\r
+\r
+<---\r
+\r
+NOTE ON THE FRONTMATTER ABOVE:\r
+- Replace <unit-name> in both \`name:\` and \`description:\`. The \`name:\`\r
+  becomes the slash command (/run-<unit-name>) and must match the\r
+  directory name.\r
+- The \`description:\` is what Claude scans to decide whether to load this\r
+  skill automati
+#### "^---" [173946272,239011224,239011296,262749240,262749296,269046049,277652792,283491560,286750056,305150100,305150135,311810595,311810614,314480920,316663645]
+--- 173946272 ---
+................................................................................................................	...	...^---\s*\n...............	...@...: unterminated frontmatter (opening "---" with no closing "---")........	...#...prose .md: unterminated frontmatter.............
+.......................	...............	.......: invalid YAML frontmatter: ............	...#...prose .md: invalid YAML 
+--- 239011224 ---
+................................................	.......[{}[\]*&#!|>%@`]|: .....................................	.......^---\s*\n([\s\S]*?)---\s*\n?....................................	...0...^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)........	.......bash............	...
+...powershell...................... ...............(.......................	.......bash............	...
+...powershell......
+--- 239011296 ---
+|: .....................................	.......^---\s*\n([\s\S]*?)---\s*\n?....................................	...0...^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)........	.......bash............	...
+...powershell...................... ...............(.......................	.......bash............	...
+...powershell......
+.........................................p.......P,......P,......P,....
+#### "function parseFrontmatter" []
+#### "---\s*\n" [173946273,239011225,239011243,305150101,305150119,318708986]
+--- 173946273 ---
+...............................................................................................................	...	...^---\s*\n...............	...@...: unterminated frontmatter (opening "---" with no closing "---")........	...#...prose .md: unterminated frontmatter.............
+.......................	...............	.......: invalid YAML frontmatter: ............	...#...prose .md: invalid YAML f
+--- 239011225 ---
+...............................................	.......[{}[\]*&#!|>%@`]|: .....................................	.......^---\s*\n([\s\S]*?)---\s*\n?....................................	...0...^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)........	.......bash............	...
+...powershell...................... ...............(.......................	.......bash............	...
+...powershell......
+
+--- 239011243 ---
+.............................	.......[{}[\]*&#!|>%@`]|: .....................................	.......^---\s*\n([\s\S]*?)---\s*\n?....................................	...0...^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)........	.......bash............	...
+...powershell...................... ...............(.......................	.......bash............	...
+...powershell......
+..................
+#### "charCodeAt(0)===65279?e.slice(1)" [305142126]
+--- 305142126 ---
+}function P1e(e,t){if(e.contentHash!==void 0)return e.contentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this.cache=new Mx({max:e,maxSize:t,sizeCalculation:(r)=>Math.max(1,Buffer.byteLength(r.content))})}get(e){return this.cache.
+#### "function GCe(e,t)" [303699654]
+--- 303699654 ---
+").trim().toLowerCase().replace(/\s+/g,"-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:
+#### "kind:"main"" [303699705,313589123,313598375]
+--- 303699705 ---
+n WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=
+--- 313589123 ---
+Vu(t),a=Hy(n.teamContext),l=null;if(iBr(t))return{kind:"not-found",closest:[]};if(typeof r==="string"){if(t===dL)return{kind:"main"};let C=n.teamContext?.teammates??{},x=Object.entries(C).find(([,F])=>F.name===t),I=(x?void 0:n.agentNameRegistry.get(t))??_re(t);if(I)return rTl(n,I,t);if(x)return{kind:"mailbox",recipientName:t,memberAgentId:x[0],memberIdentitySource:"team-context"};let M=WCe(t);if(a
+--- 313598375 ---
+atus,agentName:r}}return{kind:"agent-evicted",agentId:t,agentName:r}}function rso(e,t){switch(e.kind){case"main":return{kind:"main"};case"teammate":return{kind:"mailbox",recipientName:e.name,memberAgentId:e.id,memberIdentitySource:e.where==="in-process"?"team-context":"roster"};case"subagent":return rTl(t,Hd(e.id),e.name);case"session":return{kind:"local-session",sock:e.sock,displayName:e.name};ca
+#### "kind:"teammate"" [303699876,303700241,326194543]
+--- 303699876 ---
+ck:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.type==="local_agent"?h:void 0;r.push({name:f,id:m,kind:"subagent",where:"in-process",lastActive:g?.startTime,sock:void 0})}for(let f of t.teamFile?.members
+--- 303700241 ---
+})}for(let f of t.teamFile?.members??[]){if(n.has(f.agentId))continue;n.add(f.agentId),r.push({name:f.name,id:f.agentId,kind:"teammate",where:"this-machine",lastActive:void 0,sock:void 0})}for(let f of t.sessions)r.push({name:f.name||nWd.basename(f.cwd),id:f.sock,kind:"session",where:"this-machine",lastActive:f.statusUpdatedAt,sock:f.sock});let o=new Map;for(let f of t.sessions)if(f.bridgeSessionI
+--- 326194543 ---
+.promise}clear(){this.verdicts.clear()}}var yLs=()=>{};function DHy(){if(gle())return{kind:"in-process"};if(Qb())return{kind:"teammate",agentName:JR()};return{kind:"session"}}function _Ls(e,t){switch(e.kind){case"in-process":return;case"teammate":return e.agentName;case"session":{if(cQ(t.teamContext)){if(!ror(t.teamContext))return;let{leadAgentId:r,teammates:n}=t.teamContext;return n[r]?.name||"te
+#### "kind:"cloud"" []
+#### "teammates on your team" [306241216]
+--- 306241216 ---
+HOp="ListPeers",gjv;var GGe=A(()=>{UG();gjv=`Lists agents you can ${Jm} to \u2014 in-process subagents you spawned, the teammates on your team, other local Claude sessions on this machine, your Claude sessions running in the cloud (when this session has cloud access; a cloud session receives your message but cannot message any session back yet \u2014 do not ask it to reply, read its answer in its 
+#### "V1w" [92647920,98314920,314383618,314385487,335820356]
+--- 92647920 ---
+xVu+KQZ2aKrr+InUlYrAoos
+FCT5v0ICvybIxo/gbjh9Uy3l7ZizlWNof/k19N+IxWA1ksB8aRxhlRbQ694Lrz4EEEVlWFA4
+r0jyWbYW8jwNkALGcC4BrTwV1wIDAQABo0IwQDAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB
+/wQEAwIBBjAdBgNVHQ4EFgQU7edvdlq/YOxJW8ald7tyFnGbxD0wDQYJKoZIhvcNAQELBQAD
+ggIBAJHfgD9DCX5xwvfrs4iP4VGyvD11+ShdyLyZm3tdquXK4Qr36LLTn91nMX66AarHakE7
+kNQIXLJgapDwyM4DYvmL7ftuKtwGTTwpD4kWilhMSA/ohGHqPHKmd+RCroijQ1h5fq7KpVMN
+qT1wvSAZYaR
+--- 98314920 ---
+WCv.............	.......njg.............	.......Cqr.............	.......ygf.............	.......oau.............	.......V1w.............	.......cGb.............	.......BSy.............	.......cma.............	.......ju..............	.......Qf_.............	.......f$i.............	.......Xlh.............	......._$..............	.......xeb.............	.......Lbs.............	.......FqE.............
+--- 314383618 ---
+1w=new Set([8205,65038,65039])});var UHm={};Et(UHm,{buildSubagentExtras:()=>SRl,describeSelf:()=>DHm,formatForModel:()=>V1w,formatForUser:()=>wRl,listAllPeers:()=>vRl});async function vRl(e,t,r){let n=!1,o=rg();if(o)await Ven({refresh:!0,credentials:r});let i=o?fWi(e,r):Promise.resolve({rows:[],failed:!1,identityKey:null}),s=Promise.resolve({peers:[],warnings:[]}),a=!1,[l,c,u,d]=await Promise.all(
+#### "function V1w" [314385478]
+--- 314385478 ---
+Context===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(
+
+==== GCe 303699654 ====
+
+-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"in-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.type==="local_agent"?h:void 0;r.push({name:f,id:m,kind:"subagent",where:"in-process",lastActive:g?.startTime,sock:void 0})}for(let f of t.teamFile?.members??[]){if(n.has(f.agentId))continue;n.add(f.agentId),r.push({name:f.name,id:f.agentId,kind:"teammate",where:"this-machine",lastActive:void 0,sock:void 0})}for(let f of t.sessions)r.push({name:f.name||nWd.basename(f.cwd),id:f.sock,kind:"session",where:"this-machine",lastActive:f.statusUpdatedAt,sock:f.sock});let o=new Map;for(let f of t.sessions)if(f.bridgeSessionId!==void 0){let m=Mf(f.bridgeSessionId);o.set(m,[...o.get(m)??[],f.sock])}let i=[];for(let f of t.cloud??[]){if(OFn(t.sessions,f.id)){i.push({rawName:f.title||"untitled",socks:o.get(Mf(f.id))??[]});continue}r.push({name:f.title||"untitled",id:f.id,kind:"cloud-session",...nti(f.title)&&{derivedName:!0},where:f.remoteControl?"remote":"cloud",lastActive:f.lastActive,sock:void 0})}let s=new Set((t.cloud??[]).map((f)=>Mf(f.id))),a=aBr(t.sessions);for(let f of t.bridge??[]){let m=Mf(f.id);if(s.has(m))continue;if(a.has(m)){i.push({rawName:f.title||"untitled",socks:o.get(m)??[]});continue}let h=Date.parse(f.updated_at);r.push({name:f.title||"untitled",id:f.id,kind:"bridge-session",...nti(f.title)&&{derivedName:!0},where:PFn(f)?"cloud":"remote",lastActive:Number.isNaN(h)?void 0:h,sock:void 0})}let l=r.flatMap((f)=>{let m=ALe(f.name);return m!==null&&__a(m)?[{...f,name:m}]:[]}),c=new Set,u=pYb(l.filter((f)=>{if(f.kind!=="session")return!0;let m=`${Vu(f.name)}\x00${f.id}`;if(c.has(m))return!1;return c.add(m),!0})),d=new Map;for(let f of u){let m=Vu(f.name),h=d.get(m);if(h)h.push(f);else d.set(m,[f])}let p=new Map;for(let{rawName:f,socks:m}of i){let h=ALe(f);if(h===null||!__a(h))continue;let g=Vu(h),y=p.get(g)??new Set;for(let _ of m)y.add(_);p.set(g,y)}return{candidates:u,byName:d,remoteNamesClaimedLocally:p}}function Jnr(e,t,r){let n=e.get(t);if(!n||n.length===0)return;let o=r===void 0?[]:n.filter((a)=>a.name===r),s=(o.length>0?o:n)[0];if(s.where==="in-process")return{kind:"one",candidate:s};return{kind:"ambiguous"}}function VCe(e){return`${e.name} [${e.ref}]`}function ati(e){return e==="remote"?`${oti(e)} (Remote Control)`:oti(e)}function oti(e){switch(e){case"in-process":return"in this session";case"cloud":return"in the cloud";case"remote":return"on another machine";case"this-machine":return"on this machine"}}function DFn(e,t){let r=e.kind==="main"?"main conversation":e.kind==="session"||e.kind==="cloud-session"||e.kind==="bridge-session"?"Claude session":e.kind,n=ati(e.where),o=e.lastActive===void 0?"":`, ${e.kind==="subagent"?"started":"active"} ${Bs(Math.max(0,t-e.lastActive),{mostSignificantOnly:!0})} ago`;return`${VCe(e)} \u2014 ${r}, ${n}${o}`}function ALe(e){if(typeof e!=="string")return null;return[...e.replace(/[\p{Cc}\p{Cf}]/gu,(r)=>/\s/.test(r)?r:"").replace(/\s+/g," ").trim()].slice(0,dYb).join("").trim()||"untitled session"}function lti(e,t){return e.find((r)=>r.name===t)??e.find((r)=>ALe(r.name)===t)}function TLe(e){let t=ALe(e);return t!==null&&!iBr(t)&&ELe(t)?t:null}function MFn(e){let t=ALe(e);return t!==null&&__a(t)&&Vu(t)!==dL?t:null}function __a(e){return!iBr(e)&&ELe(e)&&!e.
+
+==== HG 305142126 ====
+
+rfaced:0,listed:0}});function Zbp(e){return Bun.hash(e).toString(36)}function nyt(e){if((e.offset??1)>1||e.isPartialView)return!1;if(e.limit===void 0)return!0;return e.content!==""&&Pd(e.content,`
+`)+1<e.limit}function $Qe(e){return e!==void 0&&nyt(e)&&!e.contentNotInModelContext}function P1e(e,t){if(e.contentHash!==void 0)return e.contentHash===Zbp(t);return e.content===t}function HG(e){return e.charCodeAt(0)===65279?e.slice(1):e}function L7(e){return HG(e).replaceAll(`\r
+`,`
+`)}function wui(e,t){return P1e(e,L7(t))}class Qbp{cache;constructor(e,t){this.cache=new Mx({max:e,maxSize:t,sizeCalculation:(r)=>Math.max(1,Buffer.byteLength(r.content))})}get(e){return this.cache.get(Gzn.normalize(e))}set(e,t){let r=Gzn.normalize(e),n=this.cache.get(r),o=t.keepContent??n?.keepContent,i=t.contentHash??Zbp(t.content),s=t.contentLength??t.content.length,a=o&&t.content===""&&i===n?.contentHash&&n.content?n.content:t.content,l=o||Buffer.byteLength(a)<=yTv?a:"";return this.cache.set(r,{...t,keepContent:o,contentHash:i,contentLength:s,content:l}),this}has(e){return this.cache.has(Gzn.normalize(e))}delete(e){return this.cache.delete(Gzn.normalize(e))}clear(){this.cache.clear()}get size(){return this.cache.size}get max(){return this.cache.max}get maxSize(){return this.cache.maxSize}get calculatedSize(){return this.cache.calculatedSize}keys(){return this.cache.keys()}entries(){return this.cache.entries()}dump(){return this.cache.dump()}load(e){this.cache.load(e)}}function PG(e,t=gTv){return new Qbp(e,t)}function Vzn(e){return Object.fromEntries(e.entries())}function _Wr(e){return Array.from(e.keys())}function aGe(e,t){let r=PG(e.max,e.maxSize),n=e.dump();if(t?.stripSeededFromContext){for(let o of n)if(o[1].value?.seededFromContext)o[1].value={...o[1].value,seededFromContext:!1}}return r.load(n),r}function Eui(e,t){let r=aGe(e);for(let[n,o]of t.entries()){let i=r.get(n);if(!i||o.timestamp>i.timestamp)r.set(n,o)}return r}var Gzn,pq=5000,gTv=26214400,yTv=4096;var cP=A(()=>{fOe();Lr();Gzn=require("path")});function dHa(e){return e.replace(/[-_]/g,"").toLowerCase()}function Aui(e){return new Map(e.map((t)=>[dHa(t),t]))}var pHa=()=>{};var _Tv,bKC,bTv,vKC;var Tui=A(()=>{qe();pHa();_Tv=["name","description","model","allowed-tools","argument-hint","arguments","disable-model-invocation","user-invocable","effort","shell","version","when_to_use","paths","hooks","context","agent","created_by","improved_by","mcpServers","lspServers","agents","outputStyles","themes","workflows","channels","monitors","settings","experimental","commands","skills","dependencies","userConfig","metadata","displayName","defaultEnabled","fallback","evals","author","homepage","repository","license","keywords","compatibility","tools","disallowedTools","color","permissionMode","maxTurns","initialPrompt","memory","background","isolation","observer","observerMessage","observeSubagents","keep-coding-instruction

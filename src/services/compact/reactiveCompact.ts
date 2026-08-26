@@ -21,7 +21,10 @@ import { truncateToWidth } from '../../utils/truncate.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { hasExactErrorMessage, isAbortError } from '../../utils/errors.js'
 
-export const isReactiveOnlyMode: () => boolean = () => false
+/** densable raccoon — same GB as autoCompact / TokenWarning / analyzeContext. */
+export function isReactiveOnlyMode(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_cobalt_raccoon', false)
+}
 
 /**
  * densable yAt / Plb — side-channel querySources that must not run reactive

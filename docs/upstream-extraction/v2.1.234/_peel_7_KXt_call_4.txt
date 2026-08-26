@@ -1,0 +1,2 @@
+offset=313330691
+essionState.reteeWaitingOnUser();this.republishSurvivingPendingAction()}}}createSandboxAskCallback(e,t){let r=new Map,n=async(o)=>{try{let i={type:"addRules",rules:[{toolName:Xf,ruleContent:`domain:${KXt(o)}`}],behavior:"allow",destination:"localSettings"},s=M$c(dOe(fgt)),a;try{a=await this.sendRequest({subtype:"can_use_tool",tool_name:fgt,display_name:dOe(fgt),input:{host:o},permission_suggestions:[i],tool_use_id:Rdn.randomUUID(),description:`Al

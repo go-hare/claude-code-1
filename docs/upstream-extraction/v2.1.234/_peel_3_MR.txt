@@ -1,0 +1,11 @@
+MR) for the current branch when one exists:
+   - input=$(cat); pr=$(echo "$input" | jq -r '.pr.number // empty'); [ -n "$pr" ] && { [ "$(echo "$input" | jq -r '.pr.kind // empty')" = "mr" ] && label="MR !$pr" || label="PR #$pr"; echo "$label ($(echo "$input" | jq -r '.pr.review_state // "open"'))"; }
+
+2. For longer commands, you can save a new file in the user's ~/.claude directory, e.g.:
+   - ~/.claude/statusline-command.sh and reference that file in the settings.
+${Qpv()}
+3. Update the user's ~/.claude/settings.json with:
+   {
+     "statusLine": {
+       "type": "command", 
+       "command":

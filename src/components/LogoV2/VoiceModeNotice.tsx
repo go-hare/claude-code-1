@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
-import { isVoiceModeEnabled } from '../../voice/voiceModeEnabled.js';
+import { isVoiceModeEnabled, isVoiceSettingEnabled } from '../../voice/voiceModeEnabled.js';
 import { AnimatedAsterisk } from './AnimatedAsterisk.js';
 import { shouldShowOpus1mMergeNotice } from './Opus1mMergeNotice.js';
 
@@ -21,11 +21,11 @@ function VoiceModeNoticeInner(): React.ReactNode {
   // at the top of the message list and enters scrollback quickly; any
   // re-render after it's in scrollback would force a full terminal reset.
   // If the user runs /voice this session, the notice stays visible; it won't
-  // show next session since voiceEnabled will be true on disk.
+  // show next session since voice.enabled / voiceEnabled will be true on disk.
   const [show] = useState(
     () =>
       isVoiceModeEnabled() &&
-      getInitialSettings().voiceEnabled !== true &&
+      !isVoiceSettingEnabled(getInitialSettings()) &&
       (getGlobalConfig().voiceNoticeSeenCount ?? 0) < MAX_SHOW_COUNT &&
       !shouldShowOpus1mMergeNotice(),
   );

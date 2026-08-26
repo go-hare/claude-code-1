@@ -1,0 +1,3 @@
+OFFSET=288413376
+
+z_=class z_ extends qs{constructor(e,t=null,r=null,n=null){super(e);this.statusCode=t,this.body=r,this.requestId=n}}});function r2e(){return Math.floor(Date.now()/1000)}class jqt{constructor(e,t){this.cached=null,this.pendingRefresh=null,this.nextForce=!1,this.lastAdvisoryError=0,this.provider=e,this.onAdvisoryRefreshError=t}async getToken(){let e=this.nextForce;this.nextForce=!1;let t=this.cached;if(e||t==null)return(await this.refresh(e)).token;if(t.expiresAt==null)return t.token;let r=t.expiresAt-r2e();if(r>r8c)return t.token;if(r>N0t)return this.backgroundRefresh(),t.token;return(await thi

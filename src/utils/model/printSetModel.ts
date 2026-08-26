@@ -7,6 +7,7 @@
 import { has1mContext } from '../context.js'
 import { isModelAlias, isModelFamilyAlias } from './aliases.js'
 import {
+  getDefaultFableModel,
   getDefaultHaikuModel,
   getDefaultMainLoopModel,
   getDefaultOpusModel,
@@ -140,8 +141,10 @@ function suggestClosestModelId(input: string): { suggestion?: string } {
     'sonnet',
     'opus',
     'haiku',
+    'fable',
     'best',
     'opusplan',
+    'fable[1m]',
   ] as const) {
     candidates.add(alias)
   }
@@ -208,7 +211,9 @@ export function stepFamilyAliasToAllowed(model: string): string | null {
       ? getDefaultOpusModel()
       : family === 'sonnet'
         ? getDefaultSonnetModel()
-        : getDefaultHaikuModel()
+        : family === 'fable'
+          ? getDefaultFableModel()
+          : getDefaultHaikuModel()
 
   if (!isModelAllowed(candidate)) return null
 

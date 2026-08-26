@@ -1,0 +1,77 @@
+
+==== "[\"sonnet\",\"opus\",\"haiku\",\"fable\"" hits=6 ====
+@302739186:
+aude-sonnet-4-0","claude-sonnet-4-5","claude-sonnet-4-6","claude-sonnet-5"],qOe=["sonnet","opus","haiku","fable","best","sonnet[1m]","opus[1m]","fable[1m]","opusplan"],r1n=["sonnet","opus","haiku","fable"]});function f$(e){return qOe.includes(e)}function Ya(e){return e.replace(/\[1m\]$/i,"")}function vrr(e,t){return Ya(e).toLowerCase()===Ya(t).toLowerCase()}function fd(e){return e.replace(/\[(1|2)m\]/gi,"")}function r7(e){return r1n.inc
+
+@302739278:
+pus","haiku","fable","best","sonnet[1m]","opus[1m]","fable[1m]","opusplan"],r1n=["sonnet","opus","haiku","fable"]});function f$(e){return qOe.includes(e)}function Ya(e){return e.replace(/\[1m\]$/i,"")}function vrr(e,t){return Ya(e).toLowerCase()===Ya(t).toLowerCase()}function fd(e){return e.replace(/\[(1|2)m\]/gi,"")}function r7(e){return r1n.includes(e)}var D9o="claude-mythos-preview";var fb=A(()=>{P9o()});function ala(){return{validat
+
+@312945958:
+ional().describe("The type of specialized agent to use for this task"),model:Or(["sonnet","opus","haiku","fable"]).optional().describe(`Optional model override for this agent. Takes precedence over the agent definition's model frontmatter. If omitted, uses the agent definition's model, or inherits from the parent. Ignored for subagent_type: "fork" \u2014 forks always inherit the parent model.`),run_in_background:Ut().optional().describe
+
+@318468510:
+();uh();sw();_z();lte();uye();wYl();V2=P(Lt(),1),Em=P(Ae(),1),Ayo=P(Me(),1);Que=["sonnet","opus","haiku","fable"],aVt={sonnet:"Sonnet",opus:"Opus",haiku:"Haiku",fable:"Fable"},LMh={sonnet:"ANTHROPIC_DEFAULT_SONNET_MODEL",opus:"ANTHROPIC_DEFAULT_OPUS_MODEL",haiku:"ANTHROPIC_DEFAULT_HAIKU_MODEL",fable:"ANTHROPIC_DEFAULT_FABLE_MODEL"};qss={auth:"auth failed",permission:"no InvokeModel permission",model:"not enabled in this account",network
+
+
+==== "[\"sonnet\",\"opus\",\"haiku\"]" hits=0 ====
+
+==== "fable[1m]" hits=8 ====
+@118016104:
+................................string..................fable...................fable[1m]...............2...................%....................@.$.I...@.U.F....pJ.@0'.@p..F...@0U.F.....U..0..@ ..F.....3...;..0=.@...@...L...I.4...4.....@pT.L...F.4...L.......+...+.@.M.L...@.5.....@`=..`4........................'...1...y...{...................................H........................OY.....................@%..............................
+
+@118127104:
+.i...... ...............(...............................fable...................fable[1m]........................................@...@.<..0=.@ .................)...........................................&.C.s.........C.....2.C...C......H..H........................w.......................v......h.......................................@.U.....................................................................................................
+
+@118128000:
+........X...............P...............................fable...................fable[1m]...................................................H...(?:^|[./])claude-fable-5(?:[-@]\d{8})?(?:-v\d+(?::\d+)?)?(?:\[[12]m\])?$.................................@...@.$K(.....L.@p4P............................................MV.....@.............C.....T.....C.U.....C...C......H..H.......................@.......................(.......h...............
+
+@225593040:
+best....................sonnet[1m]......................opus[1m]................fable[1m].......................opusplan................................................................................................................................................................................sonnet..................opus....................haiku...................fable...................best....................sonnet[1m]..............
+
+
+==== "getDefaultFable" hits=2 ====
+@106541024:
+ult.............I.3.&...getClaudeAiUserDefaultModelDescription..................getDefaultFableModel..............3.....getDefaultHaikuModel....................getDefaultMainLoopModel...........3.....getDefaultMainLoopModelSetting..................getDefaultOpusModel.....................getDefaultSonnetModel...................getEnforcedDefaultModel.................getEnvDefaultModel................3.....getExternalClassifierDefault....
+
+@303269895:
+ClassifierSonnet5Default:()=>cWb,getClaudeAiUserDefaultModelDescription:()=>AZo,getDefaultFableModel:()=>XNn,getDefaultHaikuModel:()=>mht,getDefaultMainLoopModel:()=>GS,getDefaultMainLoopModelSetting:()=>q8,getDefaultOpusModel:()=>BC,getDefaultSonnetModel:()=>GH,getEnforcedDefaultModel:()=>EZo,getEnvDefaultModel:()=>_Ot,getExternalClassifierDefault:()=>vma,getFableDeclineFallbackModel:()=>fZe,getMainLoopModel:()=>zi,getMarketingNameForM
+
+
+==== "ANTHROPIC_DEFAULT_FABLE_MODEL" hits=8 ====
+@106504320:
+N..................."...ANTHROPIC_CUSTOM_MODEL_OPTION_NAME2..............d2.....ANTHROPIC_DEFAULT_FABLE_MODEL............m..)...ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTIONe2.............I..."...ANTHROPIC_DEFAULT_FABLE_MODEL_NAME......................ANTHROPIC_DEFAULT_HAIKU_MODEL...............)...ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION..................."...ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME...............[......ANTHROPIC_DEFAULT_MODEL.
+
+@106504368:
+PTION_NAME2..............d2.....ANTHROPIC_DEFAULT_FABLE_MODEL............m..)...ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTIONe2.............I..."...ANTHROPIC_DEFAULT_FABLE_MODEL_NAME......................ANTHROPIC_DEFAULT_HAIKU_MODEL...............)...ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION..................."...ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME...............[......ANTHROPIC_DEFAULT_MODEL.................ANTHROPIC_DEFAULT_OPUS_MODEL....
+
+@106504432:
+.........m..)...ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTIONe2.............I..."...ANTHROPIC_DEFAULT_FABLE_MODEL_NAME......................ANTHROPIC_DEFAULT_HAIKU_MODEL...............)...ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION..................."...ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME...............[......ANTHROPIC_DEFAULT_MODEL.................ANTHROPIC_DEFAULT_OPUS_MODEL................(...ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION........
+
+@163157532:
+............................To enable automatic fallback on this provider, set `ANTHROPIC_DEFAULT_FABLE_MODEL` to your Fable 5 model ID and `ANTHROPIC_DEFAULT_OPUS_MODEL` to your Opus 4.8 model ID................................................................................P.$.........FS......0.../...D.......E...<............H..H........................G+......................G+.....h........................................j..........
+
+
+==== "case\"fable\"" hits=3 ====
+@303289713:
+){case"opus":return dZe(t);case"sonnet":return gZo(t);case"haiku":return Tma(t);case"fable":return Ema(t);case"opusplan":return gZo(t);case"best":{let r=hZo[PFd()];return r!==void 0?r.builtinDefault(t):dZe(t)}default:return kma(e)?dZe(t):null}}function Rma(){let e=NFd();if(EZo(e.setting,e.envFamily,e.concreteBaseline)!==null)return!0;return wZo(e.setting)!==null}function GS(){return bs(q8())}function TWe(){return V.CLAUDE_CODE_NO_MODEL_
+
+@303294452:
+{let t=e.trim(),r=t.toLowerCase(),n=H0(r),o=n?Ya(r).trim():r;if(f$(o))switch(o){case"fable":{let i=XNn();return m$(i+(n&&!UV()&&!H0(i)?"[1m]":""))}case"opusplan":return n?m$(dne(GH())):GH();case"sonnet":return n?m$(dne(GH())):GH();case"haiku":return n?m$(dne(mht())):mht();case"opus":return n?m$(dne(BC())):BC();case"best":return DFd();default:}if(R_()&&cZe(o)&&ynr())return n?m$(dne(BC())):BC();if(n&&UV()&&dWb(o)&&nj(o))return m$(t.replac
+
+@310378912:
+urn m$(e+"[1m]");return e}function N3f(e,t){let r=$o(t);switch(e.toLowerCase()){case"fable":return r.includes("fable");case"opus":return r.includes("opus");case"sonnet":return r.includes("sonnet");case"haiku":return r.includes("haiku");default:return!1}}var Fjt=A(()=>{Zt();lj();WH();qe();mr();fb();XOe();Li();WV();Bcl();Fs()});function xIe(e){let t=e.replace(/[^A-Za-z0-9._:/@[\]-]/g,"");if(t.length===0)return"(unrecognized model name)";r
+
+
+==== "claude-fable-5" hits=8 ====
+@100911017:
+ences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.............(.u...O.b.j.e.c.t. .a.n.d. .a.r.r.a.y. .p.a.r.a.m.e.t.e.r. .v.a.l.u.e.s. .m.u.s.t. .b.e. .a. .s.i.n.g.l.e. .J.S.O.N. .v.a.l.u.e. ..  .n.e.v.e.r. .w.r.i.t.e. .p.a.r.a.m.e.t.e.r.-.t.a.g. .m.a.r.k.u.p. .i.n.s.i.d.e. .a. .J.S.O.N. .v.a.l.u.e...(...............(.e...W.h.e.n. .y.o.u. .u.s.e. .a. .p.r.o.n.o.u
+
+@112739832:
+............................................i...................................claude-fable-5...................................@...I.....L.................................................n(.....(....n(.)....n(..n(......H..H........................6'......................6'.....h.......................................X.......................................................................................................................
+
+@112747688:
+..............G............................i....................................claude-fable-5........................................0..@ ........;...u.@ .........S....................93...............................................".................Fq(.j...(....q(.)...Rq(.zq(......H..H.......................X7+.....................@7+.....h.......................................h.......................................................
+
+@112759792:
+................firstParty..............................disabled................claude-fable-5..................absent..................That model..................<..............................;...%......pe.@ ..L...B.4..#<..U4...:...U.@ ......@PL.@@..V.......@..D....@.D.@ d.C...@.;.@.D.@ d.C...@.;...D.....E!<S.....RTX....@.<.@pn.L...@Pu.V.....M.@ .......`L.@ ........<.....@PT...w.@ ...............pT.@ ..........@ .........-...G...I...
+

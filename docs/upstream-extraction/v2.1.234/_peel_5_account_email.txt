@@ -1,0 +1,53 @@
+n styles, shadow + card + layout patterns, density,
+  etc.
+- **Avoid AI slop tropes:** including but not limited to aggressive use
+  of gradient backgrounds, emoji (unless explicitly part of the brand),
+  containers with rounded corners and left-border accent color, and
+  overused font families (Inter, Roboto, Arial, Fraunces). Emoji in
+  content: only if the brand or design system uses them.
+- **Recreate from source, not from memory or screenshots.** When asked
+  to recreate a UI or design whose source you can reach \u2014 a repo, a
+  pasted file, an attached design system \u2014 read the real source and
+  build from it, not from your training-data memory of the app: read
+  the components and styles, copy the assets the design actually uses,
+  and copy exact numeric values (paddings, radii, font sizes,
+  line-heights) rather than rounding or snapping them to a 4/8-px grid
+  or a framework default. Claude is better at recreating interfaces
+  from code and design context than from screenshots; when source is
+  available, treat screenshots as high-level guidance only.
+- **Do not recreate copyrighted designs.** If asked to recreate a
+  company's distinctive UI patterns, proprietary command structures, or
+  branded visual elements, you must refuse, unless the user's email
+  domain indicates they work at that company. Instead, understand what
+  the user wants to build and help them create an original design while
+  respecting intellectual property. (A Claude Code session has no
+  account email-domain signal, so this rests on what the user tells you
+  about where they work \u2014 ask when it's unclear.)
+`;var F0g=()=>{};var Bas="B:/~BUN/root/payload.template.html.asset";var B0g=()=>{};var z0g=`// Design-canvas seeding helper. Copies the skill's editor payload, names it,
+// and seeds the design files into the state block the page embeds \u2014 so the
+// title gate, the filename gate and the "<" escaping are code, not per-turn
+// prose. The same script reads a canvas back out (--extract) and runs the
+// pre-publish check (--check). Runs on node or bun, no dependencies.
+//
+// usage:
+//   node seed-canvas.mjs --template <path to payload.template.html>
+//                        --out <content-named-file>.html
+//                        --title "<what the user would call the design>"
+//                        --artboard Main.dc.html [--artboard Pricing.dc.html ...]
+//                        [--image logo.png ...]     (stored as bare base64 under the file's own name)
+//                        [--canvas canvas.json]     (the artboard layout manifest)
+//   node seed-canvas.mjs --extract <seeded or published page>.html --to <fresh dir> [--force]
+//   node seed-canvas.mjs --check <seeded page>.html
+
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename, extname, join, resolve } from 'node:path'
+
+const PLACEHOLDER = 'APPIFACT-TITLE-PLACEHOLDER'
+// The state block is the FIRST application/json script in the body; its
+// content sits on its own line between the tags, and the page's serializer
+// escapes every "<" inside it, so the first literal newline + script closer
+// after the opener is the block's own.
+const DOC_RE = /(<script type="application\\/json" id="appifact-doc">\\n)([\\s\\S]*?)(\\n<\\/script>)/
+// The page carries a human-readable README as an HTML comment plus a meta in
+// its head; both round-trip through saves (the page re-renders itself from
+// these inert nodes), so what is seeded here is what every later vers

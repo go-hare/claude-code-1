@@ -44,7 +44,7 @@ describe('densable 2.1.224 #7 ListAgents wire', () => {
     const p = getListAgentsPrompt()
     expect(p).toContain('Lists agents you can SendMessage to')
     expect(p).toContain(
-      'when Remote Control is connected here) your Remote Control sessions on other machines',
+      "when Remote Control is connected here) your account's other sessions",
     )
     expect(p).not.toContain('only in reply, after it messages you first')
     expect(p).toContain('SendMessage({to: "<name>", message: "..."})')

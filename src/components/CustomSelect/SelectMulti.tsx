@@ -1,12 +1,13 @@
 import figures from 'figures';
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, type ClickEvent } from '@anthropic/ink';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
 import type { OptionWithDescription } from './select.js';
 import { SelectInputOption } from './select-input-option.js';
 import { SelectOption } from './select-option.js';
 import { useMultiSelectState } from './use-multi-select-state.js';
+import { useStrayClickGuard } from './use-stray-click.js';
 
 export type SelectMultiProps<T> = {
   readonly isDisabled?: boolean;
@@ -100,6 +101,22 @@ export function SelectMulti<T>({
   });
 
   const maxIndexWidth = options.length.toString().length;
+  const isStrayClick = useStrayClickGuard();
+  const optionOnClick = (option: OptionWithDescription<T>) => {
+    if (isDisabled || option.disabled === true) {
+      return undefined;
+    }
+    return (event: ClickEvent) => {
+      if (isStrayClick(event)) {
+        return;
+      }
+      if (option.type === 'input') {
+        state.focusOption(option.value);
+      } else {
+        state.toggleValue(option.value);
+      }
+    };
+  };
 
   return (
     <Box flexDirection="column">
@@ -141,6 +158,7 @@ export function SelectMulti<T>({
                   onImagePaste={onImagePaste}
                   pastedContents={pastedContents}
                   onRemoveImage={onRemoveImage}
+                  onClick={optionOnClick(option)}
                 >
                   <Text color={isSelected ? 'success' : undefined}>[{isSelected ? figures.tick : ' '}] </Text>
                 </SelectInputOption>
@@ -156,6 +174,7 @@ export function SelectMulti<T>({
                 shouldShowDownArrow={areMoreOptionsBelow && isLastVisibleOption}
                 shouldShowUpArrow={areMoreOptionsAbove && isFirstVisibleOption}
                 description={option.description}
+                onClick={optionOnClick(option)}
               >
                 {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth)}</Text>}
                 <Text color={isSelected ? 'success' : undefined}>[{isSelected ? figures.tick : ' '}]</Text>

@@ -521,13 +521,15 @@ export async function getAwsSdkProxyRequestHandler(opts?: {
 }
 
 /**
- * densable pYt({url}) — AWS client proxy config:
- * requestHandler + defaultProvider(clientConfig.requestHandler).
- * Returns {} when no proxy / NO_PROXY.
+ * densable NMt/pYt({url, requestTimeoutMs, region}) — AWS client proxy
+ * config: requestHandler + defaultProvider with parentClientConfig.region
+ * (2.1.239 STS / fromIni SSO through HTTPS_PROXY). Returns {} when no
+ * proxy / NO_PROXY.
  */
 export async function getAWSClientProxyConfig(opts?: {
   url?: string
   requestTimeoutMs?: number
+  region?: string
 }): Promise<object> {
   const requestHandler = await getAwsSdkProxyRequestHandler(opts)
   if (!requestHandler) {
@@ -540,6 +542,10 @@ export async function getAWSClientProxyConfig(opts?: {
     requestHandler,
     credentials: defaultProvider({
       clientConfig: { requestHandler },
+      parentClientConfig: {
+        requestHandler,
+        ...(opts?.region !== undefined && { region: opts.region }),
+      },
     }),
   }
 }

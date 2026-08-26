@@ -227,6 +227,14 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // conditionally propagate.
       'ctrl+shift+c': 'selection:copy',
       'cmd+c': 'selection:copy',
+      // densable 2.1.239 #30 — named extend actions so selection:copy
+      // does not swallow Shift+Arrow / Shift+Home/End.
+      'shift+left': 'selection:extendLeft',
+      'shift+right': 'selection:extendRight',
+      'shift+up': 'selection:extendUp',
+      'shift+down': 'selection:extendDown',
+      'shift+home': 'selection:extendLineStart',
+      'shift+end': 'selection:extendLineEnd',
     },
   },
   {

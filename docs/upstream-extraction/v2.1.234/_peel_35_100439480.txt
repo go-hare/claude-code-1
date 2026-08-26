@@ -1,0 +1,5 @@
+OFFSET=100439480
+
+te Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account...p...........I.......Error: You must be logged in to use Remote Control.
+
+Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account..........I.......Remote Control disconnected.............I......./login..............W...R.e.m.o.t.e. .C.o.n.t.r.o.l. .g.o.t. .a.n. .u.n.e.x.p.e.c.t.e.d. .s.e.r.v.e.r. .r.e.s.p.o.n.s.e.

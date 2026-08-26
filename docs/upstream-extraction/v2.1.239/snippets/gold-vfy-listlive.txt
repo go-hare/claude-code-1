@@ -1,0 +1,27 @@
+t(nSe,{MAX_SANE_EPOCH_MS:()=>dmp,SessionRecordsUnreadableError:()=>Fjn,admitDroppedIdsByDestination:()=>cxa,admitReceiptForOutstandingSend:()=>lxa,creditPacerForHeldSend:()=>axa,debitPacerForReleasedS
+end:()=>Ali,findLivePeerBySessionId:()=>hxa,isSaneEpochMs:()=>$jn,isSenderPacingEnabled:()=>nmp,listAllLiveSessions:()=>b1e,listLivePeerSessions:()=>mxa,listRegisteredSessionRecords:()=>fxa,ownMessagi
+ngSocket:()=>EQe,registerOutstandingSend:()=>smp,registeredInboxesOfPids:()=>dxa,registeredLivePeerForSocket:()=>uxa,sendControlToUdsSocket:()=>T4r,sendStampedControlToUdsSocket:()=>Tli,sendToUdsSocke
+t:()=>Njn,unregisterOutstandingSend:()=>amp});function Kbv(e){return qbv.includes(e)?e:void 0}function Xbv(e){return Ybv.includes(e)?e:void 0}function Jbv(e){if(typeof e!=="object"||e===null)return!1;
+let{name:t,until:r}=e;return typeof t==="string"&&$jn(r)}function Zbv(e){if(!Array.isArray(e))return[];return e.filter(Jbv).slice(0,_ti).map(({name:t,until:r})=>({name:So(t,fle),until:r}))}function Qb
+v(){return Ym().outbound.pacer??=Kfp(w4r)}function nmp(){if(V.CLAUDE_CODE_HARBOR_KITE_PACING_OFF)return!1;return!it("tengu_harbor_kite_pacing_off",!1)}function axa(e){omp(e,(t,r)=>t.credit(r))}functio
+n Ali(e){omp(e,(t,r)=>t.debit(r))}function omp(e,t){let r=Ym().outbound.pacer;if(!r)return;let{scheme:n,target:o}=xD(e);if(n!=="uds")return;t(r,lQ(o)??o)}async function Njn(e,t,r,n,o,i,{trackReceipts:
+s=!0}={}){let a=EQe(),l=a?$ht(a):void 0,c=oBr(l,r,t,void 0,Xei(o,l?q1t(l):void 0),i),u=q3e(),d={...u,type:"user",message:{role:"user",content:c},priority:"next",from:l,...(n?.length??0)>0&&{file_attac
+hments:n}},p=lmp(d),m=(l!==void 0||Wt()!=="windows")&&nmp()?Qbv().reserve(lQ(e)??e):evv;if(!m.ok)throw E(`[uds-client] paced: not sending to ${LD(e)} \u2014 ${m.sentInBurst} sent this burst; its inbox
+ rate limit would drop more`),tmp(m.sentInBurst);if(E(`[uds-client] Sending ${t.length} chars to ${LD(e)}`),s)smp(u.msg_id,$ht(e));try{await cmp(e,d,{noFollowSymlink:!0,preflightedJson:p})}catch(h){if
+(A4r(h)){if(m.refund(),s)amp(u.msg_id)}throw h}return{msgId:u.msg_id}}function smp(e,t){let r=Ym().receipts.outstandingSends;if(r.length>=imp)r.shift();r.push({msgId:e,to:t})}function amp(e){let t=Ym(
+).receipts.outstandingSends,r=t.findIndex((n)=>n.msgId===e);if(r!==-1)t.splice(r,1)}function lxa(e,t){if(typeof e!=="string")return;let{outstandingSends:r,awaitingTerminal:n}=Ym().receipts,o=r.findInd
+ex((s)=>s.msgId===e);if(o!==-1){let[s]=r.splice(o,1);if(!s)return;if(t==="held"){if(n.length>=imp)n.shift();n.push(s)}return{destination:s.to,wasHeld:!1}}let i=n.findIndex((s)=>s.msgId===e);if(i!==-1&
+&t!=="held"){let[s]=n.splice(i,1);return s?{destination:s.to,wasHeld:!0}:void 0}return}function cxa(e){let t=new Map;if(e.length===0)return t;let r=new Set(e),{outstandingSends:n,awaitingTerminal:o}=Y
+m().receipts;for(let i of[n,o]){let s=i===o;for(let a=0;a<i.length;){let l=i[a];if(r.delete(l.msgId)){i.splice(a,1);let c=t.get(l.to)??{dropped:0,wereHeld:0};if(c.dropped++,s)c.wereHeld++;t.set(l.to,c
+)}else a++}}return t}function T4r(e,t,r={}){return Tli(e,t,q3e(),r).then(()=>{})}async function Tli(e,t,r=q3e(),{expectPeerPid:n}={}){return E(`[uds-client] Sending control:${t.action} to ${LD(e)}`),a
+wait cmp(e,{type:"control",...t,...r},{noFollowSymlink:!0,...n!==void 0&&{expectPeerPid:n}}),{msgId:r.msg_id}}async function uxa(e){let t=lQ(e);if(t===void 0)return;for(let r of await k4r()){if(!r.soc
+k||lQ(r.sock)!==t)continue;if(await pxa(r))return{pid:r.pid,features:r.peerFeatures}}return}async function dxa(e){let t=Gn(e),r=new Map;if(t.length===0)return r;let n=kLe(),i=(await Promise.all(t.map(
+(a)=>pmp(n,`${a}.json`)))).filter((a)=>a!==null&&Boolean(a.sock)),s=await Promise.all(i.map((a)=>pxa(a)));return i.forEach((a,l)=>{if(s[l]&&a.sock)r.set(a.pid,a.sock)}),r}async function pxa(e){let t=e
+.procStartFt??e.procStart;if(t===void 0||b7(e.pid))return!1;return await cBr(e.pid,t)===!0}function lmp(e){let t=He(e),r=HWd+t.length+1;if(r>S4r)throw Qfp(r,S4r);return t}async function rvv(e){let t=l
+Q(e);if(t===void 0)return!1;for(let r of await k4r()){if(!r.sock||lQ(r.sock)!==t)continue;if(b7(r.pid))continue;if((r.procStartFt??r.procStart)!==void 0){if(await pxa(r))return!0;continue}if(qS(r.pid)
+)return!0}return!1}async function cmp(e,t,{noFollowSymlink:r=!1,expectPeerPid:n,preflightedJson:o}={}){let i=o??lmp(t);if(!ELe(e))throw new _1e("non-local",`Refusing to connect to non-local IPC path: 
+${e}`);let s=mti(),a=await IWd(e,{requireLiveOwner:s}),l=a.kind==="token"?a.token:void 0;if(s&&a.kind!=="token"){if(!(a.kind==="no-key"&&await rvv(e)))throw new Sli(a.kind,`No running session has regi
+stered an inbox at ${e} (${Jfp}: ${a.kind}) \u2014 refusing to send to an unvouched pipe`);l=void 0}let c=l!==void 0?H_a(l):"";if(r&&!(Wt()==="windows"&&jWe(e)!==void 0)){let d;try{d=(await Y1t.lstat(
+e)).isSymbolicLink()}catch(p){if(lr(p))throw p;throw E(`[uds-client] reply target unvettable: ${dt(p)??"lstat failed"}`),new _1e("unvettable","Refusing to send: cannot vet reply target")}if(d)throw ne
+w _1e("symlink","Refusing to send: reply target is a symlink")}let u=c+i+`
+`;return new Promise((d,p)=>{let f=sxa.connect({path:e}),m=!1;f.setTimeout(5000,()=>{m=!0,f.destroy(),p(Error(`Timed out send

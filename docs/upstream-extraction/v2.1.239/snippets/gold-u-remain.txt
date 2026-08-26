@@ -1,0 +1,163 @@
+#### "queuedCommands" count=10 [176918328,320307255,320307668,320307808,320317698,322377886]
+--- 176918328 ---
+....................................T.....................8._......................4.......................].......................HK.....................................................................@.......................H...............	.......queuedCommands..........	......pendingAgents...........	.......pendingWorkflows.....................V,.:...Z...:...[....V,.$W,......D..H...............................................................................................@............................................................... ................A.......q..............................................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................8...........H...................................................................................................................................................0...............(.......................................................................................w..................................H./......H.&.................................F-......Q..%....................	.....
+......i.. ...........
+--- 320307255 ---
+rking"}function Zat(e){return bO(e)&&e.type!=="local_workflow"&&!(e.type==="monitor_ws"&&e.ambient===!0&&e.frameLive?.explicit!==!0)&&!(Ovo()&&(DW(e)||e.type==="in_process_teammate"))}var Qat=A(()=>{Dl();NA();I2();poc();p0t()});function cfn({tasks:e,queuedCommands:t=[]}){let r=new Set,n=new Set,o=(i)=>{if(DW(i)&&i.isBackgrounded)r.add(i.id);else if(i.type==="local_workflow")n.add(i.id)};for(let i of Object.values(e))if(i.status==="running"||Ow(i.status)&&!i.notified)o(i);for(let i of t){if(i.mode!=="task-notification"||!dC(i)||i.taskId===void 0)continue;let s=e[i.taskId];if(s)o(s)}return{pendingAgents:r.size,pendingWorkflows:n.size}}function AQh({tasks:e,queuedCommands:t=[],turnDurationMs:r,turnStartTime:n,now:o,backgroundWaitStartTime:i}){let{pendingAgents:s,pendingWorkflows:a}=cfn({tasks:e,queuedCommands:t});if(s>0||a>0)return{durationMs:r,pendingBackgroundAgentCount:s>0?s:void 0,pendingWorkflowCount:a>0?a:void 0,backgroundWaitStartTime:i??n};return{durationMs:i!==null?o-i:r,pendingBackgroundAgentCount:void 0,pendingWorkflowCount:void 0,backgroundWaitStartTime:null}}var Aps=A(()=>{DD();NA();xee()});function Ac0(ErO,ArO){return ErO
+#### "abortOnEscape" count=0 []
+#### "finish early" count=0 []
+#### "queued prompt" count=0 []
+#### "escapeQueued" count=0 []
+#### "posix_spawn" count=1 [87652476]
+--- 87652476 ---
+chmodlchownlseeklstatlutimemkdtempfnctlmemfd_createmmapmunmappreadpwritereadlinkstatstatfssymlinkatutimeutimensatgetcwdgetenvchdirfcopyfilerecvsendfilesendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollscandirkeventkqueueepoll_ctlkillwaitpidposix_spawnwritevpwritevreadvpreadvioctl_ficlonebind2connect2try_writesocketpairsetsockoptstatxuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfchownatioctlgetrlimitsetrlimitclone3....%E..............9E............y..E............?..E..............9E..............9E..............9E....	.........9E...............E.............9E..............9E............$.9E............*.9E............2.9E............8.9E............=.9E....	.......F.9E............K.9E............R.9E............W.9E....	.......`.9E............h.9E....
+.......r.9E..............9E..............9E............M..E..............9E..............9E..............9E.............. E..............9E..............9E..............9E..............9E..............9E.............s.E..............9E....
+#### "function dme" count=2 [304295810,337331314]
+--- 304295810 ---
+ this tool call.",kav,Cav;var G4=A(()=>{iQ();wtp=[sq,GC,mj];Aav=["Stop","TeammateIdle","TaskCreated","TaskCompleted"];kav=[Iii,Tav,Bya].filter((e)=>e.length>0),Cav=[P0a,D0a,M0a,O0a]});function Ow(e){return e==="completed"||e==="failed"||e==="killed"}function dme(){let e=V.CLAUDE_CODE_TMPDIR;if(e)return e;return L0a.tmpdir()}function WLt(e){let t=process.getuid?.();if(t===void 0)return;let r=e.replace(/[\/]+$/,"")||e,n="Set CLAUDE_CODE_TMPDIR to a directory you control, or ask an administrator to remove it.",o;try{o=i9.openSync(r,i9.constants.O_RDONLY|i9.constants.O_DIRECTORY|i9.constants.O_NOFOLLOW)}catch(i){let s=dt(i);if(s==="ELOOP"||s==="ENOTDIR")throw Error(`Temp directory ${e} is not a directory (may be an attacker-planted symlink). Refusing to use it. ${n}`);if(s==="EACCES"){let a;try{let l=i9.lstatSync(r);if(l.uid!==t)a=l.uid}catch{}if(a!==void 0)throw new gt(`Temp directory ${e} is owned by uid ${a}, expected ${t}. Refusing to use it \u2014 another user may have pre-created it. ${n}`,"temp dir owned by another uid (EACCES at open); refusing to use it");throw new gt(`Temp directory ${e} is not readable (its mode may have been
+--- 337331314 ---
+ventListener("pointermove",p),s.removeEventListener("pointerup",m),s.removeEventListener("pointercancel",m),f&&(cancelAnimationFrame(f),d())};s.addEventListener("pointermove",p),s.addEventListener("pointerup",m),s.addEventListener("pointercancel",m)}function dme({name:e,meta:t,cur:n,onChange:r}){let o=t.editor==="int",a=t.step??1;return(0,Bt.jsxs)("div",{className:"om-dc-num flex items-center box-border min-w-0 h-7 pl-2 border border-om-border-default rounded-md bg-om-bg-surface focus-within:border-om-border-strong",children:[(0,Bt.jsx)("span",{className:"font-medium text-[11.5px] text-om-text-secondary cursor-ew-resize select-none pr-2 touch-none",onPointerDown:i=>ume(i,typeof n=="number"&&Number.isFinite(n)?n:0,a,t.min,t.max,s=>r(o?Math.trunc(s):s)),children:e}),(0,Bt.jsx)("input",{type:"number",value:vO(n),min:t.min,max:t.max,step:o?Math.max(1,a):t.step??"any",className:"flex-1 min-w-0 h-full border-0 bg-transparent text-xs text-om-text-primary tabular-nums text-right pr-2 outline-none",onChange:i=>{let s=i.target.value;if(s==="")return r(void 0);let c=Number(s);Number.isFinite(c)&&r(o?Math.trunc(c):c)},onKeyDown:i=>{if(i.key!=="
+#### "dme()" count=8 [304295819,304297505,307992209,309972800,309978464,313226890]
+--- 304295819 ---
+l call.",kav,Cav;var G4=A(()=>{iQ();wtp=[sq,GC,mj];Aav=["Stop","TeammateIdle","TaskCreated","TaskCompleted"];kav=[Iii,Tav,Bya].filter((e)=>e.length>0),Cav=[P0a,D0a,M0a,O0a]});function Ow(e){return e==="completed"||e==="failed"||e==="killed"}function dme(){let e=V.CLAUDE_CODE_TMPDIR;if(e)return e;return L0a.tmpdir()}function WLt(e){let t=process.getuid?.();if(t===void 0)return;let r=e.replace(/[\/]+$/,"")||e,n="Set CLAUDE_CODE_TMPDIR to a directory you control, or ask an administrator to remove it.",o;try{o=i9.openSync(r,i9.constants.O_RDONLY|i9.constants.O_DIRECTORY|i9.constants.O_NOFOLLOW)}catch(i){let s=dt(i);if(s==="ELOOP"||s==="ENOTDIR")throw Error(`Temp directory ${e} is not a directory (may be an attacker-planted symlink). Refusing to use it. ${n}`);if(s==="EACCES"){let a;try{let l=i9.lstatSync(r);if(l.uid!==t)a=l.uid}catch{}if(a!==void 0)throw new gt(`Temp directory ${e} is owned by uid ${a}, expected ${t}. Refusing to use it \u2014 another user may have pre-created it. ${n}`,"temp dir owned by another uid (EACCES at open); refusing to use it");throw new gt(`Temp directory ${e} is not readable (its mode may have been altered,
+--- 304297505 ---
+448)}finally{i9.closeSync(o)}}class Ttp{ensured=void 0;childProcessTmpDirMemo=void 0;markEnsured(e){this.ensured=e}setChildProcessTmpDirMemo(e){this.childProcessTmpDirMemo=e}}function VC(){return Ctp(ktp.of(ar().host))}function Ctp(e){let r=J2n.join(dme(),"claude");if(r!==e.ensured){if(typeof process.getuid==="function")i9.mkdirSync(r,{recursive:!0,mode:448}),WLt(r);else try{i9.mkdirSync(r,{recursive:!0,mode:448})}catch{}e.markEnsured(r)}return r}function Gjr(){let e=VC();i9.mkdirSync(e,{recursive:!0,mode:448}),WLt(e);let t=J2n.join(e,"plugin-tool-staging");return i9.mkdirSync(t,{recursive:!0,mode:448}),WLt(t),t}function Vjr(){let e=ktp.of(ar().host),t=Ctp(e);return t}function qjr(e="claude-prompt",t=".md",r){let n=r?.contentHash?Hii.createHash("sha256").update(r.contentHash).digest("hex").slice(0,16):Hii.randomUUID();return J2n.join(VC(),`${e}-${n}${t}`)}var Hii,i9,L0a,J2n,ktp;var rP=A(()=>{tt();gg();st();mr();Hii=require("crypto"),i9=require("fs"),L0a=require("os"),J2n=require("path");ktp=new Ar(()=>new Ttp)});class xtp{claudeTempDir=void 0;childProcessTmpDir=void 0;bundledSkillsRoot=void 0;scratchpadDirBySessionId=new Map;resolve
+#### "Hooks: cwd" count=0 []
+#### "hook cwd" count=0 []
+#### "getOriginalCwd" count=6 [106445448,151748533,152045349,300700591,313432026,313515404]
+--- 106445448 ---
+on........Iv......getModelStrings..........F.....getModelUsage...........I.......getOTelWindowCloseCause.........	.......getOauthScopesFromFd.............y0.....getOauthTokenFromFd.............	.......getOnboardingShownThisSession...........	.......getOriginalCwd..........	.......getParentManagedSettings.........^......getParentManagedSettingsInvalid.........I.......getParentSessionId..............	.......getPendingBranchLinks...................getPendingPrLinks...............	.......getPermissionPromptToolName.............	.......getPlanSlugCache........	..."...getPolicyPredicateTelemetryEmitted0.............I~0.....getPrCounter.............~0.....getPrintOutputFormat............	.......getProactivitySelectorGate..............	... ...getProactivitySelectorGateEverOn........	.......getProjectRoot..........	.......getPromptCache1hAllowlist...............	.......getPromptId.............	.......getPromptIndex..........	... ...getProposeGoalAvailabilityLogged........	.......getQuestionPreviewFormat.........e..&...getRefusalFallbackLatchOriginRequestId..........	.......getRefusalFallbackModelLatch............	.......getRegisteredHooks0.
+--- 151748533 ---
+.....	...J...Cannot destructure property 'getOAuthHeaders' from null or undefined value......................	...K...Cannot destructure property 'getMainLoopModel' from null or undefined value.....................	...I...Cannot destructure property 'getOriginalCwd' from null or undefined value.......................	...B...Cannot destructure property 'default' from null or undefined value......................	...O...Cannot destructure property 'isFirstPartyProvider' from null or undefined value.........	.......S...............	...:...[bridge] Session create skipped on non-firstParty provider..............	.......bridge_session_create...........	...!...bridge_session_create_3p_provider.......................	.......l...............	.......c...............	.......f.......	...............	.......p...............	...-...[bridge] No access token for session creation...........	.......bridge_session_create_no_token..........	.......m.......
+...............	...)...[bridge] No org UUID for session creation...............	.......bridge_session_create_no_org............	.......n...............	.......o...............	.......i................
+#### "ENOENT" count=10 [7195698,17194247,20908533,28339539,70252107,70396542]
+--- 7195698 ---
+H..G........H..........H......L...2.a.H.......f.a..A.oF.........H..`.......t(...uAH..`...H......H....x.H......H..Sp..H......H....I.H......H..s....?H..`...H......H....x.H......H...p..H......H....I.H......H..t...L................H...<.......N.H.. H	.H.ENOENT..H9.uQH..H..0.....*....t>....t(.........H..Hz..H......H..:.I.H......H...2..L.......b...H......H......L..........s(...uKH......H......H....x.H......H..-o..H......H....I.H......H...4..L..........H......H......H....x.H......H...n..H......H....I.H......H...4..L..........H......H.......W...H.............H......H.E.........)E.H.E.H......H.E.H......H......H..........r(.........H......H......H....x.H......H..-n..H......H....I.H......H...........H..i.......H...m..H......H....I.H......H..["..L...........H......H......H...=..H......H..^x..H......H..P.I.H......H...!..L.......x...H..p...H......H......H......H......H.E.....q(.....{...H......H....x.H......H..4m..H......H....I.H......H...!..L...........H..P...H......H....x.H......H...l..H......H....I.H......H...3..L...........H..P...H......H..L.x.H......H...l..H......H..@.I.H......H...#..L.......h...H......H..P...H....x.H..X...H......H..`...H.
+#### "vimMode" count=10 [146118360,189262072,289352016,289352392,312192647,312192667]
+--- 146118360 ---
+..B..............................Q..	...F"..........................
+.....i.......................2........................................@`..H...@.4.@ ..@`,.....@.<............ ...@................... .........................;.............	.......vimMode.@...(<......
+..../..J.......K.......`........H..H.........................,.......................,.....h........................................j..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...................(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...................................`...............................................................................................................@.......................2........p...........$.........................a........i....... ...............P.......................(.........................................;.....	.......
+.........................................`........T............................p.;.........
+--- 189262072 ---
+...L........................I.............................................p.c.....................x^v.............................................xL..............................................(.Z.............	...	...addedDirs...............	.......vimModeEnabled..........	.......session_name............	.......current_dir.............	.......project_dir.............	...
+...added_dirs..............	.......git_worktree............	.......context_window..........	.......exceeds_200k_tokens.............	...	...fast_mode...............	.......review_state............	.......original_cwd............	.......original_branch......\........J.w	..F...i.J.G.....J...J......H..H.......................................................h.......................................@...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h....................................... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... .......................................................
+#### "NORMAL" count=10 [70903268,70903737,71552973,86118635,86119109,86120436]
+--- 70903268 ---
+ge);
+  error.errno = errno, error.code = code, self.destroy(error), self[kError] = error;
+}
+var FLUSH_BOUND = [
+  [Z_NO_FLUSH, Z_BLOCK],
+  [BROTLI_OPERATION_PROCESS, BROTLI_OPERATION_EMIT_METADATA],
+  [ZSTD_e_continue, ZSTD_e_end]
+], FLUSH_BOUND_IDX_NORMAL = 0, FLUSH_BOUND_IDX_BROTLI = 1, FLUSH_BOUND_IDX_ZSTD = 2;
+function ZlibBase(opts, mode, handle, { flush, finishFlush, fullFlush }) {
+  let chunkSize = Z_DEFAULT_CHUNK, maxOutputLength = kMaxLength, flushBoundIdx;
+  if (mode === BROTLI_ENCODE || mode === BROTLI_DECODE)
+    flushBoundIdx = FLUSH_BOUND_IDX_BROTLI;
+  else if (mode === ZSTD_COMPRESS || mode === ZSTD_DECOMPRESS)
+    flushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
+  else
+    flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
+  if (opts) {
+    if (chunkSize = opts.chunkSize, !validateFiniteNumber(chunkSize, "options.chunkSize"))
+      chunkSize = Z_DEFAULT_CHUNK;
+    else if (chunkSize < Z_MIN_CHUNK)
+      throw @makeErrorWithCode(161, "options.chunkSize", `>= ${Z_MIN_CHUNK}`, chunkSize);
+    if (flush = checkRangesOrGetDefault(opts.flush, "options.flush", FLUSH_BOUND[flushBoundIdx][0], FLUSH_BOUND[flushBoundIdx][1], flush), finishFlush = ch
+--- 70903737 ---
+;
+  if (mode === BROTLI_ENCODE || mode === BROTLI_DECODE)
+    flushBoundIdx = FLUSH_BOUND_IDX_BROTLI;
+  else if (mode === ZSTD_COMPRESS || mode === ZSTD_DECOMPRESS)
+    flushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
+  else
+    flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
+  if (opts) {
+    if (chunkSize = opts.chunkSize, !validateFiniteNumber(chunkSize, "options.chunkSize"))
+      chunkSize = Z_DEFAULT_CHUNK;
+    else if (chunkSize < Z_MIN_CHUNK)
+      throw @makeErrorWithCode(161, "options.chunkSize", `>= ${Z_MIN_CHUNK}`, chunkSize);
+    if (flush = checkRangesOrGetDefault(opts.flush, "options.flush", FLUSH_BOUND[flushBoundIdx][0], FLUSH_BOUND[flushBoundIdx][1], flush), finishFlush = checkRangesOrGetDefault(opts.finishFlush, "options.finishFlush", FLUSH_BOUND[flushBoundIdx][0], FLUSH_BOUND[flushBoundIdx][1], finishFlush), maxOutputLength = checkRangesOrGetDefault(opts.maxOutputLength, "options.maxOutputLength", 1, kMaxLength, kMaxLength), opts.encoding || opts.objectMode || opts.writableObjectMode)
+      opts = { ...opts }, opts.encoding = null, opts.objectMode = !1, opts.writableObjectMode = !1;
+  }
+  Transform.@apply(this, [{ autoDestroy: !0, .
+#### "agent view" count=10 [111228336,180223577,185141815,207225110,207225405,207225797]
+--- 111228336 ---
+onfiguration: the CLI --worktree flag, EnterWorktree and agent isolation, plus the location Claude Code Desktop uses for SSH-session worktrees on this machine............	...*...Disable all hooks and statusLine execution..............	.......Disable agent view (`claude agents`, `--bg`, /background, the on-demand daemon). Typically set in managed settings. Equivalent to CLAUDE_CODE_DISABLE_AGENT_VIEW=1..............	.......Disable Remote Control (claude.ai/code, `claude remote-control`, `--remote-control`/`--rc`, auto-start, and the in-session toggle). Typically set in managed settings...........	...G...Disable the Workflows feature (also via CLAUDE_CODE_DISABLE_WORKFLOWS)..........	...B...Disable the Artifact tool (also via CLAUDE_CODE_DISABLE_ARTIFACT)...............	...k...Enable or disable the Artifact tool for this user. Unset defaults to enabled once the feature is available..............	...m...Enable or disable the Workflows feature for this user. Unset = default by plan once the feature is available............	.......unrestricted............	.......small...........	.......medium..........	.......large...................@...
+--- 180223577 ---
+...i.....`...............x.......................................................................................	.......leftArrowOpensAgents............	...... opens agents...................	.......defaultToAgentsView.............	.......Start in agent view......................................................... ....@p..U.. ...cl......i...........A....@...T.. ...`...............a...o...u.......................................pc........................%.....................`O*.....................0................................................................................................&!.............................@.............3.C...E....'..F.....3...3......D..H.......................................................h.......................................x...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...................................................................8...h...h...........(...(...8...8...8...8...8...H...H...H...H...H...H...H...H...H...H...H...H................................................
+#### "AgentView" count=10 [106568591,111276343,115257923,176606255,302068793,304180948]
+--- 106568591 ---
+....|4.....USER_INTENT_SETTING_KEYS........	.......resolveSetting..........	.......saveUserIntentSetting...................AGENT_VIEW_RELAUNCH_ENV_KEY.............I~4.....bgSupervisorNoun.........A......bgSupervisorNounCap.............	.......consumeAgentViewRelaunchMarker..........	.......daemonColdStartGbDefault..........4.
+...daemonHint	.............	.......ensureFleetGateHydrated.........	.......fleetGateRejected.4...............4.....isAgentsFleetEnabled............	.......isDaemonCliEnabled..............I.4.....isDaemonServiceInstallEnabled...................isDaemonServiceRecalled.........	.......isDaemonWorkerRegistryEnabled...........	.......isLaunchComposerEnabled...........4.....isListReturnRelaunch............	.......isPastSessionsExperimentEnabled.........	.......shouldShowLaunchComposer............!...applyAutoUploadSessionsToAppState...............	.......applyRemoteControlToAppState............	.......checkBridgeMinVersion.............4.....describeAuthPrecedenceBlocker...........	.4.....getBridgeAuthDebugInfo..........	.......getBridgeDisabledReason...........4.....getBridgeDoctorInfo.............	.......getBridgeEn
+--- 111276343 ---
+dSkills............	.......allowedMcpServers...............	.......deniedMcpServers........	.......sparsePaths.............	.......baseRef.........	.......bgIsolation.............	.......worktree........	.......disableAllHooks.........	.......disableAgentView........	.......disableRemoteControl............	.......disableWorkflows........	.......disableArtifact.........	.......enableArtifact..........	.......enableWorkflows.........	.......workflowSizeGuideline...........	.......workflowKeywordTriggerEnabled...........	.......disableSkillShellExecution..............	.......defaultShell............	.......respondToBashCommands...........	.......allowManagedHooksOnly...........	.......allowedHttpHookUrls.............	.......httpHookAllowedEnvVars..........	.......allowManagedPermissionRulesOnly.........	.......allowManagedMcpServersOnly..............	.......allowAllClaudeAiMcps............	.......strictPluginOnlyCustomization...........	.......padding.........	.......refreshInterval.........	.......hideVimModeIndicator............	...
+...statusLine..............	......prUrlTemplate...........	.......footerLinksRegexes..............	..
+#### "organization policy" count=3 [185574005,321688044,326596774]
+--- 185574005 ---
+property 'reason' from null or undefined value...............	.......NPL.....
+...............................	...(...Git is required to install marketplaces.........	...+...Please install git and restart Claude Code......................	...B...Your organization policy does not allow any external marketplaces...............	.......Contact your administrator......................	...<...Your organization restricts which marketplaces can be added.............	...7...Switch to the Marketplaces tab to view allowed sources..................	... ...Failed to load marketplace data.........	.......Check your network connection...................	...,...All available plugins are already installed.............	...5...Check for new plugins later or add more marketplaces....................	...5...All available plugins are installed for this project............	...,...Use the Browse tab to install at user scope.....................	...3...Add a marketplace first using the Marketplaces tab..............	.......No plugins available...............................................................=.....C!L..@=...|...N.......4..`........4......pU.....
+--- 321688044 ---
+places."}),Pu.jsx(v,{dimColor:!0,children:"Please install git and restart Claude Code."})]}),dbn[0]=kJ;else kJ=dbn[0];return kJ}case"all-blocked-by-policy":{let kJ;if(dbn[1]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization policy does not allow any external marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Contact your administrator."})]}),dbn[1]=kJ;else kJ=dbn[1];return kJ}case"policy-restricts-sources":{let kJ;if(dbn[2]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization restricts which marketplaces can be added."}),Pu.jsx(v,{dimColor:!0,children:"Switch to the Marketplaces tab to view allowed sources."})]}),dbn[2]=kJ;else kJ=dbn[2];return kJ}case"all-marketplaces-failed":{let kJ;if(dbn[3]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Failed to load marketplace data."}),Pu.jsx(v,{dimColor:!0,children:"Check your network connection."})]}),dbn[3]=kJ;else kJ=dbn[3];return kJ}case"all-plugins-installed":{let kJ;if(dbn[4]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"All available plugins are already installed."
+#### "org policy" count=10 [115309456,115309524,148856800,161741921,179893955,182965420]
+--- 115309456 ---
+..	.......DISABLE_GROWTHBOOK..............	.......tengu_ccr_bridge................	...2...Connected to the Anthropic API (api.anthropic.com)..............	...6...Not connected to the Anthropic API (api.anthropic.com)..........	...1...Not disabled by org policy (disableRemoteControl)...............	...-...Disabled by org policy (disableRemoteControl)...........	.......Signed in to claude.ai..........	.......Not signed in to claude.ai..............	.......claude.ai subscription active...........	...&...claude.ai subscription auth not active..........	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disa
+--- 115309524 ---
+..............	...2...Connected to the Anthropic API (api.anthropic.com)..............	...6...Not connected to the Anthropic API (api.anthropic.com)..........	...1...Not disabled by org policy (disableRemoteControl)...............	...-...Disabled by org policy (disableRemoteControl)...........	.......Signed in to claude.ai..........	.......Not signed in to claude.ai..............	.......claude.ai subscription active...........	...&...claude.ai subscription auth not active..........	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disabled........	.......disabled by ............	...'...Remote Control e
+#### "shouldRetry" count=10 [71503320,71503794,99479896,209315712,223843904,224066520]
+--- 71503320 ---
+nish(err);
+        else
+          this.connection?.close();
+      else
+        this.adapter.release(this, !0);
+    }
+  }
+  handleClose(err) {
+    if (err)
+      err = this.wrapError(err);
+    if (this.connection = null, this.storedError = err, this.#shouldRetryConnecting(err)) {
+      this.connectAttempts++;
+      let delay = Math.min(20 * 2 ** this.connectAttempts, 1000);
+      this.retryTimer = setTimeout(BasePooledConnection.#retryTimerFired, delay, this);
+      return;
+    }
+    this.connectStartedAt = 0, this.#finishClose(err);
+  }
+  static #retryTimerFired(self) {
+    if (self.retryTimer = null, self.#canKeepRetrying())
+      self.#beginConnecting();
+    else
+      self.#finishClose(self.storedError);
+  }
+  #shouldRetryConnecting(err) {
+    if (!this.isConnectFailureError(err))
+      return !1;
+    return this.#canKeepRetrying();
+  }
+  #canKeepRetrying() {
+    if (this.adapter.closed || this.onFinish !== null)
+      return !1;
+    if (this.adapter.waitingQueue.length === 0 && this.adapter.reservedQueue.length === 0)
+      return !1;
+    let connectionTimeout = this.connectionInfo.connectionTimeout ?? 30000;
+    if (connectionT
+#### "policy_violation" count=0 []
+#### "PreToolUse" count=10 [100779304,100779488,102361000,102361892,102362090,102363116]
+--- 100779304 ---
+sk system and teammate messaging.
+........	.......queued_notifications....................queued-remote-notifications.............IM......flag:idle-window................	...7...The message for the user. Supports markdown formatting..........	.......PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...................0............... .......K.......`...............................................@.......K.........................................................................%...............%...............................%.............................................I.......depth...................
+.[.&  .o.u.t.p.u.t. .t.r.u.n.c.a.t.e.d. ..  .t.h.i.s. .s.e.t.t.l.e. .e.x.c.e.e.d.e.d. .t.h.e. .a.s.y.n.c. .R.E.P.L. .b.y.t.e. .b.u.d.g.e.t.;. .p.r.i.n.t. .l.e.s.s.,. .o.r. .w.r.i.t.e. .l.a.r.g.e. .o.u.t.p.u.t. .t.o. .a. .f.i.l.e. .a.n.d. .r.e.a.d. .i.
+--- 100779488 ---
+ssage for the user. Supports markdown formatting..........	.......PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...................0............... .......K.......`...............................................@.......K.........................................................................%...............%...............................%.............................................I.......depth...................
+.[.&  .o.u.t.p.u.t. .t.r.u.n.c.a.t.e.d. ..  .t.h.i.s. .s.e.t.t.l.e. .e.x.c.e.e.d.e.d. .t.h.e. .a.s.y.n.c. .R.E.P.L. .b.y.t.e. .b.u.d.g.e.t.;. .p.r.i.n.t. .l.e.s.s.,. .o.r. .w.r.i.t.e. .l.a.r.g.e. .o.u.t.p.u.t. .t.o. .a. .f.i.l.e. .a.n.d. .r.e.a.d. .i.t. .i.n. .a. .l.a.t.e.r. .e.v.a.l.].........	.......McpToolError............	... ...enforce_web_search_mcp_isolation........	.......tengu_doorbell_agave...........?.q...............O%.
+#### "deferred by" count=1 [323696901]
+--- 323696901 ---
+\r\nThe gate for \xA75: render check `bad` empty; every component in this campaign's scope \u2014 the `.sync-diff.json` `changed`+`added` partition on a re-sync, everything user-scoped on a first sync \u2014 authored and graded `good` (or explicitly deferred by the user); no `[LEARNINGS_UNMERGED]` on the final capture run; the user has seen `.review.html` (or declined). Verified-by-upload components are OUTSIDE the gate \u2014 they need no recapture or regrade, and the closing driver run enforces the learnings check itself \u2014 its verdict fails (`[LEARNINGS_UNMERGED]`, the `learningsUnmerged` field) while any unfolded learnings file remains. Floor-card components pass the gate by design \u2014 they're the deliberate baseline, reported as such.\r\n\r\nOn the final full `package-capture.mjs` run (after the final rebuild) every graded component should print `carried forward` with zero `grade cleared` \u2014 that line IS the proof the next sync will be fast. A cleared grade on a no-change run means a nondeterministic source input \u2014 chase it now; a driver-triggered `[SPOT_CHECK]` is not that (pipeline churn being auto-verified \u
+#### "pendingSgr" count=0 []
+#### "35;150;7M" count=0 []

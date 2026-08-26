@@ -1,0 +1,5 @@
+.session,e,t,r.getAppState(),r.storageV5,r.credentials);switch(o.kind){case"local-session":if(Xen(o.sock))return{kind:"refused",reason:"self",message:qEt(e)};if(Jio(e,o.sock))return{kind:"refused",rea
+son:"impersonation",message:Zio(e)};if(VEt(o.sock))return{kind:"refused",reason:"self",message:qEt(e)};return{kind:"uds",sock:o.sock,label:o.displayName,byName:!0,contestedNote:N0m(o.sameNamedSiblings
+),identityNote:` (${aWt}${ttn(o)})${o.previouslyPinned?`
+${SWi}`:""}`,pin:{displayName:o.displayName,kind:"session",id:o.sock}};case"cloud-session":{if(XFe(o.sessionId))return{kind:"refused",reason:"self",message:qEt(e)};let{isRemoteControlPeerUnreachableFr
+omHere:i,formatUnreachableElevatedRefusal:s

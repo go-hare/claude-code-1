@@ -20,11 +20,16 @@ import {
   modelSupports1M,
 } from '../context.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { resolveCatalogFamilyModelString } from './catalogFamilyDefault.js'
 import { getModelStrings, resolveOverriddenModel } from './modelStrings.js'
 import { formatModelPricing, getOpus46CostTier } from '../modelCost.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
-import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './providers.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+  isFirstPartyProviderWithFirstPartyBase,
+} from './providers.js'
 import { LIGHTNING_BOLT } from '../../constants/figures.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import { type ModelAlias, isModelAlias } from './aliases.js'
@@ -239,6 +244,33 @@ export function getDefaultHaikuModel(): ModelName {
 
   // Haiku 4.5 is available on all platforms (first-party, Foundry, Bedrock, Vertex)
   return getModelStrings().haiku45
+}
+
+/**
+ * Official XNn / Ema — default Fable family model.
+ *   env ANTHROPIC_DEFAULT_FABLE_MODEL ?? Ema()
+ *   Ema: SZo("fable", zv()) ?? zv().fable5; UV strips `[1m]` (tle)
+ */
+export function getDefaultFableModel(): ModelName {
+  const resolved =
+    process.env.ANTHROPIC_DEFAULT_FABLE_MODEL ?? getBuiltinDefaultFableModel()
+  return isFirstPartyProviderWithFirstPartyBase()
+    ? resolved.replace(/\[1m\]/gi, '')
+    : resolved
+}
+
+/** Official Ema — SZo("fable") ?? modelStrings.fable5; UV strips `[1m]`. */
+function getBuiltinDefaultFableModel(): ModelName {
+  const strings = getModelStrings()
+  const fromCatalog = resolveCatalogFamilyModelString(
+    'fable',
+    strings,
+    getAPIProvider(),
+  )
+  const builtin = fromCatalog ?? strings.fable5
+  return isFirstPartyProviderWithFirstPartyBase()
+    ? builtin.replace(/\[1m\]/gi, '')
+    : builtin
 }
 
 /**
@@ -573,6 +605,10 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
       return 'Haiku 4.5'
     case getModelStrings().haiku35:
       return 'Haiku 3.5'
+    case getModelStrings().fable5:
+      return 'Fable 5'
+    case getModelStrings().fable5 + '[1m]':
+      return 'Fable 5 (1M context)'
     default:
       return null
   }
@@ -650,6 +686,15 @@ export function parseUserSpecifiedModel(
 
   if (isModelAlias(modelString)) {
     switch (modelString) {
+      case 'fable': {
+        // Official: XNn() + (n && !UV() && !H0(i) ? "[1m]" : "")
+        const resolved = getDefaultFableModel()
+        const append1m =
+          has1mTag &&
+          !isFirstPartyProviderWithFirstPartyBase() &&
+          !has1mContext(resolved)
+        return resolved + (append1m ? '[1m]' : '')
+      }
       case 'opusplan':
         return getDefaultSonnetModel() + (has1mTag ? '[1m]' : '') // Sonnet is default, Opus in plan mode
       case 'sonnet':
@@ -817,6 +862,9 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   }
   if (canonical.includes('claude-3-5-haiku')) {
     return 'Claude 3.5 Haiku'
+  }
+  if (canonical.includes('claude-fable-5')) {
+    return has1m ? 'Fable 5 (with 1M context)' : 'Fable 5'
   }
 
   return undefined

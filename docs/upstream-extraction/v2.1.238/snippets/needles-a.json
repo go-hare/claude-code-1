@@ -1,0 +1,12 @@
+[
+  { "name": "ztc-clienthead", "needle": "this is a forward proxy: expected CONNECT host:port", "before": 2600, "after": 3400 },
+  { "name": "ztc-loopback407", "needle": "without valid loopback credentials", "before": 1200, "after": 2600 },
+  { "name": "trust-mint-headers", "needle": "This folder runs commands to mint HTTP headers", "before": 2200, "after": 2600 },
+  { "name": "fiw-receipts", "needle": "inbox full", "before": 2600, "after": 3200 },
+  { "name": "pacer-queuefull", "needle": "queue-full", "before": 2600, "after": 3400 },
+  { "name": "sendmsg-refused", "needle": "status_detail", "before": 2200, "after": 3000 },
+  { "name": "mcp-disabled-glyph", "needle": "Disabled for this project (re-enable via /mcp)", "before": 900, "after": 1600 },
+  { "name": "proxy-tunnel-copy", "needle": "ERR_PROXY_TUNNEL", "before": 1800, "after": 2400 },
+  { "name": "esources-equal", "needle": "requireInlinedManifest", "before": 2200, "after": 2600 },
+  { "name": "concise-style", "needle": "Concise Style Active", "before": 3000, "after": 3400 }
+]

@@ -186,6 +186,7 @@ export async function toolToAPISchema(
         tools: options.tools,
         agents: options.agents,
         allowedAgentTypes: options.allowedAgentTypes,
+        model: options.model,
       }),
       input_schema,
     }

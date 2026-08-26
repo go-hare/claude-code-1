@@ -2,7 +2,7 @@
 // Find a specific occurrence of a keyword and print N bytes around it as a clean UTF-8 string.
 // Usage: node extract-one.mjs <keyword> <occurrence-index> [context-bytes=4096]
 import { readFileSync } from 'node:fs'
-const BIN = String.raw`C:\Users\Administrator\AppData\Local\Temp\pkg-latest\package\claude.exe`
+const BIN = String.raw`C:\Users\Administrator\AppData\Local\Temp\official-239\package\claude.exe`
 const [kw, idxArg, ctxArg] = process.argv.slice(2)
 const idx = Number(idxArg || 0)
 const ctx = Number(ctxArg || 4096)

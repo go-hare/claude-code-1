@@ -3519,6 +3519,20 @@ async function run(): Promise<CommanderCommand> {
         },
       });
 
+      // densable MQA / initializeSessionTeam: one implicit team per session
+      // when agent swarms are enabled. Spawned teammates already have a team
+      // (--agent-id) and must not re-init. KAIROS assistant team is reused
+      // via existingTeamName so we do not rewrite assistant-*.
+      let sessionTeamContext: AppState['teamContext'] | undefined;
+      if (isAgentSwarmsEnabled() && !storedTeammateOpts?.agentId) {
+        const { initializeSessionTeam } = await import('./utils/swarm/sessionTeam.js');
+        sessionTeamContext = (
+          await initializeSessionTeam({
+            existingTeamName: assistantTeamContext?.teamName,
+          })
+        ).teamContext;
+      }
+
       const setupTrigger = determineSetupTrigger({ initOnly, init, maintenance });
       if (initOnly) {
         applyConfigEnvironmentVariables();
@@ -3631,6 +3645,12 @@ async function run(): Promise<CommanderCommand> {
           // overdue cron tasks on spawn = N serial subagent turns blocking
           // user input. Computed at :1620, well before this branch.
           ...(feature('KAIROS') ? { kairosEnabled } : {}),
+          // densable MQA: implicit session team so Agent(name) can spawn
+          // without TeamCreate. Assistant context wins when KAIROS already
+          // seeded the same team (keeps isLeader / selfAgent*).
+          teamContext: (assistantTeamContext ??
+            sessionTeamContext ??
+            computeInitialTeamContext()) as AppState['teamContext'],
         };
 
         // Init app state
@@ -3943,6 +3963,9 @@ async function run(): Promise<CommanderCommand> {
           : getGlobalConfig().showExpandedTodos
             ? 'tasks'
             : 'none',
+        // densable replTab:"convo", panelFileView:null
+        replTab: 'convo',
+        panelFileView: null,
         showTeammateMessagePreview: isAgentSwarmsEnabled() ? false : undefined,
         selectedIPAgentIndex: -1,
         selectedBgAgentIndex: -1,
@@ -4092,14 +4115,12 @@ async function run(): Promise<CommanderCommand> {
         endedByModel: false,
         fastMode: getInitialFastModeSetting(resolvedInitialModel),
         ...(isAdvisorEnabled() && advisorModel && { advisorModel }),
-        // Compute teamContext synchronously to avoid useEffect setState during render.
-        // KAIROS: assistantTeamContext takes precedence — set earlier in the
-        // KAIROS block so Agent(name: "foo") can spawn in-process teammates
-        // without TeamCreate. computeInitialTeamContext() is for tmux-spawned
-        // teammates reading their own identity, not the assistant-mode leader.
-        teamContext: (feature('KAIROS')
-          ? (assistantTeamContext ?? computeInitialTeamContext())
-          : computeInitialTeamContext()) as AppState['teamContext'],
+        // densable MQA: implicit session team when swarms are on.
+        // KAIROS assistantTeamContext wins (same team, keeps isLeader).
+        // computeInitialTeamContext() is for tmux-spawned teammates.
+        teamContext: (assistantTeamContext ??
+          sessionTeamContext ??
+          computeInitialTeamContext()) as AppState['teamContext'],
       };
 
       // Add CLI initial prompt to history

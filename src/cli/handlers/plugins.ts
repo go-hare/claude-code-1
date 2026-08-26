@@ -47,6 +47,7 @@ import { parseMarketplaceInput } from '../../utils/plugins/parseMarketplaceInput
 import {
   parsePluginIdentifier,
   scopeToSettingSource,
+  SYNCED_MARKETPLACE_NAME,
 } from '../../utils/plugins/pluginIdentifier.js'
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js'
 import type { PluginSource } from '../../utils/plugins/schemas.js'
@@ -174,6 +175,14 @@ export async function pluginListHandler(options: {
   const inlinePlugins = allLoadedPlugins.filter(p =>
     p.source.endsWith('@inline'),
   )
+  const syncedPlugins = allLoadedPlugins.filter(p =>
+    p.source.endsWith(`@${SYNCED_MARKETPLACE_NAME}`),
+  )
+  const syncedLoadErrors = loadErrors.filter(
+    e =>
+      e.source.endsWith(`@${SYNCED_MARKETPLACE_NAME}`) ||
+      e.source.startsWith(`${SYNCED_MARKETPLACE_NAME}[`),
+  )
   // Path-level inline failures (dir doesn't exist, parse error before
   // manifest is read) use source='inline[N]'. Plugin-level errors after
   // manifest read use source='name@inline'. Collect both for the session
@@ -284,6 +293,38 @@ export async function pluginListHandler(options: {
       })
     }
 
+    // densable iN — claude.ai-synced plugins show as name@synced
+    for (const p of syncedPlugins) {
+      const servers = p.mcpServers || (await loadPluginMcpServers(p))
+      const pErrors = syncedLoadErrors
+        .filter(
+          e => e.source === p.source || ('plugin' in e && e.plugin === p.name),
+        )
+        .map(getPluginErrorMessage)
+      plugins.push({
+        id: p.source,
+        version: p.manifest.version ?? 'unknown',
+        scope: SYNCED_MARKETPLACE_NAME,
+        enabled: p.enabled !== false,
+        installPath: p.path,
+        mcpServers:
+          servers && Object.keys(servers).length > 0 ? servers : undefined,
+        errors: pErrors.length > 0 ? pErrors : undefined,
+      })
+    }
+    for (const e of syncedLoadErrors.filter(e =>
+      e.source.startsWith(`${SYNCED_MARKETPLACE_NAME}[`),
+    )) {
+      plugins.push({
+        id: e.source,
+        version: 'unknown',
+        scope: SYNCED_MARKETPLACE_NAME,
+        enabled: false,
+        installPath: 'path' in e ? e.path : '',
+        errors: [getPluginErrorMessage(e)],
+      })
+    }
+
     // If --available is set, also load available plugins from marketplaces
     if (options.available) {
       const available: Array<{
@@ -336,11 +377,15 @@ export async function pluginListHandler(options: {
     }
   }
 
-  if (pluginIds.length === 0 && inlinePlugins.length === 0) {
+  if (
+    pluginIds.length === 0 &&
+    inlinePlugins.length === 0 &&
+    syncedPlugins.length === 0
+  ) {
     // inlineLoadErrors can exist with zero inline plugins (e.g. --plugin-dir
     // points at a nonexistent path). Don't early-exit over them — fall
     // through to the session section so the failure is visible.
-    if (inlineLoadErrors.length === 0) {
+    if (inlineLoadErrors.length === 0 && syncedLoadErrors.length === 0) {
       cliOk(
         'No plugins installed. Use `claude plugin install` to install a plugin.',
       )
@@ -408,6 +453,36 @@ export async function pluginListHandler(options: {
     // `--plugin-dir /typo` doesn't just silently produce nothing.
     for (const e of inlineLoadErrors.filter(e =>
       e.source.startsWith('inline['),
+    )) {
+      console.log(
+        `  ${figures.pointer} ${e.source}: ${figures.cross} ${getPluginErrorMessage(e)}\n`,
+      )
+    }
+  }
+
+  if (syncedPlugins.length > 0 || syncedLoadErrors.length > 0) {
+    console.log('Synced plugins:\n')
+    for (const p of syncedPlugins) {
+      const pErrors = syncedLoadErrors.filter(
+        e => e.source === p.source || ('plugin' in e && e.plugin === p.name),
+      )
+      const status =
+        pErrors.length > 0
+          ? `${figures.cross} loaded with errors`
+          : p.enabled !== false
+            ? `${figures.tick} enabled`
+            : `${figures.cross} disabled`
+      console.log(`  ${figures.pointer} ${p.source}`)
+      console.log(`    Version: ${p.manifest.version ?? 'unknown'}`)
+      console.log(`    Path: ${p.path}`)
+      console.log(`    Status: ${status}`)
+      for (const e of pErrors) {
+        console.log(`    Error: ${getPluginErrorMessage(e)}`)
+      }
+      console.log('')
+    }
+    for (const e of syncedLoadErrors.filter(e =>
+      e.source.startsWith(`${SYNCED_MARKETPLACE_NAME}[`),
     )) {
       console.log(
         `  ${figures.pointer} ${e.source}: ${figures.cross} ${getPluginErrorMessage(e)}\n`,

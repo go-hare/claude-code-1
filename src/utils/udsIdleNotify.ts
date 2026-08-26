@@ -12,18 +12,17 @@
  */
 
 import { randomUUID } from 'crypto'
-import { dirname, resolve as pathResolve } from 'path'
+import { dirname } from 'path'
 import { z } from 'zod/v4'
 import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 import { lazySchema } from './lazySchema.js'
 import { resolveCrossSessionInbound } from './settings/settings.js'
 import {
+  canonicalizeMessagingSocketPath,
   formatUdsAddress,
   getUdsMessagingSocketPath,
   isLocalIpcPath,
-  parseWindowsNamedPipeName,
-  sendUdsMessage,
   type UdsMessage,
 } from './udsMessaging.js'
 
@@ -36,7 +35,7 @@ export const MAX_PENDING_IDLE_SUBSCRIPTIONS = 32
 /** densable AVn — subscription lifetime (12h). */
 export const IDLE_SUBSCRIPTION_TTL_MS = 43_200_000
 /** densable E2f — trim older outstanding rows per target beyond this. */
-const MAX_OUTSTANDING_PER_TARGET = 3
+export const MAX_OUTSTANDING_PER_TARGET = 3
 /** densable v2f — label display cap (chars). */
 const IDLE_LABEL_MAX_CHARS = 100
 
@@ -231,6 +230,34 @@ export type IdleNoticeForModel = {
   modelVisible: boolean
 }
 
+/** densable LTl — short toast / transcript display. */
+export function idleNoticeDisplayText(notice: IdleNoticeForModel): string {
+  const at = formatIdleNoticeClock(notice.finishedAt)
+  switch (notice.kind) {
+    case 'idle':
+      return `${notice.label} is idle${at ? ` — finished a turn at ${at}` : ''}${notice.detail ? ` · «${notice.detail}»` : ''}`
+    case 'exited':
+      return `${notice.label} exited${notice.finishedAt !== undefined ? ` at ${at}` : ''} before going idle.`
+    case 'unavailable':
+      return `${notice.label} is not holding the idle subscription (${UNAVAILABLE_DETAIL}) — no idle notice will come from it.`
+    case 'expired':
+      return `No idle signal from ${notice.label} within ${IDLE_SUBSCRIPTION_TTL_MS / 3_600_000} h — idle subscription expired.`
+  }
+}
+
+function formatIdleNoticeClock(iso: string | undefined): string {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+  } catch {
+    return ''
+  }
+}
+
 export function idleNoticeModelText(notice: IdleNoticeForModel): string {
   const harness =
     notice.kind === 'expired'
@@ -282,15 +309,9 @@ export function sanitizeIdleLabel(raw: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 export function canonicalSocketKey(path: string): string | undefined {
-  const pipe = parseWindowsNamedPipeName(path)
-  if (pipe !== undefined) return `\\\\.\\pipe\\${pipe.toLowerCase()}`
   if (!path || path.includes('\0')) return undefined
   if (!isLocalIpcPath(path)) return undefined
-  try {
-    return pathResolve(path)
-  } catch {
-    return undefined
-  }
+  return canonicalizeMessagingSocketPath(path)
 }
 
 /**
@@ -357,10 +378,11 @@ type PeerSubscriber = {
   subscribedAt: number
 }
 
-/** Tip startUdsMessaging registers (target, frame) → sendUdsMessage control. */
+/** Official r3i: (target, fields, expectPeerPid?) → T4r/cmp. */
 type PeerIdleNoticeSender = (
   replyTarget: string,
   frame: Record<string, unknown>,
+  expectPeerPid?: number,
 ) => Promise<void>
 
 type IdleNotifyState = {
@@ -393,6 +415,26 @@ export function resetUdsIdleNotifyForTests(): void {
   state.onNotice = null
   state.pendingNotices.length = 0
   state.conversationId = randomUUID()
+}
+
+/**
+ * Test-only: seed an outstanding idle subscription without binding a UDS inbox.
+ * Used to exercise deliverNotice/correlate hold surfaces on hosts where
+ * startUdsMessaging cannot listen (e.g. Windows named-pipe errno 10050).
+ */
+export function seedOutstandingIdleSubscriptionForTests(args: {
+  msgId: string
+  label: string
+  target: string
+}): void {
+  // densable E2f / M7: go through recordOutstanding so trim semantics apply
+  // (raw push would bypass the >= MAX pre-trim and hide the off-by-one).
+  const result = recordOutstanding(args.msgId, args.label, args.target)
+  if (!result.ok) {
+    throw new Error(
+      `seedOutstandingIdleSubscriptionForTests: ${result.reason} for ${args.target}`,
+    )
+  }
 }
 
 function fail(reason: IdleSubscribeReason): IdleSubscribeResult {
@@ -432,8 +474,10 @@ function recordOutstanding(
     return { ok: false, reason: 'unreachable-namespace' }
   }
   const rows = state.outstanding
+  // densable E2f / M7: trim BEFORE push using `>= MAX` so after insert the
+  // target holds at most MAX_OUTSTANDING_PER_TARGET (not MAX+1).
   let same = rows.filter(r => r.targetKey === targetKey)
-  while (same.length > MAX_OUTSTANDING_PER_TARGET) {
+  while (same.length >= MAX_OUTSTANDING_PER_TARGET) {
     const drop = same.splice(1, 1)[0]
     if (!drop) break
     clearTimeout(drop.expiry)
@@ -548,27 +592,21 @@ export function buildPeerIdleNoticeSender(
   ownSocketPath: string,
 ): PeerIdleNoticeSender {
   const from = formatUdsAddress(ownSocketPath)
-  return async (replyTarget, frameFields) => {
-    const { readUdsCapabilityToken } = await import('./udsMessaging.js')
-    const token = await readUdsCapabilityToken(replyTarget)
-    if (!token) {
-      throw new Error(`no capability token for ${replyTarget}`)
-    }
-    const frame: UdsMessage = {
-      type: 'control',
-      from: ownSocketPath,
-      ts: new Date().toISOString(),
-      action:
-        typeof frameFields.action === 'string'
-          ? frameFields.action
-          : 'peer_idle_notice',
-      ...frameFields,
-      meta: {
+  return async (replyTarget, frameFields, expectPeerPid) => {
+    // Official r3i → T4r → cmp. Token optional after no-key+rvv.
+    const { sendUdsControl } = await import('./udsClient.js')
+    await sendUdsControl(
+      replyTarget,
+      {
+        action:
+          typeof frameFields.action === 'string'
+            ? frameFields.action
+            : 'peer_idle_notice',
         ...frameFields,
         from: typeof frameFields.from === 'string' ? frameFields.from : from,
       },
-    }
-    await sendUdsMessage(replyTarget, frame, { authToken: token })
+      expectPeerPid !== undefined ? { expectPeerPid } : undefined,
+    )
   }
 }
 
@@ -699,13 +737,13 @@ async function subscribeToPeerIdleInner(
         ...(opts.fromMode !== undefined ? { from_mode: opts.fromMode } : {}),
       })
     } else {
-      const { readUdsCapabilityToken } = await import('./udsMessaging.js')
-      const token = await readUdsCapabilityToken(targetSocketPath)
-      if (!token) {
-        forgetIdleSubscription(msgId)
-        return fail('peer-gone')
-      }
-      await sendUdsMessage(targetSocketPath, frame, { authToken: token })
+      const { sendUdsControl } = await import('./udsClient.js')
+      await sendUdsControl(targetSocketPath, {
+        action: 'notify_when_idle',
+        from,
+        msg_id: msgId,
+        ...(opts.fromMode !== undefined ? { from_mode: opts.fromMode } : {}),
+      })
     }
     return {
       // densable: peerKnownCapable iff a live registry row was resolved (voucher passed).

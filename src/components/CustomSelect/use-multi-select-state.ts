@@ -151,6 +151,16 @@ export type MultiSelectState<T> = {
    * Callback for canceling the select.
    */
   onCancel: () => void
+
+  /**
+   * densable `focusOption` — click an input option focuses it (yln-guarded).
+   */
+  focusOption: (value: T | undefined) => void
+
+  /**
+   * densable `toggleValue` — click a text option toggles membership.
+   */
+  toggleValue: (value: T) => void
 }
 
 export function useMultiSelectState<T>({
@@ -216,6 +226,15 @@ export function useMultiSelectState<T>({
   // Automatically register as an overlay.
   // This ensures CancelRequestHandler won't intercept Escape when the multi-select is active.
   useRegisterOverlay('multi-select', undefined)
+
+  const toggleValue = useCallback(
+    (value: T) => {
+      updateSelectedValues(prev =>
+        prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value],
+      )
+    },
+    [updateSelectedValues],
+  )
 
   const updateInputValue = useCallback(
     (value: T, inputValue: string) => {
@@ -377,10 +396,7 @@ export function useMultiSelectState<T>({
         // Enter or Space toggles selection (including for input fields)
         const focused = navigation.getFocusedValue()
         if (focused !== undefined) {
-          const newValues = selectedValues.includes(focused)
-            ? selectedValues.filter(v => v !== focused)
-            : [...selectedValues, focused]
-          updateSelectedValues(newValues)
+          toggleValue(focused)
         }
         return
       }
@@ -389,11 +405,7 @@ export function useMultiSelectState<T>({
       if (!hideIndexes && /^[0-9]+$/.test(normalizedInput)) {
         const index = parseInt(normalizedInput, 10) - 1
         if (index >= 0 && index < options.length) {
-          const value = options[index]!.value
-          const newValues = selectedValues.includes(value)
-            ? selectedValues.filter(v => v !== value)
-            : [...selectedValues, value]
-          updateSelectedValues(newValues)
+          toggleValue(options[index]!.value)
         }
         return
       }
@@ -414,5 +426,6 @@ export function useMultiSelectState<T>({
     isSubmitFocused,
     updateInputValue,
     onCancel,
+    toggleValue,
   }
 }

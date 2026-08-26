@@ -1,0 +1,5 @@
+nd(e,t,r){this.exchanges=[...this.exchanges,{question:e,response:t,...r&&{fallbackNotice:r}}].slice(-20)}}function xu(e){return e}function Yc(e){return/^[\\/]{2}/.test(e)||Eke(e)}function IMr(e){retur
+n/(^|[\\/])\.\.([\\/]|$)/.test(e)}function XA(e){return/^[\\/]\?\?[\\/]/.test(e)}function HMe(e){if(/^[\\/]{2}[?.][\\/](?!unc[\\/])/i.test(e))return null;return e.match(/^[\\/]{2}(?:[?.][\\/]unc[\\/])
+?([^\\/]+)/i)?.[1]?.replace(/[A-Z]/g,(t)=>t.toLowerCase())??null}function NI(e){return/(^|[\\/])\.{1,2}([\\/]|$)/.test(e)}function obe(e){return/^[\\/]{2}[?.][\\/]/.test(e)}function P4s(e){return/^[\\
+/](GLOBAL\?\?|GLOBALROOT|DosDevices|Device)[\\/]/i.test(e)}function RMr(e,t){if(!Yc(e))return!1;if(obe(e)||Eke(e))return!0;if(NI(e))return!0;let r=HMe(e);return r===null||r!==HMe(t)}function tBo(e){re
+turn null}function R4s(e){return e.replace(/[A-Z]/g,(t)=>t.toLowerCase())}function pxn(e,t="win32"){

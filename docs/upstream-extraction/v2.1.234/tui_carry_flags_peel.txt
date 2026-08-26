@@ -1,0 +1,401 @@
+
+===== around 308478000 =====
+mc();Ppc();_a();VM();Jx();Lpc=require("path"),r1=H(It(),1),yd=H(be(),1),Npc=H(De(),1);AYh=BDs+BDs});var IYh={};yt(IYh,{call:()=>z4w});function HYh(q9M){let Znt=PYh.c(25),{onDone:xWt}=q9M,[xYh,tfo]=ya(),{customThemes:CYh}=aMe(),L4w;if(Znt[0]===ae)L4w={kind:"picker"},Znt[0]=L4w;else L4w=Znt[0];let[$pc,N4w]=Bpc.useState(L4w),$4w;if(Znt[1]===ae)$4w=bf("themes"),Znt[1]=$4w;else $4w=Znt[1];let F4w=$4w,RYh=sMe(),U4w;if(Znt[2]!==RYh)U4w=yG(RYh),Znt[2]=RYh,Znt[3]=U4w;else U4w=Znt[3];let Fpc=U4w;if($pc.kind==="editor"){let CWt;if(Znt[4]!==xWt||Znt[5]!==tfo)CWt=(B4w)=>{tfo(eMe(B4w.slug)),xWt(`Using custom theme "${B4w.name}"`)},Znt[4]=xWt,Znt[5]=tfo,Znt[6]=CWt;else CWt=Znt[6];let Mts;if(Znt[7]===ae)Mts=()=>N4w({kind:"picker"}),Znt[7]=Mts;else Mts=Znt[7];let Msn;if(Znt[8]!==xYh||Znt[9]!==$pc.initial||Znt[10]!==CWt)Msn=RWt.jsx(Dts,{initial:$pc.initial,defaultBase:xYh,onDone:CWt,onCancel:Mts}),Znt[8]=xYh,Znt[9]=$pc.initial,Znt[10]=CWt,Znt[11]=Msn;else Msn=Znt[11];return Msn}let CWt;if(Znt[12]!==CYh||Znt[13]!==xWt||Znt[14]!==tfo)CWt=(Ots)=>{tfo(Ots),xWt(yG(Ots)?`Using custom theme "${CYh.find((K9M)=>eMe(K9M.slug)===Ots)?.name??Ots}"`:`Theme set to ${Ots}`)},Znt[12]=CYh,Znt[13]=xWt,Znt[14]=tfo,Znt[15]=CWt;else CWt=Znt[15];let Mts;if(Znt[16]===ae)Mts=F4w?void 0:(Y9M)=>N4w({kind:"editor",initial:Y9M}),Znt[16]=Mts;else Mts=Znt[16];let Msn;if(Znt[17]!==Fpc)Msn=F4w?`Custom themes are disabled in safe mode \u2014 ${BI()} to create or edit them${Fpc?`. Your saved theme "${Fpc}" is a custom theme; selecting a preset here replaces it`:""}`:"",Znt[17]=Fpc,Znt[18]=Msn;else Msn=Znt[18];let Upc;if(Znt[19]!==xWt)Upc=()=>{xWt("Theme picker dismissed",{display:"system"})},Znt[19]=xWt,Znt[20]=Upc;else Upc=Znt[20];let j4w;if(Znt[21]!==CWt||Znt[22]!==Msn||Znt[23]!==Upc)j4w=RWt.jsx(mp,{color:"permission",children:RWt.jsx(Mbt,{onThemeSelect:CWt,onCustomTheme:Mts,helpText:Msn,onCancel:Upc,skipExitHandling:!0})}),Znt[21]=CWt,Znt[22]=Msn,Znt[23]=Upc,Znt[24]=j4w;else j4w=Znt[24];return j4w}var Bpc,RWt,PYh,z4w=async(e,t)=>RWt.jsx(HYh,{onDone:e});var DYh=A(()=>{VM();kYh();cqi();Dt();PC();Cze();lo();Bpc=H(It(),1),RWt=H(be(),1),PYh=H(De(),1)});var jYh={};yt(jYh,{call:()=>n3w,cannotSwitchRendererMessage:()=>UYh,relaunchInto:()=>I_r,savedWithoutRestartForTasksMessage:()=>nfo,savedWithoutRestartMessage:()=>Jpc});async function I_r(e,t,r,n,o){await rKn();let i=await MLe(r,"relaunch",{},o);return iOi(i,{freshIfNoTranscript:!0,extraArgs:t,proactivity:n,env:{CLAUDE_CODE_TUI_JUST_SWITCHED:e,...nKe()},dropEnv:["CLAUDE_CODE_NO_FLICKER","CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN","CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL"]},o)}function UYh(e,t){return`Cannot switch renderers in this session \u2014 it has restrictions a restart can't carry over (${t.join("; ")}). Nothing was changed. Running /tui ${e} in a session started without them switches every later session too.`}function Jpc(e){return`Staying on the default renderer without a restart \u2014 this session now has restrictions a restart can't carry over (${e.join("; ")}); the preference is saved.`}function nfo(e,t){return`Staying on the ${e} renderer without a restart \u2014 ${t==="comment_monitor"?"Claude is now auto-replying to artifact comments and a restart would stop the replies (stop the monitor via /tasks, or ask Claude to stop it)":"work is now running in the background"}; the preference is saved.`}function Zpc(e,t,r){return L("tengu_tui_refused",{active_tasks:t.activeTasks,comment_monitor:t.kind==="comment_monitor",deferred:!0}),r(nfo(e,t.
+===== around 308482000 =====
+==jpc||H_r[4]!==Vpc||H_r[5]!==rfo||H_r[6]!==Lts||H_r[7]!==qpc||H_r[8]!==Wpc||H_r[9]!==Kpc||H_r[10]!==R_r)V4w=()=>{if(R_r===null){return}let K4w=!1;return(async()=>{if(R_r&&R_r.toLowerCase().replace(/[^a-z]/g,"")!==$Yh){let PKM=pp(R_r).slice(0,FYh);await lL("tengu_tui_optout_reason",{reason:PKM,from_entry_path:ge(jpc),bounce:zpc,downsell_gate:SAe.downsellGateCached===!0,revert_kind:ge(Wpc),downsell_seen_count:or().fullscreenDownsellSeenCount??0}).catch(xe)}if(await xr(PK*2),K4w){return}let Y4w=W4e(Lts().toolPermissionContext,Jce());if(Y4w.length>0){L("tengu_tui_refused",{uncarriable:!0}),rfo(Jpc(Y4w),{display:"system"});return}let X4w=qpc();if(X4w!==void 0){Zpc("default",X4w,rfo);return}I_r("default",Gpc(),Vpc(),Lts(),Kpc).catch((Ypc)=>{xe(Ypc),rfo(`Couldn't switch renderers \u2014 ${Ypc instanceof Error?Ypc.message:String(Ypc)}. The setting was saved; restart Claude Code to apply it.`,{display:"system"})})})(),()=>{K4w=!0}},q4w=[R_r,jpc,zpc,Wpc,Gpc,Vpc,Lts,qpc,Kpc,rfo],H_r[1]=zpc,H_r[2]=Gpc,H_r[3]=jpc,H_r[4]=Vpc,H_r[5]=rfo,H_r[6]=Lts,H_r[7]=qpc,H_r[8]=Wpc,H_r[9]=Kpc,H_r[10]=R_r,H_r[11]=V4w,H_r[12]=q4w;else V4w=H_r[11],q4w=H_r[12];qCe.useEffect(V4w,q4w);let J4w,Z4w;if(H_r[13]===ae)J4w=()=>LYh(""),Z4w={context:"Settings"},H_r[13]=J4w,H_r[14]=Z4w;else J4w=H_r[13],Z4w=H_r[14];if(Ao("confirm:no",J4w,Z4w),R_r!==null){let Nts;if(H_r[15]===ae)Nts=t4.jsx(R,{paddingX:1,children:t4.jsx(_,{dimColor:!0,children:"Switching back to the classic renderer\u2026"})}),H_r[15]=Nts;else Nts=H_r[15];return Nts}let Nts;if(H_r[16]===ae)Nts=()=>LYh(""),H_r[16]=Nts;else Nts=H_r[16];let Q4w,e3w;if(H_r[17]===ae)Q4w=t4.jsxs(Fr,{children:[t4.jsx(at,{chord:"enter",action:"send"}),t4.jsx(mo,{action:"confirm:no",context:"Confirmation",fallback:"Esc",description:"skip"})]}),e3w=t4.jsx(_,{children:"To help us make fullscreen mode better, what made you switch back?"}),H_r[17]=Q4w,H_r[18]=e3w;else Q4w=H_r[17],e3w=H_r[18];let t3w;if(H_r[19]===ae)t3w=t4.jsx(_,{children:">"}),H_r[19]=t3w;else t3w=H_r[19];const NYh=Math.max(10,HKM-8);let r3w;if(H_r[20]!==OYh||H_r[21]!==MYh||H_r[22]!==NYh)r3w=t4.jsxs(Lr,{title:"Fullscreen feedback",onCancel:Nts,isCancelActive:!1,inputGuide:Q4w,children:[e3w,t4.jsxs(R,{flexDirection:"row",gap:1,children:[t3w,t4.jsx(Il,{value:MYh,onChange:xKM,onSubmit:LYh,focus:!0,showCursor:!0,columns:NYh,cursorOffset:OYh,onChangeCursorOffset:CKM})]})]}),H_r[20]=OYh,H_r[21]=MYh,H_r[22]=NYh,H_r[23]=r3w;else r3w=H_r[23];return r3w}var qCe,t4,zYh,Xpc,n3w=async(e,t,r)=>{let n=r.trim().toLowerCase(),o=Ns()?"fullscreen":"default";if(n==="")return e(`Current renderer: ${o}. Usage: /tui <${Xpc.join("|")}>`,{display:"system"}),null;if(!Xpc.includes(n))return e(`Unknown renderer "${n}". Usage: /tui <${Xpc.join("|")}>`,{display:"system"}),null;let i=n,s=()=>{let v=un(t);return[...Cmt(v,pv(t)),...Rmt(v,iHe())]},a=()=>({proactivityLevel:t.getProactivityLevel(),toolPermissionContext:un(t)}),l=()=>t.getMessages?.()??t.messages,c=()=>iyt(t.taskRegistry.all());if(As()){let v=Yct(),{error:S}=await ea("userSettings",{tui:i},void 0,t.storageV5);if(S)return e(`Failed to save setting: ${S.message}`,{display:"system"}),null;let w=ZX();return L("tengu_tui_command",{fullscreen:i==="fullscreen",from:ge(o),to:ge(i),from_entry_path:ge(v),session_age_ms:Math.round(process.uptime()*1000),bounce:!1,scroll_decay_curve:w.useDecayCurve,scroll_base:w.base,scroll_xtermjs:w.xtermJs}),e(`Saved. Background sessions always use the fullscreen renderer while attached; the ${i} renderer will apply to sess
+===== around 308484000 =====
+onst NYh=Math.max(10,HKM-8);let r3w;if(H_r[20]!==OYh||H_r[21]!==MYh||H_r[22]!==NYh)r3w=t4.jsxs(Lr,{title:"Fullscreen feedback",onCancel:Nts,isCancelActive:!1,inputGuide:Q4w,children:[e3w,t4.jsxs(R,{flexDirection:"row",gap:1,children:[t3w,t4.jsx(Il,{value:MYh,onChange:xKM,onSubmit:LYh,focus:!0,showCursor:!0,columns:NYh,cursorOffset:OYh,onChangeCursorOffset:CKM})]})]}),H_r[20]=OYh,H_r[21]=MYh,H_r[22]=NYh,H_r[23]=r3w;else r3w=H_r[23];return r3w}var qCe,t4,zYh,Xpc,n3w=async(e,t,r)=>{let n=r.trim().toLowerCase(),o=Ns()?"fullscreen":"default";if(n==="")return e(`Current renderer: ${o}. Usage: /tui <${Xpc.join("|")}>`,{display:"system"}),null;if(!Xpc.includes(n))return e(`Unknown renderer "${n}". Usage: /tui <${Xpc.join("|")}>`,{display:"system"}),null;let i=n,s=()=>{let v=un(t);return[...Cmt(v,pv(t)),...Rmt(v,iHe())]},a=()=>({proactivityLevel:t.getProactivityLevel(),toolPermissionContext:un(t)}),l=()=>t.getMessages?.()??t.messages,c=()=>iyt(t.taskRegistry.all());if(As()){let v=Yct(),{error:S}=await ea("userSettings",{tui:i},void 0,t.storageV5);if(S)return e(`Failed to save setting: ${S.message}`,{display:"system"}),null;let w=ZX();return L("tengu_tui_command",{fullscreen:i==="fullscreen",from:ge(o),to:ge(i),from_entry_path:ge(v),session_age_ms:Math.round(process.uptime()*1000),bounce:!1,scroll_decay_curve:w.useDecayCurve,scroll_base:w.base,scroll_xtermjs:w.xtermJs}),e(`Saved. Background sessions always use the fullscreen renderer while attached; the ${i} renderer will apply to sessions started directly with \`claude\`.`,{display:"system"}),null}if(k$())return e("Screen-reader mode always uses the classic renderer, so the tui setting has no effect while it is active.",{display:"system"}),null;let u=i==="fullscreen",d=u===Ns();if(d&&qo().tui!==void 0)return e(`Already using the ${i} renderer.`,{display:"system"}),null;let p=(v)=>{let S=W4e(un(t),Jce());if(S.length>0)return L("tengu_tui_refused",{uncarriable:!0}),UYh(i,S);let w=c();if(w!==void 0)return L("tengu_tui_refused",{active_tasks:w.activeTasks,comment_monitor:w.kind==="comment_monitor",...v&&{deferred:v}}),w.kind==="comment_monitor"?"Cannot switch renderers while auto-replying to artifact comments \u2014 switching restarts Claude Code and would stop the replies. Stop the artifact comment monitor via /tasks (or ask Claude to stop it), then run /tui again.":"Cannot switch renderers while work is running in the background \u2014 wait for it to finish (or stop it via /tasks), then run /tui again.";return},f;if(!d){let v=p();if(v===void 0)await xve(t.messages,t.storageV5),v=p(!0),f={flags:s(),handoff:a()};if(v!==void 0)return e(v,{display:"system"}),null}let m=Yct(),{error:h}=await ea("userSettings",{tui:i},void 0,t.storageV5);if(h)return e(`Failed to save setting: ${h.message}`,{display:"system"}),null;let g=ZX(),y=(K.CLAUDE_CODE_TUI_JUST_SWITCHED==="fullscreen"||m==="downsell_on"||SAe.downsellGateCached===!0)&&i==="default";if(L("tengu_tui_command",{fullscreen:u,from:ge(o),to:ge(i),from_entry_path:ge(m),session_age_ms:Math.round(process.uptime()*1000),bounce:y,scroll_decay_curve:g.useDecayCurve,scroll_base:g.base,scroll_xtermjs:g.xtermJs}),d)return e(`Already using the ${i} renderer.`,{display:"system"}),null;if(i==="default"&&(y||m==="gb_on"||m==="settings_on")&&bye()&&Hs("allow_product_feedback"))return t4.jsx(BYh,{fromEntryPath:m,bounce:y,revertKind:y||m==="gb_on"?"same_session":"later_session",carryFlags:s,getMessages:l,proactivity:a,relaunchBlocker:c,storageV5:t.storageV5,onDone:e});le
+===== around 308486000 =====
+{active_tasks:w.activeTasks,comment_monitor:w.kind==="comment_monitor",...v&&{deferred:v}}),w.kind==="comment_monitor"?"Cannot switch renderers while auto-replying to artifact comments \u2014 switching restarts Claude Code and would stop the replies. Stop the artifact comment monitor via /tasks (or ask Claude to stop it), then run /tui again.":"Cannot switch renderers while work is running in the background \u2014 wait for it to finish (or stop it via /tasks), then run /tui again.";return},f;if(!d){let v=p();if(v===void 0)await xve(t.messages,t.storageV5),v=p(!0),f={flags:s(),handoff:a()};if(v!==void 0)return e(v,{display:"system"}),null}let m=Yct(),{error:h}=await ea("userSettings",{tui:i},void 0,t.storageV5);if(h)return e(`Failed to save setting: ${h.message}`,{display:"system"}),null;let g=ZX(),y=(K.CLAUDE_CODE_TUI_JUST_SWITCHED==="fullscreen"||m==="downsell_on"||SAe.downsellGateCached===!0)&&i==="default";if(L("tengu_tui_command",{fullscreen:u,from:ge(o),to:ge(i),from_entry_path:ge(m),session_age_ms:Math.round(process.uptime()*1000),bounce:y,scroll_decay_curve:g.useDecayCurve,scroll_base:g.base,scroll_xtermjs:g.xtermJs}),d)return e(`Already using the ${i} renderer.`,{display:"system"}),null;if(i==="default"&&(y||m==="gb_on"||m==="settings_on")&&bye()&&Hs("allow_product_feedback"))return t4.jsx(BYh,{fromEntryPath:m,bounce:y,revertKind:y||m==="gb_on"?"same_session":"later_session",carryFlags:s,getMessages:l,proactivity:a,relaunchBlocker:c,storageV5:t.storageV5,onDone:e});let b=c();if(b!==void 0)return Zpc(i,b,e);return I_r(i,f.flags,l(),f.handoff,t.storageV5).catch((v)=>(xe(v),e(`Couldn't switch renderers \u2014 ${v instanceof Error?v.message:String(v)}. The setting was saved; restart Claude Code to apply it.`,{display:"system"}),null))},$Yh="egcouldntcopytext",FYh=1000;var Qpc=A(()=>{bt();by();mc();zl();_a();Jx();Ql();jPt();Dt();fl();N9();Ut();Bd();Mu();OLe();$n();cr();Jc();Th();Vr();pk();ure();Hj();RJe();To();qCe=H(It(),1),t4=H(be(),1),zYh=H(De(),1),Xpc=["default","fullscreen"]});function p3w(){return!or().hasSeenUltraplanTerms}function f3w(){return U9n()}function m3w(qKM){return qKM.replBridgeEnabled}function h3w(){return null}function g3w(XYh){if(!XYh.replBridgeEnabled){return XYh}return{...XYh,replBridgeEnabled:!1,replBridgeExplicit:!1,replBridgeOutboundOnly:!1,replBridgeSessionGroupingId:void 0}}function y3w(JYh){return JYh.hasSeenUltraplanTerms?JYh:{...JYh,hasSeenUltraplanTerms:!0}}function sfo(e){if(!e.bundleSeedEnabled)return null;return e.cloneViable?"This will try to clone your git remote and fall back to uploading this repository.":"This will upload your repository to Claude Code on the web."}function dfc(VKM){let Osn=pfc.c(25),{sourcePromise:WYh,onChoice:GYh}=VKM;$g("ultraplan-launch");let[USt]=KCe.useState(p3w),[P_r]=KCe.useState(f3w),o3w;if(Osn[0]!==P_r)o3w=B9n(P_r),Osn[0]=P_r,Osn[1]=o3w;else o3w=Osn[1];let ofo=o3w,ifo=ft(m3w),VYh=Li(),{storageV5:qYh}=En(),i3w;if(Osn[2]!==WYh||Osn[3]!==USt)i3w=()=>USt?WYh??Q$t().catch(h3w):null,Osn[2]=WYh,Osn[3]=USt,Osn[4]=i3w;else i3w=Osn[4];let[KYh]=KCe.useState(i3w),s3w;if(Osn[5]!==GYh||Osn[6]!==P_r||Osn[7]!==ifo||Osn[8]!==VYh||Osn[9]!==USt||Osn[10]!==qYh)s3w=function D_r(efc){let YYh=efc==="run"&&ifo;if(L("tengu_ultraplan_dialog_choice",{choice:ge(efc),first_run:USt,bridge_disconnected:YYh,prompt_identifier:ge(P_r)}),YYh)VYh(g3w);if(efc!=="cancel"&&USt)L("tengu_ultraplan_first_launch",{prompt_identifier:ge(P_r)}),tn(y3w,qYh);GYh(efc,{disconnectedBridge:YYh,promptIdentifier:P_r})},Os
+===== around 308488000 =====
+t","fullscreen"]});function p3w(){return!or().hasSeenUltraplanTerms}function f3w(){return U9n()}function m3w(qKM){return qKM.replBridgeEnabled}function h3w(){return null}function g3w(XYh){if(!XYh.replBridgeEnabled){return XYh}return{...XYh,replBridgeEnabled:!1,replBridgeExplicit:!1,replBridgeOutboundOnly:!1,replBridgeSessionGroupingId:void 0}}function y3w(JYh){return JYh.hasSeenUltraplanTerms?JYh:{...JYh,hasSeenUltraplanTerms:!0}}function sfo(e){if(!e.bundleSeedEnabled)return null;return e.cloneViable?"This will try to clone your git remote and fall back to uploading this repository.":"This will upload your repository to Claude Code on the web."}function dfc(VKM){let Osn=pfc.c(25),{sourcePromise:WYh,onChoice:GYh}=VKM;$g("ultraplan-launch");let[USt]=KCe.useState(p3w),[P_r]=KCe.useState(f3w),o3w;if(Osn[0]!==P_r)o3w=B9n(P_r),Osn[0]=P_r,Osn[1]=o3w;else o3w=Osn[1];let ofo=o3w,ifo=ft(m3w),VYh=Li(),{storageV5:qYh}=En(),i3w;if(Osn[2]!==WYh||Osn[3]!==USt)i3w=()=>USt?WYh??Q$t().catch(h3w):null,Osn[2]=WYh,Osn[3]=USt,Osn[4]=i3w;else i3w=Osn[4];let[KYh]=KCe.useState(i3w),s3w;if(Osn[5]!==GYh||Osn[6]!==P_r||Osn[7]!==ifo||Osn[8]!==VYh||Osn[9]!==USt||Osn[10]!==qYh)s3w=function D_r(efc){let YYh=efc==="run"&&ifo;if(L("tengu_ultraplan_dialog_choice",{choice:ge(efc),first_run:USt,bridge_disconnected:YYh,prompt_identifier:ge(P_r)}),YYh)VYh(g3w);if(efc!=="cancel"&&USt)L("tengu_ultraplan_first_launch",{prompt_identifier:ge(P_r)}),tn(y3w,qYh);GYh(efc,{disconnectedBridge:YYh,promptIdentifier:P_r})},Osn[5]=GYh,Osn[6]=P_r,Osn[7]=ifo,Osn[8]=VYh,Osn[9]=USt,Osn[10]=qYh,Osn[11]=s3w;else s3w=Osn[11];let D_r=s3w,tfc;if(Osn[12]!==D_r)tfc=()=>D_r("cancel"),Osn[12]=D_r,Osn[13]=tfc;else tfc=Osn[13];let a3w;if(Osn[14]===ae)a3w=YS.jsx(_,{dimColor:!0,children:"Loading\u2026"}),Osn[14]=a3w;else a3w=Osn[14];let rfc;if(Osn[15]!==ofo||Osn[16]!==D_r||Osn[17]!==ifo||Osn[18]!==USt||Osn[19]!==KYh)rfc=YS.jsx(KCe.Suspense,{fallback:a3w,children:YS.jsx(ufc,{showTerms:USt,sourcePromise:KYh,copy:ofo,replBridgeEnabled:ifo,onChoice:D_r})}),Osn[15]=ofo,Osn[16]=D_r,Osn[17]=ifo,Osn[18]=USt,Osn[19]=KYh,Osn[20]=rfc;else rfc=Osn[20];let l3w;if(Osn[21]!==ofo.timeEstimate||Osn[22]!==tfc||Osn[23]!==rfc)l3w=YS.jsx(Lr,{title:"Run ultraplan in the cloud?",subtitle:ofo.timeEstimate,onCancel:tfc,children:rfc}),Osn[21]=ofo.timeEstimate,Osn[22]=tfc,Osn[23]=rfc,Osn[24]=l3w;else l3w=Osn[24];return l3w}function ufc(KKM){let Nsn=pfc.c(22),{showTerms:$ts,sourcePromise:c3w,copy:Lsn,replBridgeEnabled:Fts,onChoice:ZYh}=KKM,nfc=c3w?KCe.use(c3w):null,u3w;if(Nsn[0]!==nfc)u3w=nfc&&sfo(nfc),Nsn[0]=nfc,Nsn[1]=u3w;else u3w=Nsn[1];let ofc=u3w,ifc;if(Nsn[2]!==Lsn.dialogBody||Nsn[3]!==Lsn.dialogPipeline||Nsn[4]!==Fts||Nsn[5]!==$ts||Nsn[6]!==ofc)ifc=$ts?YS.jsxs(YS.Fragment,{children:[YS.jsx(_,{dimColor:!0,children:Lsn.dialogBody}),YS.jsxs(R,{flexDirection:"column",children:[ofc&&YS.jsx(_,{dimColor:!0,children:ofc}),YS.jsxs(_,{dimColor:!0,children:["More information: ",YS.jsx(ki,{url:xLe,children:xLe})]})]}),YS.jsx(_,{children:"Proceed?"})]}):YS.jsxs(YS.Fragment,{children:[YS.jsxs(R,{flexDirection:"column",children:[YS.jsx(_,{dimColor:!0,children:Lsn.dialogBody}),Fts&&YS.jsx(_,{dimColor:!0,children:"This will disable Remote Control for this session."})]}),!Fts&&YS.jsx(_,{dimColor:!0,children:Lsn.dialogPipeline})]}),Nsn[2]=Lsn.dialogBody,Nsn[3]=Lsn.dialogPipeline,Nsn[4]=Fts,Nsn[5]=$ts,Nsn[6]=ofc,Nsn[7]=ifc;else ifc=Nsn[7];const QYh=$ts?"Yes":"Run ultraplan",e7h=Fts?"Disable remote control and launch in Claude Code on the web":"
+## b'Cannot switch renderers' idxs=[308480634, 308486120, 308486347]
+
+----- @308480634 -----
+){await rKn();let i=await MLe(r,"relaunch",{},o);return iOi(i,{freshIfNoTranscript:!0,extraArgs:t,proactivity:n,env:{CLAUDE_CODE_TUI_JUST_SWITCHED:e,...nKe()},dropEnv:["CLAUDE_CODE_NO_FLICKER","CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN","CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL"]},o)}function UYh(e,t){return`Cannot switch renderers in this session \u2014 it has restrictions a restart can't carry over (${t.join("; ")}). Nothing was changed. Running /tui ${e} in a session started without them switches every later session too.`}function Jpc(e){return`Staying on the default renderer without a restart \u2014 this session now has restrictions a restart can't carry over (${e.join("; ")}); the preference is saved.`}function nfo(e,t){return`Staying on the ${e} renderer without a restart \u2014 ${t==="comment_monitor"?"Claude is now auto-replying to artifact comments and a restart would stop the replies (stop the monitor via /tasks, or ask Claude to stop it)":"work is now running in the background"}; the preference is saved.`}function Zpc(e,t,r){return L("tengu_tui_refused",{active_tasks:t.activeTasks,comment_monitor:t.kind==="comment_monitor",deferred:!0}),r(nfo(e,t.kind),{display:"system"}),null}function BYh(kKM){let H_r=zYh.c(24),{fromEntryPath:jpc,bounce:zpc,revertKind:Wpc,carryFlags:Gpc,getMessages:Vpc,proactivity:Lts,relaunchBlocker:qpc,storageV5:Kpc,onDone:rfo}=kKM,[MYh,xKM]=qCe.useState(""),[OYh,CKM]=qCe.useState(0),[R_r,RKM]=qCe.useState(null),{columns:HKM}=fn(),W4w=qCe.useRef(!1),G4w;if(H_r[0]===ae)G4w=(IKM)=>{if(W4w.current){return}W4w.current=!0,RKM(IKM.trim())},H_r[0]=G4w;else G4w=H_r[0];let LYh=G4w,V4w,q4w;if(H_r[1]!==zpc||H_r[2]!==Gpc||H_r[3]!==jpc||H_r[4]!==Vpc||H_r[5]!==rfo||H_r[6]!==Lts||H_r[7]!==qpc||H_r[8]!==Wpc||H_r[9]!==Kpc||H_r[10]!==R_r)V4w=()=>{if(R_r===null){retur
+
+----- @308486120 -----
+splay:"system"}),null;let p=(v)=>{let S=W4e(un(t),Jce());if(S.length>0)return L("tengu_tui_refused",{uncarriable:!0}),UYh(i,S);let w=c();if(w!==void 0)return L("tengu_tui_refused",{active_tasks:w.activeTasks,comment_monitor:w.kind==="comment_monitor",...v&&{deferred:v}}),w.kind==="comment_monitor"?"Cannot switch renderers while auto-replying to artifact comments \u2014 switching restarts Claude Code and would stop the replies. Stop the artifact comment monitor via /tasks (or ask Claude to stop it), then run /tui again.":"Cannot switch renderers while work is running in the background \u2014 wait for it to finish (or stop it via /tasks), then run /tui again.";return},f;if(!d){let v=p();if(v===void 0)await xve(t.messages,t.storageV5),v=p(!0),f={flags:s(),handoff:a()};if(v!==void 0)return e(v,{display:"system"}),null}let m=Yct(),{error:h}=await ea("userSettings",{tui:i},void 0,t.storageV5);if(h)return e(`Failed to save setting: ${h.message}`,{display:"system"}),null;let g=ZX(),y=(K.CLAUDE_CODE_TUI_JUST_SWITCHED==="fullscreen"||m==="downsell_on"||SAe.downsellGateCached===!0)&&i==="default";if(L("tengu_tui_command",{fullscreen:u,from:ge(o),to:ge(i),from_entry_path:ge(m),session_age_ms:Math.round(process.uptime()*1000),bounce:y,scroll_decay_curve:g.useDecayCurve,scroll_base:g.base,scroll_xtermjs:g.xtermJs}),d)return e(`Already using the ${i} renderer.`,{display:"system"}),null;if(i==="default"&&(y||m==="gb_on"||m==="settings_on")&&bye()&&Hs("allow_product_feedback"))return t4.jsx(BYh,{fromEntryPath:m,bounce:y,revertKind:y||m==="gb_on"?"same_session":"later_session",carryFlags:s,getMessages:l,proactivity:a,relaunchBlocker:c,storageV5:t.storageV5,onDone:e});let b=c();if(b!==void 0)return Zpc(i,b,e);return I_r(i,f.flags,l(),f.handoff,t.storageV5).catch((v)=>(xe(v),e(`Couldn't sw
+
+----- @308486347 -----
+ind==="comment_monitor",...v&&{deferred:v}}),w.kind==="comment_monitor"?"Cannot switch renderers while auto-replying to artifact comments \u2014 switching restarts Claude Code and would stop the replies. Stop the artifact comment monitor via /tasks (or ask Claude to stop it), then run /tui again.":"Cannot switch renderers while work is running in the background \u2014 wait for it to finish (or stop it via /tasks), then run /tui again.";return},f;if(!d){let v=p();if(v===void 0)await xve(t.messages,t.storageV5),v=p(!0),f={flags:s(),handoff:a()};if(v!==void 0)return e(v,{display:"system"}),null}let m=Yct(),{error:h}=await ea("userSettings",{tui:i},void 0,t.storageV5);if(h)return e(`Failed to save setting: ${h.message}`,{display:"system"}),null;let g=ZX(),y=(K.CLAUDE_CODE_TUI_JUST_SWITCHED==="fullscreen"||m==="downsell_on"||SAe.downsellGateCached===!0)&&i==="default";if(L("tengu_tui_command",{fullscreen:u,from:ge(o),to:ge(i),from_entry_path:ge(m),session_age_ms:Math.round(process.uptime()*1000),bounce:y,scroll_decay_curve:g.useDecayCurve,scroll_base:g.base,scroll_xtermjs:g.xtermJs}),d)return e(`Already using the ${i} renderer.`,{display:"system"}),null;if(i==="default"&&(y||m==="gb_on"||m==="settings_on")&&bye()&&Hs("allow_product_feedback"))return t4.jsx(BYh,{fromEntryPath:m,bounce:y,revertKind:y||m==="gb_on"?"same_session":"later_session",carryFlags:s,getMessages:l,proactivity:a,relaunchBlocker:c,storageV5:t.storageV5,onDone:e});let b=c();if(b!==void 0)return Zpc(i,b,e);return I_r(i,f.flags,l(),f.handoff,t.storageV5).catch((v)=>(xe(v),e(`Couldn't switch renderers \u2014 ${v instanceof Error?v.message:String(v)}. The setting was saved; restart Claude Code to apply it.`,{display:"system"}),null))},$Yh="egcouldntcopytext",FYh=1000;var Qpc=A(()=>{bt();by();mc();zl();_a();Jx()
+
+## b'--allowed-tools' idxs=[100583362, 134043936, 137395944, 137404336, 137406816, 137443760, 167950784, 175547800, 196425600, 220446608, 220448120, 246850984]
+
+----- @100583362 -----
+a summary of changes.'
+
+          # Optional: Add claude_args to customize behavior and configuration
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+          # claude_args: '--allowed-tools Bash(gh pr *)'
+
+                �  # #   >��  I n s t a l l i n g   C l a u d e   C o d e   G i t H u b   A p p 
+ 
+ T h i s   P R   a d d s   a   G i t H u b   A c t i o n s   w o r k f l o w   t h a t   e n a b l e s   C l a u d e   C o d e   i n t e g r a t i o n   i n   o u r   r e p o s i t o r y . 
+ 
+ # # #   W h a t   i s   C l a u d e   C o d e ? 
+ 
+ [ C l a u d e   C o d e ] ( h t t p s : / / c l a u d e . c o m / c l a u d e - c o d e )   i s   a n   A I   c o d i n g   a g e n t   t h a t   c a n   h e l p   w i t h : 
+ -   B u g   f i x e s   a n d   i m p r o v e m e n t s     
+ -   D o c u m e n t a t i o n   u p d a t e s 
+ -   I m p l e m e n t i n g   n e w   f e a t u r e s 
+ -   C o d e   r e v i e w s   a n d   s u g g e s t i o n s 
+ -   W r i t i n g   t e s t s 
+ -   A n d   m o r e ! 
+ 
+ # # #   H o w   i t   w o r k s 
+ 
+ O n c e   t h i s   P R   i s   m e r g e d ,   w e ' l l   b e   a b l e   t o   i n t e r a c t   w i t h   C l a u d e   b y   m e n t i o n i n g   @ c l a u d e   i n   a   p u l l   r e q u e s t   o r   i s s u e   c o m m e n t . 
+ O n c e   t h e   w o r k f l o w   i s   t r i g g e r e d ,   C l a u d e   w i l l   a n a l y z e   t h e   c o m m e n t   a n d   s u r r o u n d i n g   c o n t e x t ,   a n d   e x e c u t e   o n   t h e   r e q u e s t   i n   a   G i t H u b   a c t i o n . 
+ 
+ # # #   I m p o r t a n t   N o t e s 
+ 
+ -   * * T h i s   w o r k f l o w   w o n ' t   t a k e   e f f e 
+
+----- @134043936 -----
+h   h   h   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   ����������������������       �              �              �              �       ��������������        �������        �������        �������                      �����"��	 i�                      	      --allowed-tools                               �@�%               r�� ~  �   ~     �r�� ���    D  H       ������������������������������������������h       �������            ��������    x�a������������        �������        ��������������           ����        ����                               h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   ����������������������       �              �              �              �       ��������������        �������        �������        �������                      �����"��	 i�                      	      --disallowed-tools                                    �@�%       �8      ��� �`  6   ∍ 7  ��� <��     H  H       ��������������������������������������������h       �������            ��������    ��a������������        �������        ��������������           ����         ����                             h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   �   �   �   �                                               ����������������������       H             �              �              �       ��������������                     �������        �������               R       �G"�   i���    ��    ����
+
+----- @137395944 -----
+    �              �               �              �                            ��
+              	      allow          	      (              	      )              	      (*)            	   +   Iterator result interface is not an object.          ��       	      cliArg         	      --allowed-tools                     G                  �@�m����� L�� ğ@���M ���U�@ ��J �ɢ4�@�4�J �̢4���1�@po�J �̢4�@M�J �ɢ4�@�d�J �̢4�@@��J �ɢ4�@ ��E �@ U�J �@0e�G �@Pe�� 5�@ ��G ���3S,����l4��� �.���@ ����� L�� ğ�ट@ �������<�@ ��I �@�4�L ��03�@�U�E �@ U�@�e�L �@M�I �@�d�L �@@��I �L����䟄p�� ��@ �       ,   ?   L   ~   �   �   �   %  )  E  K  Q  s  �  �  �      /  3  O  U  [  a  h  t  y  H   �   {   �   <     �  �   ��������������p�0��������������������U�������������������� ����������������������U��������������������خj�������������������خj��������������������.���������������������?�������������������h       ��������������H��������������������X       ����������������0���������������������������       	      ruleDisplay            	      sourceDisplay       d:      ��� 4$  )   ��� *  �Ő�      H  H       ������������������������������������������h       �������            ��������    �l.������������        �������        ��������������           ����         ����                             h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   x   x   x   x   x   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   ����������������������                     �              �              �       ��������������        �              �������        �������           
+
+----- @137404336 -----
+           �               �              �                      
+                    ��       	      allow          	      (              	      )              	      (*)            	   +   Iterator result interface is not an object.          ��       	      cliArg         	      --allowed-tools                     A                  0  �@ ����� L�� ğ@���M ���U�@ ��J �@�4�� �@U�E �@ U�J �@0e�G �@Pe�J �̢4�@M�J �ɢ4�@�d�J �̢4�@@��J �ɢ4�� ��@ ��G ���3�����l��P����@ ����� L�� ğ�ट@ �������<�@ ��@ ����@pT�E �@ U�@�e�L �@M�I �@�d�L �@@��I �L����䟄��� ��@ �       !   O   b   o   �   �   �     6  :  V  \  b  �  �  �  �    '  :  >  Z  `  f  l  s    �      k   �   �  �   �   �   _     ����������������0��������������������4��������������������`���������������������4��������������������`s.������������������� �?��������������������j�������������������؍j������������������������������������������������������������������������������������ȅ0�������������������0ެ�����    d:      +�� �(  :  �� ; �7�� q��     H  H       ���������������ڮ��������������������ڮ�����h       �������            ��������    L.������������        �������        ��������������           ����         ����         (                 %   h   h   h   �  �  �  �  �  �  �  �  h  h  h  h  h  h  h  h  �  �  �  8  8  8  8  8  �  �  �    �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �       ��������������H      �             P      	       �      	       �      ��������             �             �������        �������        �              �������        �������        ��������������        �������    
+
+## b'--disallowed-tools' idxs=[134044688, 137443792, 175548552, 196425987, 220446680, 220448192, 246851048, 246853440, 246854528, 290780694, 297435242, 297435746]
+
+----- @134044688 -----
+h   h   h   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   ����������������������       �              �              �              �       ��������������        �������        �������        �������                      �����"��	 i�                      	      --disallowed-tools                                    �@�%       �8      ��� �`  6   ∍ 7  ��� <��     H  H       ��������������������������������������������h       �������            ��������    ��a������������        �������        ��������������           ����         ����                             h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   �   �   �   �                                               ����������������������       H             �              �              �       ��������������                     �������        �������               R       �G"�   i���    ��    ���� H�����"��F������������j��"��i�                           	      =                             �@���@]�@ �����@`T�@ �@p\�@PL         )   7   P   ��������������P������@   �8      =�� %a  i   %�� j  �I�� ���     H  H       ���������������q���������������������q������h       �������            ��������    �a������������        �������        ��������������           ����         ����                          	   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   �   �   �   �   �   h  h  h  x  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  ����������������������       0             �������        �������        �   
+
+----- @137443792 -----
+n o   k n o w n   t o o l      c h e c k   f o r   t y p o s .            	      cliArg         	      allow          	   F   Cannot destructure property 'ruleContent' from null or undefined value  �������`�������        �������6������               	      --allowed-tools        	      --disallowed-tools             	      flagSettings           	   
+   --settings             	      policySettings         	      managed policy settings        	       rule (        	      ):             	      i       �������(                  
+   ���������������N������	              	   A   Cannot destructure property 'result' from null or undefined value              	      success        	      Y              	      addDirectories         	      alreadyInWorkingDirectory              	      pathNotFound    2     ��                                                                                 O                 ]  �@`���D�@ ���೟D1<�PBT�G=� �� xT�@�9� �� D��p��@ ���೟��;����� ����;�� C�@�=� Л�  �@`4�G �� �+��@=�@ ��E ���QL��R<�T4���:� �:�@0?�@@���0�@ ���೟D1<��p4�D҃�@ {Q ��� d��@���0�����@p4����0;��P-��@��� ��@p4����p;�@�]�@0��G �� �+�����@ ���೟��<�@ ��D ��p4�Dу�ˡS�@�;�@�E��@�� ���PL�� ��!<�BT���<��yT�@`=��5��0���0���P��� L�� ğ@ ��D L�@`4�C��@pT�I �@�4����@PT�E �@p4����� ��@p���4����@�<�D ��@�4�@0��P�� �� p;�� %�� ��� ��@�l��2�@0V�D �@`4�@�<�]ac��p.�� ���rt���L�@�~�@�՟@P̟ ����4�� ��@�<����@`�����"D��p4��Ӄ�@�<�E ��QT�@ ?�E ��QT�@�U�E ��QT�@�W�` ���@N�@ �  ���Dr<��p4�DӃ�ID<���4��փ�@pT�E L��QT�@�U�E ��QT�@�U�E ��QT��`V�� ��� ]�� ��@PT�@@�@������@��ݟ��������B4��@3���V�����B4�  1f ��� <�@ ��@ ���c���;�� �@ ��@ ���K���;�@�D�G � �+�@0m�D �WAT�@0n�@ ��G ��P]�@ �����E1<��R4
+
+----- @175548552 -----
+h   h   h   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   ����������������������       �              �              �              �       ��������������        �������        �������        �������                      �����"��	 i�                      	      --disallowed-tools                                    �@�%              ��%� �a   �  b  ���%��%   D  H       ������������������������������������������h       �������            ��������    ���������������        �������        ��������������           ����        ����                             h   h   h   h   h   h   h   h   h   h   h   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   0  0  0  P  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  ����������������������                    �              �             �      ��������������        �             �������        �������               g       �!� 
+�  ����   ��   K��� H���F���������  ��  ���� ���j��
+��
+�i� `               X              h              p              �              �                             	   	   Couldn't               	      fork           	   
+   background                          
+                                     �@ v�L ���о�@ ����       *   /   2   ��������������0�c�������������������0���������������������x���������������������Pjn�������������������@3��������������������@{
+�����           ��%� �)   �  *  ���%��%   D  H       ������������������������������������������x       �������            ��������    @       �������        �������        ��������������        `�u�������������   ����        
+
+----- @196425987 -----
+ames to allow (e.g. "Bash(git *) Edit")         	      --tools <tools...>             	   �   Specify the list of available tools from the built-in set. Use "" to disable all tools, "default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read").             	   0   --disallowedTools, --disallowed-tools <tools...>       	   M   Comma or space-separated list of tool names to deny (e.g. "Bash(git *) Edit")          	      --mcp-config <configs...>              	   =   Load MCP servers from JSON files or strings (space-separated)          	      --permission-prompt-tool <tool>        	   @   MCP tool to use for permission prompts (only works with --print)       	      --system-prompt <prompt>       	   $   System prompt to use for the session           	      --system-prompt-file <file>            	      Read system prompt from a file         	      --append-system-prompt <prompt>        	   3   Append a system prompt to the default system prompt            	   "   --append-system-prompt-file <file>             	   F   Read system prompt from a file and append to the default system prompt         	   (   --append-subagent-system-prompt <prompt>       	   �   Append a system prompt to every Task-tool subagent's system prompt, propagated to nested subagents (only works with --print). Implies CLAUDE_CODE_ENABLE_APPEND_SUBAGENT_PROMPT=1.             	   '   --plan-mode-instructions <instructions>        	   �   Custom workflow body for plan mode. Replaces the default code-implementation phases in the plan-mode system reminder; the read-only enforcement preamble and ExitPlanMode protocol footer are always kept.             	   (   --exclude-dynamic-system-prompt-sections       	   �   Move per-machine sections (cwd, env info, memory paths,
+
+## b'--permission-mode' idxs=[134035240, 139550792, 139550864, 162362664, 162575136, 162575176, 162586457, 165859144, 167950512, 175172600, 175499360, 175499778]
+
+----- @134035240 -----
+d-dir                     	   +   Iterator result interface is not an object.          ��       	   $   --allow-dangerously-skip-permissions                                      	   $   --allow-dangerously-skip-permissions           	      --model        	      --effort       	      --permission-mode                           .                  ���@ ��] ���3������ ����;�� L�� ğ@Ќ�@�D�@�M�E �@p4�����P�H ��� �@ �������<�� ��@`<�a �@PN�I ���L� P;�@�7����@`�����@ �H �V�T��p;�@@� ��@p=�ې��@ � ��@�=�܀��@ 7�E    o   �   �   �   �   �   �   �   �   �   �   #  /  6  <  Z  h  n  u  �  �  �  �  ������������������������������������)*��������������������)��������������������x�c�������������������h�a�������������������`�c�������������������H���������������������h���������������������8�)���������������������c������������������� b�������������������(`r�����                   �� < �   <    ��� ��    D  H       ������������������������������������������x       �������            ��������    @       �������        �������        ��������������        ��c������a�����   ����        ����                               h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   p   ����������������������       �              �              �              �       ��������������        �������        �������        �������                      �����"��	 i�                      	   	   --add-dir                                     �@0%       �8      t�� \]  7   \�� 8  ���� ���     H  H       ��������������x
+�����������������
+
+----- @139550792 -----
+                          	   K   Cannot destructure property 'planModeRequired' from null or undefined value            	      r              	      bypassPermissions              	      n              	      --dangerously-skip-permissions         	      acceptEdits            	      --permission-mode acceptEdits          	      auto           	      --permission-mode auto         	      o              	      --model        	      string         	      i              	   	   --effort               	      --settings            ��
+              	      --plugin-dir           	   +   Iterator result interface is not an object.          ��       	      --plugin-dir-no-mcp            	      --plugin-url                  	      --chrome              	      --no-chrome            	                                                  `                  N���@ (  �@��@�D�@�=�E ��QL�@�>�@ =�E ��QL�@�>�@�<�E ��QL�@ .���L�� ��@p<�@ �E ���4�@����@���;��-��U�� ��@@T�E �@0M��!k���-�� ���pT�� ��@pT�@ �E ��`M�@0����K���r��0.�� ��@U����� L�� ğ@`��E ���M�@0����K���r��P�  ��p�� ����;�� L�� ğ@���E ���M�@0����K��ar���B���� �� ����;�� L�� ğ@���E ���M�@0����K���r�����@�� ��@p<�@p$�E ��QL�@`=�@p$�E ��QL�@�-�E ��QL   )   /   M   O   V   i   p   �   �   �   �   �   �   �     +  \  b  �  �  �  %  A  G  M  �  �  �  �  �  �  3  F  �  �  �  �  �  �  �  �  	      #  /  6  �������������� Sq�������������������P�/�������������������p      ��������������X	�����������������������������������������}��������������������xb����������������������������������������X��������������������X����������������������;��������������������Hل�������������������@�����������������
+
+----- @139550864 -----
+eRequired' from null or undefined value            	      r              	      bypassPermissions              	      n              	      --dangerously-skip-permissions         	      acceptEdits            	      --permission-mode acceptEdits          	      auto           	      --permission-mode auto         	      o              	      --model        	      string         	      i              	   	   --effort               	      --settings            ��
+              	      --plugin-dir           	   +   Iterator result interface is not an object.          ��       	      --plugin-dir-no-mcp            	      --plugin-url                  	      --chrome              	      --no-chrome            	                                                  `                  N���@ (  �@��@�D�@�=�E ��QL�@�>�@ =�E ��QL�@�>�@�<�E ��QL�@ .���L�� ��@p<�@ �E ���4�@����@���;��-��U�� ��@@T�E �@0M��!k���-�� ���pT�� ��@pT�@ �E ��`M�@0����K���r��0.�� ��@U����� L�� ğ@`��E ���M�@0����K���r��P�  ��p�� ����;�� L�� ğ@���E ���M�@0����K��ar���B���� �� ����;�� L�� ğ@���E ���M�@0����K���r�����@�� ��@p<�@p$�E ��QL�@`=�@p$�E ��QL�@�-�E ��QL   )   /   M   O   V   i   p   �   �   �   �   �   �   �     +  \  b  �  �  �  %  A  G  M  �  �  �  �  �  �  3  F  �  �  �  �  �  �  �  �  	      #  /  6  �������������� Sq�������������������P�/�������������������p      ��������������X	�����������������������������������������}��������������������xb����������������������������������������X��������������������X����������������������;��������������������Hل�������������������@��������������������@������������������������������������������xF�����������������
+
+----- @162362664 -----
+   --input-format         	      stream-json            	      --output-format        	      --replay-user-messages         	   	   --resume=              	   	   --verbose                                         	   	   --verbose              	      --debug-file           	      --permission-mode       2     ��       	      bridge         	      1       1     ��     ��       	   $   [bridge:session] Spawning sessionId=           	       sdkUrl=       	       accessToken=          	      present        	      MISSING        	      [bridge:session] Child args:           	                     	      [bridge:session] Debug log:            	      pipe                 0              8              @                     	      pipe           	      pipe           	      pipe                  	      [bridge:session] sessionId=            	       pid=                 	      line                                                    �                  +  ����@ ��J L���3�@@U�J ��@0e�J ��̢4���L�@�<� ��@�$�J ��Ƣ4�@�L�E��@�l�@@4�J ��Ƣ4�@�4�C��@��J ��@�d�@�d�H ����L�� ����4�� ��@`U� rj�@`>�@�\�J ��� M�� ����4�� ��@�4�J ����3�@@V�9i�@�?��@�� ��@@5�O�k�@�:�@pF�C LZ �� 1l\ ��@ ,�H ��@�N�i�Q�@P/�K ����3�@@N�G L�@�M�J Lp ��@ ğG L�@�l�H ����@��@ 5��Њ�@��O ��@`f�O �����C ��@ D�D �� �KS ��@ ��H �����M ��@ ,�L L���f�@ ��L L���3�@Po�L L� �3�%
+��@ �H ��@O�J L�@`e�G L�@�e�L Lz,���@�| ��@ ,�H ��@�N�E ��QL�o�q�@/�@ �H ��@�N�d�Q���.�� ��@�4�I ��@�4�@p<�@0�H ��@�`�@`;T ��@ D�H ��@�N�J L�@0e�D L�z�h@ ��@ \�@PD�@pt�@PD�@PD�@�D�G L���L�� ��@�U�G L��tc�C)=� �� :l.Ԟ��@ ,�G L���L�� ��@�U�G L��tc�C)=8�� :lJ�������,7����F��@ \�J L�@e�@�4�@�|�L L�@�e�'��@ ���e ��@ D       m   �   �   $  &  ?  
+
+## b'carryFlags' idxs=[181625544, 308481612, 308487406]
+
+----- @181625544 -----
+������������������~������������������������������������������{I�������������������xs��������������������X͟��������������������K����������������������+�������������������He������       	      fromEntryPath          	      bounce         	   
+   revertKind             	   
+   carryFlags             	      relaunchBlocker         �      (      H+                  ��55 �=   5  >  ���5��5   D  H       �����������������������������������H      X      �������            ��������    @       �������        �������        ��������������               p�������              �1R     �����������������������������������������        ��������       �       �       �       �        �������(���������������       �       �       0��������       �              	      Z4w            	      r3w            	      V4w            	      e3w            	      Nts            	      t3w            	      HKM            	      J4w            	      q4w            	      NYh            	      Q4w            	      G4w        ����        ����                             h   h   h   h   h   h   h   h   h   h   h   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �     �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  ����������������������       h             �                            �       ��������������        (             �������        �������               Y       ���    ��    �� H�i��   ��   
+�  ��  ��  ������ � i                                      
+                          	                  ����� ���@]�� ����4��@��� �R4��p;                 ��������������0��������������������� �
+
+----- @308481612 -----
+the background"}; the preference is saved.`}function Zpc(e,t,r){return L("tengu_tui_refused",{active_tasks:t.activeTasks,comment_monitor:t.kind==="comment_monitor",deferred:!0}),r(nfo(e,t.kind),{display:"system"}),null}function BYh(kKM){let H_r=zYh.c(24),{fromEntryPath:jpc,bounce:zpc,revertKind:Wpc,carryFlags:Gpc,getMessages:Vpc,proactivity:Lts,relaunchBlocker:qpc,storageV5:Kpc,onDone:rfo}=kKM,[MYh,xKM]=qCe.useState(""),[OYh,CKM]=qCe.useState(0),[R_r,RKM]=qCe.useState(null),{columns:HKM}=fn(),W4w=qCe.useRef(!1),G4w;if(H_r[0]===ae)G4w=(IKM)=>{if(W4w.current){return}W4w.current=!0,RKM(IKM.trim())},H_r[0]=G4w;else G4w=H_r[0];let LYh=G4w,V4w,q4w;if(H_r[1]!==zpc||H_r[2]!==Gpc||H_r[3]!==jpc||H_r[4]!==Vpc||H_r[5]!==rfo||H_r[6]!==Lts||H_r[7]!==qpc||H_r[8]!==Wpc||H_r[9]!==Kpc||H_r[10]!==R_r)V4w=()=>{if(R_r===null){return}let K4w=!1;return(async()=>{if(R_r&&R_r.toLowerCase().replace(/[^a-z]/g,"")!==$Yh){let PKM=pp(R_r).slice(0,FYh);await lL("tengu_tui_optout_reason",{reason:PKM,from_entry_path:ge(jpc),bounce:zpc,downsell_gate:SAe.downsellGateCached===!0,revert_kind:ge(Wpc),downsell_seen_count:or().fullscreenDownsellSeenCount??0}).catch(xe)}if(await xr(PK*2),K4w){return}let Y4w=W4e(Lts().toolPermissionContext,Jce());if(Y4w.length>0){L("tengu_tui_refused",{uncarriable:!0}),rfo(Jpc(Y4w),{display:"system"});return}let X4w=qpc();if(X4w!==void 0){Zpc("default",X4w,rfo);return}I_r("default",Gpc(),Vpc(),Lts(),Kpc).catch((Ypc)=>{xe(Ypc),rfo(`Couldn't switch renderers \u2014 ${Ypc instanceof Error?Ypc.message:String(Ypc)}. The setting was saved; restart Claude Code to apply it.`,{display:"system"})})})(),()=>{K4w=!0}},q4w=[R_r,jpc,zpc,Wpc,Gpc,Vpc,Lts,qpc,Kpc,rfo],H_r[1]=zpc,H_r[2]=Gpc,H_r[3]=jpc,H_r[4]=Vpc,H_r[5]=rfo,H_r[6]=Lts,H_r[7]=qpc,H_r[8]=Wpc,H_r[9]=Kpc,H_r[10]=R_r,H_r[11]=V4w,H_r[1
+
+----- @308487406 -----
+se:g.base,scroll_xtermjs:g.xtermJs}),d)return e(`Already using the ${i} renderer.`,{display:"system"}),null;if(i==="default"&&(y||m==="gb_on"||m==="settings_on")&&bye()&&Hs("allow_product_feedback"))return t4.jsx(BYh,{fromEntryPath:m,bounce:y,revertKind:y||m==="gb_on"?"same_session":"later_session",carryFlags:s,getMessages:l,proactivity:a,relaunchBlocker:c,storageV5:t.storageV5,onDone:e});let b=c();if(b!==void 0)return Zpc(i,b,e);return I_r(i,f.flags,l(),f.handoff,t.storageV5).catch((v)=>(xe(v),e(`Couldn't switch renderers \u2014 ${v instanceof Error?v.message:String(v)}. The setting was saved; restart Claude Code to apply it.`,{display:"system"}),null))},$Yh="egcouldntcopytext",FYh=1000;var Qpc=A(()=>{bt();by();mc();zl();_a();Jx();Ql();jPt();Dt();fl();N9();Ut();Bd();Mu();OLe();$n();cr();Jc();Th();Vr();pk();ure();Hj();RJe();To();qCe=H(It(),1),t4=H(be(),1),zYh=H(De(),1),Xpc=["default","fullscreen"]});function p3w(){return!or().hasSeenUltraplanTerms}function f3w(){return U9n()}function m3w(qKM){return qKM.replBridgeEnabled}function h3w(){return null}function g3w(XYh){if(!XYh.replBridgeEnabled){return XYh}return{...XYh,replBridgeEnabled:!1,replBridgeExplicit:!1,replBridgeOutboundOnly:!1,replBridgeSessionGroupingId:void 0}}function y3w(JYh){return JYh.hasSeenUltraplanTerms?JYh:{...JYh,hasSeenUltraplanTerms:!0}}function sfo(e){if(!e.bundleSeedEnabled)return null;return e.cloneViable?"This will try to clone your git remote and fall back to uploading this repository.":"This will upload your repository to Claude Code on the web."}function dfc(VKM){let Osn=pfc.c(25),{sourcePromise:WYh,onChoice:GYh}=VKM;$g("ultraplan-launch");let[USt]=KCe.useState(p3w),[P_r]=KCe.useState(f3w),o3w;if(Osn[0]!==P_r)o3w=B9n(P_r),Osn[0]=P_r,Osn[1]=o3w;else o3w=Osn[1];let ofo=o3w,ifo=ft(m3w),VYh=Li(),{
+
+## b'cannotSwitchRenderer' idxs=[106663144, 308480169]
+
+----- @106663144 -----
+    ��2    filterResumableSessions        	      WorkflowDetailDialog           ��    computeVisibleWindow           	      TeleportError          	      showTeleportErrorsImpl         	�    TeleportResumeWrapper          	      TeleportMenu           	      Teleport       ��2    cannotSwitchRendererMessage            	�2    relaunchInto           �� "   savedWithoutRestartForTasksMessage             	      savedWithoutRestartMessage             	      initialIndexFor        	      initialQuietIndexFor           I�2    initialThresholdIndexFor       	   	   DaemonHub              	      renderDaemonHubStandalone              	      isActive       ��2 	   isRunning�            ��2    initReplBridge         	[    prependImageBlocks             	      prependPathRefs        	      resolveAndPrependX            	�2    resolveInboundAttachments�            I�2    ClosedIssueNotice              	      getEmoji       	�    getEmojiSuggestions            	   4   DELAY_VERY_SLOW_OPERATIONS_THAT_HAPPEN_EVERY_SESSION           ��    STALE_CLEANUP_CATCHUP_DELAY_MS         	g     TRANSCRIPT_HEARTBEAT_INTERVAL_MS       ��2    isLastCleanupSentinelFresh2            	�    startBackgroundHousekeeping            ��2    FIRST_PRESS_FALLBACK_MS        	      classifyEmptyRecording         I�2    computeLevel           ��2    useVoice       	      AsciicastRecording2            ��    asciicastRecordings            	      flushAsciicastRecorder         ��    getRecordFilePath              	      getSessionRecordingPaths       ��2    installAsciicastRecorder       	      renameRecordingForSession              	      findGoalToRestore�2            	�    restoreGoalFromTranscript            ��2 
+
+----- @308480169 -----
+n,onCancel:Upc,skipExitHandling:!0})}),Znt[21]=CWt,Znt[22]=Msn,Znt[23]=Upc,Znt[24]=j4w;else j4w=Znt[24];return j4w}var Bpc,RWt,PYh,z4w=async(e,t)=>RWt.jsx(HYh,{onDone:e});var DYh=A(()=>{VM();kYh();cqi();Dt();PC();Cze();lo();Bpc=H(It(),1),RWt=H(be(),1),PYh=H(De(),1)});var jYh={};yt(jYh,{call:()=>n3w,cannotSwitchRendererMessage:()=>UYh,relaunchInto:()=>I_r,savedWithoutRestartForTasksMessage:()=>nfo,savedWithoutRestartMessage:()=>Jpc});async function I_r(e,t,r,n,o){await rKn();let i=await MLe(r,"relaunch",{},o);return iOi(i,{freshIfNoTranscript:!0,extraArgs:t,proactivity:n,env:{CLAUDE_CODE_TUI_JUST_SWITCHED:e,...nKe()},dropEnv:["CLAUDE_CODE_NO_FLICKER","CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN","CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL"]},o)}function UYh(e,t){return`Cannot switch renderers in this session \u2014 it has restrictions a restart can't carry over (${t.join("; ")}). Nothing was changed. Running /tui ${e} in a session started without them switches every later session too.`}function Jpc(e){return`Staying on the default renderer without a restart \u2014 this session now has restrictions a restart can't carry over (${e.join("; ")}); the preference is saved.`}function nfo(e,t){return`Staying on the ${e} renderer without a restart \u2014 ${t==="comment_monitor"?"Claude is now auto-replying to artifact comments and a restart would stop the replies (stop the monitor via /tasks, or ask Claude to stop it)":"work is now running in the background"}; the preference is saved.`}function Zpc(e,t,r){return L("tengu_tui_refused",{active_tasks:t.activeTasks,comment_monitor:t.kind==="comment_monitor",deferred:!0}),r(nfo(e,t.kind),{display:"system"}),null}function BYh(kKM){let H_r=zYh.c(24),{fromEntryPath:jpc,bounce:zpc,revertKind:Wpc,carryFlags:Gpc,getMessages:Vpc,proactivity:Lts,relaunchBl
+
+## b'function s()' idxs=[288593891, 288763622, 289047659, 289717512, 291457464, 292237686, 294380421, 294825862, 295283831, 295939765, 297456952, 304714690]
+
+----- @288593891 -----
+});var V0r={};yt(V0r,{sleep:()=>xr,withDeadline:()=>Pb,withTimeout:()=>Ol});function xr(e,t,r){return new Promise((n,o)=>{if(t?.aborted){if(r?.throwOnAbort||r?.abortError)o(r.abortError?.()??Error("aborted"));else n();return}let i=setTimeout((a,l,c)=>{a?.removeEventListener("abort",l),c()},e,t,s,n);function s(){if(clearTimeout(i),r?.throwOnAbort||r?.abortError)o(r.abortError?.()??Error("aborted"));else n()}if(t?.addEventListener("abort",s,{once:!0}),r?.unref)i.unref()})}function Ahy(e,t){e(Error(t))}function Ol(e,t,r){let n,o=new Promise((i,s)=>{n=setTimeout(Ahy,t,s,r)});return Promise.race([e,o]).finally(()=>{if(n!==void 0)clearTimeout(n)})}function Pb(e,t){let r,n=new Promise((o)=>{r=setTimeout(o,t,void 0)});return Promise.race([e,n]).finally(()=>{if(r!==void 0)clearTimeout(r)})}var c6t={};yt(c6t,{drainStdoutBeforeExit:()=>Y0r,exitWithError:()=>Rhy,getStdoutDrainBudgetMs:()=>lTo,handleStreamGoneErrors:()=>q0r,isStdinUnusableError:()=>K0r,iterateStreamUntilClose:()=>xAs,markStdoutDrainExternallyClocked:()=>vHe,outstandingStdoutBytes:()=>aTo,peekForStdinData:()=>zgn,registerProcessIOErrorHandlers:()=>TAs,stdoutDrainState:()=>q6e,writeToStderr:()=>Q0t,writeToStdout:()=>pl});function K0r(e){let t=e!==null&&typeof e==="object"&&"code"in e&&typeof e.code==="string"?e.code:void 0;return t!==void 0&&(Thy.has(t)||HKc.has(t))}function q0r(e,t){e.on("error",(r)=>{if(r.code!==void 0&&HKc.has(r.code)){try{e.destroy?.()}catch{}t?.(r.code)}})}function TAs(e){q0r(process.stdin,(t)=>e("stdin",t)),q0r(process.stdout,(t)=>e("stdout",t)),process.stdout.on("error",()=>{q6e.markErrored()}),q0r(process.stderr)}function IKc(e,t,r){if(e.destroyed||e.writableEnded)return!1;return e.write(t,r),!0}class kAs{everWritten=!1;drainPromise=void 0;bytesQueued=0;bytesFlushed=0;notifyFlushProgress=void 
+
+----- @288763622 -----
+et p of d)if(p[0]==="-")r.skips.push(p.slice(1));else r.names.push(p)}function i(u,d){let p=0,f=0,m=-1,h=0;while(p<u.length)if(f<d.length&&(d[f]===u[p]||d[f]==="*"))if(d[f]==="*")m=f,h=p,f++;else p++,f++;else if(m!==-1)f=m+1,h++,p=h;else return!1;while(f<d.length&&d[f]==="*")f++;return f===d.length}function s(){let u=[...r.names,...r.skips.map((d)=>"-"+d)].join(",");return r.enable(""),u}function a(u){for(let d of r.skips)if(i(u,d))return!1;for(let d of r.names)if(i(u,d))return!0;return!1}function l(u){if(u instanceof Error)return u.stack||u.message;return u}function c(){console.warn("Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.")}return r.enable(r.load()),r}PJc.exports=NEy});var DJc=ne(function(a0e,QTo){a0e.formatArgs=FEy;a0e.save=UEy;a0e.load=BEy;a0e.useColors=$Ey;a0e.storage=jEy();a0e.destroy=(()=>{let e=!1;return()=>{if(!e)e=!0,console.warn("Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.")}})();a0e.colors=["#0000CC","#0000FF","#0033CC","#0033FF","#0066CC","#0066FF","#0099CC","#0099FF","#00CC00","#00CC33","#00CC66","#00CC99","#00CCCC","#00CCFF","#3300CC","#3300FF","#3333CC","#3333FF","#3366CC","#3366FF","#3399CC","#3399FF","#33CC00","#33CC33","#33CC66","#33CC99","#33CCCC","#33CCFF","#6600CC","#6600FF","#6633CC","#6633FF","#66CC00","#66CC33","#9900CC","#9900FF","#9933CC","#9933FF","#99CC00","#99CC33","#CC0000","#CC0033","#CC0066","#CC0099","#CC00CC","#CC00FF","#CC3300","#CC3333","#CC3366","#CC3399","#CC33CC","#CC33FF","#CC6600","#CC6633","#CC9900","#CC9933","#CCCC00","#CCCC33","#FF0000","#FF0033","#FF0066","#FF0099","#FF00CC","#FF00FF","#FF3300","#FF3333","#FF3366","#FF3399","#FF33CC","#FF33FF",
+
+----- @289047659 -----
+){let{gen:e,schemaCode:t,schemaType:r,def:n,it:o}=this;return(0,Oh.or)(i(),s());function i(){if(r.length){if(!(t instanceof Oh.Name))throw Error("ajv implementation error");let a=Array.isArray(r)?r:[r];return Oh._`${(0,vxo.checkDataTypes)(a,t,o.opts.strictNumbers,vxo.DataType.Wrong)}`}return Oh.nil}function s(){if(n.validateSchema){let a=e.scopeValue("validate$data",{ref:n.validateSchema});return Oh._`!${a}(${t})`}return Oh.nil}}subschema(e,t){let r=(0,gCs.getSubschema)(this.it,e);(0,gCs.extendSubschemaData)(r,this.it,e),(0,gCs.extendSubschemaMode)(r,e);let n={...this.it,...r,items:void 0,props:void 0};return qFy(n,t),n}mergeEvaluated(e,t){let{it:r,gen:n}=this;if(!r.opts.unevaluated)return;if(r.props!==!0&&e.props!==void 0)r.props=bat.mergeEvaluated.props(n,e.props,r.props,t);if(r.items!==!0&&e.items!==void 0)r.items=bat.mergeEvaluated.items(n,e.items,r.items,t)}mergeValidEvaluated(e,t){let{it:r,gen:n}=this;if(r.opts.unevaluated&&(r.props!==!0||r.items!==!0))return n.if(t,()=>this.mergeEvaluated(e,Oh.Name)),!0}}PAt.KeywordCxt=bCs;function eru(e,t,r,n){let o=new bCs(e,r,t);if("code"in r)r.code(o,n);else if(o.$data&&r.validate)(0,h_n.funcKeywordCode)(o,r);else if("macro"in r)(0,h_n.macroKeywordCode)(o,r);else if(r.compile||r.validate)(0,h_n.funcKeywordCode)(o,r)}var a2y=/^\/(?:[^~]|~0|~1)*$/,l2y=/^([0-9]+)(#|\/(?:[^~]|~0|~1)*)?$/;function tru(e,{dataLevel:t,dataNames:r,dataPathArr:n}){let o,i;if(e==="")return Db.default.rootData;if(e[0]==="/"){if(!a2y.test(e))throw Error(`Invalid JSON-pointer: ${e}`);o=e,i=Db.default.rootData}else{let c=l2y.exec(e);if(!c)throw Error(`Invalid JSON-pointer: ${e}`);let u=+c[1];if(o=c[2],o==="#"){if(u>=t)throw Error(l("property/index",u));return n[t-u]}if(u>t)throw Error(l("data",u));if(i=r[t-u],!o)return i}let s=i,a=o.split("/");for(let c of
+
+----- @289717512 -----
+le?e:{default:e}};Object.defineProperty(Ykr,"__esModule",{value:!0});Ykr.parseProxyResponse=void 0;var S7y=v7y(HAr()),$Io=(0,S7y.default)("https-proxy-agent:parse-proxy-response");function E7y(e){return new Promise((t,r)=>{let n=0,o=[];function i(){let u=e.read();if(u)c(u);else e.once("readable",i)}function s(){e.removeListener("end",a),e.removeListener("error",l),e.removeListener("readable",i)}function a(){s(),$Io("onend"),r(Error("Proxy connection ended before receiving CONNECT response"))}function l(u){s(),$Io("onerror %o",u),r(u)}function c(u){o.push(u),n+=u.length;let d=Buffer.concat(o,n),p=d.indexOf(`\r
+\r
+`);if(p===-1){$Io("have not received end of HTTP headers yet..."),i();return}let f=d.slice(0,p).toString("ascii").split(`\r
+`),m=f.shift();if(!m)return e.destroy(),r(Error("No header received from proxy CONNECT response"));let h=m.split(" "),g=+h[1],y=h.slice(2).join(" "),b={};for(let v of f){if(!v)continue;let S=v.indexOf(":");if(S===-1)return e.destroy(),r(Error(`Invalid header from proxy CONNECT response: "${v}"`));let w=v.slice(0,S).toLowerCase(),T=v.slice(S+1).trimStart(),k=b[w];if(typeof k==="string")b[w]=[k,T];else if(Array.isArray(k))k.push(T);else b[w]=T}$Io("got proxy server response: %o %o",m,b),s(),t({connect:{statusCode:g,statusText:y,headers:b},buffered:d})}e.on("error",l),e.on("end",a),i()})}Ykr.parseProxyResponse=E7y});var Xkr=ne(function(aIe){var w7y=aIe&&aIe.__createBinding||(Object.create?function(e,t,r,n){if(n===void 0)n=r;var o=Object.getOwnPropertyDescriptor(t,r);if(!o||("get"in o?!t.__esModule:o.writable||o.configurable))o={enumerable:!0,get:function(){return t[r]}};Object.defineProperty(e,n,o)}:function(e,t,r,n){if(n===void 0)n=r;e[n]=t[r]}),A7y=aIe&&aIe.__setModuleDefault||(Object.create?function(e,t){Object.defineProperty(e,"default",{e
+
+## b'handoff' idxs=[70972548, 70972997, 70974462, 70974491, 70975120, 99306104, 99306136, 100554237, 101065165, 121839048, 143117200, 152543366]
+
+----- @70972548 -----
+ibute(0, handle);
+  }
+  onAcceptedSocketClose(handle) {
+    remove(handle);
+    let inFlight = this.inFlight;
+    for (let [id, pending] of inFlight)
+      if (pending === handle) {
+        inFlight.delete(id);
+        let worker = this.all.get(id);
+        if (worker !== @undefined)
+          this.handoff(worker);
+        break;
+      }
+  }
+  onServerListening() {
+    this.listening = !0, this.handle = this.server._handle;
+  }
+  add(worker, send) {
+    this.all.set(worker.id, worker);
+    let done = () => {
+      if (this.handle.getsockname && typeof this.server.address() === "object") {
+        let out = {};
+        this.handle.getsockname(out), send(null, { sockname: out }, null);
+      } else
+        send(null, null, null);
+      this.handoff(worker);
+    };
+    if (this.listening)
+      return done();
+    this.server.once("listening", done), this.server.once("error", (err) => {
+      let raw = typeof err.errno === "number" && err.errno !== 0 ? err.errno : null;
+      send(raw != null ? uvTranslateSysError(raw) : UV_EINVAL, null, null);
+    });
+  }
+  has(worker) {
+    return this.all.has(worker.id);
+  }
+  remove(worker, channelGone = !1) {
+    if (channelGone) {
+      let pending = this.inFlight.get(worker.id);
+      if (pending !== @undefined) {
+        this.inFlight.delete(worker.id);
+        let others = this.all.size - (this.all.has(worker.id) ? 1 : 0);
+        if (!worker.exitedAfterDisconnect && others > 0)
+          this.distribute(0, pending);
+        else
+          pending.close();
+      }
+    }
+    if (!this.all.delete(worker.id))
+      return !1;
+    if (this.free.delete(worker.id), this.all.size !== 0)
+      return !1;
+    for (let pending of this.inFlight.values())
+      pending.close();
+    this.inFlight.clear();
+    while (!isEmpty(this.handles)) {
+  
+
+----- @70972997 -----
+d) {
+    this.all.set(worker.id, worker);
+    let done = () => {
+      if (this.handle.getsockname && typeof this.server.address() === "object") {
+        let out = {};
+        this.handle.getsockname(out), send(null, { sockname: out }, null);
+      } else
+        send(null, null, null);
+      this.handoff(worker);
+    };
+    if (this.listening)
+      return done();
+    this.server.once("listening", done), this.server.once("error", (err) => {
+      let raw = typeof err.errno === "number" && err.errno !== 0 ? err.errno : null;
+      send(raw != null ? uvTranslateSysError(raw) : UV_EINVAL, null, null);
+    });
+  }
+  has(worker) {
+    return this.all.has(worker.id);
+  }
+  remove(worker, channelGone = !1) {
+    if (channelGone) {
+      let pending = this.inFlight.get(worker.id);
+      if (pending !== @undefined) {
+        this.inFlight.delete(worker.id);
+        let others = this.all.size - (this.all.has(worker.id) ? 1 : 0);
+        if (!worker.exitedAfterDisconnect && others > 0)
+          this.distribute(0, pending);
+        else
+          pending.close();
+      }
+    }
+    if (!this.all.delete(worker.id))
+      return !1;
+    if (this.free.delete(worker.id), this.all.size !== 0)
+      return !1;
+    for (let pending of this.inFlight.values())
+      pending.close();
+    this.inFlight.clear();
+    while (!isEmpty(this.handles)) {
+      let handle = peek(this.handles);
+      handle.close(), remove(handle);
+    }
+    return this.server?.close(), this.server = null, this.handle = null, !0;
+  }
+  distribute(err, handle) {
+    if (err)
+      return;
+    append(this.handles, handle);
+    let [workerEntry] = this.free;
+    if (ArrayIsArray(workerEntry)) {
+      let { 0: workerId, 1: worker } = workerEntry;
+      this.free.delete(workerId), this.handoff(worker);
+    }
+  }
+  handof
+
+----- @70974462 -----
+this.server = null, this.handle = null, !0;
+  }
+  distribute(err, handle) {
+    if (err)
+      return;
+    append(this.handles, handle);
+    let [workerEntry] = this.free;
+    if (ArrayIsArray(workerEntry)) {
+      let { 0: workerId, 1: worker } = workerEntry;
+      this.free.delete(workerId), this.handoff(worker);
+    }
+  }
+  handoff(worker) {
+    if (!this.all.has(worker.id))
+      return;
+    for (;; ) {
+      let handle = peek(this.handles);
+      if (handle === null) {
+        this.free.set(worker.id, worker);
+        return;
+      }
+      remove(handle);
+      let message = { act: "newconn", key: this.key };
+      if (this.inFlight.set(worker.id, handle), sendHelper(worker.process[kHandle], message, handle, (reply) => {
+        if (this.inFlight.get(worker.id) !== handle)
+          return;
+        if (this.inFlight.delete(worker.id), reply.accepted)
+          handle.close();
+        else
+          this.distribute(0, handle);
+        this.handoff(worker);
+      }) !== null)
+        return;
+      let { id } = worker;
+      if (this.inFlight.delete(id), handle.fd < 0) {
+        handle.close();
+        continue;
+      }
+      if (this.distribute(0, handle), this.all.has(id))
+        this.free.set(id, worker);
+      return;
+    }
+  }
+};
+function noop() {}
+function makeAcceptedHandle(socket) {
+  return {
+    get fd() {
+      let nativeSocket = socket._handle;
+      return socket.destroyed || !nativeSocket ? -1 : nativeSocket.fd;
+    },
+    close(cb) {
+      if (socket.destroy(), typeof cb === "function")
+        process.nextTick(cb);
+    }
+  };
+}
+return $})
+
+ (function (){"use strict";// build/release/tmp_modules/internal/cluster/SharedHandle.ts
+var $, clusterRawBind = @lazy(5), closeRawHandle = @lazy(6), validateFd = @lazy(7);
+$ = class SharedHandle {
+  key;
+  workers;
+
+----- @70974491 -----
+le = null, !0;
+  }
+  distribute(err, handle) {
+    if (err)
+      return;
+    append(this.handles, handle);
+    let [workerEntry] = this.free;
+    if (ArrayIsArray(workerEntry)) {
+      let { 0: workerId, 1: worker } = workerEntry;
+      this.free.delete(workerId), this.handoff(worker);
+    }
+  }
+  handoff(worker) {
+    if (!this.all.has(worker.id))
+      return;
+    for (;; ) {
+      let handle = peek(this.handles);
+      if (handle === null) {
+        this.free.set(worker.id, worker);
+        return;
+      }
+      remove(handle);
+      let message = { act: "newconn", key: this.key };
+      if (this.inFlight.set(worker.id, handle), sendHelper(worker.process[kHandle], message, handle, (reply) => {
+        if (this.inFlight.get(worker.id) !== handle)
+          return;
+        if (this.inFlight.delete(worker.id), reply.accepted)
+          handle.close();
+        else
+          this.distribute(0, handle);
+        this.handoff(worker);
+      }) !== null)
+        return;
+      let { id } = worker;
+      if (this.inFlight.delete(id), handle.fd < 0) {
+        handle.close();
+        continue;
+      }
+      if (this.distribute(0, handle), this.all.has(id))
+        this.free.set(id, worker);
+      return;
+    }
+  }
+};
+function noop() {}
+function makeAcceptedHandle(socket) {
+  return {
+    get fd() {
+      let nativeSocket = socket._handle;
+      return socket.destroyed || !nativeSocket ? -1 : nativeSocket.fd;
+    },
+    close(cb) {
+      if (socket.destroy(), typeof cb === "function")
+        process.nextTick(cb);
+    }
+  };
+}
+return $})
+
+ (function (){"use strict";// build/release/tmp_modules/internal/cluster/SharedHandle.ts
+var $, clusterRawBind = @lazy(5), closeRawHandle = @lazy(6), validateFd = @lazy(7);
+$ = class SharedHandle {
+  key;
+  workers;
+  handle;
+  errno;
+  data;
+ 

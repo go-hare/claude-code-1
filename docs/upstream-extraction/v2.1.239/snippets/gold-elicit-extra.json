@@ -1,0 +1,46 @@
+[
+  {
+    "needle": "function zRr",
+    "hits": [
+      322459887
+    ],
+    "samples": [
+      "Me(),1)});function zRr(e){let t=wt((g)=>g.teamContext),r=wt((g)=>g.standaloneAgentContext),n=wt((g)=>g.agent);wt((g)=>g.viewingAgentTaskId);let o=au(),[i]=La(),[s,a]=ewn.useState(null),l=r?.prideGradient,c=ewn.useMemo(()=>l&&tZg?tZg(l,i):l,[l,i]);ewn.useEffect(()=>{WVe().then(a)},[]);let u=o.getState();if(Qb()&&!gle()){let g=JR();if(g&&Hy())return{text:`@${g}`,bgColor:wRs(t?.selfAgentColor??sj())}}if(t?.teammates&&Object.keys(t.teammates).length>1){let g=e8e(u),y=wRs(g?.identity.color),_=VZn(),b=rcl()?.isNative??!1;if(s===!1&&!_&&!b)return{text:`View teammates: \\`tmux -L ${CZn()} a\\``,bgColor:y};if((s===!0||_||b)&&g)return{text:`@${g.identity.agentName}`,bgColor:y}}let p=$in(u);if(p.type===\"named_agent\"){let g=p.task,y;for(let[_,b]of u.agentNameRegistry)if(b===g.id){y=_;break}return{text:y?`@${y}`:g.description,bgColor:YUt(g.agentType)??\"cyan_FOR_SUBAGENTS_ONLY\"}}let f=n?u.agentDefinitions.activeAgents.find((g)=>g.agentType===n):void 0,m=Q$m(u),h=r?.color;if(!e?.hideSessionTitle&&(m||h||c))return{text:m||n||\"\",bgColor:wRs(KUt({userOverride:h,agentDefinitionColor:f?.color})),gradient:c};if(n)return{text:n,bgColor:wRs(f?.color,\"promptBorder\")};return null}function wRs(e,t=\"cyan_FOR_SUBAGENTS_ONLY\"){return e&&ZI.includes(e)?cee[e]:t}var ewn,tZg=void 0;var ERs=A(()=>{rs();Fin();YG();jlo();owt();A7r();TX();yg();tme();wwe();ewn=P(Lt(),1)});function WbA(e){return Date.now()-c4()>=e}function WRr(e,t){let r=Poe(),[n,o]=WPo.useState(!1);WPo.useEffect(()=>{_xn()},[]),WPo.useEffect(()=>{o(!1)},[e,"
+    ]
+  },
+  {
+    "needle": "function Tk(",
+    "hits": [],
+    "samples": []
+  },
+  {
+    "needle": "Loe=",
+    "hits": [],
+    "samples": []
+  },
+  {
+    "needle": "Aee=",
+    "hits": [],
+    "samples": []
+  },
+  {
+    "needle": "Xhe=",
+    "hits": [],
+    "samples": []
+  },
+  {
+    "needle": "function nH(",
+    "hits": [],
+    "samples": []
+  },
+  {
+    "needle": "function or(",
+    "hits": [],
+    "samples": []
+  },
+  {
+    "needle": "function fp(",
+    "hits": [],
+    "samples": []
+  }
+]

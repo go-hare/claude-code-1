@@ -1,0 +1,2 @@
+set(e,s),s}function Yyt(e){if(Wt()!=="windows")return e;let t=e.replace(/[\\/]+$/,""),r=g3r(t);if(t.length===0||/^[A-Za-z]:$/.test(r))return e;if(/^[\\/]{2}/.test(r)||ibe(t))return t;try{if(!Iu.statSy
+nc(t).isDirectory())return t}catch{}return t+aa.sep}function mGr(e,t){return/[\\/]$/.test(e.trim())&&!VNt(g3r(t))?Yyt(t):t}function D1a(e){return aa.resolve(e,".claude",gOe)}function xPp(e=!0){let t=n

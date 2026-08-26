@@ -1,0 +1,3 @@
+OFFSET=301617193
+
+esChannel",label:"Auto-update channel",value:r?.autoUpdatesChannel==="rc"?"slow":r?.autoUpdatesChannel??"latest",type:"managedEnum",onChange(){}},{id:"theme",label:"Theme",value:bf("themes")&&yG(n)?`${n} (disabled in safe mode)`:n,type:"managedEnum",options:dvn,optionsHint:"For custom themes, use /theme.",onChange:C},...vgt()?[{id:"notifChannel",label:"Notifications",value:Rxi(t.preferredNotifChannel),type:"managedEnum",options:[...koe],onChange:Y}]:[{id:"notifChannel",label:"Local notifications",value:t.preferredNotifChannel,options:[...koe],t

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  applyVirtualScrollRangeClamp,
   clampScrollTopToContentMax,
   clampStoredScrollTop,
   clampVisualScrollTop,
@@ -188,5 +189,26 @@ describe('resolveNearestScrollTop', () => {
         viewportHeight: 20,
       }),
     ).toBe(30) // 40+10-20
+  })
+})
+
+describe('applyVirtualScrollRangeClamp', () => {
+  test('sticky skips leftover mounted-range clamp (empty-transcript paint)', () => {
+    // visual at maxScroll (sticky pin); leftover clamp is the prior top range
+    expect(applyVirtualScrollRangeClamp(400, 0, 30, true)).toBe(400)
+  })
+
+  test('non-sticky clamps visual scrollTop into mounted range', () => {
+    expect(applyVirtualScrollRangeClamp(400, 0, 30, false)).toBe(30)
+    expect(applyVirtualScrollRangeClamp(10, 20, 80, false)).toBe(20)
+    expect(applyVirtualScrollRangeClamp(50, 20, 80, false)).toBe(50)
+  })
+
+  test('passthrough when either bound is missing', () => {
+    expect(applyVirtualScrollRangeClamp(400, undefined, 30, false)).toBe(400)
+    expect(applyVirtualScrollRangeClamp(400, 0, undefined, false)).toBe(400)
+    expect(applyVirtualScrollRangeClamp(400, undefined, undefined, false)).toBe(
+      400,
+    )
   })
 })

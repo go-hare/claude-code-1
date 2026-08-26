@@ -15,9 +15,14 @@ import {
   FILE_UNCHANGED_STUB,
 } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
-import type { Message } from '../types/message.js'
+import type { AssistantMessage, Message } from '../types/message.js'
 import type { OrphanedPermission } from '../types/textInputTypes.js'
+import type { HookDeferredToolAttachment } from './attachments.js'
 import { logForDebugging } from './debug.js'
+import {
+  extractTraceparentContext,
+  withOtelContext,
+} from './telemetry/sessionTracing.js'
 import { isEnvTruthy } from './envUtils.js'
 import { isFsInaccessible } from './errors.js'
 import { getFileModificationTime, stripLineNumberPrefix } from './file.js'
@@ -33,6 +38,7 @@ import type {
   inputSchema as permissionToolInputSchema,
   outputSchema as permissionToolOutputSchema,
 } from './permissions/PermissionPromptToolResultSchema.js'
+import { safeParseJSON } from './json.js'
 import type { ProcessUserInputContext } from './processUserInput/processUserInput.js'
 import { recordTranscript } from './sessionStorage.js'
 
@@ -429,6 +435,237 @@ export async function* handleOrphanedPermission(
       yield sdkMessage
     }
   }
+}
+
+function isHookDeferredToolAttachment(
+  attachment: unknown,
+): attachment is HookDeferredToolAttachment {
+  return (
+    typeof attachment === 'object' &&
+    attachment !== null &&
+    (attachment as { type?: string }).type === 'hook_deferred_tool'
+  )
+}
+
+/** Official `$2l` tail window (1 MiB). */
+export const DEFERRED_TOOL_TAIL_BYTES = 1048576
+
+/**
+ * Official `$2l` — last unresolved `hook_deferred_tool` in the transcript
+ * tail. storageV5 `RQi` arm is intentionally not ported.
+ */
+export async function scanDeferredToolUseFromTranscriptTail(
+  transcriptPath: string,
+): Promise<HookDeferredToolAttachment | null> {
+  try {
+    const { open } = await import('fs/promises')
+    const handle = await open(transcriptPath, 'r')
+    try {
+      const st = await handle.stat()
+      let content: string
+      let bytesRead: number
+      const bytesTotal = st.size
+      if (st.size === 0) {
+        content = ''
+        bytesRead = 0
+      } else {
+        const offset = Math.max(0, st.size - DEFERRED_TOOL_TAIL_BYTES)
+        const len = st.size - offset
+        const buf = Buffer.allocUnsafe(len)
+        let filled = 0
+        while (filled < len) {
+          const { bytesRead: n } = await handle.read(
+            buf,
+            filled,
+            len - filled,
+            offset + filled,
+          )
+          if (n === 0) break
+          filled += n
+        }
+        content = buf.toString('utf8', 0, filled)
+        bytesRead = filled
+      }
+      const lines = content.split('\n')
+      if (bytesRead < bytesTotal) lines.shift()
+      let found: HookDeferredToolAttachment | undefined
+      let foundAt = -1
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]!.trim()
+        if (!line.includes('"hook_deferred_tool"')) continue
+        const parsed = safeParseJSON(line) as {
+          type?: string
+          attachment?: HookDeferredToolAttachment
+        } | null
+        if (
+          parsed?.type === 'attachment' &&
+          isHookDeferredToolAttachment(parsed.attachment)
+        ) {
+          found = parsed.attachment
+          foundAt = i
+          break
+        }
+      }
+      if (!found) return null
+      const needle = `"tool_use_id":"${found.toolUseID}"`
+      for (let i = foundAt + 1; i < lines.length; i++) {
+        if (lines[i]!.includes(needle)) return null
+      }
+      return found
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return null
+  }
+}
+
+/** leftover Ld — walk official toolAliases before findToolByName. */
+export function findToolByNameWithAliases(
+  tools: Tools,
+  name: string,
+  aliases?: Record<string, string>,
+): ReturnType<typeof findToolByName> {
+  if (aliases && Object.hasOwn(aliases, name) && aliases[name] !== name) {
+    return findToolByNameWithAliases(tools, aliases[name]!, aliases)
+  }
+  return findToolByName(tools, name)
+}
+
+export function findUnresolvedDeferredToolUse(
+  messages: readonly Message[],
+): HookDeferredToolAttachment | undefined {
+  const found = messages.findLast(
+    m => m.type === 'attachment' && isHookDeferredToolAttachment(m.attachment),
+  )
+  if (!found || found.type !== 'attachment') return
+  if (!isHookDeferredToolAttachment(found.attachment)) return
+  const attachment = found.attachment
+  const toolUseID = attachment.toolUseID
+  const resolved = messages.some(m => {
+    if (m.type !== 'user') return false
+    const content = m.message?.content
+    if (!Array.isArray(content)) return false
+    return content.some(
+      block =>
+        typeof block === 'object' &&
+        block !== null &&
+        'type' in block &&
+        block.type === 'tool_result' &&
+        'tool_use_id' in block &&
+        block.tool_use_id === toolUseID,
+    )
+  })
+  if (resolved) return
+  return attachment
+}
+
+/**
+ * Official H8f — re-emit a PreToolUse-deferred tool_use on the original
+ * trace (Zrp + Qrp around each runTools next()).
+ *
+ * Returns:
+ * - `'unavailable'` when the tool is gone
+ * - the new `hook_deferred_tool` attachment when the hook defers again
+ * - `undefined` when the tool completed or the original tool_use is missing
+ */
+export async function* handleDeferredToolUse(
+  deferred: HookDeferredToolAttachment,
+  tools: Tools,
+  mutableMessages: Message[],
+  canUseTool: CanUseToolFn,
+  processUserInputContext: ProcessUserInputContext,
+): AsyncGenerator<
+  SDKMessage,
+  HookDeferredToolAttachment | 'unavailable' | undefined
+> {
+  if (
+    !findToolByNameWithAliases(
+      tools,
+      deferred.toolName,
+      processUserInputContext.options.toolAliases,
+    )
+  ) {
+    logForDebugging(
+      `Deferred tool resume: tool '${deferred.toolName}' is no longer available (MCP server disconnected or tool removed)`,
+      { level: 'warn' },
+    )
+    return 'unavailable'
+  }
+
+  const currentMode =
+    processUserInputContext.getAppState().toolPermissionContext.mode
+  if (currentMode !== deferred.permissionMode) {
+    logForDebugging(
+      `Deferred tool resume: permissionMode mismatch (deferred under '${deferred.permissionMode}', resuming under '${currentMode}'). --resume does not restore permissionMode — pass --permission-mode ${deferred.permissionMode} to match.`,
+      { level: 'warn' },
+    )
+  }
+
+  const assistant = mutableMessages.findLast(
+    m =>
+      m.type === 'assistant' &&
+      Array.isArray(m.message?.content) &&
+      m.message.content.some(
+        block => block.type === 'tool_use' && block.id === deferred.toolUseID,
+      ),
+  )
+  if (!assistant || assistant.type !== 'assistant') {
+    logForDebugging(
+      `Deferred tool resume: tool_use ${deferred.toolUseID} not found in transcript`,
+      { level: 'warn' },
+    )
+    return
+  }
+  const assistantMessage = assistant as AssistantMessage
+  const content = assistantMessage.message?.content
+  const toolUse = Array.isArray(content)
+    ? content.find(
+        block => block.type === 'tool_use' && block.id === deferred.toolUseID,
+      )
+    : undefined
+  if (!toolUse || toolUse.type !== 'tool_use') return
+
+  logForDebugging(
+    `Deferred tool resume: re-emitting ${deferred.toolName} (${deferred.toolUseID}) through PreToolUse`,
+  )
+
+  const persistSession = !isSessionPersistenceDisabled()
+  const otelCtx = extractTraceparentContext(deferred.traceparent)
+  const iterator = runTools(
+    [toolUse as ToolUseBlock],
+    [assistantMessage],
+    canUseTool,
+    processUserInputContext,
+  )[Symbol.asyncIterator]()
+
+  let redeferred: HookDeferredToolAttachment | undefined
+  try {
+    while (true) {
+      const step = await withOtelContext(otelCtx, () => iterator.next())
+      if (step.done) break
+      const update = step.value
+      if (!update.message) continue
+      mutableMessages.push(update.message)
+      if (persistSession) {
+        await recordTranscript(mutableMessages)
+      }
+      if (
+        update.message.type === 'attachment' &&
+        isHookDeferredToolAttachment(update.message.attachment)
+      ) {
+        redeferred = update.message.attachment
+      }
+      yield {
+        ...update.message,
+        session_id: getSessionId(),
+        parent_tool_use_id: null,
+      } as SDKMessage
+    }
+  } finally {
+    await iterator.return?.(undefined)
+  }
+  return redeferred
 }
 
 /** densable P3e — token-cap partial-view system-reminder prefix. */

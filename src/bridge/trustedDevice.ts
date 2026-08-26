@@ -31,6 +31,45 @@ import { jsonStringify } from '../utils/slowOperations.js'
  */
 
 const TRUSTED_DEVICE_GATE = 'tengu_sessions_elevated_auth_enforcement'
+/** densable nFn — org policy that requires a trusted device for elevated RC. */
+const REQUIRE_TRUSTED_DEVICES_POLICY = 'require_trusted_devices'
+
+/**
+ * densable cei / CLOUD_CANNOT_REACH_ELEVATED_HINT.
+ */
+export const CLOUD_CANNOT_REACH_ELEVATED_HINT =
+  'not reachable from a cloud session — that session requires a trusted device, which a cloud session never has; message it from one of your own machines instead'
+
+/**
+ * densable iFn / isTrustedDeviceActiveForOrg — GB gate then eya(nFn).
+ */
+export function isTrustedDeviceActiveForOrg(): boolean {
+  if (!isGateEnabled()) return false
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { isPolicyEnforced } =
+    require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  return isPolicyEnforced(REQUIRE_TRUSTED_DEVICES_POLICY)
+}
+
+/**
+ * densable H9b / isRemoteControlPeerUnreachableFromHere.
+ * Official: `V.CLAUDE_CODE_REMOTE===true && !V.CLAUDE_TRUSTED_DEVICE_TOKEN && iFn()`.
+ */
+export function isRemoteControlPeerUnreachableFromHere(): boolean {
+  return (
+    process.env.CLAUDE_CODE_REMOTE === 'true' &&
+    !process.env.CLAUDE_TRUSTED_DEVICE_TOKEN &&
+    isTrustedDeviceActiveForOrg()
+  )
+}
+
+/**
+ * densable P9b / formatUnreachableElevatedRefusal.
+ */
+export function formatUnreachableElevatedRefusal(displayName: string): string {
+  return `Nothing was sent: Remote Control session '${displayName}' is ${CLOUD_CANNOT_REACH_ELEVATED_HINT}.`
+}
 
 function isGateEnabled(): boolean {
   return getFeatureValue_CACHED_MAY_BE_STALE(TRUSTED_DEVICE_GATE, false)

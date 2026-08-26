@@ -1,0 +1,702 @@
+#### "fullscreen offer" 0 []
+
+#### "tuiOffer" 0 []
+
+#### "cloud provider offer" 0 []
+
+#### "Bedrock, Vertex" 4 [151479824, 151626619, 151634062, 184623598]
+
+==== Bedrock, Vertex 151479824 ====
+ry shortly, or run /design-login to re-authorize................	...�...DesignSync is only available with claude.ai authentication. It is not supported through Bedrock, Vertex, or other third-party providers.........	...�...DesignSync is unavailable while nonessential network traffic is restricted (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set). Unset it to use /design-sync......
+.......................................�@�.�@�.�Y..M.��@.l�Y...................... ..."...$...&...(...�������.�������.H.������....�C......,��..�.��....��.�..�>��.+��.....	H..H.......�������.�������.���������������.�������.��������h.......�������.............��������....@�X������������.........�������.........�������.�������.............����....$.......����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p...�...0...0...0...0...`...`...`...`...`...`...`...`...`...`...`...`...`...`...`...h...h...h...h...�.......�������.�������.........�...............�...............�...............x.......�������.�������.........�...............�������.........�...............�...............
+
+==== Bedrock, Vertex 151626619 ====
+....., or run /design login..........	.......................	...�...Claude Design is only available with claude.ai authentication. It is not supported through Bedrock, Vertex, or other third-party providers..............	...M...Claude Design is disabled because nonessential network traffic is restricted....
+...............................................�@�$�G..�@�d�G..�@`��G..�@`N�Y..�.��@.t..��@.��@0M�Y........."...%.......:...<...N...f...k...n...z...|...~...�������.�������.Т�������������.�������.��y������������.�������.�������....�C......���.�..|...���.}..����.>��......H..H.......�������.�������..��������������.�������.�������h.......�������.............��������....�\V������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......�...............�...............`...............X.......�������.�������.........�...............�������.........���
+
+==== Bedrock, Vertex 151634062 ====
+ocess is refreshing the OAuth token. Retry in a moment............	...�...Projects is only available with claude.ai authentication. It is not supported through Bedrock, Vertex, or other third-party providers...........	...{...Projects is unavailable while nonessential network traffic is restricted (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set)..............	...�...Projects is disabled for this organization by compliance policy (e.g. HIPAA). Project read/write uploads workspace content to claude.ai, which is blocked under your org's compliance settings..
+...............................................�@�.....................
+...................................�C......���..".�....���.�..����.Z��.....	H..H.......�������.�������.h.�������������.�������.P.������h.......�������.............��������....(?V������������.........�������.........�������.�������.............����....$.......����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p...�...0...0...0...0...H...H...H...H...H...H...H...H...H...H...H...H...H...H...H...P...P...P...P...�.......�������.������
+
+==== Bedrock, Vertex 184623598 ====
+ist...............	.......disabled........	...$...Channels are not currently available............	.......provider........	...9...Channels are not available on Bedrock, Vertex, or Foundry...............	.......policy..........	...k...Channels are not enabled for your org � have an administrator set channelsEnabled: true in managed settings.............	.......Channel messages from ".........	...R..." are unavailable: this connection's protocol version has no channel delivery path..............	.......channels-blocked-era-...........	.......channels-blocked-...............	.......warning.........	.......tengu_mcp_channel_gate..�������.(...................
+...�������.�������.��0�����	.............��......���������.(...................
+...�������.�������.h�0�����	.............��........	...
+...Transient ..............	......<sse-no-code>................... .o.n. .i.n.i.t.i.a.l. .c.o.n.n.e.c.t. ..  .r.e.t.r.y. .........	......./...............	....... in ............	.......ms..............	.......pending.........	.......b...............	......._...............	.......MCP...........................................................................
+
+#### "three launches" 0 []
+
+#### "launchCount" 0 []
+
+#### "fullscreenPrompt" 0 []
+
+#### "unable to answer" 0 []
+
+#### "Accept/Decline" 0 []
+
+#### "Accept or Decline" 0 []
+
+#### "elicitation" 4 [109219272, 109219444, 109219888, 125748224]
+
+==== elicitation 109219272 ====
+p.......................	....... does not support task creation (required for ..........	.......)...............	.......sampling/createMessage..........	.......elicitation/create..............	...I... does not support task creation for sampling/createMessage (required for ...............	...E... does not support task creation for elicitation/create (required for ...
+.......................................�@�.�@�.�@P��@ O�{�hF..�.�?�@�.�@@V�I..���L�@�M�@P�M.��@.LV����@.laȊ��..<�@P&�L..�H�L�@AM�@P�I.��@.LRL���@.l]H���..<........3...=...O...~...�...�...�...�...�.......;...�...�������.�������..��������������.�������.P.......�������.�������.P.......�������.�������.X.......�������.�������.��������........	.......sampling........	......createMessage...........	.......elicitation.........�.......��..Þ..�...��..�..���..��.......H..H.......�������.�������.��e������������.�������.��e�����h.......�������.............��������....pq�������������.........�������.........�������.�������.............����............����................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...
+
+==== elicitation 109219444 ====
+create..............	...I... does not support task creation for sampling/createMessage (required for ...............	...E... does not support task creation for elicitation/create (required for ...
+.......................................�@�.�@�.�@P��@ O�{�hF..�.�?�@�.�@@V�I..���L�@�M�@P�M.��@.LV����@.laȊ��..<�@P&�L..�H�L�@AM�@P�I.��@.LRL���@.l]H���..<........3...=...O...~...�...�...�...�...�.......;...�...�������.�������..��������������.�������.P.......�������.�������.P.......�������.�������.X.......�������.�������.��������........	.......sampling........	......createMessage...........	.......elicitation.........�.......��..Þ..�...��..�..���..��.......H..H.......�������.�������.��e������������.�������.��e�����h.......�������.............��������....pq�������������.........�������.........�������.�������.............����............����................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......h...............�.......
+.......�...
+
+==== elicitation 109219888 ====
+�������.P.......�������.�������.P.......�������.�������.X.......�������.�������.��������........	.......sampling........	......createMessage...........	.......elicitation.........�.......��..Þ..�...��..�..���..��.......H..H.......�������.�������.��e������������.�������.��e�����h.......�������.............��������....pq�������������.........�������.........�������.�������.............����............����................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......h...............�.......
+.......�.......
+.......�.......�������.�������......... ...............�������.........�������.................e.......���..��...��.��..��.....��...��.��..��.....��...��.��..��.....��...��.��..��.....��.	.��.��..��..
+.i�...�...............�...............�...............�...............�...............................................8...............@...............`...............�������.........................	.......<...............	.......\u003c..
+
+==== elicitation 125748224 ====
+........(.......................	.......number..........	.......integer.........	.......array...........	.......form............	.......url.............	.......elicitation/create..............	..."...notifications/elicitation/complete..............	.......accept..........	.......decline.........	.......cancel..................0...............8...............@.......................	.......accept..........	.......decline.........	.......cancel..........	.......ref/resource............	...
+...ref/prompt..............	.......completion/complete.....d.....��........	.......file://.........	...
+...roots/list..............	... ...notifications/roots/list_changed........	.......working.........	.......input_required..........	...	...completed...............	.......failed..........	...	...cancelled.......................P...............X...............h...............x...............�.......................	.......working.........	.......input_required..........	...	...completed...............	.......failed..........	...	...cancelled...............	.......notifications/tasks/status..............	...	...tasks/get...............	.......tasks/result....
+
+#### "urlOverflows" 0 []
+
+#### "setMcpServers" 4 [111238512, 177557736, 177732504, 229939052]
+
+==== setMcpServers 111238512 ====
+ the CLI-flag bypass of strictKnownMarketplaces. Pair with allowedMcpServers for per-server MCP control; this setting does not gate other MCP entry points (SDK setMcpServers, claude mcp add, .mcp.json). Also blocks surfaces that spawn the CLI with these flags internally (see settings documentation). Only honored from managed settings; ignored in user/project/local settings.........	...J...Marketplace names whose plugins may surface as contextual install suggestions (relevance-based tips). No marketplace-declared suggestions surface without this allowlist; the built-in first-party frontend-design tip is unaffected. Only honored when set in managed settings (policy scope); the key is ignored in user, project, and local settings. A name only takes effect when the marketplace is registered on the machine AND its registered source is also declared in managed settings, either as the extraKnownMarketplaces entry for that name or as an entry of strictKnownMarketplaces. A marketplace registered from a different source under an allowlisted name is ignored. The official marketplace is exempt from the source requirement: allowlisting its name alone suffi
+
+==== setMcpServers 177557736 ====
+s...............	.......supportedAgents.........	.......mcpServerStatus.........	.......reconnectMcpServer..............	.......toggleMcpServer.........	......setMcpServers...........	......reloadPlugins...........	.......mcpAuthenticate.........	.......mcpClearAuth............	.......mcpSubmitOAuthCallbackUrl...............	.......getContextUsage.........	.......stopTask........	.......getSettings.............	.......generateSessionTitle............	.......messageRated............	.......askSideQuestion.........	.......rewindFiles.............	.......submitFeedback..........	.......launchUltrareview.......X.......�.......�.......H.......�.......�!......�1......�<.......�......��......��..................YE.....�f.......g..�dE..�E.......H..H.......�������.�������.�ܜ������������.�������.�ܜ������.......�������.............��������....@.......�������.........�������.........�������.�������.........................................�D......�k������0�������X��������������̜�����(�������8��������̜�����`�������h�������0������p�������Ho�������j��������������(k���������������������H��������������pۜ�����ؠ������������H��������������Р������
+
+==== setMcpServers 177732504 ====
+�...............�...............�...............�...............�...............�.....................��........
+...............	.......u...............	...%...setMcpServers: no mcpDelegate wired (...........	....... server(s))...........��......��<.....��;.....��........................................�@�<�@����񞟅.����4���.��C<M.��@�xX����..<�@�.�K.����4�.�.�.Pܟ..|................h...�...�...�.......�������.�������.���������������.�������.�o�������������.�������.�%�������������.�������.���������������.�������.................	...
+...setServers....... ..........��..lG.�V...lG..W..���..	�.......D..H.......�������.�������.�������.�������.�������.pS������h.......�������.............��������.... V�������������.........�������.........�������.�������.............����....,.......����............	.......................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...�...�...�...�...�...@...@...@...p...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�.......�������.�������......... ...............�.......	.......�.......	.......�.......�������.�������.........�...............
+
+==== setMcpServers 229939052 ====
+"...Names of servers that were removed..............	...H...Map of server names to error messages for servers that failed to connect........	...$...Result of a setMcpServers operation.....................................��`.�����@ ��B.����;��Q<�$�L���n�@ ��B.����;��Q<�&�L��.o�@ ��B.��@@<�B.����;�ɒ<L.��.�L�,����.l稜��	.<�..�(�L........�������.�������.��'������������.�������.ȯ.������������.�������.�/4������������.�������.(a�������������.�������.�n������������.�������.�n������������.�������.H�"������������.�������.�ا�����............�Y).I..�M...I...M..��Y)..Z)......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....�h�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...�...�...�...�...................................................................................�������.�������.�������.�.......�...............�...............p...............h.......�������.�������.........x...............�������.........�������.....
+
+#### "hasFailedSdkClients" 0 []
+
+#### "failed forever" 0 []
+
+#### "mcp_status" 4 [113362448, 204228736, 230421712, 230761272]
+
+==== mcp_status 113362448 ====
+�.......�.......�.......:...............�...............p.......0.......�.......@...............X.......-..............	...	...get_usage...............	...
+...mcp_status..............	......mcp_reconnect...........	.......apply_flag_settings.............	...	...interrupt...............	.......mcp_oauth_callback_url..........	.......set_max_thinking_tokens.........	.......rename_session..........	...	...read_file...............	.......mcp_authenticate........	...
+...initialize..............	.......file_suggestions........	...	...set_color...............	.......mcp_set_servers.........	.......set_permission_mode.............	...	...set_model...............	.......get_context_usage...............	...	...stop_task...............�.......�p��..����.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.L�.t...��....��....��....��....��....��....��....��....��.	..��	
+	.��
+.
+.��....��...��..��....��....��....��....��....��....��....�.�!....��....�.�!....��....��....��...��.G�..��.....��......��..�.(.i.��..��.....��.......��.&..H�..��.....��.......��....�.....��  ..��.(!.G�.��..��.....��....".��..�..#..�� $.��ّ�.j��..�.*.!�.
+
+==== mcp_status 204228736 ====
+ed in its previous working directory....................s.e.t._.c.w.d.:. .r.e.l.o.c.a.t.i.o.n. .f.a.i.l.e.d. ..  ...............	........ ..............	...
+...mcp_status..............	.......get_binary_version..............	...D...report the issue at https://github.com/anthropics/claude-code/issues............	.......@anthropic-ai/claude-code...............	...(...https://code.claude.com/docs/en/overview........	.......2.1.239.........	...0...https://github.com/anthropics/claude-code/issues........	.......2026-08-21T04:40:30Z............	...(...9bf8e9521fe06414183309865310e27c9b8db3dd........	.......win32...........	.......get_context_usage...............	.......ke..............	.......Kl..............	.......Cu............��2.....��........	.......list_models.............	.......get_session_cost........	...	...get_usage.............��........	.......mcp_message.....�������.(...................
+...�������.�������.�HG�����	...............	.......xn..............	...	...connected...............	.......rewind_files..........��........	.......Unexpected error........	.......cancel_async_message....�������.(...................
+...�������.�������.
+
+==== mcp_status 230421712 ====
+�������.................N.......�.��.....��......!�...��.....��......��..��....
+�.�...��.....��...��..��....i�.. ...............0.......................	...
+...mcp_status..............	...:...Requests the current status of all MCP server connections.......................................��`.������.���@k���=���L........�������.�������.p� ������������.�������.�x)������������.�������.�.�������������.�������.�.������............�a+.�I.�p...�I..p..��a+..b+......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....�.�������������.........�������.........�������.�������.............����............����............	.......................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...P...P...P...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......�...............�...............@...............8.......�������.�������.........`...............�������.........�������.................b.......�.��.....��......!�...��.....��.......��.....��.......��.....��....
+�.�...��.....��...��..��....
+
+==== mcp_status 230761272 ====
+ze..............	.......file_suggestions........	...	...read_file...............	.......get_context_usage...............	...	...get_usage...............	...
+...mcp_status......................`...............p...............�...............�...............�...............�.......................	...
+...initialize..............	.......file_suggestions........	...	...read_file...............	.......get_context_usage...............	...	...get_usage...............	...
+...mcp_status......
+...........................#...................��p.��.���P,��.���`,��.���P,��.���P,��.���`,��.���`,��.���P,��.���P,��.���P,��.���P,��.���`d���.��.����;��`}���.��.ğ��;���~���.\.���.ğ��;............�������.�������.��!������������.�������...(������������.�������.Hh.������������.�������.��#������������.�������.x�.������������.�������.��%������������.�������.�) ������������.�������.�A.������������.�������.ؕ.������������.�������.�X"������������.�������.��.������������.�������.x� ������������.�������.Ȇ(������������.�������.�
+"������������.�������...�������������.�������.�6 �����@...........�.-.��.�N...h.-.O..��.-.�.-......D..H.......�������.�������.�������.�������.
+
+#### "vimMode" 4 [146118360, 189262072, 289352016, 289352392]
+
+==== vimMode 146118360 ====
+........2.....��................................�@`.�H..�@�4�@ ��@`,�.�.�@�<............ ...@...�������.�������. .......�������.�������...;�����........	.......vimMode.@...(<......
+��.�/..J...�.K..�.��.`��......H..H.......�������.�������.��,������������.�������.��,�����h.......�������.............��������....�j�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...�...�...�.......(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...�������.�������.�������.�.......`...............�.......................................�������.�������.........................�������.........@.......................2.......�p��..���.�..$....��.....��.......��...a��..�...i....... ...............P...............�������.(.......................�������.�������.�.;�����	.......
+.......................................��`���.����T............�������.�������.p.;������������.�������.@.6������������.�������.�S.�����....................&��....�9.......9..�&��.^��......D..
+
+==== vimMode 189262072 ====
+�������.x^v������������.�������.�.......�������.�������.xL�������������.�������.�.......�������.�������.(.Z�����........	...	...addedDirs...............	.......vimModeEnabled..........	.......session_name............	.......current_dir.............	.......project_dir.............	...
+...added_dirs..............	.......git_worktree............	.......context_window..........	.......exceeds_200k_tokens.............	...	...fast_mode...............	.......review_state............	.......original_cwd............	.......original_branch.....�\......��J.w	..F...i�J.G..���J.ӻJ......H..H.......�������.�������..��������������.�������.��������h.......�������.............��������....@..������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�....... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ...�������.�������.�������.�.......�...............�...............0...............(.......�������.�������.........X...............�������.........�������.
+
+==== vimMode 289352016 ====
+�...............�...............................................p.......................	...
+...tokenUsage..............	.......permissionMode..........	.......vimMode.........	......mainLoopModel...........	.......fastMode........	.......effortValue.............	.......thinkingEnabled.........	.......prStatus................�...............�...............�...............�...............�...............�...............�...............�.......................	...
+...tokenUsage..............	.......permissionMode..........	.......vimMode.........	......mainLoopModel...........	.......fastMode........	.......effortValue.............	.......thinkingEnabled.........	.......prStatus
+...........................*...................��p.��.���`,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���`,��.���P,��.���P,��.���P,��.���P,��.���`d��.,........�������.�������.hW�������������.�������.���������������.�������..��������������.�������.0H�������������.�������.`
+�������������.�������.�A�������������.�������.Pנ������������.�������.�˝������������.�������.���������������.�������.�1�������������.
+
+==== vimMode 289352392 ====
+�...............�...............�...............�...............�.......................	...
+...tokenUsage..............	.......permissionMode..........	.......vimMode.........	......mainLoopModel...........	.......fastMode........	.......effortValue.............	.......thinkingEnabled.........	.......prStatus
+...........................*...................��p.��.���`,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���P,��.���`,��.���P,��.���P,��.���P,��.���P,��.���`d��.,........�������.�������.hW�������������.�������.���������������.�������..��������������.�������.0H�������������.�������.`
+�������������.�������.�A�������������.�������.Pנ������������.�������.�˝������������.�������.���������������.�������.�1�������������.�������.8,�������������.�������.`��������������.�������.�)�������������.�������.H
+�������������.�������..P�������������.�������.�.�������������.�������.��������������.�������.讨������������.�������.@.�������������.�������.(J�������������.�������.�v������....�\......@�J.*..�=....�J.>..�@�J.}�J......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.
+
+#### "INSERT" 4 [28874596, 71493504, 71494197, 71495997]
+
+==== INSERT 28874596 ====
+OPY.��...1���...�.D.�K.I�� I	�H�MERGE...1�I9�A.���....I�FETCH...M9�.��...D���.�������.vz�...�..�C.H�� H	�H�RELECT..H9�.%H�UPDATE..H9�tN�....I�DELETE..L9�t?�tH�INSERT..H9�.��...H�SELECT..H9�uR�....�.�ȍD.���.w@���.�....H�B.H9�.�f...H�.]��.D.�4.I��I)�H.�H�M�H��E1��pf.��}�.t.H�^.H�~.H�.....H��H��8[_^A^A_]�H�E.H�F.A��H�.���.Jc.�H.���H�.....��H�J.H9�.�....I��I)�L�<.I��.wZH9�t�1�A�<. t|H��I9�u��H�.....�H�.....�H�.....�y���H�.....�m���H�.....�a���H�.....�U���H�.Y��.%�7..�H.��H��~�.H�.�L��L��A� ��L9�.�.�����H�H.I9�veI)�I.�H�M�L��M��E1��]e.��}�..�����H�E.H�F.H�.....�����L�Ȟb.1�I���.Ob.L���b.H��H��I���.Ob.L���b.��L���b.L��M����Nb.��������������UVH��8H�l$0H��.�.����1.�B...H�P��.Hc.�H.���M��.�<...H�M�L��M���.."��....�/...M��.�....H�M�L��M����."��....�...M��.�....H�M�L��M����."��....��...M��.�....H�M�L��M���."��....��...M��.�....H�M�L��M���."��...�...M��.�....H�M�L��M���q."��....�...M��.�....H�M�L��M���O."��....�c...M��.�....H�M�L��M���-."��....�A...M��.�....H�M�L��M���.."��....�....�F..H�.�����"...M��.�....H�M�L��M����."��....��...M��.�....H�M�L��M���."��....��...M��.�....H�M�L��M���."��....M��.�....H�M�L��M���x."��....�...M��.�....H
+
+==== INSERT 71493504 ====
+(@isArray(items)) {
+    for (let j = 0;j < items.length; j++)
+      if (items[j] == null)
+        throw SyntaxError("Cannot use null or undefined as an item in INSERT helper");
+  }
+  for (let k = 0;k < columnCount; k++) {
+    let column = columns[k], hasDefinedValue = !1;
+    if (@isArray(items)) {
+      for (let j = 0;j < items.length; j++)
+        if (typeof items[j][column] < "u") {
+          hasDefinedValue = !0;
+          break;
+        }
+    } else
+      hasDefinedValue = typeof items[column] < "u";
+    if (hasDefinedValue) {
+      if (definedColumns.length > 0)
+        columnsSql += ", ";
+      columnsSql += escapeIdentifier(column), definedColumns.push(column);
+    }
+  }
+  return columnsSql += ") VALUES", { definedColumns, columnsSql };
+}
+function commandToString(command) {
+  switch (command) {
+    case 0 /* insert */:
+      return "INSERT";
+    case 2 /* updateSet */:
+    case 1 /* update */:
+      return "UPDATE";
+    case 4 /* in */:
+    case 3 /* where */:
+      return "WHERE";
+    default:
+      return "";
+  }
+}
+function detectCommand(query, anyAndAllMeanIn) {
+  let text = query.toLowerCase().trim(), text_len = text.length, token
+
+==== INSERT 71494197 ====
+urn columnsSql += ") VALUES", { definedColumns, columnsSql };
+}
+function commandToString(command) {
+  switch (command) {
+    case 0 /* insert */:
+      return "INSERT";
+    case 2 /* updateSet */:
+    case 1 /* update */:
+      return "UPDATE";
+    case 4 /* in */:
+    case 3 /* where */:
+      return "WHERE";
+    default:
+      return "";
+  }
+}
+function detectCommand(query, anyAndAllMeanIn) {
+  let text = query.toLowerCase().trim(), text_len = text.length, token = "", command = -1 /* none */, quoted = !1;
+  for (let i = text_len - 1;i >= 0; i--) {
+    let char = text[i];
+    switch (char) {
+      case " ":
+      case `
+`:
+      case "\t":
+      case "\r":
+      case "\f":
+      case "\v":
+        switch (token) {
+          case "insert":
+            return 0 /* insert */;
+          case "update":
+            return 1 /* update */;
+          case "where":
+            return 3 /* where */;
+          case "set":
+            return 2 /* updateSet */;
+          case "in":
+            return 4 /* in */;
+          default: {
+            token = "";
+            continue;
+          }
+        }
+      default: {
+        if (char === '"') {
+          qu
+
+==== INSERT 71495997 ====
+mand = detectCommand(query, anyAndAllMeanIn);
+  if (command === -1 /* none */ || command === 3 /* where */)
+    throw SyntaxError("Helpers are only allowed for INSERT, UPDATE and IN commands");
+  return command;
+}
+function pushBindParam(adapter, value, binding_values, index) {
+  if (typeof value > "u")
+    binding_values.push(null);
+  else
+    binding_values.push(value);
+  return adapter.placeholder(index) + " ";
+}
+function normalizeQuery(adapter, strings, values, binding_idx = 1) {
+  if (typeof strings === "string")
+    return [strings, values || []];
+  if (!@isArray(strings))
+    throw SyntaxError("Invalid query: SQL Fragment cannot be executed or was misused");
+  let str_len = strings.length;
+  if (str_len === 0)
+    return ["", []];
+  let binding_values = [], query = "";
+  for (let i = 0;i < str_len; i++) {
+    let string = strings[i];
+    if (typeof string === "string") {
+      if (query += string, values.length > i) {
+        let value = values[i];
+        if (value instanceof Query) {
+          let q = value, [sub_query, sub_values] = normalizeQuery(adapter, q[_strings], q[_values], binding_idx);
+          query += sub_query;
+         
+
+#### "NORMAL" 4 [70903268, 70903737, 71552973, 86118635]
+
+==== NORMAL 70903268 ====
+}
+var FLUSH_BOUND = [
+  [Z_NO_FLUSH, Z_BLOCK],
+  [BROTLI_OPERATION_PROCESS, BROTLI_OPERATION_EMIT_METADATA],
+  [ZSTD_e_continue, ZSTD_e_end]
+], FLUSH_BOUND_IDX_NORMAL = 0, FLUSH_BOUND_IDX_BROTLI = 1, FLUSH_BOUND_IDX_ZSTD = 2;
+function ZlibBase(opts, mode, handle, { flush, finishFlush, fullFlush }) {
+  let chunkSize = Z_DEFAULT_CHUNK, maxOutputLength = kMaxLength, flushBoundIdx;
+  if (mode === BROTLI_ENCODE || mode === BROTLI_DECODE)
+    flushBoundIdx = FLUSH_BOUND_IDX_BROTLI;
+  else if (mode === ZSTD_COMPRESS || mode === ZSTD_DECOMPRESS)
+    flushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
+  else
+    flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
+  if (opts) {
+    if (chunkSize = opts.chunkSize, !validateFiniteNumber(chunkSize, "options.chunkSize"))
+      chunkSize = Z_DEFAULT_CHUNK;
+    else if (chunkSize < Z_MIN_CHUNK)
+      throw @makeErrorWithCode(161, "options.chunkSize", `>= ${Z_MIN_CHUNK}`, chunkSize);
+    if (flush = checkRangesOrGetDefault(opts.flush, "options.flush", FLUSH_BOUND[flushBoundIdx][0], FLUSH_BOUND[flushBoundIdx][1], flush), finishFlush = checkRangesOrGetDefault(opts.finishFlush, "options.finishFlush", FLUSH_BOUND[flushBoundIdx][0], FLUSH_
+
+==== NORMAL 70903737 ====
+IDX_BROTLI;
+  else if (mode === ZSTD_COMPRESS || mode === ZSTD_DECOMPRESS)
+    flushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
+  else
+    flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
+  if (opts) {
+    if (chunkSize = opts.chunkSize, !validateFiniteNumber(chunkSize, "options.chunkSize"))
+      chunkSize = Z_DEFAULT_CHUNK;
+    else if (chunkSize < Z_MIN_CHUNK)
+      throw @makeErrorWithCode(161, "options.chunkSize", `>= ${Z_MIN_CHUNK}`, chunkSize);
+    if (flush = checkRangesOrGetDefault(opts.flush, "options.flush", FLUSH_BOUND[flushBoundIdx][0], FLUSH_BOUND[flushBoundIdx][1], flush), finishFlush = checkRangesOrGetDefault(opts.finishFlush, "options.finishFlush", FLUSH_BOUND[flushBoundIdx][0], FLUSH_BOUND[flushBoundIdx][1], finishFlush), maxOutputLength = checkRangesOrGetDefault(opts.maxOutputLength, "options.maxOutputLength", 1, kMaxLength, kMaxLength), opts.encoding || opts.objectMode || opts.writableObjectMode)
+      opts = { ...opts }, opts.encoding = null, opts.objectMode = !1, opts.writableObjectMode = !1;
+  }
+  Transform.@apply(this, [{ autoDestroy: !0, ...opts }]), this[kError] = null, this.bytesWritten = 0, this._handle = handle, handle[owner_symbol] 
+
+==== NORMAL 71552973 ====
+CACHE: 262144,
+  SQLITE_OPEN_WAL: 524288,
+  SQLITE_OPEN_NOFOLLOW: 16777216,
+  SQLITE_OPEN_EXRESCODE: 33554432,
+  SQLITE_PREPARE_PERSISTENT: 1,
+  SQLITE_PREPARE_NORMALIZE: 2,
+  SQLITE_PREPARE_NO_VTAB: 4,
+  SQLITE_DESERIALIZE_READONLY: 4,
+  SQLITE_FCNTL_LOCKSTATE: 1,
+  SQLITE_FCNTL_GET_LOCKPROXYFILE: 2,
+  SQLITE_FCNTL_SET_LOCKPROXYFILE: 3,
+  SQLITE_FCNTL_LAST_ERRNO: 4,
+  SQLITE_FCNTL_SIZE_HINT: 5,
+  SQLITE_FCNTL_CHUNK_SIZE: 6,
+  SQLITE_FCNTL_FILE_POINTER: 7,
+  SQLITE_FCNTL_SYNC_OMITTED: 8,
+  SQLITE_FCNTL_WIN32_AV_RETRY: 9,
+  SQLITE_FCNTL_PERSIST_WAL: 10,
+  SQLITE_FCNTL_OVERWRITE: 11,
+  SQLITE_FCNTL_VFSNAME: 12,
+  SQLITE_FCNTL_POWERSAFE_OVERWRITE: 13,
+  SQLITE_FCNTL_PRAGMA: 14,
+  SQLITE_FCNTL_BUSYHANDLER: 15,
+  SQLITE_FCNTL_TEMPFILENAME: 16,
+  SQLITE_FCNTL_MMAP_SIZE: 18,
+  SQLITE_FCNTL_TRACE: 19,
+  SQLITE_FCNTL_HAS_MOVED: 20,
+  SQLITE_FCNTL_SYNC: 21,
+  SQLITE_FCNTL_COMMIT_PHASETWO: 22,
+  SQLITE_FCNTL_WIN32_SET_HANDLE: 23,
+  SQLITE_FCNTL_WAL_BLOCK: 24,
+  SQLITE_FCNTL_ZIPVFS: 25,
+  SQLITE_FCNTL_RBU: 26,
+  SQLITE_FCNTL_VFS_POINTER: 27,
+  SQLITE_FCNTL_JOURNAL_POINTER: 28,
+  SQLITE_FCNTL_WIN32_GET_HANDLE: 29,
+  SQLITE_FCNTL_PDB: 30,
+  SQLITE_FCNTL_BE
+
+==== NORMAL 86118635 ====
+n0, n1, n2;
+  UWtype q0, q1;
+  UWtype b, bm;
+
+  nn.ll = n;
+  dd.ll = d;
+
+  d0 = dd.s.low;
+  d1 = dd.s.high;
+  n0 = nn.s.low;
+  n1 = nn.s.high;
+
+#if !UDIV_NEEDS_NORMALIZATION
+  if (d1 == 0)
+    {
+      if (d0 > n1)
+	{
+	  /* 0q = nn / 0D */
+
+	  udiv_qrnnd (q0, n0, n1, n0, d0);
+	  q1 = 0;
+
+	  /* Remainder in n0.  */
+	}
+      else
+	{
+	  /* qq = NN / 0d */
+
+	  if (d0 == 0)
+	    d0 = 1 / d0;	/* Divide intentionally by zero.  */
+
+	  udiv_qrnnd (q1, n1, 0, n1, d0);
+	  udiv_qrnnd (q0, n0, n1, n0, d0);
+
+	  /* Remainder in n0.  */
+	}
+
+      if (rp != 0)
+	{
+	  rr.s.low = n0;
+	  rr.s.high = 0;
+	  *rp = rr.ll;
+	}
+    }
+
+#else /* UDIV_NEEDS_NORMALIZATION */
+
+  if (d1 == 0)
+    {
+      if (d0 > n1)
+	{
+	  /* 0q = nn / 0D */
+
+	  count_leading_zeros (bm, d0);
+
+	  if (bm != 0)
+	    {
+	      /* Normalize, i.e. make the most significant bit of the
+		 denominator set.  */
+
+	      d0 = d0 << bm;
+	      n1 = (n1 << bm) | (n0 >> (W_TYPE_SIZE - bm));
+	      n0 = n0 << bm;
+	    }
+
+	  udiv_qrnnd (q0, n0, n1, n0, d0);
+	  q1 = 0;
+
+	  /* Remainder in n0 >> bm.  */
+	}
+      else
+	{
+	  /* qq = NN / 0d */
+
+	  if (d0 == 0)
+	    d0 = 1 / d0;	/* Divide intentionally by zero.  */
+
+
+#### "agent view" 4 [111228336, 180223577, 185141815, 207225110]
+
+==== agent view 111228336 ====
+n Claude Code Desktop uses for SSH-session worktrees on this machine............	...*...Disable all hooks and statusLine execution..............	...�...Disable agent view (`claude agents`, `--bg`, /background, the on-demand daemon). Typically set in managed settings. Equivalent to CLAUDE_CODE_DISABLE_AGENT_VIEW=1..............	...�...Disable Remote Control (claude.ai/code, `claude remote-control`, `--remote-control`/`--rc`, auto-start, and the in-session toggle). Typically set in managed settings...........	...G...Disable the Workflows feature (also via CLAUDE_CODE_DISABLE_WORKFLOWS)..........	...B...Disable the Artifact tool (also via CLAUDE_CODE_DISABLE_ARTIFACT)...............	...k...Enable or disable the Artifact tool for this user. Unset defaults to enabled once the feature is available..............	...m...Enable or disable the Workflows feature for this user. Unset = default by plan once the feature is available............	.......unrestricted............	.......small...........	.......medium..........	.......large...................@...............P...............X...............`.......................	.......unrestricted............
+
+==== agent view 180223577 ====
+.......................	.......leftArrowOpensAgents............	...... opens agents...................	.......defaultToAgentsView.............	.......Start in agent view.............................................���.��.����� ..�@p.�U.� ..�cl����..i.��..��.�A.��@.ԟT.� ..�`�����..........a...o...u...�...�...�...�.......�������.�������.pc.������������.�������.��%������������.�������.`O*������������.�������.0��������������.�������..��������������.�������..��������������.�������.�.�������������.�������..&!������������.�������.��������@...........��3.C..�E....'..F..���3..�3......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....x.�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...8...h...h...........(...(...8...8...8...8...8...H...H...H...H...H...H...H...H...H...H...H...H...�������.�������.�������.�.......�...............�............... .......................�������.�������.........�...............�������.........�
+
+==== agent view 185141815 ====
+.DLc...........��........	...I... requires authentication. Open this session and run /mcp to authenticate................	...*... It now shows "needs input" in agent view.......�������.	...............	...3... requires authentication. Use /mcp to authenticate..............	.......Failed to reconnect to .........	.......Error: .............................j...................��.���.��.�4��#<��D4���4��WT���=��P.�� � ..���.��@.��.����,�� � ..���.���>��@����.���u��0���г���<��@����.���,��.����,��@����.���=��0���гG..���..��r4���M��.����,�� �����I.���.<��`� ..��.��P.��.���p,��.���Pm��@���.����4��0� ..���.\.���.Tj�����.�-..���.���`�P..���..����..\�.����3�.���.<��`� ..���.�.���.<��Н��0��@.��.����,��е��0�L.���.����.�@..�ų����\��..���D��@����.���<��@����.���,��.����,��д��@����.��0s...��@�n.��...�..��...........�...x...�...�...�...�...&.......'...-...k...n...{...�...�...<...>...m...�...�...�.......�...�...�...�...$.......M...�...<...�...�...�...�������.�������.���������������.�������.�)�������������.�������.��W������������.�������.`:�������������.�������. �f������������.�������..��������������.�������.P��������������.�������.�������
+
+==== agent view 207225110 ====
+o allow tool access to in dispatched sessions (repeatable)........	.......--plugin-dir <path>.............	...]...Load plugins from specified directory for the agent view and dispatched sessions (repeatable)...........	.......--plugin-dir-no-mcp <path>..............	...F...Like --plugin-dir but the engine will not read this plugin's .mcp.json..........	.......--settings <file-or-json>...............	...O...Settings file or JSON string to apply to the agent view and dispatched sessions.........	.......--mcp-config <config>...........	...E...MCP server configuration to apply to dispatched sessions (repeatable)...........	.......--strict-mcp-config.............	...=...Only use MCP servers from --mcp-config in dispatched sessions...........	.......--permission-mode <mode>........	...?...Default permission mode for sessions dispatched from agent view.........	.......--dangerously-skip-permissions..........	...-...Alias for --permission-mode bypassPermissions...........	...$...--allow-dangerously-skip-permissions............	...V...Make bypass-permissions mode available to dispatched sessions without defaulting to it..........	.......--model <model
+
+#### "gained focus" 0 []
+
+#### "window focus" 0 []
+
+#### "focus click" 0 []
+
+#### "click through" 4 [311505178, 316861560, 323443585, 324552363]
+
+==== click through 311505178 ====
+elf-contained, shareable page can
+genuinely stand in for the thing being workshopped \u2014 a user-facing page,
+UI, or small visual experience the reader could click through and pass
+around. When it can, surface it as ONE early decision, among the first
+open decisions while the plan is still taking shape.
+
+Choose the lean per task, like any other decision: weigh how much a
+page the reader can open would actually settle before anyone commits \u2014
+lean \`prototype\` when the open questions are ones a real page answers
+cheaply, lean \`direct\` when the shape is already settled and a prototype
+would only delay the build \u2014 and say which in the lean reason. Omit the
+lean only when genuinely torn.
+
+When no such page could stand in for the work \u2014 the substance is
+backend, infrastructure, command-line, refactoring, or anything else
+with nothing to render \u2014 do not raise it, and do not mention prototyping
+at all. Offering the option where it cannot deliver is worse than
+silence.
+
+It is an ordinary decision block:
+
+\`\`\`\`
+\`\`\`decision
+id: build-approach
+question: Build a working prototype as a published artifact first, or implement d
+
+==== click through 316861560 ====
+our first clarifying questions, or when the first real design decision surfaces: the user can plan through an interactive workshop, a published page where they click through each open decision in their browser and their choices flow back into this session. Describe the offer in those product terms \u2014 what the user will experience, never the machinery underneath. If the task has no real decision points, do not offer, and do not mention the workshop at all.
+
+If the user accepts: invoke the workshop skill (${Nf} tool), create the workshop document at ${e.workshopOfferDocPath}, and seed it from the planning context so far \u2014 the task summary, what exploration has established, and the open decisions. The plan file remains the canonical plan: fold each resolved decision back into it as the workshop progresses, and finish the planning workflow (ending with ${ak}) as normal once the decisions are settled. Once the workshop document exists, the end-turn rule in these reminders gains a third option (publishing the document so the user can take decisions on the page) \u2014 follow the rule as stated in each reminder.
+
+If the user declines: conti
+
+==== click through 323443585 ====
+ change actually works end-to-end \u2014 not just that unit tests pass. Look for:
+   - A \`claude-in-chrome\` skill or browser-automation tool (for UI changes: click through the affected flow, screenshot the result)
+   - A \`tmux\` or CLI-verifier skill (for CLI changes: launch the app interactively, exercise the changed behavior)
+   - A dev-server + curl pattern (for API changes: start the server, hit the affected endpoints)
+   - An existing e2e/integration test suite the worker can run
+
+   If you cannot find a concrete e2e path, use the \`${gy}\` tool to ask the user how to verify this change end-to-end. Offer 2\u20133 specific options based on what you found (e.g., "Screenshot via chrome extension", "Run \`bun run dev\` and curl the endpoint", "No e2e \u2014 unit tests are sufficient"). Do not skip this \u2014 the workers cannot ask the user themselves.
+
+   Write the recipe as a short, concrete set of steps that a worker can execute autonomously. Include any setup (start a dev server, build first) and the exact command/interaction to verify.
+
+4. **Write the plan.** In your plan file, include:
+   - A summary of what you found during researc
+
+==== click through 324552363 ====
+
+name: prototype
+description: Turn an idea into a working proof of concept and publish it as an Artifact \u2014 a single self-contained page the user can open, click through, and react to. Run a short intake, state your assumptions, build, then iterate on feedback in the same artifact. Use when the user asks to prototype an idea, mock up a concept, build a proof of concept, or wants to see something working before committing to a real build \u2014 including, on an explicit ask, a new feature shown in place on an app they already have.
+when_to_use: Offer it unprompted, too \u2014 at most once per session, as one short line before you stop and wait, and building the prototype only if the user says yes; on a no, or no answer, carry on and do not offer again. Make the offer when the user is describing or weighing a new product or UI idea with nothing built yet \u2014 still working out whether or what to build \u2014 not when they have asked for real code, are working on a concrete task in an existing codebase, or have already said no.
+---
+
+Prototype the user's idea as a working proof of concept and publish it
+as an Artifact \u2014 one page that d
+
+#### "MODAL_TRANSCRIPT_PEEK" 0 []
+
+#### "transcript peek" 0 []
+
+#### "/config" 4 [91306914, 111254741, 114733533, 116247821]
+
+==== /config 91306914 ====
+de....�FqE............<stdin><stdin> has no metadatacommondir	ignoring �.: �. bytes.ignore::walk	ignoring �.: �.whitelisting �.: �.XDG_CONFIG_HOMEgit/ignoregit/configadding a default type should never fail.line �.: �..File system loop found: �. points to an ancestor �..unrecognized file type: �.invalid definition (format is type:glob, e.g., html:*.html)..0�4A.... ...............��DC....is_whitelistis_only_dir.........................��DC............................p�DC....IgnoreMatch.............................p�DC....globsGitignoreUnmatchedIgnore............................�DC....Matched.........................P�DC....Override........................0�DC............................ �DC....def..............................�DC....FileTypeDef.............................0�DC....IgnoreWhitelist..........................�DC....l���B���H���B���y�������y���y���y���.���R���(���B������������������� %��R&��4&��I&���Y��^Y��dY��^Y���Y���Y���Y���Y���Y������<���.���3���.���S���5���J�������������������.�������.���.���.����H��%J��aI���L���H��nJ���I���I��3I��lO���O���O���O���Z���Z���Z��}\���[��V]��6^���o���o���o��$p��$p��Ap��%compiled regex exceeds size l
+
+==== /config 111254741 ====
+sources............	...#...Display name for the SSH connection.............	...T...SSH host in format "user@hostname" or "hostname", or a host alias from ~/.ssh/config............	.......SSH port (default: 22)..........	...'...Path to SSH identity file (private key).........	...�...Default working directory on the remote host. Supports tilde expansion (e.g. ~/projects). If not specified, defaults to the remote user home directory. Can be overridden by the [dir] positional argument in `claude ssh <config> [dir]`...............	...�...SSH connection configurations for remote environments. Typically set in managed settings by enterprise administrators to pre-configure SSH connections for team members.........	...p...CLAUDE.md-style instructions injected as organization-managed memory. Only honored from managed/policy settings.........	...M...Glob patterns or absolute paths of CLAUDE.md files to exclude from loading. Patterns are matched against absolute file paths using picomatch. Only applies to User, Project, and Local memory types (Managed/policy files cannot be excluded). Examples: "/home/user/monorepo/CLAUDE.md", "**/code/CLAUDE.md", "**/so
+
+==== /config 114733533 ====
+...................	...(...claude /logout to sign out of claude.ai.........	...W...Run `ant auth logout`, or remove the active profile under ~/.config/anthropic/configs/..........	.......Unset the apiKeyHelper setting..........	...?...This token is injected by the CCR host; check the host session..�������.	...............	...
+...Unset the ..............	....... environment variable...
+.......................................�@�...��@.�....................
+........... .......h.......��4.-...,...��4.-..���4.��4......H..H.......�������.�������.�F.������������.�������.�F.�����h.......�������.............��������....�N�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...�...�...�.......8...8...8...8...8...8...8...8...8...8...8...8...8...8...8...8...8...8...8...8...�������.�������.�������.�.......................�...............�...............�.......�������.�������.........�...............�������.........�������.................8.......�.��.....��.......��....H�.��.F..��..
+
+==== /config 116247821 ====
+...........�...............�������.(.......................�������.�������.xXr�����	...............
+...............	......./.git/hooks.............	......./.git/config............	......./.git/config.lock...............	......./.git/config.worktree...........	......./.git/config.worktree.lock..............	......./.git/commondir.........	......./.git/worktrees.........	....../.git/modules...........	......./.git/info/exclude..............	......./.git/glab-cli..........	......./.gitmodules............	......./.github........	......./.claude........	......./run/docker.sock........	......./run/containerd/containerd.sock.........	......./run/podman/podman.sock.........	......./run/buildkit/buildkitd.sock............	...	.../run/dbus...............	...	.../run/user.......................`...............p...............�...............�...............�...............�.......................	......./run/docker.sock........	......./run/containerd/containerd.sock.........	......./run/podman/podman.sock.........	......./run/buildkit/buildkitd.sock............	...	.../run/dbus...............	...	.../run/user...............	......./.bash_profile.......
+
+#### "workflows" 4 [100984266, 111225423, 111225480, 111245431]
+
+==== workflows 100984266 ====
+e. .s.h.o.w.n. .i.n. .f.u.l.l. ..  .c.o.m.p.a.r.e. .t.h.e. .o.p.t.i.o.n. .l.a.b.e.l.s. .a.n.d. .d.e.s.c.r.i.p.t.i.o.n.s. .i.n.s.t.e.a.d.).............�w......� workflows run best with it on.........�L*.^...Analyze shell commands and explain what they do, why you're running them, and potential risks...........HM*.....L.o.a.d.i.n.g. .e.x.p.l.a.n.a.t.i.o.n.& ........	.......deny............	N*.....(file family: no shell tool)............IN*.....Claude needs your permission............ɕ......security-guidance...............	.......setProbe........IO*.....host................�...T.h.e. .t.y.p.e. .d.e.f.i.n.i.t.i.o.n.s. .c.o.v.e.r. .o.n.l.y. .t.h.e. .c.a.l.l. .e.n.v.e.l.o.p.e. ..  .t.h.e.y. .d.o. .n.o.t. .t.e.l.l. .y.o.u. .a. .c.o.n.n.e.c.t.o.r. .t.o.o.l.'.s. .a.r.g.u.m.e.n.t. .n.a.m.e.s. .o.r. .i.t.s. .r.e.s.u.l.t. .e.n.c.o.d.i.n.g... .N.e.v.e.r. .p.u.b.l.i.s.h. .a. .p.a.g.e. .t.h.a.t. .c.a.l.l.s. .a. .c.o.n.n.e.c.t.o.r. .t.o.o.l. .w.i.t.h.o.u.t. .h.a.v.i.n.g. .o.b.s.e.r.v.e.d. .o.n.e. .r.e.a.l. .r.e.q.u.e.s.t./.r.e.s.p.o.n.s.e. .p.a.i.r. .f.o.r. .t.h.a.t. .t.o.o.l. .i.n. .t.h.i.s. .s.e.s.s.i.o.n.;. .i.f. .y.o.u. .c.a.n.n.o.t. .s.a.f.e.l.y. .o.b.
+
+==== workflows 111225423 ====
+s description; "user-invocable-only" hides it from the model but keeps /name; "off" hides it from both. Absent = on..............	...'...Disable the skills and workflows that ship with Claude Code: bundled skills and workflows are removed entirely; built-in slash commands stay typable but are hidden from the model. Plugins, .claude/skills/, and .claude/commands/ are unaffected. Equivalent to CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1..........	.......Enterprise allowlist of MCP servers that can be used. Applies to all scopes including enterprise servers from managed-mcp.json. If undefined, all servers are allowed. If empty array, no servers are allowed. Denylist takes precedence - if a server is on both lists, it is denied...........	...�...Enterprise denylist of MCP servers that are explicitly blocked. If a server is on the denylist, it will be blocked across all scopes including enterprise. Denylist takes precedence over allowlist - if a server is on both lists, it is denied................	...3...Custom commands to run before/after tool executions.............	...�...Directories to symlink from main repository to worktrees to avoid disk bloat. M
+
+==== workflows 111225480 ====
+del but keeps /name; "off" hides it from both. Absent = on..............	...'...Disable the skills and workflows that ship with Claude Code: bundled skills and workflows are removed entirely; built-in slash commands stay typable but are hidden from the model. Plugins, .claude/skills/, and .claude/commands/ are unaffected. Equivalent to CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1..........	.......Enterprise allowlist of MCP servers that can be used. Applies to all scopes including enterprise servers from managed-mcp.json. If undefined, all servers are allowed. If empty array, no servers are allowed. Denylist takes precedence - if a server is on both lists, it is denied...........	...�...Enterprise denylist of MCP servers that are explicitly blocked. If a server is on the denylist, it will be blocked across all scopes including enterprise. Denylist takes precedence over allowlist - if a server is on both lists, it is denied................	...3...Custom commands to run before/after tool executions.............	...�...Directories to symlink from main repository to worktrees to avoid disk bloat. Must be explicitly configured - no directories are symlink
+
+==== workflows 111245431 ====
+.g.s. .o.r. .t.h.e. .a.p.p.l.y._.f.l.a.g._.s.e.t.t.i.n.g.s. .c.o.n.t.r.o.l. .r.e.q.u.e.s.t.;. ...........	...b...interactive toggles never persist it. Requires workflows to be enabled and an xhigh-capable model.......��....��@B....��........	.......Auto-compact window size........	.../...Advisor model for the server-side advisor tool..........	...H...When true, fast mode is enabled. When absent or false, fast mode is off.........	...^...When true, fast mode does not persist across sessions. Each session starts with fast mode off...........	...a...When false, prompt suggestions are disabled. When absent or true, prompt suggestions are enabled................	...�...When false, the :emoji: shortcode typeahead (the suggestion popup and the :name: inline replacement) is disabled. When absent or true, it is enabled............	...�...@internal When false, the session recap (shown when you return after being away for 5+ minutes) is disabled. When absent or true, recap is enabled. Hidden from public SDK types until external launch..........	...W...When true, the plan-approval dialog offers a "clear context" option. Defaults to false..........	......
+
+#### "Workflow detail" 0 []
+
+#### "overflow" 4 [69823043, 69824854, 70250934, 70252026]
+
+==== overflow 69823043 ====
+(?# comment.parentheses are too deeply nested.regular expression is too large.failed to allocate heap memory.unmatched closing parenthesis.internal error: code overflow.missing closing parenthesis for condition.length of lookbehind assertion is not limited.a relative value of zero is not allowed.conditional subpattern contains more than two branches.atomic assertion expected after (?( or (?(?C).digit expected after (?+ or (?-.unknown POSIX class name.internal error in pcre2_study(): should not occur.this version of PCRE2 does not have Unicode support.parentheses are too deeply nested (stack check).character code point value in \x{} or \o{} is too large.lookbehind is too complicated.\C is not allowed in a lookbehind assertion in UTF-8 mode.PCRE2 does not support \F, \L, \l, \N{name}, \U, or \u.number after (?C is greater than 255.closing parenthesis for (?C expected.invalid escape sequence in (*VERB) name.unrecognized character after (?P.syntax error in subpattern name (missing terminator?).two named subpatterns have the same name (PCRE2_DUPNAMES not set).subpattern name must start with a non-digit.this version of PCRE2 does not have support f
+
+==== overflow 69824854 ====
+esis.obsolete error (should not occur).(*VERB) not recognized or malformed.subpattern number is too big.subpattern name expected.internal error: parsed pattern overflow.non-octal character in \o{} (closing brace missing?).different names for subpatterns of the same number are not allowed.(*MARK) must have an argument.non-hex character in \x{} (closing brace missing?).\c must be followed by a printable ASCII character.\k is not followed by a braced, angle-bracketed, or quoted name.internal error: unknown meta code in check_lookbehinds().\N is not supported in a class.callout string is too long.disallowed Unicode code point (>= 0xd800 && <= 0xdfff).using UTF is disabled by the application.using UCP is disabled by the application.name is too long in (*MARK), (*PRUNE), (*SKIP), or (*THEN).character code point value in \u.... sequence is too large.digits missing after \x or in \x{} or \o{} or \N{U+}.syntax error or number too big in (?(VERSION condition.internal error: unknown opcode in auto_possessify().missing terminating delimiter for callout with string argument.unrecognized string delimiter follows (?C.using \C is disabled by the application.
+
+==== overflow 70250934 ====
+"ai_family not supported",
+  EAI_MEMORY: "out of memory",
+  EAI_NODATA: "no address",
+  EAI_NONAME: "unknown node or service",
+  EAI_OVERFLOW: "argument buffer overflow",
+  EAI_PROTOCOL: "resolved protocol is unknown",
+  EAI_SERVICE: "service not available for socket type",
+  EAI_SOCKTYPE: "socket type not supported",
+  EALREADY: "connection already in progress",
+  EBADF: "bad file descriptor",
+  EBUSY: "resource busy or locked",
+  ECANCELED: "operation canceled",
+  ECHARSET: "invalid Unicode character",
+  ECONNABORTED: "software caused connection abort",
+  ECONNREFUSED: "connection refused",
+  ECONNRESET: "connection reset by peer",
+  EDESTADDRREQ: "destination address required",
+  EEXIST: "file already exists",
+  EFAULT: "bad address in system call argument",
+  EFBIG: "file too large",
+  EHOSTUNREACH: "host is unreachable",
+  EINTR: "interrupted system call",
+  EINVAL: "invalid argument",
+  EIO: "i/o error",
+  EISCONN: "socket is already connected",
+  EISDIR: "illegal operation on a directory",
+  ELOOP: "too many symbolic links encountered",
+  EMFILE: "too many open files",
+  EMSGSIZE: "message too long",
+  ENAMETOOLONG: "name too long",
+  
+
+==== overflow 70252026 ====
+
+  EMSGSIZE: "message too long",
+  ENAMETOOLONG: "name too long",
+  ENETDOWN: "network is down",
+  ENETUNREACH: "network is unreachable",
+  ENFILE: "file table overflow",
+  ENOBUFS: "no buffer space available",
+  ENODEV: "no such device",
+  ENOENT: "no such file or directory",
+  ENOMEM: "not enough memory",
+  ENONET: "machine is not on the network",
+  ENOPROTOOPT: "protocol not available",
+  ENOSPC: "no space left on device",
+  ENOSYS: "function not implemented",
+  ENOTCONN: "socket is not connected",
+  ENOTDIR: "not a directory",
+  ENOTEMPTY: "directory not empty",
+  ENOTSOCK: "socket operation on non-socket",
+  ENOTSUP: "operation not supported on socket",
+  EOVERFLOW: "value too large for defined data type",
+  EPERM: "operation not permitted",
+  EPIPE: "broken pipe",
+  EPROTO: "protocol error",
+  EPROTONOSUPPORT: "protocol not supported",
+  EPROTOTYPE: "protocol wrong type for socket",
+  ERANGE: "result too large",
+  EROFS: "read-only file system",
+  ESHUTDOWN: "cannot send after transport endpoint shutdown",
+  ESPIPE: "invalid seek",
+  ESRCH: "no such process",
+  ETIMEDOUT: "connection timed out",
+  ETXTBSY: "text file is busy",
+  EXDEV: 
+
+#### "truncatePathMiddle" 2 [106552672, 303689894]
+
+==== truncatePathMiddle 106552672 ====
+setTime.........Io......formatSecondsShort..............	.......formatTokenEstimate.............I�3.....formatTokens............��3.....truncate........	.......truncatePathMiddle..............I�3.....truncateStartToWidth............	.......truncateToWidth.........	.......truncateToWidthNoEllipsis...............	.......wrapText........��3.....forcedUnavailable...............	.......captureProcessStartTimeAsync............	.......getAncestorPidsAsync............I�3.....getAncestorPidsCheckedAsync.............	�3.....getAncestorPidsLinuxSync........	.......getProcessCommand�3.............��3.....getProcessCreationTimeMsAsync...........I�3.....getProcessStartTime.............	.......getProcessStartTimeAsync........I�......getProcessStartTokenLinuxSync...........��3.....isProbeablePid..........	�3.....isProcessProvablyGone...........	.......isProcessRunning........	......isSameProcess...........	.......isSameProcessAsync..............I�......looksLikeFullHostProcessTable...........�[......ownProcStart............��......ownProcStartAsync...............	.......ownProcStartMemo........	.......procIdentityFields4.............ɮ......procIdentityOf..
+
+==== truncatePathMiddle 303689894 ====
+elativeTimeAgo:()=>_7,formatResetText:()=>tBr,formatResetTime:()=>w$,formatSecondsShort:()=>GOt,formatTokenEstimate:()=>mle,formatTokens:()=>nc,truncate:()=>Wl,truncatePathMiddle:()=>AU,truncateStartToWidth:()=>bG,truncateToWidth:()=>Hi,truncateToWidthNoEllipsis:()=>xZe,wrapText:()=>Kei});function GOt(e){return`${(e/1000).toFixed(1)}s`}function Bs(e,t){if(e<60000){if(e===0)return"0s";if(e<1)return`${(e/1000).toFixed(1)}s`;return`${Math.floor(e/1000).toString()}s`}let r=Math.floor(e/86400000),n=Math.floor(e%86400000/3600000),o=Math.floor(e%3600000/60000),i=Math.round(e%60000/1000);if(i===60)i=0,o++;if(o===60)o=0,n++;if(n===24)n=0,r++;let s=t?.hideTrailingZeros;if(t?.mostSignificantOnly){if(r>0)return`${r}d`;if(n>0)return`${n}h`;if(o>0)return`${o}m`;return`${i}s`}if(r>0){if(s&&n===0&&o===0)return`${r}d`;if(s&&o===0)return`${r}d ${n}h`;return`${r}d ${n}h ${o}m`}if(n>0){if(s&&o===0&&i===0)return`${n}h`;if(s&&i===0)return`${n}h ${o}m`;return`${n}h ${o}m ${i}s`}if(o>0){if(s&&i===0)return`${o}m`;return`${o}m ${i}s`}return`${i}s`}function VOt(e){let t=Math.max(0,Math.floor(e/1000));if(t<60)return`${t}s`;let r=Math.floor(t/60);if(r<60)return`${r}m${St
+
+#### "truncateToWidth" 4 [106552752, 106552784, 303689948, 303689971]
+
+==== truncateToWidth 106552752 ====
+ate.............I�3.....formatTokens............��3.....truncate........	.......truncatePathMiddle..............I�3.....truncateStartToWidth............	.......truncateToWidth.........	.......truncateToWidthNoEllipsis...............	.......wrapText........��3.....forcedUnavailable...............	.......captureProcessStartTimeAsync............	.......getAncestorPidsAsync............I�3.....getAncestorPidsCheckedAsync.............	�3.....getAncestorPidsLinuxSync........	.......getProcessCommand�3.............��3.....getProcessCreationTimeMsAsync...........I�3.....getProcessStartTime.............	.......getProcessStartTimeAsync........I�......getProcessStartTokenLinuxSync...........��3.....isProbeablePid..........	�3.....isProcessProvablyGone...........	.......isProcessRunning........	......isSameProcess...........	.......isSameProcessAsync..............I�......looksLikeFullHostProcessTable...........�[......ownProcStart............��......ownProcStartAsync...............	.......ownProcStartMemo........	.......procIdentityFields4.............ɮ......procIdentityOf..........	.4.....procStartCaches.........�=......provenSameProcessAsync..........
+
+==== truncateToWidth 106552784 ====
+kens............��3.....truncate........	.......truncatePathMiddle..............I�3.....truncateStartToWidth............	.......truncateToWidth.........	.......truncateToWidthNoEllipsis...............	.......wrapText........��3.....forcedUnavailable...............	.......captureProcessStartTimeAsync............	.......getAncestorPidsAsync............I�3.....getAncestorPidsCheckedAsync.............	�3.....getAncestorPidsLinuxSync........	.......getProcessCommand�3.............��3.....getProcessCreationTimeMsAsync...........I�3.....getProcessStartTime.............	.......getProcessStartTimeAsync........I�......getProcessStartTokenLinuxSync...........��3.....isProbeablePid..........	�3.....isProcessProvablyGone...........	.......isProcessRunning........	......isSameProcess...........	.......isSameProcessAsync..............I�......looksLikeFullHostProcessTable...........�[......ownProcStart............��......ownProcStartAsync...............	.......ownProcStartMemo........	.......procIdentityFields4.............ɮ......procIdentityOf..........	.4.....procStartCaches.........�=......provenSameProcessAsync..........	.......sigtermThenKill.........
+
+==== truncateToWidth 303689948 ====
+setTime:()=>w$,formatSecondsShort:()=>GOt,formatTokenEstimate:()=>mle,formatTokens:()=>nc,truncate:()=>Wl,truncatePathMiddle:()=>AU,truncateStartToWidth:()=>bG,truncateToWidth:()=>Hi,truncateToWidthNoEllipsis:()=>xZe,wrapText:()=>Kei});function GOt(e){return`${(e/1000).toFixed(1)}s`}function Bs(e,t){if(e<60000){if(e===0)return"0s";if(e<1)return`${(e/1000).toFixed(1)}s`;return`${Math.floor(e/1000).toString()}s`}let r=Math.floor(e/86400000),n=Math.floor(e%86400000/3600000),o=Math.floor(e%3600000/60000),i=Math.round(e%60000/1000);if(i===60)i=0,o++;if(o===60)o=0,n++;if(n===24)n=0,r++;let s=t?.hideTrailingZeros;if(t?.mostSignificantOnly){if(r>0)return`${r}d`;if(n>0)return`${n}h`;if(o>0)return`${o}m`;return`${i}s`}if(r>0){if(s&&n===0&&o===0)return`${r}d`;if(s&&o===0)return`${r}d ${n}h`;return`${r}d ${n}h ${o}m`}if(n>0){if(s&&o===0&&i===0)return`${n}h`;if(s&&i===0)return`${n}h ${o}m`;return`${n}h ${o}m ${i}s`}if(o>0){if(s&&i===0)return`${o}m`;return`${o}m ${i}s`}return`${i}s`}function VOt(e){let t=Math.max(0,Math.floor(e/1000));if(t<60)return`${t}s`;let r=Math.floor(t/60);if(r<60)return`${r}m${String(t%60).padStart(2,"0")}s`;let n=Math.floor(r/60);i
+
+==== truncateToWidth 303689971 ====
+condsShort:()=>GOt,formatTokenEstimate:()=>mle,formatTokens:()=>nc,truncate:()=>Wl,truncatePathMiddle:()=>AU,truncateStartToWidth:()=>bG,truncateToWidth:()=>Hi,truncateToWidthNoEllipsis:()=>xZe,wrapText:()=>Kei});function GOt(e){return`${(e/1000).toFixed(1)}s`}function Bs(e,t){if(e<60000){if(e===0)return"0s";if(e<1)return`${(e/1000).toFixed(1)}s`;return`${Math.floor(e/1000).toString()}s`}let r=Math.floor(e/86400000),n=Math.floor(e%86400000/3600000),o=Math.floor(e%3600000/60000),i=Math.round(e%60000/1000);if(i===60)i=0,o++;if(o===60)o=0,n++;if(n===24)n=0,r++;let s=t?.hideTrailingZeros;if(t?.mostSignificantOnly){if(r>0)return`${r}d`;if(n>0)return`${n}h`;if(o>0)return`${o}m`;return`${i}s`}if(r>0){if(s&&n===0&&o===0)return`${r}d`;if(s&&o===0)return`${r}d ${n}h`;return`${r}d ${n}h ${o}m`}if(n>0){if(s&&o===0&&i===0)return`${n}h`;if(s&&i===0)return`${n}h ${o}m`;return`${n}h ${o}m ${i}s`}if(o>0){if(s&&i===0)return`${o}m`;return`${o}m ${i}s`}return`${i}s`}function VOt(e){let t=Math.max(0,Math.floor(e/1000));if(t<60)return`${t}s`;let r=Math.floor(t/60);if(r<60)return`${r}m${String(t%60).padStart(2,"0")}s`;let n=Math.floor(r/60);if(n<24)return`${n}h${St
+
+#### "focus-in" 1 [325937604]
+
+==== focus-in 325937604 ====
+ext.\r
+\r
+Keep going \u2014 click into the main feature, fill a form, see the result\r
+show up, screenshot it. The driver grows whatever commands you need\r
+(\`focus-input\`, \`goto-settings\`, \`login-as-test-user\`\u2026). When one real\r
+flow works end-to-end, you're done building and ready to write.\r
+\r
+## Step 4 \u2014 write SKILL.md\r
+\r
+Keep it short. The driver is the meat; \`SKILL.md\` is the manual.\r
+Structure that works:\r
+\r
+> ---\r
+> name: run-desktop\r
+> description: Build, run, and drive the <app> Electron desktop app. Use when asked to start the desktop app, take a screenshot of it, build it, or interact with its UI.\r
+> ---\r
+>\r
+> <App> is an Electron desktop app. For agent/automated use, drive it\r
+> via the Playwright REPL at \`.claude/skills/run-desktop/driver.mjs\`\r
+> under xvfb. Launch is slow (~10s) and the interesting UI lives in a\r
+> BrowserView, not the main window \u2014 the driver handles both.\r
+>\r
+> All paths are relative to \`apps/desktop/\`.\r
+>\r
+> ## Prerequisites\r
+>\r
+> \`\`\`bash\r
+> apt-get install -y xvfb libnss3 libgbm1 libasound2t64 libgtk-3-0 \\\r
+>   libxss1 libxkbcommon0 libatk-bridge2.0-0 lib
+
+#### "focus-out" 1 [336128162]
+
+==== focus-out 336128162 ====
+s",ore="track-press",are="increment-press",ire="decrement-press",sre="input-change",lre="input-clear",cre="input-blur",ure="input-paste",dre="input-press",fre="focus-out",pre="escape-key",mre="close-watcher",hre="list-navigation",gre="keyboard",bre="pointer",vre="drag",yre="wheel",xre="scrub",wre="cancel-open",Ere="sibling-open",Sre="disabled",kre="missing",Cre="initial",Rre="imperative-action",Tre="swipe",Pre="window-resize"});var Rr=j(()=>{kH()});function Qe(e,t,n,r){let o=!1,a=!1,i=r??un;return{reason:e,event:t??new Event("base-ui"),cancel(){o=!0},allowPropagation(){a=!0},get isCanceled(){return o},get isPropagationAllowed(){return a},trigger:n,...i}}function Ih(e,t,n){let r=n??un;return{reason:e,event:t??new Event("base-ui"),...r}}var Tr=j(()=>{Eo()});function zh(e){CH.useEffect(e,Are)}var CH,Are,tE=j(()=>{"use client";CH=A(ne(),1),Are=[]});function Os(){let e=gr(dl.create).current;return zh(e.disposeEffect),e}var nE,ive,pA,rE,dl,Ru=j(()=>{"use client";Oi();tE();nE=null,ive=globalThis.requestAnimationFrame,pA=class{callbacks=[];callbacksCount=0;nextId=1;startId=1;isScheduled=!1;tick=t=>{this.isScheduled=!1;let n=this.callbacks,r=this.call
+
+#### "hasFailedSdk" 0 []
+
+#### "handshake timeout" 4 [91936633, 92341182, 199922744, 200032056]
+
+==== handshake timeout 91936633 ====
+yout.number-spellout.busy_timeout.max_idle_timeout.options.timeout.failsafe activated: resume sending packets again after timeout.Socket connection timeout.TLS handshake timeout.setRequestTimeout.setTimeout.clearTimeout.TLSOptions.sessionTimeout._onTimeout.kOnTimeout._idleTimeout.setServerIdleTimeout.Gateway Timeout.Request Timeout.Has Observed Timeout._stdout.qdh_begin_out.timed-out.SSL_SESSION could not be parsed out.connection timed out.kut.jut.IsTangut.shortcut.stepOut.swappedOut.isRequestTimedOut.ttt.WasmFuncRefTableFunction_rtt.WebAssemblyFunctionBase_rtt.WebAssemblyGCStructure_rtt.btt.kilowatt.milliwatt.gigawatt.megawatt..zst.zstd.tzst.*.tzst.*.pax.zst.*.tar.zst.*.cpio.zst.Avst.trust.colcasefirst.Context should be init first.Temporal.ZonedDateTime is not supported in Intl.DateTimeFormat; use toLocaleString() or convert to PlainDateTime first.WebView.cdp(): no session - await navigate() first.caseFirst.colCaseFirst.pst.JSC_useCompilerSignpost.JSC_useGCSignpost.JSC_disallowLoopUnrollingForNonInnermost.The target port was posted to itself, and the communication channel was lost..localhost.Ratio converting FTL # of DFG nodes to approx byte
+
+==== handshake timeout 92341182 ====
+ymaic.IsImperialAramaic.Imperial_Aramaic.IsMandaic.FFI ic.x-uhc.argc.bgc.nfc.exec.RegExpExec.regExpBuiltinExec.SqlExec.vec.create purgatory, min life %llu usec.handshake timeout %lu usec is too large.  The maximum for server is %u usec.Abort connection: Update Max Ack Delay value of %llu usec is invalid, as it is smaller than the advertised min_ack_delay of %u usec.parsec.subsec.rb,rhtml,rjs,rxml,erb,rake,spec.op_dec.qpack-dec.**dec.Rec.Dec.sdc.pdc.tinycc.islamicc.yacc.gost94cc.gost2001cc.../../vendor/boringssl/crypto/x509/x509_vfy.cc.../../vendor/boringssl/crypto/x509/a_verify.cc.../../vendor/boringssl/ssl/ssl_privkey.cc.../../vendor/boringssl/crypto/x509/v3_skey.cc.../../vendor/boringssl/crypto/pem/pem_pkey.cc.../../vendor/boringssl/crypto/x509/x_pubkey.cc.../../vendor/boringssl/crypto/x509/v3_akey.cc.../../vendor/boringssl/crypto/x509/policy.cc.../../vendor/boringssl/crypto/evp/evp_ctx.cc.../../vendor/boringssl/ssl/ssl_aead_ctx.cc.../../vendor/boringssl/crypto/asn1/a_strex.cc.../../vendor/boringssl/crypto/asn1/tasn_new.cc.../../vendor/boringssl/crypto/x509/v3_extku.cc.../../vendor/boringssl/crypto/x509/v3_bitst.cc.../../vendor/boringssl/cr
+
+==== handshake timeout 199922744 ====
+......��....�...F..��.....��.......��.....��......��..��.....�...i..��.F�.......0...............(............... ...............
+.......................	.......handshake timeout...................
+...................�@�.�@��@..�@�D�F.���a4�@�<�@a��U.��\�;............%...B...s...�������.�������.��v������������.�������.P�v������������.�������.0��������������.�������.��v������������.�������.p�y�����............Oˋ....�>.......?..�Oˋ.�ˋ......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....X��������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...�...�...�...�...�...�...�...�...0...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�.......�������.�������.........P...............�...............�...............�.......�������.�������.........................�������.........�������.........�...............�������.........�������.........�������.�������.........�������.........�������.........�������.................
+
+==== handshake timeout 200032056 ====
+��......��..�...��..��...K���..�...F.��.i......0...............P...............h.......................	.......[agent-proxy] ws open timeout...........	.......handshake timeout.......
+.......................................�@�.�C..�@`L�C..�.14�@r5�K.��@�T�a.��@0.�L..���d....
+...0...^...a.......�������.�������.�$.������������.�������.H;�������������.�������.H��������������.�������.8.......�������.�������.���������������.�������.��������........	...
+...CONNECTING..........��......m.�.E.......U.�....�y.�.�.�......H..H.......�������.�������.�>�������������.�������.�>������h.......�������.............��������....@�s������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......�...............�...............�...............�.......�������.�������.........�...............�������.........�������.........................���..��...K�
+.�...F.��.i................

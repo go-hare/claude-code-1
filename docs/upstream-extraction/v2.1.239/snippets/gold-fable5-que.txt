@@ -1,0 +1,73 @@
+
+==== "Que=[\"sonnet\",\"opus\",\"haiku\",\"fable\"]" hits=1 ====
+@318468506:
+);Lr();uh();sw();_z();lte();uye();wYl();V2=P(Lt(),1),Em=P(Ae(),1),Ayo=P(Me(),1);Que=["sonnet","opus","haiku","fable"],aVt={sonnet:"Sonnet",opus:"Opus",haiku:"Haiku",fable:"Fable"},LMh={sonnet:"ANTHROPIC_DEFAULT_SONNET_MODEL",opus:"ANTHROPIC_DEFAULT_OPUS_MODEL",haiku:"ANTHROPIC_DEFAULT_HAIKU_MODEL",fable:"ANTHROPIC_DEFAULT_FABLE_MODEL"};qss={auth:"auth failed",permission:"no InvokeModel permission",model:"not enabled in this account",network:"unreachable",other:"request failed"}});function tu(w_M){let JYl=zMh.c(10),{message:UMh,bold:FWE,dimColor:UWE,subtitle:XYl}=w_M,BMh=FWE===void 0?!1:FWE,jMh=UWE===void 0?!1:UWE,BWE;if(JYl[0]===ue)BWE=g2e.jsx(ef,{}),JYl[0]=BWE;else BWE=JYl[0];let ZYl;if(JYl[1]!==BMh||JYl[2]!==jMh||JYl[3]!==UMh)ZYl=g2e.jsxs(H,{flexDirection:"row",childr
+
+
+==== "Balanced performance - best for most agents" hits=0 ====
+
+==== "Most capable for complex reasoning tasks" hits=0 ====
+
+==== "Inherit from parent" hits=0 ====
+
+==== "fable5:" hits=1 ====
+@305039803:
+}function URa(){let e=!R_(),t=`Fable 5 \xB7 ${Hyp}${Pyp()}`;return{value:e?zv().fable5:"fable",label:"Fable",description:t,descriptionForModel:"Fable 5 - most capable for your hardest and longest-running tasks"}}function Eyp(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(Rci()&&e){let t=H0(e);return{value:"opus",label:V.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME??e,description:V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" (1M context)":""}`,descriptionForModel:`${V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" with 1M context":""}`} (${e})`}}}function m0v(){return{value:zv().opus41,label:"Opus 4.1",description:"Opus 4.1 \xB7 Legacy",descriptionForModel:"Opus 4.1 - legacy version"}}function h0v(){return{value:!R_()?zv().opus46:"claude-opus-4-6
+
+
+==== "fable5:" hits=1 ====
+@305039803:
+}function URa(){let e=!R_(),t=`Fable 5 \xB7 ${Hyp}${Pyp()}`;return{value:e?zv().fable5:"fable",label:"Fable",description:t,descriptionForModel:"Fable 5 - most capable for your hardest and longest-running tasks"}}function Eyp(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(Rci()&&e){let t=H0(e);return{value:"opus",label:V.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME??e,description:V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" (1M context)":""}`,descriptionForModel:`${V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" with 1M context":""}`} (${e})`}}}function m0v(){return{value:zv().opus41,label:"Opus 4.1",description:"Opus 4.1 \xB7 Legacy",descriptionForModel:"Opus 4.1 - legacy version"}}function h0v(){return{value:!R_()?zv().opus46:"claude-opus-4-6
+
+
+==== "claude-fable-5" hits=6 ====
+@100911017:
+ences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.............(.u...O.b.j.e.c.t. .a.n.d. .a.r.r.a.y. .p.a.r.a.m.e.t.e.r. .v.a.l.u.e.s. .m.u.s.t. .b.e. .a. .s.i.n.g.l.e. .J.S.O.N. .v.a.l.u.e. ..  .n.e.v.e.r. .w.r.i.t.e. .p.a.r.a.m.e.t.e.r.-.t.a.g. .m.a.r.k.u.p. .i.n.s.i.d.e. .a. .J.S.O.N. .v.a.l.u.e...(...............(.e...W.h.e.n. .y.o.u. .u.s.e. .a. .p.r.o.n.o.u.n. .f.o.r. .s.o.m.e.o.n.e. ..  .t.h.e. .u.s.e.r. .o.r. .a.n.y.o.n.e. .e.l.s.e. .y.o.u. .m.e.n.t.i.o.n. ..  .a.n.d. .t.h.e.i.r. .p.r.o.n.o.u.n.s. .h.a.v.e.n.'.t. .b.e.e.n. .s.t.a.t.e.d.,. .u.s.e. .t.h.e.y./.t.h.e.m... .A. .n.a.m.e. .d.o.e.s.n.'.t. .t.e.l.l. .y.o.u. .s.o.m.e.o.n.e.'.s. .p.r.o.n.o.u.n.s.;. .a. .w.r.o.n.g. .g.u.e.s.s. .m.i.s
+
+@112739832:
+............................................i...................................claude-fable-5...................................@...I.....L.................................................n(.....(....n(.)....n(..n(......H..H........................6'......................6'.....h.......................................X...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x.......................................................................................................................................................................................................................................
+
+@112747688:
+..............G............................i....................................claude-fable-5........................................0..@ ........;...u.@ .........S....................93...............................................".................Fq(.j...(....q(.)...Rq(.zq(......H..H.......................X7+.....................@7+.....h.......................................h...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...H...H...H...h...................................................................................................................0...................................
+
+@112759792:
+................firstParty..............................disabled................claude-fable-5..................absent..................That model..................<..............................;...%......pe.@ ..L...B.4..#<..U4...:...U.@ ......@PL.@@..V.......@..D....@.D.@ d.C...@.;.@.D.@ d.C...@.;...D.....E!<S.....RTX....@.<.@pn.L...@Pu.V.....M.@ .......`L.@ ........<.....@PT...w.@ ...............pT.@ ..........@ .........-...G...I...........................0...H...T...p...............................;...C........................./.....................X./.....................h........................S.......................-........................-......................W........................-.............................................P...........................
+
+
+==== "ANTHROPIC_DEFAULT_FABLE_MODEL" hits=6 ====
+@106504320:
+N..................."...ANTHROPIC_CUSTOM_MODEL_OPTION_NAME2..............d2.....ANTHROPIC_DEFAULT_FABLE_MODEL............m..)...ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTIONe2.............I..."...ANTHROPIC_DEFAULT_FABLE_MODEL_NAME......................ANTHROPIC_DEFAULT_HAIKU_MODEL...............)...ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION..................."...ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME...............[......ANTHROPIC_DEFAULT_MODEL.................ANTHROPIC_DEFAULT_OPUS_MODEL................(...ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION.........h2.!...ANTHROPIC_DEFAULT_OPUS_MODEL_NAME.......................ANTHROPIC_DEFAULT_SONNET_MODEL..............*...ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION..................#...ANTHROPIC_DEFAULT_SONNET_MODEL_NAME..............&..
+
+@106504368:
+PTION_NAME2..............d2.....ANTHROPIC_DEFAULT_FABLE_MODEL............m..)...ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTIONe2.............I..."...ANTHROPIC_DEFAULT_FABLE_MODEL_NAME......................ANTHROPIC_DEFAULT_HAIKU_MODEL...............)...ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION..................."...ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME...............[......ANTHROPIC_DEFAULT_MODEL.................ANTHROPIC_DEFAULT_OPUS_MODEL................(...ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION.........h2.!...ANTHROPIC_DEFAULT_OPUS_MODEL_NAME.......................ANTHROPIC_DEFAULT_SONNET_MODEL..............*...ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION..................#...ANTHROPIC_DEFAULT_SONNET_MODEL_NAME..............&......ANTHROPIC_MODEL..........j2.....ANTHROPIC_SM
+
+@106504432:
+.........m..)...ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTIONe2.............I..."...ANTHROPIC_DEFAULT_FABLE_MODEL_NAME......................ANTHROPIC_DEFAULT_HAIKU_MODEL...............)...ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION..................."...ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME...............[......ANTHROPIC_DEFAULT_MODEL.................ANTHROPIC_DEFAULT_OPUS_MODEL................(...ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION.........h2.!...ANTHROPIC_DEFAULT_OPUS_MODEL_NAME.......................ANTHROPIC_DEFAULT_SONNET_MODEL..............*...ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION..................#...ANTHROPIC_DEFAULT_SONNET_MODEL_NAME..............&......ANTHROPIC_MODEL..........j2.....ANTHROPIC_SMALL_FAST_MODEL2.................'...CLAUDE_CODE_3P_PROBE_WROTE_O
+
+@163157532:
+............................To enable automatic fallback on this provider, set `ANTHROPIC_DEFAULT_FABLE_MODEL` to your Fable 5 model ID and `ANTHROPIC_DEFAULT_OPUS_MODEL` to your Opus 4.8 model ID................................................................................P.$.........FS......0.../...D.......E...<............H..H........................G+......................G+.....h........................................j..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................h...h...h...x...........................................................................................................
+
+
+==== "function SZo(" hits=1 ====
+@303276281:
+"fable")}function wma(e){return}function pWb(e){return}function zNn(e){return!1}function SZo(e,t,r=ao()){let n=QHu(e,fWb[r]);if(n===void 0)return;let o=ZA(n)?.provider_ids.first_party,i=o!==void 0?ZOe[o]:void 0;return i!==void 0?t[i]:void 0}function XNn(){let e=V.ANTHROPIC_DEFAULT_FABLE_MODEL??Ema();return m$(UV()?tle(e):e)}function Ema(e=zv()){let t=SZo("fable",e)??e.fable5;return UV()?tle(t):t}function BC(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(e!==void 0)return m$(e);return dZe()}function dZe(e=zv()){return SZo("opus",e)??e.opus5}function Ama(){return dZe(WJe())}function GH(){let e=V.ANTHROPIC_DEFAULT_SONNET_MODEL;if(e!==void 0)return m$(e);return gZo()}function gZo(e=zv()){return SZo("sonnet",e)??e.sonnet46}function mht(){let e=V.ANTHROPIC_DEFAULT_HAIKU_MODEL;if(e
+
+
+==== "function QHu(" hits=1 ====
+@300839803:
+.capabilities.includes(t)?!0:void 0;return gOr().runtimeCapabilityLookup?.(r,t)}function QHu(e,t){let r=Dke().aliases,n=Object.hasOwn(r,e)?r[e]:void 0;if(!n)return;let o=n.per_provider;return(o&&Object.hasOwn(o,t)?o[t]:void 0)??n.default}var hy_,ZHu,gy_,yy_,_y_,by_,Dke;var $B=A(()=>{qn();hqs();Sn();hy_=ve(()=>_e({first_party:L(),bedrock:L().nullish(),vertex:L().nullish(),foundry:L().nullish(),anthropic_aws:L().nullish(),anthropic_google_cloud:L().nullish(),mantle:L().nullish(),gateway:L().nullish()}).loose()),ZHu=ve(()=>_e({input:Xe(),output:Xe(),cache_write_5m:Xe().optional(),cache_write_1h:Xe().optional(),cache_read:Xe().optional(),web_search:Xe().optional()}).loose()),gy_=ve(()=>_e({id:L(),family:L(),display_name:L(),slogan:L().optional(),knowledge_cutoff:L().optiona
+
+
+==== "ZOe[" hits=5 ====
+@303008077:
+elOverrides;if(!t)return e;let r={...e};for(let[n,o]of Object.entries(t)){let i=ZOe[n];if(i&&o)r[i]=m$(o)}return r}function lUr(e){let t;try{t=Jo().modelOverrides}catch{return e}if(!t)return e;for(let[r,n]of Object.entries(t))if(n===e)return r;return e}function bkd(){if(nQt()!==null)return;if(ao()!=="bedrock"){Txn(N1n(ao()));return}_kd()}function zv(){let e=nQt();if(e===null)return bkd(),ykd(N1n(ao()));return ykd(e)}function WJe(){let e=nQt();if(e===null)return bkd(),N1n(ao());return e}async function D7o(){if(nQt()!==null)return;if(ao()!=="bedrock"){Txn(N1n(ao()));return}await _kd()}var wda,_kd;var yWe=A(()=>{tt();Yft();qe();$r();Ho();XOe();nG();Fs();wda=Object.keys(md);_kd=_fe(async()=>{if(nQt()!==null)return;try{let e=await jPb();if(ao()!=="bedrock")return;Txn(e)}catc
+
+@303276398:
+fWb[r]);if(n===void 0)return;let o=ZA(n)?.provider_ids.first_party,i=o!==void 0?ZOe[o]:void 0;return i!==void 0?t[i]:void 0}function XNn(){let e=V.ANTHROPIC_DEFAULT_FABLE_MODEL??Ema();return m$(UV()?tle(e):e)}function Ema(e=zv()){let t=SZo("fable",e)??e.fable5;return UV()?tle(t):t}function BC(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(e!==void 0)return m$(e);return dZe()}function dZe(e=zv()){return SZo("opus",e)??e.opus5}function Ama(){return dZe(WJe())}function GH(){let e=V.ANTHROPIC_DEFAULT_SONNET_MODEL;if(e!==void 0)return m$(e);return gZo()}function gZo(e=zv()){return SZo("sonnet",e)??e.sonnet46}function mht(){let e=V.ANTHROPIC_DEFAULT_HAIKU_MODEL;if(e!==void 0)return m$(e);return Tma()}function Tma(e=zv()){return SZo("haiku",e)??e.haiku45}function Ufe(e){return e===
+
+@303295768:
+on pne(e){let t=fd(e),r=t.toLowerCase();if(!Object.hasOwn(ZOe,r))return t;let n=ZOe[r];if(n===void 0)return t;let o=WJe()[n];if(ZNn().state==="refused")return t;let s;try{s=yn("policySettings")}catch{return t}let a=s?.availableModels,l=s?.modelOverrides??UDt()??{},c,u;if(a===void 0)c=zv()[n],u=c!==o;else{if(!Gu(r,{allowlist:a,overridesMap:l,envFreeAliasResolution:!0}))return t;let p=EWb(l,n);c=p??o,u=p!==void 0}let d=ao();if(u||d!=="foundry"&&md[n][d]!==null)return fd(c);return t}function EWb(e,t){for(let[r,n]of Object.entries(e))if(Object.hasOwn(ZOe,r)&&ZOe[r]===t&&n)return n;return}function tle(e){return e.replace(/\[1m\]/gi,"")}var hZo,_ma="opus46",hve="sonnet45",hht="haiku45",GNn="opus5",VNn="opus5",vnr="opus5",qNn="fable5",fWb,gWb,yWb,bWb,vWb,SWb,wWb;var Li=A(()=>{
+
+@303296249:
+n t}function EWb(e,t){for(let[r,n]of Object.entries(e))if(Object.hasOwn(ZOe,r)&&ZOe[r]===t&&n)return n;return}function tle(e){return e.replace(/\[1m\]/gi,"")}var hZo,_ma="opus46",hve="sonnet45",hht="haiku45",GNn="opus5",VNn="opus5",vnr="opus5",qNn="fable5",fWb,gWb,yWb,bWb,vWb,SWb,wWb;var Li=A(()=>{tt();oi();WH();Pa();yWe();PNn();nve();qLr();ENn();HCe();Ho();Fs();pT();Lu();nG();$B();dZo();WV();WV();fb();jNn();qe();lf();hZo={fable:{available:Snr,defaultModel:()=>XNn(),builtinDefault:(e)=>Ema(e)}};fWb={firstParty:"first_party",bedrock:"bedrock",vertex:"vertex",foundry:"foundry",anthropicAws:"anthropic_aws",anthropicGoogleCloud:"anthropic_google_cloud",mantle:"mantle",gateway:"gateway"};gWb=new RegExp(`^((${Bft.join("|")})\\.)?(anthropic\\.|claude-)`);yWb=new Set(["claude-3
+

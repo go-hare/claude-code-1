@@ -1,0 +1,100 @@
+, options2), socket.once("error", freeSocketErrorListener), freeSockets.push(socket);
+  }), this.on("newListener", maybeEnableKeylog);
+}
+@toClass(Agent, "Agent", EventEmitter);
+function maybeEnableKeylog(eventName) {
+  if (eventName === "keylog") {
+    this.removeListener("newListener", maybeEnableKeylog);
+    let agent = this;
+    this[kOnKeylog] = function onkeylog(keylog) {
+      agent.emit("keylog", keylog, this);
+    };
+    for (let socket of Object.values(this.sockets).flat())
+      socket.on("keylog", this[kOnKeylog]);
+  }
+}
+var tls = getLazy(() => @getInternalField(@internalModuleRegistry, 180) || @createInternalModuleById(180)), net = getLazy(() => @getInternalField(@internalModuleRegistry, 160) || @createInternalModuleById(160));
+Agent.defaultMaxSockets = @Infinity;
+Agent.prototype.createConnection = function createConnection(...args) {
+  let normalized = net()._normalizeArgs(args), options = normalized[0], cb = normalized[1];
+  if (!checkShouldUseProxy(this[kProxyConfig], options))
+    return net().createConnection(...args);
+  let connectOptions = {
+    ...this[kProxyConfig].proxyConnectionOptions
+  }, proxyProtocol = this[kProxyConfig].protocol;
+  if (proxyProtocol === "http:")
+    return net().connect(connectOptions, cb);
+  else if (proxyProtocol === "https:")
+    return tls().connect(connectOptions, cb);
+};
+Agent.prototype.getName = function getName(options = kEmptyObject) {
+  let { host, port, localAddress, family, socketPath } = options, name = host || "localhost";
+  if (name += ":", port)
+    name += port;
+  if (name += ":", localAddress)
+    name += localAddress;
+  if (family === 4 || family === 6)
+    name += `:${family}`;
+  if (socketPath)
+    name += `:${socketPath}`;
+  return name;
+};
+function handleSocketAfterProxy(err, req) {
+  if (err.code === "ERR_PROXY_TUNNEL") {
+    if (err.proxyTunnelTimeout)
+      req.emit("timeout");
+    req.emit("error", err);
+  }
+}
+Agent.prototype.addRequest = function addRequest(req, options, port, localAddress) {
+  if (typeof options === "string")
+    options = {
+      __proto__: null,
+      host: options,
+      port,
+      localAddress
+    };
+  options = { __proto__: null, ...options, ...this.options };
+  let socketPath = options.socketPath;
+  if (socketPath)
+    options.path = socketPath;
+  normalizeServerName(options, req);
+  let name = this.getName(options);
+  this.sockets[name] ||= [];
+  let freeSockets = this.freeSockets[name], socket;
+  if (freeSockets) {
+    while (freeSockets.length && freeSockets[0].destroyed)
+      freeSockets.shift();
+    if (socket = this.scheduling === "fifo" ? freeSockets.shift() : freeSockets.pop(), !freeSockets.length)
+      delete this.freeSockets[name];
+  }
+  let sockLen = (freeSockets ? freeSockets.length : 0) + this.sockets[name].length;
+  if (socket)
+    this.reuseSocket(socket, req), setRequestSocket(this, req, socket), this.sockets[name].push(socket);
+  else if (sockLen < this.maxSockets && this.totalSocketCount < this.maxTotalSockets)
+    this.createSocket(req, options, onSocketCreated.bind(this, req));
+  else
+    this.requests[name] ||= [], req[kRequestOptions] = options, req[kRequestAsyncResource] = new AsyncResource("QueuedRequest"), this.requests[name].push(req);
+};
+Agent.prototype.createSocket = function createSocket(req, options, cb) {
+  options = { __proto__: null, ...options, ...this.options };
+  let socketPath = options.socketPath;
+  if (socketPath)
+    options.path = socketPath;
+  normalizeServerName(options, req);
+  let timeout = req.timeout || this.options.timeout || @undefined;
+  if (timeout)
+    options.timeout = timeout;
+  let name = this.getName(options);
+  options._agentKey = name, options.encoding = null;
+  let oncreate = once((err, s) => {
+    let done = cb;
+    if (cb = @undefined, err)
+      return done(err, s);
+    this.sockets[name] ||= [], this.sockets[name].push(s), this.totalSocketCount++, installListeners(this, s, options), done(null, s);
+  }), keepAlive = this.keepAlive;
+  if (keepAlive)
+    options.keepAlive = keepAlive, options.keepAliveInitialDelay = this.keepAliveMsecs;
+  let newSocket = this.createConnection(options, oncreate);
+  if (newSocket && !newSocket[kWaitForProxyTunnel])
+    oncreate(null, 

@@ -1,0 +1,2 @@
+offset=292976165
+,t,"no-match")))return{allowed:!0};return{allowed:!1,reason:`sandbox.network.allowManagedDomainsOnly is set and ${e} is not in the policy allowlist`}}function zvb(e){let{sessionAllowedHosts:t}=RT(),r=KXt(e);if(t.has(r))return;t.add(r),C8o()}function Mee(e){let t;try{t=ld.readlinkSync(e)}catch{return RT().denyLiteralSymlinkCandidates.push(e),e}let r;try{return r=ld.realpathSync(e),RT().symlinkedDenyScrubPaths.push({literal:e,resolved:r}),r}catch{l

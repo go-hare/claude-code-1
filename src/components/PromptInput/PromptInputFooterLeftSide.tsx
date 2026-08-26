@@ -24,6 +24,8 @@ import { BackgroundTaskStatus } from '../tasks/BackgroundTaskStatus.js';
 import { isBackgroundTask } from '../../tasks/types.js';
 import { isPanelAgentTask } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
 import { getVisibleAgentTasks } from '../CoordinatorAgentStatus.js';
+import { hasParkedSubagentsForFooter } from '../../utils/panelIdleSummary.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { count } from '../../utils/array.js';
 import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
@@ -400,6 +402,7 @@ function ModeIndicator({
   const [remoteSessionUrl] = useState(() => store.getState().remoteSessionUrl);
   const viewSelectionMode = useAppState(s => s.viewSelectionMode);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
+  const replTabIsDiff = useAppState(s => s.replTab === 'diff');
   const expandedView = useAppState(s => s.expandedView);
   const showSpinnerTree = expandedView === 'teammates';
   const prStatus = usePrStatus(isLoading, isPrStatusEnabled());
@@ -479,6 +482,17 @@ function ModeIndicator({
   const isViewingTeammate = viewSelectionMode === 'viewing-agent' && viewedTask?.type === 'in_process_teammate';
   const isViewingCompletedTeammate = isViewingTeammate && viewedTask != null && viewedTask.status !== 'running';
   const hasBackgroundTasks = runningTaskCount > 0 || isViewingTeammate;
+  // Official mt = !fl() && ary(T, I). fl = InternalAccessibilityContext (SR).
+  const hasParkedSubagentsHint = !isScreenReaderModeEnabled() && hasParkedSubagentsForFooter(tasks, viewingAgentTaskId);
+  // Official at = M && !mt && !re && I===void 0 && Vs() && !wa()
+  // M = replTab==="diff", re = fl() (screen reader), I = viewingAgentTaskId
+  const hideDiffHint =
+    replTabIsDiff &&
+    !hasParkedSubagentsHint &&
+    !isScreenReaderModeEnabled() &&
+    viewingAgentTaskId === undefined &&
+    isFullscreenEnvEnabled() &&
+    !getIsRemoteMode();
 
   // Count primary items (permission mode or coordinator mode, background tasks, and teams)
   const primaryItemCount = (isCoordinator || hasActiveMode ? 1 : 0) + (hasBackgroundTasks ? 1 : 0) + (hasTeams ? 1 : 0);
@@ -605,7 +619,25 @@ function ModeIndicator({
             ? [<AgentsFooterHint key="agents-hint-teammate" leftArrowAgain={leftArrowAgain} />]
             : []),
         ];
-    const otherParts = [...(modePart ? [modePart] : []), ...parts, ...teammateHintParts];
+    const otherParts = [
+      ...(modePart ? [modePart] : []),
+      ...parts,
+      ...teammateHintParts,
+      ...(hasParkedSubagentsHint
+        ? [
+            <Text dimColor key="tasks-subagents">
+              /tasks to see subagents
+            </Text>,
+          ]
+        : []),
+      ...(hideDiffHint
+        ? [
+            <Text dimColor key="diff-panel">
+              /diff to hide diff
+            </Text>,
+          ]
+        : []),
+    ];
     return (
       <Box flexDirection="column">
         <Box>
@@ -652,7 +684,7 @@ function ModeIndicator({
     if (!parts.some(p => React.isValidElement(p) && p.key === 'agents-hint')) {
       parts.push(<AgentsFooterHint key="agents-hint" leftArrowAgain={leftArrowAgain} />);
     }
-  } else if (parts.length === 0 && !tasksPart && !modePart && showHint) {
+  } else if (parts.length === 0 && !tasksPart && !modePart && showHint && !hasParkedSubagentsHint) {
     parts.push(
       <Text dimColor key="shortcuts-hint">
         ? for shortcuts
@@ -704,11 +736,31 @@ function ModeIndicator({
     voiceEnabled &&
     voiceState === 'idle' &&
     hintParts.length === 0 &&
-    voiceHintUnderCap
+    voiceHintUnderCap &&
+    !hasParkedSubagentsHint
   ) {
     parts.push(
       <Text dimColor key="voice-hint">
         hold {voiceKeyShortcut} to speak
+      </Text>,
+    );
+  }
+
+  // Official MJc sits beside the pill (wn()+MJc) before Qe. nt=mt → none
+  // suppresses later voice/shortcuts; manage/ctrl_t/agents still win.
+  if (hasParkedSubagentsHint) {
+    parts.push(
+      <Text dimColor key="tasks-subagents">
+        /tasks to see subagents
+      </Text>,
+    );
+  }
+
+  // Official OJc — after MJc, before manage/feedback-drafts
+  if (hideDiffHint) {
+    parts.push(
+      <Text dimColor key="diff-panel">
+        /diff to hide diff
       </Text>,
     );
   }

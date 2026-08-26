@@ -199,17 +199,28 @@ function ScrollBox({
           scrollMutated(el);
           return;
         }
-        // Already live-following: do not clear clamp/HWM or forceRender.
-        // Type-into-empty (and other return-to-live paths) call scrollToBottom
-        // while sticky; the remount path paints topSpacer for a frame → white
-        // flash until the next repin (often Enter). Just re-assert bottom pin.
+        // Already live-following: do not forceRender (React remount → white
+        // flash). Type-into-empty (and other return-to-live paths) call
+        // scrollToBottom while sticky. Leftover virtual-range clamp from a
+        // prior scrolled-up mount MUST still be cleared — otherwise sticky
+        // paint lands in topSpacer (empty transcript, logo at y=0, no pill).
         // Same truth as isSticky(): explicit false wins; else attribute default.
         const alreadySticky = el.stickyScroll ?? Boolean(el.attributes?.['stickyScroll']);
         if (alreadySticky) {
+          const hadClamp = el.scrollClampMin !== undefined || el.scrollClampMax !== undefined;
+          // Drop leftover virtual clamp without React remount (forceRender) —
+          // remount is the white-flash path. Ink paint with clamp cleared
+          // lands at maxScroll instead of topSpacer.
+          el.scrollClampMin = undefined;
+          el.scrollClampMax = undefined;
           const vh = el.scrollViewportHeight ?? 0;
           const sh = el.scrollHeight ?? 0;
           if (vh > 0 && sh > 0) {
             el.scrollTop = Math.max(0, sh - vh);
+          }
+          if (hadClamp) {
+            markDirty(el);
+            queueMicrotask(() => scheduleRenderFrom(el));
           }
           return;
         }

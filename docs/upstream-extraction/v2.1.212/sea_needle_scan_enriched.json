@@ -1,0 +1,371 @@
+{
+  "bytes:\\??\\": {
+    "count": 6,
+    "samples": [
+      "..UAWAVVWSH..8H.l$0M..L..H..H....w..eH..%X...H...L...E....E....uhI..H..u8H....eH. H=....td....A....E1....?.H..t^H..I..L.t$(H.\\$ ....I..I....H..8[_^A^A_]....u:H..j...L....`.A.G...z...H..t(H..d...H....f.G.H. `%F..KPM.1..h....UVH..(H.l$ M....A..../t...\\ulI...s.I...t3fA.8\\\\u+....A.8\\??\\tnI...r.H.\\??\\UNC\\I9.tYfA.8\\\\t\\H....H.\\.?.?.\\.H..H...H..H....H....dI...r.A.x.:u.A..@.../..y....\\..p...H..(^]....fA.x.?\\t6I...H...vmI..../.[....H...H..H....H...H..H..(^].H...v%H.\\.?.?.\\.H..H..H...H...I...I....\\...L. \"$F.I....1....E.L. .$F.I....1....E....UAWAVVWSH..8H.l$0H..H..I...r.H.\\.\\",
+      "H.l$0M..L..H..H....w..eH..%X...H...L...E....E....uhI..H..u8H....eH. H=....td....A....E1....?.H..t^H..I..L.t$(H.\\$ ....I..I....H..8[_^A^A_]....u:H..j...L....`.A.G...z...H..t(H..d...H....f.G.H. `%F..KPM.1..h....UVH..(H.l$ M....A..../t...\\ulI...s.I...t3fA.8\\\\u+....A.8\\??\\tnI...r.H.\\??\\UNC\\I9.tYfA.8\\\\t\\H....H.\\.?.?.\\.H..H...H..H....H....dI...r.A.x.:u.A..@.../..y....\\..p...H..(^]....fA.x.?\\t6I...H...vmI..../.[....H...H..H....H...H..H..(^].H...v%H.\\.?.?.\\.H..H..H...H...I...I....\\...L. \"$F.I....1....E.L. .$F.I....1....E....UAWAVVWSH..8H.l$0H..H..I...r.H.\\.\\.?.\\.I9.u.I...",
+      "...f.H...I9.tp..~$Of.o.f.u.fA.~.A...t.f..O\\.f.o.f.u.fA.:...A...t.f.DO.\\.f.o.f.u.fA.:...A...t.f.DO.\\.f.u.fA.:...A...t.f.DO.\\...L9.u0f.|W.\\t.H9.s^f..W\\.H..H9.sPf..W..H..H.. _^].L..OH..W..f....f.I...I9.t.fA.8/u.fA..\\...L. ..F.1.I....E.L....F.H..H....E.L....F.1.1....E....UVH..(H.l$ M..I...s.A....L..I...t/....A.8\\??\\t.L....M.J.I.@.I...M..r..8\\\\?\\tlM..E...A...A...A...wOA.x.:uHE..@.A..\\t.A../u7H...vJI.\\.\\.?.\\.L..H...L.A.H..L..I...{...H...H..H..(^].I..M....I..M..H..(^].T...L. ..F.I....1....E....UAWAVATVWSH..`H.l$`fD..M.fD..E.f..}.f..u.M..M..H..H...&...H..I....r'H....f....H. ..[.H...]...H..1....I..I...w.M..tq1...",
+      "...2....J....a.... ....T...~...:....G...2...R....p..@....`..@....@....@....T...F...N...#...\\\\?\\.... .@....@..@.... ..i...-. ..i....<>:\"|?*\\??\\.\\.?.?.\\.\\.?.?.\\.U.N.C.\\...././././.\\.:.\\.U.N.C.\\.:.\\..insertion index (is ..) should be <= len (is ..)..swap_remove index (is ..) should be < len (is ..)..removal index (is ..) should be < len (is ..)..`at` split index (is ..) should be <= len (is ..)....P.U@....`..@....PA.@....G.@....-nul byte",
+      "....@....8....P....'....i..0.... ....\\x1b\\[(?:<\\d+;\\d+;\\d+[Mm]|M[\\s\\S]{3}|I|O|\\??\\d+;\\d+(?:;\\d+)*R|[?>]\\d+(?:;\\d+)*c|\\?\\d+(?:;\\d+)*\\$y|\\?997;[12]n|\\?\\d+u)|\\x1bP[^\\x1b]*\\x1b\\\\|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\).... ...l...^\\x1b(?:$|\\[(?:[<?>]?\\d*(?:;\\d*)*\\$?|M[\\s\\S]{0,2})$|P(?:$|[>01][^\\x1b]*\\x1b?$)|\\](?:$|\\d[^\\x07\\x1b]*\\x1b?$)).... ...."
+    ],
+    "offsets": [
+      13951310,
+      13951324,
+      13953211,
+      87078669,
+      276122753,
+      307285585
+    ]
+  },
+  "bytes:\\?\\": {
+    "count": 80,
+    "samples": [
+      "....O.H....H..I....D$ ...H.T$0I..A....}.[....H..H.E...H....H....H.>....H....I...L.t$@....1...f....H..H....A..A....A....u...Q....u.H....f....D....A....r....A....s...H....1....=...H....[....T....~H....'....H....1..bH.\\\\?\\pipeI..H..I...H....H...H..L.t$@t%H...H..L.D$@H..I....p...H..=$...t ..1.H..uZH...$...H...H...1'...0H....2.O..!'...0..H.L$PH1.H..j8O.H9...|...H..X[]_^A^A_.H...H...H..t....H...t>A..A....E...A....u'..C.%....=....u.H...H...H....f....f...w.H....=....w.H....H.L$PH1....H..tCM..t>I.8.t8D.IX.+...A...",
+      "=...K..'H.}.L.m.H.T$0H.D$(L.d$ H.M H.U.A....M...4....EK<.u)L.E(I....L..H..M... ...C../.M...T...H.} L.e(..E;..E...E0..E..MLH.}.L.e..E..M.H.M.H....[.M..t.H..H....H..H.}..L.e.t.H.M.H....H..1....A...<\\....A...\\....A..G....?....L. ....1.L..L..M...5.{.I..I).L..L).H....k...H...L..I.O.H...<...H.\\\\?\\UNC\\I..L9...g...I....$...<.wNA...:uGA...\\u@M.h.H.D$ ....L..L..M..E1..z...A..\\\\?\\M9....L....L..L....k..M9....L.e.H..L...PU..H..@...I..../.r.L..H....H..H.M.H...t ...u..A.,$.u&L..H....H..L....M..t.H..H....H..1.@..H.E....X....Wb..H. ....L..J....k..I..L. 6...1.L....l..H. sN....E...X`..L.",
+      ".. ...C../.M...T...H.} L.e(..E;..E...E0..E..MLH.}.L.e..E..M.H.M.H....[.M..t.H..H....H..H.}..L.e.t.H.M.H....H..1....A...<\\....A...\\....A..G....?....L. ....1.L..L..M...5.{.I..I).L..L).H....k...H...L..I.O.H...<...H.\\\\?\\UNC\\I..L9...g...I....$...<.wNA...:uGA...\\u@M.h.H.D$ ....L..L..M..E1..z...A..\\\\?\\M9....L....L..L....k..M9....L.e.H..L...PU..H..@...I..../.r.L..H....H..H.M.H...t ...u..A.,$.u&L..H....H..L....M..t.H..H....H..1.@..H.E....X....Wb..H. ....L..J....k..I..L. 6...1.L....l..H. sN....E...X`..L. ....1.L..M....k..H. ....L....+....k....L....a..H..L....L....i....",
+      "....1..`...E1.E1....H..H....`....*....UAVVWSH..PH.l$PH..H..H...J..Hc..H....H.A..P....s.... ....H..u2H...H.L.../H.Y.H....H#y..!H.Y.H....f...H.y...H.A.H.. H..H.9H..M;..H....I..../t ..\\....H....s.H...w6....H....H..H..I....H..L..H....wW.{.:uQ..K...\\t.../uC..\\\\?\\L.F.A....H..H...n.X.H..H...H....L....H....I..H.M.H..I..I....r.H.}..t*H.}..[H...r3.{.:u-..S...\\..../....f.}.$....}..uM..tOL...|;..t H....w&H..H..I...-+....>.H....H..H... H...9..1.H..H..P[_^A^].1...u..E..E.H.E.H.E.H....A.H.E.H. ....L....H.U....UVWSH..HH.l$@H..H..H...H..Hc.",
+      ".E.H.E.H.E.H....A.H.E.H. ....L....H.U....UVWSH..HH.l$@H..H..H...H..Hc..H....H.A..P....s.... ....H..uBH...H.L...?H.Y.H....H#y.H..u7.'...H.Y.H....H.y.H..u....H.A.H.. H..H.9H..../t ..\\....H....s.H...w,....H....H..H....H=....$...<.wW.{.:uQ..C...\\t.../uC..\\\\?\\L.F.A....H..H...D.X.H..H...H....L....H....H.M.H..I..I....r.H.}..t8H.}..VH...r>.{.:u...K...\\..../..%...H....v....1..$f.}.$....}..u%..t'H..H..I....)....>.H..H..H..H[_^].1...u..E..E.H.E.H.E.H....A.H.E.H. ....L....H.U....UVWSH..(H.l$ H....m.H....H.=S...H..6....I..I.. ttf..D..H....m"
+    ],
+    "offsets": [
+      4599631,
+      5849863,
+      5849946,
+      6416986,
+      6417540,
+      8612147,
+      13953242,
+      20245774,
+      36551423,
+      36682263
+    ]
+  },
+  "utf16le:\\??\\": {
+    "count": 18,
+    "samples": [
+      "...t.L...?.z.L....H....H....A.0....\"~....A..$. ....L....u...I....H....H....A.0....w\"~....9....] ....X ..L....1...v....H...\"..H....H..7...H....H....htmC3D7.C..L7...l .u)L..L..A.*...7....u.H..L..M..A...#....+...H.\\.?.?.\\.H...W..H...W....Kh....A..I.H.I.p.=....S...L.=.W....A..DO....A...OH.b.i.n.\\.I.DO....L).I..wL....M...S37.H..2H.t2.H....H...b.u.n.I..OfA.DO.x.H.... ..fA.DO ..H..8...L....L...\\...L....H....H.D$ H..H..L..p...M...T...L....7.H....t.L....z....M..$p...M.<$M.l$.H...;..A....H",
+      "...L...E....E....uhI..H..u8H....eH. H=....td....A....E1....?.H..t^H..I..L.t$(H.\\$ ....I..I....H..8[_^A^A_]....u:H..j...L....`.A.G...z...H..t(H..d...H....f.G.H. `%F..KPM.1..h....UVH..(H.l$ M....A..../t...\\ulI...s.I...t3fA.8\\\\u+....A.8\\??\\tnI...r.H.\\??\\UNC\\I9.tYfA.8\\\\t\\H....H.\\.?.?.\\.H..H...H..H....H....dI...r.A.x.:u.A..@.../..y....\\..p...H..(^]....fA.x.?\\t6I...H...vmI..../.[....H...H..H....H...H..H..(^].H...v%H.\\.?.?.\\.H..H..H...H...I...I....\\...L. \"$F.I....1....E.L. .$F.I....1....E....UAWAVVWSH..8H.l$0H..H..I...r.H.\\.\\.?.\\.I9.u.I...I...H..H...r_1.H..tDM..t?K..IH9.v.H.M",
+      "z...H..t(H..d...H....f.G.H. `%F..KPM.1..h....UVH..(H.l$ M....A..../t...\\ulI...s.I...t3fA.8\\\\u+....A.8\\??\\tnI...r.H.\\??\\UNC\\I9.tYfA.8\\\\t\\H....H.\\.?.?.\\.H..H...H..H....H....dI...r.A.x.:u.A..@.../..y....\\..p...H..(^]....fA.x.?\\t6I...H...vmI..../.[....H...H..H....H...H..H..(^].H...v%H.\\.?.?.\\.H..H..H...H...I...I....\\...L. \"$F.I....1....E.L. .$F.I....1....E....UAWAVVWSH..8H.l$0H..H..I...r.H.\\.\\.?.\\.I9.u.I...I...H..H...r_1.H..tDM..t?K..IH9.v.H.M.L..M..M..M...I.>.M..M..H.E.H.D$ H..H....H9.v(....H..H..8[_^A^A_].L. M#F.1.H..E1.. .E.L..9#F.H..H...M.E....UVH..(H.l$ M....A..../t",
+      "..H...M.E....UVH..(H.l$ M....A..../t...\\uuI...s.I...A...f..\\...D..t-....f..\\....fA.x.?u.fA.x.?u.fA.x.\\t[I...s`fA.x.\\....I.A.M.P.I....fA.:?....I...r!fA.x.:u.E..P.A../..n...A..\\..d...H..(^]....fA.x.?u0fA.x.?u(fA.x.\\u fA.x.Uu.fA.x Nu.fA.x.Cu.fA.x.\\t.fA.x.\\u?I.A.M.P.fA.:?uYfA.x.\\uQH...v.H.\\.?.?.\\.H..H..H...H...I...I....H...vWH.\\.?.?.\\.H..H...H..H....H....*H...vD...\\.[....H...H..H...M..I....H...H..H..(^].L. t!F.I....1..E.E.L. ^!F.I....1../.E....UVWH.. H.l$ H..H..1.H..H...H.C...D..H..t9H9....H..t@H...H...I..H....H..H..H..H...s#1....H....f....1....1..v...H..H...E1.f.o.` F.",
+      "....A..../t...\\uuI...s.I...A...f..\\...D..t-....f..\\....fA.x.?u.fA.x.?u.fA.x.\\t[I...s`fA.x.\\....I.A.M.P.I....fA.:?....I...r!fA.x.:u.E..P.A../..n...A..\\..d...H..(^]....fA.x.?u0fA.x.?u(fA.x.\\u fA.x.Uu.fA.x Nu.fA.x.Cu.fA.x.\\t.fA.x.\\u?I.A.M.P.fA.:?uYfA.x.\\uQH...v.H.\\.?.?.\\.H..H..H...H...I...I....H...vWH.\\.?.?.\\.H..H...H..H....H....*H...vD...\\.[....H...H..H...M..I....H...H..H..(^].L. t!F.I....1..E.E.L. ^!F.I....1../.E....UVWH.. H.l$ H..H..1.H..H...H.C...D..H..t9H9....H..t@H...H...I..H....H..H..H..H...s#1....H....f....1....1..v...H..H...E1.f.o.` F...f....@.I...L9...i....B.o.Gf.u.f"
+    ],
+    "offsets": [
+      10024068,
+      13951357,
+      13951508,
+      13952104,
+      13952144,
+      13956981,
+      16671113,
+      20301397,
+      20826422,
+      68799353
+    ]
+  },
+  "CLAUDE_CODE_PROJECT_DIR_NAME": {
+    "count": 6,
+    "samples": [
+      "_MODE.... ....CLAUDE_CODE_PLAN_ARTIFACTS.... ....CLAUDE_CODE_PLAN_V2_AGENT_COUNT.... ...'...CLAUDE_CODE_PLAN_V2_EXPLORE_AGENT_COUNT....IA,....CLAUDE_CODE_PLUGIN_CACHE_DIR.... B,.!...CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS.... ....CLAUDE_CODE_PLUGIN_SEED_DIR.... ....CLAUDE_CODE_POWERUP_ONBOARDING.... ....CLAUDE_CODE_PROJECT_DIR_NAME....C,.!...CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS.... ...#...CLAUDE_CODE_QUESTION_PREVIEW_FORMAT....<..\"...CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE.... ....CLAUDE_CODE_REMOTE,....(..#...CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE.... ... ...CLAUDE_CODE_REMOTE_HERMETIC_MODE.... ....CLAUDE_CODE_REMOTE_MEMORY_DIR.... ...\"...",
+      ".... ....CLAUDE_BG_AUTH_SNAPSHOT_PATH.... ...'...CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR.... ...#...CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR.... ...*...CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR.... ...!...CLAUDE_SESSION_INGRESS_TOKEN_FILE.... ... ...CLAUDE_CODE_SESSION_ACCESS_TOKEN.... ....CLAUDE_CODE_SESSION_KIND.... ....CLAUDE_CODE_PROJECT_DIR_NAME.... ....CLAUDE_CODE_REMOTE.... ....CLAUDE_CODE_ENVIRONMENT_KIND.... ....CLAUDE_CODE_ACCOUNT_UUID.... ....CLAUDE_CODE_ORGANIZATION_UUID.... ....CLAUDE_CODE_USER_EMAIL.... ....CLAUDE_CODE_CONTAINER_ID.... ....CLAUDE_CODE_SESSION_ID.... ....CLAUDE_CODE_SYNC_SESSION_REFS.... ....CLAUDE_CODE_REMO",
+      ".default({}),best:F().optional(),latest_per_family:ho(F(),F()).default({}),alias_migration:ho(F(),F()).default({})}).loose()),tfy={schema_version:0,pricing_tiers:{},models:[],aliases:{},defaults:{},latest_per_family:{},alias_migration:{}};jwe=Shn});function V0o(){return process.env.CLAUDE_CONFIG_DIR}function $qt(){return pHe.join(Hn(),\"teams\")}function T6c(){return process.env.CLAUDE_CODE_PROJECT_DIR_NAME}function bws(e){if(!e||!nfy.test(e)||ofy.test(e))return;return e}function ify(){return`${V0o()??\"\"}\\x00${T6c()??\"\"}`}function Qst(e){let t=Hn();if(pHe.resolve(e)===pHe.resolve(t))return!0;return w6c(e)===w6c(t)}function w6c(e){let t=pHe.resolve(e),r=pHe.dirname(t),n=p5(r)??r;return Pu(pHe.join(n,pHe.basename(t)))}function l0r(e){let t=process.env.NODE_OPTIONS;if(!t)return!1;re",
+      "_OVERRIDE_DATE:()=>EIy,CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS:()=>TDy,CLAUDE_CODE_PERFORCE_MODE:()=>wIy,CLAUDE_CODE_PLAN_ARTIFACTS:()=>uDy,CLAUDE_CODE_PLAN_V2_AGENT_COUNT:()=>nMy,CLAUDE_CODE_PLAN_V2_EXPLORE_AGENT_COUNT:()=>oMy,CLAUDE_CODE_PLUGIN_CACHE_DIR:()=>AIy,CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS:()=>iMy,CLAUDE_CODE_PLUGIN_SEED_DIR:()=>TIy,CLAUDE_CODE_POWERUP_ONBOARDING:()=>kIy,CLAUDE_CODE_PROJECT_DIR_NAME:()=>xIy,CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS:()=>sMy,CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:()=>CIy,CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE:()=>RIy,CLAUDE_CODE_REMOTE:()=>dDy,CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE:()=>HIy,CLAUDE_CODE_REMOTE_HERMETIC_MODE:()=>pDy,CLAUDE_CODE_REMOTE_MEMORY_DIR:()=>IIy,CLAUDE_CODE_REMOTE_RAW_EVENTS_FILE:()=>PIy,CLAUDE_CODE_REMOTE_SEND_KEEPALIVES:()=>fDy,CLAUDE"
+    ],
+    "offsets": [
+      106465216,
+      247378160,
+      288393977,
+      288852478,
+      297753958,
+      304175183
+    ]
+  },
+  "selection:clear": {
+    "count": 5,
+    "samples": [
+      "....(.... .... .... ....Scroll....@ |....h....@..j....4....\"....@....8....=F....P.... ....selection:clear....\"....5....6....\".=.\"....D..H....x....x....@.... ....X....h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h..",
+      "ll:pageUp.... ....scroll:pageDown.... ... ...scroll:lineUp.... ....scroll:lineDown.... ... ...scroll:top.... ... ...scroll:bottom.... ....scroll:halfPageUp.... ....scroll:halfPageDown.... ....scroll:fullPageUp.... ....scroll:fullPageDown.... ....selection:copy.... ....selection:clear.... ....selection:extendLeft.... ....selection:extendRight.... ....selection:extendUp.... ....selection:extendDown.... ....selection:extendLineStart.... ....selection:extendLineEnd.... .",
+      "ll:pageUp.... ....scroll:pageDown.... ... ...scroll:lineUp.... ....scroll:lineDown.... ... ...scroll:top.... ... ...scroll:bottom.... ....scroll:halfPageUp.... ....scroll:halfPageDown.... ....scroll:fullPageUp.... ....scroll:fullPageDown.... ....selection:copy.... ....selection:clear.... ....selection:extendLeft.... ....selection:extendRight.... ....selection:extendUp.... ....selection:extendDown.... ....selection:extendLineStart.... ....selection:extendLineEnd. ....",
+      "\"plugin:install\",\"plugin:favorite\",\"permission:toggleDebug\",\"settings:search\",\"settings:retry\",\"settings:periodDay\",\"settings:periodWeek\",\"settings:sortByTokens\",\"voice:pushToTalk\",\"scroll:pageUp\",\"scroll:pageDown\",\"scroll:lineUp\",\"scroll:lineDown\",\"scroll:top\",\"scroll:bottom\",\"scroll:halfPageUp\",\"scroll:halfPageDown\",\"scroll:fullPageUp\",\"scroll:fullPageDown\",\"selection:copy\",\"selection:clear\",\"selection:extendLeft\",\"selection:extendRight\",\"selection:extendUp\",\"selection:extendDown\",\"selection:extendLineStart\",\"selection:extendLineEnd\"],vCb=Se(()=>ye({context:Mr(YLr).describe(\"UI context where these bindings apply. Global bindings work everywhere.\"),bindings:ho(F().describe('Keystroke pattern (e.g., \"ctrl+k\", \"shift+tab\")'),Ls([Mr(Faa),F().regex(/^command:[a-zA-Z0-"
+    ],
+    "offsets": [
+      174130456,
+      234330104,
+      234337200,
+      293621872,
+      307230364
+    ]
+  },
+  "Continue automatically at usage limit": {
+    "count": 2,
+    "samples": [
+      "....I....R....0.z.... ....8.z....C....I....mB.... ...G...Cannot destructure property 'globalConfig' from null or undefined value.... ....t.... ....autoCompact.... ....Auto-compact.... ....boolean.... ....S.... ....autoContinueAtUsageLimit.... ...%...Continue automatically at usage limit.... ....r.... ....switchModelsOnFlag.... ....tips.... ... ...Show tips.... ....feedbackDrafts.... ....Claude-drafted feedback.... ....notify.... ....quiet.... ....off....0....8....@.... ....notify.... ....q",
+      "engu_push_notif_pref_changed\",{key:Ce(\"agentPushNotifEnabled\"),value:N})}let X=b1t(t.workflowSizeGuideline);return{settings:[{id:\"autoCompact\",label:\"Auto-compact\",value:t.autoCompactEnabled,type:\"boolean\",onChange(N){U(\"autoCompactEnabled\",N),I((q)=>({...q,autoCompactEnabled:N})),L(\"tengu_auto_compact_setting_changed\",{enabled:N})}},...S?[{id:\"autoContinueAtUsageLimit\",label:\"Continue automatically at usage limit\",value:r?.autoContinueAtUsageLimit??!0,type:\"boolean\",consentGated:!0,async onChange(N){P((se)=>({...se,autoContinueAtUsageLimit:N}));let q=await D({autoContinueAtUsageLimit:N});if(q?.error){let se=Wqn();return P((Z)=>({...Z,autoContinueAtUsageLimit:se})),{error:q.error}}L(\"tengu_quota_auto_resume_setting_changed\",{enabled:N})}}]:[],...FTi()?[{id:\"switchModelsOnFlag\",label:X2f"
+    ],
+    "offsets": [
+      152871608,
+      301607873
+    ]
+  },
+  "CLAUDE_CODE_GOAL_CHECKIN_MINUTES": {
+    "count": 3,
+    "samples": [
+      "DE_CODE_FORCE_BRIDGE....I3,.!...CLAUDE_CODE_FORCE_EVALUATE_MEMORY.... ...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL....4,....CLAUDE_CODE_FORCE_FULL_LOGO....[ ....CLAUDE_CODE_FORCE_MEMORY_SURVEY....I5,....CLAUDE_CODE_FORCE_TIP_ID.... ....CLAUDE_CODE_GIT_BASH_PATH.... ... ...CLAUDE_CODE_GLOB_TIMEOUT_SECONDS.... ... ...CLAUDE_CODE_GOAL_CHECKIN_MINUTES.... ....CLAUDE_CODE_HIDE_SETTINGS_HINT.... ....CLAUDE_CODE_HOST_PLATFORM.... ....CLAUDE_CODE_IDE_HOST_OVERRIDE.... ...\"...CLAUDE_CODE_IDLE_THRESHOLD_MINUTES,.... 9 . ...CLAUDE_CODE_IDLE_TOKEN_THRESHOLD....9,....CLAUDE_CODE_IS_COWORK.... ....CLAUDE_CODE_LOOP_KEEPALIVE.... ....CLAUDE_CODE_LOOP_PERSISTENT.",
+      "_AFTER_STOP_DELAY:()=>KDy,CLAUDE_CODE_FABLE_BRIDGE_DIALOG_TIMEOUT_MS:()=>YDy,CLAUDE_CODE_FORCE_BRIDGE:()=>eDy,CLAUDE_CODE_FORCE_EVALUATE_MEMORY:()=>tDy,CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL:()=>rDy,CLAUDE_CODE_FORCE_FULL_LOGO:()=>nDy,CLAUDE_CODE_FORCE_MEMORY_SURVEY:()=>oDy,CLAUDE_CODE_FORCE_TIP_ID:()=>hIy,CLAUDE_CODE_GIT_BASH_PATH:()=>gIy,CLAUDE_CODE_GLOB_TIMEOUT_SECONDS:()=>XDy,CLAUDE_CODE_GOAL_CHECKIN_MINUTES:()=>JDy,CLAUDE_CODE_HIDE_SETTINGS_HINT:()=>yIy,CLAUDE_CODE_HOST_PLATFORM:()=>_Iy,CLAUDE_CODE_IDE_HOST_OVERRIDE:()=>bIy,CLAUDE_CODE_IDLE_THRESHOLD_MINUTES:()=>ZDy,CLAUDE_CODE_IDLE_TOKEN_THRESHOLD:()=>QDy,CLAUDE_CODE_IS_COWORK:()=>iDy,CLAUDE_CODE_LOOP_KEEPALIVE:()=>sDy,CLAUDE_CODE_LOOP_PERSISTENT:()=>aDy,CLAUDE_CODE_MANAGED_SETTINGS_PATH:()=>vIy,CLAUDE_CODE_MAX_CONCURRENT_SUBAGE",
+      "overhead\".padEnd(22)} ${k2e(i).padStart(10)}ms`);return o.join(` `)}function xdi(){if(!tjn)return;let e;try{e=bPv()}catch(t){xe(t);return}E(e)}var tjn,kdi;var Wor=A(()=>{Ze();cr();Vr();hko();jr();tjn=K.CLAUDE_CODE_PROFILE_QUERY;kdi=new rYp});function iae({getProactivityLevel:e}){return}var Imt=A(()=>{Ut();XBe()});function wPv(){if(!tt(\"tengu_saffron_wren\",!0))return 0;return(K.CLAUDE_CODE_GOAL_CHECKIN_MINUTES??SPv)*60000}function APv(e,t,r){let n=Math.max(1,Math.round(t/60000)),o=Wa(oYp(e));if(r.length===0)return{summary:\"Goal check-in: background work no longer running\",body:`Goal check-in: \\xAB${o}\\xBB is still active. Its evaluation was deferred for ${n} min while background work ran, and that work is no longer running (it finished or was stopped without reporting back). Continu"
+    ],
+    "offsets": [
+      106463808,
+      288851374,
+      297508828
+    ]
+  },
+  "Allowed by auto mode classifier": {
+    "count": 2,
+    "samples": [
+      ".... .... ....$ro.... ....Nro.... .... ....Rrh.... ....Hrh.... ....Irh.... ....Prh.... ....renderToolResultMessage.... .... ....gKP.... ....Allowed by auto mode classifier.... ....column.... ....!.... ....PostToolUse....\"....#....$....%....W....D!L....<....uD....;...L...l#....@....<..@....<....;...]....4..@K...%....4..`b...G..p",
+      ",smr[13]=RWi.toolUseResult,smr[14]=Rrh,smr[15]=Hrh,smr[16]=Drh,smr[17]=rrt,smr[18]=bSe,smr[19]=Irh,smr[20]=Prh,smr[21]=AUE,smr[22]=TUE,smr[23]=sPl}else AUE=smr[21],TUE=smr[22],sPl=smr[23];if(sPl!==ol)return sPl;let $rh=TUE;const Frh=AUE?void 0:gKP;let aPl;if(smr[24]!==rrt.name||smr[25]!==Lrh)aPl=Lrh&&rrt.name!==di&&vSe.jsx(rn,{height:1,children:vSe.jsx(_,{dimColor:!0,children:\"Allowed by auto mode classifier\"})}),smr[24]=rrt.name,smr[25]=Lrh,smr[26]=aPl;else aPl=smr[26];let lPl;if(smr[27]!==$rh||smr[28]!==Frh||smr[29]!==aPl)lPl=vSe.jsxs(R,{flexDirection:\"column\",width:Frh,children:[$rh,aPl]}),smr[27]=$rh,smr[28]=Frh,smr[29]=aPl,smr[30]=lPl;else lPl=smr[30];let cPl;if(smr[31]!==$ro||smr[32]!==Nro||smr[33]!==bSe)cPl=vSe.jsx(E5e,{children:vSe.jsx(_Jr,{hookEvent:\"PostToolUse\",lookups:"
+    ],
+    "offsets": [
+      170276528,
+      306633823
+    ]
+  },
+  "strictKnownMarketplaces": {
+    "count": 37,
+    "samples": [
+      "hat owner. The check happens BEFORE downloading, so blocked sources never touch the filesystem. ....F...N.o.t.e.:. .t.h.i.s. .i.s. .a. .p.o.l.i.c.y. .g.a.t.e. .o.n.l.y. .. .i.t. .d.o.e.s. .N.O.T. .r.e.g.i.s.t.e.r. .m.a.r.k.e.t.p.l.a.c.e.s... .... ...P...To pre-register allowed marketplaces for users, also set extraKnownMarketplaces.... ...]...Alias for strictKnownMarketplaces (managed settings only): this key is read exactly as if it ....]...w.e.r.e. .s.p.e.l.l.e.d. .s.t.r.i.c.t.K.n.o.w.n.M.a.r.k.e.t.p.l.a.c.e.s... .D.o. .n.o.t. .s.e.t. .b.o.t.h. .i.n. .o.n.e. .f.i.l.e. .. .i.f. .b.o.t.h. .a.p.p.e.a.r.,. .t.h.i.s. .k.e.y. .... ....is ignored with a warning. Clients older than this alias ignore it, so keep using strictKnown",
+      "arketplaces (managed settings only): this key is read exactly as if it ....]...w.e.r.e. .s.p.e.l.l.e.d. .s.t.r.i.c.t.K.n.o.w.n.M.a.r.k.e.t.p.l.a.c.e.s... .D.o. .n.o.t. .s.e.t. .b.o.t.h. .i.n. .o.n.e. .f.i.l.e. .. .i.f. .b.o.t.h. .a.p.p.e.a.r.,. .t.h.i.s. .k.e.y. .... ....is ignored with a warning. Clients older than this alias ignore it, so keep using strictKnownMarketplaces when the allowlist must also bind older Claude Code versions.... ...~...Enterprise blocklist of marketplace sources. When set in managed settings, these sources are blocked from being added as marketplaces. Entries match exactly, except that a github entry may use the owner-wildcard form {\"source\":\"github\",\"repo\":\"owner/*\"} to block every repository under that owner. The",
+      ".a.n. .o.r.g. .t.h.a.t. .r.e.s.t.r.i.c.t.s. .h.o.o.k. .e.x.e.c.u.t.i.o.n. .t.o. .m.a.n.a.g.e.d. .... ...O...settings gets command sources disabled too. Only honored from managed settings.... ....When true (and set in managed settings), rejects the --plugin-dir, --plugin-url, --agents, and non-sdk --mcp-config CLI flags at startup. Closes the CLI-flag bypass of strictKnownMarketplaces. Pair with allowedMcpServers for per-server MCP control; this setting does not gate other MCP entry points (SDK setMcpServers, claude mcp add, .mcp.json). Also blocks surfaces that spawn the CLI with these flags internally (see settings documentation). Only honored from managed settings; ignored in user/project/local settings.... ...J...Marketplace names whose plugins may",
+      "-in first-party frontend-design tip is unaffected. Only honored when set in managed settings (policy scope); the key is ignored in user, project, and local settings. A name only takes effect when the marketplace is registered on the machine AND its registered source is also declared in managed settings, either as the extraKnownMarketplaces entry for that name or as an entry of strictKnownMarketplaces. A marketplace registered from a different source under an allowlisted name is ignored. The official marketplace is exempt from the source requirement: allowlisting its name alone suffices, since that name can only register from the official Anthropic source.... ....claudeai.... ....console.... ....gateway....0....8...."
+    ],
+    "offsets": [
+      110959282,
+      110959674,
+      110960912,
+      110961839,
+      110997016,
+      117044799,
+      117044905,
+      117066309
+    ]
+  },
+  "setup-token": {
+    "count": 34,
+    "samples": [
+      "llback returned the same expired token; treating as no refresh.... ....debug.... ....error.... ....oauth_401_sdk_callback_failed.... ...#...SDK getOAuthToken callback failed: .... ....OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login.... ...#...tengu_oauth_401_recovered_from_disk.... ....oauth_401_disk_read_failed.... ...\"...OAuth 401 recovery: waiting up to .... ....ms for a rotated env token.... ...'...tengu_oauth_401_recovered_from_rotation.... ... ...oauth_401_skipp",
+      "ing `disableRemoteControl`).... ...q...Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.... ...4...Remote Control requires claude.ai subscription auth.... ....to use Remote Control.... ....Remote Control requires a full-scope login token. Long-lived tokens (from `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) are limited to inference-only for security reasons. Run `claude auth login` to use Remote Control.... ....Unable to determine your organization for Remote Control eligibility. Run `claude auth login` to refresh your account information.... ....unavailable.... ...e...Couldn't verify your organization",
+      "ole.... ...@...Login method pre-selected: API usage billing (Anthropic Console).... ...+...Iterator result interface is not an object.... .... ....string.... ....n.... ....about_to_retry.... ....confirm:yes.... ....Confirmation.... ....success.... ....setup-token.... ....gateway_done.... ....bedrock_done.... ....vertex_done.... ....aws_refresh_done.... ....error.... ....o.... ....t.... ....e.... ....column.... ....waiting_for_login.... ...1...Browser didn't open? Use the url below to sign in....",
+      "....Q...!... ....i....O....Q...!... ....i....H..!... ....i.!... ....i.... ....setup-token.... ....n.... ....ready_to_start.... ....claudeai.... ....h.... ....console.... ....g.... ... ...gateway_setup.... ....idle....@..#....@@..@..#....@....$...;...R...^...t....o....p...."
+    ],
+    "offsets": [
+      114126312,
+      114468362,
+      166709864,
+      166720008,
+      166722016,
+      166723376,
+      166740760,
+      166746072
+    ]
+  },
+  "claude-api": {
+    "count": ">=100",
+    "samples": [
+      ".l.a.t.f.o.r.m.-.a.v.a.i.l.a.b.i.l.i.t.y...m.d.`.).,. .s.t.a.t.e. .t.h.a.t. .t.h.e. .r.e.f.e.r.e.n.c.e. .i.s. .u.n.a.v.a.i.l.a.b.l.e. .t.h.i.s. .s.e.s.s.i.o.n. .a.n.d. .p.r.o.c.e.e.d. .b.e.s.t.-.e.f.f.o.r.t. .f.r.o.m. .t.h.i.s. .d.o.c.u.m.e.n.t... . .<.d.o.c. .p.a.t.h.=.\".s.h.a.r.e.d./.l.i.v.e.-.s.o.u.r.c.e.s...m.d.\".>. .... .... .... </doc>.... ..../claude-api/README.md.... ....## Detected Language: .... .... `.... ...2...` is included below since every task starts there.... .R.e.a.d. .t.h.e. .o.t.h.e.r. .r.e.f.e.r.e.n.c.e.d. .f.i.l.e.s. .f.r.o.m. .t.h.e. .b.a.s.e. .d.i.r.e.c.t.o.r.y. .o.n. .d.e.m.a.n.d... .T.h.a.t. .d.i.r.e.c.t.o.r.y. .i.s. .s.e.s.s.i.o.n.-.s.c.o.p.e.d. .. .a.f.t.e.r",
+      ".a. .R.e.a.d. .u.n.d.e.r. .i.t. .e.v.e.r. .f.a.i.l.s.,. .r.e.-.i.n.v.o.k.e. .t.h.i.s. .s.k.i.l.l. .t.o. .r.e.-.e.x.t.r.a.c.t.... ... ... <doc path=\".... ....\"> .... ....prompt-audit.... ....No project language was auto-detected. Ask the user which language they are using (see Language Detection above), then Read the matching `{lang}/claude-api/README.md` (or `curl/examples.md` for cURL/raw HTTP or an unsupported language) from the base directory before anything else.... ....No project language was auto-detected. Ask the user which language they are using (see Language Detection above) before writing code.... ....## User Request .... .... ....M....",
+      "....`....p....`....(.... .... .... ...C...Cannot destructure property 'disabled' from null or undefined value.... ... ...claude-api.... ...,...Build and debug apps that use the Claude API.... ....Read.... ....Grep.... ....Glob.... ....WebFetch....@....H....P....X.... ....Read.... ....Grep.... ....Glob.... ....WebFetch....",
+      "....MYTHOS_NAME.... ....OPUS_ID.... ... ...OPUS_NAME.... ....PREV_OPUS_ID.... ....PREV_OPUS_NAME.... ... ...SONNET_ID.... ....SONNET_NAME.... ....SONNET_NEXT_ID.... ....SONNET_NEXT_NAME.... ....HAIKU_ID.... ... ...HAIKU_NAME.... ....PREV_SONNET_ID.... ....csharp/claude-api/README.md.... ....csharp/claude-api/batches.md.... ....csharp/claude-api/files-api.md.... ....csharp/claude-api/streaming.md.... ....csharp/claude-api/tool-use.md.... ....curl/examples.md.... ....curl/managed-agents.md.... ....go/claude-api/README.md.... ....go/claude-api/files-api.md.... ...."
+    ],
+    "offsets": [
+      188150601,
+      188151425,
+      188155792,
+      279727383,
+      279727431,
+      279727479,
+      279727527,
+      279727575
+    ]
+  },
+  "Try the new fullscreen renderer": {
+    "count": 3,
+    "samples": [
+      "d.u.r.i.n.g. .l.o.n.g. .r.e.s.p.o.n.s.e.s.... ....=.... .M.o.u.s.e. .s.u.p.p.o.r.t. .. .c.l.i.c.k. .t.o. .m.o.v.e. .y.o.u.r. .c.u.r.s.o.r. .o.r. .e.x.p.a.n.d. .r.e.s.u.l.t.s.... ...-.... Selected text auto-copies to your clipboard... .... ....Yes, try it.... ....Not now.... ... ...Try the new fullscreen renderer?....*....D!L..P>...z...u...E....D....rL..P;..`E....;...]....4....p....@E....p4....4..@..I....E....4..@c...G..p4...c...4..p....@E....4....\\....4..@K...%....4..`b...%....4...a...&....4...`...'....4....L....D..p4...K...4..p4...c...4..p4...c...4..p",
+      "tifications in ${Wo(\"suggestion\",e.theme)(\"/config\")}`,cooldownSessions:15,isRelevant:async()=>Koc()},{id:\"voice-mode\",content:async()=>\"Use /voice to enable push-to-talk dictation\",cooldownSessions:10,advertisedCommand:\"voice\",isRelevant:async()=>D6r()&&qo().voiceEnabled===void 0&&!R4()&&!K.CLAUDE_CODE_REMOTE&&!K.isSSH()},{id:\"no-flicker\",providerAgnostic:!0,content:async()=>\"Try the new fullscreen renderer \\u2014 flicker-free output, mouse support, auto-copy on select \\xB7 /tui fullscreen\",cooldownSessions:10,advertisedCommand:\"tui\",isRelevant:async()=>!Ns()&&qo().tui===void 0&&Pxn()},{id:\"console-api-key\",content:async(e)=>`Build your AI product with Claude API. Run ${Wo(\"suggestion\",e.theme)(\"/claude-api\")} to get started`,cooldownSessions:15,isRelevant:async()=>{if(!Yi()||!R9",
+      "d text auto-copies to your clipboard\"})]}),Vun[12]=LA0;else LA0=Vun[12];let pMc;if(Vun[13]!==$cs||Vun[14]!==mSr)pMc=Ace.jsxs(R,{flexDirection:\"column\",gap:1,children:[LA0,Ace.jsx(Wl,{confirmLabel:\"Yes, try it\",cancelLabel:\"Not now\",onConfirm:$cs,onCancel:mSr})]}),Vun[13]=$cs,Vun[14]=mSr,Vun[15]=pMc;else pMc=Vun[15];let NA0;if(Vun[16]!==mSr||Vun[17]!==pMc)NA0=Ace.jsx(Lr,{title:\"Try the new fullscreen renderer?\",onCancel:mSr,children:pMc}),Vun[16]=mSr,Vun[17]=pMc,Vun[18]=NA0;else NA0=Vun[18];return NA0}var qun,Ace,hLg,P_o=3;var gLg=A(()=>{bt();Qpc();X7e();Dt();Ut();Mu();$n();cr();OLe();Th();Vr();ure();Hj();RJe();To();cl();Ji();VT();zl();cVl();qun=H(It(),1),Ace=H(be(),1),hLg=H(De(),1)});function mMc(e,t,r){let n=[],o=[],i=[];for(let[s,a]of Object.entries(e)){let l=t[s],c=yLg(a.source"
+    ],
+    "offsets": [
+      190822032,
+      312668074,
+      312734416
+    ]
+  },
+  "session list was too long": {
+    "count": 6,
+    "samples": [
+      "....,...`....|.... ....?.... ....key?....dropToolUse....a...Note: messaging a new session for the first time under a previously used name (was it restarted?)....?&...another Claude session on this machine....; your session list was too long to check completely, so a same-named session beyond what was searched would not have been seen.... ...r... Your session list was too long to check completely, so a session by that name may exist beyond what was searched.... ...2...your session list was too long to check completely..Q....Y..z...Remote Control is only available with claude.ai subscription",
+      "y?....dropToolUse....a...Note: messaging a new session for the first time under a previously used name (was it restarted?)....?&...another Claude session on this machine....; your session list was too long to check completely, so a same-named session beyond what was searched would not have been seen.... ...r... Your session list was too long to check completely, so a session by that name may exist beyond what was searched.... ...2...your session list was too long to check completely..Q....Y..z...Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account...p....I....Error: You must be logged in to use Remote Control. Remote",
+      "s it restarted?)....?&...another Claude session on this machine....; your session list was too long to check completely, so a same-named session beyond what was searched would not have been seen.... ...r... Your session list was too long to check completely, so a session by that name may exist beyond what was searched.... ...2...your session list was too long to check completely..Q....Y..z...Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account...p....I....Error: You must be logged in to use Remote Control. Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account....I....Re",
+      "t all be checked just now\":\"your account's other sessions could not be checked just now\"}function oza(e){return`A session on this machine now claims to be '${e}', which was confirmed earlier as a session elsewhere`}var Usr=\"Note: messaging a new session for the first time under a previously used name (was it restarted?)\",EWr=\"another Claude session on this machine\",Gff=\"; your session list was too long to check completely, so a same-named session beyond what was searched would not have been seen\",wWr=` Your session list was too long to check completely, so a session by that name may exist beyond what was searched.`,iza=\"your session list was too long to check completely\";var sza=A(()=>{mye()});function E_i(e){BE.sessionRehydrators.push(e)}function aza(e,t){let r=t;for(let n"
+    ],
+    "offsets": [
+      100439031,
+      100439174,
+      100439309,
+      298988974,
+      298989107,
+      298989227
+    ]
+  },
+  "PROJECT_DIR_NAME": {
+    "count": 6,
+    "samples": [
+      ".... ....CLAUDE_CODE_PLAN_ARTIFACTS.... ....CLAUDE_CODE_PLAN_V2_AGENT_COUNT.... ...'...CLAUDE_CODE_PLAN_V2_EXPLORE_AGENT_COUNT....IA,....CLAUDE_CODE_PLUGIN_CACHE_DIR.... B,.!...CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS.... ....CLAUDE_CODE_PLUGIN_SEED_DIR.... ....CLAUDE_CODE_POWERUP_ONBOARDING.... ....CLAUDE_CODE_PROJECT_DIR_NAME....C,.!...CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS.... ...#...CLAUDE_CODE_QUESTION_PREVIEW_FORMAT....<..\"...CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE.... ....CLAUDE_CODE_REMOTE,....(..#...CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE.... ... ...CLAUDE_CODE_REMOTE_HERMETIC_MODE.... ....CLAUDE_CODE_REMOTE_MEMORY_DIR.... ...\"...",
+      "CLAUDE_BG_AUTH_SNAPSHOT_PATH.... ...'...CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR.... ...#...CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR.... ...*...CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR.... ...!...CLAUDE_SESSION_INGRESS_TOKEN_FILE.... ... ...CLAUDE_CODE_SESSION_ACCESS_TOKEN.... ....CLAUDE_CODE_SESSION_KIND.... ....CLAUDE_CODE_PROJECT_DIR_NAME.... ....CLAUDE_CODE_REMOTE.... ....CLAUDE_CODE_ENVIRONMENT_KIND.... ....CLAUDE_CODE_ACCOUNT_UUID.... ....CLAUDE_CODE_ORGANIZATION_UUID.... ....CLAUDE_CODE_USER_EMAIL.... ....CLAUDE_CODE_CONTAINER_ID.... ....CLAUDE_CODE_SESSION_ID.... ....CLAUDE_CODE_SYNC_SESSION_REFS.... ....CLAUDE_CODE_REMO",
+      ",best:F().optional(),latest_per_family:ho(F(),F()).default({}),alias_migration:ho(F(),F()).default({})}).loose()),tfy={schema_version:0,pricing_tiers:{},models:[],aliases:{},defaults:{},latest_per_family:{},alias_migration:{}};jwe=Shn});function V0o(){return process.env.CLAUDE_CONFIG_DIR}function $qt(){return pHe.join(Hn(),\"teams\")}function T6c(){return process.env.CLAUDE_CODE_PROJECT_DIR_NAME}function bws(e){if(!e||!nfy.test(e)||ofy.test(e))return;return e}function ify(){return`${V0o()??\"\"}\\x00${T6c()??\"\"}`}function Qst(e){let t=Hn();if(pHe.resolve(e)===pHe.resolve(t))return!0;return w6c(e)===w6c(t)}function w6c(e){let t=pHe.resolve(e),r=pHe.dirname(t),n=p5(r)??r;return Pu(pHe.join(n,pHe.basename(t)))}function l0r(e){let t=process.env.NODE_OPTIONS;if(!t)return!1;re",
+      "TE:()=>EIy,CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS:()=>TDy,CLAUDE_CODE_PERFORCE_MODE:()=>wIy,CLAUDE_CODE_PLAN_ARTIFACTS:()=>uDy,CLAUDE_CODE_PLAN_V2_AGENT_COUNT:()=>nMy,CLAUDE_CODE_PLAN_V2_EXPLORE_AGENT_COUNT:()=>oMy,CLAUDE_CODE_PLUGIN_CACHE_DIR:()=>AIy,CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS:()=>iMy,CLAUDE_CODE_PLUGIN_SEED_DIR:()=>TIy,CLAUDE_CODE_POWERUP_ONBOARDING:()=>kIy,CLAUDE_CODE_PROJECT_DIR_NAME:()=>xIy,CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS:()=>sMy,CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:()=>CIy,CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE:()=>RIy,CLAUDE_CODE_REMOTE:()=>dDy,CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE:()=>HIy,CLAUDE_CODE_REMOTE_HERMETIC_MODE:()=>pDy,CLAUDE_CODE_REMOTE_MEMORY_DIR:()=>IIy,CLAUDE_CODE_REMOTE_RAW_EVENTS_FILE:()=>PIy,CLAUDE_CODE_REMOTE_SEND_KEEPALIVES:()=>fDy,CLAUDE"
+    ],
+    "offsets": [
+      106465228,
+      247378172,
+      288393989,
+      288852490,
+      297753970,
+      304175195
+    ]
+  },
+  "usage limit resets": {
+    "count": 12,
+    "samples": [
+      "te.... ....Your claude.ai usage is available again before the usage-limit reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.... . ....tengu_marble_heron.... ....Automatic continue cancelled . this session moved to the background, so the task will not resume on its own when the usage limit resets....I....Automatic continue cancelled . Claude Code relaunched during the wait, so the task will not resume on its own when the usage limit resets (send a prompt then to continue).... ....Automatic continue cancelled . this session moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there).... ..",
+      "hed; do not repeat work that is already complete.... . ....tengu_marble_heron.... ....Automatic continue cancelled . this session moved to the background, so the task will not resume on its own when the usage limit resets....I....Automatic continue cancelled . Claude Code relaunched during the wait, so the task will not resume on its own when the usage limit resets (send a prompt then to continue).... ....Automatic continue cancelled . this session moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there).... ....Automatic continue cancelled . sending this session to the cloud, so the task will not resume here on its own when the usage limit resets (continue i",
+      "will not resume on its own when the usage limit resets....I....Automatic continue cancelled . Claude Code relaunched during the wait, so the task will not resume on its own when the usage limit resets (send a prompt then to continue).... ....Automatic continue cancelled . this session moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there).... ....Automatic continue cancelled . sending this session to the cloud, so the task will not resume here on its own when the usage limit resets (continue it in the cloud session)....I.!....Automatic continue cancelled . Claude Code exited during the wait, so the task will not resume on its own when the usage limit resets (send a promp",
+      "wn when the usage limit resets (send a prompt then to continue).... ....Automatic continue cancelled . this session moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there).... ....Automatic continue cancelled . sending this session to the cloud, so the task will not resume here on its own when the usage limit resets (continue it in the cloud session)....I.!....Automatic continue cancelled . Claude Code exited during the wait, so the task will not resume on its own when the usage limit resets (send a prompt after the reset to continue).... ...).../api/claude_code/notification/preferences....D.o. .N.O.T. .r.e.a.d. .t.h.e. .f.o.r.e.i.g.n.-.a.g.e.n.t. .c"
+    ],
+    "offsets": [
+      100492357,
+      100492511,
+      100492701,
+      100492879,
+      100493067,
+      180155818,
+      301599459,
+      301599606
+    ]
+  },
+  "GOAL_CHECKIN": {
+    "count": 3,
+    "samples": [
+      "E_BRIDGE....I3,.!...CLAUDE_CODE_FORCE_EVALUATE_MEMORY.... ...#...CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL....4,....CLAUDE_CODE_FORCE_FULL_LOGO....[ ....CLAUDE_CODE_FORCE_MEMORY_SURVEY....I5,....CLAUDE_CODE_FORCE_TIP_ID.... ....CLAUDE_CODE_GIT_BASH_PATH.... ... ...CLAUDE_CODE_GLOB_TIMEOUT_SECONDS.... ... ...CLAUDE_CODE_GOAL_CHECKIN_MINUTES.... ....CLAUDE_CODE_HIDE_SETTINGS_HINT.... ....CLAUDE_CODE_HOST_PLATFORM.... ....CLAUDE_CODE_IDE_HOST_OVERRIDE.... ...\"...CLAUDE_CODE_IDLE_THRESHOLD_MINUTES,.... 9 . ...CLAUDE_CODE_IDLE_TOKEN_THRESHOLD....9,....CLAUDE_CODE_IS_COWORK.... ....CLAUDE_CODE_LOOP_KEEPALIVE.... ....CLAUDE_CODE_LOOP_PER",
+      "DELAY:()=>KDy,CLAUDE_CODE_FABLE_BRIDGE_DIALOG_TIMEOUT_MS:()=>YDy,CLAUDE_CODE_FORCE_BRIDGE:()=>eDy,CLAUDE_CODE_FORCE_EVALUATE_MEMORY:()=>tDy,CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL:()=>rDy,CLAUDE_CODE_FORCE_FULL_LOGO:()=>nDy,CLAUDE_CODE_FORCE_MEMORY_SURVEY:()=>oDy,CLAUDE_CODE_FORCE_TIP_ID:()=>hIy,CLAUDE_CODE_GIT_BASH_PATH:()=>gIy,CLAUDE_CODE_GLOB_TIMEOUT_SECONDS:()=>XDy,CLAUDE_CODE_GOAL_CHECKIN_MINUTES:()=>JDy,CLAUDE_CODE_HIDE_SETTINGS_HINT:()=>yIy,CLAUDE_CODE_HOST_PLATFORM:()=>_Iy,CLAUDE_CODE_IDE_HOST_OVERRIDE:()=>bIy,CLAUDE_CODE_IDLE_THRESHOLD_MINUTES:()=>ZDy,CLAUDE_CODE_IDLE_TOKEN_THRESHOLD:()=>QDy,CLAUDE_CODE_IS_COWORK:()=>iDy,CLAUDE_CODE_LOOP_KEEPALIVE:()=>sDy,CLAUDE_CODE_LOOP_PERSISTENT:()=>aDy,CLAUDE_CODE_MANAGED_SETTINGS_PATH:()=>vIy,CLAUDE_CODE_MAX_CONCURREN",
+      "dEnd(22)} ${k2e(i).padStart(10)}ms`);return o.join(` `)}function xdi(){if(!tjn)return;let e;try{e=bPv()}catch(t){xe(t);return}E(e)}var tjn,kdi;var Wor=A(()=>{Ze();cr();Vr();hko();jr();tjn=K.CLAUDE_CODE_PROFILE_QUERY;kdi=new rYp});function iae({getProactivityLevel:e}){return}var Imt=A(()=>{Ut();XBe()});function wPv(){if(!tt(\"tengu_saffron_wren\",!0))return 0;return(K.CLAUDE_CODE_GOAL_CHECKIN_MINUTES??SPv)*60000}function APv(e,t,r){let n=Math.max(1,Math.round(t/60000)),o=Wa(oYp(e));if(r.length===0)return{summary:\"Goal check-in: background work no longer running\",body:`Goal check-in: \\xAB${o}\\xBB is still active. Its evaluation was deferred for ${n} min while background work ran, and that work is no longer running (it finished or was stopped without reporting back)."
+    ],
+    "offsets": [
+      106463820,
+      288851386,
+      297508840
+    ]
+  },
+  "GitLab merge request": {
+    "count": 1,
+    "samples": [
+      "// Optional: open PR/MR for the current branch (mirrors the footer badge) \"number\": number, // PR number (or GitLab MR iid) \"url\": \"string\", // PR/MR URL \"review_state\": \"approved\" | \"pending\" | \"changes_requested\" | \"draft\", // Optional review status \"kind\": \"mr\" // Optional: present when this is a GitLab merge request (conventionally shown as !N); absent for GitHub PRs }, \"worktree\": { // Optional, only present when in a --worktree session \"name\": \"string\", // Worktree name/slug (e.g., \"my-feature\") \"path\": \"string\", // Full path to the worktree directory \"branch\": \"string\", // Optional: Git branch name for the workt"
+    ],
+    "offsets": [
+      295809127
+    ]
+  },
+  "glab": {
+    "count": 34,
+    "samples": [
+      "e.... .... .... ..../.git/hooks.... ..../.git/config.... ..../.git/config.lock.... ..../.git/config.worktree.... ..../.git/config.worktree.lock.... ..../.git/commondir.... ..../.git/worktrees.... ... .../.git/modules.... ..../.git/info/exclude.... ..../.git/glab-cli.... ..../.gitmodules.... ..../.github.... ..../.claude.... ..../run/docker.sock.... ..../run/containerd/containerd.sock.... ..../run/podman/podman.sock.... ..../run/buildkit/buildkitd.sock.... ... .../run/dbus.... ... .../run/user....`....p....",
+      ".... ... .../yarn.lock.... ..../pnpm-lock.yaml.... ..../node_modules/.bin.... ..../scripts.... ..../.local/bin.... ..../runners.... ..../actions-runner.... ...!.../tmp/inline-comments-buffer.jsonl.... ... .../_actions/.... .... ..../.config/gh.... ..../.config/glab-cli.... ..../.netrc.... ..../.ssh....@`5.F....L....4.@`T.M....M....@.:.@.E.T....M....B4.@pM.W....N....B4...L....5....B4..B3.@@~.K....AM....B4.@PM..P....Hb4.@.4.C....<....Hb4.@.4.C.K..P9.@@'.@ m.@0m.@.m.@.m.@.n.@`m.@`m.@@m.@.m.@Pm.@0m.@.l#",
+      "....\\....G..i....G..i....G....i.F3.... ....j...!... ....i.i....F....`....X....P....X.... ..../.... ...!...glab MR badge repo probe failed: .... ....warn.... ....<..0....;.@.<..`-.@ ....@.<..`-.@ ....3.@...@`..x....8...:...W...Y...|....h....8.w....`....@.w....0.t....t....S....!X`.. ..\"... X`.#...",
+      "....J....j...!... ....i....@....P....p....x.... ....gitlab_mr_badge.... ....glab MR badge poll failed: .... ....warn.... ....fetch-failed....@@....@p-.@...r....r....t....a....S.... Z`.u....Y`....Z`..]`.... H..H....Hxv....0xv....h.... c...."
+    ],
+    "offsets": [
+      116990790,
+      116992521,
+      124024504,
+      124029648,
+      124033528,
+      124033864,
+      124204906,
+      238375168
+    ]
+  },
+  "\\??\\": {
+    "count": 6,
+    "samples": [
+      "..M9.w.L..H..H.. _^].L. r&F.. L. i&F.1.L..M...<.E....UAWAVVWSH..8H.l$0M..L..H..H....w..eH..%X...H...L...E....E....uhI..H..u8H....eH. H=....td....A....E1....?.H..t^H..I..L.t$(H.\\$ ....I..I....H..8[_^A^A_]....u:H..j...L....`.A.G...z...H..t(H..d...H....f.G.H. `%F..KPM.1..h....UVH..(H.l$ M....A..../t...\\ulI...s.I...t3fA.8\\\\u+....A.8\\??\\tnI...r.H.\\??\\UNC\\I9.tYfA.8\\\\t\\H....H.\\.?.?.\\.H..H...H..H....H....dI...r.A.x.:u.A..@.../..y....\\..p...H..(^]....fA.x.?\\t6I...H...vmI..../.[....H...H..H....H...H..H..(^].H...v%H.\\.?.?.\\.H..H..H...H...I...I....\\...L. \"$F.I....1....E.L. .$F.I....1....E....UAWAVVWSH..8H.l$0H..H..I...r.H.\\.\\.?.\\.I9.u.I...I...H..H...r_1.H..tDM..t?K..IH9.v.H.M.L..M..M.",
+      ".. _^].L. r&F.. L. i&F.1.L..M...<.E....UAWAVVWSH..8H.l$0M..L..H..H....w..eH..%X...H...L...E....E....uhI..H..u8H....eH. H=....td....A....E1....?.H..t^H..I..L.t$(H.\\$ ....I..I....H..8[_^A^A_]....u:H..j...L....`.A.G...z...H..t(H..d...H....f.G.H. `%F..KPM.1..h....UVH..(H.l$ M....A..../t...\\ulI...s.I...t3fA.8\\\\u+....A.8\\??\\tnI...r.H.\\??\\UNC\\I9.tYfA.8\\\\t\\H....H.\\.?.?.\\.H..H...H..H....H....dI...r.A.x.:u.A..@.../..y....\\..p...H..(^]....fA.x.?\\t6I...H...vmI..../.[....H...H..H....H...H..H..(^].H...v%H.\\.?.?.\\.H..H..H...H...I...I....\\...L. \"$F.I....1....E.L. .$F.I....1....E....UAWAVVWSH..8H.l$0H..H..I...r.H.\\.\\.?.\\.I9.u.I...I...H..H...r_1.H..tDM..t?K..IH9.v.H.M.L..M..M..M...I.>.M..M.",
+      "....I..I...N..Of.o...F.f.o ..F.f.o...F.f.o...F...f....f.H...I9.tp..~$Of.o.f.u.fA.~.A...t.f..O\\.f.o.f.u.fA.:...A...t.f.DO.\\.f.o.f.u.fA.:...A...t.f.DO.\\.f.u.fA.:...A...t.f.DO.\\...L9.u0f.|W.\\t.H9.s^f..W\\.H..H9.sPf..W..H..H.. _^].L..OH..W..f....f.I...I9.t.fA.8/u.fA..\\...L. ..F.1.I....E.L....F.H..H....E.L....F.1.1....E....UVH..(H.l$ M..I...s.A....L..I...t/....A.8\\??\\t.L....M.J.I.@.I...M..r..8\\\\?\\tlM..E...A...A...A...wOA.x.:uHE..@.A..\\t.A../u7H...vJI.\\.\\.?.\\.L..H...L.A.H..L..I...{...H...H..H..(^].I..M....I..M..H..(^].T...L. ..F.I....1....E....UAWAVATVWSH..`H.l$`fD..M.fD..E.f..}.f..u.M..M..H..H...&...H..I....r'H....f....H. ..[.H...]...H..1....I..I...w.M..tq1....A.<./t=H..I9.u..1...H..U...%.7...H...H. ..r.H...L..L..A./..",
+      "...2...2...2...2...2...2...2...2....2...2...2...2...2...2...2....J....a.... ....T...~...:....G...2...R....p..@....`..@....@....@....T...F...N...#...\\\\?\\.... .@....@..@.... ..i...-. ..i....<>:\"|?*\\??\\.\\.?.?.\\.\\.?.?.\\.U.N.C.\\...././././.\\.:.\\.U.N.C.\\.:.\\..insertion index (is ..) should be <= len (is ..)..swap_remove index (is ..) should be < len (is ..)..removal index (is ..) should be < len (is ..)..`at` split index (is ..) should be <= len (is ..)....P.U@....`..@....PA.@....G.@....-nul byte found in provided data at position: ...."
+    ],
+    "offsets": [
+      13951310,
+      13951324,
+      13953211,
+      87078669,
+      276122753,
+      307285585
+    ]
+  },
+  "_nearby": {
+    "Continue automatically": {
+      "count": 2,
+      "sample": ".... ...G...Cannot destructure property 'globalConfig' from null or undefined value.... ....t.... ....autoCompact.... ....Auto-compact.... ....boolean.... ....S.... ....autoContinueAtUsageLimit.... ...%...Continue automatically at usage limit.... ....r.... ....switchModelsOnFlag.... ....tips.... ... ...Show tips.... ....feedbackDrafts.... ....Claude-drafted feedback.... ....notify.... ....quiet.... ....off...."
+    },
+    "goal_checkin": {
+      "count": 6,
+      "sample": ".... .... .... .... .... .... .... ... .... ....j....i....x.... ....tengu_goal_checkin_injected.... ....goal_checkin.... ....[goal] check-in injected (.... ....) after .... ... ...s deferred.... .... %.@ ....;.@.>....@ ....@.m.@.4.@.4.G...@.,..`..@.er....@.4u....,....@ -.@....L....@.4...."
+    },
+    "GOAL_CHECKIN": {
+      "count": 3,
+      "sample": "CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL....4,....CLAUDE_CODE_FORCE_FULL_LOGO....[ ....CLAUDE_CODE_FORCE_MEMORY_SURVEY....I5,....CLAUDE_CODE_FORCE_TIP_ID.... ....CLAUDE_CODE_GIT_BASH_PATH.... ... ...CLAUDE_CODE_GLOB_TIMEOUT_SECONDS.... ... ...CLAUDE_CODE_GOAL_CHECKIN_MINUTES.... ....CLAUDE_CODE_HIDE_SETTINGS_HINT.... ....CLAUDE_CODE_HOST_PLATFORM.... ....CLAUDE_CODE_IDE_HOST_OVERRIDE.... ...\"...CLAUDE_CODE_IDLE_THRESHOLD_MINUTES,.... 9 . ...CLAUDE_CODE_IDLE_TOKEN_THRESHOLD....9,....CLAUDE_CODE_IS_COWORK...."
+    },
+    "PROJECT_DIR_NAME": {
+      "count": 6,
+      "sample": "_V2_AGENT_COUNT.... ...'...CLAUDE_CODE_PLAN_V2_EXPLORE_AGENT_COUNT....IA,....CLAUDE_CODE_PLUGIN_CACHE_DIR.... B,.!...CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS.... ....CLAUDE_CODE_PLUGIN_SEED_DIR.... ....CLAUDE_CODE_POWERUP_ONBOARDING.... ....CLAUDE_CODE_PROJECT_DIR_NAME....C,.!...CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS.... ...#...CLAUDE_CODE_QUESTION_PREVIEW_FORMAT....<..\"...CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE.... ....CLAUDE_CODE_REMOTE,....(..#...CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE.... ... ...CLAUDE_CODE_REMO"
+    },
+    "selection:clear": {
+      "count": 5,
+      "sample": ".... .... .... ....Scroll....@ |....h....@..j....4....\"....@....8....=F....P.... ....selection:clear....\"....5....6....\".=.\"....D..H....x....x....@.... ....X....h...h.."
+    },
+    "shell command": {
+      "count": 30,
+      "sample": "uires sandboxing, but the sandbox is unavailable on Windows. The command matches a sandbox exclusion pattern, but exclusions only exempt a command where a permission prompt can approve the unsandboxed run, and none is available here. Shell command execution is blocked by policy....,...[shell command execution disabled by policy].... %!. ...markAvailable....v....ListCapExceeded....%!....Not enough messages to compact....`..5...[earlier conversation truncated for compaction retry].... ...M...Conversation too long. Press esc twice to go up a few messages and"
+    },
+    "fullscreen renderer": {
+      "count": 10,
+      "sample": "s.u.p.p.o.r.t. .. .c.l.i.c.k. .t.o. .m.o.v.e. .y.o.u.r. .c.u.r.s.o.r. .o.r. .e.x.p.a.n.d. .r.e.s.u.l.t.s.... ...-.... Selected text auto-copies to your clipboard... .... ....Yes, try it.... ....Not now.... ... ...Try the new fullscreen renderer?....*....D!L..P>...z...u...E....D....rL..P;..`E....;...]....4....p....@E....p4....4..@..I....E....4..@c...G..p4...c...4..p....@E....4....\\....4..@K...%....4..`b...%....4...a..."
+    },
+    "usage limit resets": {
+      "count": 12,
+      "sample": "limit reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.... . ....tengu_marble_heron.... ....Automatic continue cancelled . this session moved to the background, so the task will not resume on its own when the usage limit resets....I....Automatic continue cancelled . Claude Code relaunched during the wait, so the task will not resume on its own when the usage limit resets (send a prompt then to continue).... ....Automatic continue cancelled . this session moved to Claude Desktop, so the task will not r"
+    },
+    "at usage limit": {
+      "count": 2,
+      "sample": ".... ...G...Cannot destructure property 'globalConfig' from null or undefined value.... ....t.... ....autoCompact.... ....Auto-compact.... ....boolean.... ....S.... ....autoContinueAtUsageLimit.... ...%...Continue automatically at usage limit.... ....r.... ....switchModelsOnFlag.... ....tips.... ... ...Show tips.... ....feedbackDrafts.... ....Claude-drafted feedback.... ....notify.... ....quiet.... ....off....0...."
+    },
+    "strictKnownMarketplaces": {
+      "count": 30,
+      "sample": "the filesystem. ....F...N.o.t.e.:. .t.h.i.s. .i.s. .a. .p.o.l.i.c.y. .g.a.t.e. .o.n.l.y. .. .i.t. .d.o.e.s. .N.O.T. .r.e.g.i.s.t.e.r. .m.a.r.k.e.t.p.l.a.c.e.s... .... ...P...To pre-register allowed marketplaces for users, also set extraKnownMarketplaces.... ...]...Alias for strictKnownMarketplaces (managed settings only): this key is read exactly as if it ....]...w.e.r.e. .s.p.e.l.l.e.d. .s.t.r.i.c.t.K.n.o.w.n.M.a.r.k.e.t.p.l.a.c.e.s... .D.o. .n.o.t. .s.e.t. .b.o.t.h. .i.n. .o.n.e. .f.i.l.e. .. .i.f. .b.o.t.h. .a.p.p.e.a.r.,. .t.h.i.s. .k.e.y. .... ....is ignored wi"
+    },
+    "knownMarketplaces": {
+      "count": 6,
+      "sample": "....?2....2.... ....rootManifestDeps.... ... ...closureSet.... ....alreadyEnabled.... ....forceInclude.... ....rootMarketplace.... ....allowedCrossMarketplaces.... ....blockedDependency.... ....knownMarketplaces.... ....blockedMarketplace.... ....depInfo.P....M....s$....H..H....h....!...."
+    },
+    "Allowed by auto mode classifier": {
+      "count": 2,
+      "sample": ".... ....Rrh.... ....Hrh.... ....Irh.... ....Prh.... ....renderToolResultMessage.... .... ....gKP.... ....Allowed by auto mode classifier.... ....column.... ....!.... ....PostToolUse....\"....#....$....%....W....D!L....<....uD....;...L...l#.."
+    },
+    "GitLab merge request": {
+      "count": 1,
+      "sample": "badge) \"number\": number, // PR number (or GitLab MR iid) \"url\": \"string\", // PR/MR URL \"review_state\": \"approved\" | \"pending\" | \"changes_requested\" | \"draft\", // Optional review status \"kind\": \"mr\" // Optional: present when this is a GitLab merge request (conventionally shown as !N); absent for GitHub PRs }, \"worktree\": { // Optional, only present when in a --worktree session \"name\": \"string\", // Worktree name/slug (e.g., \"my-feature\") \"path\": \"string\", // Full path to the worktree directo"
+    },
+    "glab": {
+      "count": 30,
+      "sample": "git/config.... ..../.git/config.lock.... ..../.git/config.worktree.... ..../.git/config.worktree.lock.... ..../.git/commondir.... ..../.git/worktrees.... ... .../.git/modules.... ..../.git/info/exclude.... ..../.git/glab-cli.... ..../.gitmodules.... ..../.github.... ..../.claude.... ..../run/docker.sock.... ..../run/containerd/containerd.sock.... ..../run/podman/podman.sock.... ..../run/buildkit/buildkitd.sock.... ... .../run/dbus.... ... ."
+    }
+  }
+}

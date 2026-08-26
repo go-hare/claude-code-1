@@ -77,6 +77,7 @@ import { hasPermissionsToUseTool } from '../permissions/permissions.js';
 import { isOfficialMarketplaceName, parsePluginIdentifier } from '../plugins/pluginIdentifier.js';
 import { isRestrictedToPluginOnly, isSourceAdminTrusted } from '../settings/pluginOnlyPolicy.js';
 import { parseSlashCommand } from '../slashCommandParsing.js';
+import { slashCommandEditDistance, suggestSlashCommand } from '../slashCommandSuggest.js';
 import { sleep } from '../sleep.js';
 import { recordSkillUsage } from '../suggestions/skillUsageTracking.js';
 import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js';
@@ -138,11 +139,28 @@ async function executeForkedSlashCommand(
     }),
   });
 
-  const { skillContent, modifiedGetAppState, baseAgent, promptMessages } = await prepareForkedCommandContext(
-    command,
-    args,
-    context,
-  );
+  const appState = await context.getAppState();
+  const forceSyncFork =
+    // Non-interactive / disable-bg handled inside shouldBackgroundForkedSkill
+    false;
+  const background = shouldBackgroundForkedSkill(command, forceSyncFork);
+  const {
+    skillContent,
+    modifiedGetAppState,
+    baseAgent,
+    promptMessages,
+    availableTools,
+    webFetchReadmissionAllowed,
+    contextLayers,
+    recordInvocation,
+    forkReadFileState,
+  } = await prepareForkedCommandContext(command, args, context, {
+    replaceCommandRules: true,
+    replaceDenyRules: !background,
+    deferInvocationRecording: background,
+  });
+  const permissionLayers =
+    contextLayers.length > 0 ? [...(context.permissionLayers ?? []), ...contextLayers] : context.permissionLayers;
 
   // Merge skill's effort into the agent definition so runAgent applies it
   const agentDefinition = command.effort !== undefined ? { ...baseAgent, effort: command.effort } : baseAgent;
@@ -153,12 +171,8 @@ async function executeForkedSlashCommand(
   // (task-notification on complete). Opt out with frontmatter `background: false`.
   // KAIROS/assistant path below remains a separate fire-and-forget re-enqueue
   // loop for scheduled tasks (meta prompt + autonomy finalize).
-  const appState = await context.getAppState();
-  const forceSyncFork =
-    // Non-interactive / disable-bg handled inside shouldBackgroundForkedSkill
-    false;
   if (
-    shouldBackgroundForkedSkill(command, forceSyncFork) &&
+    background &&
     // KAIROS path owns autonomy re-enqueue; skip double-bg when that wins.
     !(appState.kairosEnabled && (feature('KAIROS') || context.options.allowBackgroundForkedSlashCommands === true))
   ) {
@@ -171,10 +185,18 @@ async function executeForkedSlashCommand(
         description: `/${getCommandName(command)} ${args}`.trim(),
         prompt: skillContent,
         promptMessages,
-        context,
+        context: {
+          ...context,
+          getAppState: modifiedGetAppState,
+          permissionLayers,
+        },
         canUseTool,
-        getAppState: context.getAppState,
+        getAppState: modifiedGetAppState,
         setAppState,
+        availableTools,
+        webFetchReadmissionAllowed,
+        readFileState: forkReadFileState,
+        recordInvocationOnSuccess: recordInvocation,
       });
       if (launched) {
         const stdout = `Running in the background as @${launched.name}`;
@@ -200,6 +222,8 @@ async function executeForkedSlashCommand(
           resultText: stdout,
         };
       }
+      // Official: live-duplicate → T() then fall through to sync
+      recordInvocation();
       // null = live-duplicate → fall through to sync path
     } catch (err) {
       if (context.abortController.signal.aborted) {
@@ -260,6 +284,7 @@ async function executeForkedSlashCommand(
     }
   }
   if (canRunBackgroundForkedSlashCommand) {
+    recordInvocation();
     // Standalone abortController — background subagents survive main-thread
     // ESC (same policy as AgentTool's async path). They're cron-driven; if
     // killed mid-run they just re-fire on the next schedule.
@@ -339,6 +364,7 @@ async function executeForkedSlashCommand(
         toolUseContext: {
           ...context,
           getAppState: modifiedGetAppState,
+          permissionLayers,
           abortController: bgAbortController,
         },
         canUseTool,
@@ -346,7 +372,7 @@ async function executeForkedSlashCommand(
         querySource: 'agent:custom',
         model: command.model as ModelAlias | undefined,
         availableTools: freshTools,
-        override: { agentId },
+        override: { agentId, readFileState: forkReadFileState },
       })) {
         agentMessages.push(message);
       }
@@ -434,12 +460,15 @@ async function executeForkedSlashCommand(
       toolUseContext: {
         ...context,
         getAppState: modifiedGetAppState,
+        permissionLayers,
       },
       canUseTool,
       isAsync: false,
       querySource: 'agent:custom',
       model: command.model as ModelAlias | undefined,
-      availableTools: context.options.tools,
+      availableTools,
+      webFetchReadmissionAllowed,
+      override: { readFileState: forkReadFileState },
     })) {
       agentMessages.push(message);
       const normalizedNew = normalizeMessages([message]);
@@ -566,11 +595,23 @@ export async function processSlashCommand(
       // Not a file path — treat as command name
     }
     if (looksLikeCommand(commandName) && !isFilePath) {
+      const suggestion = suggestSlashCommand(
+        commandName,
+        context.options.commands
+          .filter(cmd => !cmd.isHidden && isCommandEnabled(cmd))
+          .map(cmd => ({ name: getCommandName(cmd), aliases: cmd.aliases })),
+        { maxEditDistance: 2 },
+      );
       logEvent('tengu_input_slash_invalid', {
         input: commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        input_length: commandName.length,
+        had_suggestion: Boolean(suggestion),
+        suggestion_distance: suggestion ? slashCommandEditDistance(commandName, suggestion) : undefined,
       });
 
-      const unknownMessage = `Unknown skill: ${commandName}`;
+      const unknownMessage = suggestion
+        ? `Unknown command: /${commandName}. Did you mean /${suggestion}?`
+        : `Unknown command: /${commandName}`;
       return {
         messages: [
           createSyntheticUserCaveatMessage(),
@@ -982,7 +1023,18 @@ async function getMessagesForSlashCommand(
 
           void command
             .load()
-            .then(mod => mod.call(onDone, { ...context, canUseTool }, argsForDispatch))
+            .then(mod =>
+              mod.call(
+                onDone,
+                {
+                  ...context,
+                  canUseTool,
+                  // densable dispatchedAsImmediate: E$t(cmd, args)
+                  dispatchedAsImmediate: isCommandImmediate(command, argsForDispatch),
+                },
+                argsForDispatch,
+              ),
+            )
             .then(jsx => {
               if (jsx == null) return;
               if (context.options.isNonInteractiveSession) {

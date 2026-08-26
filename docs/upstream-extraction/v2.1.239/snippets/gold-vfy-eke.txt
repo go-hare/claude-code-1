@@ -1,0 +1,4 @@
+:n}),r?t:CHt(t,{foldCase:n}));return o===""||!BE.isAbsolute(o)&&o!==".."&&!o.startsWith(`..${BE.sep}`)}function sbe(e){return Yc(e)}function Eke(e){return aRu.test(e)||e.includes("??")&&aRu.test(cRu(e
+))}function cRu(e){return x4s.win32?x4s.win32.normalize(e):e}var I4s,H4s,BE,x4s,km_=4,Cm_,xm_=4,Rm_=50,nRu,Im_,k4s,Pm_,aRu;var gl=A(()=>{I4s=require("fs"),H4s=require("os"),BE=require("path"),x4s=P(re
+quire("path"));Cm_=new Set(["EPERM","EBUSY","EACCES"]);Im_=new Set(["node_modules",".venv","venv","env",".env","virtualenv",".tox",".nox",".direnv","__pypackages__"]);Pm_=["usr/local","usr/libexec/cup
+s","usr/share/snmp","AppleInternal","Applications","Library","Users","Volumes","cores","home","media

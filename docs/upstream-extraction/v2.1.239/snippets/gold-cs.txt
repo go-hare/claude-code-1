@@ -1,0 +1,12 @@
+==== startsWith **/ wider ====
+treeBranch:o,headCommit:u,baseBranch:c,existed:!1}}async function Rdh(e,t){let r;try{r=await Mc.readFile(Oc.join(e,".worktreeinclude"),"utf-8")}catch{return[]}let n=r.split(/\r?\n/).map((p)=>p.trim()).filter((p)=>p.length>0&&!p.startsWith("#"));if(n.length===0)return[];let o=await wo(Io(),[...Qs,"ls-files","--others","--ignored","--exclude-standard","--directory"],{cwd:e,env:Om()});if(o.code!==0||!o.stdout.trim())return[];let i=o.stdout.trim().split(`
+`).filter(Boolean),s=Sdh.default().add(ULt(kii(r),"worktreeinclude")),a=i.filter((p)=>p.endsWith("/")),l=i.filter((p)=>!p.endsWith("/")&&s.ignores(p)),c=a.filter((p)=>{if(n.some((f)=>{let m=f.startsWith("/")?f.slice(1):f;if(m.startsWith(p))return!0;let h=m.search(/[*?[]/);if(h>0){let y=m.slice(0,h);if(p.startsWith(y))return!0}let g=m;while(g.startsWith("**/"))g=g.slice(3);if(g!==m){let y=Cs(g,"/"),_=y.search(/[*?[]/),S=(_===-1?y:y.slice(0,_)).replace(/\\/g,"").toLowerCase();if(S.length>0){let w=p.slice(0,-1).split("/").map((T)=>T.toLowerCase());if(_===-1?w.includes(S):w.some((T)=>T.startsWith(S)))return!0}}return!1}))return!0;if(s.ignores(p.slice(0,-1))||s.ignores(p))return!0;return!1});if(c.length>0){let p=await wo(Io(),[...Qs,"ls-fi
+
+==== function Cs( ====
+
+---- 301051975 ----
+function Cs(e,t){let r=e.indexOf(t);return r===-1?e:e.slice(0,r)}function fp(e){return Cs(e,`
+`)}function Pd(e,t,r=0){let n=0,o=e.indexOf(t,r);while(o!==-1)n++,o=e.indexOf(t,o+1);return n}function Mre
+
+---- 335914769 ----
+function Cs(e,t,n,r){return new aee(e,t,n,r)}function QT(e){return e=e.prototype,!(!e||!e.isReactComponent)}function mu(e,t){var n=e.alternate;return n===null?(n=Cs(e.tag,t,e.key,e.mode),n.elementType

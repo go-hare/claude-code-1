@@ -1,0 +1,165 @@
+
+==== startsWith ./ @305468637 305468637 ====
+ze(e)}if(iO()!=="windows"&&e.endsWith("/")&&e!=="/"&&!REp(e))e=e.replace(/\/+$/,"")||"/";let r=Lxv(e);if(r!==e);else if(e.startsWith("./")||e.startsWith("../"))r=zQ.resolve(t,e);else if(!zQ.isAbsolute(e))r=zQ.resolve(t,e);if(REp(r)){let n=iO()==="windows"?/[*?]/:/[*?[\]]/,o=r.split(n)[0];if(o&&o!=="/"){let i=o.endsWith("/")?o.slice(0,-1):zQ.dirname(o);try{let s=sar.realpathSync(i);if(!lWn(i,s)){let a=r.slice(i.length);return s+a}}catch{}}return r}try{let n=sar.realpathSync(r);if(lWn(r,n));else r=n}catch{}return r}function uWn(){let e=aWn.homedir();return["/dev/stdout","/dev/stderr","/dev/null","/dev/tty","/dev/dtracehelper","/dev/autofs_nowait","/tmp/claude","/private/tmp/claude",zQ.join(e,".npm/_logs"),zQ.join(e,".claude/debug")]}function y3r(e,t,r,n,o,i){let s=Uxv(i),a=s===Ryt?s:encodeURIComponent(s),l=n?`${a}:${n}@`:"",c=["SANDBOX_RUNTIME=1"];if(!o){let p=process.env.CLAUDE_CODE_TMPDIR||process.env.CLAUDE_TMPDIR||"/tmp/claude";c.push(`TMPDIR=${p}`)}if(r)for(let p of $xv)c.push(`${p}=${r}`);if(!e&&!t)re
+
+==== startsWith ./ @310151789 310151789 ====
+;if(r.includes("\\"))return null;if(/[<>|&;(){}]/.test(r))return null;return r}function dzf(e){return wX.isAbsolute(e)||e.startsWith("./")||e.startsWith("../")||e==="."||e===".."}async function pzf(e,t,r){if(e.startsWith("-"))return!1;if(!dzf(e))return!1;if(e.includes("$")||e.includes("`")||/[*?[]/.test(e)||Wt()!=="windows"&&e.includes("\\")||Wt()==="windows"&&e.includes("%"))return!1;if(eN(e)||Wt()==="windows"&&/^[\\/]{2}/.test(e))return!1;if(Wt()==="windows"&&!fzf(e,t))return!1;{let i=wX.isAbsolute(e),s=!1;for(let a of e.split(/[\\/]/)){if(a===""||a===".")continue;if(a===".."){if(!i||s)return!1;continue}s=!0}}let n=wX.isAbsolute(e)?e:wX.resolve(t,e),o=await val(n);if(o===null)return!1;return o===r}function fzf(e,t){let r=e,n,o=/^[A-Za-z]:[\\/]/.exec(e);if(o)r=e.slice(o[0].length),n=0;else if(/^[\\/]/.test(e)||e.includes("\\"))return!1;else{if(/^[\\/]{2}/.test(t))return!1;n=0;for(let a of t.replace(/^[A-Za-z]:/,"").split(/[\\/]/)){if(a===""||a===".")continue;n+=a===".."?-1:1}}let i=!o,s=!1;for(let a of r
+
+==== startsWith ./ @320468217 320468217 ====
+/",description:"directory",metadata:{type:"directory"}}))}function hdc(e){return e.startsWith("~/")||e.startsWith("/")||e.startsWith("./")||e.startsWith("../")||e==="~"||e==="."||e===".."}async function hf0(e,t){let{pathScanCache:r}=lie.of(e),n=r.get(t);if(n)return n;try{let s=(await Cr().readdir(t)).filter((a)=>!a.name.startsWith(".")).map((a)=>({name:a.name,path:U2e.join(t,a.name),type:a.isDirectory()?"directory":"file"})).sort((a,l)=>{if(a.type==="directory"&&l.type!=="directory")return-1;if(a.type!=="directory"&&l.type==="directory")return 1;return a.name.localeCompare(l.name)}).slice(0,rog);return r.set(t,s),s}catch(o){if(as(o))return r.set(t,[],{ttl:tog}),E(`Path completion: ${t} is inaccessible (${o.code})`),[];return E(`Failed to scan directory for path completion: ${o}`,{level:"error"}),[]}}async function gdc(e,t,r={}){if(wa())return[];let{basePath:n=rr(),maxResults:o=10,keepDotPrefix:i=!1}=r,{directory:s,prefix:a}=nog(t,n),l=await hf0(e,s),c=a.toLowerCase(),u=l.filter((f)=>f.name.toLowerCase().s
+
+==== WATCHDOG JS @301321502 301321502 ====
+CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY:()=>iU_,CLAUDE_CODE_MAX_TURNS:()=>sU_,CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:()=>AU_,CLAUDE_CODE_RETRY_WATCHDOG:()=>bU_,CLAUDE_CODE_SLOW_OPERATION_THRESHOLD_MS:()=>EU_,CLAUDE_ENABLE_BYTE_WATCHDOG:()=>pU_,CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK:()=>fU_,CLAUDE_ENABLE_STREAM_WATCHDOG:()=>mU_,CLAUDE_MOCK_HEADERLESS_429:()=>wU_,CLAUDE_SLOW_FIRST_BYTE_MS:()=>_U_,CLAUDE_STREAM_IDLE_TIMEOUT_MS:()=>gU_,HTTPS_PROXY:()=>$F_,HTTP_PROXY:()=>NF_,MAX_MCP_OUTPUT_TOKENS:()=>cU_,MAX_STRUCTURED_OUTPUT_RETRIES:()=>lU_,MAX_THINKING_TOKENS:()=>aU_,NO_PROXY:()=>FF_,all_proxy:()=>WF_,http_proxy:()=>UF_,https_proxy:()=>BF_,no_proxy:()=>jF_});var NF_,$F_,FF_,UF_,BF_,jF_,zF_,WF_,GF_,VF_,qF_,KF_,YF_,XF_,JF_,ZF_,QF_,eU_,tU_,rU_,nU_,oU_,iU_,sU_,aU_,lU_,cU_,uU_,dU_,pU_,fU_,mU_,hU_,gU_,yU_,_U_,bU_,vU_,SU_,wU_,EU_,AU_;var jFu=A(()=>{S4e();NF_=Ve.str(),$F_=Ve.str(),FF_=Ve.str(),UF_=Ve.str(),BF_=Ve.str(),jF_=Ve.str(),zF_=Ve.str(),WF_=Ve.str(),GF_=Ve.str(),VF_=Ve.str(),qF_=Ve.str(),KF_=Ve.bool(),YF_=Ve.str(),X
+
+==== WATCHDOG JS @310726389 310726389 ====
+med response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function Cnt(){return V.CLAUDE_CODE_RETRY_WATCHDOG}function J8f(e){return Jle(e)||e instanceof Os&&e.status===429}function JQn(e){return V.CLAUDE_CODE_REMOTE&&e instanceof Os&&(e.status===401||e.status===403)}function bew(e){if(!(e instanceof MC))return!1;let t=GU(e);return t!==null&&Zle.has(t.code)}function vew(e){if(!(e instanceof MC))return!1;let t=GU(e);if(t===null)return!1;let{code:r}=t;return Zle.has(r)||r==="EPROTO"||r==="FailedToOpenSocket"||r.startsWith("ERR_OSSL_")||r.startsWith("ERR_SSL_")}async function Sew(e){if(!V.CLAUDE_CODE_CLIENT_CERT||V.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION)return{reportedFailure:!1,attempted:!1};try{let{changed:t,readFailed:r,mismatched:n}=await kJe();if(t)FJe(),sne();if(r){if(e)be("api_mtls_cert_reload",n?"material_mismatched":"material_read_failed");return{reportedFailure:e,attempted:!0}}if(t)E("Stale connection \u2014 reloaded rotated mTLS client material"),E
+
+==== no agent named JS @313694772 313694772 ====
+' is reachable.${T}${C}${x}${R}${p.searchTruncated?rtn:""}${S!=="no"?Jen(e.to,g5(t)):""}
+${k}`,display:`Not sent \u2014 no agent named '${e.to}' is reachable.${p.closest.length>0?` Did you mean: ${p.closest.map((I)=>I.name).join(", ")}?`:""}${p.bridgeUnavailable||p.cloudUnavailable||p.localUnavailable?` Note: ${qAl(p)} \u2014 it may exist there; a retry searches again.`:""}${p.searchTruncated?` Note: ${YAl} \u2014 it may exist beyond what was searched.`:""}${p.pinnedIdentityClaimedLocally?` ${KAl(p.pinnedIdentityClaimedLocally)} \u2014 that is suspicious if you did not set it up.`:""}`}}}if(p.kind==="ambiguous"){let S=typeof e.message==="string"?Qen(e.to):"no";if(S==="categorical"&&p.matchedBy==="prefix"&&Zen(p))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to)}};let w=Date.now(),T=p.candidates.map((G)=>`  ${DFn(G,w)}`).join(`
+`),k=p.total>p.candidates.length?`
+  \u2026and ${p.total-p.candidates.length} more${f?` \u2014 use ${e_} to see them all.`:"."}`:""
+
+==== no agent named JS @321115719 321115719 ====
+sion)
+`);let Y=f?e$e((await uee(r??rr(),s)).activeAgents,f):void 0;if(f&&!Y&&t==="shell")process.stderr.write(`warning: no agent named '${f}' \u2014 spawning with default template
+`);let G=void 0,q=n?.intent??_??"",j=!Y?.initialPrompt&&!n?.exec&&!_&&!p.some((X,te)=>!b.has(te)&&X==="--reply-on-resume"),U=!1,Z;if(t!=="fleet"&&t!=="spare"){let X=u?null:await Uc(c,s);if(X===null)Z=S_(c,rot({template:{name:n?.exec?"exec":f??void 0??"bg",description:Y?.whenToUse??G?.description??"",initialPrompt:Y?.initialPrompt,color:Y?.color},routine:void 0,respawnFlags:F,intent:q,name:g,nameSource:h?"user":n?.nameSource,color:n?.color,detail:n?.detail??(j?G?`(idle \u2014 waiting for ${lSg(G.triggers)})`:uZr:void 0),tempo:j?G?"idle":"blocked":void 0,needs:j&&!G?bN:void 0,sessionId:a,cwd:r??rr(),worktreePath:n?.worktree?.path,worktreeBranch:n?.worktree?.branch,worktreeHookBased:n?.worktree?.hookBased,originCwd:n?.worktree?.originCwd,bgIsolation:k,interactiveLineage:t==="repl"?!0:void 0,inFlight:n?.inFlight,providerEnv:C,sessio
+
+==== eventstream JS @302910977 302910977 ====
+r fwd=(e)=>async(t)=>{let{request:r}=t;if(!wrr.isInstance(r))return e(t);return r.headers={...r.headers,"content-type":"application/vnd.amazon.eventstream","x-amz-content-sha256":"STREAMING-AWS4-HMAC-SHA256-EVENTS"},e({...t,request:r})},mwd;var dua=A(()=>{cua();mwd={step:"build",tags:["EVENT_STREAM","HEADER","CONTENT_TYPE","CONTENT_SHA256"],name:"eventStreamHeaderMiddleware",override:!0}});var hwd=(e)=>({applyToStack:(t)=>{t.addRelativeTo(dwd(e),pwd),t.add(fwd,mwd)}});var gwd=A(()=>{uua();dua()});var pua=A(()=>{uua();dua();gwd()});var ywd,mWk,hWk,gWk,yWk,_Wk,bWk,vWk,SWk,wWk,EWk,_wd,bwd,AWk,TWk,vwd,kWk,CWk,xWk,RWk,Err,fua,IWk,Swd,HWk,PWk,DWk,MWk,OWk,LWk,NWk,$Wk,FWk;var KYo=A(()=>{ywd=P(O$r(),1),{__extends:mWk,__assign:hWk,__rest:gWk,__decorate:yWk,__param:_Wk,__esDecorate:bWk,__runInitializers:vWk,__propKey:SWk,__setFunctionName:wWk,__metadata:EWk,__awaiter:_wd,__generator:bwd,__exportStar:AWk,__createBinding:TWk,__values:vwd,__read:kWk,__spread:CWk,__spreadArrays:xWk,__spreadArray:RWk,__await:Err,__asyncG
+
+==== Working dir JS @309978589 309978589 ====
+],he=null,fe=-1;for(let[we,Ie]of ge.entries())try{he=await xmr.realpath(Ie),fe=we;break}catch{}if(he===null)return ggt(`Working directory "${F}" no longer exists. Please restart Claude from an existing directory.`);if(g&&fe===0)return E(`[worktree] blocked shell exec: cwd "${F}" is gone and recovery targets the shared checkout; agentWorktree=${g}`,{level:"warn"}),N("tengu_agent_worktree_cwd_escape_blocked",{reason:xe("worktree_gone")}),ggt(`This agent is isolated in the worktree ${g}, but its working directory "${F}" no longer exists and the only recovery target is the parent session's shared checkout. Refusing to run there \u2014 the isolation worktree appears to have been removed. Report this instead of retrying.`);if(E(`Shell CWD "${F}" no longer exists, recovering to "${he}"`),o?.setCwd(he),jZs(he),fe>0)return ggt(`Working directory "${F}" was deleted; shell cwd recovered to "${he}". Re-issue your command (it will run from the recovered directory).`);F=he}if(t.aborted)return X0a();let W,Q=y??g;if(Q){l
+
+==== voiceEnabled JS @302040603 302040603 ====
+al().describe("Prevent claude-cli:// protocol handler registration with the OS")})},voice:{buildGate:()=>!0,shape:()=>({voiceEnabled:Ut().optional().describe("Enable voice mode (hold-to-talk dictation)")})},briefView:{buildGate:()=>!0,shape:()=>({defaultView:Or(["chat","transcript"]).optional().describe("Default transcript view: chat (SendUserMessage checkpoints only) or transcript (full)")})},screenReader:{buildGate:()=>!0,shape:()=>({axScreenReader:Ut().optional().describe("Render screen-reader friendly output (flat text, no decorative borders or animations). Overridden by the CLAUDE_AX_SCREEN_READER env var and the --ax-screen-reader CLI flag.")})}}});function Q3(e){return Object.hasOwn(Fta,e)?Fta[e]:e}function FVo(e){let t=[];for(let[r,n]of Object.entries(Fta))if(n===e)t.push(r);return t}function vOn(e,t){let r=t&&Object.hasOwn(t,e)?t[e]:void 0;return r!==void 0&&r!==e?[e,r]:[e]}function RDt(e,t){if(!t)return[];let r=[];for(let[n,o]of Object.entries(t))if(o===e)r.push(n);return r}function tWe(e){retur
+
+==== voiceEnabled JS @316284441 316284441 ====
+uE});var yXm;var _Xm=A(()=>{yXm={isEnabled:()=>!1,isHidden:!0,name:"stub"}});function Ldo(e){return(e.voice?.enabled??e.voiceEnabled)===!0}function bXm(e){return e.voice?.enabled!==void 0||e.voiceEnabled!==void 0}function zXi(){try{if(!qE())return!1;return Vk()}catch{return!1}}function WXi(){return Ks("allow_voice_mode")}function tin(){return zXi()&&WXi()}var Ndo=A(()=>{hp();oi()});var EXm={};Et(EXm,{FINALIZE_TIMEOUTS_MS:()=>F$l,connectVoiceStream:()=>j$l,isTypedInterimsEnabled:()=>SXm,isVoiceStreamAvailable:()=>B$l,probeVoiceConnectivity:()=>U$l,sanitizeKeytermsForHeader:()=>wXm});function GXi(e,t,r){return typeof e==="number"&&Number.isInteger(e)&&e>=t&&e<=r?String(e):"unknown"}function wuE(e){return yf(e)?.toLowerCase()??"unknown"}async function U$l(){if(fa()||Jke())return"skipped_privacy";try{let e=await di.get(`${tl().BASE_API_URL}/api/hello`,{headers:{"User-Agent":sLe()},timeout:EuE,validateStatus:()=>!0,maxRedirects:0}),t=GXi(e.status,100,599);return e.headers["cf-mitigated"]!==void 0?`cf_mitigated
+
+#### "this session is named" 0 
+
+#### "this agent is named" 0 
+
+#### "your own name" 0 
+
+#### "You are " 8 85852010,85852269,99538072,99538152,99538264,99581543,100778692,100897488
+
+==== You are  85852010 ====
+ (exit code: �.)�.��.error: 'bun upgrade' is unsupported on systems without ld
+
+You are likely on an immutable system such as NixOS, where dynamic
+libraries are stored in a global cache.
+
+Please use your system's package manager to properly upgrade bun.
+�.��..[0m.[31merror.[0m.[2m:.[0m 'bun upgrade' is unsupported on systems without ld
+
+You are likely on an immutable system such as NixOS, where dynamic
+libraries are stored in a global cache.
+
+Please use your system's package manager to properly upgrade bun.
+�.#error: Failed to verify Bun (code: �.)�.8.[0m.[31merror.[0m.[2m:.[0m Failed to verify Bun (code: �.).[0m�.)error: Failed to spawn Expand-Archive on �. due to error 
+
+#### "(untitled)" 8 152464272,155462944,155464968,155483544,176666968,313568778,314389869,314390060
+
+==== (untitled) 152464272 ====
+#.......�.��.....��......��..��....L�.��.i�.............................	...
+...(untitled)......................................���.�@ ����.........!...�������.�������.(�������....0D......X��.p�.�J...F��.K..�j��.���.....	H..H.......�������.�������.X��������������.�������.@�������h.......�������.............��������....��I������������.........�������.........�������.�������.............����....$.......����....................................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�.......�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�.......�������.�������.(.......
+
+#### "title.startsWith(\"/\")" 0 
+
+#### "startsWith(\"/\")&&" 8 85795363,306009148,306061601,306160913,306340523,309263874,312254611,313617404
+
+==== startsWith("/")&& 85795363 ====
+if(e.endsWith(".bun"))return new URL("/"+e,globalThis.location.href).href;if(!e.startsWith("/")&&L){var r=e;e=L,L.endsWith("/")?e+=r:e+="/"+r}var o=`/src:${e}`;return o=le(o,t,n),new URL(o,globalThis.location.href).href},Te=class{constructor(t){this.runtimeType=t.runtime_type||0,this.runtimeTypeName=ht[this.runtimeType]||"undefined",this.message=t.message||"",this.explain="",this.normalize(t)}runtimeType;explain;runtimeTypeName;message;normalize(t){if(!t.message)return;let n=t.message.lastIndexOf(" is ");if(n===-1)return;let r=t.message.substring(n+4),o=/(["a-zA-Z0-9_\.]+)\)$/.exec(r);if(o&&o[0]){switch(this.runtimeTypeName=o[0],this.runtimeTypeName=this.runtimeTypeName.s
+
+#### "charCodeAt(0)===47" 5 333794294,333794446,333794637,333802478,333803188
+
+==== charCodeAt(0)===47 333794294 ====
+uments[O]:(M===void 0&&(M=process.cwd()),$=M),D($),$.length!==0&&(L=$+"/"+L,B=$.charCodeAt(0)===47)}return L=_(L,!B),B?L.length>0?"/"+L:"/":L.length>0?L:"."},"resolve"),normalize:S(function(M){if(D(M),M.length===0)return".";var L=M.charCodeAt(0)===47,B=M.charCodeAt(M.length-1)===47;return(M=_(M,!L)).length!==0||L||(M="."),M.length>0&&B&&(M+="/"),L?"/"+M:M},"normalize"),isAbsolute:S(function(M){return D(M),M.length>0&&M.charCodeAt(0)===47},"isAbsolute"),join:S(function(){if(arguments.length===0)return".";for(var M,L=0;L<arguments.length;++L){var B=arguments[L];D(B),B.length>0&&(M===void 0?M=B:M+="/"+B)}return M===void 0?".":R.normalize(M)},"join"),relative:S(function(M,L){
+
+#### "stripLeadingSlash" 0 
+
+#### "if(e[0]===\"/\")" 1 301506006
+
+==== if(e[0]==="/") 301506006 ====
+evel:t,dataNames:r,dataPathArr:n}){let o,i;if(e==="")return Uv.default.rootData;if(e[0]==="/"){if(!w4_.test(e))throw Error(`Invalid JSON-pointer: ${e}`);o=e,i=Uv.default.rootData}else{let c=E4_.exec(e);if(!c)throw Error(`Invalid JSON-pointer: ${e}`);let u=+c[1];if(o=c[2],o==="#"){if(u>=t)throw Error(l("property/index",u));return n[t-u]}if(u>t)throw Error(l("data",u));if(i=r[t-u],!o)return i}let s=i,a=o.split("/");for(let c of a)if(c)i=Pg._`${i}${(0,Pg.getProperty)((0,Vft.unescapeJsonPointer)(c))}`,s=Pg._`${s} && ${i}`;return s;function l(c,u){return`Cannot access ${c} ${u} levels up, current level is ${t}`}}FPt.getData=TBu});var UPn=ae(function(U7s){Object.defineProperty(
+
+#### "if(t[0]===\"/\")" 2 301514279,301514529
+
+==== if(t[0]==="/") 301514279 ====
+t[0]==="."){if(t[1]===".")break;else if(t[1]==="/"){t=t.slice(2);continue}}else if(t[0]==="/"){if(t[1]==="."||t[1]==="/"){r.push("/");break}}}else if(o===3){if(t==="/.."){if(r.length!==0)r.pop();r.push("/");break}}if(t[0]==="."){if(t[1]==="."){if(t[2]==="/"){t=t.slice(3);continue}}else if(t[1]==="/"){t=t.slice(2);continue}}else if(t[0]==="/"){if(t[1]==="."){if(t[2]==="/"){t=t.slice(2);continue}else if(t[2]==="."){if(t[3]==="/"){if(t=t.slice(3),r.length!==0)r.pop();continue}}}}if((n=t.indexOf("/",1))===-1){r.push(t);break}else r.push(t.slice(0,n)),t=t.slice(n)}return r.join("")}var F4_={"@":"%40","/":"%2F","?":"%3F","#":"%23",":":"%3A"},U4_=/[@/?#:]/g,B4_=/[@/?#]/g;functio
+
+#### "directoryCompletion" 0 
+
+#### "completeDirectory" 0 
+
+#### "shell completion" 4 89609387,89609436,89609485,89609541
+
+==== shell completion 89609387 ====
+page or completion scripts]:when:((
+      man\:"man page"
+      complete-bash\:"shell completions for bash"
+      complete-zsh\:"shell completions for zsh"
+      complete-fish\:"shell completions for fish"
+      complete-powershell\:"shell completions for PowerShell"
+    ))'
+
+    + glob # File-glob options
+    '*'{-g+,--glob=}'[include/exclude files matching specified glob]:glob'
+    '*--iglob=[include/exclude files matching specified case-insensitive glob]:glob'
+
+    + '(glob-case-insensitive)' # File-glob case sensitivity options
+    '--glob-case-insensitive[treat -g/--glob patterns case insensitively]'
+    $no'--no-glob-case-insensitive[treat -g/--glob patterns case se
+
+#### "function bew(" 1 310726574
+
+==== function bew( 310726574 ====
+{return V.CLAUDE_CODE_REMOTE&&e instanceof Os&&(e.status===401||e.status===403)}function bew(e){if(!(e instanceof MC))return!1;let t=GU(e);return t!==null&&Zle.has(t.code)}function vew(e){if(!(e instanceof MC))return!1;let t=GU(e);if(t===null)return!1;let{code:r}=t;return Zle.has(r)||r==="EPROTO"||r==="FailedToOpenSocket"||r.startsWith("ERR_OSSL_")||r.startsWith("ERR_SSL_")}async function Sew(e){if(!V.CLAUDE_CODE_CLIENT_CERT||V.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION)return{reportedFailure:!1,attempted:!1};try{let{changed:t,readFailed:r,mismatched:n}=await kJe();if(t)FJe(),sne();if(r){if(e)be("api_mtls_cert_reload",n?"material_mismatched":"material_read_failed
+
+#### "function Zle(" 0 
+
+#### "WATCHDOG" 8 70284473,106507154,106507259,106507307,106507365,301321520,301321604,301321640
+
+==== WATCHDOG 70284473 ====
+AP: 33,
+  TCPWRAP: 34,
+  TTYWRAP: 35,
+  UDPSENDWRAP: 36,
+  UDPWRAP: 37,
+  SIGINTWATCHDOG: 38,
+  WORKER: 39,
+  WORKERHEAPSNAPSHOT: 40,
+  WRITEWRAP: 41,
+  ZLIB: 42,
+  CHECKPRIMEREQUEST: 43,
+  PBKDF2REQUEST: 44,
+  KEYPAIRGENREQUEST: 45,
+  KEYGENREQUEST: 46,
+  KEYEXPORTREQUEST: 47,
+  CIPHERREQUEST: 48,
+  DERIVEBITSREQUEST: 49,
+  HASHREQUEST: 50,
+  RANDOMBYTESREQUEST: 51,
+  RANDOMPRIMEREQUEST: 52,
+  SCRYPTREQUEST: 53,
+  SIGNREQUEST: 54,
+  TLSWRAP: 55,
+  VERIFYREQUEST: 56,
+  INSPECTORJSBINDING: 57
+};
+$ = {
+  AsyncLocalStorage,
+  createHook,
+  executionAsyncId,
+  triggerAsyncId,
+  executionAsyncResource,
+  asyncWrapProviders,
+  AsyncResource
+};
+return $})
+
+.(function (){"use str
+
+#### "retryWatchdog" 0 

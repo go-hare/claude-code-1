@@ -13,6 +13,8 @@ import {
   toExternalPermissionMode,
 } from '../utils/permissions/PermissionMode.js'
 import {
+  isWorkerPermissionModeRecordEnabled,
+  notifyInternalMetadataChanged,
   notifyPermissionModeChanged,
   notifySessionMetadataChanged,
   type SessionExternalMetadata,
@@ -124,6 +126,12 @@ export function onChangeAppState({
         permission_mode: newExternal,
         is_ultraplan_mode: isUltraplan,
       })
+      // Official k8e: only after enableWorkerPermissionModeRecord (XWy).
+      if (isWorkerPermissionModeRecordEnabled()) {
+        notifyInternalMetadataChanged({
+          worker_permission_mode: newExternal,
+        })
+      }
     }
     notifyPermissionModeChanged(newMode)
   }

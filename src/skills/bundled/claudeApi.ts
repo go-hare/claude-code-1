@@ -110,6 +110,7 @@ export function matchSubcommand(
     'migrate',
     'managed-agents-onboard',
     'prompt-audit',
+    'upgrade',
   ],
 ): string {
   const first = args.trim().toLowerCase().split(/\s+/)[0] ?? ''

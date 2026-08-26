@@ -1,0 +1,3 @@
+OFFSET=301250233
+
+7 Run /login to sign in with your claude.ai account",oVr="OAuth token revoked \xB7 Please run /login",lbS="Login expired \xB7 Please run /login",cbS="Anthropic profile login expired \xB7 Re-authenticate your Anthropic profile",ubS="Anthropic profile login expired \xB7 Run /login to use your claude.ai account instead, or re-authenticate the profile",cUf="Authentication error \xB7 This may be a temporary network issue, please try again",JTi="Authentication error \xB7 The gateway could not authenticate with its upstream provider \u2014 contact your gateway administrator",dbS="Your apiKeyHelper script is failing \xB7 This usually means you need to re-authenticate with your provider \xB7 Run /status to see the script's error output",IYa="https:/

@@ -2937,6 +2937,45 @@ function safeKeys(obj: Record<string, unknown> | undefined | null): string[] {
   return obj ? Object.keys(obj) : []
 }
 
+/**
+ * densable pnh — /insights model reply prompt.
+ * Official locks the user-visible lines so models do not echo wrapper tags.
+ */
+export function buildInsightsResponsePrompt({
+  insightsJson,
+  reportUrl,
+  htmlPath,
+  facetsDir,
+  header,
+  summaryText,
+}: {
+  insightsJson: string
+  reportUrl: string
+  htmlPath: string
+  facetsDir: string
+  header: string
+  summaryText: string
+}): string {
+  return `The user just ran /insights to generate a usage report analyzing their Claude Code sessions.
+
+Here is the full insights data:
+${insightsJson}
+
+Report URL: ${reportUrl}
+HTML file: ${htmlPath}
+Facets directory: ${facetsDir}
+
+At-a-glance summary (for your context only — the user has not seen any output yet):
+${header}${summaryText}
+
+Respond with exactly the following, and nothing else. Do not add, omit, or reword any line:
+
+Your shareable insights report is ready:
+${reportUrl}
+
+Want to dig into any section or try one of the suggestions?`
+}
+
 // ============================================================================
 // Command Definition
 // ============================================================================
@@ -2957,8 +2996,7 @@ const usageReport: Command = {
       { collectRemote },
     )
 
-    let reportUrl = `file://${htmlPath}`
-    let uploadHint = ''
+    const reportUrl = `file://${htmlPath}`
 
     // Build header with stats
     const sessionLabel =
@@ -2997,34 +3035,18 @@ ${data.date_range.start} to ${data.date_range.end}
 ${remoteInfo}
 `
 
-    const userSummary = `${header}${summaryText}
-
-Your full shareable insights report is ready: ${reportUrl}${uploadHint}`
-
-    // Return prompt for Claude to respond to
+    // densable 2.1.239 #24 pnh — locked reply, no <message> wrapper (models echoed the tags).
     return [
       {
         type: 'text',
-        text: `The user just ran /insights to generate a usage report analyzing their Claude Code sessions.
-
-Here is the full insights data:
-${jsonStringify(insights, null, 2)}
-
-Report URL: ${reportUrl}
-HTML file: ${htmlPath}
-Facets directory: ${getFacetsDir()}
-
-Here is what the user sees:
-${userSummary}
-
-Now output the following message exactly:
-
-<message>
-Your shareable insights report is ready:
-${reportUrl}${uploadHint}
-
-Want to dig into any section or try one of the suggestions?
-</message>`,
+        text: buildInsightsResponsePrompt({
+          insightsJson: jsonStringify(insights, null, 2),
+          reportUrl,
+          htmlPath,
+          facetsDir: getFacetsDir(),
+          header,
+          summaryText,
+        }),
       },
     ]
   },

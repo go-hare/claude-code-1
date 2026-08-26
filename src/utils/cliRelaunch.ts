@@ -364,9 +364,8 @@ export function applyTuiRelaunchPlanToProcessEnv(
 }
 
 /**
- * Gate for full spawnSync+exit after /tui or fullscreen upsell accept.
- * Off by default (plan+inject only); set CLAUDE_CODE_SPAWN_TUI_RELAUNCH=1
- * to opt into process replacement densable.
+ * Legacy opt-in leftover. Official `/tui` accept always oyt (spawn+exit).
+ * `acceptTuiRelaunch` no longer reads this; tests may still force `spawn:false`.
  */
 export function isTuiRelaunchSpawnEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -424,10 +423,10 @@ export function flushStreamsBeforeRelaunchExit(input?: {
 }
 
 /**
- * Official fullscreen-upsell /tui accept densable:
+ * Official fullscreen-upsell /tui accept densable (`oyt`):
  * 1. build OLt plan
  * 2. apply inject/drop to process.env
- * 3. optionally spawnSync replacement when SPAWN_TUI_RELAUNCH is set
+ * 3. spawnSync replacement (pass `spawn: false` only in tests)
  * 4. multi-flush streams before caller process.exit
  * Caller may process.exit after mode==='spawned' if spawn.ok.
  */
@@ -448,9 +447,8 @@ export function acceptTuiRelaunch(input: {
 }): AcceptTuiRelaunchResult {
   const plan = buildTuiRelaunchPlan(input)
   applyTuiRelaunchPlanToProcessEnv(plan, input.env ?? process.env)
-  const shouldSpawn =
-    input.spawn ?? isTuiRelaunchSpawnEnabled(input.env ?? process.env)
-  if (!shouldSpawn) {
+  // densable accept → oyt. Tests pass spawn:false to stay on inject_only.
+  if (input.spawn === false) {
     return { mode: 'inject_only', plan }
   }
   const spawn = spawnCliRelaunch({

@@ -62,6 +62,8 @@ import {
   endHookSpan,
   isBetaTracingEnabled,
 } from './telemetry/sessionTracing.js'
+import { startSessionActivity, stopSessionActivity } from './sessionActivity.js'
+import { resolveHookCwd } from './hooks/resolveHookCwd.js'
 import {
   hookJSONOutputSchema,
   promptRequestSchema,
@@ -347,7 +349,7 @@ export interface HookResult {
   outcome: 'success' | 'blocking' | 'non_blocking_error' | 'cancelled'
   preventContinuation?: boolean
   stopReason?: string
-  permissionBehavior?: 'ask' | 'deny' | 'allow' | 'passthrough'
+  permissionBehavior?: 'ask' | 'deny' | 'allow' | 'passthrough' | 'defer'
   hookPermissionDecisionReason?: string
   additionalContext?: string
   initialUserMessage?: string
@@ -373,7 +375,7 @@ export type AggregatedHookResult = {
   stopReason?: string // 停止继续时的可读原因，用于日志、遥测或向用户解释为何结束
   hookPermissionDecisionReason?: string // 钩子对权限决策的补充说明，常与 permissionBehavior 一同产出
   hookSource?: string // 产生本次权限/改参结果的定义来源（如 settings 与 policy 合并后的条目来源）
-  permissionBehavior?: PermissionResult['behavior'] // 多钩并行时按 deny > ask > allow 聚合后的权限行为
+  permissionBehavior?: PermissionResult['behavior'] | 'defer' // 多钩并行时按 deny > defer > ask > allow 聚合后的权限行为
   additionalContexts?: string[] // 注入模型上下文的补充片段（如 UserPromptSubmit），可与多条钩子结果合并
   initialUserMessage?: string // 会话启动等场景预置的首条用户侧文案，供首轮上下文使用
   sessionTitle?: string // SessionStart / UserPromptSubmit 设置的会话标题
@@ -440,7 +442,7 @@ function parseHookOutput(stdout: string): {
         hookSpecificOutput: {
           'for PreToolUse': {
             hookEventName: '"PreToolUse"',
-            permissionDecision: '"allow" | "deny" | "ask" (optional)',
+            permissionDecision: '"allow" | "deny" | "ask" | "defer" (optional)',
             permissionDecisionReason: 'string (optional)',
             updatedInput: 'object (optional) - Modified tool input to use',
           },
@@ -512,7 +514,7 @@ interface TypedSyncHookOutput {
   hookSpecificOutput?:
     | {
         hookEventName: 'PreToolUse'
-        permissionDecision?: 'ask' | 'deny' | 'allow' | 'passthrough'
+        permissionDecision?: 'ask' | 'deny' | 'allow' | 'passthrough' | 'defer'
         permissionDecisionReason?: string
         updatedInput?: Record<string, unknown>
         additionalContext?: string
@@ -671,10 +673,13 @@ function processHookJSONOutput({
       case 'ask':
         result.permissionBehavior = 'ask'
         break
+      case 'defer':
+        result.permissionBehavior = 'defer'
+        break
       default:
         // Handle unknown decision types as errors
         throw new Error(
-          `Unknown hook permissionDecision type: ${json.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask`,
+          `Unknown hook permissionDecision type: ${json.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`,
         )
     }
   }
@@ -714,6 +719,9 @@ function processHookJSONOutput({
               break
             case 'ask':
               result.permissionBehavior = 'ask'
+              break
+            case 'defer':
+              result.permissionBehavior = 'defer'
               break
           }
         }
@@ -1085,17 +1093,13 @@ async function execCommandHook(
     envVars.CLAUDE_ENV_FILE = await getHookEnvFilePath(hookEvent, hookIndex)
   }
 
-  // When agent worktrees are removed, getCwd() may return a deleted path via
-  // AsyncLocalStorage. Validate before spawning since spawn() emits async
-  // 'error' events for missing cwd rather than throwing synchronously.
+  // Official ies: deleted cwd → originalCwd → projectRoot → homedir → tmpdir.
+  // spawn() emits async 'error' for missing cwd rather than throwing.
   const hookCwd = getCwd()
-  const safeCwd = (await pathExists(hookCwd)) ? hookCwd : getOriginalCwd()
-  if (safeCwd !== hookCwd) {
-    logForDebugging(
-      `Hooks: cwd ${hookCwd} not found, falling back to original cwd`,
-      { level: 'warn' },
-    )
-  }
+  const safeCwd = await resolveHookCwd(hookCwd, {
+    originalCwd: getOriginalCwd(),
+    projectRoot: getProjectRoot(),
+  })
 
   // --
   // Spawn. Three paths:
@@ -3072,7 +3076,7 @@ async function* executeHooks({
     cancelled: 0,
   }
 
-  let permissionBehavior: PermissionResult['behavior'] | undefined
+  let permissionBehavior: PermissionResult['behavior'] | 'defer' | undefined
 
   // Run all hooks in parallel and wait for all to complete
   for await (const result of all(hookPromises)) {
@@ -3182,37 +3186,40 @@ async function* executeHooks({
       }
     }
 
-    // Check for permission behavior with precedence: deny > ask > allow
+    // Official Y: deny > defer > ask > allow
     if (result.permissionBehavior) {
       logForDebugging(
         `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) returned permissionDecision: ${result.permissionBehavior}${result.hookPermissionDecisionReason ? ` (reason: ${result.hookPermissionDecisionReason})` : ''}`,
       )
-      // Apply precedence rules
       switch (result.permissionBehavior) {
         case 'deny':
-          // deny always takes precedence
           permissionBehavior = 'deny'
           break
-        case 'ask':
-          // ask takes precedence over allow but not deny
+        case 'defer':
           if (permissionBehavior !== 'deny') {
+            permissionBehavior = 'defer'
+          }
+          break
+        case 'ask':
+          if (permissionBehavior !== 'deny' && permissionBehavior !== 'defer') {
             permissionBehavior = 'ask'
           }
           break
         case 'allow':
-          // allow only if no other behavior set
           if (!permissionBehavior) {
             permissionBehavior = 'allow'
           }
           break
         case 'passthrough':
-          // passthrough doesn't set permission behavior
           break
       }
     }
 
-    // Yield permission behavior and updatedInput if provided (from allow or ask behavior)
-    if (permissionBehavior !== undefined) {
+    // Official: only yield when this hook currently holds Y.
+    if (
+      result.permissionBehavior &&
+      permissionBehavior === result.permissionBehavior
+    ) {
       const updatedInput =
         result.updatedInput &&
         (result.permissionBehavior === 'allow' ||
@@ -4257,6 +4264,9 @@ export async function* executeUserPromptSubmitHooks(
  * @param timeoutMs Optional timeout in milliseconds for hook execution
  * @returns Async generator that yields progress messages and hook results
  */
+/** Official `ees` — keepalive holder id (refcount only, not mainLoopRefcount). */
+const STARTUP_HOOK_HOLD = 'startup-hook-hold'
+
 export async function* executeSessionStartHooks(
   // densable 2.1.214 #47: source enum includes "fork"
   source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork',
@@ -4275,14 +4285,20 @@ export async function* executeSessionStartHooks(
     model,
   }
 
-  yield* executeHooks({
-    hookInput,
-    toolUseID: randomUUID(),
-    matchQuery: source,
-    signal,
-    timeoutMs,
-    forceSyncExecution,
-  })
+  // Official flo: ihr("hook_exec", ees) / try yield* S2 / finally shr
+  startSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
+  try {
+    yield* executeHooks({
+      hookInput,
+      toolUseID: randomUUID(),
+      matchQuery: source,
+      signal,
+      timeoutMs,
+      forceSyncExecution,
+    })
+  } finally {
+    stopSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
+  }
 }
 
 /**
@@ -4305,14 +4321,20 @@ export async function* executeSetupHooks(
     trigger,
   }
 
-  yield* executeHooks({
-    hookInput,
-    toolUseID: randomUUID(),
-    matchQuery: trigger,
-    signal,
-    timeoutMs,
-    forceSyncExecution,
-  })
+  // Official mlo: ihr("hook_exec", ees) / try yield* S2 / finally shr
+  startSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
+  try {
+    yield* executeHooks({
+      hookInput,
+      toolUseID: randomUUID(),
+      matchQuery: trigger,
+      signal,
+      timeoutMs,
+      forceSyncExecution,
+    })
+  } finally {
+    stopSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
+  }
 }
 
 /**

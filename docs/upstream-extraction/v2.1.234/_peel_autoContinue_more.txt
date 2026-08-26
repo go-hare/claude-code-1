@@ -1,0 +1,46 @@
+=== b'autoContinueAtUsageLimit' count=23 ===
+@111000032
+........verbose.................preferredNotifChannel...................autoCompactEnabled......................precomputeCompactionEnabled.....................switchModelsOnFlag......................autoContinueAtUsageLimit................autoScrollEnabled.......................wheelScrollAccelerationEnabled..................fileCheckpointingEnabled................showTurnDuration................showMessageTimestamps...................terminalProgressBarEnabled......................todoFeatureEnabled......................teammateMode..........
+
+@152712984
+........................................................................................................#..................................&.....i...... ...............8...............................autoContinueAtUsageLimit...................................................=.........................................J......q...n.......Y.......}............H..H...............................................p.......h.......................................H.D...........................................................................................
+
+@152719192
+8.......................(.......................................XDO.............hDO.....i........DO...............T..............DO.....)........DO..............CU.....I...............................autoContinueAtUsageLimit........................................unknowable......................idle........................................,....................@`l.. ..@...J....02'....@..U....@.\.e.....6.@ ......@.,.X.....3.@.&.X...@.5.[.....M..#5.@ ..V.....3.@.-.X...@.V..P..@.&.....@@..X...@.5.@ ........1T....@.9V....@.4.V....e5...LJ...!.........
+
+@152721576
+........................?.....................................&.....K........F........G......i..P...............H...............`...............X...............P.......................................autoContinueAtUsageLimit................................userSettings.......................................$.......=..8L.@.].@.<..../...2...=...................0.........................V..........J..............~...............#........H..H........................*.......................*......h.......................................h.D...........
+
+@152871568
+rty 'globalConfig' from null or undefined value.................t.......................autoCompact.....................Auto-compact....................boolean.................S.......................autoContinueAtUsageLimit............%...Continue automatically at usage limit...................r...............................switchModelsOnFlag......................tips....................Show tips.......................feedbackDrafts..................Claude-drafted feedback.................notify..................quiet...................off...
+
+@152886392
+xRowVisible.....................isConnectedToIde................isFileCheckpointingAvailable....................workflowsToggleable.....................workflowSizeGuidelineToggleable............."...autoContinueAtUsageLimitToggleable......................artifactToggleable.................. ...shouldShowExternalIncludesToggle................autoUpdaterDisabledReason.......................setTheme................setGlobalConfig.................setSettingsData.................setChanges......................onChange................consentGated..
+
+=== b'Continue automatically at usage limit' count=2 ===
+@152871608
+d value.................t.......................autoCompact.....................Auto-compact....................boolean.................S.......................autoContinueAtUsageLimit............%...Continue automatically at usage limit...................r...............................switchModelsOnFlag......................tips....................Show tips.......................feedbackDrafts..................Claude-drafted feedback.................notify..................quiet...................off.....................0...............8.....
+
+@301607873
+actEnabled,type:"boolean",onChange(N){U("autoCompactEnabled",N),I((q)=>({...q,autoCompactEnabled:N})),L("tengu_auto_compact_setting_changed",{enabled:N})}},...S?[{id:"autoContinueAtUsageLimit",label:"Continue automatically at usage limit",value:r?.autoContinueAtUsageLimit??!0,type:"boolean",consentGated:!0,async onChange(N){P((se)=>({...se,autoContinueAtUsageLimit:N}));let q=await D({autoContinueAtUsageLimit:N});if(q?.error){let se=Wqn();return P((Z)=>({...Z,autoContinueAtUsageLimit:se})),{error:q.error}}L("tengu_quota_auto_resume_setting_chang
+
+=== b'usage limit resets' count=12 ===
+@100492357
+at is already complete.....................tengu_marble_heron......................Automatic continue cancelled . this session moved to the background, so the task will not resume on its own when the usage limit resets.........I.......Automatic continue cancelled . Claude Code relaunched during the wait, so the task will not resume on its own when the usage limit resets (send a prompt then to continue)......................Automatic continue cancelled . this session moved to Claude Desktop, so the task will not resume on its own when the usage 
+
+@100492511
+ the task will not resume on its own when the usage limit resets.........I.......Automatic continue cancelled . Claude Code relaunched during the wait, so the task will not resume on its own when the usage limit resets (send a prompt then to continue)......................Automatic continue cancelled . this session moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there).....................Automatic continue cancelled . sending this session to the cloud, so the task will not resume here on
+
+@100492701
+ when the usage limit resets (send a prompt then to continue)......................Automatic continue cancelled . this session moved to Claude Desktop, so the task will not resume on its own when the usage limit resets (continue it there).....................Automatic continue cancelled . sending this session to the cloud, so the task will not resume here on its own when the usage limit resets (continue it in the cloud session)............I.!.....Automatic continue cancelled . Claude Code exited during the wait, so the task will not resume on i
+
+@100492879
+e on its own when the usage limit resets (continue it there).....................Automatic continue cancelled . sending this session to the cloud, so the task will not resume here on its own when the usage limit resets (continue it in the cloud session)............I.!.....Automatic continue cancelled . Claude Code exited during the wait, so the task will not resume on its own when the usage limit resets (send a prompt after the reset to continue)...................).../api/claude_code/notification/preferences.......................D.o. .N.O.T. 
+
+@100493067
+wn when the usage limit resets (continue it in the cloud session)............I.!.....Automatic continue cancelled . Claude Code exited during the wait, so the task will not resume on its own when the usage limit resets (send a prompt after the reset to continue)...................).../api/claude_code/notification/preferences.......................D.o. .N.O.T. .r.e.a.d. .t.h.e. .f.o.r.e.i.g.n.-.a.g.e.n.t. .c.o.n.f.i.g. .f.i.l.e.s. .o.r. .w.r.i.t.e. .C.l.a.u.d.e. .C.o.d.e. .c.o.n.f.i.g. .y.o.u.r.s.e.l.f. ..  .t.h.e. .d.e.t.e.r.m.i.n.i.s.t.i.c. .i
+
+@180155818
+ortly.............*...Wait here, then continue automatically at ......................at .................<...Wait here, then continue automatically when the limit resets....................when your usage limit resets.....................................@.$e........@ ......@.<.@.W.@..............6...b................................................................................ ...[........1.CD........1./.....1.8.1......H..H.......................X.......................@.......h.......................................p.......................
+
+=== b'continueAtUsageLimit' count=0 ===

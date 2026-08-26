@@ -26,6 +26,12 @@ export type CompletionOptions = {
 export type PathCompletionOptions = CompletionOptions & {
   includeFiles?: boolean
   includeHidden?: boolean
+  /**
+   * densable 2.1.239 gdc `keepDotPrefix` — when true, keep a leading `./`
+   * (or `.\` on Windows) on the completed path. Official bash-path Tab
+   * (`!`) passes true so `./script` is not rewritten to `script`.
+   */
+  keepDotPrefix?: boolean
 }
 
 type ParsedPath = {
@@ -214,6 +220,7 @@ export async function getPathCompletions(
     maxResults = 10,
     includeFiles = true,
     includeHidden = false,
+    keepDotPrefix = false,
   } = options
 
   const { directory, prefix } = parsePartialPath(partialPath, basePath)
@@ -229,7 +236,7 @@ export async function getPathCompletions(
 
   // Construct relative path based on original partialPath
   // e.g., if partialPath is "src/c", directory portion is "src/"
-  // Strip leading "./" since it's just used for cwd search
+  // densable 2.1.239 gdc: strip leading "./" unless keepDotPrefix (bash `!`)
   // Handle both forward slash and platform separator for Windows compatibility
   const hasSeparator = partialPath.includes('/') || partialPath.includes(sep)
   let dirPortion = ''
@@ -240,7 +247,10 @@ export async function getPathCompletions(
     const lastSeparatorPos = Math.max(lastSlash, lastSep)
     dirPortion = partialPath.substring(0, lastSeparatorPos + 1)
   }
-  if (dirPortion.startsWith('./') || dirPortion.startsWith('.' + sep)) {
+  if (
+    !keepDotPrefix &&
+    (dirPortion.startsWith('./') || dirPortion.startsWith('.' + sep))
+  ) {
     dirPortion = dirPortion.slice(2)
   }
 

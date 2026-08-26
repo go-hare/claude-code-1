@@ -1,0 +1,33 @@
+=== function pTt( ===
+n/[%\x00-\x1f\x7f-\u{10FFFF}]/u.test(e)}function pTt(e){e=e.replace(/^[\x00-\x20]+/,"");let t=e.indexOf("://");if(t===-1)return!1;let r=e.slice(t+3),n=e.slice(0,t).toLowerCase();if(u8y.has(n)){let s=r.match(/^[/\\]+/)?.[0]??"";if(s.includes("\\"))return!0;r=r.slice(s.length)}let o=r.search(/[/?#]/);return(o===-1?r:r.slice(0,o)).includes("\\")}function Obn(e){if(e.includes("://")){if(pTt(e))return!0;try{let o=new URL(e);if(o.protocol==="http:"||o.protocol==="https:")return!1;return Ldu(o.hostname)}catch{return!0}}let t=e.indexOf(":"),r=e.indexOf("@");if(t>=0&&r>t)return!0;let n=e.match(/^(?:[^@]+@)?([^:]+):/)?.[1];return n?Ldu(n):!1}function Ndu(e){let t=e.length;while(t>0&&e[t-1]===".")t--;return e.slice(0,t)}var i_="github.com",c8y,u8y;var yx=A(()=>{c8y=/[:/\\?#@\s]/,u8y=new Set(["http","https","ws","wss","ftp"])});function Hm(e){let t={};for(let n of ZRo)t[n]=void 0;let r=new Set(Object.keys(e??{}).map((n)=>n.toUpperCase()))
+
+=== pTt=e=> ===
+MISS
+
+=== function I8s( ===
+[^@:/]+@)?([^:/]+):/.exec(t)?.[1]??null}function I8s(e){let t=/^([^@:/[\]]+)@([^@:/[\]]+):(.*)$/s.exec(e);return t?{user:t[1],host:t[2],path:t[3]}:null}var bK_="gitlab.com",vK_="bitbucket.org";var oPr=A(()=>{yx()});function Cyd(e){return P8s.compileErrorMessage(e)}function SK_(e){try{return xyd.default().add([e]).test("probe"),null}catch(t){return t instanceof Error?t.message:String(t)}}class Ryd{compileErrorMessages=new Map;warnedDroppedPatterns=new Set;compileErrorMessage(e){let t=this.compileErrorMessages.get(e);if(t!==void 0)return t;let r=SK_(e);return this.compileErrorMessages.set(e,r),r}hasWarnedDroppedPattern(e,t){return this.warnedDroppedPatterns.has(`${e}\x00${t}`)}markDroppedPatternWarned(e,t){this.warnedDroppedPatterns.add(`${e}\x00${t}`)}reset(){this.compileErrorMessages.clear(),this.warnedDroppedPatterns.clear()}}function wK_(e,t){if(P8s.hasWarnedDroppedPattern(e,t))return;E(`[${e}] gitignore-style pattern failed
+
+=== I8s=e=> ===
+MISS
+
+=== function SCn( ===
+.hostname),t.toString()}catch{return e}}function SCn(e){let t=H8e(e);return om(t)?i_:t}function w5o(e){return VAd.test(e)&&!e.startsWith("-")&&e!=="."&&e!==".."}function qAd(e){if(!e.endsWith("/*"))return null;let t=e.slice(0,-2);return w5o(t)?t:null}function ztb(e,t){let r=e.split("/");if(r.length!==2)return!1;let[n,o]=r;if(n===void 0||o===void 0||!w5o(n)||!w5o(o))return!1;return n===t}function KAd(e){let t=e;try{t=decodeURIComponent(e)}catch{}let r=YAd(t);return XAd(r)}function YAd(e){let t=[];for(let r of e.split("/")){if(r===".")continue;if(r===".."){t.pop();continue}t.push(r)}return t.filter((r)=>r!=="").join("/")}function S5o(e,t){let r=KAd(t),n=qAd(e);if(n===null){if(e.includes("*"))E(`Invalid owner-wildcard repo in policy settings blockedMarketplaces: ${e} (only "<owner>/*" is supported); entry only matches a literally identical repo string`,{level:"error"});return r===e||t===e}let o=r.split("/");if(o.length!==2)return
+
+=== SCn=e=> ===
+MISS
+
+=== function Xye( ===
+l&&e.some((t)=>t.source!=="skills-dir")}function Xye(e){return e===void 0?T5o():!pL(e)}function k5o(){return ln("policySettings")?.pluginTrustMessage}function bCn(){return ln("policySettings")?.pluginSuggestionMarketplaces??[]}function vCn(e,t){let r=ln("policySettings"),n=r?.extraKnownMarketplaces?.[e]?.source;if(n&&jAd(t,n))return!0;return r?.strictKnownMarketplaces?.some((o)=>JAd(t,o))??!1}function jAd(e,t){if(e.source!==t.source)return!1;switch(e.source){case"url":return E5o(e.url)===E5o(t.url);case"github":return e.repo===t.repo&&(e.ref||void 0)===(t.ref||void 0)&&(e.path||void 0)===(t.path||void 0);case"git":return UAd(e.url)===UAd(t.url)&&(e.ref||void 0)===(t.ref||void 0)&&(e.path||void 0)===(t.path||void 0);case"npm":retur
+
+=== Xye=(e ===
+MISS
+
+=== isSourceDisallowedOrUnverifiable ===
+y:()=>YH,isSourceAllowedByPolicy:()=>pL,isSourceDisallowedOrUnverifiable:()=>Xye,isSourceInBlocklist:()=>jDr,localPluginDirsBlockedMessage:()=>_Cn,sideloadFlagsBlockedMessage:()=>M7t});function YH(e){return ln("policySettings")?.enabledPlugins?.[e]===!1}function Rde(){let e=ln("policySettings");if(!e?.strictKnownMarketplaces)return null;return e.strictKnownMarketplaces}function P7t(){if(A5o()?.some((t)=>t.source==="skills-dir"))return!1;let e=Rde();return e===null||e.some((t)=>t.source==="skills-dir")}function _Cn(e){return`Plugins from ${e}/ are blocked by your organization's managed settings (strictKnownMarketplaces or blockedMarketplaces). Ask your administrator to add {"source":"skills-dir"} to strictKnownMarketplaces, or remo
+
+=== function pL( ===
+tern")return GAd(e,r);return Wtb(e,r)})}function pL(e){if(e.source==="git"&&x5o(e.url))return!1;if(jDr(e))return!1;let t=Rde();if(t===null)return!0;return t.some((r)=>JAd(e,r))}function JAd(e,t){if(e.source==="git"&&Obn(e.url))return!1;if(t.source==="hostPattern"){if((e.source==="github"||e.source==="git")&&e.path&&!BAd(e.path))return!1;return WAd(e,t)}if(t.source==="pathPattern")return GAd(e,t);if(e.source==="github"&&t.source==="github"){let r=qAd(t.repo);if(r===null&&t.repo.includes("*"))E(`Invalid owner-wildcard repo in policy settings strictKnownMarketplaces: ${t.repo} (only "<owner>/*" is supported); entry only matches a literally identical repo string`,{level:"error"});if(r!==null)return ztb(e.repo,r)&&(t.ref||void 0)===(e.ref||void 0)&&(t.path?t.path===(e.path||void 0):!e.path||BAd(e.path))}if(t.source==="skills-dir")return!1;return jAd(e,t)}var $Pe="Command-sourced plugins are disabled by your organization's managed s
+
+=== pL=(e ===
+MISS
+

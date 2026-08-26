@@ -1,0 +1,3 @@
+OFFSET=309309066
+
+elled"])),default:"cancelled"})});var eyo;var Wkc=A(()=>{Vn();wn();eyo=x_({kind:"chrome_install_upsell",payload:Se(()=>ye({})),result:Se(()=>Mr(["install","not_now","dont_ask_again","cancelled"])),default:"cancelled"})});function Ml0(xqO){return xqO.toolPermissionContext.mode}function ggg(e){switch(e){case"yes":return{behavior:"allow",updatedInput:{},permissionUpdates:[{type:"setMode",mode:"plan",destination:"session"}]};case"no":return{behavior:"deny"}}}function qkc(kqO){let tyo=_gg.c(11),{payload:fgg,answer:mgg}=kqO,hgg=ft(Ml0),Cl0;if(tyo[0]!==mgg||tyo[1]!==hgg)Cl0=(Rl0)=>{if(Rl0==="yes")L("tengu_plan_enter",{entryMethod:Ce("tool")}),P6e(hgg,"plan");mgg(ggg(Rl0))},tyo[0]=mgg,tyo[1]=hgg,tyo

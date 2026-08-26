@@ -1,0 +1,25 @@
+OFFSET=85940478
+
+th>1?`
+
+`:""):"",k=g.trim().length===0?q():null;if(k){let $=await Yq(k,Z.files);if($&&$.trim().length>0)g=$}else if(Z.files.length>0)process.stderr.write(`${w}+ ${Z.files.map(($)=>$.filename).join(", ")}${H}
+`);let c=g.trim();if(c.length===0){L("No feedback provided. Supply text, file paths, or pipe input."),W(1);return}let i=c,d=zq(),o=process.env.BUN_FEEDBACK_URL||"https://bun.report/v1/feedback",O=new FormData;O.append("email",G),O.append("message",i);for(let $ of Z.files)O.append("files[]",new Blob([$.content]),$.filename);let h=Bun.randomUUIDv7();if(O.append("platform","win32"),O.append("arch","x64"),O.append("bunRevision",Bun.revision),O.append("hardwareConcurrency",String(navigator.hardwareConcurrency)),O.append("bunVersion",Bun.version),O.append("bunBuild",j.basename(process.release.sourceUrl,j.extname(process.release.sourceUrl))),O.append("availableMemory",String(process.availableMemory())),O.append("totalMemory",String(C.totalmem())),O.append("osVersion",String(C.version())),O.append("osRelease",String(C.release())),O.append("id",h),!1)O.append("docker","true");let F="none",T="none";try{let $=Object.entries(C.networkInterfaces()||{});for(let[a,u]of $)for(let V of u||[])if(V.family==="IPv4")if(V.internal)T=v(V,T);else F=v(V,F);else if(V.family==="IPv6")if(V.internal)T=v(V,T);else F=v(V,F)}catch{}if(O.append("localIPSupport",T),O.append("remoteIPSupport",F),d)O.append("projectId",d);let A=await fetch(o,{method:"POST",body:O}),m;if(!A.ok||(m=A.status)!==200){let $=await A.text().catch(()=>"");if(L(`Failed to send feedback (${m??A.status} ${A.statusText}).`),$)process.stderr.write(`${$}
+`);W(1)}let y="";if(x)y=`
+${w}ID: ${h}${H}`;else y=`
+ID: ${h}`;process.stdout.write(`${P.check} Feedback sent.
+${y}${Nq}
+`)}finally{Q?.cleanup()}}await Kq().catch((J)=>{let Q=J instanceof Error?J.message:String(J);L(`Unexpected error while sending feedback: ${Q}`),process.exit(1)});
+....U@.......................@.......@....p-.A.......@.......@....https://.png.jpg.gif.webp.bin.bun-md-...COLUMNS....................![Kerror: markdown rendering exceeded the stack ... input is too deeply nested..X.[0m.[31merror.[0m: markdown rendering exceeded the stack ... input is too deeply nested.. error: failed to render markdown..-.[0m.[31merror.[0m: failed to render markdown....[0m.[31merror.[0m: ....<d>[github] <b>GET<r> <blue>../..<r>..https://../repos/../../tarball..AuthorizationBearer ..2error: Invalid response from GitHub (missing body)..?.[0m.[31merror.[0m: Invalid response from GitHub (missing body)..:error: Invalid response from GitHub (missing content type)..G.[0m.[31merror.[0m: Invalid response from GitHub (missing content type)..,error: Unexpected content type from GitHub: ...9.[0m.[31merror.[0m: Unexpected content type from GitHub: ...USERPROFILE.Fetching package.json)https://registry.npmjs.org/@bun-examples/../latest.Parsing package.jsondistDownloading tarball.Error fetching tarball: ...!Error fetching tarball: .[0m.[31m...[0m..?package.json is missing tarball url. This is an internal error!...Error parsing package: ... Error parsing package: .[0m.[31m...[0m..  bun create .. ..
+
+..  .[0m.[1mbun create .[36m...[0m.[1m ...[0m
+
+..  # ..
+  bun create .. ..
+  
+
+..  .[0m# ...[0m
+  .[1mbun create .[36m...[0m.[1m ..[0m
+.[2m  
+
+.https://registry.npmjs.org/bun-examples-all/latestexamples.jsonexamplesinfallible: prop has key4Corrupt examples data: expected object but received ....Error parsing examples: ...!Error parsing examples: .[0m.[31m...[0m.... .. fetching examples :( ....[0m.[31m.. ...[0m fetching examples :( ...6 while trying to fetch examples list. Please try again....[0m.[31m.:.[0m while trying to fetch examples list. Please try again..GRequest timed out while trying to fetch examples list. Please try again...Unexpected argument '.2'. This command does not take positional arguments.positionaloptionoption-terminatorrawNameinlineValueinternal error: entered unreachable code: VM handle closed with stat-watcher pool work outstandingdeinit: watcherqualitylosslesscompressionLevelpalettecolorsditherprogressivebrightnesssaturationfitwithoutEnlargementresize(width, height?, options?)rotate: only multiples of 90 are supportedrotate(degrees) expects 90, 180 or 270.__bunstr_Impossible>internal error: entered unreachable code: child_done on freed ..9internal error: entered unreachable code: start on freed ..global_this set on Js event-loop path8internal error: entered unreachable code: next on freed ...Cmd .. is not running a builtin.Cannot redirect stdout/stderr to an immutable blob. Expected a file.unknown error ..
+.internal error: entered unreachable code: do_connect requires self.connection to be setExpected 1 argumentsNo handlers set on SocketinitialDelayisServersocketinitialDatasecureContextSecureContextFailed to upgrade socket from TCP -> TLS. Is the TLS config correct?Expected options objectupgradeTLS requires an established sockettosFailed to connectExpected 1 argument, got 0Timeout must be a positive integerlocalhostHostn

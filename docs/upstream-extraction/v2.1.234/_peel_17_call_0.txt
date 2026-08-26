@@ -1,0 +1,1 @@
+n}));return[...e.slice(0,t).map((n)=>({line:n})),{line:`\u2026 ${e.length-t-r} lines \u2026`,folded:!0},...e.slice(-r).map((n)=>({line:n}))]}function OTl(e){let t=new Set,r=new Map;for(let n of e){if(t.has(n.data.toolUseId))continue;t.add(n.data.toolUseId),r.set(n.data.toolName,(r.get(n.data.toolName)??0)+1)}return[...r].map(([n,o])=>`${o} ${Rt(o,n

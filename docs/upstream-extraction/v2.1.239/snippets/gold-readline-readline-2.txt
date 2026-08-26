@@ -1,0 +1,96 @@
+# readline offset=70482421
+
+s[kIsFlushing] = !0, this[kTimer])
+      clearTimeout(this[kTimer]);
+    this[kTimer] = setTimeout(() => this[kFlushHistory](), kDebounceHistoryMS);
+  }
+  async[kFlushHistory]() {
+    if (this[kTimer] = null, this[kWriting]) {
+      this[kPending] = !0;
+      return;
+    }
+    this[kWriting] = !0;
+    let historyData = ArrayPrototypeJoin(this[kHistory], `
+`);
+    try {
+      if (await this[kHistoryHandle].write(historyData, 0, "utf8"), this[kWriting] = !1, this[kPending])
+        this[kPending] = !1, this[kOnLine]();
+      else if (this[kIsFlushing] = Boolean(this[kTimer]), !this[kIsFlushing])
+        this[kContext].emit("flushHistory");
+    } catch (err) {
+      this[kWriting] = !1, debug("Error writing history file:", err);
+    }
+  }
+  async[kOnExit]() {
+    if (this[kIsFlushing]) {
+      this[kContext].once("flushHistory", this[kOnExit].bind(this));
+      return;
+    }
+    this[kContext].off("line", this[kOnLine].bind(this)), await this[kCloseHandle]();
+  }
+  async[kCloseHandle]() {
+    if (this[kHistoryHandle] !== null) {
+      let handle = this[kHistoryHandle];
+      this[kHistoryHandle] = null;
+      try {
+        await handle.close();
+      } catch (err) {
+        debug("Error closing history file:", err);
+      }
+    }
+  }
+  closeHandle() {
+    return this[kCloseHandle]();
+  }
+  [kReplHistoryMessage]() {
+    if (this[kHistory].length === 0)
+      ReplHistory[kWriteToOutput](this[kContext], `
+Persistent history support disabled. Set the NODE_REPL_HISTORY environment
+variable to a valid, user-writable path to enable.
+`);
+    return this[kContext]._historyPrev = this.historyPrev, this[kContext]._historyPrev();
+  }
+}
+__node_module__.exports = {
+  ReplHistory
+};
+$ = __node_module__.exports;
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/readline/interface.ts
+var $, primordials = @getInternalField(@internalModuleRegistry, 64) || @createInternalModuleById(64), __node_module__ = { exports: {} }, {
+  ArrayFrom,
+  ArrayPrototypeFilter,
+  ArrayPrototypeJoin,
+  ArrayPrototypeMap,
+  ArrayPrototypePop,
+  ArrayPrototypePush,
+  ArrayPrototypeReverse,
+  ArrayPrototypeShift,
+  ArrayPrototypeUnshift,
+  DateNow,
+  FunctionPrototypeCall,
+  MathCeil,
+  MathFloor,
+  MathMax,
+  MathMaxApply,
+  NumberIsFinite,
+  ObjectDefineProperty,
+  ObjectSetPrototypeOf,
+  RegExpPrototypeExec,
+  SafeStringIterator,
+  StringPrototypeCodePointAt,
+  StringPrototypeEndsWith,
+  StringPrototypeIncludes,
+  StringPrototypeRepeat,
+  StringPrototypeReplaceAll,
+  StringPrototypeSlice,
+  StringPrototypeSplit,
+  StringPrototypeStartsWith,
+  Symbol,
+  SymbolAsyncIterator,
+  SymbolDispose
+} = primordials, {
+  AbortError,
+  codes: { ERR_INVALID_ARG_VALUE, ERR_USE_AFTER_CLOSE }
+} = @getInternalField(@internalModuleRegistry, 62) || @createInternalModuleById(62), { validateAbortSignal, validateString, validateUint32 } = @getInternalField(@internalModuleRegistry, 122) || @createInternalModuleById(122), { kEmptyObject } = @getInternalField(@internalModuleRegistry, 68) || @createInternalModuleById(68), nodeInspect = @getInternalField(@internalModuleRegistry, 63) || @createInternalModuleById(63), { getStringWidth, stripVTControlCharacters } = nodeInspect, EventEmitter = @getInternalField(@internalModuleRegistry, 152) || @createInternalModuleById(152), { addAbortListener } = @getInternalField(@internalModuleRegistry, 3) || @createInternalModuleById(3), { charLengthAt, charLengthLeft, commonPrefix, kSubstringSearch } = @getInternalField(@internalModuleRegistry, 54) || @createInternalModuleById(54), emitKeypressEvents, kFirstEventParam, { clearScreenDown, curso

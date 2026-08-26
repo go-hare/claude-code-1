@@ -1,5 +1,5 @@
 import React, { type ReactNode } from 'react';
-import { ListItem } from '@anthropic/ink';
+import { ListItem, type ClickEvent } from '@anthropic/ink';
 
 export type SelectOptionProps = {
   /**
@@ -37,6 +37,8 @@ export type SelectOptionProps = {
    * Set false when a child declares its own cursor (e.g. BaseTextInput).
    */
   readonly declareCursor?: boolean;
+
+  readonly onClick?: (event: ClickEvent) => void;
 };
 
 export function SelectOption({
@@ -47,6 +49,7 @@ export function SelectOption({
   shouldShowDownArrow,
   shouldShowUpArrow,
   declareCursor,
+  onClick,
 }: SelectOptionProps): React.ReactNode {
   return (
     <ListItem
@@ -57,6 +60,7 @@ export function SelectOption({
       showScrollUp={shouldShowUpArrow}
       styled={false}
       declareCursor={declareCursor}
+      onClick={onClick}
     >
       {children}
     </ListItem>

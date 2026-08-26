@@ -1,0 +1,4 @@
+offset=100524177
+needle=b'auto mode'
+window=
+o bypass the intent behind this denial. ............V".+...[Tool result missing due to internal error].............Ig..W...Permission for this action was denied by the Claude Code auto mode classifier. Reason: .............4...Permission for this action has been denied. Reason: ..................... If you have other tasksY"..............Y".h...If it keeps failing, continue with other tasks that d

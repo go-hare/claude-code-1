@@ -48,6 +48,7 @@ import type {
   MessageOrigin,
   SystemCompactBoundaryMessage,
 } from './types/message.js'
+import type { HookDeferredToolAttachment } from './utils/attachments.js'
 import { transformCompletedAssistantMessage } from './utils/messageDisplayTransform.js'
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
@@ -124,6 +125,7 @@ import {
 } from './utils/permissions/filesystem.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
+  handleDeferredToolUse,
   handleOrphanedPermission,
   isResultSuccessful,
   normalizeMessage,
@@ -186,6 +188,10 @@ export type QueryEngineConfig = {
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
   orphanedPermission?: OrphanedPermission
+  /** Official JNs `F` — `$2l` attachment from resume, not a message scan. */
+  deferredToolUse?: HookDeferredToolAttachment
+  /** Official toolAliases — SDK-renamed tools for leftover Ld resume. */
+  toolAliases?: Record<string, string>
   /**
    * Snip-boundary handler: receives each yielded system message plus the
    * current mutableMessages store. Returns undefined if the message is not a
@@ -219,6 +225,7 @@ export class QueryEngine {
   private permissionDenials: SDKPermissionDenial[]
   private totalUsage: NonNullableUsage
   private hasHandledOrphanedPermission = false
+  private hasHandledDeferredToolUse = false
   private readFileState: FileStateCache
   // Turn-scoped skill discovery tracking (feeds was_discovered on
   // tengu_skill_tool_invocation). Must persist across the two
@@ -278,6 +285,8 @@ export class QueryEngine {
       agents = [],
       setSDKStatus,
       orphanedPermission,
+      deferredToolUse: configDeferredToolUse,
+      toolAliases,
     } = this.config
 
     this.discoveredSkillNames.clear()
@@ -415,6 +424,7 @@ export class QueryEngine {
         maxBudgetUsd,
         // densable 2.1.219 #6 — plumb into ToolUseContext for AgentTool
         forwardSubagentText,
+        toolAliases,
       },
       getAppState,
       setAppState,
@@ -460,6 +470,57 @@ export class QueryEngine {
         processUserInputContext,
       )) {
         yield message
+      }
+    }
+
+    // Official JNs — `Ie=hasHandled?void 0:F`; F is constructor config only.
+    const deferredToolUse = this.hasHandledDeferredToolUse
+      ? undefined
+      : configDeferredToolUse
+    if (deferredToolUse) {
+      this.hasHandledDeferredToolUse = true
+      const resumeOutcome = yield* handleDeferredToolUse(
+        deferredToolUse,
+        tools,
+        this.mutableMessages,
+        wrappedCanUseTool,
+        processUserInputContext,
+      )
+      if (resumeOutcome) {
+        const unavailable = resumeOutcome === 'unavailable'
+        const attachment =
+          resumeOutcome === 'unavailable' ? deferredToolUse : resumeOutcome
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: unavailable,
+          duration_ms: Date.now() - startTime,
+          duration_api_ms: 0,
+          num_turns: this.mutableMessages.length,
+          result: '',
+          stop_reason: unavailable
+            ? 'tool_deferred_unavailable'
+            : 'tool_deferred',
+          session_id: getSessionId(),
+          total_cost_usd: getTotalCost(),
+          usage: this.totalUsage,
+          modelUsage: getModelUsage(),
+          permission_denials: this.permissionDenials,
+          ...(unavailable
+            ? { terminal_reason: 'tool_deferred_unavailable' }
+            : {}),
+          deferred_tool_use: {
+            id: attachment.toolUseID,
+            name: attachment.toolName,
+            input: attachment.toolInput,
+          },
+          fast_mode_state: getFastModeState(
+            initialMainLoopModel,
+            initialAppState.fastMode,
+          ),
+          uuid: randomUUID(),
+        } as SDKMessage
+        return
       }
     }
 
@@ -609,6 +670,7 @@ export class QueryEngine {
         maxBudgetUsd,
         // densable 2.1.219 #6
         forwardSubagentText,
+        toolAliases,
       },
       getAppState,
       setAppState,
@@ -785,6 +847,8 @@ export class QueryEngine {
     const initialStructuredOutputCalls = jsonSchema
       ? countToolCalls(this.mutableMessages, SYNTHETIC_OUTPUT_TOOL_NAME)
       : 0
+    // Official ke — only this ask's hook_deferred_tool, not the whole history.
+    let deferredThisTurn: HookDeferredToolAttachment | undefined
 
     for await (const message of query({
       messages,
@@ -1019,6 +1083,11 @@ export class QueryEngine {
             prompt?: string
             source_uuid?: string
             [key: string]: unknown
+          }
+
+          if (attachment.type === 'hook_deferred_tool') {
+            deferredThisTurn =
+              msg.attachment as unknown as HookDeferredToolAttachment
           }
 
           // Extract structured output from StructuredOutput tool calls
@@ -1385,6 +1454,7 @@ export class QueryEngine {
       }
     }
 
+    const deferredAtEnd = deferredThisTurn
     yield {
       type: 'result',
       subtype: 'success',
@@ -1392,14 +1462,23 @@ export class QueryEngine {
       duration_ms: Date.now() - startTime,
       duration_api_ms: getTotalAPIDuration(),
       num_turns: turnCount,
-      result: textResult,
-      stop_reason: lastStopReason,
+      result: deferredAtEnd ? '' : textResult,
+      stop_reason: deferredAtEnd ? 'tool_deferred' : lastStopReason,
       session_id: getSessionId(),
       total_cost_usd: getTotalCost(),
       usage: this.totalUsage,
       modelUsage: getModelUsage(),
       permission_denials: this.permissionDenials,
       structured_output: structuredOutputFromTool,
+      ...(deferredAtEnd
+        ? {
+            deferred_tool_use: {
+              id: deferredAtEnd.toolUseID,
+              name: deferredAtEnd.toolName,
+              input: deferredAtEnd.toolInput,
+            },
+          }
+        : {}),
       fast_mode_state: getFastModeState(
         mainLoopModel,
         initialAppState.fastMode,
@@ -1486,6 +1565,7 @@ export async function* ask({
   agents = [],
   setSDKStatus,
   orphanedPermission,
+  deferredToolUse,
 }: {
   commands: Command[]
   prompt: string | Array<ContentBlockParam>
@@ -1526,6 +1606,7 @@ export async function* ask({
   agents?: AgentDefinition[]
   setSDKStatus?: (status: SDKStatus) => void
   orphanedPermission?: OrphanedPermission
+  deferredToolUse?: HookDeferredToolAttachment
 }): AsyncGenerator<SDKMessage, void, unknown> {
   const engine = new QueryEngine({
     cwd,
@@ -1557,6 +1638,7 @@ export async function* ask({
     setSDKStatus,
     abortController,
     orphanedPermission,
+    deferredToolUse,
     ...(feature('HISTORY_SNIP')
       ? {
           snipReplay: (yielded: Message, store: Message[]) => {

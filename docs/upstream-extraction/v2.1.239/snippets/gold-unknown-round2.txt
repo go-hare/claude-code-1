@@ -1,0 +1,203 @@
+
+==== function xZv 306958404 ====
+a(e,t){let r=h9p(e,t);if(r&&r.severity==="warning")return r.message;return null}function xZv(e,t){let r=Ile(),n=sP(),o=n?"":" \xB7 contact your admin to increase it",i=e.resetsAt,s=i?w$(i,!0):void 0,a=e.overageResetsAt?w$(e.overageResetsAt,!0):void 0,l=s?` \xB7 resets ${s}`:"",c,u=()=>{if(c===void 0)c=RZv(e,l,t);return c},d=e.rateLimitType==="five_hour"||e.rateLimitType==="seven_day"||e.rateLimitType==="seven_day_opus"||e.rateLimitType==="seven_day_sonnet"||e.rateLimitType==="seven_day_overage_included",p=()=>e.rateLimitType==="seven_day_overage_included"||!(VH(t)&&Wgt()&&!cSe());if(!r&&e.overageDisabledReason&&d&&!kVr.has(e.overageDisabledReason)&&p()){let f=u();if(f!==null)return f}if(!r&&e.overageDisabledReason&&kVr.has(e.overageDisabledReason)){let f=e.overageDisabl
+
+==== p=()=>e.rateLimitType 306958833 ====
+eLimitType==="seven_day_sonnet"||e.rateLimitType==="seven_day_overage_included",p=()=>e.rateLimitType==="seven_day_overage_included"||!(VH(t)&&Wgt()&&!cSe());if(!r&&e.overageDisabledReason&&d&&!kVr.has(e.overageDisabledReason)&&p()){let f=u();if(f!==null)return f}if(!r&&e.overageDisabledReason&&kVr.has(e.overageDisabledReason)){let f=e.overageDisabledReason==="org_spend_cap_reached",m=cc(),h=m==="team"||m==="enterprise",g=Kvi(e),y=g&&p()?g:null,_=y?` \xB7 your ${y.limitName} resets ${y.resetTime}`:"";if(h)return itt(f?m9p:"org's monthly spend limit",`${n?" \xB7 run /usage-credits to raise it, or visit claude.ai/admin-settings/usage":" \xB7 run /usage-credits to ask your admin for a higher limit"}${_}`,t);let b=n?"monthly spend limit":f?m9p:"org's monthly spend limit",S=
+
+==== function VH( 303274664 ====
+fe(e){let t=V.ANTHROPIC_DEFAULT_FABLE_MODEL;if(!t)return!1;return Ya(e)===Ya(t)}function VH(e){return Ya($o(e))==="claude-fable-5"||Ffe(e)}function KNn(e){return Ya($o(e))==="claude-mythos-5"}function bma(e){return Ya($o(e))==="claude-opus-5"}function YNn(e){let t=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(t===void 0){let r=zv();if(t=r.opus5,ao()==="firstParty")t=vda.map((n)=>r[n]).find((n)=>Gu(n))??r.opus5}return MFd(m$(t),e)}function MFd(e,t){if((H0(t)||nj(t))&&!H0(e)&&!yOt($o(e)))return m$(e+"[1m]");return e}function vma(e){let t=nle(e);if(t==="claude-sonnet-4-6"||t==="claude-sonnet-4-5"||t.startsWith("claude-haiku-"))return;let r=V.ANTHROPIC_DEFAULT_SONNET_MODEL,o=r!==void 0&&r===V.CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT?void 0:r;if(o!==void 0&&!((VV(o)??Gu(o))&&!XZ(o,JZ()
+
+==== function Wgt( 305033485 ====
+planLimitsEndDate={value:e,ms:vci(e)};return Date.now()>=t.planLimitsEndDate.ms}function Wgt(){return E1e()||FWs()}function E1e(){let e=r0v();if(e.enabled===!1)return!1;return e.overageConsentRequired===!0||n0v(e.planLimitsEndDate)}function cSe(){return ao()!=="firstParty"||!ls()||bht()||BV()==="default_claude_zero"}function i0v(){let e=it("tengu_saffron_credits_only_tiers",syp),t=bci();if(t.creditsOnlyTiers===null||t.creditsOnlyTiers.raw!==e){let r=o0v().safeParse(e);if(!r.success)E("tengu_saffron_credits_only_tiers: unparseable value, using default",{level:"warn"});t.creditsOnlyTiers={raw:e,parsed:r.success?r.data:syp}}return t.creditsOnlyTiers.parsed}function s0v(){return cc()==="enterprise"&&!bht()}function xQe(){if(s0v())return!0;let e=cc();if(e===null)return!1;ret
+
+==== function cSe( 305033637 ====
+ed===!1)return!1;return e.overageConsentRequired===!0||n0v(e.planLimitsEndDate)}function cSe(){return ao()!=="firstParty"||!ls()||bht()||BV()==="default_claude_zero"}function i0v(){let e=it("tengu_saffron_credits_only_tiers",syp),t=bci();if(t.creditsOnlyTiers===null||t.creditsOnlyTiers.raw!==e){let r=o0v().safeParse(e);if(!r.success)E("tengu_saffron_credits_only_tiers: unparseable value, using default",{level:"warn"});t.creditsOnlyTiers={raw:e,parsed:r.success?r.data:syp}}return t.creditsOnlyTiers.parsed}function s0v(){return cc()==="enterprise"&&!bht()}function xQe(){if(s0v())return!0;let e=cc();if(e===null)return!1;return i0v().includes(e)}function lyp(){return it("tengu_saffron_picker_dim",!1)}function Sci(){if(!w1e())return null;let e=it("tengu_saffron_ladder",null)
+
+#### needle "Strip leading ./" hits=0 
+
+#### needle "leading ./" hits=0 
+
+#### needle "keep the ./" hits=0 
+
+#### needle "startsWith(\"./\")&&" hits=0 
+
+#### needle "e.startsWith(\"./\")" hits=4 301995925,305468637,310151789,320468217
+
+==== e.startsWith("./") 301995925 ====
+tion gOn(e){return typeof e==="string"&&e.startsWith("./")}function Xre(e){return e.source==="file"||e.source==="directory"}function tQ_(e){let t=yOn();return e.flatMap((r,n)=>{let o=t.safeParse(r);if(o.success){let a=o.data.source;if(typeof a==="object"&&a.source==="unsupported"&&a.error!==void 0)return[{...o.data,source:{source:"unsupported"}}];return[o.data]}let i=eQ_().safeParse(r).data?.name,s=o.error.issues.map((a)=>`${a.path.join(".")}: ${a.message}`).join(", ");if(i){E(`Stubbing unparseable marketplace plugin entry (${i}): ${s
+
+#### needle "dirPortion.startsWith(\"./\")" hits=0 
+
+#### needle "replace(/^\\.\\//" hits=5 301997739,308046634,313399614,321882478,337343801
+
+==== replace(/^\.\// 301997739 ====
+s("\\")||e.includes(":"))return;let t=e.replace(/^\.\//,"").replace(/\/+$/,"");if(t===""||t===".")return".";if(t.split("/").some((r)=>r===""||r==="."||r===".."))return;return t}function Nta(e,t){if(t===void 0||!jo(e)||!MVo(e.source))return e;let r=t==="."?`./${e.source}`:`./${t}/${e.source}`;return{...e,source:r}}function $ta(e){if(!jo(e)||!Array.isArray(e.plugins))return e;let t=jo(e.metadata)?Lta(e.metadata.pluginRoot):void 0;if(t===void 0)return e;return{...e,plugins:e.plugins.map((r)=>Nta(r,t))}}var vVo,SVo,Ptr=500,wVo=32,P9u,fOn,
+
+#### needle "slice(2)" hits=8 70340646,85772877,85772888,85953224,300853617
+
+==== slice(2) 70340646 ====
+== "{}")
+          str = "\\{\\}" + str.slice(2);
+        return expand_(escapeBraces(str), max, !0).map(unescapeBraces);
+      }
+      function embrace(str) {
+        return "{" + str + "}";
+      }
+      function isPadded(el) {
+        return /^-?0\d/.test(el);
+      }
+      function lte(i, y) {
+        return i <= y;
+      }
+      function gte(i, y) {
+        return i >= y;
+      }
+      function expand_(str, max, isTop) {
+        let expansions = [], m = (0, balanced_match_1.balanced)("{", "}", str);
+        if (!m)
+          retu
+
+#### needle "UTF-8 BOM" hits=0 
+
+#### needle "utf8 BOM" hits=0 
+
+#### needle "stripBom" hits=3 236186072,304534058,304534179
+
+==== stripBom 236186072 ====
+�������.�������.��������........	.......stripBom........�...................��;.....j.......w..���;..�;......H..H.......�������.�������.�.......�������.�������.p.......�.......�������.............��������....�.L������������.........�������.........�������.�������.................	.......ypv.........����............����................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...
+
+#### needle "feff" hits=8 6818333,71850288,77784547,88895753,99492655
+
+==== feff 6818333 ====
+mentH3U�H	�.�i...H�unicodefH�U�H1�I�codefeffL3E�I	�.�i...H3M�H�codefffeH3U�H	�.�v...H�windows-H�U�H1�I�dows-31jL3E�I	�.�v...H�U�H1�I�dows-874L3E�I	�.�t...H3M�H�dows-949H3U�H	�.�u...H�x-mac-roH3M�H�ac-romanH3U�H	�.�\����s...�...�}�big5.��...�}�koi8.�<...�}�sjis.��...�}�utf8.�.����....�S...f.oE�.�M�f.n�f.�.t.�.f.�|.�.f.��f.8.�.�����1�� ...�asci3M�.�Uă�i	�.�L...�cp813M�.�Uă�9	�.��...�cp863M�.�Uă�6	�.�,...�gree3M�.�Uă�k	�.��...�ms933M�.�Uă�2	�.��...�ucs-3M�.�Uă�2	�.�'...�utf-3M�.�Uă�8	�.�t...�x-gb3M�.�Uă�k	�.�)�����...�^...H�x-u
+
+#### needle "FEFF" hits=8 110953891,114687973,120049483,120049539,214725398
+
+==== FEFF 110953891 ====
+����.........................	.......[\uFEFF]�������.........................	.......[\uE000-\uF8FF].................................�@�$�H..�]�d�@�>�H..�W�d�.x=�.�d��.=G..�.�d^..�.p=f..�.�dv..�..=~..�.�d�@�=........�������.�������..�������....�........�..rZ..R...��..S..�#�..u�.......H..H.......�������.�������.HcN������������.�������.0cN�����h.......�������.............��������....@��������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h..
+
+#### needle "\\uFEFF" hits=8 110953889,120049481,120049537,214725396,214725412
+
+==== \uFEFF 110953889 ====
+������.........................	.......[\uFEFF]�������.........................	.......[\uE000-\uF8FF].................................�@�$�H..�]�d�@�>�H..�W�d�.x=�.�d��.=G..�.�d^..�.p=f..�.�dv..�..=~..�.�d�@�=........�������.�������..�������....�........�..rZ..R...��..S..�#�..u�.......H..H.......�������.�������.HcN������������.�������.0cN�����h.......�������.............��������....@��������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h
+
+#### needle "parseFrontmatter" hits=0 
+
+#### needle "frontmatter" hits=8 118607253,118607308,118608752,118612772,118631557
+
+==== frontmatter 118607253 ====
+...........	... ...Failed to parse YAML frontmatter........	.......: ..............	...!...the frontmatter failed to parse: ...................................�...................%..�@�.��P.�@ ����.�@�<�F..���4�����@�<�@.��@�D�C..�@�|�F..�@�4�C..�.14�ͱ+�@@��R..�@�}�F..���4�����@�<�� .�@�|�E..��Q4�.�;�@.%�E..��Q4�.�:�@ &�@�$�E..��Q4�@`<�E..��Q4�.P:�.��@.l�R..���e�@ ����.�@�<�O..�.�4�..+�@ ?�O..�.�4�FUL�@���E..�.�3�@�U��@.��@��@ ��E..���3���;�R�;�@`=�@04��P4�@ ��@ .���.�@�u�@�4�@P4�.�.�@�]��@b�@@.�K..�.�4�FTLh.��@.��@�4�@p|�@p��@@4�
+
+#### needle "voiceEnabled" hits=6 160753808,302040603,316284441,316284512,316295803
+
+==== voiceEnabled 160753808 ====
+�������.�������.................	.......voiceEnabled........7M......���.c...=...w��.>..����.���......H..H.......�������.�������..�I������������.�������.�I�����h.......�������.............��������......�������������.........�������.........�������.�������.............����............����....
+...............................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.����
+
+#### needle "voice.enabled" hits=0 
+
+#### needle "VoiceModeNotice" hits=0 
+
+#### needle "sanitizeSessionTitle" hits=0 
+
+#### needle "no agent named" hits=3 182281801,313694772,321115719
+
+==== no agent named 182281801 ====
+.....��......��........	.......warning: no agent named '...................#...'. ..  .s.p.a.w.n.i.n.g. .w.i.t.h. .d.e.f.a.u.l.t. .t.e.m.p.l.a.t.e.
+...�������.	.......................	.......fleet...........	.......spare...........	.......u.......................	.......c.............��........	.......exec............	.......bg..............	.......user....................(.i.d.l.e. ..  .w.a.i.t.i.n.g. .f.o.r. .........	.......)...............	.......idle............	.......blocked.........2.....��........	.......l...............	....
+
+#### needle "own name" hits=8 92849926,117890164,129414951,152536628,152541532
+
+==== own name 92849926 ====
+t must contain required parameter '.Unknown named parameter '.Cannot create bare named parameter '.Parameter '.Unexpected identifier '.Header '.Unexpected number '.bun:ffi cannot convert argument to '.WebSocket connection to '.Can't declare global function '.FFI: created JSFFIFunction '.' multiple times in '.' not found in '.Unrecognized token '.Unexpected token '.' does not have an export named 'default'. Did you mean '. is not a function. (In '.Cannot find scope for the label '.Cannot continue to the label '.Attempted to redeclare t
+
+#### needle "ListAgents" hits=8 99616088,106666232,220526848,259777184,259787976
+
+==== ListAgents 99616088 ====
+	...
+...ListSkills..............	...
+...ListAgents..............	...	...ListPeers...............	...!...Cancel a scheduled cron job by ID.!.............��......List scheduled cron jobs........	.......WaitForMcpServers�..............I.
+.....RefreshMcpTools.........H�..�...R.e.-.q.u.e.r.i.e.s. .t.h.e. .t.o.o.l. .l.i.s.t. .o.f. .c.o.n.n.e.c.t.e.d. .M.C.P. .s.e.r.v.e.r.s. .a.n.d. .u.p.d.a.t.e.s. .t.h.e. .s.e.t. .o.f. .a.v.a.i.l.a.b.l.e. .t.o.o.l.s.,. .r.e.p.o.r.t.i.n.g. .w.h.i.c.h. .t.o.o.l.s. .w.e.r.e. .a.d.d.e.d. .o.r. .r.e.m.o.v.e.d...
+
+#### needle "CLAUDE_CODE_RETRY_WATCHDOG" hits=4 106507136,301321502,310726389,328759919
+
+==== CLAUDE_CODE_RETRY_WATCHDOG 106507136 ====
+T_BG_WAIT_CEILING_MS............�z2.....CLAUDE_CODE_RETRY_WATCHDOG..............�z2.'...CLAUDE_CODE_SLOW_OPERATION_THRESHOLD_MS.........	.......CLAUDE_ENABLE_BYTE_WATCHDOG.............	...#...CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK.............�{2.....CLAUDE_ENABLE_STREAM_WATCHDOG...........Iw.....CLAUDE_MOCK_HEADERLESS_4292.............	.	.....CLAUDE_SLOW_FIRST_BYTE_MS|2.............�#......CLAUDE_STREAM_IDLE_TIMEOUT_MS...........	}2.....HTTPS_PROXY.............	�..
+...HTTP_PROXY2.............	�......MAX_MCP_OUTPUT_TOKENS...........	...
+
+#### needle "out-of-credits" hits=2 228250392,303017038
+
+==== out-of-credits 228250392 ====
+	.......overage-active..........	.......out-of-credits..........	.......fast-mode-short-limit...........	.......member-zero-credit-limit........	.......extra-usage-required............	.......opus-warning............	.......seat-tier-zero-credit-limit.............	.......approaching-weekly-limit........	.......sonnet-warning..........	.......weekly-limit-reached............	.......overage-exhausted...............	.......sonnet-limit....................�.....��.��.Q..%��.!�..
+�.�..
+.....
+.....
+.....i.
+......��.....��.�.....��....��....
+
+#### needle "out_of_credits" hits=8 112602768,112604552,117979024,124637448,183680256
+
+==== out_of_credits 112602768 ====
+org_spend_cap_reached...........	.......out_of_credits..........	.......seat_tier_zero_credit_limit.............	.......member_zero_credit_limit........	.......member_level_disabled...........	.......org_level_disabled_until................�_..i.i.i.i.i.i.i.i.....�...............�...............�...............(...............h...............�...............�............... .......................	...,...Fast mode disabled � usage credits exhausted............	...B...Fast mode disabled � usage credits turned off by your organization..
+
+#### needle "spend-limit" hits=0 
+
+#### needle "spend_limit" hits=8 104908858,123372146,123372192,123373308,123376876
+
+==== spend_limit 104908858 ====
+
+
+............	......./v1/organizations/spend_limits..........	.......fanout..........	�..%...blocked by your organization's policy...Z.....��........	A......x-request-id............I.0.2...cloud session was archived before producing output..............	...�...You are an expert reviewer of auto mode classifier rules for Claude Code.
+
+Claude Code has an "auto mode" that uses an AI classifier to decide whether tool calls should be auto-approved or require user confirmation. Users can write custom rules in four categories:
+
+- **allow**:
+
+#### needle "application/vnd.amazon.eventstream" hits=8 124614304,142628832,227339400,243666440,302910977
+
+==== application/vnd.amazon.eventstream 124614304 ====
+	.......content-type............	..."...application/vnd.amazon.eventstream..............	.......vnd.amazon.eventstream..........	...
+...firstParty..............	.......gateway.........	.......anthropicAws............	.......text/event-stream...............	.......cf-ray..........	.......x-amzn-requestid......��........	......._chunkTimes.....................................................................4..��!.�@ ��I.����s�@.=��1��G���@�\�D.����D�@ ���ჟ� =�@ ��@ ����������@ ��@ ��@ 4�Ǡ.�@�,�D..���4�E���@ ��@@��D..���4�E���@pT�D..
+
+#### needle "Working directory \"" hits=3 137613952,309978589,309979300
+
+==== Working directory " 137613952 ====
+ an object............��........	.......Working directory ".............	...E..." no longer exists. Please restart Claude from an existing directory..........��........	...$...[worktree] blocked shell exec: cwd "............	...B..." is gone and recovery targets the shared checkout; agentWorktree=..............	......worktree_gone...........	...'...This agent is isolated in the worktree .........	......., but its working directory "...............�...". .n.o. .l.o.n.g.e.r. .e.x.i.s.t.s. .a.n.d. .t.h.e. .o.n.l.y. .r.e.c.o.v.e.r.y. .t.
+
+#### needle "no longer exists. Please restart" hits=2 137613994,309978614
+
+==== no longer exists. Please restart 137613994 ====
+rking directory ".............	...E..." no longer exists. Please restart Claude from an existing directory..........��........	...$...[worktree] blocked shell exec: cwd "............	...B..." is gone and recovery targets the shared checkout; agentWorktree=..............	......worktree_gone...........	...'...This agent is isolated in the worktree .........	......., but its working directory "...............�...". .n.o. .l.o.n.g.e.r. .e.x.i.s.t.s. .a.n.d. .t.h.e. .o.n.l.y. .r.e.c.o.v.e.r.y. .t.a.r.g.e.t. .i.s. .t.h.e. .p.a.r.e.n.t. .s.
+
+#### needle "Please restart Claude from an existing directory" hits=2 137614012,309978632
+
+==== Please restart Claude from an existing directory 137614012 ====
+............	...E..." no longer exists. Please restart Claude from an existing directory..........��........	...$...[worktree] blocked shell exec: cwd "............	...B..." is gone and recovery targets the shared checkout; agentWorktree=..............	......worktree_gone...........	...'...This agent is isolated in the worktree .........	......., but its working directory "...............�...". .n.o. .l.o.n.g.e.r. .e.x.i.s.t.s. .a.n.d. .t.h.e. .o.n.l.y. .r.e.c.o.v.e.r.y. .t.a.r.g.e.t. .i.s. .t.h.e. .p.a.r.e.n.t. .s.e.s.s.i.o.n.'.s. .
+
+#### needle "HTTPS_PROXY" hits=8 71157759,71158751,71158768,71226958,86666155
+
+==== HTTPS_PROXY 71157759 ====
+l === "https:" ? env.https_proxy || env.HTTPS_PROXY : env.http_proxy || env.HTTP_PROXY;
+  if (!proxyUrl)
+    return null;
+  if (proxyUrl.includes("\r") || proxyUrl.includes(`
+`))
+    throw @makeErrorWithCode(203, `Invalid proxy URL: ${proxyUrl}`);
+  return proxyUrl;
+}
+function parseProxyConfigFromEnv(env, protocol, keepAlive) {
+  if (protocol !== "http:" && protocol !== "https:")
+    return null;
+  let proxyUrl = parseProxyUrl(env, protocol);
+  if (proxyUrl === null)
+    return null;
+  if (!proxyUrl.startsWith("http://") && !proxyUrl.
+
+#### needle "fromNodeProviderChain" hits=8 106558936,172157213,234319925,243314093,243669693
+
+==== fromNodeProviderChain 106558936 ====
+fromLoginCredentials............	.......fromNodeProviderChain...........I.4.....fromTemporaryCredentials........	.......propertyProviderChain...........I%..$...AWS_CHAIN_RESOLVE_REQUEST_TIMEOUT_MS............	.......OAuthRefreshLockContendedError..........	.......SDK_OAUTH_REFRESH_ENTRYPOINTS...........	...$...__resetKnownDeadRefreshTokensForTest............	h..&..._resetCredentialsChangeCheckForTesting..........	.......acquireOAuthRefreshLock.........�......apiKeyHelperStates..............	.......authFailureClocks24.............�24.
+
+#### needle "getAwsSdkProxyRequestHandler" hits=0 

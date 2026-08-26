@@ -1,0 +1,3 @@
+OFFSET=318779876
+
+ex);for(;(n=this.tokenizer.rules.inline.blockSkip.exec(i))!=null;)i=i.slice(0,n.index)+"["+"a".repeat(n[0].length-2)+"]"+i.slice(this.tokenizer.rules.inline.blockSkip.lastIndex);i=this.options.hooks?.emStrongMask?.call({lexer:this},i)??i;let a=!1,s="";for(;t;){a||(s=""),a=!1;let l;if(this.options.extensions?.inline?.some(h=>(l=h.call({lexer:this},t,r))?(t=t.substring(l.raw.length),r.push(l),!0):!1))continue;if(l=this.tokenizer.escape(t)){t=t.substring(l.raw.length),r.push(l);continue}if(l=this.tokenizer.tag(t)){t=t.substring(l.raw.length),r.push(l);continue}if(l=this.tokenizer.link(t)){t=t.sub

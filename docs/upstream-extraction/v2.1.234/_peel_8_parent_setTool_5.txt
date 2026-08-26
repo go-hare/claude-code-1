@@ -1,0 +1,12 @@
+OFFSET=297989603
+NEEDLE=b'setToolPermissionContext'
+
+f(d)o?.({type:"notification",notification:{key:"auto-mode-gate-plan-exit-fallback",text:`plan exit \u2192 default \xB7 ${d}`,priority:"immediate",color:"warning",timeoutMs:1e4}});let p=un(t);if(p.mode==="plan"){ioe(!0),Uwe(!0);let m=p.prePlanMode??"default";{if(m==="auto"&&!(s?.isAutoModeGateEnabled()??!1))m="default";let y=m==="auto",b=i?.isAutoModeActive()??!1;if(i?.setAutoModeActive(y),b&&!y)lQ(!0)}MPe({from:"plan",to:m,trigger:"exit_plan_mode"});let h=m==="auto",g=p.strippedDangerousRules;t.setToolPermissionContext((y)=>{let b=y;if(h)b=s?.stripDangerousPermissionsForAutoMode(b)??b;else if(g)b=s?.restoreDangerousPermissions(b)??b;return{...b,mode:m,prePlanMode:void 0}})}let f=fd()&&t.options.tools.some((m)=>Qa(m,di));return{data:{plan:u,isAgent:a,filePath:l,hasTaskTool:f||void 0,planWasEdited:c!==void 0||void 0}}},mapToolResultToToolResultBlockParam({isAgent:e,plan:t,filePath:r,hasTaskTool:n,planWasEdited:o,awaitingLeaderApproval:i,requestId:s},a){if(i)return{type:"tool_result",content:`Your plan has been submitted to the team lead for approval.
+
+Plan file: ${r}
+
+**What happens next:**
+1. Wait for the team lead to review your plan
+2. You will receive a message in your inbox with approval/rejection
+3. If approved, you can proceed with implementation
+4. If rejected, refine your plan based on the feedba

@@ -78,6 +78,11 @@ type R2GetOptions = {}
 
 // -- ExportedHandler -------------------------------------------------------
 
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void
+  passThroughOnException(): void
+}
+
 interface ExportedHandler<Env = unknown> {
   fetch?: (
     request: Request,

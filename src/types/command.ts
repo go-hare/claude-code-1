@@ -39,6 +39,8 @@ export type PromptCommand = {
   argNames?: string[]
   allowedTools?: string[]
   disallowedTools?: string[]
+  /** Official Lto `e.getAllowedTools?.()` — async override of allowedTools. */
+  getAllowedTools?(): Promise<string[] | undefined>
   model?: string
   source: SettingSource | 'builtin' | 'mcp' | 'plugin' | 'bundled'
   pluginInfo?: {
@@ -112,6 +114,11 @@ export type LocalJSXCommandContext = ToolUseContext & {
     log: LogOption,
     entrypoint: ResumeEntrypoint,
   ) => Promise<void>
+  /**
+   * densable `dispatchedAsImmediate` — true when this local-jsx ran via the
+   * mid-turn immediate path (`ARt` / REPL / handlePromptSubmit).
+   */
+  dispatchedAsImmediate?: boolean
 }
 
 export type ResumeEntrypoint =

@@ -1,0 +1,3 @@
+OFFSET=299782059
+
+ther"||S?.type==="safetyCheck"?S.reason:`${w} targeting '${Xbe(y)?v:y}' was blocked. For security, Claude Code may only access files in the allowed working directories for this session: ${k}.`;if(S?.type==="rule")return{behavior:"deny",message:x,decisionReason:S};let C=[];if(v&&Xbe(y))if(u==="read"){let I=QXt(Soe(v),"session");if(I)C.push(I)}else C.push({type:"addDirectories",directories:[Soe(v)],destination:"session"});if(Xbe(y)&&(u==="write"||u==="create")&&(t.mode==="default"||t.mode==="plan"))C.push({type:"setMode",mode:"acceptEdits",destination:"session"});o??={behavior:"ask",message:x,blockedPath:Xbe(y)?v:void 0,decisionReason:S,suggestions:C}}}}if(e.nestedCommands)for(let l of e.neste

@@ -160,7 +160,7 @@ export async function getBridgeDisabledReason(): Promise<string | null> {
       return 'Unable to determine your organization for Remote Control eligibility. Run `claude auth login` to refresh your account information.'
     }
     if (!(await checkGate_CACHED_OR_BLOCKING('tengu_ccr_bridge'))) {
-      return 'Remote Control is not yet enabled for your account.'
+      return "Remote Control isn't enabled for this account. If you recently changed plans, run `claude auth logout` then `claude auth login` to refresh your entitlements, or `claude doctor` for details."
     }
     return null
   }

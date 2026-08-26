@@ -1,0 +1,349 @@
+#### "function QV(" 1 [303731748]
+
+==== function QV( 303731748 ====
+}}function Rve(){return e3d.of(ar().host)}function UYb(){return Rve().heldNames}function QV(){return Rve().registeredName}function GFn(){let e=Rve();return e.registration??Promise.resolve(e.registered)}function KWe(){let e=V.CLAUDE_CODE_SESSION_KIND;if(e==="bg"||e==="daemon"||e==="daemon-worker")return e;return}function As(){return KWe()==="bg"}function QOt(){return Cx()||As()||Kxn()!==void 0}function XM(){return As()&&!dA()}function Xk(){return As()||aj()!==null}function PZe(){return aj()?.jobDir??V.CLAUDE_JOB_DIR}function DZe(){return V.CLAUDE_BG_BACKEND==="daemon"}function F_a(){return Pn.session(Sti)}function gti(){return Pn.session(`${process.pid}.json`)}async function U_a(e){if(e){try{let t=await e.write(F_a(),Stri
+
+#### "registeredName" 5 [114211904, 303730528, 303730716, 303730779, 303731133]
+
+==== registeredName 114211904 ====
+�O!<............�������.�������..�.������������.�������.................	.......registeredName......?.......�j/. ...C...�j/.D..��j/..k/......H..H.......�������.�������.�.������������.�������.ؓ.�����h.......�������.............��������....`E�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...x...x...x...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......@...............�...............�...............�.......�������.�������.........�...............�������.........�������...........
+
+==== registeredName 303730528 ====
+ncleanExitPaths=new Set;watchedCache=void 0;pidFileWriteChain=Promise.resolve();registeredName=void 0;formerNames=[];heldNames=new Map;registered=!1;bornSpare=!1;spareClaimPoll=void 0;registration=void 0;registrySweepPermitted=void 0;setRegisteredName(e,t){let r=this.registeredName,n=Date.now(),o=Vu(e);if(r&&Vu(r.name)===o){this.registeredName={name:e,source:t,since:r.since};return}if(r)this.heldNames.set(Vu(r.name),r.source);if(this.heldNames.delete(o),this.formerNames=this.formerNames.filter((i)=>Vu(i.name)!==o),r&&r.source!=="derived"&&n-r.since>=FYb){let i=Vu(r.name);this.formerNames=[{name:r.name,until:n},...this.formerNames.filter((s)=>Vu(s.name)!==i)].slice(0,_ti)}this.registeredName={name:e,source:t,since:n}}setU
+
+==== registeredName 303730716 ====
+stration=void 0;registrySweepPermitted=void 0;setRegisteredName(e,t){let r=this.registeredName,n=Date.now(),o=Vu(e);if(r&&Vu(r.name)===o){this.registeredName={name:e,source:t,since:r.since};return}if(r)this.heldNames.set(Vu(r.name),r.source);if(this.heldNames.delete(o),this.formerNames=this.formerNames.filter((i)=>Vu(i.name)!==o),r&&r.source!=="derived"&&n-r.since>=FYb){let i=Vu(r.name);this.formerNames=[{name:r.name,until:n},...this.formerNames.filter((s)=>Vu(s.name)!==i)].slice(0,_ti)}this.registeredName={name:e,source:t,since:n}}setUncleanExitsScanned(e){this.uncleanExitsScanned=e}markUncleanExitReported(e){this.reportedUncleanExitPaths.add(e)}setWatchedCache(e){this.watchedCache=e}setPidFileWriteChain(e){this.pidFile
+
+#### "heldNames" 5 [114211096, 303730565, 303730843, 303730886, 303731738]
+
+==== heldNames 114211096 ====
+�J!<............�������.�������.(�.������������.�������.................	...	...heldNames...........?.......�j/.�.......nj/....��j/.�j/......H..H.......�������.�������.�x.������������.�������.�x.�����h.......�������.............��������....�H�������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...�...�...�...�...................................................................................�������.�������.�������.�.......�...............�������.........�������.........�.......�������.�������.........�...............�������.........�������...........
+
+==== heldNames 303730565 ====
+void 0;pidFileWriteChain=Promise.resolve();registeredName=void 0;formerNames=[];heldNames=new Map;registered=!1;bornSpare=!1;spareClaimPoll=void 0;registration=void 0;registrySweepPermitted=void 0;setRegisteredName(e,t){let r=this.registeredName,n=Date.now(),o=Vu(e);if(r&&Vu(r.name)===o){this.registeredName={name:e,source:t,since:r.since};return}if(r)this.heldNames.set(Vu(r.name),r.source);if(this.heldNames.delete(o),this.formerNames=this.formerNames.filter((i)=>Vu(i.name)!==o),r&&r.source!=="derived"&&n-r.since>=FYb){let i=Vu(r.name);this.formerNames=[{name:r.name,until:n},...this.formerNames.filter((s)=>Vu(s.name)!==i)].slice(0,_ti)}this.registeredName={name:e,source:t,since:n}}setUncleanExitsScanned(e){this.uncleanExi
+
+==== heldNames 303730843 ====
+name)===o){this.registeredName={name:e,source:t,since:r.since};return}if(r)this.heldNames.set(Vu(r.name),r.source);if(this.heldNames.delete(o),this.formerNames=this.formerNames.filter((i)=>Vu(i.name)!==o),r&&r.source!=="derived"&&n-r.since>=FYb){let i=Vu(r.name);this.formerNames=[{name:r.name,until:n},...this.formerNames.filter((s)=>Vu(s.name)!==i)].slice(0,_ti)}this.registeredName={name:e,source:t,since:n}}setUncleanExitsScanned(e){this.uncleanExitsScanned=e}markUncleanExitReported(e){this.reportedUncleanExitPaths.add(e)}setWatchedCache(e){this.watchedCache=e}setPidFileWriteChain(e){this.pidFileWriteChain=e}isRegistrySweepPermitted(){return this.registrySweepPermitted??=this.probeRegistrySweepPermitted(),this.registrySw
+
+#### "function Rve(" 2 [303731670, 333364982]
+
+==== function Rve( 303731670 ====
+ewrapSandbox()||Vn(V.IS_SANDBOX)||await aG.getIsDocker())return!1;return E_a()}}function Rve(){return e3d.of(ar().host)}function UYb(){return Rve().heldNames}function QV(){return Rve().registeredName}function GFn(){let e=Rve();return e.registration??Promise.resolve(e.registered)}function KWe(){let e=V.CLAUDE_CODE_SESSION_KIND;if(e==="bg"||e==="daemon"||e==="daemon-worker")return e;return}function As(){return KWe()==="bg"}function QOt(){return Cx()||As()||Kxn()!==void 0}function XM(){return As()&&!dA()}function Xk(){return As()||aj()!==null}function PZe(){return aj()?.jobDir??V.CLAUDE_JOB_DIR}function DZe(){return V.CLAUDE_BG_BACKEND==="daemon"}function F_a(){return Pn.session(Sti)}function gti(){return Pn.session(`${proc
+
+==== function Rve( 333364982 ====
+eturn dr.isInstance(e,A0.$type)}function O$(e){return dr.isInstance(e,$1.$type)}function Rve(e){let t=e,r=!1;for(;t;){let i=U0(t.grammarSource,cs);if(i&&i.dataType)t=t.container,r=!0;else return r?t:void 0}}function Z1(e){return new Y1(e,t=>oh(t)?t.content:[],{includeRoot:!0})}function Lve(e){return Z1(e).filter(q0)}function B$(e,t){for(;e.container;)if(e=e.container,e===t)return!0;return!1}function nT(e){return{start:{character:e.startColumn-1,line:e.startLine-1},end:{character:e.endColumn,line:e.endLine-1}}}function Q1(e){if(!e)return;let{offset:t,end:r,range:i}=e;return{range:i,offset:t,end:r,length:r-t}}function F$(e,t){if(e.end.line<t.start.line||e.end.line===t.start.line&&e.end.character<=t.start.character)return X
+
+#### "function e3d" 0 []
+
+#### "a message to yourself" 1 [314385182]
+
+==== a message to yourself 314385182 ====
+er sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(t.appState,{teamFile:t.teamFile,sessions:c,cloud:u,bridge:o?[]:e.flatMap((
+
+#### "You are sending to yourself" 0 []
+
+#### "message to yourself" 1 [314385184]
+
+==== message to yourself 314385184 ====
+ sessions use to message it (it is not listed below; a message to it would be a message to yourself).`}async function SRl(e,t){let r=e.getAppState(),n=Hy(r.teamContext);return{appState:r,teamFile:n?await _O(n,e.storageV5):null,callerTeammateId:e.teammateContext===void 0?void 0:e.agentContext?.agentId===e.teammateContext.agentId?e.teammateContext.agentId:null,self:DHm(t)}}function V1w(e,t,{didWarnings:r=[],didFocused:n=!1,bridgeWalkFailed:o=!1,cloudListFailed:i=!1,localListFailed:s=!1,messagingDisabled:a=!1,listTruncated:l=!1}={}){let c=e.flatMap((b)=>b.transport==="uds"?[b.session]:[]),u=e.flatMap((b)=>b.transport==="cloud"?[b.session]:[]),d=GCe(t.appState,{teamFile:t.teamFile,sessions:c,cloud:u,bridge:o?[]:e.flatMap((b)
+
+#### "your own name" 0 []
+
+#### "function lQ(" 2 [303720956, 335887228]
+
+==== function lQ( 303720956 ====
+ndomBytes(R_a).toString("hex")}}function kLe(){return eor.join(En(),"sessions")}function lQ(e){let t=jWe(e);if(t!==void 0)return`\\\\.\\pipe\\${t.replace(/[A-Z]+/g,(r)=>r.toLowerCase())}`;if(IMr(e))return;return eor.resolve(e)}function CWd(e){let t=lQ(e);return t===void 0?void 0:zFn.createHash("sha256").update(t).digest("hex")}function HYb(e,t){let r=CWd(t);if(r===void 0)throw Error("refusing to derive a messaging key name for a non-canonical socket path");return`${e}.${r}.key`}async function xWd(e,t,{sweepPermitted:r}){let n=kLe();await Uht.mkdir(n,{recursive:!0,mode:448}),await PYb(n,r);let o=eor.join(n,HYb(process.pid,e));try{await Uht.unlink(o)}catch{}return await od(o,He({peerToken:t,...GWe(await eme())}),384),o}asy
+
+==== function lQ( 335887228 ====
+trictMode(lv,e)}catch{}}var As=Math.clz32?Math.clz32:lQ,iQ=Math.log,sQ=Math.LN2;function lQ(e){return e>>>=0,e===0?32:31-(iQ(e)/sQ|0)|0}var hw=256,gw=262144,bw=4194304;function Kf(e){var t=e&42;if(t!==0)return t;switch(e&-e){case 1:return 1;case 2:return 2;case 4:return 4;case 8:return 8;case 16:return 16;case 32:return 32;case 64:return 64;case 128:return 128;case 256:case 512:case 1024:case 2048:case 4096:case 8192:case 16384:case 32768:case 65536:case 131072:return e&261888;case 262144:case 524288:case 1048576:case 2097152:return e&3932160;case 4194304:case 8388608:case 16777216:case 33554432:return e&62914560;case 67108864:return 67108864;case 134217728:return 134217728;case 268435456:return 268435456;case 536870912:
+
+#### "lQ(" 5 [7231056, 89187014, 303720965, 303721125, 304927044]
+
+==== lQ( 7231056 ====
+���....�.�....�.�....�.�....�.�....H���...H��X...H�O.�j�.H���...H���...M��tqH�.lQ(.�.�....eH�	H=�....�`...I��.....��...H��.��...I�E.H���H��.....L�x.M��.��...I�.H�H.f�@.I�.....L��L��M�����.L���...H���...L�gX�....A�....M��tsH�WPH�.�P(.�.�....eH�	H=�....��...I��.....�q...H��.�h...I�D$.H���H��.....L�x.M��.�J...I�.H�H.f�@.I�.....L��M������.L���...M��.�����H�.VP(.�.�....eH�	H=�....��...I��.....�����H��.�����I�@.H���H��.....H�p.H��.�y���H�.H�H.f�@.H�.....����H��.��...H�.�O(.H�.�I��.....������n...H��.��...H�.�O(.H�.�I��.....������i...H��.�.���H�.�O(.H�.�L���...I��.....�O��������H��.�X...H�.tO(.H�.�I��.....������=...�....H.�L!��A.o..f.��H��.��.�������fA.o.f.���D.��C.�..����H��.�....H�..O(.H�.������H��.�0...H�.�N(.H�.������H��
+
+==== lQ( 89187014 ====
+~Px�e#{�˅ј�L�.Q���.s�!��.�&�.PZ��.٦7�,ȋt7.�/��F�1�.�.���q.��=�u���.��.^�ClQ(|��.x9��.�ݙ�Y.�hh���7wKR�`jt�m�*.�U^�6�>��"ӱA.*�%�u)4A�.	�nʾ�k%bf�#:}H�p�X)ؓae���J��L^�.�?�K��0����1e�\.�}���..Y�LT$/�7��.�.���.�X����..��ҬZ..i��l�P���lO��+���2�k=f���.�x�=�g9rB��a�]�4i��|<_�..���y���.���.�_Ғ.�gF�v�@��0�̪���tC��.�y�p�#�Q���ڌT���"�/P��r�ߩ��r�Xa�q�_.݂+Y:��..#�5'0v2ZP�!��.�@���>n{J��5�{A��'�k8.D�b.�-&��C���L.A,�����Υ+bC�g�7��Ɇ�.���&���B�zG ��*)��.�ǒ�w�\��..l�d�:.���=p�hJ�}�.EN.��.ό9=椯��A.Q���{�B����jp.�5o.��ô뜹��`���S�X���O<.v��◰�ހ..�c�".~l.�l.��;.���D��3�.�zqd.ĖJ.Д���V�.��s.,..�w����J7Ո����[=��c^�+��U�k�Q&.�LbWf�Z��.�z.g��.���	���@���eJ`�R���*~�����.n2.%n����.z.8?�..�?`.���Bt�.�֫��f�.VG
+
+==== lQ( 303720965 ====
+(R_a).toString("hex")}}function kLe(){return eor.join(En(),"sessions")}function lQ(e){let t=jWe(e);if(t!==void 0)return`\\\\.\\pipe\\${t.replace(/[A-Z]+/g,(r)=>r.toLowerCase())}`;if(IMr(e))return;return eor.resolve(e)}function CWd(e){let t=lQ(e);return t===void 0?void 0:zFn.createHash("sha256").update(t).digest("hex")}function HYb(e,t){let r=CWd(t);if(r===void 0)throw Error("refusing to derive a messaging key name for a non-canonical socket path");return`${e}.${r}.key`}async function xWd(e,t,{sweepPermitted:r}){let n=kLe();await Uht.mkdir(n,{recursive:!0,mode:448}),await PYb(n,r);let o=eor.join(n,HYb(process.pid,e));try{await Uht.unlink(o)}catch{}return await od(o,He({peerToken:t,...GWe(await eme())}),384),o}async functi
+
+#### "crash dump" 0 []
+
+#### "no longer exists" 5 [70866367, 137613994, 137614818, 144318739, 151176458]
+
+==== no longer exists 70866367 ====
+_RESULT_NO_LISTENERS)
+    throw @makeErrorWithCode(329, "The destination thread no longer exists or is not listening for `workerMessage` events.");
+  else if (status[WORKER_MESSAGING_RESULT_INDEX] === WORKER_MESSAGING_RESULT_LISTENER_ERROR)
+    throw @makeErrorWithCode(328, "The destination thread threw an error while processing the message.");
+}
+$ = {
+  initThreadInfo,
+  createMessagingChannel,
+  registerMainThreadPort,
+  destroyMainThreadPort,
+  setupMainThreadPort,
+  postMessageToThread
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/node/worker_threads.ts
+var $, EventEmitter = @getInternalField(@internalModuleRegistry, 152) || @createInternalModuleById(152), { SafeMap } = @getInternalField(@int
+
+==== no longer exists 137613994 ====
+n object............��........	.......Working directory ".............	...E..." no longer exists. Please restart Claude from an existing directory..........��........	...$...[worktree] blocked shell exec: cwd "............	...B..." is gone and recovery targets the shared checkout; agentWorktree=..............	......worktree_gone...........	...'...This agent is isolated in the worktree .........	......., but its working directory "...............�...". .n.o. .l.o.n.g.e.r. .e.x.i.s.t.s. .a.n.d. .t.h.e. .o.n.l.y. .r.e.c.o.v.e.r.y. .t.a.r.g.e.t. .i.s. .t.h.e. .p.a.r.e.n.t. .s.e.s.s.i.o.n.'.s. .s.h.a.r.e.d. .c.h.e.c.k.o.u.t... .R.e.f.u.s.i.n.g. .t.o. .r.u.n. .t.h.e.r.e. ..  .t.h.e. .i.s.o.l.a.t.i.o.n. .w.o.r.k.t.r.e.e. .a.p.
+
+==== no longer exists 137614818 ====
+ .o.f. .r.e.t.r.y.i.n.g...............	.......Shell CWD ".............	...#..." no longer exists, recovering to ".............	......."...............	...'..." was deleted; shell cwd recovered to ".........	...D...". Re-issue your command (it will run from the recovered directory).............	.......y...............	...>...[worktree] blocked shell exec outside isolation worktree: cwd=..........	....... isolationRoot=.........	.......shared_checkout.......��........	...6...[worktree] blocked shell exec: command guard refused (..........	.......): cwd=.........	.......command_redirect........	...
+...powershell..............	......./bin/sh.......��........	.......simple..........	.......
+.......�������.(...................
+
+#### "Current working directory does not exist" 0 []
+
+#### "starting directory" 0 []
+
+#### "The startup directory" 0 []
+
+#### "cannot access the current" 0 []
+
+#### "process.cwd()" 5 [70091650, 70094141, 70185214, 70318903, 70465754]
+
+==== process.cwd() 70091650 ====
+Cwd === "." || newCwd === "" || newCwd === "./")
+        newCwd = defaultCwd ?? process.cwd();
+      return this.#args.setCwd(newCwd), this;
+    }
+    env(newEnv) {
+      if (this.#throwIfRunning(), typeof newEnv > "u")
+        newEnv = defaultEnv;
+      return this.#args.setEnv(newEnv), this;
+    }
+    #run() {
+      if (!this.#hasRun) {
+        this.#hasRun = !0;
+        let interp = createShellInterpreter(this.#resolve, this.#reject, this.#args);
+        this.#args = @undefined, interp.run();
+      }
+    }
+    #quiet(isQuiet = !0) {
+      return this.#throwIfRunning(), this.#args.setQuiet(isQuiet), this;
+    }
+    quiet(isQuiet) {
+      return this.#quiet(isQuiet ?? !0);
+    }
+    nothrow() {
+      return this.#throws
+
+==== process.cwd() 70094141 ====
+d === "." || newCwd === "" || newCwd === "./")
+          newCwd = defaultCwd ?? process.cwd();
+        this[cwdSymbol] = newCwd;
+      } else
+        @throwTypeError("cwd must be a string or undefined");
+      return this;
+    }
+    nothrow() {
+      return this[throwsSymbol] = !1, this;
+    }
+    throws(doThrow) {
+      return this[throwsSymbol] = !!doThrow, this;
+    }
+  }
+  var BunShell = function BunShell2(first, ...rest) {
+    if (first?.raw === @undefined)
+      throw Error("Please use '$' as a tagged template function: $`cmd arg1 arg2`");
+    let parsed_shell_script = createParsedShellScript(first.raw, rest), cwd = BunShell2[cwdSymbol], env = BunShell2[envSymbol], throws = BunShell2[throwsSymbol];
+    if (cwd)
+   
+
+==== process.cwd() 70185214 ====
+
+function safeGetCWD() {
+  let workingDirectory;
+  try {
+    workingDirectory = process.cwd();
+  } catch {
+    return;
+  }
+  return workingDirectory;
+}
+function formatError(err, constructor, tag, ctx, keys) {
+  let name = err.name != null ? @String(err.name) : "Error", stack = getStackString(err);
+  //! temp fix for Bun losing the error name from inherited errors + extraneous ": " with no message
+  if (stack = stack.replace(/^Error: /, `${name}${err.message ? ": " : ""}`), removeDuplicateErrorKeys(ctx, keys, err, stack), "cause" in err && (keys.length === 0 || !ArrayPrototypeIncludes(keys, "cause")))
+    ArrayPrototypePush.@call(keys, "cause");
+  if (@isJSArray(err.errors) && (keys.length === 0 || !ArrayPrototypeIncludes
+
+#### "FEFF" 5 [110953891, 114687973, 120049483, 120049539, 214725398]
+
+==== FEFF 110953891 ====
+.............	.......[\u2066-\u2069].�������.........................	.......[\uFEFF]�������.........................	.......[\uE000-\uF8FF].................................�@�$�H..�]�d�@�>�H..�W�d�.x=�.�d��.=G..�.�d^..�.p=f..�.�dv..�..=~..�.�d�@�=........�������.�������..�������....�........�..rZ..R...��..S..�#�..u�.......H..H.......�������.�������.HcN������������.�������.0cN�����h.......�������.............��������....@��������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...H...H...H...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�
+
+==== FEFF 114687973 ====
+...........�...............�.......................	.......a byte-order mark (U+FEFF)..............	.......a zero-width character (........	.......)...............	.......a no-break space (..............	.......a typographic quote (...........	.......a typographic dash (............	.......an ellipsis character (U+2026)..........	.......a line or paragraph separator (.........	... ...a replacement character (U+FFFD).�....����....��........	.......an unpaired UTF-16 surrogate............
+...............................................�@�.|.���.D�@ ����.�����@ ����.P.���.��@ ����.�����@ ����.w.���.ğ@ ����.K.��@.��.�.�@�$�.P............./...X...�...�...�...�...�...�...�...�...�...�.......�������.�������.��.�����....G..
+
+==== FEFF 120049483 ====
+.............	.......^\s*(?:\/\*\*)?$�������.........................	.......^\uFEFF([!#]?)..�������.........................	.......^\uFEFF.................[.��]...................................�@�$�H..�O�d��TV�@p4���.�@�T�@�.�H..�e�l��[>���d....0...2.......�������.�������.h�8������������.�������. �8�����....................��I.l..�....l......���I.��I......D..H.......�������.�������.�������.�������.�������.�������.x.......�������.............��������....@.......�������.........�������.........�������.�������.........�g:�����018�����....����............����.....................................................................................................................................................................
+
+#### "stripBom" 3 [236186072, 304534058, 304534179]
+
+==== stripBom 236186072 ====
+�������.p+X������������.�������. .......�������.�������.��������........	.......stripBom........�...................��;.....j.......w..���;..�;......H..H.......�������.�������.�.......�������.�������.p.......�.......�������.............��������....�.L������������.........�������.........�������.�������.................	.......ypv.........����............����................................
+...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......�.......	.......8...............�...............�.......�������.�������.........X...............��
+
+==== stripBom 304534058 ====
+)e=e.toString("utf8");return e.replace(/^\uFEFF/,"")}Gap.exports={stringify:ypv,stripBom:_pv}});var rka=ae(function(NUC,Kap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.parse(o,t?t.reviver:null)}catch(s){if(n)throw s.message=`${e}: ${s.message}`,s;else return null}return i}var vpv=eai.fromPromise(bpv);function Spv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0;try{let o=r.readFileSync(e,t);return o=qap(o),JSON.parse(o,t.reviver)}catch(o){if(n)throw o.messa
+
+==== stripBom 304534179 ====
+ap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.parse(o,t?t.reviver:null)}catch(s){if(n)throw s.message=`${e}: ${s.message}`,s;else return null}return i}var vpv=eai.fromPromise(bpv);function Spv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0;try{let o=r.readFileSync(e,t);return o=qap(o),JSON.parse(o,t.reviver)}catch(o){if(n)throw o.message=`${e}: ${o.message}`,o;else return null}}async function wpv(e,t,r={}){let n=r.fs||Bzr,o=Vap(t,r);await eai.fromCallbac
+
+#### "\\uFEFF" 5 [110953889, 120049481, 120049537, 214725396, 214725412]
+
+==== \uFEFF 110953889 ====
+...............	.......[\u2066-\u2069].�������.........................	.......[\uFEFF]�������.........................	.......[\uE000-\uF8FF].................................�@�$�H..�]�d�@�>�H..�W�d�.x=�.�d��.=G..�.�d^..�.p=f..�.�dv..�..=~..�.�d�@�=........�������.�������..�������....�........�..rZ..R...��..S..�#�..u�.......H..H.......�������.�������.HcN������������.�������.0cN�����h.......�������.............��������....@��������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...H...H...H...h...�...�...�...�...�...�...�...�...�...�...�...�...�..
+
+==== \uFEFF 120049481 ====
+...............	.......^\s*(?:\/\*\*)?$�������.........................	.......^\uFEFF([!#]?)..�������.........................	.......^\uFEFF.................[.��]...................................�@�$�H..�O�d��TV�@p4���.�@�T�@�.�H..�e�l��[>���d....0...2.......�������.�������.h�8������������.�������. �8�����....................��I.l..�....l......���I.��I......D..H.......�������.�������.�������.�������.�������.�������.x.......�������.............��������....@.......�������.........�������.........�������.�������.........�g:�����018�����....����............����...................................................................................................................................................................
+
+==== \uFEFF 120049537 ====
+...............	.......^\uFEFF([!#]?)..�������.........................	.......^\uFEFF.................[.��]...................................�@�$�H..�O�d��TV�@p4���.�@�T�@�.�H..�e�l��[>���d....0...2.......�������.�������.h�8������������.�������. �8�����....................��I.l..�....l......���I.��I......D..H.......�������.�������.�������.�������.�������.�������.x.......�������.............��������....@.......�������.........�������.........�������.�������.........�g:�����018�����....����............����...........................................................................................................................................................................................................................
+
+#### "US-only-inference" 0 []
+
+#### "1.1" 5 [7006482, 7008610, 10514170, 21708685, 71162156]
+
+==== 1.1 7006482 ====
+��...H�>..��...��....<..��...H�E�....H�U�I��..��...H�~X..��...H�1.0 200 H�HTTP/1.1I3.L��....M3P.I	�.��...H�HTTP/1.0I3.I3@.H	�.��...H��!...��A..��...Ɔ"....H���y"..H�M��....�[/�.��...���.....��...H���...H��.��...�.���...�P.���...��.u.H�O.L��M���da..���...�ȉ��...��.��...H���.�..�u...I��H�M�H���b=..H�]�H�.......�H.�H��H��?H!�uWH�}ЋE�=�....��...H��=�....�....�"...�...H�M�H���.=..H�]�H�.......�H.�H��H��?H!�.��...H��..��...H��....��@..��...�����...��u.H���N�..���...�ȉ��....��...H�>.t	H�N.����.H���....t.H���...�..�.H���...H��t.H���....t.��.�.H��H�Ĉ...[_^A\A]A^A_]��.�.H�}�L�E�H��H���>..�1L�e�L�}�M9�.��...M��M)�y\E1�L��L���;�.�!...�	@..H��t.H���.�.��....t.H�Ĉ...[_^A\A]A^A_]�H��H�Ĉ...[_^A\A]A^A_]�e@..L��A�....t8L�e.A�
+
+==== 1.1 7008610 ====
+��...H�>..��...��....<..��...H�E�....H�U�I��..��...H�~X..��...H�1.0 200 H�HTTP/1.1I3.L��....M3P.I	�.��...H�HTTP/1.0I3.I3@.H	�.��...H��!...�9..��...Ɔ"....H���)...H�M��....�.'�.��...���.....��...H���...H��.��...�.���...�P.���...��.u.H�O.L��M���.Y..���...�ȉ��...��.��...H��趬..�u...I��H�M�H���.5..H�]�H�.......�H.�H��H��?H!�uWH�}ЋE�=�....��...H��=�....�....�"...�...H�M�H���4..H�]�H�.......�H.�H��H��?H!�.��...H��..��...H��....�8..��...�����...��u.H�����..���...�ȉ��....��...H�>.t	H�N.���.H���....t.H���...����.H���...H��t.H���....t.���.H��H�Ĉ...[_^A\A]A^A_]���.H�}�L�E�H��H���<6..�1L�e�L�}�M9�.��...M��M)�y\E1�L��L�����.�!...�7..H��t.H���<��.��....t.H�Ĉ...[_^A\A]A^A_]�H��H�Ĉ...[_^A\A]A^A_]�.8..L��A�....t8L�e.A�
+
+==== 1.1 10514170 ====
+�V{.H9�t.f�9h2.��...�E�.H�U�H�E.....�BH�F.....�..H��H��8[_^]�H�.wǇ.H9�t.I�http/1.1L9.u@�E�.H�U�H�E.....H�_8H�U�H���.�7.���.....��...H��.��...H�F.1��.�H�E�H�....... H	�H�U�H.��>r'H�M�H���f}A.�|H��H...H��h...H.p...�.���H�.���.H�����.A����.L.B�A9�s:H�������..H!��,}s.L�.	��.A�q...f��.H���t..H��H����..1��.H�M�H��踊A.H�F.�����H���z.L�.��z.�....�uz.H�����.......u H��t.H��H�{...�����F..�.�.����H�K`�....芃,.H��u������UVWH��0H�l$0L��H��.....E�H�M�����.H��.u H��t:H��1�E1�E1���..H��t.H�F.�.H�F.....1��.H��H��0_^]��F..�.��H�.�z.L�..�z.�....��tz.�UAWAVAUATVWSH��...H��$�...E�q E��.��...M��H��H��H�E�
+...I��0E1�A��.A.��A��.H�M�L���.�v.@�.A��.t.H�E�H��H���H��..��...H��.@.��.....E�H�M��.��.�..��...H��.��...D.���...@��.�....A��.
+
+#### "data-residency" 5 [113685448, 128961544, 139531616, 141634987, 270314208]
+
+==== data-residency 113685448 ====
+	.......essential-traffic-only..........	...
+...firstParty..............	.......data-residency..................	.......teleport-org..........��......��......��........	.......no-auth.........	...E...OAuth refresh token is no longer valid; run /login to re-authenticate...........	.......No OAuth token in keychain............��........	...F...Cannot destructure property 'accessToken' from null or undefined value..........	.......d.......2.....��........	.......p...............	.......:orgUUID........	.......session-jwt.............	.......No session access token.........	.......Bearer .........	.......claude-ai-oauth.......��........	.......no claude.ai login..............	.......none..........��........	.......async.....
+
+==== data-residency 128961544 ====
+stream..........	.......application/octet-stream......��......��........	.......data-residency..........	.......skipped_data_residency..........	.......essential-traffic-only..........	.......skipped_essential_traffic_only..........	.......skipped_no_claude_ai_auth...............	.......asset fetch skipped (...........	.......)...............	...A...Cannot destructure property 'status' from null or undefined value...............	.......i.......�.....���.....��........	.......asset not found (404)...........	.......asset_not_found.�.....��........	.......asset denylisted (410)..........	.......asset_denylisted�.....��........	.......asset fetch failed (............	.......asset_transient.........	.......unexpected asset r
+
+==== data-residency 139531616 ====
+........	.......0...............@...............H.......................	.......data-residency..........	.......no-auth.........	.......essential-traffic-only..................�_..i.i.i.i.....@...............�...............................�...........................=...P.o.s.t.i.n.g. .n.e.e.d.s. .a. .C.l.a.u.d.e...a.i. .a.c.c.o.u.n.t. ..  .r.u.n. ./.l.o.g.i.n. .a.n.d. .t.r.y. .a.g.a.i.n.................	...V...Posting runs on Claude Code on the web, which is unavailable on third-party providers...........	...i...Posting runs on Claude Code on the web, which is unavailable while essential-traffic-only mode is active........
+.......................................�@�.....................
+...........4.......a<�.T.......I<
+
+#### "15 * 60 * 1000" 4 [311589635, 311715843, 323260452, 324459067]
+
+==== 15 * 60 * 1000 311589635 ====
+ript's fixed strings. */
+  var WAIT_KEY = 'ws-waiting';
+  var WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+  function fnv1a(s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+  function rememberWaiting(html) {
+    try {
+      sessionStorage.setItem(
+        WAIT_KEY,
+        JSON.stringify({ since: Date.now(), scrollY: window.scrollY, h: fnv1a(html) })
+      );
+    } catch (_) {}
+  }
+  function clearWaitingMarker() {
+    try {
+      sessionStorage.removeItem(WAIT_KEY);
+    } catch (_) {}
+  }
+  function readWaitingMarker() {
+    var w = null;
+    try {
+      var raw = sessionStorage.getItem(WAIT_KEY);
+      if (raw) w = J
+
+==== 15 * 60 * 1000 311715843 ====
+ript's fixed strings. */
+  var WAIT_KEY = 'ws-waiting';
+  var WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+  function fnv1a(s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+  function rememberWaiting(html) {
+    try {
+      sessionStorage.setItem(
+        WAIT_KEY,
+        JSON.stringify({ since: Date.now(), scrollY: window.scrollY, h: fnv1a(html) })
+      );
+    } catch (_) {}
+  }
+  function clearWaitingMarker() {
+    try {
+      sessionStorage.removeItem(WAIT_KEY);
+    } catch (_) {}
+  }
+  function readWaitingMarker() {
+    var w = null;
+    try {
+      var raw = sessionStorage.getItem(WAIT_KEY);
+      if (raw) w = J
+
+==== 15 * 60 * 1000 323260452 ====
+ript's fixed strings. */
+  var WAIT_KEY = 'ws-waiting';
+  var WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+  function fnv1a(s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+  function rememberWaiting(html) {
+    try {
+      sessionStorage.setItem(
+        WAIT_KEY,
+        JSON.stringify({ since: Date.now(), scrollY: window.scrollY, h: fnv1a(html) })
+      );
+    } catch (_) {}
+  }
+  function clearWaitingMarker() {
+    try {
+      sessionStorage.removeItem(WAIT_KEY);
+    } catch (_) {}
+  }
+  function readWaitingMarker() {
+    var w = null;
+    try {
+      var raw = sessionStorage.getItem(WAIT_KEY);
+      if (raw) w = J
+
+#### "900000" 5 [303930930, 303931274, 303931451, 305997618, 308276763]
+
+==== 900000 303930930 ====
+ues(new Uint32Array(Se*=2));for(;he<Se;)if(ge=oe[he]*131072+(oe[he+1]>>>11),ge>=9000000000000000)ee=crypto.getRandomValues(new Uint32Array(2)),oe[he]=ee[0],oe[he+1]=ee[1];else fe.push(ge%100000000000000),he+=2;he=Se/2}else if(crypto.randomBytes){oe=crypto.randomBytes(Se*=7);for(;he<Se;)if(ge=(oe[he]&31)*281474976710656+oe[he+1]*1099511627776+oe[he+2]*4294967296+oe[he+3]*16777216+(oe[he+4]<<16)+(oe[he+5]<<8)+oe[he+6],ge>=9000000000000000)crypto.randomBytes(7).copy(oe,he);else fe.push(ge%100000000000000),he+=7;he=Se/7}else throw W=!1,Error(i+"crypto unavailable");if(!W){for(;he<Se;)if(ge=re(),ge<9000000000000000)fe[he++]=ge%100000000000000}if(Se=fe[--he],de%=l,Se&&de)ge=u[l-de],fe[he]=o(Se/ge)*ge;for(;fe[he]===0;fe.pop(),h
+
+==== 900000 303931274 ====
+oe[he+2]*4294967296+oe[he+3]*16777216+(oe[he+4]<<16)+(oe[he+5]<<8)+oe[he+6],ge>=9000000000000000)crypto.randomBytes(7).copy(oe,he);else fe.push(ge%100000000000000),he+=7;he=Se/7}else throw W=!1,Error(i+"crypto unavailable");if(!W){for(;he<Se;)if(ge=re(),ge<9000000000000000)fe[he++]=ge%100000000000000}if(Se=fe[--he],de%=l,Se&&de)ge=u[l-de],fe[he]=o(Se/ge)*ge;for(;fe[he]===0;fe.pop(),he--);if(he<0)fe=[se=0];else{for(se=-1;fe[0]===0;fe.splice(0,1),se-=l);for(he=1,ge=fe[0];ge>=10;ge/=10,he++);if(he<l)se-=l-he}return we.e=se,we.c=fe,we}}(),U.sum=function(){var te=1,re=arguments,de=new U(re[0]);for(;te<re.length;)de=de.plus(re[te++]);return de},k=function(){var te="0123456789";function re(de,oe,ee,se){var Se,ge=[0],he,fe=0,we=
+
+==== 900000 303931451 ====
+}else throw W=!1,Error(i+"crypto unavailable");if(!W){for(;he<Se;)if(ge=re(),ge<9000000000000000)fe[he++]=ge%100000000000000}if(Se=fe[--he],de%=l,Se&&de)ge=u[l-de],fe[he]=o(Se/ge)*ge;for(;fe[he]===0;fe.pop(),he--);if(he<0)fe=[se=0];else{for(se=-1;fe[0]===0;fe.splice(0,1),se-=l);for(he=1,ge=fe[0];ge>=10;ge/=10,he++);if(he<l)se-=l-he}return we.e=se,we.c=fe,we}}(),U.sum=function(){var te=1,re=arguments,de=new U(re[0]);for(;te<re.length;)de=de.plus(re[te++]);return de},k=function(){var te="0123456789";function re(de,oe,ee,se){var Se,ge=[0],he,fe=0,we=de.length;for(;fe<we;){for(he=ge.length;he--;ge[he]*=oe);ge[0]+=se.indexOf(de.charAt(fe++));for(Se=0;Se<ge.length;Se++)if(ge[Se]>ee-1){if(ge[Se+1]==null)ge[Se+1]=0;ge[Se+1]+=ge[
+
+#### "posix_spawn ENOENT" 0 []
+
+#### "project root or home" 0 []

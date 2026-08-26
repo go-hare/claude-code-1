@@ -1,0 +1,105 @@
+#### "finish early" count=0 []
+#### "prompt queued" count=0 []
+#### "queued prompt" count=0 []
+#### "leaving the session idle" count=0 []
+#### "repeat actions" count=0 []
+#### "popCommandFromQueue" count=3 [193138888,322915719,326487421]
+--- 193138888 ---
+............ }`.....................0.d.......................*......................b..............	.......onAgentsKilled..........	.......isMessageSelectorVisible........	.......popCommandFromQueue.............	.......isInputOverlayActive............	.......isVimEditing............	...	...inputMode...............	.......getInFlightMessageId....H................................$.......B......(F.......J.......T...................%T..................%T.!%T......D..H...............................................................................................@...................................
+--- 322915719 ---
+:"feedback",text:yus,priority:"immediate",timeoutMs:8000})}function mQc(e){let{onCancel:t,onAgentsKilled:r,isMessageSelectorVisible:n,screen:o,abortSignal:i,isExternalLoading:s=!1,popCommandFromQueue:a,isLocalJSXCommand:l,isInputOverlayActive:c,isVimEditing:u,inputMode:d,isInputEmpty:p,getInFlightMessageId:f}=e,m=au(),h=ts(),g=MAt(),y=dH(),_=ns(),{storageV5:b}=tn(),S=tS(),w=h_e(),{addNotification:T,removeNotification:k}=Nu(),C=wut.useRef(0),x=wut.useRef(0),R=wt((se)=>se.viewSelectionMode),I=fx(),[,M]=wut.useState(0),O=a_t(),D=mPe().phase,F=n3t(D),B=F&&p===!0,W=D==="armed"||D==="stale",Q=wt((se
+--- 326487421 ---
+nFlightMessageId:()=>Er.stream.inFlightMessageId,onAgentsKilled:()=>Oo((nr)=>[...nr,blh()]),isMessageSelectorVisible:hi||!!QF,screen:Pe,abortSignal:Js?.signal,isExternalLoading:VT,popCommandFromQueue:HDr,isLocalJSXCommand:us?.isLocalJSXCommand,isInputOverlayActive:vw,isVimEditing:$E,inputMode:Ps,isInputEmpty:lZ};ho.useEffect(()=>{if(j||Un||uy===!1)return;if(he!==null||Vpe.current&&ui===0)return;if(uy===null){if(ww()<5)return;N("tengu_cost_threshold_reached",{}),KO(aci());return}let nr=Kt.getState().open;if(cr().hasAcknowledgedCostThreshold||nr.some((Xr)=>Xr.kind===Wxt.kind))return;oXg(Gm,Q)},[
+#### "skipIdleCheck" count=0 []
+#### "claude_code.tool" count=6 [116365456,116368216,116372056,304357222,304357926,304358518]
+--- 116365456 ---
+............x...............................x.......................................................
+...............	.......dummy...........	.......tool....1...............	.......claude_code.tool........	.......agent_id........	.......parent_agent_id.............c.....................P.......`T.@ ..@ ....... e.......<.....@.T...4......b4...4..`T.....
+!<...L..@U..@..@....b5......C4.@...@ e.@.4v......4x....@.,..........b4...4..`T.....
+!<...L.. M.......<.@@..@P4...K...*.@.=.J...@.n.@04.....@.>..P..@ ......@.T.H...@.L.M...@.M.H....33.@.-.N...@.M.M...@.N.N.....2.@P..N.... 5.@ ........;...,.@ ..@ .
+--- 116368216 ---
+....`...............h...............................................	.......tool_permission.
+...............	.......dummy...........	.......tool.blocked_on_user............	... ...claude_code.tool.blocked_on_user............=.............................`T.......f.......<.....@.T...4......b4...4..`T.....
+!<...L..@U..@..@....b5......C4C....@...@.4z......4|....@.,..........b4...4..`T.....
+!<...L.. M.......<.....@.=.J...@.o.@04....@......<..@..@....b5......C4.@.l.@.5.@.4Wl.....4Y....@.,........*...F...I...z...}.......@...........z.......w...............................................8...........
+--- 116372056 ---
+....
+.....
+.....
+..........i........@...............8...............@...............P...............................	.......dummy...........	.......tool.execution..........	.......claude_code.tool.execution..................%......................l.......<.......T......b4...4..`T.....
+!<...L.. M.......<.....@`=.J...@Po.@04.."....?.@ ..@ ........,..@..@....b5......C4.@.l.@.4F......4H....@.,........>....................................................-......................@............................................... ...........................................................................
+#### "claude_code.hook" count=2 [116395912,304361369]
+--- 116395912 ---
+....	.......dummy...........	...B...Cannot destructure property 'content' from null or undefined value..............	.......hook............	.......s.......1...............	.......claude_code.hook...........................................T......b4...4..`T.....
+!<...L.. M.......<.......=.@ ..........@P..@.4.@.4..`4.....@pu..pzM......(Q....@.<.J...@.n.@04.......?.....@`4.@.<..b5......C4.@.l.@.4D......4F....@.,....*...w...y....................................................|.......................4.......................E...............................................E..........................
+--- 304361369 ---
+ace.getActiveSpan()||TQ().startSpan("dummy");let o=TQ(),i=xne(),{content:s}=gj(n),a=rir("hook",{hook_event:e,hook_name:t,num_hooks:r,...hS()&&{hook_definitions:s}}),l=o.startSpan("claude_code.hook",{attributes:a},i);return QLt.set(l,{span:l,startTime:performance.now(),attributes:a,priorContext:i}),l}function onp(e,t){if(!rnp())return;let r=QLt.get(e);if(!r||r.ended)return;r.ended=!0;let o={duration_ms:Math.max(0,Math.round(performance.now()-r.startTime))};if(t){if(t.numSuccess!==void 0)o.num_success=t.numSuccess;if(t.numBlocking!==void 0)o.num_blocking=t.numBlocking;if(t.numNonBlockingError!==
+#### "deferred by" count=1 [323696901]
+--- 323696901 ---
+his campaign's scope \u2014 the `.sync-diff.json` `changed`+`added` partition on a re-sync, everything user-scoped on a first sync \u2014 authored and graded `good` (or explicitly deferred by the user); no `[LEARNINGS_UNMERGED]` on the final capture run; the user has seen `.review.html` (or declined). Verified-by-upload components are OUTSIDE the gate \u2014 they need no recapture or regrade, and the closing driver run enforces the learnings check itself \u2014 its verdict fails (`[LEARNINGS_UNMERGED]`, the `learningsUnmerged` field) while any unfolded learnings file remains. Floor-card compon
+#### "resume in the original" count=0 []
+#### "keeps your text" count=0 []
+#### "clearing the prompt" count=0 []
+#### "falling back to original cwd" count=0 []
+#### "falling back to" count=8 [87136470,87136555,89561541,89585055,89585148,89585233,89585316,92589561]
+--- 87136470 ---
+me "..".resolutionBun currently does not support patched package "resolutions"&Expected string value for resolution "..".optionalpeerDependenciesMeta9warn: CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+..J.[33mwarn.[0m.[2m:.[0m CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+../Refusing to install package with invalid name ".."..Refusing to install "..": tarball root directory ".." is not a valid folder name.Tried to delete root and stopped it."package.json" for ".." failed to resolve: ..."package.json" for ".." failed to open: ..!failed to resolve cache dir for "..": .
+--- 87136555 ---
+ed string value for resolution "..".optionalpeerDependenciesMeta9warn: CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+..J.[33mwarn.[0m.[2m:.[0m CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+../Refusing to install package with invalid name ".."..Refusing to install "..": tarball root directory ".." is not a valid folder name.Tried to delete root and stopped it."package.json" for ".." failed to resolve: ..."package.json" for ".." failed to open: ..!failed to resolve cache dir for "..": .. failed to verify cache dir for "..": ...moving ".." to cache dir failed
+.	
+  From: 
+--- 89561541 ---
+itignore file: ..ignore::gitignore.assembling HIR from .. fixed string literals.grep_regex::config.............................P.#B.....R#B......: error spawning command '..': .& (falling back to uncompressed reader)...............................0.#B....0.#B....0.#B....slice reader: searching via slice-by-line strategygrep_searcher::searcherslice reader: searching via multiline strategyslice reader: needs transcoding, using generic readergeneric reader: searching via roll buffer strategygeneric reader: reading everything to heap for multilinegeneric reader: searching via multiline strategy..:
+#### "Hooks: cwd" count=0 []
+#### "not found, falling back" count=0 []
+#### "posix_spawn ENOENT" count=0 []
+#### "rejected by an organization" count=0 []
+#### "organization policy check" count=0 []
+#### "blocked by your organization's policy" count=8 [104908912,129162989,129163141,129163284,173034509,173034636,173075229,173152421]
+--- 104908912 ---
+....https://api.anthropic.com./.................$...event: ping
+data: {"type": "ping"}
+
+............	......./v1/organizations/spend_limits..........	.......fanout..........	...%...blocked by your organization's policy...Z...............	A......x-request-id............I.0.2...cloud session was archived before producing output..............	.......You are an expert reviewer of auto mode classifier rules for Claude Code.
+
+Claude Code has an "auto mode" that uses an AI classifier to decide whether tool calls should be auto-approved or require user confirmation. Users can write custom rules in four
+--- 129162989 ---
+annot install local plugin "...........	...&..." without marketplace install location..........	.......Failed to update settings: .............	.......Plugin "........	...B..." is blocked by your organization's policy and cannot be installed..............	.......Cannot install "........	.......": dependency ".........	...*..." is blocked by your organization's policy..............	.......": marketplace "........	......." is from marketplace ".........	...1...", which is blocked by your organization's policy...............	.......Plugin..........	...
+...Dependency..............	.......tengu_plu
+--- 129163141 ---
+lugin "........	...B..." is blocked by your organization's policy and cannot be installed..............	.......Cannot install "........	.......": dependency ".........	...*..." is blocked by your organization's policy..............	.......": marketplace "........	......." is from marketplace ".........	...1...", which is blocked by your organization's policy...............	.......Plugin..........	...
+...Dependency..............	.......tengu_plugin_installed..2...............	.......third-party.............	.......hint............	......ui-suggestion...........	.......ui-discover.....1........
+#### "saved file path" count=0 []
+#### "session's network proxy" count=0 []
+#### "non-API" count=0 []
+#### "www.anthropic.com" count=8 [100910994,100958560,100961744,163318556,163318652,163319220,163319316,187200648]
+--- 100910994 ---
+ approved organizations. Fable 5 is the most advanced generally available Claude model. If the person asks about the differences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.............(.u...O.b.j.e.c.t. .a.n.d. .a.r.r.a.y. .p.a.r.a.m.e.t.e.r. .v.a.l.u.e.s. .m.u.s.t. .b.e. .a. .s.i.n.g.l.e. .J.S.O.N. .v.a.l.u.e. ..  .n.e.v.e.r. .w.r.i.t.e. .p.a.r.a.m.e.t.e.r.-.t.a.g. .m.a.r.k.u.p. .i.n.s.i.d.e. .a. .J.S.O.N. .v.a.l.u.e...(...............(.e...W.h.e.n. .y.o.u. .u.s.e. .a. .p.r.o.n.o.u.n. .f.o.r. .s.o.m.e.o.n.e. ..  .t.h.
+--- 100958560 ---
+....(.......................IN).	...normalize................N).....notePending.............	O).....refreshPending...........O).....tengu-top-of-feed-tip...........	.../...https://www.anthropic.com/legal/promotion-terms.........	.......markRestored............	...7...Auto mode is now Claude Code's default permission mode..........IQ).....Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest...............	...0...https://code.claude.com/docs
+--- 100961744 ---
+if that variable is set in your shell profile or a Claude Code settings file, new `claude` sessions will keep using the old token until you remove it there.........	.......https://www.anthropic.com/legal/consumer-terms..........	.......yes.....,.......................	j).....import:fallback-skill...........	.......Add Claude Code GitHub Workflow.........	...H...https://github.com/anthropics/claude-code-action/blob/main/docs/setup.md........Ik).R...name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assig
+#### "docs.anthropic.com" count=4 [213219200,213468488,300980940,301007352]
+--- 213219200 ---
+....	.......i...............	.......The model '.............	.......' is deprecated and will reach end-of-life on ..........	...}...
+Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information............	.......enabled.........	.......Using Claude with ..............	....... and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking......
+...............	......./v1/messages?beta=tr
+--- 213468488 ---
+....	.......n...............	.......The model '.............	.......' is deprecated and will reach end-of-life on ..........	...}...
+Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information............	.......enabled.........	.......Using Claude with ..............	....... and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking......
+...............	......./v1/messages.....'	.
+--- 300980940 ---
+file_id:o,...i}=r;if(i.model in EMu)console.warn(`The model '${i.model}' is deprecated and will reach end-of-life on ${EMu[i.model]}
+Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.`);if(gb_.includes(i.model)&&i.thinking&&i.thinking.type==="enabled")console.warn(`Using Claude with ${i.model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking`);let s=this._client.

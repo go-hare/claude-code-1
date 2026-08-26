@@ -1,0 +1,3 @@
+OFFSET=293770444
+
++r.slice(this.tokenizer.rules.inline.reflinkSearch.lastIndex)}}while((n=this.tokenizer.rules.inline.blockSkip.exec(r))!=null)r=r.slice(0,n.index)+"["+"a".repeat(n[0].length-2)+"]"+r.slice(this.tokenizer.rules.inline.blockSkip.lastIndex);while((n=this.tokenizer.rules.inline.anyPunctuation.exec(r))!=null)r=r.slice(0,n.index)+"++"+r.slice(this.tokenizer.rules.inline.anyPunctuation.lastIndex);let o=!1,i="";while(e){if(!o)i="";o=!1;let s;if(this.optio

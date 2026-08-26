@@ -1,16 +1,18 @@
 import type { ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
-import React, { useMemo } from 'react';
+import React, { useContext, useMemo } from 'react';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import type { ThemeName } from 'src/utils/theme.js';
 import type { Command } from '../../commands.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { Box, Text, stringWidth, useTheme } from '@anthropic/ink';
+import { StaticRenderContext } from '../../utils/staticRender.js';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { findToolByName, type Tool, type ToolProgressData, type Tools } from '../../Tool.js';
 import type { ProgressMessage } from '../../types/message.js';
 import { useIsClassifierChecking } from '../../utils/classifierApprovalsHook.js';
 import { logError } from '../../utils/log.js';
 import type { buildMessageLookups } from '../../utils/messages.js';
+import { FilePathWidthContext, toolUsePathWidth } from '../FilePathLink.js';
 import { MessageResponse } from '../MessageResponse.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 import { SentryErrorBoundary } from '../SentryErrorBoundary.js';
@@ -51,6 +53,7 @@ export function AssistantToolUseMessage({
   const terminalSize = useTerminalSize();
   const [theme] = useTheme();
   const bg = useSelectedMessageBg();
+  const isStaticRender = useContext(StaticRenderContext);
   const pendingWorkerRequest = useAppStateMaybeOutsideOfProvider(state => state.pendingWorkerRequest);
   const isClassifierCheckingRaw = useIsClassifierChecking(param.id);
   const permissionMode = useAppStateMaybeOutsideOfProvider(state => state.toolPermissionContext.mode);
@@ -160,9 +163,17 @@ export function AssistantToolUseMessage({
             </Text>
           </Box>
           {renderedToolUseMessage !== '' && (
-            <Box flexWrap="nowrap">
-              <Text>({renderedToolUseMessage})</Text>
-            </Box>
+            <FilePathWidthContext.Provider
+              value={
+                verbose || isStaticRender
+                  ? null
+                  : toolUsePathWidth(terminalSize.columns, shouldShowDot, userFacingToolName)
+              }
+            >
+              <Box flexWrap="nowrap">
+                <Text>({renderedToolUseMessage})</Text>
+              </Box>
+            </FilePathWidthContext.Provider>
           )}
           {/* Render tool-specific tags (timeout, model, resume ID, etc.) */}
           {input.success && tool.renderToolUseTag && tool.renderToolUseTag(input.data)}

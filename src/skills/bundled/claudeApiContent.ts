@@ -24,6 +24,9 @@ import pythonClaudeApiFilesApi from './claude-api/python/claude-api/files-api.md
 import pythonClaudeApiReadme from './claude-api/python/claude-api/README.md' with {
   type: 'text',
 }
+import pythonClaudeApiSdkUpgrade from './claude-api/python/claude-api/sdk-upgrade.md' with {
+  type: 'text',
+}
 import pythonClaudeApiStreaming from './claude-api/python/claude-api/streaming.md' with {
   type: 'text',
 }
@@ -113,6 +116,7 @@ export const CLAUDE_API_SUBCOMMANDS = [
   'migrate',
   'managed-agents-onboard',
   'prompt-audit',
+  'upgrade',
 ] as const
 
 export type ClaudeApiSubcommand =
@@ -126,6 +130,7 @@ export const SKILL_FILES: Record<string, string> = {
   'java/claude-api/README.md': javaClaudeApi,
   'php/claude-api/README.md': phpClaudeApi,
   'python/claude-api/README.md': pythonClaudeApiReadme,
+  'python/claude-api/sdk-upgrade.md': pythonClaudeApiSdkUpgrade,
   'python/claude-api/batches.md': pythonClaudeApiBatches,
   'python/claude-api/files-api.md': pythonClaudeApiFilesApi,
   'python/claude-api/streaming.md': pythonClaudeApiStreaming,

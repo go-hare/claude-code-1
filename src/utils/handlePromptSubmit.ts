@@ -377,7 +377,11 @@ export async function handlePromptSubmit(
       }
 
       const impl = await immediateCommand.load()
-      const jsx = await impl.call(onDone, context, commandArgs)
+      const jsx = await impl.call(
+        onDone,
+        { ...context, dispatchedAsImmediate: true },
+        commandArgs,
+      )
 
       // Skip if onDone already fired — prevents stuck isLocalJSXCommand
       // (see processSlashCommand.tsx local-jsx case for full mechanism).

@@ -1,0 +1,3 @@
+OFFSET=302882010
+
+solve().then(() => (Nsm(),Lsm))},$sm=sGS});var Tol;var Usm=A(()=>{Epe();Wlr();Tol={type:"local-jsx",name:"advisor",description:"Let Claude consult a stronger model at key moments",requires:{ink:!0},thinClientDispatch:"control-request",immediate:(e)=>e.trim()!==""?X3e():RVr(),get argumentHint(){return`[${[...Zer(),"off"].join("|")}]`},isEnabled:()=>Spe(),get isHidden(){return!Spe()}}});function aFt(){if(!qf())return!1;return vYt()}var kol=A(()=>{Zo();ws()});class Bsm{implementation=null;isC4EUpsellCommandEnabled(){return this.implementation===null?!1:this.implementation()}register(e){this.implementation=e}}function jsm(e){xol.register(e.isC4EUpsellCommandEnabled)}var xol;var Col=A(()=>{xol=ne

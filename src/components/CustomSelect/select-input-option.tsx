@@ -1,6 +1,6 @@
 import React, { type ReactNode, useEffect, useRef, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- UP arrow exit not in Attachments bindings
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput, type ClickEvent } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { PastedContent } from '../../utils/config.js';
 import { getImageFromClipboard } from '../../utils/imagePaste.js';
@@ -78,6 +78,9 @@ type Props<T> = {
    * Callback to change the selected image index.
    */
   onSelectedImageIndexChange?: (index: number) => void;
+
+  /** densable Select option click (yln-guarded by the caller). */
+  onClick?: (event: ClickEvent) => void;
 };
 
 export function SelectInputOption<T>({
@@ -104,6 +107,7 @@ export function SelectInputOption<T>({
   selectedImageIndex = 0,
   onImagesSelectedChange,
   onSelectedImageIndexChange,
+  onClick,
 }: Props<T>): React.ReactNode {
   const imageAttachments = pastedContents ? Object.values(pastedContents).filter(c => c.type === 'image') : [];
 
@@ -227,6 +231,7 @@ export function SelectInputOption<T>({
         shouldShowDownArrow={shouldShowDownArrow}
         shouldShowUpArrow={shouldShowUpArrow}
         declareCursor={false}
+        onClick={onClick}
       >
         <Box flexDirection="row" flexShrink={layout === 'compact' ? 0 : undefined}>
           <Text dimColor>{`${index}.`.padEnd(maxIndexWidth + 2)}</Text>

@@ -1,0 +1,6 @@
+offset=312832623
+f({requestId:cs,host:Lt.host,resolve:wc}),Je(($i)=>({...$i,pendingSandboxRequest:{requestId:cs,host:Lt.host}}))})}return new Promise((cs)=>{let rs=!1;function wc($i){if(rs)return;rs=!0,cs($i)}Ym(($i)=>[...$i,{hostPattern:Lt,resolvePromise:wc}]);{let $i=ht.getState().replBridgePermissionCallbacks;if($i){let Xl=gwt.randomUUID();$i.sendRequest(Xl,fgt,{host:Lt.host},gwt.randomUUID(),`Allow network connection to ${Lt.host}?`);let Sp=$i.onResponse(Xl,fgt,(I0)=>{Sp();let Mh=I0.behavior==="allow";if(Mh)oi.addSessionAllowedHost(Lt.host);Ym((Eh)=>(Eh.filter((bm)=>bm.hostPattern.host===Lt.host).forEach((bm)=>bm.resolvePromise(Mh)),Eh.filter((bm)=>bm.hostPattern.host!==Lt.host)));let Ep=tm.current.get(Lt.host);if(Ep){for(let Eh of Ep)Eh();tm.current.delete(Lt.host)}}),ef=()=>{Sp(),$i.cancelRequest(Xl)},Gf=tm.current.get(Lt.host)??[];Gf.push(ef),tm.current.set(Lt.host,Gf)}}})},[Je,ht,Y]);if(an.useEffect(()=>{let Lt=oi.getSandboxUnavailableReason();if(Lt&&oi.isSandboxRequired()){process.stderr.write(`
+Error: sandbox required but unavailable: ${Lt}
+`+`  sandbox.failIfUnavailable is set \u2014 refusing to start without a working sandbox.
+
+`),zd(1,"other");return}if(Lt)E(`sandbox disabled: ${Lt}`,{level:"warn"});let Rr=Lt?void 0:oi.getMaskCredentialWarning();if(Rr)E(`sandbox: ${Rr}`,{level:"warn"

@@ -1,0 +1,149 @@
+
+#### "GetCallerIdentityCommand" 7 [106557704,232057200,303832900,303834527,303837931,303896754,318453411] 
+
+==== GetCallerIdentityCommand 303832900 ====
+meterInstructions())]}).s("AWSSecurityTokenServiceV20110615","GetCallerIdentity",{}).n("STSClient","GetCallerIdentityCommand").sc(KVd).build(){}});var sqd,pri;var Dba=A(()=>{E7();ZCe();ILe();sqd=P(xs(),1);pri=class pri extends A$.classBuilder().ep(SG).m(function(e,t,r,n){return[sqd.getEndpointPlugin(r,e.getEndpointParameterInstructions())]}).s("AWSSecurityTokenServiceV20110615","GetDelegatedAccessToken",{}).n("STSClient","GetDelegatedAccessTokenCommand").sc(YVd).build(){}});var aqd,fri;var Mba=A(()=>{E7();ZCe();ILe();aqd=P(xs(),1);fri=class fri extends A$.classBuilder().ep(SG).m(function(e,t,r,n){return[aqd.getEndpointPlugin(r,e.getEndpointParameterInstructions())]}).s("AWSSecurityTokenServiceV20110615","GetFederationToken",{}).n("STSClient","GetFederationTokenCommand").sc(XVd).build(){}});var lqd,mri;var Oba=A(()=>{E7();ZCe();ILe();lqd=P(xs(),1);mri=class mri extends A$.classBuilder().e
+
+#### "STSClient" 8 [106558376,114623733,172131517,225225672,232033088,232037096,232041120,232045128] 
+
+==== STSClient 106558376 ====
+....	�......PackedPolicyTooLargeException...........I......RegionDisabledException.........	...	...STSClient...............	.......STSServiceException.............	E.."...SessionDurationEscalationException..............	...!...decorateDefaultCredentialProvider�..............�*......getDefaultRoleAssumer...........	...$...getDefaultRoleAssumerWithWebIdentity............��......CognitoIdentityClient...........	... ...GetCredentialsForIdentityCommand........	.......GetIdCommand............	.......createCredentialChain...........I�......fromCognitoIdentity.............	.......fromCognitoIdentityPool.........�-4.....fromLoginCredentials............	.......fromNodeProviderChain...........I.4.....fromTemporaryCredentials........	.......propertyProviderChain...........I%..$...AWS_CHAIN_RESOLVE_REQUEST_TIMEOUT_MS............	.......OAuthRefreshLockContendedError..........	.......SDK_OAUTH_REFRES
+
+#### "checkStsCallerIdentity" 0 [] 
+
+#### "Fetching AWS caller identity" 2 [114788952,304100598] 
+
+==== Fetching AWS caller identity 304100598 ====
+fore trust check",n),N("tengu_awsAuthRefresh_missing_trust",{}),!1}}if(bor)return bor;try{return E("Fetching AWS caller identity for AWS auth refresh command"),await iYd(),E("Fetched AWS caller identity, skipping AWS auth refresh command"),!1}catch{if(bor)return bor;if(coi!==null&&Date.now()-coi<Snv)return!1;return bor=(async()=>{try{return await o2n(e)}finally{if(t===Cwa)coi=Date.now();bor=null}})(),bor}}function o2n(e,t){E("Running AWS auth refresh command");let r=ome.getInstance();return r.startAuthentication(),new Promise((n)=>{let o=Mwa.exec(e,{timeout:Env,signal:t,windowsHide:!0});o.stdout.on("data",(i)=>{let s=i.toString().trim();if(s)r.addOutput(s),E(s,{level:"debug"})}),o.stderr.on("data",(i)=>{let s=i.toString().trim();if(s)r.setError(s),E(s,{level:"error"})}),o.on("close",(i,s)=>{if(i===0)E("AWS auth refresh completed successfully"),r.endAuthentication(!0),n(!0);else{let a=t?.
+
+#### "new STSClient(" 0 [] 
+
+#### "GetCallerIdentity" 8 [106557704,231985336,231985376,231991192,232057128,232057200,233900954,303825954] 
+
+==== GetCallerIdentity 303825954 ====
+Xb=[3,"com.amazonaws.sts","GetAccessKeyInfoResponse",0,["Account"],[0]],_Xb=[3,"com.amazonaws.sts","GetCallerIdentityRequest",0,[],[]],bXb=[3,"com.amazonaws.sts","GetCallerIdentityResponse",0,["UserId","Account","Arn"],[0,0,0]],vXb=[3,"com.amazonaws.sts","GetDelegatedAccessTokenRequest",0,["TradeInToken"],[[()=>tXb,0]]],SXb=[3,"com.amazonaws.sts","GetDelegatedAccessTokenResponse",0,["Credentials","PackedPolicySize","AssumedPrincipal"],[[()=>dor,0],1,0]],wXb=[3,"com.amazonaws.sts","GetFederationTokenRequest",0,["Name","Policy","PolicyArns","DurationSeconds","Tags"],[0,0,()=>ori,1,()=>Cba]],EXb=[3,"com.amazonaws.sts","GetFederationTokenResponse",0,["Credentials","FederatedUser","PackedPolicySize"],[[()=>dor,0],()=>hXb,1]],AXb=[3,"com.amazonaws.sts","GetSessionTokenRequest",0,["DurationSeconds","SerialNumber","TokenCode"],[1,0,0]],TXb=[3,"com.amazonaws.sts","GetSessionTokenResponse",0,["Cre
+
+#### "Please restart Claude from an existing directory" 2 [137614012,309978632] 
+
+==== Please restart Claude from an existing directory 309978632 ====
+realpath(Ie),fe=we;break}catch{}if(he===null)return ggt(`Working directory "${F}" no longer exists. Please restart Claude from an existing directory.`);if(g&&fe===0)return E(`[worktree] blocked shell exec: cwd "${F}" is gone and recovery targets the shared checkout; agentWorktree=${g}`,{level:"warn"}),N("tengu_agent_worktree_cwd_escape_blocked",{reason:xe("worktree_gone")}),ggt(`This agent is isolated in the worktree ${g}, but its working directory "${F}" no longer exists and the only recovery target is the parent session's shared checkout. Refusing to run there \u2014 the isolation worktree appears to have been removed. Report this instead of retrying.`);if(E(`Shell CWD "${F}" no longer exists, recovering to "${he}"`),o?.setCwd(he),jZs(he),fe>0)return ggt(`Working directory "${F}" was deleted; shell cwd recovered to "${he}". Re-issue your command (it will run from the recovered director
+
+#### "process.chdir" 8 [301039257,301848844,301848869,301848901,301849053,303198708,303198743,303198757] 
+
+==== process.chdir 301039257 ====
+ymlink:s}=Wy(n,t);if(s&&i!==t)r.add(i);return Array.from(r)}function Cr(){return vae}function NH(e){process.chdir(e);try{process.cwd()}catch{}}async function lPt(e,t,r){await using n=await T0.open(e,"r");let o=(await n.stat()).size;if(o<=t)return null;let i=Math.min(o-t,r),s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await n.read(s,a,i-a,t+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:o}}async function eL(e,t){await using r=await T0.open(e,"r");let n=(await r.stat()).size;if(n===0)return{content:"",bytesRead:0,bytesTotal:0};let o=Math.max(0,n-t),i=n-o,s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await r.read(s,a,i-a,o+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:n}}async function*KMu(e,t=65536){let r=await T0.open(e,"r"),n=Buffer.alloc(t),o=0,i=[],s=0;try{while(!0){let{bytesRead:a}=await r.
+
+#### "chdir(" 5 [301039265,301848909,301849061,313030487,328495781] 
+
+==== chdir( 301039265 ====
+}=Wy(n,t);if(s&&i!==t)r.add(i);return Array.from(r)}function Cr(){return vae}function NH(e){process.chdir(e);try{process.cwd()}catch{}}async function lPt(e,t,r){await using n=await T0.open(e,"r");let o=(await n.stat()).size;if(o<=t)return null;let i=Math.min(o-t,r),s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await n.read(s,a,i-a,t+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:o}}async function eL(e,t){await using r=await T0.open(e,"r");let n=(await r.stat()).size;if(n===0)return{content:"",bytesRead:0,bytesTotal:0};let o=Math.max(0,n-t),i=n-o,s=Buffer.allocUnsafe(i),a=0;while(a<i){let{bytesRead:l}=await r.read(s,a,i-a,o+a);if(l===0)break;a+=l}return{content:s.toString("utf8",0,a),bytesRead:a,bytesTotal:n}}async function*KMu(e,t=65536){let r=await T0.open(e,"r"),n=Buffer.alloc(t),o=0,i=[],s=0;try{while(!0){let{bytesRead:a}=await r.read(n,0
+
+#### "ENOENT" 8 [7195698,17194247,20908533,28339539,70252107,70396542,70405037,70405473] 
+
+==== ENOENT 7195698 ====
+`�..H����..H�.��x.H����..H�..p�.H����..H�.��I.H��ȇ..H�.t��.L����..��...�....H���<.�.�..�N.H�� H	�H�ENOENT..H9�uQH��H��0�..�*�.��t>.�..t(.��.��...H�.Hz�.H����..H�.:�I.H����..H�.�2�.L����..�b...H���...H���...L����...�.�s(.��uKH����..H����..H�.۲x.H����..H�.-o�.H����..H�.��I.H����..H�..4�.L����..��..H����..H����..H�.��x.H����..H�.�n�.H����..H�.��I.H����..H�..4�.L����..�..H���...H����..�W�..H���...�.��...H���...H�E�..��....)E�H�E�H���...H�E�H���...H���...H����...�.�r(.��.�....H����..H���...H�.۱x.H���...H�.-n�.H���...H�.��I.H���...H�.�.�.�....H��i�.��.�.H�.�m�.H����..H�.��I.H����..H�.["�.L����..��...H���...H����..H�.�=�.H����..H�.^x�.H����..H�.P�I.H����..H�..!�.L����..�x...H��p�..H���...H��؈..H���...H���...H�E�.�.�q(.��.�{...H����..H�.�x.H����..H�.4m�.H����..H�.��I.H����..H�.�!�.L����..��...H��P�..H����..H�.��x.H����..H�.�l�.H����..H�.��I.H����..H�..3�.L����..�...H��P�..H����..H�.L�
+
+#### "this session" 8 [99512049,99517173,99517246,99556228,99575849,99730284,99730382,99730493] 
+
+==== this session 99512049 ====
+.a.t.e.m.e.n.t.............�...d...@internal Running totals of the subagents the Agent tool started this session; see SDKSubagentStats.................�...C.u.m.u.l.a.t.i.v.e. .e.s.t.i.m.a.t.e.d. .c.o.s.t. .i.n. .U.S.D. .f.o.r. .t.h.i.s. .q.u.e.r.y.(.). .c.a.l.l.,. .c.o.v.e.r.i.n.g. .t.h.e. .s.a.m.e. .q.u.e.r.y.-.p.i.p.e.l.i.n.e. .c.a.l.l.s. .a.s. .m.o.d.e.l.U.s.a.g.e. .a.n.d. .s.h.a.r.i.n.g. .i.t.s. .l.i.f.e.c.y.c.l.e.:. .c.u.m.u.l.a.t.i.v.e. .a.c.r.o.s.s. .t.u.r.n.s. .i.n. .s.t.r.e.a.m.i.n.g.-.i.n.p.u.t. .s.e.s.s.i.o.n.s. ..  .e.a.c.h. .r.e.s.u.l.t. .c.a.r.r.i.e.s. .t.h.e. .r.u.n.n.i.n.g. .t.o.t.a.l. .s.o. .f.a.r.,. .s.o. .r.e.a.d. .t.h.e. .l.a.t.e.s.t. .r.e.s.u.l.t. .r.a.t.h.e.r. .t.h.a.n. .s.u.m.m.i.n.g. .a.c.r.o.s.s. .r.e.s.u.l.t.s... .C.r.a.s.h./.s.t.a.r.t.u.p.-.e.r.r.o.r. .r.e.s.u.l.t.s. .m.a.y. .c.a.r.r.y. .z.e.r.o.e.d. .v.a.l.u.e.s.,. .r.e.s.u.m.e.d. .s.e.s.s.i.o.n.s. .s.t.a.r.t
+
+#### "your own" 8 [99581601,100912137,150155237,153018008,153967166,154198652,154273470,160105644] 
+
+==== your own 99581601 ====
+hould never be word-for-word the same.
+ - You are not a lawyer and never comment on the legality of your own prompts and responses.
+ - Never produce or reproduce exact song lyrics........�������.(...................
+...�������.8.......p�������........��������K.......���������.......�������.................��������.. .............�d .	...getConfig�..............	~.....clearConfig.............�d .....countFilesRounded...............	...	...setStatus...............	.......testOnFirstUse..........	...�...ripgrep not found on PATH. Install it (brew install ripgrep / apt install ripgrep / winget install BurntSushi.ripgrep.MSVC) or use the native claude binary which embeds it......-1...��........�$	.!...sandbox configuration unavailable...............	.......rearmMirrorAllUncovered.........�g .....emitMirrorAllUncoveredOnce .............I�......oversizeNoticedFor......�������?........�h .
+...m
+
+#### "You are " 8 [85852010,85852269,99538072,99538152,99538264,99581543,100778692,100897488] 
+
+==== You are  85852010 ====
+ed to verify Bun.[0m (exit code: �.)�.��.error: 'bun upgrade' is unsupported on systems without ld
+
+You are likely on an immutable system such as NixOS, where dynamic
+libraries are stored in a global cache.
+
+Please use your system's package manager to properly upgrade bun.
+�.��..[0m.[31merror.[0m.[2m:.[0m 'bun upgrade' is unsupported on systems without ld
+
+You are likely on an immutable system such as NixOS, where dynamic
+libraries are stored in a global cache.
+
+Please use your system's package manager to properly upgrade bun.
+�.#error: Failed to verify Bun (code: �.)�.8.[0m.[31merror.[0m.[2m:.[0m Failed to verify Bun (code: �.).[0m�.)error: Failed to spawn Expand-Archive on �. due to error ��.6.[0m.[31merror:.[0m Failed to spawn Expand-Archive on �. due to error ��. error: Failed to open temp file ��.-.[0m.[31merror:.[0m Failed to open temp file ��.Failed to read temporary directory: {}
+
+#### "this row is you" 0 [] 
+
+#### "(you)" 0 [] 
+
+#### "own name" 8 [92849926,117890164,129414951,152536628,152541532,305024067,308132045,311298111] 
+
+==== own name 305024067 ====
+ t=e.toLowerCase();return t.includes("not permitted")||t.includes("cannot be set")||t.includes("unknown name")||t.includes("unknown field")||t.includes("unrecognized")||t.includes("additional propert")}function dci(e,t,r){if(e===413)return cci(t)||lci(t)?"prompt_too_long":void 0;if(e!==400)return;if(xRa(t))return"mid_conv_system";if(RRa(t))return"cache_control_field";if(TRa(t))return"thinking_signature";let n=kRa(t);if(n)return`thinking_type:${n}`;if(HEv(t))return"effort_unsupported";if(PEv(t))return"media_budget";let o=CRa(t);if(o)return o.kind==="image"?"image_block":"document_block";if(lci(t))return"prompt_too_long";if(ARa(t))return"max_tokens_context_overflow";for(let i of r??[]){let s=i.trim();if(s&&uci(t,s))return`beta_header:${s}`}return}var Mgp="capability_rejected: ",REv,IEv,Lgp;var pci=A(()=>{bU();REv=["could not process image","image exceeds","image dimensions exceed","image d
+
+#### "Lists agents you can" 2 [242498176,306241141] 
+
+==== Lists agents you can 306241141 ====
+""}function T$a(){return gjv+hjv()}var e_="ListAgents",HOp="ListPeers",gjv;var GGe=A(()=>{UG();gjv=`Lists agents you can ${Jm} to \u2014 in-process subagents you spawned, the teammates on your team, other local Claude sessions on this machine, your Claude sessions running in the cloud (when this session has cloud access; a cloud session receives your message but cannot message any session back yet \u2014 do not ask it to reply, read its answer in its own transcript), and (when Remote Control is connected here) your account's other sessions \u2014 Remote Control sessions on other machines and cloud sessions, each row labeled by kind. Names are the address: send with \`${Jm}({to: "<name>", message: "..."})\`, copying the name exactly as a row prints it. Append a row's \` [ref]\` only when the bare name is not enough \u2014 two rows share it, or an error asks you to disambiguate.`});var DOp
+
+#### "in-process subagents" 1 [306241178] 
+
+==== in-process subagents 306241178 ====
+r e_="ListAgents",HOp="ListPeers",gjv;var GGe=A(()=>{UG();gjv=`Lists agents you can ${Jm} to \u2014 in-process subagents you spawned, the teammates on your team, other local Claude sessions on this machine, your Claude sessions running in the cloud (when this session has cloud access; a cloud session receives your message but cannot message any session back yet \u2014 do not ask it to reply, read its answer in its own transcript), and (when Remote Control is connected here) your account's other sessions \u2014 Remote Control sessions on other machines and cloud sessions, each row labeled by kind. Names are the address: send with \`${Jm}({to: "<name>", message: "..."})\`, copying the name exactly as a row prints it. Append a row's \` [ref]\` only when the bare name is not enough \u2014 two rows share it, or an error asks you to disambiguate.`});var DOp={};Et(DOp,{CRON_CREATE_TOOL_NAME:()=
+
+#### "\\\\.\\pipe\\claude-code-" 0 [] 
+
+#### "claude-code-" 8 [99483496,99502147,99502203,99515896,99557648,99676856,99679196,99680304] 
+
+==== claude-code- 99483496 ====
+....user:profile............	.......org:create_api_key..............�...3...https://claude.ai/oauth/claude-code-client-metadata.............	.......command-name............	.......command-message.........	.......command-args............	...
+...bash-input..............	.......bash-stdout.............	.......bash-stderr.............	.......bash-exit-code..........	.......local-command-stdout............��
+.....local-command-stderr............	.......local-command-caveat............�.......tick............	.......forked-skill-launch.............I.......fork-source.............�.......task-notification...............	.......task-id.........� ......tool-use-id.............�...	...task-type!..............I!......artifact-watch-lifecycle........	.......output-file.............	.......status..........�"......summary.........	.......Background command .............I�......Agent ".........	......
+
+#### "named pipe" 1 [92024682] 
+
+==== named pipe 92024682 ====
+atement must be executed before accessing declaredTypes.JSC_useWasmJSTypes.Selected Attribute Types.named pipes.IsGeometricShapes.does not have a 'maximum' but the module requires that it does.did not have a 'maximum' but the module requires that it does.mapTimezones.cannot compute day-or-larger difference between ZonedDateTimes with different time zones.windowsZones.getTimeZones.metaZones.public key routines.object identifier routines.memory buffer routines.common libcrypto routines.Diffie-Hellman routines.bignum routines.ASN.1 encoding routines.elliptic curve routines.X.509 certificate routines.configuration file routines.CMS routines.OCSP routines.COMP routines.BIO routines.PEM routines.SSL routines.UI routines.ECDH routines.ENGINE routines.HMAC routines.RSA routines.ECDSA routines.PKCS8 routines.PKCS7 routines.X509 V3 routines.JITStubRoutines.Application transferred too many scanline
+
+#### "cross-session" 8 [99484544,100816438,100939602,111247284,117335486,117335928,117338024,117598394] 
+
+==== cross-session 99484544 ====
+....remote-review-progress..........	.......teammate-message........	.......channel.........I%......cross-session-message...........	...
+...slack-ping..............	.......slack-tag-message�..............�%.....agent-message...........�%......fetched-web-content.............	.......coordinator-relay&..............�&......fork-boilerplate........I'......Your directive: d.....��........	.......<system-reminder>..............	�......</system-reminder>..............	.......dispatch........��
+.
+...attachSink..............I(......isHardFailMode..........	(......kernelString............�(......getPlatform.............��.....getWslVersion...........	)......getMacOSMajorVersion............	.......getLinuxDistroInfo..............��......readLinuxDistroInfo.............	.......prime...........	�......use.............	.......eject...........�)......forEach.........	.......abcdefghijklmnopqrstuvwx
+
+#### "cross session" 8 [111245751,122751409,266083849,302085577,306243083,313253131,313394322,325132894] 
+
+==== cross session 302085577 ====
+ is off."),fastModePerSessionOptIn:Ut().optional().describe("When true, fast mode does not persist across sessions. Each session starts with fast mode off."),promptSuggestionEnabled:Ut().optional().describe("When false, prompt suggestions are disabled. When absent or true, prompt suggestions are enabled."),emojiCompletionEnabled:Ut().optional().describe("When false, the :emoji: shortcode typeahead (the suggestion popup and the :name: inline replacement) is disabled. When absent or true, it is enabled."),awaySummaryEnabled:Ut().optional().describe("@internal When false, the session recap (shown when you return after being away for 5+ minutes) is disabled. When absent or true, recap is enabled. Hidden from public SDK types until external launch."),showClearContextOnPlanAccept:Ut().optional().describe('When true, the plan-approval dialog offers a "clear context" option. Defaults to false.')
+
+#### "function ALe(" 2 [303702701,334834969] 
+
+==== function ALe( 303702701 ====
+(Math.max(0,t-e.lastActive),{mostSignificantOnly:!0})} ago`;return`${VCe(e)} \u2014 ${r}, ${n}${o}`}function ALe(e){if(typeof e!=="string")return null;return[...e.replace(/[\p{Cc}\p{Cf}]/gu,(r)=>/\s/.test(r)?r:"").replace(/\s+/g," ").trim()].slice(0,dYb).join("").trim()||"untitled session"}function lti(e,t){return e.find((r)=>r.name===t)??e.find((r)=>ALe(r.name)===t)}function TLe(e){let t=ALe(e);return t!==null&&!iBr(t)&&ELe(t)?t:null}function MFn(e){let t=ALe(e);return t!==null&&__a(t)&&Vu(t)!==dL?t:null}function __a(e){return!iBr(e)&&ELe(e)&&!e.includes("@")&&e!=="*"}function iBr(e){let t=Vu(e);return xD(e).scheme!=="other"||xD(t).scheme!=="other"||g_a(e)||g_a(t)}function pYb(e){let t=e.map((s)=>iti(s.kind,s.id)),r=A8.CLAUDE_CODE_MESSAGING_SOCKET,n=r===void 0?[]:[iti("session",r)],o=Gn([...t,...n]).sort(),i=new Map;for(let s=0;s<o.length;s++){let a=o[s],l=Math.max(s>0?rWd(a,o[s-1]):0,s
+
+#### "function TLe(" 1 [303702971] 
+
+==== function TLe( 303702971 ====
+||"untitled session"}function lti(e,t){return e.find((r)=>r.name===t)??e.find((r)=>ALe(r.name)===t)}function TLe(e){let t=ALe(e);return t!==null&&!iBr(t)&&ELe(t)?t:null}function MFn(e){let t=ALe(e);return t!==null&&__a(t)&&Vu(t)!==dL?t:null}function __a(e){return!iBr(e)&&ELe(e)&&!e.includes("@")&&e!=="*"}function iBr(e){let t=Vu(e);return xD(e).scheme!=="other"||xD(t).scheme!=="other"||g_a(e)||g_a(t)}function pYb(e){let t=e.map((s)=>iti(s.kind,s.id)),r=A8.CLAUDE_CODE_MESSAGING_SOCKET,n=r===void 0?[]:[iti("session",r)],o=Gn([...t,...n]).sort(),i=new Map;for(let s=0;s<o.length;s++){let a=o[s],l=Math.max(s>0?rWd(a,o[s-1]):0,s+1<o.length?rWd(a,o[s+1]):0);i.set(a,Math.min(a.length,Math.max(sti,l+1)))}return e.map((s,a)=>{let l=t[a];return{...s,ref:l.slice(0,i.get(l))}})}function rWd(e,t){let r=0;while(r<e.length&&r<t.length&&e[r]===t[r])r++;return r}function iti(e,t){return String(iu(`${e}:${
+
+#### "startsWith(\"/\")" 8 [71641777,71644740,71655317,85790877,85795363,300649817,300674441,300674787] 
+
+==== startsWith("/") 300649817 ====
+Case().trim();return["0","false","no","off"].includes(t)}function U3(e){if(!e||e.startsWith("-")||e.startsWith("/"))return!1;if(e.includes(".."))return!1;if(e.split("/").some((t)=>t==="."||t===""))return!1;return/^[a-zA-Z0-9/._+@-]+$/.test(e)}function xi(){let e=new Set;return{subscribe(t){let r=wMr(t);return e.add(r),()=>{e.delete(r)}},emit(...t){let r;for(let n of e)try{n(...t)}catch(o){(r??=[]).push(o)}if(r)throw r.length===1?r[0]:AggregateError(r,"Signal listener(s) threw")},clear(){e.clear()}}}var cxu=A(()=>{Xzs()});function EMr(e){if(!e)return{code:"en"};let t=e.toLowerCase().trim();if(!t)return{code:"en"};if(uxu.has(t))return{code:t};let r=Ff_[t];if(r)return{code:r};let n=t.split("-")[0];if(n&&uxu.has(n))return{code:n};return{code:"en",fellBackFrom:e}}var Ff_,uxu;var dxu=A(()=>{Ff_={english:"en",spanish:"es",espa\u{f1}ol:"es",espanol:"es",french:"fr",fran\u{e7}ais:"fr",francais:"f
+
+#### "stripBom" 3 [236186072,304534058,304534179] 
+
+==== stripBom 304534058 ====
+f(Buffer.isBuffer(e))e=e.toString("utf8");return e.replace(/^\uFEFF/,"")}Gap.exports={stringify:ypv,stripBom:_pv}});var rka=ae(function(NUC,Kap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.parse(o,t?t.reviver:null)}catch(s){if(n)throw s.message=`${e}: ${s.message}`,s;else return null}return i}var vpv=eai.fromPromise(bpv);function Spv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0;try{let o=r.readFileSync(e,t);return o=qap(o),JSON.parse(o,t.reviver)}catch(o){if(n)throw o.message=`${e}: ${o.message}`,o;else return null}}async function wpv(e,t,r={}){let n=r.fs||Bzr,o=Vap(t,r);await eai.fromCallback(n.writeFile)(e,o,r)}var Epv
+
+#### "posix_spawn" 1 [87652476] 
+
+==== posix_spawn 87652476 ====
+esendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollscandirkeventkqueueepoll_ctlkillwaitpidposix_spawnwritevpwritevreadvpreadvioctl_ficlonebind2connect2try_writesocketpairsetsockoptstatxuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfchownatioctlgetrlimitsetrlimitclone3..��%E............�9E............y�.E............?..E............�9E............�9E............��9E....	........�9E............��.E............�9E.............�9E............$�9E............*�9E............2�9E............8�9E............=�9E....	.......F�9E............K�9E............R�9E............W�9E....	.......`�9E............h�9E....
+.......r�9E............��9E............��9E............M�.E............��9E............��9E............��9E............�� E............��9E
+
+#### "hook cwd" 0 [] 

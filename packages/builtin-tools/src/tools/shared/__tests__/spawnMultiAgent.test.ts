@@ -212,7 +212,7 @@ describe('generateUniqueTeammateName densable pzg', () => {
 })
 
 describe('spawnTeammate', () => {
-  test('fails before spawn side effects when the team file is missing', async () => {
+  test('fails when the implicit session team was never initialized', async () => {
     let setAppStateCalled = false
     const context = {
       getAppState: () => ({
@@ -233,11 +233,38 @@ describe('spawnTeammate', () => {
         {
           name: 'worker',
           prompt: 'do work',
-          team_name: 'missing-team',
         },
         context as any,
       ),
-    ).rejects.toThrow('Team "missing-team" does not exist')
+    ).rejects.toThrow('session team not initialized')
+    expect(setAppStateCalled).toBe(false)
+  })
+
+  test('fails before spawn side effects when the team file is missing', async () => {
+    let setAppStateCalled = false
+    const context = {
+      getAppState: () => ({
+        teamContext: { teamName: 'missing-team' },
+      }),
+      setAppState: () => {
+        setAppStateCalled = true
+      },
+      options: {
+        agentDefinitions: {
+          activeAgents: [],
+        },
+      },
+    }
+
+    await expect(
+      spawnTeammate(
+        {
+          name: 'worker',
+          prompt: 'do work',
+        },
+        context as any,
+      ),
+    ).rejects.toThrow('team file for "missing-team" not found')
     expect(setAppStateCalled).toBe(false)
   })
 

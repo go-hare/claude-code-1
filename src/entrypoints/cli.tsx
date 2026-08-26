@@ -5,6 +5,7 @@
 import '../utils/performanceShim.js';
 import { feature } from 'bun:bundle';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import { getStartupCwdError } from '../utils/startupCwd.js';
 
 // Runtime fallback for MACRO.* when not injected by build/dev defines.
 // This happens when running cli.tsx directly (not via `bun run dev` or built dist/).
@@ -46,6 +47,10 @@ if (forceInteractiveEarly) {
     }
   }
 }
+
+// densable: Windows must not resolve relative paths against a deleted cwd.
+// eslint-disable-next-line custom-rules/no-top-level-side-effects, custom-rules/no-process-env-top-level
+process.env.NoDefaultCurrentDirectoryInExePath = '1';
 
 // Bugfix for corepack auto-pinning, which adds yarnpkg to peoples' package.jsons
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
@@ -103,6 +108,13 @@ async function main(): Promise<void> {
       }
     }
     return;
+  }
+
+  // densable `cku` — after --version (zero extra work on that path).
+  const startupCwdError = getStartupCwdError();
+  if (startupCwdError) {
+    console.error(startupCwdError);
+    process.exit(1);
   }
 
   // For all other paths, load the startup profiler

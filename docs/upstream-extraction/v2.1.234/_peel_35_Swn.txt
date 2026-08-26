@@ -1,0 +1,3 @@
+OFFSET=290666943
+
+cache.clear?.()}function P$o(){return A5()!==null}function Swn(){return A5()==="profile-implicit"&&uzs()==="user_oauth"}function Ewn(){let e=A5();if(e==="env-quad"){let t=process.env.ANTHROPIC_WORKSPACE_ID?.trim();return`env-quad \xB7 org ${azs(process.env.ANTHROPIC_ORGANIZATION_ID??"")} \xB7 rule ${azs(process.env.ANTHROPIC_FEDERATION_RULE_ID??"")}${t?` \xB7 ws ${t.startsWith("wrkspc_")?azs(t):t}`:""}`}if(e==="profile-explicit"||e==="profile-imp

@@ -1,0 +1,3 @@
+OFFSET=299782203
+
+wed working directories for this session: ${k}.`;if(S?.type==="rule")return{behavior:"deny",message:x,decisionReason:S};let C=[];if(v&&Xbe(y))if(u==="read"){let I=QXt(Soe(v),"session");if(I)C.push(I)}else C.push({type:"addDirectories",directories:[Soe(v)],destination:"session"});if(Xbe(y)&&(u==="write"||u==="create")&&(t.mode==="default"||t.mode==="plan"))C.push({type:"setMode",mode:"acceptEdits",destination:"session"});o??={behavior:"ask",message:x,blockedPath:Xbe(y)?v:void 0,decisionReason:S,suggestions:C}}}}if(e.nestedCommands)for(let l of e.nestedCommands){let{paths:c,operationType:u,hasUnvalidatablePathArg:d,optionalWrite:p}=mwf(l);if(d){let m=Hw(l.name);o??={behavior:"ask",message:`${m

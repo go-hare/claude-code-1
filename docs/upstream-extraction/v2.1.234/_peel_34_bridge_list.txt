@@ -1,0 +1,115 @@
+=== b'q_i=5' first@299115470 ===
+r:ue(x)}}Shf(p,T)}if(T.status===403&&cOe(T.data,IU(T.data))==="untrusted_device"){if(yxt())return{ok:!1,error:`auth: ${Z0n()}`}}}if(T.status===403&&cOe(T.data,IU(T.data))==="session_stale_relogin")return{ok:!1,error:`auth: ${wZe({terminal:!0,reason:"session_stale_relogin"})}`};if(!Ahf(T.status)){if(T.status===401&&K.CLAUDE_CODE_REMOTE===!0)return{ok:!1,error:`auth: ${whf}`};return{ok:!1,error:`HTTP ${T.status}`}}return E(`[bridge:peers] posted to ${p}: ${t.slice(0,60)}`),{ok:!0,msgId:g.msg_id}}function JGv(e){return e==="bridge"||e==="anthropic_cloud"||e==="byoc"||e==="snap"}function Ahf(e){return e===200||e===201||e===204}function Shf(e,t){if(Ahf(t.status))return;let r=IU(t.data);E(`[bridge:peers] post to ${e} rejected: HTTP ${t.status}${r?` \u2014 ${Lat(r)}`:""}`,{level:"warn"})}var Ehf,q_i=5,whf="this cloud session cannot message other sessions yet \u2014 its credential is accepted for its own work but not for delivering to another session, so a reply from here is not possible; say so in your response instead of retrying";var AWn=A(()=>{sv();Ze();Roe();cr();pt();bxn();dX();Y3o();xx();rsi();WXe();vte();G_i();nN();_k();iii();V2();Ehf=require("crypto")});function Uza(e){return gAn(e)?"cloud":Y_i}function TWn(e){let t=MUe(e);return t!==null&&D5(t).scheme==="other"&&j0e(t)?t:null}function Thf(e){return TWn(e)??"(untitled)"}class khf{listed=void 0;inFlight=void 0;record(e,t,r){this.listed={at:Date.now(),listed:e,handle:t,truncated:r}}forget(){this.listed=void 0}begin(e){this.inFlight=e}settle(e){if(this.inFlight===e)this.inFlight=void 0}}function kWn(){let{getReplBridgeHandle:e}=(nN(),on(hYp)),{isReplBridgeActive:t}=(bt(),on(KFe)),r=e();return r&&t()?r:null}async function J_i(e){{let t=kWn();if(!t)return{rows:[],failed:!1,handle:null};let r=X_i.of(e),n=r.inFlight;if(n!==void 0&&n.handle===t)return n.promise;let{listBridgePeerSessions:o}=(AWn(),on(wWn)),i={record:void 0},s=Date.now(),a=(async()=>{try{let l={failed:!1,truncated:!1},c;try{c=await o(l)}catch(u){return E(`[bridge:population] fetch threw: ${ue(u)} \u2014 treated as failed`,{level:"warn"}),{rows:[],failed:!0,handle:t}}return E(`[bridge:population] fetched ${c.length} rows in ${Date.now()-s}ms${l.failed?" (FAILED \u2014 not recordable)":""}${l.truncated?" (truncated at page budget)":""}`),{rows:c,failed:l.failed,...l.truncated&&{truncated:!0},handle:t}}finally{r.settle(i.record)}})();return i.record={handle:t,promise:a},r.begin(i.record),a}return{rows:[],failed:!1,handle:null}}function Z_i(e){{let t=kWn();return t!==null&&e.handle===t}return!1}function xWn(e,t,r){{let n=kWn();if(!n)return;if(t.handle!==n){E("[bridge:population] walk ran under a previous identity \u2014 ignoring its outcome for the current handle");return}let o=X_i.of(e);if(t.failed){let i=o.listed;if(i!==void 0&&i.handle===n)o.forget(),E("[bridge:population] failed walk \u2014 cleared the printed set (going cold, never sticky)");return}o.record(r,n,t.truncated===!0),E(`[bridge:population] recorded ${r.length} bridge rows (cloud-deduped)`)}}function Q_i(e,t){{let r=kWn();if(!r||t.handle!==r)return;let n=X_i.of(e),o=n.listed;if(o!==void 0&&o.handle===r)n.forget(),E("[bridge:population] forgot the recorded set (an unrecordable listing superseded it)")}}function xhf(e){return Bza(e)?.rows}function Bza(e){{let t=kWn(),r=X_
+
+=== b'listBridgePeerSessions' first@106602368 ===
+isInteractiveRemoteSession..............	.......walkCcrSessionList0...............0.....BRIDGE_ACCOUNT_UNVERIFIED_HINT..........	`......BRIDGE_LOGIN_ERROR..............	.......BRIDGE_LOGIN_HINT.0.............I.0.....BRIDGE_LOGIN_INSTRUCTION........	.......BRIDGE_MALFORMED_RESPONSE_HINT..........	.......BRIDGE_OWNER_CHANGED_HINT...............	... ...BRIDGE_REATTACH_UNAVAILABLE_HINT........	.......REMOTE_CONTROL_DISCONNECTED_MSG.........	......waitingOnUser...........	.......pendingCount............	.......droppedBatchCount.......................droppedInternalBatches..........	.......droppedDurableBatches............i......internalEventsPending...........	.......CLOUD_SESSION_CANNOT_SEND_HINT..........	.......classifyBridgeSendError.................isLikelyStaleBridgeError........	.......listBridgePeerSessions...........v......postInterClaudeMessage..........	.......InFlightTeammateResumes.........	)......SendMessagePreconditionError............I.0.....SendMessageTool...........0.....emitPeerFileReceiveTelemetry............I.0.....injectPeerFilePrefix............	.......materializeLocalPeerFiles...............	.......peerFileCountCapNote..............0.....peerFileFailureNote.............	.......peerTransferSpoolDir............	.0.....peerUploadsDir..........I.0.....readPeerFileBounded.............	.......sanitizePeerFileName..............0.....stageLocalPeerFile..............	.......sweepStaleSpoolEntries............0.....verifyPeerFileIntegrity.........	.......SEND_FILE_UNAVAILABLE_MESSAGE...........	.......SendFileTool............	.......COMMENT_ANALYST_AGENT.............0.....ASSET_TARGET_PIN_TAG............	.......ASSET_UPLOAD_PIN_TAG....................ArtifactTool..............0.....CAPABILITIES_PROMPT_PARAGRAPH...........	.0.....PLAN_CONSENT_ASK_TAG............	.......PLAN_CONSENT_CAPS_UNKNOWN...............	.......PLAN_CONSENT_DECISION_CAPS_TAG..........	.......PUBLISH_TARGET_TAG..............	.......REMOTE_COMMENTS_SENTENCE........	.......STALE_GUARD_INLINE_CAP..........	s.."...artifactCapabilitiesPromptGateOpen..............	.......artifactCommentsPromptGateOpen..........	.......artifactDbPromptGateOpen................artifactLiveEditCompiledIn0.....................artifactLiveEditPromptGateOpen...........".."...artifactReadPageDataPromptGateOpen..............	...$...artifactRemoteWatchUnsupportedFrozen..............0.....assetFieldsFrom..........}......buildArtifactInputSchema........	...#...buildArtifactOutputSchemaForPublish.............	.......canonicalCapsJson...............	.......commentFieldsFrom...............Z......coworkConsentMustDeny...........	.......dbDataForConsent........	.......dbFieldsFrom............	.......dbWriteTargetForConsent.........	.......derivePublishContext..............0.....landPartial.............I.0.....pickArtifactSourceAnchorRoot....................planConsentCapsJsonForStamp.....................planPublishConsentEarned........	...
+...promptTail..............	.......readAssetDestinationStem................replyTextForConsent.............	.......spellingAgnosticCapsJson........	.......stampArtifactAssetReadConsent............-......stampArtifactAssetUploadConsent...........0.....stampArtifactDbReadConsent...............`.....stampArtifactDbWriteConsent.............I.0.....stampArtifactReadCon
+
+=== b'BRIDGE_PEER_LIST_PAGE' first@-1 ===
+=== b'/v1/sessions?limit' first@-1 ===
+=== b'after_id' first@142047888 ===
+.'......	.......x.......	...............I.......................
+.......................................	...L...Cannot destructure property 'prepareApiRequest' from null or undefined value....................	...I...Cannot destructure property 'getOauthConfig' from null or undefined value...............	.......t.......................	...F...Cannot destructure property 'accessToken' from null or undefined value..........	...!...[bridge:peers] auth prep failed: .......................	.......o...............	......./v1/code/sessions...............	......./v1/sessions....2...............	.......r...............	.......n.......1.......................	.......X-Trusted-Device-Token..................................	.......limit...........	.......100.............	.......cursor..........	.......after_id........	.......?........:......................	...$...[bridge:peers] list request failed: ....................	.......untrusted_device........................	.......[bridge:peers] list failed .............	.......object..........	...6...[bridge:peers] list body `data` not an array; stopping..........	.......archived........	.......running.........	.......requires_action.........	.......idle............	...............	...	...connected...............	.......disconnected............	.../...[bridge:peers] skipping malformed session row: .........	...+...Iterator result interface is not an object......................	...K...[bridge:peers] page budget exhausted with more sessions remaining (scanned .............	....... pages).........	.......[bridge:peers] listed ..........	....... peer sessions.................. ..  .T.R.U.N.C.A.T.E.D. .a.t. .........	....... pages (more sessions exist)............	.......warn............................................................................................I..............4.E$<..UT?.....1........4.E$<..UTl....@...B.4q....@....p..@ ......m.q.@...@ ..J.....u.....@.<.B.4.. <.@.M.@...@ 4.C.....S.@.<.....@pU.@.M...a@......,.................@ ..@...\@...`6.....@`<..0..@ ..............@`...@.......C......@.=.@ ..D...OAd.@@-.@ ..D...@`4.@`].Y...@...I.....4.@`<.@P..@PL.@@d...5.....@`4.@.<..1......@.......@ ......p`q.@ /.@ ..J...@05.@P..G...@.U..P..@ ..E.....4.@ ..E.....3..`;.....@ ..........@0..@...\@..@.6.@0E.G.....3.@@%.@...G...j.j.@...@ ..J...@05.@P..E...@`U.E.....J.@.6.H...@.4.E....Q4.M.3.@0U.z...@./.@ ..J...@05.@.,.E....Q4..p3...L.....@.......@P$.@ ..O...@.E.G...@.~.N...@.U.N...@@V.N...@.].@.%.@ ..C....`D.@ ..C.....3...<.@ ......@.<.@0..@@..@.D.D...@`4.C...@.l.D...@`4.C...@P,.E...@.T.@.4.@ ..F...@.D.F...@P..@.4.@ ..K...@.D.N.......@ ..Q.....3.@.v.Q....P.C....@.,.R...@0n.R...@ ..R..x,.............,'....@.T..P..@ ......{.p.............@...@ ..E....Q4.@@..E....Q4.@.L.E....Q4.@...@...@ ...`......@.mR.......\....@..E....@.D..@..........@.D.@...G...@.]...5&....@P..l...@.......@.,.@ ..@...L@..@P5C....@p.E................@..........|...............$...-...9...l...........................O...R...............*...`...c.......................,.../...2.......>...D...I.......................p...r...............%...8...;...V...e...y........................	..)	..@	..F	..L	...	...	...	...	...
+...
+..+
+..1
+..7
+..L
+..Q
+..r
+..w
+..z
+...
+...
+..*...-...C...F...t...x...........................^.......b...........5...........K.......
+
+=== b'CLAUDE_BRIDGE_USE_CCR_V2' first@-1 ===
+=== b'nBe' first@69994420 ===
+          @throwTypeError(`Expected onLoad plugin for namespace ${userNamespace} to exist`);
+        }
+        return this.onResolveAsync(internalID, path, userNamespace, external), null;
+      }
+    return this.onResolveAsync(internalID, null, null, null), null;
+  })(specifier, inputNamespace, importer, kind);
+  while (promiseResult && @isPromise(promiseResult) && @peekPromiseStatus(promiseResult) === 1)
+    promiseResult = @peekPromiseSettledValue(promiseResult);
+  if (promiseResult && @isPromise(promiseResult))
+    promiseResult.then(() => {}, (e) => {
+      this.addError(internalID, e, 0);
+    });
+})
+(function (setup, config, promises, is_last, isBake) {"use strict";
+  this.promises = promises;
+  var onLoadPlugins = /* @__PURE__ */ new Map, onResolvePlugins = /* @__PURE__ */ new Map, onBeforeParsePlugins = /* @__PURE__ */ new Map;
+  function validate(filterObject, callback, map, symbol, external) {
+    if (!filterObject || !@isObject(filterObject))
+      @throwTypeError('Expected an object with "filter" RegExp');
+    let isOnBeforeParse = !1;
+    if (map === onBeforeParsePlugins) {
+      if (isOnBeforeParse = !0, !callback || !@isObject(callback) || !callback.@napiDlopenHandle)
+        @throwTypeError("onBeforeParse `napiModule` must be a Napi module which exports the `BUN_PLUGIN_NAME` symbol.");
+      if (typeof symbol !== "string")
+        @throwTypeError("onBeforeParse `symbol` must be a string");
+    } else if (!callback || !@isCallable(callback))
+      @throwTypeError("lmao callback must be a function");
+    var { filter, namespace = "file" } = filterObject;
+    if (!filter)
+      @throwTypeError('Expected an object with "filter" RegExp');
+    if (!@isRegExpObject(filter))
+      @throwTypeError("filter must be a RegExp");
+    if (namespace && typeof namespace !== "string")
+      @throwTypeError("namespace must be a string");
+    if ((namespace?.length ?? 0) === 0)
+      namespace = "file";
+    if (!/^([/@a-zA-Z0-9_\\-]+)$/.test(namespace))
+      @throwTypeError("namespace can only contain $a-zA-Z0-9_\\-");
+    var callbacks = map.@get(namespace);
+    if (!callbacks)
+      map.@set(namespace, [isOnBeforeParse ? [filter, callback, symbol, external] : [filter, callback]]);
+    else
+      @arrayPush(callbacks, isOnBeforeParse ? [filter, callback, symbol, external] : [filter, callback]);
+  }
+  function onLoad(filterObject, callback) {
+    return validate(filterObject, callback, onLoadPlugins, @undefined, @undefined), this;
+  }
+  function onResolve(filterObject, callback) {
+    return validate(filterObject, callback, onResolvePlugins, @undefined, @undefined), this;
+  }
+  function onBeforeParse(filterObject, { napiModule, external, symbol }) {
+    return validate(filterObject, napiModule, onBeforeParsePlugins, symbol, external), this;
+  }
+  let self = this;
+  function onStart(callback) {
+    if (isBake)
+      @throwTypeError("onStart() is not supported in Bake yet");
+    if (!@isCallable(callback))
+      @throwTypeError("callback must be a function");
+    let ret = callback();
+    if (@isPromise(ret)) {
+      if (@peekPromiseStatus(ret) != 1)
+        @pokePromiseAsHandled(ret), self.promises ??= [], self.promises.push(ret);
+    }
+    return this;
+  }
+  function onEnd(callback) {
+    if (!@isCallable(callback))
+      throw @makeErrorWithCo
+
+=== all q_i= occurrences (first 20) ===
+@299115470: q_i=5,whf="this cloud session cannot message other sessions yet \u2014 its crede
+=== b'pages>=q_i' @-1 ===
+=== b'p>=q_i' @-1 ===
+=== b'page budget' @141418409 ===
+....... rows so far): .........	.......archived........	.......bridge..........	...............	...+...Iterator result interface is not an object..............................	.......f...............	.......[ccr:list]: ............	...
+... fetched, ..............	....... after archive/bridge/husk..............	......./accept.........	....... filter.........	...... (TRUNCATED: ...........	...+...-page budget exhausted with more remaining).....................	.......[ccr:list] failed: ...............................................................................`l.......;m..............4.E$<..UT?.....1........4.E$<..UTf....@...B.4f....@...B.4.. <.@@..@ 4.C.3...<.....@ ...@......@ ..@P...tN.@ ......@...@...@ 4.@.<.]0c.....@...N...@`M......Q........4.E$<..UT.....@@..@PM.@.L.G.....].@ .....C....@0pN....@.T.E....Q4..R4.@`..E....Q4..p3...L.....@@..D...@`4.C...F.3.@@U.D...@`4.C...F.3.@.,.G.....3.@.%.S...@`M.Q.....2...'.....@p4.C.....3.@.T.S...@`M.Q.....V.@0..F...E.d..T4...:...e.@ ......@.T.H...@.L.....@.|.E...@p4.................@...E....Q4.@.}.E....Q4..R4..3L.@.<..Q......@.4.N...@.M.K.....2..aN.....@.4.@@..L...@.L.G.....,.....@@&.S.....YI......$.....@.4.....@`T.@ ..R.........4-....@.<..@.....h......D.......4.E$<..UTw....@`...P......@.<..p..@P=.H...@.L.G...@05..B..@P5.@.M.@.L.G...@P^.H...@....@5&........@.......@.,.@.T.N...@`M......Q........4.E$<..UTD....@@....M.@ ......_pr....0.......................8...>...G...................&...c...p...s.......2...8...=...a...............
+...U...................x...................................-...t...}.......................*...E........
+=== b'TRUNCATED: ' @141418378 ===
+..	... failed (...............	....... rows so far): .........	.......archived........	.......bridge..........	...............	...+...Iterator result interface is not an object..............................	.......f...............	.......[ccr:list]: ............	...
+... fetched, ..............	....... after archive/bridge/husk..............	......./accept.........	....... filter.........	...... (TRUNCATED: ...........	...+...-page budget exhausted with more remaining).....................	.......[ccr:list] failed: ...............................................................................`l.......;m..............4.E$<..UT?.....1........4.E$<..UTf....@...B.4f....@...B.4.. <.@@..@ 4.C.3...<.....@ ...@......@ ..@P...tN.@ ......@...@...@ 4.@.<.]0c.....@...N...@`M......Q........4.E$<..UT.....@@..@PM.@.L.G.....].@ .....C....@0pN....@.T.E....Q4..R4.@`..E....Q4..p3...L.....@@..D...@`4.C...F.3.@@U.D...@`4.C...F.3.@.,.G.....3.@.%.S...@`M.Q.....2...'.....@p4.C.....3.@.T.S...@`M.Q.....V.@0..F...E.d..T4...:...e.@ ......@.T.H...@.L.....@.|.E...@p4.................@...E....Q4.@.}.E....Q4..R4..3L.@.<..Q......@.4.N...@.M.K.....2..aN.....@.4.@@..L...@.L.G.....,.....@@&.S.....YI......$.....@.4.....@`T.@ ..R.........4-....@.<..@.....h......D.......4.E$<..UTw....@`...P......@.<..p..@P=.H...@.L.G...@05..B..@P5.@.M.@.L.G...@P^.H...@....@5&........@.......@.,.@.T.N...@`M......Q........4.E$<..UTD....@@....M.@ ......_pr....0.......................8...>...G...................&...c...p...s.......2...8...=...a...............
+...U...................x...................................-...t...}.....
+=== b'bridge:list' @-1 ===
+=== b'[bridge:list]' @-1 ===
+=== b'[ccr:bridge]' @-1 ===
+=== b'has_more' @140878224 ===
+........X.......................................................................h........................t........................~.......................................................................................................................s..............................................7	.......................	.....................X.	.............	.......serverError.............	.......has_more........	.......pages...........	...	...collected.......P ..,B..........y!..).......*...............	H..H....................... .r.......................r.....h........................................M..........................................................................$.......................
+.......................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...x...x...8...8...8...H...`.......................................................................................................(...............	...............	.......0.......	.......0...............................x...................................................................................................................................................................................F...........L...q............................p..............!..........!..........!...2...Q...!.......!...p.............................a................F.F.Q................i..............i.....F........F..............i........................................................................................................................................................

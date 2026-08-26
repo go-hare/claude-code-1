@@ -1,0 +1,3 @@
+OFFSET=290668120
+
+tials_path??Alt.join(e,"credentials",`${t}.json`)}function M$o(){let e=process.env.ANTHROPIC_CONFIG_DIR?.trim();if(e)return e;{let n=process.env.APPDATA?.trim();if(n)return Alt.join(n,"Anthropic");let o=process.env.USERPROFILE?.trim();return o?Alt.join(o,"AppData","Roaming","Anthropic"):null}let t=process.env.XDG_CONFIG_HOME?.trim();if(t)return Alt.join(t,"anthropic");let r=process.env.HOME?.trim();return r?Alt.join(r,".config","anthropic"):null}

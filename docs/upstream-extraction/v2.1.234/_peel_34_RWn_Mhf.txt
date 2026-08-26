@@ -1,0 +1,106 @@
+=== b'function RWn(' @ 299126087 ===
+d:i.truncated}}function nVv(e,t,r,n){let o=MWr(e,t);if(o!=="remote-control"&&o!=="cloud")return!1;let i=Pm(e[t].id);if(r.some((s)=>Pm(s.id)===i))return!1;return n===void 0||!n.some((s)=>Pm(s.id)===i)}function RWn(e){return{...e.cloudUnavailable&&{cloudUnavailable:e.cloudUnavailable},...e.bridgeUnavailable&&{bridgeUnavailable:e.bridgeUnavailable},...e.localUnavailable&&{localUnavailable:!0},...e.searchTruncated&&{searchTruncated:!0}}}function Phf(e,t,r,n,o){let i=qKt(e.byName,t,r);if(i){if(i.kind==="ambiguous"){let s=e.byName.get(t),a=Fhf(n.sendMessagePins,t,s,r,o);if(a)return Uhf(a,s,n,t,e,o);let l=tNt(n.sendMessagePins,[t],o.localClaimedRemoteBodies),c=s[0],u=MWr(n.sendMessagePins,t);if(s.length===1&&(c.kind==="session"||c.kind==="cloud-session"||c.kind==="bridge-session")&&!o.cloudUnavailable&&o.bridgeSettled&&!o.bridgeUnavailable&&!o.localUnavailable&&l.pinnedIdentityClaimedLocally===void 0&&u!=="agent"&&!c.derivedName){let d=IWn(c,n);if(d.kind==="local-session"||d.kind==="cloud-session")return{...d,exactUnique:!0,...u!==void 0&&{previouslyPinned:!0},...qza(d,t,e,o)}}return{...HWn(s,"exact"),...RWn(o),...l}}return IWn(i.candidate,n)}return}function oVv(e,t,r,n){if(t.length>=3){let o=[...e.byName.keys()].filter((i)=>i.startsWith(t));if(o.length===1){let i=qKt(e.byName,o[0]),s=MWr(r.sendMessagePins,t),a=tNt(r.sendMessagePins,[t],n.localClaimedRemoteBodies).pinnedIdentityClaimedLocally!==void 0;if(s!==void 0&&s!=="agent"||a){let l=e.byName.get(o[0]);return we("send_message_prefix_match",s!==void 0&&s!=="agent"?"typed_name_pinned":"prefix_of_claimed_pin"),{...HWn(i.kind==="one"?[i.candidate]:l,"prefix"),...RWn(n),...tNt(r.sendMessagePins,[t,o[0]],n.localClaimedRemoteBodies)}}if(i.kind==="ambiguous"){let l=e.byName.get(o[0]),c=Fhf(r.sendMessagePins,o[0],l,void 0,n,!0);if(c)return _e("send_message_prefix_match",{input_len:t.length,index_size:e.candidates.length,pinned:1}),Uhf(c,l,r,o[0],e,n);if(l.length===1)we("send_message_prefix_match","confirm_required");else pe("send_message_prefix_match","ambiguous_name");return{...HWn(l,"prefix"),...RWn(n),...tNt(r.sendMessagePins,[t,o[0]],n.localClaimedRemoteBodies)}}if(n.cloudUnavailable||n.bridgeUnavailable||n.localUnavailable)return we("send_message_prefix_match",n.cloudUnavailable||n.bridgeUnavailable?"remote_unsearched":"local_unsearched"),{...HWn([i.candidate],"prefix"),...RWn(n),...tNt(r.sendMessagePins,[t,o[0]],n.localClaimedRemoteBodies)};return _e("send_message_prefix_match",{input_len:t.length,index_size:e.candidates.length,...n.searchTruncated&&{search_truncated:!0}}),IWn(i.candidate,r)}if(o.length>1)return pe("send_message_prefix_match","ambiguous_prefix"),{...RWn(n),...tNt(r.sendMessagePins,[t,...o],n
+
+
+=== b'function Mhf(' @ 299129828 ===
+, recorded":", not recorded \u2014 cloud list failed"})`),{rows:s,unavailable:void 0,truncated:i.truncated===!0}}return{rows:[],unavailable:void 0,truncated:!1}}function Nhf(e){return bWr(e)?e:void 0}function Mhf(e,t,r,{remoteTruncated:n}){return{cloudUnavailable:Nhf(e.unavailable),...t!==void 0&&{bridgeUnavailable:t},...r&&{localUnavailable:!0},...(e.truncated===!0||n)&&{searchTruncated:!0}}}function Vza(e,t,r){let n=e.tasks[t];if(ud(n)&&!H4n(n)){if(n.status==="running")return{kind:"agent-live",agentId:t,agentName:r};if(n.stoppedByUser)return{kind:"agent-stopped-by-user",agentName:r};return{kind:"agent-stopped",agentId:t,status:n.status,agentName:r}}return{kind:"agent-evicted",agentId:t,agentName:r}}function IWn(e,t){switch(e.kind){case"main":return{kind:"main"};case"teammate":return{kind:"mailbox",recipientName:e.name,memberAgentId:e.id,memberIdentitySource:e.where==="in-process"?"team-context":"roster"};case"subagent":return Vza(t,Td(e.id),e.name);case"session":return{kind:"local-session",sock:e.sock,displayName:e.name};case"cloud-session":case"bridge-session":return{kind:"cloud-session",via:e.where==="cloud"?"cloud":"remote-control",refKind:e.kind,sessionId:e.id,displayName:e.name}}}function HWn(e,t){return{kind:"ambiguous",candidates:e.slice(0,$hf),total:e.length,matchedBy:t}}function Gza(e,t,r){let n=r?t.candidates.filter(r):t.candidates,o=fo(n.map((s)=>Np(s.name)));return{kind:"not-found",closest:m4r(e,o,$hf).map((s)=>n.find((a)=>Np(a.name)===s))}}function Fhf(e,t,r,n,o,i=!1){let s=Object.hasOwn(e,t)?e[t]:void 0;if(s===void 0)return;let a=MWr(e,t);if(a==="agent")return;let l=a!=="local";if(l&&o.localClaimedRemoteBodies.has(Pm(s.id)))return;if(a==="cloud"&&o.cloudUnavailable||a==="remote-control"&&o.bridgeUnavailable||a==="local"&&o.localUnavailable||i&&(o.cloudUnavailable||o.bridgeUnavailable||o.localUnavailable))return;let c=r.find((u)=>(l?u.kind==="cloud-session"||u.kind==="bridge-session":u.kind==="session")&&u.where!=="in-process"&&u.id===s.id);if(c===void 0){if(!(l&&o.searchTruncated))we("send_message_pin","stale");return}if(n!==void 0&&c.name!==n&&r.some((u)=>u.name===n))return;return _e("send_message_pin"),c}function Uhf(e,t,r,n,o,i){let s=IWn(e,r);if(s.kind!=="local-session"&&s.kind!=="cloud-session")return s;return{...s,...t.length>1&&{sameNamedSiblings:t.length-1},...qza(s,n,o,i)}}function Lhf(e,t,r){let n=new Set([...t.sessions.map((o)=>Pm(o.id)),...(r??[]).map((o)=>Pm(o.id))]);return new Set(e.flatMap((o)=>o.bridgeSessionId!==void 0&&n.has(Pm(o.bridgeSessionId))?[o.sock]:[]))}function qza(e,t,r,n){return{...e.kind==="local-session"&&n.socksMirroredRemotely.has(e.sock)&&{alsoListedRemotely:!0},...[...r.remoteNamesClaimedLocally.get(t)
+
+
+=== b'function qza(' @ 299132168 ===
+unction Lhf(e,t,r){let n=new Set([...t.sessions.map((o)=>Pm(o.id)),...(r??[]).map((o)=>Pm(o.id))]);return new Set(e.flatMap((o)=>o.bridgeSessionId!==void 0&&n.has(Pm(o.bridgeSessionId))?[o.sock]:[]))}function qza(e,t,r,n){return{...e.kind==="local-session"&&n.socksMirroredRemotely.has(e.sock)&&{alsoListedRemotely:!0},...[...r.remoteNamesClaimedLocally.get(t)??[]].some((o)=>e.kind!=="local-session"||o!==e.sock)&&{remoteNamesakeClaimedLocally:!0},...n.searchTruncated&&{searchTruncated:!0}}}var $hf=3,Ohf=5000;var Kza=A(()=>{_k();tr();p0();Phi();iw();j9e();Ze();jK();Y3();hg();M1();ebi();obi();Fsr();mye()});function OWr(){return tt("tengu_harbor_kite_mode_emit",!1)}var abi=A(()=>{cn()});function ubi(){switch(zhf().decidedBy){case"policySettings":return"managed-setting";case"repoSettings":return"repo-setting";case"flagSettings":case"userSettings":case void 0:return"explicit-setting"}}function MWn(e){if(e!==null)a_.inbound.shuttingDown=!1,Bhf();if(a_.inbound.getCurrentMode=e,e!==null)Rht("mode-changed")}function OWn(e){a_.inbound.onPeerHeld=e}function Xza(e){a_.inbound.sendPeerReceipt=e}function Jza(e){a_.inbound.recordCorrespondent=e}function Bhf(){if(a_.inbound.shutdownSettleHandle===null)a_.inbound.shutdownSettleHandle=Va(Zza)}async function Zza(){let e=a_.inbound;if(e.shutdownSettleHandle?.(),e.shutdownSettleHandle=null,e.shuttingDown=!0,e.held.length===0)return;let t=e.held.splice(0,e.held.length);E(`[cross-session-inbound] shutdown: settling ${t.length} still-held peer message(s) as expired`);let r=[];for(let n of t)r.push(e.sendPeerReceipt?.(n,"expired")),e.onPeerHoldDropped?.(n);await Promise.race([Promise.allSettled(r),xr(sVv,void 0,{unref:!0})])}function jhf(e){return a_.inbound.held.includes(e)?a_.inbound.announced.get(e):void 0}function LWn(e){a_.inbound.onPeerHoldDropped=e}function NWn(e){a_.inbound.onPeerHoldReleased=e}function LWr(){return zhf().value}function zhf(){let e,t;for(let r of["policySettings","flagSettings","userSettings"]){if(!Hg(r))continue;let n=ln(r)?.crossSessionInbound;if(n!==void 0){e=n,t=r;break}}for(let r of["localSettings","projectSettings"]){if(!Hg(r))continue;let n=ln(r)?.crossSessionInbound;if(n===void 0)continue;if(lbi[n]>lbi[e??"accept"])e=n,t="repoSettings";else if(n!=="accept"&&e!==void 0&&lbi[n]===lbi[e]&&t!=="policySettings")t="repoSettings"}return{value:e,decidedBy:t}}function Whf(){return yg()?void 0:{policy:"refuse",holdCause:"explicit-setting",refuseCause:"kill-switch"}}function aVv(){let e=Whf();if(e)return e;let t=LWr();if(t!==void 0)return{policy:t,holdCause:ubi()};let r=e4a();if(r===null)return{policy:"hold",holdCause:"mode-unknown"};if(!Yza.has(r.mode))return E(`[cross-session-inbound] unrecognized permiss
+
+
+=== b'searchTruncated:c.truncated' @ 299124122 ===
+.truncated,h=xHr(u),g=()=>({cloudUnavailable:Nhf(c.unavailable),bridgeUnavailable:f,localClaimedRemoteBodies:h,bridgeSettled:p!==void 0,localUnavailable:l.unavailable,socksMirroredRemotely:Lhf(u,c,p),searchTruncated:c.truncated===!0||m}),y=W0e(n,{teamFile:a,sessions:u,cloud:c.sessions,bridge:p}),b=y.byName.get(i)?.length===1?y.byName.get(i)[0]:void 0,v=MWr(n.sendMessagePins,i),S=b!==void 0&&v!==void 0&&Object.hasOwn(n.sendMessagePins,i)&&n.sendMessagePins[i].id===b.id,w=b!==void 0&&(b.kind==="session"||b.kind==="cloud-session")&&v!=="agent"&&!S;if(p===void 0&&w){let k=await sbi(e,c,i);p=k.rows,f=k.unavailable,m=k.truncated,y=W0e(n,{teamFile:a,sessions:u,cloud:c.sessions,bridge:k.rows})}let T=Phf(y,i,t,n,g());if(T)return T;if(p===void 0){let k=await sbi(e,c,i);if(p=k.rows,f=k.unavailable,m=k.truncated,k.rows.length>0){y=W0e(n,{teamFile:a,sessions:u,cloud:c.sessions,bridge:k.rows});let x=Phf(y,i,t,n,g());if(x)return x}}return oVv(y,i,n,g())??{...Gza(i,y),...Mhf(c,f,l.unavailable,{remoteTruncated:m}),...tNt(n.sendMessagePins,[i],h)}}function tVv(e,t,r){let n=MWr(e,t);if(n!=="cloud"&&n!=="remote-control")return;let o=e[t];return r.has(Pm(o.id))?o.name:void 0}function rVv(e,t){let r=t[0];if(r===void 0||r.length<3)return t;let n=Object.keys(e).filter((o)=>o!==r&&o.startsWith(r)&&!t.includes(o));return n.length===0?t:[...t,...n]}function tNt(e,t,r){for(let n of rVv(e,t)){let o=tVv(e,n,r);if(o!==void 0)return{pinnedIdentityClaimedLocally:o}}return{}}function MWr(e,t){let r=Object.hasOwn(e,t)?e[t]:void 0;if(r===void 0)return;if(Kce(r.id)!==null)return"agent";if(r.id.startsWith("cse_"))return"cloud";return Pm(r.id)!==r.id?"remote-control":"local"}async function Ihf(e,t,r,n,o,i){let s=i?.rows;if(!nVv(t,r,n.sessions,s))return{rows:s,unavailable:void 0,truncated:i!==void 0&&i.truncated};let a=await sbi(e,n,o);return{rows:a.unavailable===void 0||s===void 0?a.rows:s,unavailable:a.unavailable,truncated:a.unavailable===void 0||i===void 0?a.truncated:i.truncated}}function nVv(e,t,r,n){let o=MWr(e,t);if(o!=="remote-control"&&o!=="cloud")return!1;let i=Pm(e[t].id);if(r.some((s)=>Pm(s.id)===i))return!1;return n===void 0||!n.some((s)=>Pm(s.id)===i)}function RWn(e){return{...e.cloudUnavailable&&{cloudUnavailable:e.cloudUnavailable},...e.bridgeUnavailable&&{bridgeUnavailable:e.bridgeUnavailable},...e.localUnavailable&&{localUnavailable:!0},...e.searchTruncated&&{searchTruncated:!0}}}function Phf(e,t,r,n,o){let i=qKt(e.byName,t,r);if(i){if(i.kind==="ambiguous"){let s=e.byName.get(t),a=Fhf(n.sendMessagePins,t,s,r,o);if(a)return Uhf(a,s,n,t,e,o);let l=tNt(n.sendMessagePins,[t],o.localClaimedRemoteBodies),c=s[0],u=MWr(n.sendMessagePins,t);if(s.length===1&&(c.kind==="session"||c.k
+
+
+=== b'remoteTruncated' @ 142135408 ===
+�-��������������������������������������������������������������8�������       	      recipientName          	      memberAgentId          	      memberIdentitySource           	      remoteTruncated H       �      �            p      �      �      X      X"                 ��� �  �   �     ���� ���    D  H       ������������������������������������������X      �������            ��������    @       �������        �������        ��������������               H                     .��     �������؋�������%�����^�������������       p������              ~κ     8�������@������@�������h��������\�����p�������8����������������������R���������������������H]��������������Т������   ����        ����                             h   h   h   �  �  �                                                  P  P  P  P  P  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  �  ����������������������       �                          x             p      ��������������        �             �������        �������               �       �������  ������� �������� H���G���������
+	H������G���K������ ���G�t����   ��   ����i�     0               (                                      
+              	   +   Iterator result interface is not an object.                 	                  �<� L� l� �#  � �@���E �@�4       +   .   B   E   g   ���������������R���������������������R������������������������������������������xW������            ��� � �   �    ���� ���    D  H       ������������������������������������������x       �������            ��������    @       �������        �������        ��������������        ��Z�������������   ����        ����                              h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   x   x   x   x   x   x   x   x   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   �   ����������������������       �              �������        �������        �       ��������������        �              �������        �������                      ��  ��   ��   ����i�                         �@`�E �@�4           ������������������������������������`T������           ��� r �   r    ���� ���    D  H       ������������������������������������������h       �������            ��������    ���������������        �������        ��������������           ����        ����                             h   h   
+
+
+=== b'wWr' @ 70569560 ===
+_: null,
+        configurable: !0,
+        enumerable: !0,
+        value: causeCode,
+        writable: !0
+      }), error;
+    }
+    default:
+      return cause;
+  }
+}
+var noop = () => {};
+function newWritableStreamFromStreamWritable(streamWritable) {
+  if (!(streamWritable && typeof streamWritable?.write === "function" && typeof streamWritable?.on === "function"))
+    throw @makeErrorWithCode(120, "streamWritable", "stream.Writable", streamWritable);
+  if (isDestroyed(streamWritable) || !isWritable(streamWritable)) {
+    let writable = new @WritableStream;
+    return writable.close(), writable;
+  }
+  let highWaterMark = streamWritable.writableHighWaterMark, strategy = streamWritable.writableObjectMode ? new CountQueuingStrategy({ highWaterMark }) : {
+    highWaterMark,
+    size(chunk) {
+      return chunk?.byteLength ?? chunk?.length ?? 1;
+    }
+  }, controller, backpressurePromise, closed;
+  function onDrain() {
+    if (backpressurePromise !== @undefined)
+      backpressurePromise.resolve();
+  }
+  let cleanup = eos(streamWritable, (error) => {
+    if (error = handleKnownInternalErrors(error), cleanup(), streamWritable.on("error", () => {}), error != null) {
+      if (backpressurePromise !== @undefined)
+        backpressurePromise.reject(error);
+      if (closed !== @undefined)
+        closed.reject(error), closed = @undefined;
+      controller.error(error), controller = @undefined;
+      return;
+    }
+    if (closed !== @undefined) {
+      closed.resolve(), closed = @undefined;
+      return;
+    }
+    controller.error(@makeAbortError()), controller = @undefined;
+  });
+  return streamWritable.on("drain", onDrain), new @WritableStream({
+    start(c) {
+      controller = c;
+    },
+    write(chunk) {
+      if (!streamWritable.writableObjectMode && isAnyArrayBuffer(chunk))
+        chunk = new @Uint8Array(chunk);
+      if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
+        if (backpressurePromise = PromiseWithResolvers(), !streamWritable.writableNeedDrain)
+          backpressurePromise.resolve();
+        return SafePromisePrototypeFinally.@call(backpressurePromise.promise, () => {
+          backpressurePromise = @undefined;
+        });
+      }
+    },
+    abort(reason) {
+      destroyer(streamWritable, reason);
+    },
+    close() {
+      if (closed === @undefined && !isWritableEnded(streamWritable))
+        return closed = PromiseWithResolvers(), streamWritable.end(), closed.promise;
+      return controller = @undefined, PromiseResolve();
+    }
+  }, strategy);
+}
+function newStreamWritableFromWritableStream(writableStream, options = kEmptyObject) {
+  if (!@inherits(2, writableStream))
+    throw @makeErrorWithCode(120, "writableStream
+
+
+=== b'iza' @ 5101450 ===
+D$0H��   H�D$(H�\$ H�]�H�U`H��I��L���   �� H���� A��   H��H���7?�Ɔ�   H��  [_^A\A]A^A_]�������������UAWAVVWSH��(H�l$ H��H�qL�A H�I(L��H)�H��HD�H���$  I��H�RI�yH�1H��A�   LE�L�vH�rizationI�AH�authorizI�M��LD�M9���H�����   ����   M)�H��LD�L9���   J�1H�ɹ   HE�I���T>�I�>L9���L��H�H�Srq��usH�CH��H��H�K��   H�H�SE��H�� L	�A��I�       M	�L��L��I�<�H��([_^A^A_]ð���c���L��-�H��L��M���������t�L��-�L��M�����L��-��   1�I�����L��-�1�H�����H�Xi�L��-��_   �F��������UH�� H�l$ I9�w-L��L)�r0L�M0H)�I9�w<I�I�L��L��I��H�� ]�4=�H�M-�1��
+H�B-�L��I��L��I�����H��1�L�#-��+   �������������UH���D�B�A��s3H�AH����   H�IH���9  H������� H!�H���"  �(����   H�Q�B��   H�B�JH����   f�8N��   f�xO��   f�xD��   f�xE��   f�x_��   f�x
+H��   f�xA��   f�xN��   f�xD��   f�xL��   f�xE��   f�x_uyf�xNurf�xAukf�xCudf�xK�XA��s+H�QH��tNH������� H#A�����H9�HB�H��u.���u'H�Q�JH�BH��u�o f�F�f8���]�1�]���������UH���D�B�A��s3H�AH����   H�IH���  H������� H!�H����   �(����   H�Q�B��   H�B�JH����   f�8N��   f�xO��   f�xD��   f�xE��   f�x_��   f�x
+H��   f�xA��   f�xNuf�xDuxf�xLuqf�xE�eA��s+H�QH��t[H������� H#A�����H9�HB�H��u;���u4H�Q�JH�BH��u#H�NODE_HANH3H�E_HANDLEH3PH	���]�1�]���������������UH���D�B�A��s3H�AH����   H�IH���  H������� H!�H���  �(����   H�Q�B��   H�B�JH����   f�8N��   f�xO��   f�xD��   f�xE��   f�x_��   f�x
+C��   f�xL��   f�xU��   f�xSuzf�xTusf�xEulf�xR�`A��s+H�QH��tVH������� H#A�����H9�HB�H��u6���u/H�Q�JH�BH��uH�NODE_CLUH3�@H5STERH	���]�1�]���������UH���D�B�A��s3H�AH����   H�IH���?  H������� H!�H���(  �(����   H�Q�B��   H�B�JH����   f�8N��   f�xO��   f�xD��   f�xE��   f�x_��   f�x
+H��   f�xA��   f�xN��   f�xD��   f�xL��   f�xE��   f�x_uf�xAuxf�xCuqf�xK�eA��s+H�QH��t[H������� H#A�����H9�HB�H��u;���u4H�Q�JH�BH��u#H�NODE_HANH3H�NDLE_ACKH3PH	���]�1�]���UH�� H�l$ I��H��H�M�@D�	E�Q�A��s1H�HH��yLH�@H����   I������� L!�L9���   �   A��uL�HA�AuRI�IA�AL9���   �m�   A��s*L�HM��t:H������� H#H�����I9�IB�L9�t"�[A��uL�HA�AI�IL9�t	�B1�L9�u;�5������1�   1�L9�u#E1�fD  M9���tF�
+fF9IM�It��1�H�� ]���������������UH��   H��$�   �D�B�A��s	H�y x�r��umH�A�@��   W�)��   )��   )Ep)E`)EP)E@)E0)E )E)E )E�)E�)E�)E�)E�)E�H�U�A�   �?]� H��uT�d�   A��s#H�QH��t.H�IH������� H!�H��?H���$��uH�A1��@���1��1ɋPH��H�@H���N�D H��t� ���H��   ]����������UVH��(H�l$ H��H�r8L�E L�R I��H��H����� H�FH��tMH�     ��H��u>����H��x
+

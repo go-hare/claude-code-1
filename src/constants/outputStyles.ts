@@ -204,6 +204,8 @@ export const getAllOutputStyles = memoize(async function getAllOutputStyles(
         source: style.source,
         keepCodingInstructions: style.keepCodingInstructions,
         forceForPlugin: style.forceForPlugin,
+        // densable 2.1.237 Concise BAT / turnReminder — preserve on merge.
+        turnReminder: style.turnReminder,
       }
     }
   }

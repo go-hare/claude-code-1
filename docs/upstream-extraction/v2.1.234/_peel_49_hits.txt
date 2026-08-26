@@ -1,0 +1,41 @@
+
+===== b'task-notification' offs=[99142256, 121924023, 127989592, 128344560, 128346256, 128348888, 128358272, 128361872, 128582360, 128592664, 128603825, 128604048, 128610504, 128872512, 128886848, 128893584] heap=[] =====
+
+
+===== b'Background task notifications' offs=[] heap=[] =====
+
+
+===== b'matching mid-turn' offs=[] heap=[] =====
+
+
+===== b'enqueuePendingNotification' offs=[128375088, 295689673, 295690960, 297810744, 299398371, 303629332] heap=[295689673, 295690960, 297810744, 299398371, 303629332] =====
+
+
+----- @295689673 -----
+
+);if(gr!==-1)n.splice(gr,1),c();return{text:st,cursorOffset:Ye,images:Pt,mode:Je.mode==="bash"?"bash":"prompt"}}function Le(Fe){let Pe=cii[Fe];return n.filter((Xe)=>cii[Xe.priority??"next"]<=Pe)}return{subscribe:i.subscribe,getCommandQueueSnapshot:C,getCommandQueue:I,getCommandQueueLength:P,getMainThreadQueueLength:O,getQueuedPeerMessageCount:Y,hasCommandsInQueue:M,recheckCommandQueue:U,enqueue:z,enqueuePendingNotification:X,enqueuePollEvent:B,drainPollEventChunk:N,countPendingWakePollEvents:ee,countRemainingWakePollEventsAfter:le,hasUserIntentCommandsInQueue:D,tryBeginPollCall:se,endPollCall:Z,dequeue:ie,dequeueAll:de,peek:te,dequeueAllMatching:re,remove:ce,removeByFilter:fe,clearCommandQueue:he,resetCommandQueue:Ee,popAllEditable:ve,popEditableAt:Ne,getCommandsByMaxPriority:Le,markCancelPending:u,consumeCancelPending:d,consumeCancelPendingAcked:p,hasCancelPendingAcked:f,registerFoldInFlight:h,unregisterFoldInFlight:g,isFoldInFlight:y,suspendMidTurnFold:v,isMidTurnFoldSuspended:S,setInFlightDrainBatch:T,clearInFlightDrainBatch:k,someInFlightDrainCommand:x}}function mNp(e){if(pNp)return uii;let t=uii,r=e(t.getCommandQueue());return t.resetCommandQueue(),uii=r,pNp=!0,r}function MT()
+
+----- @295690960 -----
+
+on txa(e){return MT().getCommandQueue().some((t)=>NMt(t,e))}var fNp,ddv=(e)=>{IFn(e)},cii,pdv,uii,pNp=!1,LUr=(...e)=>MT().subscribe(...e),kXe=(...e)=>MT().getCommandQueueSnapshot(...e),RU=(...e)=>MT().getCommandQueue(...e),RFn=(...e)=>MT().getMainThreadQueueLength(...e),rxa=(...e)=>MT().recheckCommandQueue(...e),oI=(...e)=>MT().enqueue(...e),pii=(...e)=>MT().enqueuePollEvent(...e),sp=(...e)=>MT().enqueuePendingNotification(...e),hNp=(...e)=>MT().dequeue(...e),gNp=(...e)=>MT().peek(...e),NUr=(...e)=>MT().dequeueAllMatching(...e),nxa=(...e)=>MT().remove(...e),u4e=(...e)=>MT().removeByFilter(...e),yNp=(...e)=>MT().clearCommandQueue(...e),fii=(...e)=>MT().popAllEditable(...e),HFn=(...e)=>MT().popEditableAt(...e),oxa=(...e)=>MT().setInFlightDrainBatch(...e),ixa=(...e)=>MT().clearInFlightDrainBatch(...e),sxa=(...e)=>MT().someInFlightDrainCommand(...e);var ry=A(()=>{bt();bt();tr();Ze();pt();r3();ri();K5();KDe();xFn();dX();zka();XDe();c4e();lii();jl();Qm();fNp=require("crypto"),cii={now:0,next:1,later:2};pdv=new Set(["task-notification","poll-event"]);uii=exa();lNp((e)=>oI({agentId:Ai(),mode:"prompt",value:`/${e}`}))});function rT(){return d4e.join(Hn(),"projects")}function Bft(e){return d
+
+----- @297810744 -----
+
+ed"?Vjn(t,r):e==="auto-edited"?qjn(t,r):MZp(t,r,n)}function NLv(e){let t=Jo().noticeCoalesce,r=t.get(e);if(r===void 0)return;if(t.delete(e),r.timer!==void 0)clearTimeout(r.timer);let n=LLv(r.family,r.artifactName,r.count,r.suppressedPrior>0),o=r.droppedDetails>0?`
+
+(${r.droppedDetails} earlier ${r.droppedDetails===1?"notice":"notices"} in this burst omitted \u2014 newest ${FZp} kept.)`:"";r.queue.enqueuePendingNotification({uuid:$Zp.randomUUID(),value:HD({taskType:r.family==="artifact-changed"?"artifact-changed":"artifact-auto-react",summary:Wa(n),body:`
+${Wa(r.details.join(`
+
+`)+o)}`}),mode:"task-notification",origin:{kind:"task-notification",source:r.family==="artifact-changed"?"artifact-changed":"artifact-auto-react",slug:r.slug,displayName:r.artifactName,coalesced:{family:r.family,count:r.count}},agentId:Ai()})}function CNa(e){let{queue:t,slug:r,family:n,artifactName:o,detail:i,mergeDetails:s}=e,l=(e.now??Date.now)(),c=e.settle?.settleMs??MLv,u=e.settle?.maxSettleMs??OLv,d=Jo().noticeCoalesce,p=`${n}
+${r}`,f=d.get(p);if(f===void 0)f={slug:r,family:n,artifactName:o,mergeDetails:s,count:0,threadIds:new Set,firstAt:l,details:[],droppedDetails:0,suppressedPrior:0,queue:t,timer:void
+
+----- @299398371 -----
+
+ y8v="frame-live.v1",hbf,_8v=25000,j3a="act:120",b8v="If this wasn't intended, kill the task again to stop them for this artifact, or use the kill-all-agents gesture to disarm auto-replies for the whole session.";var $ht=A(()=>{Zd();tr();$be();Gy();N2a();Uhi();il();Cs();Vr();vr();$Ot();U9e();sar();KA();o5r();Vmt();HNa();I4e();JWr();Jpi();bt();$3a();ry();BTe();xy();Nb();c6();Znr();XWr();sjr();hbf={enqueuePendingNotification:(e)=>sp(e)}});function sNt(){return Jo().durable.rows}async function Rbf(e,t){let r=Jo().durable.slugOps,o=(r.get(e)??Promise.resolve()).then(t,t),i=o.then(()=>{return},()=>{return});r.set(e,i);try{return await o}finally{if(r.get(e)===i)r.delete(e)}}function Hbf(){return[...sNt().values()]}function yvi(e){return sNt().get(e)}function Ibf(e){let t=[];for(let r of e){if(!Bm(r))continue;let{config:n}=r,o=n&&typeof n==="object"&&"url"in n&&typeof n.url==="string"?n.url:null;if(o!==null&&xed(o))t.push(r)}return t.length===1?t[0]:null}function Pbf(e){let t=Ibf(e.getMcp().clients);if(!t)return null;let r=eue();if(!r)return null;return{found:t,dial:r}}function Dbf(e){return Pbf(e)!==null}async function Mbf(e,t){let r=Pbf(e);if(!r)return null;try{return await r.dial(r.fou
+
+----- @303629332 -----
+
+l}`};else if(t.type==="function")return{type:"function",name:"function"};else if(t.type==="callback")return{type:"callback",name:"callback"};return{type:"unknown"}})}function M7S(e){for(let t of["CLAUDE_PROJECT_DIR","CLAUDE_PLUGIN_ROOT","CLAUDE_PLUGIN_DATA"])e=e.replaceAll("${"+t+"}",()=>"${env:"+t+"}");return e}function qhm({summary:e,body:t,priority:r,stopHookActive:n,queue:o}){(o===void 0?sp:o.enqueuePendingNotification)({value:HD({summary:Wa(e),trailing:`
+${WE(t)}`}),mode:"task-notification",agentId:Ai(),priority:r,stopHookActive:n})}var b1i,y1i,HFt,d1i=1500,b7S=60000,v7S,$hm=30000,S7S=300,Gal,T7S,R7S=20,Lhm=!1,g1i=!1;var Mg=A(()=>{bt();ih();q9();td();hWo();Err();DTa();il();Prr();iU();toi();Yvi();_g();Hi();ws();Op();boe();kft();c0();foi();ibe();B5();Ide();wX();bt();$n();Hqn();mee();jl();To();Ut();tr();rf();TAe();$A();PM();y4e();k_();cn();Ope();cTi();Wq();HK();vm();a9r();Ze();Kg();jr();$al();ES();pt();Vr();uOe();dTi();ry();ri();BTe();Nb();lTi();cI();Zo();Rs();dhm();fhm();mhm();hQo();hhm();AOe();vr();PC();lo();pt();AKa();b1i=require("path"),y1i=require("child_process"),HFt=require("crypto");Phm();v7S=new Set;Gal=new Set;T7S=new Set(["PreToolUse","PostToolUse","PostToolUseFailure"
+
+===== b'pendingNotifications' offs=[] heap=[] =====

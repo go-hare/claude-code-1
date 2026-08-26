@@ -1,4 +1,9 @@
-import { getPluginErrorMessage, type PluginError } from '../../types/plugin.js';
+import {
+  formatSyncedPluginShadowedMessage,
+  formatSyncedPluginShadowedStatus,
+  getPluginErrorMessage,
+  type PluginError,
+} from '../../types/plugin.js';
 
 export function formatErrorMessage(error: PluginError): string {
   switch (error.type) {
@@ -62,6 +67,8 @@ export function formatErrorMessage(error: PluginError): string {
       return `Plugin "${error.plugin}" not cached at ${error.installPath}`;
     case 'generic-error':
       return error.error;
+    case 'synced-plugin-shadowed':
+      return formatSyncedPluginShadowedStatus(error.source, error.shadowedBy);
   }
   const _exhaustive: never = error;
   return getPluginErrorMessage(_exhaustive);
@@ -133,6 +140,8 @@ export function getErrorGuidance(error: PluginError): string | null {
     case 'marketplace-load-failed':
     case 'generic-error':
       return null;
+    case 'synced-plugin-shadowed':
+      return formatSyncedPluginShadowedMessage(error.source, error.shadowedBy);
   }
   const _exhaustive: never = error;
   return null;

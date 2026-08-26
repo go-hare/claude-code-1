@@ -1,0 +1,4 @@
+OFFSET=298110658
+NEEDLE=b'updatedPermissionsDropped'
+
+erInteraction?.());let C=t.toolUseContext.abortController.signal;y=f.onResponse(g,t.tool.name,(I)=>{if(!c())return;if(I.updatedPermissionsDropped)we("permission_bridge_relay","updated_permissions_malformed");else _e("permission_bridge_relay");if(y)C.removeEventListener("abort",y);if(_Je(h,t.toolUseID),b?.(),I.behavior==="allow"){let P=t.t

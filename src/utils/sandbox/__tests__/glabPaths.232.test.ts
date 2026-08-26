@@ -39,6 +39,6 @@ describe('sandbox-adapter.ts glab denyWrite (source)', () => {
     ).text()
     expect(src).toContain("join(home, '.config', 'gh')")
     expect(src).toContain("join(home, '.config', 'glab-cli')")
-    expect(src).toContain("join(originalCwd, '.git', 'glab-cli')")
+    expect(src).toContain("join(projectGitDir, 'glab-cli')")
   })
 })

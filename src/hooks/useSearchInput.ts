@@ -39,11 +39,14 @@ type UseSearchInputReturn = {
   handleKeyDown: (e: KeyboardEvent) => void
 }
 
-function isKillKey(e: KeyboardEvent): boolean {
+function isKillKey(e: KeyboardEvent, readline: boolean): boolean {
   if (e.ctrl && (e.key === 'k' || e.key === 'u' || e.key === 'w')) {
     return true
   }
-  if (e.meta && e.key === 'backspace') {
+  if ((e.meta || e.ctrl) && e.key === 'backspace') {
+    return true
+  }
+  if (readline && e.meta && !e.ctrl && e.key.toLowerCase() === 'd') {
     return true
   }
   return false
@@ -105,6 +108,11 @@ export function useSearchInput({
     if (!isActive) return
 
     const cursor = Cursor.fromText(query, effectiveColumns, cursorOffset)
+    const readline = getKeybindingFlavor() === 'readline'
+    const moveForwardWord = (): Cursor =>
+      readline ? cursor.forwardWord() : cursor.nextWord()
+    const moveBackwardWord = (): Cursor =>
+      readline ? cursor.backwardWord() : cursor.prevWord()
 
     // Check passthrough ctrl keys
     if (e.ctrl && passthroughCtrlKeys.includes(e.key.toLowerCase())) {
@@ -112,7 +120,7 @@ export function useSearchInput({
     }
 
     // Reset kill accumulation for non-kill keys
-    if (!isKillKey(e)) {
+    if (!isKillKey(e, readline)) {
       resetKillAccumulation()
     }
 
@@ -150,9 +158,11 @@ export function useSearchInput({
     // Backspace/Delete
     if (e.key === 'backspace') {
       e.preventDefault()
-      if (e.meta) {
-        // Meta+Backspace: kill word before
-        const { cursor: newCursor, killed } = cursor.deleteWordBefore()
+      if (e.meta || e.ctrl) {
+        // densable 2.1.239 #43 — Ctrl/Meta+Backspace is Re(), not one char.
+        const { cursor: newCursor, killed } = readline
+          ? cursor.backwardKillWord()
+          : cursor.deleteWordBefore()
         pushToKillRing(killed, 'prepend')
         setQueryState(newCursor.text)
         setCursorOffset(newCursor.offset)
@@ -181,14 +191,12 @@ export function useSearchInput({
     // Arrow keys with modifiers (word jump)
     if (e.key === 'left' && (e.ctrl || e.meta || e.fn)) {
       e.preventDefault()
-      const newCursor = cursor.prevWord()
-      setCursorOffset(newCursor.offset)
+      setCursorOffset(moveBackwardWord().offset)
       return
     }
     if (e.key === 'right' && (e.ctrl || e.meta || e.fn)) {
       e.preventDefault()
-      const newCursor = cursor.nextWord()
-      setCursorOffset(newCursor.offset)
+      setCursorOffset(moveForwardWord().offset)
       return
     }
 
@@ -308,15 +316,22 @@ export function useSearchInput({
       e.preventDefault()
       switch (e.key.toLowerCase()) {
         case 'b':
-          setCursorOffset(cursor.prevWord().offset)
+          setCursorOffset(moveBackwardWord().offset)
           return
         case 'f':
-          setCursorOffset(cursor.nextWord().offset)
+          setCursorOffset(moveForwardWord().offset)
           return
         case 'd': {
-          const newCursor = cursor.deleteWordAfter()
-          setQueryState(newCursor.text)
-          setCursorOffset(newCursor.offset)
+          let next: Cursor
+          if (readline) {
+            const killed = cursor.killWord()
+            pushToKillRing(killed.killed, 'append')
+            next = killed.cursor
+          } else {
+            next = cursor.deleteWordAfter()
+          }
+          setQueryState(next.text)
+          setCursorOffset(next.offset)
           return
         }
         case 'y': {

@@ -1,0 +1,7 @@
+Cannot destructure property 'clearSelection' from null or undefined value
+clicked
+modalScrollRef
+hideSticky
+setStickyPrompt
+Cannot destructure property 'scrollRef' from null or undefined value
+Cannot destructure property 'focusManager' from null or undefined value

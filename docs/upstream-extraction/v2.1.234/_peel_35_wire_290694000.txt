@@ -1,0 +1,3 @@
+OFFSET=290694000
+
+n q$o}function cRr(){if(V$o===void 0)V$o=_d("wif_credentials_resolve",async()=>{let e=await U1_();if(e===null)return q$o=null,null;let t=A5()==="env-quad"?null:await m0r(e),r=K.ANTHROPIC_BASE_URL||e.base_url,n={...e,base_url:r,...e.authentication.credentials_path||t===null?{}:{authentication:{...e.authentication,credentials_path:t}}},[{getUserAgent:o},{getProxyFetchOptions:i}]=await Promise.all([Promise.resolve().then(() => (B2(),v7u)),Promise.resolve().then(() => (gy(),Hkt))]),s=zqt(n,{baseURL:

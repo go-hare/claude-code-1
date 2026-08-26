@@ -5,6 +5,8 @@
  * are registered (Vwo/uxs).
  */
 import { afterEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   isPrintModeSignalHandlersRegistered,
   markPrintModeSignalHandlersRegistered,
@@ -13,6 +15,9 @@ import {
 import {
   createAbortErrorReason,
   getAbortReasonMessage,
+  isRemoteCancelAbortReason,
+  isShutdownAbortReason,
+  shouldSuppressInterruptionMessage,
 } from '../abortController.js'
 
 afterEach(() => {
@@ -55,5 +60,22 @@ describe('densable print-mode SIGTERM ownership (#10)', () => {
   test('exit code for SIGTERM is 143 (128+15)', () => {
     // densable Ts(143) / gracefulShutdown(143)
     expect(128 + 15).toBe(143)
+  })
+
+  test('remote-cancel suppresses interrupt + is a shutdown reason', () => {
+    const reason = createAbortErrorReason('remote-cancel')
+    expect(isRemoteCancelAbortReason(reason)).toBe(true)
+    expect(shouldSuppressInterruptionMessage(reason)).toBe(true)
+    expect(isShutdownAbortReason(reason)).toBe(true)
+  })
+
+  test('query skips Interrupted-by-user synthetic denials on remote-cancel', () => {
+    const query = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+    expect(query).toContain('isRemoteCancelAbortReason')
+    expect(query).toContain("'Interrupted by user'")
+    const deny = query.indexOf("'Interrupted by user'")
+    const gate = query.lastIndexOf('isRemoteCancelAbortReason', deny)
+    expect(gate).toBeGreaterThan(0)
+    expect(gate).toBeLessThan(deny)
   })
 })

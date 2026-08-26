@@ -20,7 +20,14 @@ import {
   SandboxRuntimeConfigSchema,
   SandboxViolationStore,
 } from '@anthropic-ai/sandbox-runtime'
-import { rmSync, statSync } from 'fs'
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'fs'
 import { readFile } from 'fs/promises'
 import { memoize } from 'lodash-es'
 import { isIP } from 'node:net'
@@ -118,6 +125,48 @@ export const DENY_READ_SOCKET_PATHS = [
   '/run/dbus',
   '/run/user',
 ] as const
+
+/**
+ * densable 2.1.239 G — on linux/wsl, create a missing `.git/config.worktree`
+ * (`openSync(..., "wx")`) so denyWrite binds a real empty file. A missing
+ * path otherwise becomes an unreadable stub (changelog #36).
+ */
+export function ensureLinuxGitWorktreeConfigPlaceholder(path: string): void {
+  const plat = getPlatform()
+  if (plat !== 'linux' && plat !== 'wsl') return
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+    if (!lstatSync(dirname(path)).isDirectory()) return
+    // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+    closeSync(openSync(path, 'wx'))
+  } catch {
+    // exists, or parent is gone — official G() swallows
+  }
+}
+
+/** densable 2.1.239 j() worktrees/* config.worktree denyWrite extras. */
+function pushLinkedWorktreeConfigDenyWrite(
+  denyWrite: string[],
+  gitDir: string,
+): void {
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+    for (const ent of readdirSync(join(gitDir, 'worktrees'), {
+      withFileTypes: true,
+    })) {
+      if (!ent.isDirectory() && !ent.isSymbolicLink()) continue
+      const nested = join(gitDir, 'worktrees', ent.name, 'config.worktree')
+      ensureLinuxGitWorktreeConfigPlaceholder(nested)
+      denyWrite.push(
+        nested,
+        join(gitDir, 'worktrees', ent.name, 'config.worktree.lock'),
+        join(gitDir, 'worktrees', ent.name, 'commondir'),
+      )
+    }
+  } catch {
+    // official j() swallows a missing worktrees dir
+  }
+}
 
 /**
  * Base credential/config file names to protect.
@@ -908,26 +957,49 @@ export function convertToSandboxRuntimeConfig(
 
   // Git internals in project directory — hooks, config, modules, exclude.
   // densable 2.1.232 #6: project-local glab-cli store (`.git/glab-cli`).
+  // densable 2.1.239 #36 CXq: config.lock / config.worktree(+.lock) /
+  // commondir / worktrees. G() materializes missing config.worktree on
+  // linux/wsl before denyWrite so bwrap does not stub an unreadable hole.
+  const projectGitDir = join(originalCwd, '.git')
+  const projectWorktreeConfig = join(projectGitDir, 'config.worktree')
+  ensureLinuxGitWorktreeConfigPlaceholder(projectWorktreeConfig)
   denyWrite.push(
-    join(originalCwd, '.git', 'hooks'),
-    join(originalCwd, '.git', 'config'),
+    join(projectGitDir, 'hooks'),
+    join(projectGitDir, 'config'),
+    join(projectGitDir, 'config.lock'),
+    projectWorktreeConfig,
+    join(projectGitDir, 'config.worktree.lock'),
+    join(projectGitDir, 'commondir'),
+    join(projectGitDir, 'worktrees'),
     join(originalCwd, '.gitmodules'),
-    join(originalCwd, '.git', 'info', 'exclude'),
-    join(originalCwd, '.git', 'glab-cli'),
+    join(projectGitDir, 'info', 'exclude'),
+    join(projectGitDir, 'glab-cli'),
   )
+  pushLinkedWorktreeConfigDenyWrite(denyWrite, projectGitDir)
 
   // When GITHUB_WORKSPACE differs from cwd (e.g. reusable workflows,
   // composite actions), also protect the workspace's git metadata
   const workspace = process.env.GITHUB_WORKSPACE
   if (workspace && resolve(workspace) !== resolve(originalCwd)) {
+    const workspaceGitDir = join(workspace, '.git')
+    const workspaceWorktreeConfig = join(workspaceGitDir, 'config.worktree')
+    ensureLinuxGitWorktreeConfigPlaceholder(workspaceWorktreeConfig)
     denyWrite.push(
-      join(workspace, '.git', 'hooks'),
-      join(workspace, '.git', 'config'),
-      join(workspace, '.git', 'modules'),
-      join(workspace, '.git', 'info', 'exclude'),
+      join(workspaceGitDir, 'hooks'),
+      join(workspaceGitDir, 'config'),
+      join(workspaceGitDir, 'config.lock'),
+      workspaceWorktreeConfig,
+      join(workspaceGitDir, 'config.worktree.lock'),
+      join(workspaceGitDir, 'commondir'),
+      join(workspaceGitDir, 'worktrees'),
+      join(workspaceGitDir, 'modules'),
+      join(workspaceGitDir, 'info', 'exclude'),
+      join(workspaceGitDir, 'glab-cli'),
       join(workspace, '.gitmodules'),
       join(workspace, '.github'),
+      join(workspace, '.claude'),
     )
+    pushLinkedWorktreeConfigDenyWrite(denyWrite, workspaceGitDir)
   }
 
   // Deny read access to container runtime sockets — these allow escaping

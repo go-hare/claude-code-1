@@ -1,6 +1,6 @@
 import figures from 'figures';
 import React, { type ReactNode, useEffect, useRef, useState } from 'react';
-import { Ansi, Box, Text, stringWidth, useDeclaredCursor } from '@anthropic/ink';
+import { Ansi, Box, Text, stringWidth, useDeclaredCursor, type ClickEvent } from '@anthropic/ink';
 import { count } from '../../utils/array.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
@@ -8,6 +8,7 @@ import { SelectInputOption } from './select-input-option.js';
 import { SelectOption } from './select-option.js';
 import { useSelectInput } from './use-select-input.js';
 import { useSelectState } from './use-select-state.js';
+import { useStrayClickGuard } from './use-stray-click.js';
 
 // Extract text content from ReactNode for width calculation
 function getTextContent(node: ReactNode): string {
@@ -271,6 +272,24 @@ export function Select<T>({
     focusValue: defaultFocusValue,
   });
 
+  // densable yln + Dql: disableSelection===true hides onClick; 'numeric' stays clickable.
+  const isStrayClick = useStrayClickGuard();
+  const optionOnClick = (option: OptionWithDescription<T>) => {
+    if (isDisabled || disableSelection === true || option.disabled === true) {
+      return undefined;
+    }
+    return (event: ClickEvent) => {
+      if (isStrayClick(event)) {
+        return;
+      }
+      if (option.type === 'input') {
+        state.focusOption(option.value);
+      } else {
+        state.onChange?.(option.value);
+      }
+    };
+  };
+
   useSelectInput({
     isDisabled,
     disableSelection: disableSelection || (hideIndexes ? 'numeric' : false),
@@ -359,6 +378,7 @@ export function Select<T>({
                 selectedImageIndex={selectedImageIndex}
                 onImagesSelectedChange={setImagesSelected}
                 onSelectedImageIndexChange={setSelectedImageIndex}
+                onClick={optionOnClick(option)}
               />
             );
           }
@@ -396,6 +416,7 @@ export function Select<T>({
                 isSelected={isSelected}
                 shouldShowDownArrow={areMoreOptionsBelow && isLastVisibleOption}
                 shouldShowUpArrow={areMoreOptionsAbove && isFirstVisibleOption}
+                onClick={optionOnClick(option)}
               >
                 <Text dimColor={isOptionDisabled} color={optionColor}>
                   {label}
@@ -477,6 +498,7 @@ export function Select<T>({
                 selectedImageIndex={selectedImageIndex}
                 onImagesSelectedChange={setImagesSelected}
                 onSelectedImageIndexChange={setSelectedImageIndex}
+                onClick={optionOnClick(option)}
               />
             );
           }
@@ -507,6 +529,7 @@ export function Select<T>({
                 isSelected={isSelected}
                 shouldShowDownArrow={areMoreOptionsBelow && isLastVisibleOption}
                 shouldShowUpArrow={areMoreOptionsAbove && isFirstVisibleOption}
+                onClick={optionOnClick(option)}
               >
                 <>
                   {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 1)}</Text>}
@@ -606,7 +629,11 @@ export function Select<T>({
           const padding = maxLabelWidth - currentLabelWidth;
 
           return (
-            <TwoColumnRow key={String(data.option.value)} isFocused={data.isFocused}>
+            <TwoColumnRow
+              key={String(data.option.value)}
+              isFocused={data.isFocused}
+              onClick={optionOnClick(data.option)}
+            >
               {/* Label part - no gap, handle spacing explicitly */}
               <Box flexDirection="row" flexShrink={0}>
                 {data.isFocused ? (
@@ -719,6 +746,7 @@ export function Select<T>({
               selectedImageIndex={selectedImageIndex}
               onImagesSelectedChange={setImagesSelected}
               onSelectedImageIndexChange={setSelectedImageIndex}
+              onClick={optionOnClick(option)}
             />
           );
         }
@@ -758,6 +786,7 @@ export function Select<T>({
             isSelected={isSelected}
             shouldShowDownArrow={areMoreOptionsBelow && isLastVisibleOption}
             shouldShowUpArrow={areMoreOptionsAbove && isFirstVisibleOption}
+            onClick={optionOnClick(option)}
           >
             <Box flexDirection="row" flexShrink={0}>
               {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
@@ -793,14 +822,22 @@ export function Select<T>({
 // the other Select layouts, this one doesn't render through SelectOption →
 // ListItem, so it declares the native cursor directly. Parks the cursor
 // on the pointer indicator so screen readers / magnifiers track focus.
-function TwoColumnRow({ isFocused, children }: { isFocused: boolean; children: ReactNode }): React.ReactNode {
+function TwoColumnRow({
+  isFocused,
+  children,
+  onClick,
+}: {
+  isFocused: boolean;
+  children: ReactNode;
+  onClick?: (event: ClickEvent) => void;
+}): React.ReactNode {
   const cursorRef = useDeclaredCursor({
     line: 0,
     column: 0,
     active: isFocused,
   });
   return (
-    <Box ref={cursorRef} flexDirection="row">
+    <Box ref={cursorRef} flexDirection="row" onClick={onClick}>
       {children}
     </Box>
   );

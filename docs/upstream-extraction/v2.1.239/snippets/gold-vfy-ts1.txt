@@ -1,0 +1,2 @@
+):t;if(n===o)return!0;let i=nav(o),s=o.endsWith(i)?o:o+i;return n.startsWith(s)}var k0a;var BLt=A(()=>{ki();k0a=require("path")});function jLt(e){let t=/^[\\/]{2}/.test(e);return(t?"\\\\":"")+(t?e.rep
+lace(/^[\\/]{2,}/,""):e).replace(/[\\/]+/g,"\\")}function jLe(e,t,r){return E(`bg-containment: refusing ${t} spelling for containment: ${e}`,{level:"warn"}),r===void 0?{lexical:e,canonical:null,skippe

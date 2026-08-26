@@ -1,0 +1,3 @@
+OFFSET=299471200
+
+the apiKeyHelper setting.");if(e==="profile"&&t==="/login managed key"&&A5()==="env-quad")return dHr("a Console API key saved by a previous /login","Run /logout to clear the saved key.");if(e==="profile"&&A5()==="env-quad")return dWs(Boolean(ln("policySettings")?.env?.ANTHROPIC_FEDERATION_RULE_ID));if(e!=="none"&&e!=="claude.ai")return dHr(e,gct(e));return lWs}async function oKv(e,t,r,n){let o=(a)=>(we("artifact_guard_autoread",a),null);if(!GDa())return o("gate_off");if(Wnr())return o("workshop_

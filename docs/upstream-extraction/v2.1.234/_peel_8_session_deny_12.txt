@@ -1,0 +1,3 @@
+OFFSET=300925787
+
+eturn(r,n,o,i)=>{let s=FfS(e,r,n,o,i,t);if(s.behavior==="deny")return s;if(e==="rm"||e==="rmdir"){let a=IGr(e,r,n,o,i);if(a.behavior!=="passthrough")return a}if(s.behavior==="passthrough")return s;if(s.behavior==="ask"){let a=t??plr[e],l=[];if(s.blockedPath)if(a==="read"){let u=Soe(s.blockedPath),d=QXt(u,"session");if(d)l.push(d)}else l.push({type:"addDirectories",directories:[Soe(s.blockedPath)],destination:"session"});let c=o.mode==="plan"&&(o.prePlanMode==="auto"||o.prePlanMode==="bypassPermissions"||o.prePlanMode==="acceptEdits"||o.prePlanMode==="dontAsk");if((a==="write"||a==="create")&&(o.mode==="default"||o.mode==="plan")&&!c)l.push({type:"setMode",mode:"acceptEdits",destination:"sess

@@ -1,0 +1,3 @@
+OFFSET=301236600
+
+.isUserSupplied)i=b0;else if(e.header==="other")i=MUf;else if(e.header==="X-Api-Key")i=t$t;return qd({error:"invalid_request",content:`${i} \xB7 ${e.message}`})}if(RUf(e)){if(uUf())return qd({error:"authentication_failed",content:cUf});if(Yn()==="gateway")return qd({error:"invalid_request",content:JTi});let{source:i}=Aj();return qd({error:"authentication_failed",content:i==="ANTHROPIC_API_KEY"||i==="apiKeyHelper"?t$t:wlr})}if(e instanceof V1r)return qd({error:"authentication_failed",content:xn()?"Failed to authenticate: OAuth session expired and could not be refreshed":lbS});if(oRr(e))return qd({error:"invalid_request",content:Swn()?ubS:cbS});if(k4e(e))return qd({error:"authentication_failed

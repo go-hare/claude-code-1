@@ -1,0 +1,42 @@
+#### "ros.Provider" [318104454]
+--- 318104454 ---
+new pkh.PassThrough;if(t!==void 0)o.columns=t;return o.on("data",(s)=>{if(n)return;n=!0,r=s.toString()}),await(await nIe(qst.jsx(k5,{children:qst.jsx(ros.Provider,{value:!0,children:qst.jsx(lCi,{value:E$E,children:e})})}),{stdout:o,patchConsole:!1})).waitUntilExit(),r}async function F6l(e,t){let r=await Oln(e,t);return vs(r)}var Yho,pkh,qst,fkh,ros;var QAt=A(()=>{lI();Rce();Nt();Yho=P(Lt(),1),pkh=
+#### "useContext(ros)" [320195267]
+--- 320195267 ---
+Message:R2e,shouldAnimate:_Ar,shouldShowDot:jTt,inProgressToolCallCount:l9e,lookups:uJ,isTranscriptMode:q0e}=EKM,I2e=vn(),[Aqt]=La(),c9e=ns(),Tqt=VTt.useContext(ros),hpn=wm(wi0);Nrc(av.id),Ran(),wm(Ei0);let yte=wm(Ai0),yi0;if(ude[0]!==av.name||ude[1]!==c9e.host)yi0=pqt(av.name,c9e.host),ude[0]=av.name,ude[1]=c9e.host,ude[2]=yi0;else yi0=ude[2];let YYh=yi0,ods;if(ude[3]!==yte||ude[4]!==YYh||ude[5]!
+#### "createContext(!1)" [308355023,308686638,317954791,318104758,318415691,318909796,320033903,320071027,321719998,336286313,336330977,336391832]
+--- 308355023 ---
+ ${n}`);return}throw r}}var ZSS;var D2t=A(()=>{qe();st();ZSS=new Set(["EIO","ENOTTY","EBADF"])});var Iyf,Hyf,pki;var uYa=A(()=>{Iyf=P(Lt(),1),Hyf=Iyf.createContext(!1);Hyf.displayName="InternalAccessibilityContext";pki=Hyf});function QSS(e){let t;try{t=new URL(e)}catch(r){throw Error(`Invalid URL format: ${e}`)}if(t.protocol!=="http:"&&t.protocol!=="https:")throw Error(`Invalid URL protocol: must 
+--- 308686638 ---
+0]=EAS;else EAS=$Xa[30];return EAS}var GSf,zXa,WXa,VSf,hCi;var Q2t=A(()=>{lfr();wwe();GSf=P(Lt(),1),zXa=P(Lt(),1),WXa=P(Ae(),1),VSf=P(Me(),1),hCi=GSf.createContext(!1)});var YSf=ae(function(lDR,KSf){var AAS=require("os"),qSf=require("tty"),O$e=C4o(),{env:See}=process,eBt;if(O$e("no-color")||O$e("no-colors")||O$e("color=false")||O$e("color=never"))eBt=0;else if(O$e("color")||O$e("colors")||O$e("col
+--- 317954791 ---
+a5t();xan();_Gl();YUe();Ars();dEr();pEr();OGl();Df();$rs();Frs();JUe();rs();VRe();y8e();Wwh=P(Lt(),1),_R=P(Lt(),1),NW=P(Ae(),1),Gwh=P(Me(),1),zrs=Wwh.createContext(!1)});var jan={};Et(jan,{AppRoot:()=>z2});function z2(RKD){let p5t=nEh.c(28),{session:qwh,storageV5:t5l,messageQueue:r5l,initialState:Kwh,onChangeAppState:Ywh,fleetNudgeStore:Xwh,writesExitHandoff:Jwh,getFpsMetrics:Zwh,stats:Qwh,keybind
+--- 318104758 ---
+ Oln(e,t);return vs(r)}var Yho,pkh,qst,fkh,ros;var QAt=A(()=>{lI();Rce();Nt();Yho=P(Lt(),1),pkh=require("stream"),qst=P(Ae(),1),fkh=P(Me(),1);ros=Yho.createContext(!1)});function U6l(e,t){let r=[...t].sort(),n=l4t(e,r.map((a)=>({name:a})),{maxEditDistance:2});if(n)return`No MCP server named "${e}". Did you mean "${n}"? Run \`claude mcp list\` to see all.`;if(r.length===0)return`No MCP server named
+#### "createContext(false)" []
+#### "function jcs(" [320084978]
+--- 320084978 ---
+|Nec[7]!==Fec)Xe0=Fec===null?oAr.jsx(v,{children:$ec}):oAr.jsx(Bi,{url:Fec,children:$ec}),Nec[6]=$ec,Nec[7]=Fec,Nec[8]=Xe0;else Xe0=Nec[8];return Xe0}function jcs(e){let t=Je0(e);return zcs.isAbsolute(t)?Fcs(t):__r(t)}function Je0(e){if(e==="~")return Uec.homedir();return e.startsWith("~"+zcs.sep)?Uec.homedir()+e.slice(1):e}var Uec,zcs,mbo,oAr,Zqh,hbo;var V8e=A(()=>{dbo();tSt();Nt();aio();rln();Oe
+#### "function HN(" [320084271]
+--- 320084271 ---
+"windows")return pbo.win32.isAbsolute(e)&&pbo.win32.parse(e).root.length>1;return pbo.isAbsolute(e)}var pbo;var Oec=A(()=>{ki();pbo=require("path")});function HN(IzM){let Nec=Zqh.c(9),{filePath:fbo,children:HzM}=IzM,Lec=mbo.useContext(hbo),mdn=HzM??fbo;if(jcs(fbo)||typeof mdn==="string"&&jcs(mdn)){let Bcs;if(Nec[0]===ue)Bcs=oAr.jsx(v,{dimColor:!0,children:"Path hidden (unsupported characters)"}),N
+#### "function AU(" [303688155,336305540]
+--- 303688155 ---
++=e.slice(o),n}var WKb,u_a,GKb,VKb;var qei=A(()=>{WKb=/\x1b\[[34]8;[25];/;u_a=/\x1b\[([\d;]*)m/g,GKb=/^(3[0-79]|9[0-7])$/,VKb=/^(4[0-79]|10[0-7])$/});function AU(e,t){if(or(e)<=t)return e;if(t<=0)return"\u2026";if(t<5)return Hi(e,t);let r=e.lastIndexOf("/"),n=r>=0?r:e.lastIndexOf("\\"),o=n>=0?e.slice(n):e,i=n>=0?e.slice(0,n):"",s=or(o);if(s>=t-1)return bG(e,t);let a=t-1-s;return xZe(i,a)+"\u2026"+
+--- 336305540 ---
+ko();Eo();Hi();iU();pi();Tr();Rr();No();_a();Wl();Pa();cy();zu();hy();gy();hD();Tu();bD();uy();Jd();Xl();up();pg();py();kU();CU();bp();Mc=A(ae(),1)});function AU(e){let{multiple:t=!1,defaultValue:n,value:r,onValueChange:o,autoComplete:a,...i}=e;return(0,PU.jsx)(RU,{...i,selectionMode:t?"multiple":"single",selectedValue:r,defaultSelectedValue:n,onSelectedValueChange:o,formAutoComplete:a})}var QPe,P
+
+==== ros= scan 300000000-322000000 ====
+
+--- 318104750 prev=";" ---
+lI();Rce();Nt();Yho=P(Lt(),1),pkh=require("stream"),qst=P(Ae(),1),fkh=P(Me(),1);ros=Yho.createContext(!1)});function U6l(e,t){let r=[...t].sort(),n=l4t(e,r.map((a)=>({name:a})),{maxEditDistance:2});if
+kept=1
+
+==== var-ish ros ====
+
+""var ros,"" []
+""var ros;"" []
+"",ros,"" []
+"",ros="" []
+"" ros="" []
+""\nros="" []

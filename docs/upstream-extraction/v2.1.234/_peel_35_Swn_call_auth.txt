@@ -1,0 +1,3 @@
+OFFSET=291317910
+
+USE_VERTEX||K.CLAUDE_CODE_USE_FOUNDRY||K.CLAUDE_CODE_USE_ANTHROPIC_AWS||K.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD||K.CLAUDE_CODE_USE_MANTLE)return!1;if(A5()==="profile-implicit"){let e=ua();if(rAn(e)&&Swn())return Vmd(),!1}return qmd(),!0}function hct(){return tye()===null&&uD()}async function r6s(){if(K.CLAUDE_CODE_USE_GATEWAY){let e=K.ANTHROPIC_BASE_URL,t=K.ANTHROPIC_AUTH_TOKEN;if(e&&t){let r;try{r=hjo(e)}catch(o){throw Error(`CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL is invalid: ${ue(o)}`)}let n=fUe(t);R6e({url:r,jwt:t,expiresAt:n!==null?n*1000:Number.MAX_SAFE_INTEGER,unpinned:!0});return}E("CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is missin

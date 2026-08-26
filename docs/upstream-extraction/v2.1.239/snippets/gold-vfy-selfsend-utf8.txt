@@ -1,0 +1,43 @@
+### sWt @313578329
+function sWt(e){return`Not sent \u2014 '${e}' is this session's own name.`}function Jen(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name),i=o===null?"this session":`this session ("${o}")`;return t?`
+('${e}' also addresses ${i} \u2014 this process's main session; to reach the main conversation from inside it, ${r}.)`:`
+('${e}' also addresses ${i} itself \u2014 if you meant yourself, there is no one to send to.)`}function Zen(e){return!e.cloudUnavailable&&!e.bridgeUnavailable&&!e.localUnavailable&&!e.searchTruncated&&!e.pinnedIdentityClaimedLocally}function Qen(e){let{getRegisteredSessionNa
+
+### DEe @313579493
+function DEe(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name);if(t){let i=o!==null?` ("${o}" is the name OTHER sessions use for it)`:"";return`'${e}' is this process's own main session${i} \u2014 from inside it, ${r} instead.`}return o!==null?`'${e}' is this session itself \u2014 "${o}" is the name other sessions use to message YOU; there is no one else by that name to send to.`:`'${e}' is this session itself \u2014 there is no one else at that address to send to.`}var vWi="target is this session itself \u2014 there is no one else to send to",qwm;var etn=A(()=>{Djn();xP();qk();Hh();jCe()
+
+### Zio @313577516
+function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to send to.)`}function Kwm(e){return`Not sent \u2014 '${e}' is this session's own name and ref, but another session record on this machine claims it.`}function qEt(e){return`'${e}' is this session's own address \u2014 a message or file sent there would only come back to this conversation; there is no one else at that address to send to.`}function 
+
+### Kwm @313577801
+function Kwm(e){return`Not sent \u2014 '${e}' is this session's own name and ref, but another session record on this machine claims it.`}function qEt(e){return`'${e}' is this session's own address \u2014 a message or file sent there would only come back to this conversation; there is no one else at that address to send to.`}function XFe(e){let t=Mf(e);return[Jhr()?.bridgeSessionId,Lgt()].some((r)=>typeof r==="string"&&Mf(r)===t)}function g5(e){return e.teammateContext!==void 0||e.agentContext!==void 0&&MZe(e.agentContext)}function sWt(e){return`Not sent \u2014 '${e}' is this session's own name.`}function Jen(e,t,
+
+### qEt @313577938
+function qEt(e){return`'${e}' is this session's own address \u2014 a message or file sent there would only come back to this conversation; there is no one else at that address to send to.`}function XFe(e){let t=Mf(e);return[Jhr()?.bridgeSessionId,Lgt()].some((r)=>typeof r==="string"&&Mf(r)===t)}function g5(e){return e.teammateContext!==void 0||e.agentContext!==void 0&&MZe(e.agentContext)}function sWt(e){return`Not sent \u2014 '${e}' is this session's own name.`}function Jen(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name),i=o===null?"this session":`this session ("${o}")`;return t?`
+('${e
+
+### vWi @313579989
+var vWi="target is this session itself \u2014 there is no one else to send to",qwm;var etn=A(()=>{Djn();xP();qk();Hh();jCe();Qfe();Zfe();qwm=`address the main conversation as "${dL}"`});function N_r(e,t,r){let n=Vu(t);e((o)=>o.sendMessagePins[n]?.id===r.id?o:{...o,sendMessagePins:{...o.sendMessagePins,[n]:{id:r.id,name:t,ref:sBr(r.kind,r.id)}}})}function wWi(e){return e==="cloud"?"a Claude session running in the cloud":"a Claude session on another machine, over Remote Control"}function ttn(e){return`${e.alsoListedRemotely?"; it is also connected via Remote Control":""}${e.remoteNamesakeClaimedLocally?`; a Remote 
+
+### qwm @313580126
+qwm=`address the main conversation as "${dL}"`});function N_r(e,t,r){let n=Vu(t);e((o)=>o.sendMessagePins[n]?.id===r.id?o:{...o,sendMessagePins:{...o.sendMessagePins,[n]:{id:r.id,name:t,ref:sBr(r.kind,r.id)}}})}function wWi(e){return e==="cloud"?"a Claude session running in the cloud":"a Claude session on another machine, over Remote Control"}function ttn(e){return`${e.alsoListedRemotely?"; it is also connected via Remote Control":""}${e.remoteNamesakeClaimedLocally?`; a Remote Control or cloud session also named '${e.displayName}' is registered to a session on this machine`:""}${e.searchTruncated?Xwm:""}`}functi
+
+### Jio @313577475
+function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to send to.)`}function Kwm(e){return`Not sent \u2014 '${e}' is this session's own name and ref, but another session record on this machine claims it.`}function qEt(e){return`'${e}' is this session's own address \u2014 a message or file sent there would only come back to this conversation; there is no one el
+
+### lRw @313577351
+function lRw(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t(),n=WCe(e);return r!==void 0&&n!==null&&v_a(n.ref,"session",r)}function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to send to.)`}function Kwm(e){return`Not sent \u2014 '${e}' is this session's own name and ref, but another session record on this machine claims it.`}function qEt(e){return`'${e}' is 
+
+### g5 @313578234
+function g5(e){return e.teammateContext!==void 0||e.agentContext!==void 0&&MZe(e.agentContext)}function sWt(e){return`Not sent \u2014 '${e}' is this session's own name.`}function Jen(e,t,r=qwm){let{getRegisteredSessionName:n}=(su(),pn(XFn)),o=MFn(n()?.name),i=o===null?"this session":`this session ("${o}")`;return t?`
+('${e}' also addresses ${i} \u2014 this process's main session; to reach the main conversation from inside it, ${r}.)`:`
+('${e}' also addresses ${i} itself \u2014 if you meant yourself, there is no one to send to.)`}function Zen(e){return!e.cloudUnavailable&&!e.bridgeUnavailable&&!e.localUnavailable&
+
+### Xen @313577169
+function Xen(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&HFn(e,r)}function VEt(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&eti(e,r)}function lRw(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t(),n=WCe(e);return r!==void 0&&n!==null&&v_a(n.ref,"session",r)}function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to
+
+### VEt @313577260
+function VEt(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t();return r!==void 0&&eti(e,r)}function lRw(e){let{ownMessagingSocket:t}=(H$(),pn(nSe)),r=t(),n=WCe(e);return r!==void 0&&n!==null&&v_a(n.ref,"session",r)}function Jio(e,t){return lRw(e)&&!Xen(t)}function Zio(e){return`'${e}' is the name-and-ref token this session advertises for ITSELF, yet a different session record on this machine claims it \u2014 not sent. A record impersonating this session is suspicious: ask the user. (If you meant yourself, there is no one to send to.)`}function Kwm(e){return`Not sent \u2014 '${e}' is this session's own name and re
+
+### MZe @303742521
+function MZe(e){return dQ(e)&&!e.isMainSession}function q_a(e){if(!dQ(e)||!e.subagentName)return;return e.isBuiltIn?e.subagentName:"user-defined"}function eLt(e){try{if(!dQ(e))return{};let t=q_a(e);if(t===void 0)return{};return{subagent_type:t,is_built_in_agent:e.isBuiltIn??!1}}catch{return{}}}function QFn(e){if(!e||!dQ(e)||!e.workflowRunId)return{};return{"workflow.run_id":e.workflowRunId,...e.workflowName&&{"workflow.name":e.workflowName}}}function rme(e){if(!e||!dQ(e)||!e.workflowRunId)return{};return{workflowRunId:e.workflowRunId,workflowName:e.workflowName}}function K_a(e){if(e.agentType==="main"||!e.invokin

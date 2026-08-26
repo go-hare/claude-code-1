@@ -46,7 +46,9 @@ export function useQueueProcessor({
   )
 
   useEffect(() => {
-    if (isQueryActive) return
+    // Official Ruy: snapshot OR live isActive. forceEnd() flips both, but a
+    // reserve()/tryStart() in the same tick can leave the snapshot stale.
+    if (isQueryActive || queryGuard.isActive) return
     if (hasActiveLocalJsxUI) return
     if (queueSnapshot.length === 0) return
 

@@ -50,6 +50,7 @@ import {
 import { assembleToolPool } from 'src/tools.js';
 import { asAgentId } from 'src/types/ids.js';
 import { getAgentContext, runWithAgentContext, type SubagentContext } from 'src/utils/agentContext.js';
+import { resolveEffectiveIsolation } from 'src/utils/agentIsolationRemote.js';
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js';
 import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
@@ -77,7 +78,7 @@ import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
 import { asSystemPrompt } from 'src/utils/systemPromptType.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
 import { getTask, getTaskListId, getTaskOwnedFiles } from 'src/utils/tasks.js';
-import { MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js';
+import { AGENT_NAME_REGEX, MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js';
 import { getParentSessionId, isTeammate } from 'src/utils/teammate.js';
 import { isInProcessTeammate } from 'src/utils/teammateContext.js';
 import { teleportToRemote } from 'src/utils/teleport.js';
@@ -103,6 +104,7 @@ import {
 } from './agentToolUtils.js';
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js';
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js';
+import { shouldSkipTeammateSpawnForWebFetch } from './built-in/webFetchAgent.js';
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME, ONE_SHOT_BUILTIN_AGENT_TYPES } from './constants.js';
 import {
   buildForkedMessages,
@@ -168,16 +170,16 @@ const baseInputSchema = lazySchema(() =>
     prompt: z.string().describe('The task for the agent to perform'),
     subagent_type: z.string().optional().describe('The type of specialized agent to use for this task'),
     model: z
-      .enum(['sonnet', 'opus', 'haiku'])
+      .enum(['sonnet', 'opus', 'haiku', 'fable'])
       .optional()
       .describe(
-        "Optional model override for this agent. Takes precedence over the agent definition's model frontmatter. If omitted, uses the agent definition's model, or inherits from the parent.",
+        'Optional model override for this agent. Takes precedence over the agent definition\'s model frontmatter. If omitted, uses the agent definition\'s model, or inherits from the parent. Ignored for subagent_type: "fork" — forks always inherit the parent model.',
       ),
     run_in_background: z
       .boolean()
       .optional()
       .describe(
-        'Agents run in the background by default; you will be notified when one completes. Set to false to run this agent synchronously when you need its result before continuing.',
+        "Agents run in the background by default; you will be notified when one completes. Set to false only when your very next action depends on this agent's result and nothing else could usefully happen while it runs — otherwise leave it in the background so the user can hand you other work.",
       ),
     task_id: z
       .string()
@@ -200,11 +202,16 @@ const fullInputSchema = lazySchema(() => {
   const multiAgentInputSchema = z.object({
     name: z
       .string()
+      .regex(AGENT_NAME_REGEX, {
+        message:
+          'name must start with a letter or digit and contain only letters, digits, underscores, or hyphens (max 64 chars)',
+      })
+      .refine(t => t !== MAIN_RECIPIENT_NAME, {
+        message: `"${MAIN_RECIPIENT_NAME}" is reserved — SendMessage routes it to the main conversation`,
+      })
       .optional()
-      .describe(
-        'Name for the spawned agent. Makes it addressable via SendMessage({to: name}) while running. "main" is reserved — SendMessage routes it to the main conversation.',
-      ),
-    team_name: z.string().optional().describe('Team name for spawning. Uses current team context if omitted.'),
+      .describe('Name for the spawned agent. Makes it addressable via SendMessage({to: name}) while running.'),
+    team_name: z.string().optional().describe('Deprecated; ignored. The session has a single implicit team.'),
     // densable 2.1.212: mode is accepted for schema compatibility but ignored.
     // Subagents inherit the parent session permission mode; agent frontmatter
     // may still override via selectedAgent.permissionMode.
@@ -218,12 +225,11 @@ const fullInputSchema = lazySchema(() => {
   return baseInputSchema()
     .merge(multiAgentInputSchema)
     .extend({
-      isolation: (process.env.USER_TYPE === 'ant' ? z.enum(['worktree', 'remote']) : z.enum(['worktree']))
+      isolation: z
+        .enum(['worktree', 'remote'])
         .optional()
         .describe(
-          process.env.USER_TYPE === 'ant'
-            ? 'Isolation mode. "worktree" creates a temporary git worktree so the agent works on an isolated copy of the repo. "remote" launches the agent in a remote CCR environment (always runs in background).'
-            : 'Isolation mode. "worktree" creates a temporary git worktree so the agent works on an isolated copy of the repo.',
+          'Isolation mode. "worktree" creates a temporary git worktree so the agent works on an isolated copy of the repo. "remote" launches the agent in a remote cloud environment (always runs in background; availability is gated).',
         ),
       cwd: z
         .string()
@@ -406,7 +412,9 @@ export const AgentTool = buildTool({
     // densable 2.1.212 #42: Task/Agent `mode` param is deprecated and ignored.
     // Keep the field on the schema so old tool calls still validate, but never
     // read `_deprecatedSpawnMode` — parent session mode + agent frontmatter win.
+    // densable 2.1.239: team_name is also ignored (single implicit session team).
     void _deprecatedSpawnMode;
+    void team_name;
 
     // Get app state for permission mode and agent filtering
     const appState = toolUseContext.getAppState();
@@ -424,24 +432,16 @@ export const AgentTool = buildTool({
     // reaches the root store so task registration/progress/kill stay visible.
     const rootSetAppState = toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState;
 
-    // Check if user is trying to use agent teams without access
-    if (team_name && !isAgentSwarmsEnabled()) {
-      throw new Error('Agent Teams is not yet available on your plan.');
-    }
-
-    // Teammates (in-process or tmux) passing `name` would trigger spawnTeammate()
-    // below, but TeamFile.members is a flat array with one leadAgentId — nested
-    // teammates land in the roster with no provenance and confuse the lead.
-    const teamName = resolveTeamName({ team_name }, appState);
-    if (isTeammate() && teamName && name) {
+    // densable: S = xd() ? g.teamContext : undefined
+    const teamContext = isAgentSwarmsEnabled() ? appState.teamContext : undefined;
+    // densable: (w || Bht()) && name — roster is flat; isTeammate covers both.
+    if (isTeammate() && name) {
       throw new Error(
         'Teammates cannot spawn other teammates — the team roster is flat. To spawn a subagent instead, omit the `name` parameter.',
       );
     }
-    // In-process teammates cannot spawn background agents (their lifecycle is
-    // tied to the leader's process). Tmux teammates are separate processes and
-    // can manage their own background agents.
-    if (isInProcessTeammate() && teamName && run_in_background === true) {
+    // densable: w && run_in_background === true (teammateContext only).
+    if (isInProcessTeammate() && run_in_background === true) {
       throw new Error(
         'In-process teammates cannot spawn background agents. Use run_in_background=false for synchronous subagents.',
       );
@@ -485,9 +485,16 @@ export const AgentTool = buildTool({
       }
     };
 
-    // Check if this is a multi-agent spawn request
-    // Spawn is triggered when team_name is set (from param or context) and name is provided
-    if (teamName && name) {
+    // densable: S && name && !fork && !WIe && !isolation && !cwd
+    const isForkType = subagent_type !== undefined && subagent_type === FORK_SUBAGENT_TYPE && isForkSubagentEnabled();
+    if (
+      teamContext &&
+      name &&
+      !isForkType &&
+      !shouldSkipTeammateSpawnForWebFetch(subagent_type, toolUseContext.options.agentDefinitions.activeAgents) &&
+      !isolation &&
+      !cwd
+    ) {
       // densable: N() before teammate spawn
       consumeSessionSpawnSlot();
       // Set agent definition color for grouped UI display before spawning
@@ -502,7 +509,6 @@ export const AgentTool = buildTool({
           name,
           prompt,
           description,
-          team_name: teamName,
           use_splitpane: true,
           // densable: plan_mode_required:_==="plan" where _ is parent session mode
           // (input `mode` is deprecated/ignored).
@@ -660,7 +666,7 @@ export const AgentTool = buildTool({
     // Same lifecycle constraint as the run_in_background guard above, but for
     // agent definitions that force background via `background: true`. Checked
     // here because selectedAgent is only now resolved.
-    if (isInProcessTeammate() && teamName && selectedAgent.background === true) {
+    if (isInProcessTeammate() && selectedAgent.background === true) {
       throw new Error(
         `In-process teammates cannot spawn background agents. Agent '${selectedAgent.agentType}' has background: true in its definition.`,
       );
@@ -755,24 +761,23 @@ export const AgentTool = buildTool({
     // <task-notification> re-entry there is handled by the else branch
     // below (registerAsyncAgentTask + notifyOnCompletion).
     const assistantForceAsync = feature('KAIROS') ? appState.kairosEnabled : false;
+    // Official q resolve: Gji → Iq ignore → Tno fallback. Then U = j || (... && !G).
+    const effectiveIsolation = resolveEffectiveIsolation(isolation, selectedAgent);
+    const isRemoteIsolation = effectiveIsolation === 'remote';
     // Official 208: te || (o===true || agent.background || coordinator ||
     // forceAsync || (!inProcessTeammate && o!==false)) && !disabled
     // Unset run_in_background → background by default (except in-process teammates).
+    // Official U=j||(...)&&!G — remote stays async even when bg tasks are disabled.
     const shouldRunAsync =
-      (run_in_background === true ||
+      isRemoteIsolation ||
+      ((run_in_background === true ||
         selectedAgent.background === true ||
         isCoordinator ||
         forceAsync ||
         assistantForceAsync ||
         (proactiveModule?.isProactiveActive() ?? false) ||
         (!isInProcessTeammate() && run_in_background !== false)) &&
-      !isBackgroundTasksDisabled;
-
-    // Resolve effective isolation mode early — densable B=remote for L(G&&!B).
-    const effectiveIsolation = isolation ?? selectedAgent.isolation;
-    // densable B: remote isolation is "async" for product but Me=G&&!B (no interrupt
-    // immunity) — remote still uses parent abort signal for teleport.
-    const isRemoteIsolation = process.env.USER_TYPE === 'ant' && effectiveIsolation === 'remote';
+        !isBackgroundTasksDisabled);
 
     // densable L(G&&!B) — count after type/permission/MCP guards, before worktree/remote/run.
     // Me = local async only: high-priority "interrupt" must not cancel bg startup.
@@ -798,15 +803,18 @@ export const AgentTool = buildTool({
       is_fork: isForkPath,
     });
 
-    // Remote isolation: delegate to CCR. Gated ant-only — the guard enables
-    // dead code elimination of the entire block for external builds.
-    if (process.env.USER_TYPE === 'ant' && effectiveIsolation === 'remote') {
+    // Official j: isolation still remote after Tno fallback → CCR.
+    if (isRemoteIsolation) {
       const eligibility = await checkRemoteAgentEligibility();
       if (!eligibility.eligible) {
         const reasons = (eligibility as { eligible: false; errors: BackgroundRemoteSessionPrecondition[] }).errors
           .map(formatPreconditionError)
           .join('\n');
-        throw new Error(`Cannot launch remote agent:\n${reasons}`);
+        logEvent('tengu_feature_bad', {
+          feature_name: 'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code: 'subagent_remote_ineligible' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+        throw new Error(`Cannot launch cloud agent:\n${reasons}`);
       }
 
       let bundleFailHint: string | undefined;
@@ -2247,11 +2255,3 @@ duration_ms: ${data.totalDurationMs}</usage>`,
   renderToolUseErrorMessage,
   renderGroupedToolUse: renderGroupedAgentToolUse,
 } satisfies ToolDef<InputSchema, Output, Progress>);
-
-function resolveTeamName(
-  input: { team_name?: string },
-  appState: { teamContext?: { teamName: string } },
-): string | undefined {
-  if (!isAgentSwarmsEnabled()) return undefined;
-  return input.team_name || appState.teamContext?.teamName;
-}

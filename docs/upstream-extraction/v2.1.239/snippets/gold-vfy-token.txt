@@ -1,0 +1,22 @@
+(!n.isFile()||n.size>r)return null;return e.readFileSync(t,{encoding:"utf8"})}var pti,fti;var E$=A(()=>{pti=require("fs"),fti=require("fs/promises")});function mti(){return Wt()==="windows"}function k
+Wd(){return{peerToken:zFn.randomBytes(R_a).toString("hex"),childToken:zFn.randomBytes(R_a).toString("hex")}}function kLe(){return eor.join(En(),"sessions")}function lQ(e){let t=jWe(e);if(t!==void 0)re
+turn`\\\\.\\pipe\\${t.replace(/[A-Z]+/g,(r)=>r.toLowerCase())}`;if(IMr(e))return;return eor.resolve(e)}function CWd(e){let t=lQ(e);return t===void 0?void 0:zFn.createHash("sha256").update(t).digest("h
+ex")}function HYb(e,t){let r=CWd(t);if(r===void 0)throw Error("refusing to derive a messaging key name for a non-canonical socket path");return`${e}.${r}.key`}async function xWd(e,t,{sweepPermitted:r}
+){let n=kLe();await Uht.mkdir(n,{recursive:!0,mode:448}),await PYb(n,r);let o=eor.join(n,HYb(process.pid,e));try{await Uht.unlink(o)}catch{}return await od(o,He({peerToken:t,...GWe(await eme())}),384)
+,o}async function PYb(e,t){if(!t)return;let r;try{r=await Uht.readdir(e)}catch{return}await Promise.all(r.map(async(n)=>{let o=CYb.exec(n);if(o&&b7(parseInt(o[1],10)))try{await Uht.unlink(eor.join(e,n
+))}catch{}}))}async function RWd(e){try{await Uht.unlink(e)}catch{}}async function IWd(e,t){let r=kLe(),n;try{n=await Uht.readdir(r)}catch(c){return lr(c)?{kind:"no-key"}:{kind:"unusable"}}let o=CWd(e
+);if(o===void 0)return{kind:"no-key"};let i=`.${o}.key`,s=n.filter((c)=>c.endsWith(i)).map((c)=>{let u=I_a.exec(c);return u?{file:c,pid:parseInt(u[1],10)}:void 0}).filter((c)=>c!==void 0);if(s.length=
+==0)return{kind:"no-key"};let a=async(c)=>{let u=await zC(eor.join(r,c),RYb);if(u===null)return;try{let d=IYb().safeParse(rT(u));return d.success?d.data:void 0}catch{return}};if(s.length===1){let c=s[
+0];if(t?.requireLiveOwner&&b7(c.pid))return{kind:"dead-owner"};let u=await a(c.file);if(u===void 0)return{kind:"unusable"};if(t?.requireLiveOwner){let d=Cve(u);if(d!==void 0){let p=await sk(c.pid,{ski
+pCache:!0});if(p!==void 0&&!BFn(d,p))return{kind:"dead-owner"}}}return{kind:"token",token:u.peerToken}}let l;for(let{file:c,pid:u}of s){let d=await a(c);if(d===void 0)continue;let p=0;if(!b7(u)){let f
+=Cve(d),m=f===void 0?void 0:await sk(u,{skipCache:!0});if(f===void 0||m===void 0)p=1;else p=BFn(f,m)?2:0}if(l===void 0||p>l.rank)l={rank:p,peerToken:d.peerToken}}if(l===void 0)return{kind:"unusable"};
+if(t?.requireLiveOwner&&l.rank===0)return{kind:"dead-owner"};return{kind:"token",token:l.peerToken}}function H_a(e){return He({type:TWd,token:e})+`
+`}function PWd(e){return typeof e==="object"&&e!==null&&"type"in e&&e.type===TWd}function DWd(e,t){if(t===void 0)return;if(xve(e,t.peerToken))return"peer";if(xve(e,t.childToken))return"child";return}v
+ar zFn,Uht,eor,TWd="auth",I_a,CYb,R_a=16,xYb,RYb=4096,IYb,HWd;var dBr=A(()=>{Vy();gl();qn();Qnr();bo();E$();st();Dw();Sn();Zfe();ki();wr();zFn=require("crypto"),Uht=require("fs/promises"),eor=require(
+"path"),I_a=/^(\d+)\.[0-9a-f]{64}\.key$/,CYb=/^(\d+)\.[0-9a-f]{64}\.key\.tmp\.[0-9a-f]+$/,xYb=/^[0-9a-f]{32}$/,IYb=ve(()=>_e({peerToken:L().regex(xYb),procStart:L().optional(),procStartFt:L().optional
+()}));HWd=H_a("0".repeat(R_a*2)).length});function DYb(e){return[...e.replace(/[\x00-\x1f\x7f-\x9f]/g,"")].slice(0,fle).join("")}function Wv(e){return DYb(yc(e.trim())).trim()}var hle=A(()=>{lf()});fu
+nction F4(){return P_a.getStore()}function OWd(e,t){return P_a.run(e,t)}function gle(){return P_a.getStore()!==void 0}function LWd(e){return{...e,isInProcess:!0}}var MWd,P_a;var tme=A(()=>{MWd=require
+("async_hooks"),P_a=new MWd.AsyncLocalStorage});var O_a={};Et(O_a,{_setAmbientMarkerProbeForTesting:()=>NYb,_tmuxGlobalEnvOutputHasMarker:()=>zWd,clearDynamicTeamContext:()=>LYb,getAgentId:()=>vG,getA
+gentName:()=>JR,getDynamicTeamContext:()=>Bht,getParentSessionId:()=>ZV,getTeamName:()=>Hy,getTeammateColor:()=>sj,getTeammateContext:()=>F4,hasActiveInProcessTeammates:()=>nor,hasNonLeadTeammate:()=>
+ror,hasWorkingInProcessTeammates:()=>D_a,isInProcessTeammate:()=>gle,isModelDrivenSession:()=>HZe,isNestedInteractiveClaudeSession:()=>tor,isPlanModeRequired:()=>WFn,isProcessTeammate:()=>BWd,isTeamLe
+ad:()=>cQ,isTeammate:()=>Qb,setCliParentSessionId:()

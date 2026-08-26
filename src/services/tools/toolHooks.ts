@@ -457,6 +457,7 @@ export async function* runPreToolUseHooks(
       >
     }
   | { type: 'hookPermissionResult'; hookPermissionResult: PermissionResult }
+  | { type: 'defer'; hookName: string }
   | { type: 'hookUpdatedInput'; updatedInput: Record<string, unknown> }
   | { type: 'preventContinuation'; shouldPreventContinuation: boolean }
   | { type: 'stopReason'; stopReason: string }
@@ -468,8 +469,10 @@ export async function* runPreToolUseHooks(
   | { type: 'stop'; stopReason?: string }
 > {
   const hookStartTime = Date.now()
-  // densable `u`: last hookPermissionResult seen this PreToolUse pass
-  let lastHookPermissionResult: PermissionResult | undefined
+  // Official `u` — deny only. Allow/ask do not suppress a latched defer.
+  let deniedPermissionResult: PermissionResult | undefined
+  // Official `c` — latch defer until the stream ends.
+  let deferredHookName: string | undefined
   // densable `d`: last stopReason from preventContinuation
   let lastStopReason: string | undefined
   try {
@@ -511,7 +514,7 @@ export async function* runPreToolUseHooks(
               reason: denialMessage,
             },
           }
-          lastHookPermissionResult = permissionResult
+          deniedPermissionResult = permissionResult
           yield {
             type: 'hookPermissionResult',
             hookPermissionResult: permissionResult,
@@ -539,13 +542,16 @@ export async function* runPreToolUseHooks(
             hookSource: result.hookSource,
             reason: result.hookPermissionDecisionReason,
           }
-          if (result.permissionBehavior === 'allow') {
+          if (result.permissionBehavior === 'defer') {
+            // Official c — latch hookSource; do not yield until the stream ends.
+            deferredHookName = result.hookSource || `PreToolUse:${tool.name}`
+            continue
+          } else if (result.permissionBehavior === 'allow') {
             const permissionResult: PermissionResult = {
               behavior: 'allow',
               updatedInput: result.updatedInput,
               decisionReason,
             }
-            lastHookPermissionResult = permissionResult
             yield {
               type: 'hookPermissionResult',
               hookPermissionResult: permissionResult,
@@ -559,13 +565,12 @@ export async function* runPreToolUseHooks(
                 `Hook PreToolUse:${tool.name} ${getRuleBehaviorDescription(result.permissionBehavior)} this tool`,
               decisionReason,
             }
-            lastHookPermissionResult = permissionResult
             yield {
               type: 'hookPermissionResult',
               hookPermissionResult: permissionResult,
             }
           } else {
-            // deny - updatedInput is irrelevant since tool won't run
+            // Official u — deny only.
             const permissionResult: PermissionResult = {
               behavior: result.permissionBehavior,
               message:
@@ -573,7 +578,7 @@ export async function* runPreToolUseHooks(
                 `Hook PreToolUse:${tool.name} ${getRuleBehaviorDescription(result.permissionBehavior)} this tool`,
               decisionReason,
             }
-            lastHookPermissionResult = permissionResult
+            deniedPermissionResult = permissionResult
             yield {
               type: 'hookPermissionResult',
               hookPermissionResult: permissionResult,
@@ -667,15 +672,17 @@ export async function* runPreToolUseHooks(
             }),
           },
         }
-        // densable: if a permission decision was already made (u), re-yield it
-        // and return — do NOT stop as infra failure (misreport as user reject).
-        // Else stop with ZFu stopReason so toolExecution emits a non-user halt.
-        if (lastHookPermissionResult) {
+        // Official: u → re-yield deny and return. Else if c yield defer, then stop.
+        if (deniedPermissionResult) {
           yield {
             type: 'hookPermissionResult',
-            hookPermissionResult: lastHookPermissionResult,
+            hookPermissionResult: deniedPermissionResult,
           }
           return
+        }
+        if (deferredHookName) {
+          yield { type: 'defer', hookName: deferredHookName }
+          deferredHookName = undefined
         }
         yield {
           type: 'stop',
@@ -684,6 +691,9 @@ export async function* runPreToolUseHooks(
             'PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed.',
         }
       }
+    }
+    if (deferredHookName && !deniedPermissionResult) {
+      yield { type: 'defer', hookName: deferredHookName }
     }
   } catch (error) {
     logError(error)

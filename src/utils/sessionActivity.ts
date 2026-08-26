@@ -17,7 +17,7 @@ import { isRemoteSendKeepalivesEnvEnabled } from './residualFinalEnvGates.js'
 
 const SESSION_ACTIVITY_INTERVAL_MS = 30_000
 
-export type SessionActivityReason = 'api_call' | 'tool_exec'
+export type SessionActivityReason = 'api_call' | 'tool_exec' | 'hook_exec'
 
 let activityCallback: (() => void) | null = null
 let refcount = 0
@@ -127,6 +127,11 @@ export function notifyDropNestedBlockedChain(agentId: string): void {
 /** Official ZRu — current mainLoopRefcount. */
 export function getMainLoopRefcount(): number {
   return mainLoopRefcount
+}
+
+/** Test-only — official `n.refcount` (keepalive hold, including hook_exec). */
+export function getSessionActivityRefcountForTests(): number {
+  return refcount
 }
 
 /**

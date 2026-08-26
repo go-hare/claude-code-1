@@ -1,0 +1,4 @@
+offset=180645506
+needle=b'sandbox network'
+window=
+h.i.n.e. ..  .r.u.n. ./.s.a.n.d.b.o.x. .t.o. .c.h.e.c.k. .s.a.n.d.b.o.x. .s.t.a.t.u.s.....................install_config_conflict.................config_conflict.................A sandbox network-filter set is already installed with a different configuration (for example, under a different sandbox account name). Remove it by running npx @anthropic-ai/sandbox-runtime windows-uninstall from a truste

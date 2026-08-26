@@ -266,6 +266,7 @@ function createPermissionContext(
       suggestions: PermissionUpdate[] | undefined,
       updatedInput?: Record<string, unknown>,
       permissionPromptStartTimeMs?: number,
+      opts?: { askSuppressesAlwaysAllowRule?: boolean },
     ): Promise<PermissionDecision | PermissionHookReprompt | null> {
       for await (const hookResult of executePermissionRequestHooks(
         tool.name,
@@ -316,6 +317,7 @@ function createPermissionContext(
               (decision.updatedPermissions ??
                 []) as unknown as import('../../types/permissions.js').PermissionUpdate[],
               permissionPromptStartTimeMs,
+              opts,
             )
           } else if (decision.behavior === 'deny') {
             this.logDecision(
@@ -413,9 +415,21 @@ function createPermissionContext(
       finalInput: Record<string, unknown>,
       permissionUpdates: PermissionUpdate[],
       permissionPromptStartTimeMs?: number,
+      opts?: { askSuppressesAlwaysAllowRule?: boolean },
     ): Promise<PermissionAllowDecision> {
+      // densable 2.1.235 #12 accept-path strip (same OR as handleUserAllow / jze).
+      const shouldStrip =
+        tool.suppressesAlwaysAllowRule?.(finalInput) === true ||
+        opts?.askSuppressesAlwaysAllowRule === true
+      const updatesToPersist = shouldStrip
+        ? stripWholeToolGrantsForAsk(
+            permissionUpdates,
+            tool,
+            toolUseContext.getAppState().toolPermissionContext,
+          )
+        : permissionUpdates
       const acceptedPermanentUpdates =
-        await this.persistPermissions(permissionUpdates)
+        await this.persistPermissions(updatesToPersist)
       this.logDecision(
         {
           decision: 'accept',

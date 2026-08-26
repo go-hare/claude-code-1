@@ -1,0 +1,69 @@
+#### "Tqt=" [320195259]
+ate:_Ar,shouldShowDot:jTt,inProgressToolCallCount:l9e,lookups:uJ,isTranscriptMode:q0e}=EKM,I2e=vn(),[Aqt]=La(),c9e=ns(),Tqt=VTt.useContext(ros),hpn=wm(wi0);Nrc(av.id),Ran(),wm(Ei0);let yte=wm(Ai0),yi0;if(ude[0]!==av.name||ude[1]!==c9e.host)yi0=pqt(av.name,c9e.host),ude[0]=av.name,ude[1]=c9e.host,ude[2]=yi0;else yi0=ude[2];let YYh=yi0,ods;
+---
+#### "let Tqt" []
+#### "const Tqt" []
+#### "Tqt=mbo.useContext" []
+#### "Tqt=VTt.useContext" [320195259]
+ate:_Ar,shouldShowDot:jTt,inProgressToolCallCount:l9e,lookups:uJ,isTranscriptMode:q0e}=EKM,I2e=vn(),[Aqt]=La(),c9e=ns(),Tqt=VTt.useContext(ros),hpn=wm(wi0);Nrc(av.id),Ran(),wm(Ei0);let yte=wm(Ai0),yi0;if(ude[0]!==av.name||ude[1]!==c9e.host)yi0=pqt(av.name,c9e.host),ude[0]=av.name,ude[1]=c9e.host,ude[2]=yi0;else yi0=ude[2];let YYh=yi0,ods;
+---
+#### "useContext(ros)" [320195267]
+shouldShowDot:jTt,inProgressToolCallCount:l9e,lookups:uJ,isTranscriptMode:q0e}=EKM,I2e=vn(),[Aqt]=La(),c9e=ns(),Tqt=VTt.useContext(ros),hpn=wm(wi0);Nrc(av.id),Ran(),wm(Ei0);let yte=wm(Ai0),yi0;if(ude[0]!==av.name||ude[1]!==c9e.host)yi0=pqt(av.name,c9e.host),ude[0]=av.name,ude[1]=c9e.host,ude[2]=yi0;else yi0=ude[2];let YYh=yi0,ods;if(ude[3
+---
+#### "var ros=" []
+#### "ros=mbo.createContext" []
+#### "var hbo=" []
+#### "hbo=mbo.createContext" [320085317]
+dbo();tSt();Nt();aio();rln();Oec();D0();Uec=require("os"),zcs=require("path"),mbo=P(Lt(),1),oAr=P(Ae(),1),Zqh=P(Me(),1),hbo=mbo.createContext(null)});function gbo(e,t=new Date){let r=new Date(e);if(Number.isNaN(r.getTime()))return"";let n=tt0(),o=Qqh(t)-Qqh(r),i=Math.round(o/86400000);if(i===0)return eBr(n,Ze0).format(r);if(i>0&&i<7)retur
+---
+#### "createContext(null)" [308327411,308327832,308554086,308565304,308641248,308718758,308720510,317873555]
+Ka,Ugf,gSS=10,ySS,tki;var F8r=A(()=>{I2t=P(Lt(),1),JKa=P(Ae(),1),Ugf=P(Me(),1),ySS={ring:[],mode:{type:"idle"}};tki=I2t.createContext(null)});function Bgf(){return{markdownTokens:new Map,highlightedCode:new Map,structuredDiff:new WeakMap}}function zgf({children:e}){let t=Ypr.useRef(null);return t.current??=Bgf(),Wgf.jsx(jgf.Provider,{valu
+---
+ll);if(e)return e;return t.current??=Bgf(),t.current}var Ypr,Wgf,jgf;var FKn=A(()=>{Ypr=P(Lt(),1),Wgf=P(Ae(),1);jgf=Ypr.createContext(null)});function ZKa(e,{include:t,exclude:r}={}){let n=(o)=>{let i=(s)=>typeof s==="string"?o===s:s.test(o);if(t)return t.some(i);if(r)return!r.some(i);return!0};for(let[o,i]of bSS(e.constructor.prototype))
+---
+rTimeout(r)},V2t=()=>()=>{},Bki=()=>null,Hoe,$bf;var yVe=A(()=>{Ert();G2t=P(Lt(),1),A7a=P(Ae(),1),Fbf=P(Me(),1);Hoe=G2t.createContext(null),$bf=hX*2});var Ubf,$ES,jki;var k7a=A(()=>{Ubf=P(Lt(),1),$ES=Ubf.createContext(()=>{}),jki=$ES});var FES=(e,t=2)=>e.replace(/^\t+/gm,(r)=>" ".repeat(r.length*t)),Bbf;var jbf=A(()=>{Bbf=FES});var UES=(e
+---
+#### "Path hidden (unsupported characters)" [175860096,320084480]
+lue.............	.......HzM.............	.......fbo.............	.......string..
+...............................	...$...Path hidden (unsupported characters)........................................................................................................p................................C!L..0>...........4.......<..PL..pL..@....3...T
+---
+,mdn=HzM??fbo;if(jcs(fbo)||typeof mdn==="string"&&jcs(mdn)){let Bcs;if(Nec[0]===ue)Bcs=oAr.jsx(v,{dimColor:!0,children:"Path hidden (unsupported characters)"}),Nec[0]=Bcs;else Bcs=Nec[0];return Bcs}let Bcs;if(Nec[1]!==Lec||Nec[2]!==mdn)Bcs=Lec!==null&&typeof mdn==="string"?AU(mdn,Lec):mdn,Nec[1]=Lec,Nec[2]=mdn,Nec[3]=Bcs;else Bcs=Nec[3];l
+---
+#### "us-only-inference" []
+#### "US-only inference" []
+#### "1.1x" []
+#### "35;150;7M" []
+#### "mouse report" []
+#### "stripBom" [236186072,304534058,304534179]
+.T.....L..p=...4...1............................p+X..................... .......................................	.......stripBom..............................;.....j.......w.....;...;......H..H...............................................p.................................................L.................................................
+---
++i}function _pv(e){if(Buffer.isBuffer(e))e=e.toString("utf8");return e.replace(/^\uFEFF/,"")}Gap.exports={stringify:ypv,stripBom:_pv}});var rka=ae(function(NUC,Kap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bz
+---
+tripBom:_pv}});var rka=ae(function(NUC,Kap){var Bzr;try{Bzr=AD()}catch(e){Bzr=require("fs")}var eai=C$(),{stringify:Vap,stripBom:qap}=Uzr();async function bpv(e,t={}){if(typeof t==="string")t={encoding:t};let r=t.fs||Bzr,n="throws"in t?t.throws:!0,o=await eai.fromCallback(r.readFile)(e,t);o=qap(o);let i;try{i=JSON.parse(o,t?t.reviver:null
+---
+#### "\uFEFF" [110953889,120049481,120049537,214725396,214725412,220985703,239199104,251666007]
+.......[\u202A-\u202E].................................	.......[\u2066-\u2069].................................	.......[\uFEFF]................................	.......[\uE000-\uF8FF]..................................@.$.H...].d.@.>.H...W.d..x=...d...=G......d^.....p=f......dv......=~......d.@.=.............................................
+---
+.......	......./.......................................	.......^\s*(?:\/\*\*)?$................................	.......^\uFEFF([!#]?)..................................	.......^\uFEFF.................[...]....................................@.$.H...O.d..TV.@p4.....@.T.@...H...e.l..[>...d....0...2.......................h.8..................
+---
+.......^\s*(?:\/\*\*)?$................................	.......^\uFEFF([!#]?)..................................	.......^\uFEFF.................[...]....................................@.$.H...O.d..TV.@p4.....@.T.@...H...e.l..[>...d....0...2.......................h.8..................... .8...........................I.l.......l.........I..
+---
+#### "effortBadge" []
+#### "badgeColor" []
+#### "You are sending to yourself" []
+#### "DHm()" []
+#### "queued prompt" []
+#### "literal tag" []
+#### "three launches" []
+#### "gained focus" []
+#### "MODAL_TRANSCRIPT_PEEK" []
+
+==== Tqt= in 320170000-320210000 ====
+
+--- 320195259 ---
+CallCount:l9e,lookups:uJ,isTranscriptMode:q0e}=EKM,I2e=vn(),[Aqt]=La(),c9e=ns(),Tqt=VTt.useContext(ros),hpn=wm(wi0);Nrc(av.id),Ran(),wm(Ei0);let yte=wm(Ai0),yi0
+
+==== hbo= ====
+
+--- 320085317 ---
+o=P(Lt(),1),oAr=P(Ae(),1),Zqh=P(Me(),1),hbo=mbo.createContext(null)});function gbo(e,t=new Date){let r=new Date(e);if(Nu

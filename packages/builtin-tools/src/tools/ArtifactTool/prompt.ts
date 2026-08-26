@@ -21,5 +21,5 @@ export async function getArtifactToolPrompt(): Promise<string> {
 3. If iterating on the same artifact, pass back the \`id\` returned from the first call as \`hash\` so the URL stays stable.
 
 ## Errors
-The tool surfaces backend error codes verbatim (e.g. \`payload_too_large\`, \`unauthorized\`). If the file does not exist, is not a regular file, or has an unsupported extension, the tool returns an \`error\` field without making an HTTP request. Accepted extensions: \`.html\`, \`.htm\`, \`.md\`, \`.markdown\`.`
+The tool surfaces backend error codes verbatim (e.g. \`payload_too_large\`, \`unauthorized\`, \`empty_body\`). If the file does not exist, is not a regular file, or has an unsupported extension, the tool returns an \`error\` field without making an HTTP request. Accepted extensions: \`.html\`, \`.htm\`, \`.md\`, \`.markdown\`.`
 }

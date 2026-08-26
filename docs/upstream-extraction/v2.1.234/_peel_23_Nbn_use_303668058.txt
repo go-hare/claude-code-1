@@ -1,0 +1,3 @@
+OFFSET=303668058
+
+;if(d===u||Sc.basename(d)!=="worktrees"||Sc.basename(Sc.dirname(d))!==".claude")return o("not directly under a .claude/worktrees directory");if(await Nbn(u))return o("still resolves to a repository");let p=await vc.readdir(u).catch(()=>null);if(p===null)return o("unreadable directory");if(p.length>0&&t!=="job_delete_force")return E(`removeAgentWorktree: kept rootless ${e} \u2014 ${p.length} unverifiable file(s); only an explicit discard may remove them`,{level:"warn"}),L("tengu_worktree_removed",{source:ge(t),changed_files:0,commits:0,no_root:1

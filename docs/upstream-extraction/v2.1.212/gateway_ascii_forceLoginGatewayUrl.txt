@@ -1,0 +1,18 @@
+offset=95114016 needle=b'forceLoginGatewayUrl'
+count=15
+
+intervalMinutes
+disableClaudeAiConnectors
+allowAllClaudeAiMcps
+forceLoginMethod
+forceLoginGatewayUrl
+forceLoginOrgUUID
+spinnerTipsEnabled
+spinnerVerbs
+spinnerTipsOverride
+totalTokensReminder
+totalTokensReminderBudget
+totalTokensReminderAfterUserTurn
+pluginTrustMessage
+Iterator result interface is not an object.
+settings

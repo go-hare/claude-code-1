@@ -1,0 +1,64 @@
+nt = document.querySelector('.present-hint')
+      if (hint) hint.remove()
+      // Per-run present state must not leak into the next run.
+      hud.classList.remove('on')
+      clearTimeout(jumpTimer)
+      jumpBuf = ''
+      if (wasEditable !== null) page.setAttribute('contenteditable', wasEditable)
+      clearInterval(hudTimer)
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {})
+      // The run reports itself: time on stage and how far the deck got.
+      {
+        const list = slides()
+        const sinks = [...slideSinks.entries()]
+          .map(([id, ms]) => ({ i: list.findIndex(s => s.dataset.slideId === id), ms }))
+          .filter(x => x.i >= 0 && x.ms > 3000)
+          .sort((a, b) => b.ms - a.ms).slice(0, 2)
+        const sinkTxt = sinks.length && hadNotes
+          ? ' \\u00b7 longest: ' + sinks.map(x => 'slide ' + (x.i + 1) + ' ' + fmtElapsed(x.ms)).join(', ')
+          : ''
+        const msg = 'Run: ' + fmtElapsed(elapsedMs()) + ' \\u00b7 reached slide ' + (furthest + 1) + ' of ' + list.length + sinkTxt
+        const toast = document.createElement('div')
+        toast.className = 'slide-undo'
+        toast.textContent = msg
+        document.body.appendChild(toast)
+        setTimeout(() => toast.remove(), 6000)
+        liveSay(msg)
+      }
+      select(current())
+    }
+    // The presenter's HUD: elapsed + clock, by the counter. T toggles
+    // the elapsed timer (and resets it), B blanks the screen.
+    let startedAt = 0, timerOn = true, hudTimer = null
+    let elapsedBase = 0 // accumulated ms from completed running spans
+    let furthest = 0
+    let slideClock = { id: null, at: 0 }
+    const slideSinks = new Map()
+    const clockSlide = s => {
+      if (!document.body.classList.contains('present')) return
+      const now = Date.now()
+      if (slideClock.id) slideSinks.set(slideClock.id, (slideSinks.get(slideClock.id) || 0) + (now - slideClock.at))
+      slideClock = { id: s ? s.dataset.slideId : null, at: now }
+    }
+    let jumpBuf = '', jumpTimer = null
+    const elapsedMs = () => elapsedBase + (timerOn ? Date.now() - startedAt : 0)
+    const fmtElapsed = ms => {
+      const s = Math.floor(ms / 1000)
+      return String(Math.floor(s / 60)).padStart(2, '0') + '\\u2236' + String(s % 60).padStart(2, '0')
+    }
+    const hud = document.createElement('div')
+    hud.className = 'present-hud'
+    document.body.appendChild(hud)
+    const endCue = document.createElement('div')
+    endCue.className = 'end-cue'
+    endCue.textContent = 'End of deck \u2014 Esc to exit'
+    document.body.appendChild(endCue)
+    const liveRegion = document.createElement('span')
+    liveRegion.className = 'visually-hidden'
+    liveRegion.setAttribute('aria-live', 'polite')
+    document.body.appendChild(liveRegion)
+    const peekBand = document.createElement('div')
+    peekBand.className = 'next-peek'
+    const peekNext = document.createElement('div')
+    peekNext.className = 'npk-next'
+    const peekEm

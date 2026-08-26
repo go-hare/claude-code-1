@@ -1,0 +1,89 @@
+
+===== Vag around 308960000 =====
+
+g||Lag[8]!==PEc)VZw=SV.jsx(R,{"aria-hidden":$ag,alignItems:"flex-start",alignSelf:"flex-start",flexWrap:"nowrap",justifyContent:"flex-start",children:PEc}),Lag[7]=$ag,Lag[8]=PEc,Lag[9]=VZw;else VZw=Lag[9];return VZw}var SV,DEc;var Uag=A(()=>{ql();Dt();Pag();B3();hg();Amr();uP();SV=H(be(),1),DEc=H(De(),1)});function QZw(OTO){return!!OTO.viewingAgentTaskId}function eQw(LTO){return LTO.queueEditIndex}function tQw(NTO){return NTO.isBriefOnly}function rQw($TO){return Zka($TO)}function nQw(XZw){let OEc=XZw.value;if(XZw.mode==="bash"&&typeof OEc==="string")OEc=`<bash-input>${OEc}</bash-input>`;return yn({content:OEc})}function JZw(e){try{return Xt(e)?.type==="idle_notification"}catch{return!1}}function ZZw(e){let t=e[0]?.origin,r=e.at(-1)?.origin;if(t?.kind==="task-notification"&&t.source==="artifact-auto-react"&&t.displayName!==void 0&&e.every((n)=>n.origin?.kind==="task-notification"&&n.origin.source==="artifact-auto-react"&&n.origin.coalesced?.family==="auto-replied"&&n.origin.slug===t.slug)){let n=e.length;return`+${n} more auto-reply ${n===1?"notice":"notices"} on Artifact: ${r?.kind==="task-notification"&&r.displayName!==void 0?r.displayName:t.displayName}`}return`+${e.length} more tasks completed`}function Wag(e){let t=e.filter((a)=>typeof a.value!=="string"||!JZw(a.value)),r=t.filter((a)=>a.mode==="task-notification"),n=t.filter((a)=>a.mode!=="task-notification");if(r.length<=LEc)return[...n,...r];let o=r.slice(0,LEc-1),i=r.slice(LEc-1),s={value:`<${iv}>
+<${y1}>${Wa(ZZw(i))}</${y1}>
+<${WO}>completed</${WO}>
+</${iv}>`,mode:"task-notification",agentId:Ai()};return[...n,...o,s]}function Vag(){let ais=qag.c(17),Dln=eqe(),DTO=ft(QZw),MEc=ft(eQw),iis=ft(tQw),sis;if(ais[0]!==Dln){bb0:{if(Dln.length===0){sis=null;break bb0}let qZw=Dln.filter(rQw);if(qZw.length===0){sis=null;break bb0}let KZw=Wag(qZw);sis={messages:Gx(KZw.map(nQw)),processedCommands:KZw}}ais[0]=Dln,ais[1]=sis}else sis=ais[1];let Jbr=sis,Bag;bb1:{if(MEc===null||Jbr===null){Bag=-1;break bb1}let Mln;if(ais[2]!==MEc||ais[3]!==Dln||ais[4]!==Jbr){let YZw=Dln.filter(lJ)[MEc];Mln=YZw?Jbr.processedCommands.indexOf(YZw):-1;ais[2]=MEc,ais[3]=Dln,ais[4]=Jbr,ais[5]=Mln}else Mln=ais[5];Bag=Mln}let yho=Bag;if(DTO||Jbr===null){return null}let lis=yho!==-1,Mln;if(ais[6]!==yho||ais[7]!==Jbr.messages||ais[8]!==lis||ais[9]!==iis){let cis;if(ais[11]!==yho||ais[12]!==lis||ais[13]!==iis)cis=(MTO,jag)=>Zbr.jsx(F3i,{isFirst:jag===0,useBriefLayout:iis,selectionHighlight:lis?jag===yho?"on":"off":void 0,children:Zbr.jsx(mme,{message:MTO,lookups:vFt,addMargin:!1,tools:[],commands:[],verbose:!1,inProgressToolUseIDs:zag,progressMessagesForMessage:[],shouldAnimate:!1,shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})},jag),ais[11]=yho,ais[12]=lis,ais[13]=iis,ais[14]=cis;else cis=ais[14];Mln=Jbr.messages.map(cis);ais[6]=yho,ais[7]=Jbr.messages,ais[8]=lis,ais[9]=iis,ais[10]=Mln}else Mln=ais[10];let cis;if(ais[15]!==Mln)cis=Zbr.jsx(R,{marginTop:1,flexDirection:"column",children:Mln}),ais[15]=Mln,ais[16]=cis;else cis=ais[16];return cis}var Gag,NEc,Zbr,qag,zag,LEc=3,uis;var $Ec=A(()=>{Dt();Ji();bt();xy();NRl();Tan();ry();ri();vr();Nb();zZr();Gag=H(It(),1),NEc=H(It(),1),Zbr=H(be(),1),qag=H(De(),1);zag=new Set;uis=Gag.memo(Vag)});function Kag(e,t,r){if(e===0||r)return;if(t===null)return"History";return`History ${Math.max(1,t-e+1)}/${t}`}function Qbr(WTO){let Oln=Xag.c(27),{banner:a4,columns:GTO,fastModeTag:Sot,borderOnly:FEc}=WTO;if(Sl()){if(FEc||!a4.text&&!Sot){return null}let T5t;if(Oln[0]!==a4.bgColor||Oln[1]!==a4.text)T5t=a4.text&&x8.jsx(KE,{color:a4.bgColor,padded:!0,children:a4.text}),Oln[0]=a4.bgColor,Oln[1]=a4.text,Oln[2]=T5t;else T5t=Oln[2];let k5t;if(Oln[3]!==Sot)k5t=Sot&&x8.jsxs(_,{color:"fastMode",children:[" ",Sot]}),Oln[3]=Sot,Oln[4]=k5t;else k5t=Oln[4];let Lln;if(Oln[5]!==a4.bgColor||Oln[6]!==T5t||Oln[7]!==k5t)Lln=x8.jsxs(_,{color:a4.bgColor,children:[T5t,k5t]}),Oln[5]=a4.bgColor,Oln[6]=T5t,Oln[7]=k5t,Oln[8]=Lln;else Lln=Oln[8];return Lln}let dis=Sot?sr(Sot)+2:0,pis=a4.text?sr(a4.text)+2:0,fis=dis||pis?"\u2500\u2500":"",UEc=Math.max(0,GTO-dis-pis-fis.length),Nln=a4.gradient,T5t;if(Oln[9]!==a4.bgColor||Oln[10]!==Nln)T5t=Nln?.at(-1)??a4.bgColor,Oln[9]=a4.bgColor,Oln[10]=Nln,Oln[11]=T5t;else T5t=Oln[11];let k5t;if(Oln[12]!==UEc||Oln[13]!==Nln)k5t=Nln?x8.jsx(Yag,{count:UEc,colors:Nln}):"\u2500".repeat(UEc),Oln[12]=UEc,Oln[13]=Nln,Oln[14]=k5t;else k5t=Oln[14];let Lln;if(Oln[15]!==a4.bgColor||Oln[16]!==a4.text||Oln[17]!==FEc||Oln[18]!==pis||Oln[19]!==Sot||Oln[20]!==dis||Oln[21]!==fis)Lln=FEc?"\u2500".repeat(dis+pis+fis.length):x8.jsxs(x8.Fragment,{children:[Sot?` ${Sot} `:null,a4.text?x8.jsx(KE,{color:a4.bgColor,padded:!0,children:a4.text}):null,fis]}),Oln[15]=a4.bgColor,Oln[16]=a4.t
+
+===== function Vag =====
+
+hit=308962203
+
+ed</${WO}>
+</${iv}>`,mode:"task-notification",agentId:Ai()};return[...n,...o,s]}function Vag(){let ais=qag.c(17),Dln=eqe(),DTO=ft(QZw),MEc=ft(eQw),iis=ft(tQw),sis;if(ais[0]!==Dln){bb0:{if(Dln.length===0){sis=null;break bb0}let qZw=Dln.filter(rQw);if(qZw.length===0){sis=null;break bb0}let KZw=Wag(qZw);sis={messages:Gx(KZw.map(nQw)),processedCommands:KZw}}ais[0]=Dln,ais[1]=sis}else sis=ais[1];let Jbr=sis,Bag;bb1:{if(MEc===null||Jbr===null){Bag=-1;break bb1}let Mln;if(ais[2]!==MEc||ais[3]!==Dln||ais[4]!==Jbr){let YZw=Dln.filter(lJ)[MEc];Mln=YZw?Jbr.processedCommands.indexOf(YZw):-1;ais[2]=MEc,ais[3]=Dln,ais[4]=Jbr,ais[5]=Mln}else Mln=ais[5];Bag=Mln}let yho=Bag;if(DTO||Jbr===null){return null}let lis=yho!==-1,Mln;if(ais[6]!==yho||ais[7]!==Jbr.messages||ais[8]!==lis||ais[9]!==iis){let cis;if(ais[11]!==yho||ais[12]!==lis||ais[13]!==iis)cis=(MTO,jag)=>Zbr.jsx(F3i,{isFirst:jag===0,useBriefLayout:iis,selectionHighlight:lis?jag===yho?"on":"off":void 0,children:Zbr.jsx(mme,{message:MTO,lookups:vFt,addMargin:!1,tools:[],commands:[],verbose:!1,inProgressToolUseIDs:zag,progressMessagesForMessage:[],shouldAnimate:!1,shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})},jag),ais[11]=yho,ais[12]=lis,ais[13]=iis,ais[14]=cis;else cis=ais[14];Mln=Jbr.messages.map(cis);ais[6]=yho,ais[7]=Jbr.messages,ais[8]=lis,ais[9]=iis,ais[10]=Mln}else Mln=ais[10];let cis;if(ais[15]!==Mln)cis=Zbr.jsx(R,{marginTop:1,flexDirection:"column",children:Mln}),ais[15]=Mln,ais[16]=cis;else cis=ais[16];return cis}var Gag,NEc,Zbr,qag,zag,LEc=3,uis;var $Ec=A(()=>{Dt();Ji();bt();xy();NRl();Tan();ry();ri();vr();Nb();zZr();Gag=H(It(),1),NEc=H(It(),1),Zbr=H(be(),1),qag=H(De(),1);zag=new Set;uis=Gag.memo(Vag)});function Kag(e,t,r){if(e===0||r)return;if(t===null)return"History";return`History ${Math.max(1,t-e+1)}/${t}`}function Qbr(WTO){let Oln=Xag.c(27),{banner:a4,columns:GTO,fastModeTag:Sot,borderOnly:FEc}=WTO;if(Sl()){if(FEc||!a4.text&&!Sot){return null}let T5t;if(Oln[0]!==a4.bgColor||Oln[1]!==a4.text)T5t=a4.text&&x8.jsx(KE,{color:a4.bgColor,padded:!0,children:a4.text}),Oln[0]=a4.bgColor,Oln[1]=a4.text,Oln[2]=T5t;else T5t=Oln[2];let k5t;if(Oln[3]!==Sot)k5t=Sot&&x8.jsxs(_,{color:"fastMode",children:[" ",Sot]}),Oln[3]=Sot,Oln[4]=k5t;else k5t=Oln[4];let Lln;if(Oln[5]!==a4.bgColor||Oln[6]!==T5t||Oln[7]!==k5t)Lln=x8.jsxs(_,{color:a4.bgColor,children:[T5t,k5t]}),Oln[5]=a4.bgColor,Oln[6]=T5t,Oln[7]=k5t,Oln[8]=Lln;else Lln=Oln[8];return Lln}let dis=Sot?sr(Sot)+2:0,pis=a4.text?sr(a4.text)+2:0,fis=dis||pis?"\u2500\u2500":"",UEc=Math.max(0,GTO-dis-pis-fis.length),Nln=a4.gradient,T5t;if(Oln[9]!==a4.bgColor||Oln[10]!==Nln)T5t=Nln?.at(-1)??a4.bgColor,Oln[9]=a4.bgColor,Oln[10]=Nln,Oln[11]=T5t;else T5t=Oln[11];let k5t;if(Oln[12]!==UEc||Oln[13]!==Nln)k5t=Nln?x8.jsx(Yag,{count:UEc,colors:Nln}):"\u2500".repeat(UEc),Oln[12]=UEc,Oln[13]=Nln,Oln[14]=k5t;else k5t=Oln[14];let Lln;if(Oln[15]!==a4.bgColor||Oln[16]!==a4.text||Oln[17]!==FEc||Oln[18]!==pis||Oln[19]!==Sot||Oln[20]!==dis||Oln[21]!==fis)Lln=FEc?"\u2500".repeat(dis+pis+fis.length):x8.jsxs(x8.Fragment,{children:[Sot?` ${Sot} `:null,a4.text?x8.jsx(KE,{color:a4.bgColor,padded:!0,children:a4.text}):null,fis]}),Oln[15]=a4.bgColor,Oln[16]=a4.text,Oln[17]=FEc,Oln[18]=pis,Oln[19]=Sot,Oln[20]=dis,Oln[21]=fis,Oln[22]=Lln;else Lln=Oln[22];let oQw;if(Oln[23]!==T5t||Oln[24]!==k5t||Oln[25]!==Lln)oQw=x8.jsxs(_,{color:T5t,children:[k5t,Lln]}),Oln[23]=T5t,Oln[24]=k5t,Oln[25]=Lln,Oln[26]=oQw;else oQw=Oln[26];return oQw}function Yag({count:e,colors:t}){if(e<=0||t.length===0)return null;let r=Math.min(t.length,e),n=Math.floor(e/r),o=e-n*r;return t.slice(0,r).map((i,s)=>{let a=n+(o-- >0?1:0);return x8.jsx(_,{color:i,children:"\u2500".repeat(a)},s)})}var x8,Xag;var BEc=A(()=>{hh();Dt();V_t();x8=H(be(),1),Xag=H(De(),1)});function Jag(e){let t=$ln.useRef(e);t.current=e;let{internal_querier:r}=Vq(),n=$ln.useSyncExternalStore(zFe,()=>Zw()?.terminal??K.terminal);$ln.useEffect(()=>{if(!Ns()||!r)return;if(n!=="iTerm.app"&&n!=="Apple_Terminal")return;let o=cm.get(process.stdout);if(!o)return;let i=new AbortController;return(async()=>{while(!i.signal.aborted){let s=await o.probeExternalClear(r);if(i.signal.aborted)return;if(s)t.current();await xr(200,i.signal,{unref:!0})}})(),()=>i.abort()},[r,n])}var $ln;var Zag=A(()=>{bt();HQo();wU();cr();Th();$ln=H(It(),1)});function iQw(e,t,r=!1){if(!r&&e.length<=Qag||e.length<=Fln)return{truncatedText:e,placeholderContent:""};let n=Math.floor(Fln/2),o=Math.floor(Fln/2),i=e.slice(0,n),s=e.slice(-o),a=e.slice(n,-o),l=RRt(a),u=`[...Truncated text #${t} +${l} lines...]`;return{truncatedText:i+u+s,placeholderContent:a}}function elg(e,t){if(e.length<=Qag)return{newInput:e,newPastedContents:t};let r=Gq(e,t),n=Math.floor(Fln/2),o=e.length-Math.floor(Fln/2),i=new Set,s=new Set,a=[],l=e,c=RR(e);for(let m=c.length-1;m>=0;m--){let h=c[m],g=t[h.id];if(!g)continue;let y=h.index+h.match.length,b=y>n&&h.index<o;if(g.type!=="text"){if(b)a.unshift(h.match),l=l.slice(0,h.index)+l.slice(y);continue}if(!b){s.add(h.id);continue}l=l.slice(0,h.index)+g.content+l.slice(y),i.add(h.id)}let{truncatedText:u,placeholderConte
+
+===== eQw / lis= / yho= around queued commands =====
+
+
+b'function eQw' [308960957]
+
+
+----- @308960957 -----
+
+);SV=H(be(),1),DEc=H(De(),1)});function QZw(OTO){return!!OTO.viewingAgentTaskId}function eQw(LTO){return LTO.queueEditIndex}function tQw(NTO){return NTO.isBriefOnly}function rQw($TO){return Zka($TO)}function nQw(XZw){let OEc=XZw.value;if(XZw.mode==="bash"&&typeof OEc==="string")OEc=`<bash-input>${OEc}</bash-input>`;return yn({content:OEc})}function JZw(e){try{return Xt(e)?.type==="idle_notification"}catch{return!1}}function ZZw(e){let t=e[0]?.origin,r=e.at(-1)?.origin;if(t?.kind==="task-notification"&&t.source==="artifact-auto-react"&&t.displayName!==void 0&&e.every((n)=>n.
+
+b'lis=' [308962825]
+
+
+----- @308962825 -----
+
+[5]=Mln}else Mln=ais[5];Bag=Mln}let yho=Bag;if(DTO||Jbr===null){return null}let lis=yho!==-1,Mln;if(ais[6]!==yho||ais[7]!==Jbr.messages||ais[8]!==lis||ais[9]!==iis){let cis;if(ais[11]!==yho||ais[12]!==lis||ais[13]!==iis)cis=(MTO,jag)=>Zbr.jsx(F3i,{isFirst:jag===0,useBriefLayout:iis,selectionHighlight:lis?jag===yho?"on":"off":void 0,children:Zbr.jsx(mme,{message:MTO,lookups:vFt,addMargin:!1,tools:[],commands:[],verbose:!1,inProgressToolUseIDs:zag,progressMessagesForMessage:[],shouldAnimate:!1,shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})},jag),ais[11]=yho,ais[12]=lis,ai
+
+b'yho=' [308962781]
+
+
+----- @308962781 -----
+
+YZw):-1;ais[2]=MEc,ais[3]=Dln,ais[4]=Jbr,ais[5]=Mln}else Mln=ais[5];Bag=Mln}let yho=Bag;if(DTO||Jbr===null){return null}let lis=yho!==-1,Mln;if(ais[6]!==yho||ais[7]!==Jbr.messages||ais[8]!==lis||ais[9]!==iis){let cis;if(ais[11]!==yho||ais[12]!==lis||ais[13]!==iis)cis=(MTO,jag)=>Zbr.jsx(F3i,{isFirst:jag===0,useBriefLayout:iis,selectionHighlight:lis?jag===yho?"on":"off":void 0,children:Zbr.jsx(mme,{message:MTO,lookups:vFt,addMargin:!1,tools:[],commands:[],verbose:!1,inProgressToolUseIDs:zag,progressMessagesForMessage:[],shouldAnimate:!1,shouldShowDot:!1,isTranscriptMode:!1,is
+
+b'eQw(' [308960966]
+
+
+----- @308960966 -----
+
+(),1),DEc=H(De(),1)});function QZw(OTO){return!!OTO.viewingAgentTaskId}function eQw(LTO){return LTO.queueEditIndex}function tQw(NTO){return NTO.isBriefOnly}function rQw($TO){return Zka($TO)}function nQw(XZw){let OEc=XZw.value;if(XZw.mode==="bash"&&typeof OEc==="string")OEc=`<bash-input>${OEc}</bash-input>`;return yn({content:OEc})}function JZw(e){try{return Xt(e)?.type==="idle_notification"}catch{return!1}}function ZZw(e){let t=e[0]?.origin,r=e.at(-1)?.origin;if(t?.kind==="task-notification"&&t.source==="artifact-auto-react"&&t.displayName!==void 0&&e.every((n)=>n.origin?.k
+
+b'gr!==null' [308976035]
+
+
+----- @308976035 -----
+
+.viewingAgentTaskId),mt=ft((Er)=>Er.viewSelectionMode),Bt=ve||ke||f!=="prompt"||gr!==null||!lte()&&Be.some((Er)=>NMt(Er,N===""));Ts.useEffect(()=>(Q?.(Bt),()=>Q?.(!1)),[Bt,Q]);let qt=ft((Er)=>Er.isBriefOnly)&&!rt,Cr=ft((Er)=>Er.mainLoopModel),fr=ft((Er)=>Er.mainLoopModelForSession),dn=ft((Er)=>Er.thinkingEnabled),Cn=ft((Er)=>ku()?Er.fastMode:!1),rr=ft((Er)=>Er.effortValue),Br=ft((Er)=>Er.ultracode),Mt=U3e(Ye.getState()),gt=Mt?.identity.agentName,Wt=Mt?.identity.color&&NR.includes(Mt.identity.color)?Mt.identity.color:void 0,yr=BGr(Ye.getState()),St=yr.type==="leader"?void 0:
+
+===== h6= near PromptInput 308974000 =====
+
+
+b'function h6' [308687032]
+
+,resolve:(o)=>{t(null),n(o)}})})),()=>PJa(null)),[]),e}var Wrs;var Seg=A(()=>{DJa();Wrs=H(It(),1)});function h6w(e){return Date.now()-m5()>=e}function tbr(e,t){let r=ote(),[n,o]=nmo.useState(!1);nmo.useEffect(()=>{smn()},[]),nmo.useEffect(()=>{o(!1)},[e,t,r]),Tp(()=>{if(h6w(MLn))o(!0),UL({message:e,notificationType:t},r)},n?null:MLn)}var nmo;var Sy
+
+b'h6=()' []
+
+
+b'let h6' []
+
+
+b'h6=Ts.use' []
+
+
+b'h6=vt' []
+
+
+b'const h6' []
+
+
+===== fii= =====
+
+hit=295691203
+
+,u4e=(...e)=>MT().removeByFilter(...e),yNp=(...e)=>MT().clearCommandQueue(...e),fii=(...e)=>MT().popAllEditable(...e),HFn=(...e)=>MT().popEditableAt(...e),oxa=(...e)=>MT().setInFlightDrainBatch(...e),ixa=(...e)=>MT().clearInFlightDrainBatch(...e),sxa=(...e)=>MT().someInFlightDrai
+
+popAllEditable wrapper hit=-1
+
+
+===== we= / function we =====
+
+function we( hit=289235515
+
+{...r,feature_name:ge(e),error_code:t})}function we(e,t,r){L("tengu_feature_sad",{...r,feature_name:ge(e),error_code:t})}async function vS(e,t){await gS("tengu_feature_ok",{feature_name:ge(e),...t})}async function ed(e,t,r){await gS("tengu_feature_bad",{...r,feature_name:ge(e),error_code:t})}async function AH(e,t){await gS("tengu_feature_

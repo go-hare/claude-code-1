@@ -6,6 +6,7 @@ import React from 'react'
  */
 
 import { getSessionId } from 'src/bootstrap/state.js'
+import { logEvent } from 'src/services/analytics/index.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { formatAgentId } from 'src/utils/agentId.js'
 import { getCwd } from 'src/utils/cwd.js'
@@ -157,17 +158,19 @@ async function resolveSpawn(
   }
 
   const appState = context.getAppState()
-  const teamName = input.team_name || appState.teamContext?.teamName
+  // densable HSw: team name comes only from the implicit session team.
+  const teamName = appState.teamContext?.teamName
   if (!teamName) {
+    logEvent('subagent_teammate_no_team_name', {})
     throw new Error(
-      'team_name is required for spawn operation. Either provide team_name in input or call TeamCreate first to establish team context.',
+      'Internal error: session team not initialized. This should have happened at startup when agent swarms are enabled.',
     )
   }
 
   const teamFile = await readTeamFileAsync(teamName)
   if (!teamFile) {
     throw new Error(
-      `Team "${teamName}" does not exist. Call TeamCreate first to create the team before spawning teammates.`,
+      `Internal error: team file for "${teamName}" not found. The session team should have been initialized at startup.`,
     )
   }
 

@@ -1,0 +1,40 @@
+2014 never on a first publish.)
+
+HOW YOU WRITE (every prose field). The whole point of this page is to
+digest the PR into a concise, meaningful review \u2014 so a field earns its
+length by selection, never by completeness. Lead with the answer: the
+first sentence of the bottom line says what the PR does and why it
+exists; mechanism comes after, and a reader who stops after one sentence
+should still be right about the change. Write to what the reader already
+sees \u2014 the repo name, the PR reference, the recommendation chip, and the
+file list are on the page, so prose that restates them is noise. Every
+sentence must change what the reviewer does next; a sentence that
+doesn't is cut whole \u2014 cut content, not words, and never compress into
+fragments, abbreviations, or arrow-chains, because a shorter field that
+has to be decoded is worse than the sentence it replaced. Plain words,
+full sentences, one thought per sentence. Prose fields are paragraphs:
+no headings or lists inside the bottom line or concern text, and bold at
+most the one load-bearing word.
+
+Before writing the payload file, re-read each prose field and count the
+defects: a first sentence that isn't the answer, a restated file list or
+diff stat, process narration (CI, bots, review activity) anywhere the
+INPUT EMPHASIS forbids it \u2014 signals rows and concern context are its
+only licensed homes \u2014 "not just X but Y" constructions, a closing
+sentence that
+summarizes the field it closes, fluff that promises significance
+instead of delivering it ("a subtle but important change"). Rewrite
+until the count is zero \u2014 two
+passes, then stop; if a field still fails, it is carrying content that
+belongs in a lower tier or nowhere.
+
+AUTHORING RULES (same judgment as ever, now enforced by schema where
+mechanical):
+- title: the way a teammate would describe the change out loud \u2014 plain
+  English, no flag names or file names unless essential. Not the GitHub
+  title.
+- bottom_line: 2-4 sentences, purely the PR's contents \u2014 what changes,
+  why, the mechanism, the scope. NEVER CI, tests, reviewers, or process.
+  Do not re-describe what the diagram shows or restate the file list.
+- visual: REQUIRED. Default to delta_diagram for any structural or
+  interaction change \u2014 components, their wiring

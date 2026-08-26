@@ -1,0 +1,232 @@
+t(nSe,{MAX_SANE_EPOCH_MS:()=>dmp,SessionRecordsUnreadableError:()=>Fjn,admitDroppedIdsByDestination:()=>cxa,admitReceiptForOutstandingSend:()=>lxa,creditPacerForHeldSend:()=>axa,debitPacerForReleasedS
+end:()=>Ali,findLivePeerBySessionId:()=>hxa,isSaneEpochMs:()=>$jn,isSenderPacingEnabled:()=>nmp,listAllLiveSessions:()=>b1e,listLivePeerSessions:()=>mxa,listRegisteredSessionRecords:()=>fxa,ownMessagi
+ngSocket:()=>EQe,registerOutstandingSend:()=>smp,registeredInboxesOfPids:()=>dxa,registeredLivePeerForSocket:()=>uxa,sendControlToUdsSocket:()=>T4r,sendStampedControlToUdsSocket:()=>Tli,sendToUdsSocke
+t:()=>Njn,unregisterOutstandingSend:()=>amp});function Kbv(e){return qbv.includes(e)?e:void 0}function Xbv(e){return Ybv.includes(e)?e:void 0}function Jbv(e){if(typeof e!=="object"||e===null)return!1;
+let{name:t,until:r}=e;return typeof t==="string"&&$jn(r)}function Zbv(e){if(!Array.isArray(e))return[];return e.filter(Jbv).slice(0,_ti).map(({name:t,until:r})=>({name:So(t,fle),until:r}))}function Qb
+v(){return Ym().outbound.pacer??=Kfp(w4r)}function nmp(){if(V.CLAUDE_CODE_HARBOR_KITE_PACING_OFF)return!1;return!it("tengu_harbor_kite_pacing_off",!1)}function axa(e){omp(e,(t,r)=>t.credit(r))}functio
+n Ali(e){omp(e,(t,r)=>t.debit(r))}function omp(e,t){let r=Ym().outbound.pacer;if(!r)return;let{scheme:n,target:o}=xD(e);if(n!=="uds")return;t(r,lQ(o)??o)}async function Njn(e,t,r,n,o,i,{trackReceipts:
+s=!0}={}){let a=EQe(),l=a?$ht(a):void 0,c=oBr(l,r,t,void 0,Xei(o,l?q1t(l):void 0),i),u=q3e(),d={...u,type:"user",message:{role:"user",content:c},priority:"next",from:l,...(n?.length??0)>0&&{file_attac
+hments:n}},p=lmp(d),m=(l!==void 0||Wt()!=="windows")&&nmp()?Qbv().reserve(lQ(e)??e):evv;if(!m.ok)throw E(`[uds-client] paced: not sending to ${LD(e)} \u2014 ${m.sentInBurst} sent this burst; its inbox
+ rate limit would drop more`),tmp(m.sentInBurst);if(E(`[uds-client] Sending ${t.length} chars to ${LD(e)}`),s)smp(u.msg_id,$ht(e));try{await cmp(e,d,{noFollowSymlink:!0,preflightedJson:p})}catch(h){if
+(A4r(h)){if(m.refund(),s)amp(u.msg_id)}throw h}return{msgId:u.msg_id}}function smp(e,t){let r=Ym().receipts.outstandingSends;if(r.length>=imp)r.shift();r.push({msgId:e,to:t})}function amp(e){let t=Ym(
+).receipts.outstandingSends,r=t.findIndex((n)=>n.msgId===e);if(r!==-1)t.splice(r,1)}function lxa(e,t){if(typeof e!=="string")return;let{outstandingSends:r,awaitingTerminal:n}=Ym().receipts,o=r.findInd
+ex((s)=>s.msgId===e);if(o!==-1){let[s]=r.splice(o,1);if(!s)return;if(t==="held"){if(n.length>=imp)n.shift();n.push(s)}return{destination:s.to,wasHeld:!1}}let i=n.findIndex((s)=>s.msgId===e);if(i!==-1&
+&t!=="held"){let[s]=n.splice(i,1);return s?{destination:s.to,wasHeld:!0}:void 0}return}function cxa(e){let t=new Map;if(e.length===0)return t;let r=new Set(e),{outstandingSends:n,awaitingTerminal:o}=Y
+m().receipts;for(let i of[n,o]){let s=i===o;for(let a=0;a<i.length;){let l=i[a];if(r.delete(l.msgId)){i.splice(a,1);let c=t.get(l.to)??{dropped:0,wereHeld:0};if(c.dropped++,s)c.wereHeld++;t.set(l.to,c
+)}else a++}}return t}function T4r(e,t,r={}){return Tli(e,t,q3e(),r).then(()=>{})}async function Tli(e,t,r=q3e(),{expectPeerPid:n}={}){return E(`[uds-client] Sending control:${t.action} to ${LD(e)}`),a
+wait cmp(e,{type:"control",...t,...r},{noFollowSymlink:!0,...n!==void 0&&{expectPeerPid:n}}),{msgId:r.msg_id}}async function uxa(e){let t=lQ(e);if(t===void 0)return;for(let r of await k4r()){if(!r.soc
+k||lQ(r.sock)!==t)continue;if(await pxa(r))return{pid:r.pid,features:r.peerFeatures}}return}async function dxa(e){let t=Gn(e),r=new Map;if(t.length===0)return r;let n=kLe(),i=(await Promise.all(t.map(
+(a)=>pmp(n,`${a}.json`)))).filter((a)=>a!==null&&Boolean(a.sock)),s=await Promise.all(i.map((a)=>pxa(a)));return i.forEach((a,l)=>{if(s[l]&&a.sock)r.set(a.pid,a.sock)}),r}async function pxa(e){let t=e
+.procStartFt??e.procStart;if(t===void 0||b7(e.pid))return!1;return await cBr(e.pid,t)===!0}function lmp(e){let t=He(e),r=HWd+t.length+1;if(r>S4r)throw Qfp(r,S4r);return t}async function rvv(e){let t=l
+Q(e);if(t===void 0)return!1;for(let r of await k4r()){if(!r.sock||lQ(r.sock)!==t)continue;if(b7(r.pid))continue;if((r.procStartFt??r.procStart)!==void 0){if(await pxa(r))return!0;continue}if(qS(r.pid)
+)return!0}return!1}async function cmp(e,t,{noFollowSymlink:r=!1,expectPeerPid:n,preflightedJson:o}={}){let i=o??lmp(t);if(!ELe(e))throw new _1e("non-local",`Refusing to connect to non-local IPC path: 
+${e}`);let s=mti(),a=await IWd(e,{requireLiveOwner:s}),l=a.kind==="token"?a.token:void 0;if(s&&a.kind!=="token"){if(!(a.kind==="no-key"&&await rvv(e)))throw new Sli(a.kind,`No running session has regi
+stered an inbox at ${e} (${Jfp}: ${a.kind}) \u2014 refusing to send to an unvouched pipe`);l=void 0}let c=l!==void 0?H_a(l):"";if(r&&!(Wt()==="windows"&&jWe(e)!==void 0)){let d;try{d=(await Y1t.lstat(
+e)).isSymbolicLink()}catch(p){if(lr(p))throw p;throw E(`[uds-client] reply target unvettable: ${dt(p)??"lstat failed"}`),new _1e("unvettable","Refusing to send: cannot vet reply target")}if(d)throw ne
+w _1e("symlink","Refusing to send: reply target is a symlink")}let u=c+i+`
+`;return new Promise((d,p)=>{let f=sxa.connect({path:e}),m=!1;f.setTimeout(5000,()=>{m=!0,f.destroy(),p(Error(`Timed out sending to ${e}`))}),f.on("error",(h)=>{m=!0,p(h)}),f.on("connect",()=>{if(n!==
+void 0&&Wt()!=="windows"){let h=mli(f);if(h===void 0){m=!0,f.destroy(),p(new _1e("endpoint-unverifiable","Refusing to send: connected endpoint identity could not be read"));return}if(h!==n){m=!0,f.des
+troy(),E(`[uds-client] connected endpoint is pid ${h}, expected ${n} \u2014 refusing to write`),p(new _1e("wrong-endpoint","Refusing to send: connected endpoint is not the expected process"));return}}
+if(f.write(u),Wt()==="macos")setTimeout((h)=>{if(!h.destroyed)h.end()},tvv,f);else f.end()}),f.on("close",()=>{if(!m)E(`[uds-client] Sent to ${LD(e)}`);d()})})}function ump(e){return new Promise((t)=>
+{if(!ELe(e)){t(!1);return}let r=sxa.connect({path:e}),n=(o)=>{r.destroy(),t(o)};r.on("connect",()=>n(!0)),r.on("error",(o)=>n(dt(o)==="EBUSY")),r.setTimeout(250,()=>n(!1))})}function $jn(e){return typ
+eof e==="number"&&Number.isFinite(e)&&e>=0&&e<=dmp}function Ljn(e){return $jn(e)?e:void 0}async function k4r(e){let t=kLe(),r;try{r=await Y1t.readdir(t)}catch(o){if(e?.rejectUnreadable&&!lr(o))throw n
+ew Fjn(dt(o));return[]}return(await Promise.all(r.filter((o)=>/^\d+\.json$/.test(o)).map((o)=>pmp(t,o)))).filter((o)=>o!==null)}async function pmp(e,t){try{let r=t.replace(/\.json$/,""),n=parseInt(r,1
+0);if(isNaN(n))return null;let o=rmp.join(e,t);if(String(n)!==r)return Y1t.unlink(o).catch(()=>{}),null;let i=await zC(o,262144);if(i===null)return null;let s=er(i);return{sock:typeof s.messagingSocke
+tPath==="string"?s.messagingSocketPath:"",cwd:typeof s.cwd==="string"?s.cwd:"?",startedAt:Ljn(s.startedAt)??0,...Ljn(s.nameSince)!==void 0&&{nameSince:Ljn(s.nameSince)},procStart:typeof s.procStart===
+"string"?s.procStart:void 0,...typeof s.procStartFt==="string"&&{procStartFt:s.procStartFt},name:typeof s.name==="string"?s.name:void 0,nameSource:s.nameSource==="derived"||s.nameSource==="collision"?
+s.nameSource:void 0,formerNames:Zbv(s.formerNames),kind:Kbv(s.kind),sessionId:typeof s.sessionId==="string"?s.sessionId:void 0,jobId:typeof s.jobId==="string"?s.jobId:void 0,parkedJobId:typeof s.parke
+dJobId==="string"?s.parkedJobId:void 0,spare:s.spare===!0,bridgeSessionId:typeof s.bridgeSessionId==="string"?s.bridgeSessionId:void 0,logPath:typeof s.logPath==="string"?s.logPath:void 0,status:Xbv(s
+.status),waitingFor:typeof s.waitingFor==="string"?s.waitingFor:void 0,updatedAt:Ljn(s.updatedAt),statusUpdatedAt:Ljn(s.statusUpdatedAt),entrypoint:typeof s.entrypoint==="string"?s.entrypoint:void 0,a
+gent:typeof s.agent==="string"?s.agent:void 0,state:typeof s.state==="string"?s.state:void 0,detail:typeof s.detail==="string"?s.detail:void 0,tempo:s.tempo==="active"||s.tempo==="idle"||s.tempo==="bl
+ocked"?s.tempo:void 0,needs:typeof s.needs==="string"?s.needs:void 0,peerProtocol:typeof s.peerProtocol==="number"?s.peerProtocol:void 0,...Array.isArray(s.peerFeatures)&&{peerFeatures:nvv(s.peerFeatu
+res)},...{},tmux:typeof s.tmux==="string"?s.tmux:void 0,pid:n,file:o}}catch{return null}}async function fxa(){return(await k4r({rejectUnreadable:!0})).map(({file:e,...t})=>t)}async function b1e(){let 
+e=await k4r(),t=e.map((i)=>qS(i.pid)),r=await Promise.all(e.map((i,s)=>t[s]&&TU(i.pid,i.procStartFt??i.procStart))),n=await fBr(),o=[];for(let i=0;i<e.length;i++){let{file:s,...a}=e[i];if(r[i])o.push(
+a);else if(n&&b7(a.pid))Y1t.unlink(s).catch(()=>{})}return o}function EQe(){return A8.CLAUDE_CODE_MESSAGING_SOCKET}async function mxa(){let e=EQe(),t=(await k4r({rejectUnreadable:!0})).filter((i)=>i.s
+ock&&!(e&&HFn(i.sock,e))&&!i.spare),r=await Promise.all(t.map((i)=>ump(i.sock))),n=await fBr(),o=[];for(let i=0;i<t.length;i++){let{file:s,...a}=t[i];if(r[i])o.push(a);else if(n&&b7(a.pid))Y1t.unlink(
+s).catch(()=>{})}return o}async function hxa(e){let t=EQe(),r=(await k4r()).filter((n)=>n.sessionId===e&&n.sock&&!(t&&HFn(n.sock,t))&&!n.spare);for(let n of r){let{file:o,...i}=n;if(await ump(i.sock))
+return i}return null}function nvv(e){return $H(e).filter((t)=>/^[a-z0-9_]{1,32}$/.test(t)).slice(0,16)}var Y1t,sxa,rmp,qbv,Ybv,evv,imp=200,tvv=150,dmp=4000000000000000,Fjn;var H$=A(()=>{hli();su();bn(
+);qe();mr();st();E$();Dw();Vir();Zfe();K1t();Yfp();Wir();SQe();Y8();gli();ki();wr();Lr();dBr();Xir();Y1t=require("fs/promises"),sxa=require("net"),rmp=require("path"),qbv=["interactive","bg","daemon",
+"daemon-worker"];Ybv=["busy","shell","idle","waiting"];evv={ok:!0,refund:()=>{}};Fjn=class Fjn extends Error{code;constructor(e){super("session records directory unreadable");this.code=e;this.name="Se
+ssionRecordsUnreadableError"}}});var bmp={};Et(bmp,{SessionNamingState:()=>yxa,baseOfMintedSuffix:()=>Rli,claimSessionNameAtStartup:()=>vxa,claimUniqueSessionName:()=>C4r,claimantPrecedes:()=>gxa,deci
+deNameCollision:()=>hmp,getSessionNamingState:()=>P$,isSessionNameUniquenessEnabled:()=>xli,liveHoldersOf:()=>fmp,noteVettedCorrespondent:()=>_xa,notifyCorrespondentsOfRename:()=>Sxa,reclaimSessionNam
+eOnResume:()=>Jir,renameSupersededDuringScan:()=>Ili,scheduleSettledRecheck:()=>Ujn,sessionNamingStates:()=>gmp,settledYieldFor:()=>Ngt,suffixedName:()=>mmp,takePendingYield:()=>Cli});function gxa(e,t
+){if(e.startedAt!==t.startedAt)return e.startedAt<t.startedAt;let r=e.procStart??"",n=t.procStart??"";if(r!==n)return r<n;return e.pid<t.pid}function fmp(e,t,r){return t.filter((n)=>n.pid!==r&&n.name!
+==void 0&&n.procStart!==void 0&&Vu(n.name)===e)}function svv(e){return new Set(e.flatMap((t)=>t.name===void 0?[]:[Vu(t.name)]))}function mmp(e,t,r=zWe){let n=(o)=>`${So(e,fle-o.length-1)}-${o}`;for(le
+t o=0;o<ovv;o++){let i=n(r());if(!t.has(Vu(i)))return i}for(let o=2;;o++){let i=n(`${r()}-${o}`);if(!t.has(Vu(i)))return i}}function hmp(e){let{desiredName:t,self:r,live:n,moment:o,slug:i}=e,s=e.suffi
+xBase??t,a=Vu(t);if(!a)return{kind:"keep"};let l=fmp(a,n,r.pid),c=o==="rename"?l:o==="startup"?l.filter((u)=>gxa(u,r)):l.filter((u)=>gxa({...u,startedAt:u.nameSince??u.startedAt},{...r,startedAt:r.nam
+eSince??r.startedAt}));if(c.length===0)return{kind:"keep"};return{kind:"yield",newName:mmp(s,svv(n),i),holders:c}}class yxa{correspondents=new Map;senderMode=null;userTypedName=void 0;hasAdopter=!1;la
+stYield=void 0;yielded=xi();pendingYield=void 0;noteCorrespondent(e,t){if(!e||xD(e).scheme!=="uds")return;if(this.correspondents.delete(e),this.correspondents.set(e,t),this.correspondents.size>ivv){le
+t r=this.correspondents.keys().next().value;if(r!==void 0)this.correspondents.delete(r)}}announceYield(e,t){this.pendingYield=[e,t],this.yielded.emit(e,t)}reset(){this.correspondents.clear(),this.last
+Yield=void 0,this.yielded.clear(),this.pendingYield=void 0,this.senderMode=null,this.userTypedName=void 0,this.hasAdopter=!1}}function P$(){return gmp.of(ar().host)}function _xa(e,t){P$().noteCorrespo
+ndent(e,t)}function Cli(){let e=P$(),t=e.pendingYield;return e.pendingYield=void 0,t}function xli(){return it("tengu_session_name_uniqueness",!0)}async function C4r(e,t,r=bxa,n=e){if(!xli())return{nam
+e:e,yielded:!1};if(n=Rli(n)??n,!await r.whenRegistered())return{name:e,yielded:!1};try{let o=await r.listLive(),i=o.find((c)=>c.pid===process.pid);if(!i)return{name:e,yielded:!1};let s=hmp({desiredNam
+e:e,self:i,live:o,moment:t,slug:r.slug,suffixBase:n});if(s.kind==="keep")return{name:e,yielded:!1};let a=avv(e,i),l=Wv(a!==void 0&&Vu(a)!==Vu(e)?a:s.newName)||s.newName;return E(`[session-name] "${e}"
+ is held by live pid ${s.holders[0]?.pid}; this session takes "${l}"`,{level:"info"}),Ee("session_name_collision"),P$().lastYield={base:Vu(n),name:l},{name:l,yielded:!0}}catch(o){return E(`[session-na
+me] uniqueness check failed, keeping "${e}": ${le(o)}`,{level:"warn"}),pe("session_name_collision","check_failed"),{name:e,yielded:!1}}}function avv(e,t){let r=Ngt(e,t.name);if(r!==void 0)return r;let
+ n=t.name,o=n===void 0?void 0:ymp(n);if(n===void 0||o===void 0)return;let i=Rli(e)??e,s=So(i,fle-o.suffix.length-1);return o.base.toLowerCase()===s.toLowerCase()?n:void 0}function ymp(e){let t=/-([a-z
+]+-[a-z]+)(-\d{1,4})?$/i.exec(e);if(!t||!sWd(t[1].toLowerCase()))return;let r=e.slice(0,e.length-t[0].length);return r.length>0?{base:r,suffix:t[0].slice(1)}:void 0}function Ngt(e,t){if(!xli())return;
+let r=P$().lastYield,n=Rli(e)??e;return r!==void 0&&t!==void 0&&Vu(r.name)===Vu(t)&&r.base===Vu(n)?t:void 0}function kli(e){let t=QV();return t!==void 0&&Vu(t.name)===Vu(e)}function Rli(e){return ymp(
+e)?.base}function _mp(e){setTimeout(e,lvv).unref()}async function vxa(e){let{sessionNameArg:t,interactive:r,writeName:n,onRenamed:o,deps:i}=e,s=e.scheduleRecheck??_mp;if(t)await n(t,"user");let a=QV()
+;if(!r||!a||a.source==="derived")return;if(t)P$().userTypedName=t;let l=async(c,u,d=c)=>{if(u&&!kli(c))return;let p=await C4r(c,u?"recheck":"startup",i,d);if(!kli(c))return;if(!p.yielded){if(!u)s(()=>
+void l(c,!0));return}if(await n(p.name,"collision"),P$().userTypedName===c)P$().userTypedName=p.name;if(o?.(p.name,c),P$().announceYield(p.name,c),!u)s(()=>void l(p.name,!0,c))};await l(a.name,!1)}fun
+ction Ujn(e){let{name:t,onYield:r,deps:n}=e,o=e.suffixBase??t;(e.scheduleRecheck??_mp)(()=>{(async()=>{if(!kli(t))return;let s=await C4r(t,"recheck",n,o);if(!s.yielded||!kli(t))return;if(P$().userType
+dName===t)P$().userTypedName=s.name;await r(s.name,t)})()})}function Ili(e,t,r){let n=QV();if(n===void 0||n.source==="derived")return;if(n.source==="collision"&&Ngt(e?.name??t,n.name)!==void 0)return;
+let o=Vu(n.name);if(e!==void 0&&o===Vu(e.name)||o===Vu(t)||o===Vu(r))return;return n}async function Jir(e,t,r={}){let n=r.deps??bxa,o=e?Wv(e):"";if(!o||!await n.whenRegistered())return;if(r.autoOnly){
+await YCe(o,t,"auto");return}let i=QV();if(i!==void 0&&i.source!=="auto"&&i.source!=="derived"&&Vu(i.name)===Vu(o))return;let s=await C4r(o,"rename",n);if(Ili(i,o,s.name))return;let a=async(l,c)=>{awa
+it YCe(l,t,"collision"),P$().announceYield(l,c)};if(!s.yielded){await YCe(o,t),Ujn({name:o,deps:n,onYield:a});return}if(await YCe(s.name,t,"collision"),Ujn({name:s.name,suffixBase:o,deps:n,onYield:a})
+,s.name===i?.name)return;P$().announceYield(s.name,o)}async function Sxa(e,t,r,n=Njn,o=bxa.listLive){if(!xli()||!rg()||P$().correspondents.size===0)return;let i=EQe(),[s,a,l]=[e,t,r].map(Wv),c=`This s
+ession was renamed from "${s}" to "${a}" ("${l}" is held by another live session on this machine). Address this one as "${a}" from now on.`,u;try{u=new Map((await o()).map((d)=>[d.pid,d.sock]))}catch(
+d){E(`[session-name] rename notice skipped: registry unreadable (${dt(d)??le(d)})`);return}await Promise.all([...P$().correspondents].map(async([d,p])=>{let{scheme:f,target:m}=xD(d);if(f!=="uds"||!m||
+i!==void 0&&eti(m,i)||u.get(p)!==m)return;try{await n(m,c,a,void 0,void 0,P$().senderMode?.(),{trackReceipts:!1})}catch(h){E(`[session-name] rename notice to ${LD(d)} failed: ${dt(h)??"send error"}`)}
+}))}var ovv=16,ivv=64,gmp,bxa,lvv=3000;var K3e=A(()=>{Zt();bn();Qfe();su();tt();qe();eO();st();Zfe();Wir();hle();dp();Lr();H$();JOt();gmp=new Ar(()=>new yxa);bxa={whenRegistered:GFn,listLive:b1e}});fu
+nction $gt(e,t){return{...e,endedByModel:t}}function X1t(e){return e?.endedByModel}function Hli(){return!1}function Exa(){return""}function Cme(e){let t=Exa();return t===""?e:`${e} ${t}`}var v1e=A(()=
+>{mr()});var Axa=0,Cle=0;var Fgt=()=>{};function pvv(e){let t=dt(e);return t!==void 0&&dvv.has(t)}function x4r(e,t){return dt(e)===t}function fvv(e){return pvv(e)?{kind:"absent"}:{kind:"fs",error:e}}a
+sync function Zir(e){try{return uxe(await e)}catch(t){return xU(fvv(t))}}var dvv;var R4r=A(()=>{st();l3e();Jf();dvv=new Set(["ENOENT","ENOTDIR"])});async function vmp(e,t,r=Bjn){let n=await Zir(AQe.ls
+tat(e));if(!n.ok&&n.error.kind!=="absent")return xU(n.error);if(n.ok&&!n.value.isFile())return xU(Smp(e,n.value));return Zir(AQe.open(e,t|Cle,r))}async function jjn(e){if(Cle===0)return vmp(e,Txa.cons
+tants.O_RDONLY);return hvv(e,await Zir(AQe.open(e,Txa.constants.O_RDONLY|Cle)))}function hvv(e,t){return!t.ok&&t.error.kind==="fs"&&x4r(t.error.error,"ELOOP")?xU({kind:"fs",error:kxa(e,"ELOOP")}):t}fu
+nction kxa(e,t){return Object.assign(gvv(t),{code:t,path:e})}function Smp(e,t){return{kind:"fs",error:kxa(e,t.isSymbolicLink()?"ELOOP":"ENXIO")}}function gvv(e){switch(e){case"ELOOP":return Error("ref
+using a symlinked path");case"ENXIO":return Error("refusing a non-regular file");case"EISDIR":return Error("refusing a directory at the leaf");case"ENOTDIR":return Error("refusing a non-directory node
+ on a write path");case"EFBIG":return Error("refusing a file over the size cap");case gMn:return Error("refusing a value that has a second name (hard link)");case yMn:return Error("refusing a value wh
+ose opened object is no longer at its key");case Pea:return Error("refusing a hardened read the host cannot verify")}}class wmp{available=void 0;probing=void 0;procUnreadableLogged=!1}var Txa,AQe,Bjn=
+384,OWC,Emp="LinkMisdirected",Amp="LinkUnverified";var J1t=A(()=>{tt();Fgt();l3e();qe();Jf();R4r();Txa=require("fs"),AQe=require("fs/promises");OWC=new Ar(()=>new wmp)});function Svv(e){return af(e,"e
+xpected a segment that is not empty or made only of dots and spaces, with no path separator, NUL or set-aside shape")}function KI(e){if(typeof e!=="object"||e===null)return af("key","expected a key ob
+ject");let t=xvv(e);if(t!==void 0)return t;let r=Xvv(e);if(r===void 0)return af("key",`${e.namespace} is not a storage namespace`);return kmp("key",r)}function kmp(e,t){for(let[r,n,o]of t){let i=`${e}
+.${r}`;if(n===void 0){if(o!=="optional")return af(i,"required")}else if(wvv(r)){if(!Array.isArray(n)||!SD(n))return af(i,"expected a non-empty array of segments, none empty or made only of dots and sp
+aces, with no path separator, NUL or set-aside shape")}else if(typeof n!=="string"||!yl(n))return Svv(i)}return}function wvv(e){return e==="relPath"||e==="agentRelPath"}function Cvv(e){return typeof e
+==="string"&&/^[0-9a-f]{64}$/.test(e)}function xvv(e){if(e.namespace==="transcript")return Hvv(e);if(e.namespace==="pluginAssetCache"&&!Cvv(e.digest))return af("key.digest","must be a SHA-256 digest: 
+64 lowercase hexadecimal characters");if(e.namespace==="globalConfig"&&"kind"in e){if(!Omp(e.kind))return af("key.kind",Mmp);if(typeof e.stamp!=="string")return af("key.stamp","a recovery copy key car
+ries its stamp")}if(e.namespace==="task")return Bvv(e);if(e.namespace==="sidecar"){let t=Dli("key.sessionId",e.sessionId);if(t!==void 0)return t;if(Mli(e.relPath))return af("key.relPath",zjn);return F
+mp(e.relPath)?af("key.relPath",Nmp):void 0}if(e.namespace==="recording")return Dli("key.sessionId",e.sessionId)??($mp(e.stamp)?void 0:af("key.stamp",Dvv));if(e.namespace==="jobsRoot")return jvv(e);if(
+e.namespace==="userConfigDir"&&!xmp.has(e.dir))return af("key.dir",Rmp);if(e.namespace==="fileHistory")return Rvv(e);if(e.namespace==="settings"&&!Uvv(e.layer))return af("key.layer","must be user, pro
+ject or local");if(e.namespace==="log"&&!Gmp(e.channel))return af("key.channel",Wmp);if(e.namespace==="job"&&Kmp(e.relPath))return af("key.relPath",qmp);if(e.namespace==="sessionLog")return Ymp("key",
+e)??(qvv(e.logName)?void 0:af("key.logName","must be the session-log stem <sessionId8>[-<title-slug>]: up to eight word characters, then lower-case a-z / 0-9 runs joined by single hyphens; not a bare 
+device name"));if(e.namespace==="pluginRegistry"&&!Evv.has(e.file))return af("key.file",Avv);if(e.namespace==="marketplaceCache"&&!Tvv.has(e.form))return af("key.form",kvv);if(e.namespace!=="agentMemo
+ry")return;if(!Pmp(e.layer))return af("key.layer","must be user, project or local");if(e.layer==="user"&&"projectKey"in e)return af("key.projectKey","the user layer is not keyed by project");if(e.laye
+r!=="user"&&typeof e.projectKey!=="string")return af("key.projectKey","required for the project and local layers");return typeof e.agentType==="string"?void 0:af("key.agentType","an agent memory key n
+ames its agent")}function Rvv(e){return typeof e.backupFileName!=="string"||!dNr.test(e.backupFileName)?af("key.backupFileName","must be a backup file name the engine has ever written (hex hash @v ver
+sion)"):void 0}function Pmp(e){return e==="user"||e==="project"||e==="local"}function Omp(e){return Ivv.has(e)}function Hvv(e){let t=Dli("key.sessionId",e.sessionId);if(t!==void 0)return t;if(Mli(e.ag
+entRelPath))return af("key.agentRelPath",zjn);if("journal"in e){if(e.journal!==!0)return af("key.journal","must be true");if(!Array.isArray(e.agentRelPath))return af("key.agentRelPath","a run journal 
+key carries its run directory");return e.agentId===void 0?void 0:af("key.agentId","a transcript key names an agent transcript or the run journal, never both")}return e.agentRelPath!==void 0&&e.agentId
+===void 0?af("key.agentRelPath","requires agentId or journal"):void 0}function $mp(e){return typeof e==="string"&&Pvv.test(e)}function Fmp(e){return Array.isArray(e)&&typeof e[0]==="string"&&SOe(e[0])
+.some((t)=>Rxa(t)!==void 0)}function Rxa(e){if(!e.endsWith(Pli))return;let t=e.slice(0,-Pli.length);return $mp(t)?t:void 0}function Bmp(e){return SOe(e).some((t)=>Ump.some((r)=>t.endsWith(r)))}functio
+n jmp(e){return SOe(e).some((t)=>Lmp.has(t))}function zmp(e){return!jmp(e)&&!INr(e)&&!Bmp(e)}function Dli(e,t){if(typeof t!=="string")return;if(jmp(t))return af(e,Ovv);if(Bmp(t))return af(e,Mvv);retur
+n INr(t)?af(e,zjn):void 0}function $vv(e){return Fvv(`${e}.json`)}function Fvv(e){return SOe(e).includes(Lvv)}function Mli(e){return Array.isArray(e)&&e.some((t)=>typeof t==="string"&&INr(t))}function
+ Uvv(e){return e==="user"||e==="project"||e==="local"}function Gmp(e){return e==="debug"||e==="telemetry"||e==="apiDump"}function Bvv(e){if("taskId"in e&&(("meta"in e)||("highWaterMark"in e)))return a
+f("key.taskId","a task key names an item, the list metadata or the list high-water mark, never more than one");if("meta"in e&&"highWaterMark"in e)return af("key.highWaterMark","a task key names an ite
+m, the list metadata or the list high-water mark, never more than one");if("meta"in e&&e.meta!==!0)return af("key.meta","must be true");if("highWaterMark"in e&&e.highWaterMark!==!0)return af("key.high
+WaterMark","must be true");if(typeof e.listId!=="string")return af("key.listId","a task key carries its listId");if("meta"in e||"highWaterMark"in e)return;if(typeof e.taskId!=="string")return af("key.
+taskId","a task item key carries its taskId");if($vv(e.taskId))return af("key.taskId",Nvv);return}function jvv(e){if("file"in e&&"draftKey"in e)return af("key.draftKey","a jobs-root key names the pins
+ file or one draft, never both");if("file"in e)return e.file==="pins"?void 0:af("key.file","must be pins");if(typeof e.draftKey!=="string")return af("key.draftKey","a jobs-root draft key carries its d
+raftKey");return Yvv.test(e.draftKey)?void 0:af("key.draftKey","must be 8 lowercase hex characters")}function Kmp(e){return Array.isArray(e)&&typeof e[0]==="string"&&SOe(e[0]).includes(Vmp)}function q
+vv(e){return typeof e==="string"&&e.length<=Gvv&&Wvv.test(e)&&!Vvv.test(e)}function Ymp(e,t){if(t.year!==void 0&&!Cxa(zvv,t.year))return af(`${e}.year`,"must be four digits (YYYY)");if(t.month!==void 
+0&&!Cxa(Tmp,t.month))return af(`${e}.month`,"must be two digits (MM)");if(t.day!==void 0&&!Cxa(Tmp,t.day))return af(`${e}.day`,"must be two digits (DD)");return}function Cxa(e,t){return typeof t==="st
+ring"&&e.test(t)}function Kvv(e){if(e.year!==void 0&&e.projectKey===void 0)return af("scope.projectKey","required when year is given");if(e.month!==void 0&&e.year===void 0)return af("scope.year","requ
+ired when month is given");if(e.day!==void 0&&e.month===void 0)return af("scope.month","required when day is given");return Ymp("scope",e)}function Xvv(e){switch(e.namespace){case"transcript":return[[
+"projectKey",e.projectKey],["sessionId",e.sessionId],["agentId",e.agentId,"optional"],["agentRelPath",e.agentRelPath,"optional"]];case"history":case"identity":return[];case"globalConfig":return"kind"i
+n e?[["stamp",e.stamp]]:[];case"settings":return e.layer==="user"?[]:e.layer==="project"?[["projectKey",e.projectKey]]:[["consentRootKey",e.consentRootKey]];case"task":return"taskId"in e?[["listId",e.
+listId],["taskId",e.taskId]]:[["listId",e.listId]];case"memory":return[["projectKey",e.projectKey],["relPath",e.relPath]];case"pluginRegistry":return[];case"marketplaceCache":return[["marketplace",e.m
+arketplace]];case"pluginCache":return[["marketplace",e.marketplace],["plugin",e.plugin],["version",e.version],["relPath",e.relPath]];case"cache":return[["store",e.store],["id",e.id]];case"paste":retur
+n[["id",e.id]];case"pluginAssetCache":return[["digest",e.digest]];case"state":return[["id",e.id]];case"plan":return[["name",e.name]];case"feedbackDraft":return[["draftId",e.draftId]];case"agentMemory"
+:return[...e.layer==="user"?[]:[["projectKey",e.projectKey]],["agentType",e.agentType],["relPath",e.relPath]];case"team":return[["team",e.team]];case"sidecar":return[["projectKey",e.projectKey],["sess
+ionId",e.sessionId],["relPath",e.relPath]];case"scratch":return[["sessionId",e.sessionId],["relPath",e.relPath]];case"userConfigDir":return[["relPath",e.relPath]];case"fileHistory":return[["sessionId"
+,e.sessionId],["backupFileName",e.backupFileName]];case"job":return[["jobId",e.jobId],["relPath",e.relPath]];case"daemon":return[["relPath",e.relPath]];case"jobsRoot":return"file"in e?[]:[["draftKey",
+e.draftKey]];case"session":return[["file",e.file]];case"bridgePointer":case"sessionAliases":return[["projectKey",e.projectKey]];case"mailbox":return[["team",e.team],["teammate",e.teammate]];case"log":
+return[["sessionId",e.sessionId],["agentId",e.agentId,"optional"],["runId",e.runId,"optional"]];case"jobTimeline":return[["jobId",e.jobId]];case"recording":return[["projectKey",e.projectKey],["session
+Id",e.sessionId],["stamp",e.stamp]];case"sessionLog":return[["projectKey",e.projectKey],["year",e.year],["month",e.month],["day",e.day],["logName",e.logName]]}return}function Ixa(e){if(typeof e!=="obj
+ect"||e===null)return af("scope","expected a scope object");let t=eSv(e);if(t===void 0)return af("scope",`${String(e.namespace)} is not a listable namespace`);return Zvv(e)??kmp("scope",t)}function Zv
+v(e){let t=e.namespace==="agentMemory"?Qvv(e):void 0;if(t!==void 0)return t;if(e.namespace==="transcript"||e.namespace==="sidecar"){let n=Dli("scope.sessionId",e.sessionId);if(n!==void 0)return n}for(
+let[n,o]of Jvv[e.namespace])if(n in e&&e[n]!==void 0)return af(`scope.${n}`,o);if(e.namespace==="sidecar"&&Mli(e.relPath))return af("scope.relPath",zjn);if(e.namespace==="sidecar"&&Fmp(e.relPath))retu
+rn af("scope.relPath",Nmp);if(e.namespace==="log"&&e.channel!==void 0&&!Gmp(e.channel))return af("scope.channel",Wmp);if(e.namespace==="job"&&Kmp(e.relPath))return af("scope.relPath",qmp);let r=e.name
+space==="sessionLog"?Kvv(e):void 0;if(r!==void 0)return r;if(e.namespace==="scratch"&&e.sessionId===void 0&&e.relPath!==void 0)return af("scope.relPath","requires scope.sessionId: a scratch relPath na
+rrows one session directory, and no cross-session prefix filter exists");if(e.namespace==="userConfigDir"&&!xmp.has(e.dir))return af("scope.dir",Rmp);if(e.namespace==="transcript"&&e.agentRelPath!==vo
+id 0&&(e.projectKey===void 0||e.sessionId===void 0))return af("scope.agentRelPath","requires scope.projectKey and scope.sessionId: an agentRelPath narrows the subagents/ tree of one session directory"
+);if(e.namespace==="transcript"&&Mli(e.agentRelPath))return af("scope.agentRelPath",zjn);if(e.namespace==="pluginCache"){if(e.marketplace===void 0&&e.plugin!==void 0)return af("scope.plugin","requires
+ scope.marketplace: a plugin narrows one marketplace folder");if(e.plugin===void 0&&e.version!==void 0)return af("scope.version","requires scope.plugin: a version narrows one plugin folder");if(e.vers
+ion===void 0&&e.relPath!==void 0)return af("scope.relPath","requires scope.version: a relPath narrows one version folder")}if(e.namespace==="job"&&e.jobId===void 0&&e.relPath!==void 0)return af("scope
+.relPath","requires scope.jobId: a job relPath narrows one job directory, and no cross-job prefix filter exists");if(e.namespace==="transcript"&&e.projectKey===void 0&&e.sessionId!==void 0)return af("
+scope.sessionId","requires scope.projectKey: a session narrows one project folder, and no cross-project session filter exists");if(e.namespace==="globalConfig"&&e.kind!==void 0&&!Omp(e.kind))return af
+("scope.kind",Mmp);return}function Qvv(e){if(!Pmp(e.layer))return af("scope.layer","must be user, project or local");if(e.layer==="user"&&"projectKey"in e)return af("scope.projectKey","the user layer 
+is not keyed by project");if(e.layer!=="user"&&typeof e.projectKey!=="string")return af("scope.projectKey","required for the project and local layers");return e.agentType===void 0&&e.relPath!==void 0?
+af("scope.relPath","requires scope.agentType: an agent-memory relPath narrows one agent directory"):void 0}function eSv(e){switch(e.namespace){case"transcript":return[["projectKey",e.projectKey,"optio
+nal"],["sessionId",e.sessionId,"optional"],["agentRelPath",e.agentRelPath,"optional"]];case"task":return[["listId",e.listId,"optional"]];case"mailbox":return[["team",e.team,"optional"]];case"memory":r
+eturn[["projectKey",e.projectKey],["relPath",e.relPath,"optional"]];case"pluginCache":return[["marketplace",e.marketplace,"optional"],["plugin",e.plugin,"optional"],["version",e.version,"optional"],["
+relPath",e.relPath,"optional"]];case"cache":return[["store",e.store]];case"state":case"plan":case"paste":case"pluginAssetCache":case"feedbackDraft":return[];case"sidecar":return[["projectKey",e.projec
+tKey],["sessionId",e.sessionId],["relPath",e.relPath,"optional"]];case"agentMemory":return[["projectKey",e.layer==="user"?void 0:e.projectKey,"optional"],["agentType",e.agentType,"optional"],["relPath
+",e.relPath,"optional"]];case"scratch":return[["sessionId",e.sessionId,"optional"],["relPath",e.relPath,"optional"]];case"userConfigDir":return[["relPath",e.relPath,"optional"]];case"fileHistory":retu
+rn[["sessionId",e.sessionId,"optional"]];case"job":return[["jobId",e.jobId,"optional"],["relPath",e.relPath,"optional"]];case"daemon":return[["relPath",e.relPath,"optional"]];case"jobsRoot":case"sessi
+on":return[];case"globalConfig":return[["kind",e.kind,"optional"]];case"log":return[["sessionId",e.sessionId,"optional"]];case"sessionLog":return[["projectKey",e.projectKey,"optional"],["year",e.year,
+"optional"],["month",e.month,"optional"],["day",e.day,"optional"]]}return}var Cmp,xmp,Rmp,Imp,Evv,Avv,Hmp,Tvv,kvv,Dmp,Ivv,Mmp,xxa="cloud-snapshots",Lmp,Pvv,Dvv="must be the recording stamp: 1 to 16 de
+cimal digits (epoch milliseconds)",Pli=".cast",Nmp,Ump,Mvv,Ovv,Lvv=".meta.json",Nvv=".meta is reserved for the list metadata key, under every spelling that opens its file",zjn="names a .jsonl stream, 
+which only a transcript key addresses",Wmp="must be debug, telemetry or apiDump",Vmp="timeline.jsonl",qmp,zvv,Tmp,Wvv,Gvv=128,Vvv,Yvv,Jvv;var xle=A(()=>{_v();u$();Ka();Jf();J1t();Cmp=["commands","agen
+ts","output-styles","skills","workflows","routines","themes","rules","session-env","uploads","mcp-skill-archives","usage-data","mcp-discovery-cache"],xmp=new Set(Cmp),Rmp=`must be one of the userConfi
+gDir directory names (${Cmp.join(", ")})`,Imp=["installed","marketplaces","flagged","catalog","inUseSweep"],Evv=new Set(Imp),Avv=`must be one of the pluginRegistry files (${Imp.join(", ")})`,Hmp=["man
+ifest","catalog"],Tvv=new Set(Hmp),kvv=`must be one of the marketplaceCache forms (${Hmp.join(", ")})`;Dmp=["backup","corrupted"],Ivv=new Set(Dmp),Mmp=`must be one of the global-config copy kinds (${D
+mp.join(", ")})`;Lmp=new Set(["memory","tiny_memory","bagel",xxa,"bridge-pointer.json",".session-aliases"]),Pvv=/^[0-9]{1,16}$/,Nmp=`<stamp>${Pli} inside a session's folder is that session's terminal 
+recording stream: address it as keys.recording(projectKey, sessionId, stamp)`;Ump=[".ccr-tip.json",".precompact.json",Pli],Mvv=`must not end with ${Ump.join(", ")}: those name a session's project-leve
+l sibling files`;Ovv=`${[...Lmp].join(", ")} are reserved: they name project-level entries, not sessions`;qmp=`${Vmp} is the job's timeline stream: address it as keys.jobTimeline(jobId)`;zvv=/^\d{4}$/
+,Tmp=/^\d{2}$/,Wvv=/^[A-Za-z0-9_-]{1,8}(?:-[a-z0-9]+)*$/,Vvv=/^(?:con|prn|aux|nul|com\d|lpt\d)$/i;Yvv=/^[0-9a-f]{8}$/;Jvv={transcript:[["agentId","names one agent transcript, a stream key, not a scope
+: narrow a scope with agentRelPath"],["journal","names a run journal, a stream key, not a scope: narrow a scope with agentRelPath"]],log:[["agentId","names one log stream, a stream key, not a scope"],
+["runId","names one log stream, a stream key, not a scope"]],sessionLog:[["logName","names one session's log, a stream key, not a scope: a day scope lists its logs"]],task:[["taskId","names one task v
+alue, a key, not a scope: a list scope narrows with listId only"],["meta","names one task value, a key, not a scope: a list scope narrows with listId only"],["highWaterMark","names one task value, a k
+ey, not a scope: a list scope narrows with listId only"]],mailbox:[["teammate","names one inbox, a key, not a scope"]],cache:[["id","names one cached value, a key, not a scope: a cache scope narrows w
+ith store only"]],pluginAssetCache:[["digest","names one cached asset, a key, not a scope"]],fileHistory:[["backupFileName","names one backup, a key, not a scope: a file-history scope narrows with ses
+sionId only"]],state:[["id","names one value, a key, not a scope"]],feedbackDraft:[["draftId","names one draft, a key, not a scope"]],jobsRoot:[["file","names one value, a key, not a scope"],["draftKe
+y","names one value, a key, not a scope"]],plan:[["name","names one plan, a key, not a scope"]],paste:[["id","names one paste, a key, not a scope"]],session:[["file","names one value, a key, not a sco
+pe"]],globalConfig:[["stamp","names one recovery copy, a key, not a scope: the scope narrows with kind only"]],memory:[],pluginCache:[],daemon:[],sidecar:[],agentMemory:[],scratch:[],userConfigDir:[],
+job:[]}});async function Y3e(e){let t=Date.now(),{stdout:r,code:n}=await wo(Io(),["-c","core.hooksPath=/dev/null","-c","core.fsmonitor=","worktree","list","--porcelain"],{cwd:e,preserveOutputOnError:!
+1}),o=Date.now()-t;if(n!==0)return N("tengu_worktree_detection",{duration_ms:o,worktree_count:0,success:!1}),[];let i=r.split(`
+`).filter((l)=>l.startsWith("worktree ")).map((l)=>xu(l.slice(9)));N("tengu_worktree_detection",{duration_ms:o,worktree_count:i.length,success:!0});let s=i.find((l)=>e===l||e.startsWith(l+Xmp.sep)),a=
+i.filter((l)=>l!==s).sort((l,c)=>l.localeCompare(c));return s?[s,...a]:a}var Xmp;var I4r=A(()=>{jt();gl();rc();al();Xmp=require("path")});class Jmp{pendingWrites=new Set;unresumedAdopt=new Map;unresum
+edFrameLive=new Map;exitRetryFrameLive=new Map;track(e){this.pendingWrites.add(e),e.finally(()=>this.pendingWrites.delete(e))}hasPending(){return this.pendingWrites.size>0}async drain(){await Promise.
+allSettled(Array.from(this.pendingWrites))}}function oSe(){return tSv.of(ar().host)}function Zmp(e){oSe().track(e)}function Qmp(){return oSe().hasPending()}function ehp(){return oSe().drain()}var tSv;
+var Oli=A(()=>{tt();tSv=new Ar(()=>new Jmp)});var Lli=78,Wjn=75,Gjn=70;var nhp={};Et(nhp,{ErrorTrackingClient:()=>Hxa,enqueueErrorLog:()=>Dxa,errorTrackingClient:()=>Qir,errorTrackingClients:()=>rhp,f
+lushErrorTracking:()=>lSv,isErrorTrackingCapReached:()=>Pxa,shutdownErrorTracking:()=>uSv});function sSv(){return V.CLAUDE_CODE_DD_ERROR_TRACKING_FLUSH_INTERVAL_MS||nSv}async function aSv(e){let t=He(
+e),r=new URLSearchParams({ddsource:"browser","dd-api-key":cii,"dd-evp-origin":"browser","dd-evp-origin-version":{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues"
+,PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.239",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08
+-21T04:40:30Z",GIT_SHA:"9bf8e9521fe06414183309865310e27c9b8db3dd",DD_SOURCEMAP_GROUP:"win32"}.VERSION,"dd-request-id":thp.randomUUID()});try{await Tw.post(`${rSv}?${r}`,t,{headers:{"Content-Type":"app
+lication/json"},timeout:iSv})}catch(n){if(UH(n)&&n.response)E(`dd-error-tracking: intake responded ${n.response.status} (batch=${e.length})`,{level:"warn"});else E(`dd-error-tracking: intake failed: $
+{le(n)}`,{level:"warn"})}}class Hxa{reportsEnqueued=0;capSentinelSent=!1;cachedUserBucket=void 0;sender=aii({maxBatchSize:oSv,getFlushIntervalMs:sSv,post:aSv})}function Qir(){return rhp.of(ar().host)}
+async function lSv(){await Qir().sender.flush()}function Pxa(){return Qir().reportsEnqueued>=H4r}function cSv(e){return{...e,message:`ErrorTrackingCapReached: per-process cap of ${H4r} hit, dropping f
+urther reports`,error:{kind:"ErrorTrackingCapReached",message:`per-process cap of ${H4r} hit`,stack:`ErrorTrackingCapReached
+    at enqueueErrorLog (src/services/errorTracking/client.ts)`,fingerprint:"cap-reached-sentinel",handling:"handled"},error_frames:void 0}}function Dxa(e){let t=Qir();if(t.reportsEnqueued>=H4r)return;
+if(t.reportsEnqueued++,t.reportsEnqueued===H4r&&!t.capSentinelSent)t.capSentinelSent=!0,E(`dd-error-tracking: per-process report cap reached (${H4r}); dropping further reports`,{level:"warn"}),t.sende
+r.enqueue(cSv(e));else t.sender.enqueue(e)}async function uSv(){await Qir().sender.shutdown()}var thp,rSv="https://browser-intake-us5-datadoghq.com/api/v2/logs",nSv=30000,oSv=25,iSv=1e4,H4r=100,rhp;va
+r Mxa=A(()=>{tt();qe();mr();st();wr();xLe();LC();thp=require("crypto");rhp=new Ar(()=>new Hxa)});function Z1t(e){return[...Lxa,...Nxa].reduce((t,[r,n])=>t.replace(r,n),String(e))}function $xa(e){retur
+n hSv.some((t)=>t.test(e))}function Vjn(e,t,r,n,o="",i="",s="g"){let a=`${t}{${r},}${o}`;return new RegExp(`(?:\\b${e}${i}${a}|${e}${n}${a})`,s)}function P4r(e){return`(?=${e}{0,64}[0-9])`}function oh
+p(e){return`(?=[A-Za-z0-9_-]{0,64}?(?=[A-Za-z0-9]{${e}})(?=[A-Za-z0-9]{0,64}[0-9])(?=[A-Za-z0-9]{0,64}[A-Za-z]))`}var dSv,Oxa,pSv,ihp=4096,a3C,shp,ahp,lhp,fSv,mSv,Lxa,Nxa,hSv;var qjn=A(()=>{dSv=/hooks
+\.slack\.com\/(?:services|workflows|triggers)\/[A-Za-z0-9/_-]+/gi,Oxa={bearer:[/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,"Bearer <token>"],basic:[/(:\s*)Basic\s+[A-Za-z0-9+/=]{8,}/gi,"$1Basic <token>"],sk
+:[/\bsk-[A-Za-z0-9_-]{20,}/g,"<token>"]},pSv=[/\bBearer\s{1,512}(?=[A-Za-z0-9._~+/=-]{16})(?:eyJ|(?=[A-Za-z0-9._~+/=-]{0,64}[0-9=]))/i,/:\s{0,512}Basic\s{1,512}(?=[A-Za-z0-9+/=]{16})(?=[A-Za-z0-9+/=]{
+0,64}[0-9=])/i,/\bsk-(?=[A-Za-z0-9_-]{20})(?=[A-Za-z0-9_-]{0,64}[0-9])/],a3C=new RegExp(`(?:\\b(?:xox[abe-z](?:\\.xox[a-z])?|xapp|xwfp)-${P4r("[A-Za-z0-9+/=%_-]")}|\\bxox[cd]-|(?:xox[abe-z](?:\\.xox[a
+-z])?|xapp|xwfp)-(?=[0-9])|xox[cd]-${P4r("[A-Za-z0-9+/=%_-]")}(?=[A-Za-z0-9+/=%_-]{16}))`,"i"),shp=[[Vjn("sk-ant-","[A-Za-z0-9_-]",8,ohp(8)),"<token>"],[Vjn("sk-(?:proj|svcacct|admin)-","[A-Za-z0-9_-]
+",20,ohp(20)),"<token>"]],ahp=[[/(^|[^A-Za-z0-9+])AKIA[A-Z0-9]{16}(?![A-Za-z0-9+=])/g,"$1<token>"],[/(^|[^A-Za-z0-9+])ASIA[A-Z0-9]{16}(?![A-Za-z0-9+=])/g,"$1<token>"]],lhp=[[Vjn("gh[opusr]_","[A-Za-z0
+-9]",20,P4r("[A-Za-z0-9]")),"<token>"],[/github_pat_[A-Za-z0-9_]{82,}/g,"<token>"],[/sq0(?:atp|csp)-[A-Za-z0-9_-]{22,}/g,"<token>"],[/(^|[^A-Za-z0-9+/])EAAA[A-Za-z0-9+/=%_-]{56,}/g,"$1<token>"],[Vjn("
+gl(?:pat|dt|rt|ft|soat|oas|agent|ptt|cbt|imt|ffct)-","[A-Za-z0-9_=-]",20,P4r("[A-Za-z0-9_=-]"),"(?:\\.[0-9a-z]{9})?"),"<token>"],[Vjn("(?:xox[abe-z](?:\\.xox[a-z])?|xapp|xwfp)-","[A-Za-z0-9+/=%_-]",10
+,"(?=[0-9])","",P4r("[A-Za-z0-9+/=%_-]"),"gi"),"<token>"],[new RegExp(`(?:\\bxox[cd]-[A-Za-z0-9+/=%_-]{10,}|xox[cd]-${P4r("[A-Za-z0-9+/=%_-]")}[A-Za-z0-9+/=%_-]{16,})`,"gi"),"<token>"],[dSv,"hooks.sla
+ck.com/<redacted>"]],fSv=[/\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,"<jwt>"],mSv=/\beyJ(?:[A-Za-z0-9_-]{256}|[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{10})/,Lxa=[Oxa.bearer,Oxa.basi
+c,...shp,Oxa.sk,...ahp],Nxa=[...lhp,fSv];hSv=[...pSv,...[...shp,...ahp,...lhp].map(([e])=>new RegExp(e.source,e.flags.replaceAll("g",""))),mSv]});function gSv(e){let t=e,r="";try{r=php.homedir()}catch
+{}if(r)t=t.replaceAll(r+"/","~/").replaceAll(r+"\\","~\\");let n=(o,i)=>/https?:\/\/[^\s'",;|()]*$/i.test(o.slice(0,i));return t=t.replace(/([/\\](?:Users|home)[/\\])[^/\\\n]+/gi,(o,i,s,a)=>n(a,s)?o:`
+${i}<user>`).replace(/(\/(?:Volumes|mnt|media)\/)[^/\n]+/g,(o,i,s,a)=>n(a,s)?o:`${i}<vol>`).replace(/\b([A-Za-z]):[\\/]/g,"<drv>:\\").replace(/\\\\[^\\]+\\[^\\\s'",:()]+/g,"<unc>"),t}function _Sv(e){r
+eturn e.replace(ySv,"<email>")}function wSv(e){return e.replace(bSv,"<ip>").replace(vSv,(t)=>SSv.test(t)?t:"<ip>")}function kSv(e){return e.replace(ESv,(t,r,n)=>n.replace(/\D/g,"").length>=7&&!ASv.tes
+t(n)?`${r}<phone>`:`${r}${n}`).replace(TSv,"<phone>")}function xSv(e){let t=e;for(let[r,n]of CSv)t=t.replace(r,n);return t}function RSv(e){return e.replace(/https?:\/\/\S+/gi,"<url>").replace(/\b(?:ss
+h|git|gs|s3|file|s?ftp|wss?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/\S+/gi,"<url>").replace(/\b[\w.-]+\.(?:ant\.dev|anthropic\.com)\b[^\s"')\]]*/gi,"<url>")}function $Sv(e){return 
+e.replace(NSv,"$1<path>'").replace(ISv,"~/<path>").replace(HSv,"<path>").replace(PSv,"<path>").replace(DSv,"<path>").replace(MSv,"<path>").replace(OSv,"<path>").replace(LSv,"<path>")}function USv(e){r
+eturn e.replace(FSv,"<api-error-body>")}function BSv(e){return e.replace(/\bmcp__[A-Za-z0-9_-]+__([A-Za-z0-9_-]+)/g,"mcp__<server>__$1").replace(/\bmcp__[A-Za-z0-9_-]+/g,"mcp__<server>").replace(/\bpl
+ugin:[^\s:"')\],]+:[^\s"')\],]*/g,"plugin:<server>")}function zSv(e){try{return e.replace(jSv,(t,r)=>`${r}<http-body.${t.length-r.length}>`)}catch{return e}}function VSv(e){return e.replace(WSv,"$1<re
+dacted>").replace(GSv,"$1<redacted>$2")}function KSv(e){return e.replace(qSv,(t,r,n,o)=>`${r}${n||": "}${o===void 0?"<redacted>":`<domains.${o.split("', '").length}>`}`)}function twv(e){return(e.inclu
+des(" in allowed_domains: ")||e.includes(" in blocked_domains: ")?e.replace(XSv,(r,n,o,i)=>`${n}<redacted>'${o}${i??"<redacted>"}`):e).replace(JSv,(r,n,o)=>`${n}<redacted>${o??""}`).replace(ZSv,(r,n,o
+)=>`${n}<redacted>'${o??""}`).replace(QSv,"$1<redacted>").replace(ewv,(r,n,o)=>`${n}<redacted>${o??""}`)}function owv(e){let t=e.replace(rwv,"$1's altnames: <redacted>"),r=nwv.exec(t);if(!r)return t;l
+et[,n,o,i,s,a]=r,l=t.slice(0,r.index);if(n!==void 0)return`${l}${n}<host>${o}<redacted>`;if(i!==void 0)return`${l}${i}<ip>${s}<redacted>`;return`${l}${a===void 0?"":`${a} `}<redacted>`}function Fxa(e)
+{let t=e.search(uwv)+1;if(t===0)return e;let r=e.slice(0,t),n=e.slice(t),o=dwv.exec(r);if(o)return`<ip>${o[1]??""}${n}`;if(uhp.test(r))return`<ip>${n}`;if(uhp.test(e))return"<ip>";if(pwv.test(r))retur
+n e;return`<host>${fwv.exec(r)?.[0]??""}${n}`}function vwv(e,t){if(e.includes("://"))return-1;let r=e.search(gwv);if(r>0)return r;let n=e.search(ywv);if(n>=0)return n;let o=t?e.search(_wv):-1;if(o>=0)
+return o;let i=e.search(bwv);return i>0?i:-1}function Uxa(e,t){if(mwv.test(e))return e;let r=vwv(e,t);if(r>=0)return Fxa(e.slice(0,r))+e.slice(r);let n=hwv.exec(e);if(n){let[,o="",i="",s=""]=n;return(
+o===""?"":Fxa(o))+i+s}return Fxa(e)}function Ewv(e,t,r){let n=Swv.exec(t);return n!==null&&n.index<e.length?Uxa(e.slice(0,n.index),!1)+e.slice(n.index):Uxa(e,r)}function Awv(e){return e.replace(cwv,(t
+,r,n,o,i,s)=>{let a=s+t.length,l=e[a]==="\\";return r+(n??"")+Uxa(o,i===void 0&&l)+(i===void 0?"":` ${Ewv(i.slice(1),e.slice(a-i.length+1,a+wwv),l)}`)})}function kwv(e){return e.replace(Twv,"$1<path>"
+)}function yhp(e,t){let r=e;return[r?.path,r?.dest].filter((n)=>typeof n==="string"&&n.length>0).sort((n,o)=>o.length-n.length).reduce((n,o)=>n.split(o).join("<path>"),t)}function iSe(e){let t=e.lengt
+h>dhp?e.slice(0,dhp)+"\u2026<truncated>":e,r=zSv(t),n=KSv(r),o=VSv(n),i=owv(o),a=Awv(i).replace(/:\/\/[^\s/]*@(?=[^@\s]*(?:[/:\s]|$))/g,"://<userinfo>@").replace(/\b[\w][\w.+-]*@[\w.-]+:[^\s"')\]]*(?:
+\/[^\s"')\]]*|\.git\b)/gi,"<url>"),l=BSv(kSv(xSv(wSv(_Sv(gSv(a))))));return kwv(twv($Sv(RSv(USv(l)))))}var php,ySv,bSv,vSv,SSv,ESv,ASv,TSv,CSv,Q1t,ISv,HSv,PSv,DSv,MSv,OSv,LSv,Bxa,NSv,jxa,FSv,jSv,WSv,G
+Sv,qSv,YSv,XSv,JSv,ZSv,QSv,ewv,Nli,rwv,nwv,fhp,iwv,mhp,zxa,swv,$li,awv,hhp,chp,ghp,lwv,cwv,uwv,dwv,uhp,pwv,fwv,mwv,hwv,gwv,ywv,_wv,bwv,Swv,wwv=160,Twv,dhp=4000;var esr=A(()=>{qjn();php=require("os");y
+Sv=/[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){0,7}\.[A-Za-z][\w-]{0,62}/g;bSv=/\b(?:\d{1,3}\.){3}\d{1,3}\b/g,vSv=/\b(?:[A-Fa-f0-9]{1,4}:){2,7}(?::?[A-Fa-f0-9]{1,4}){1,7}\b/g,SSv=/^\d{1,2}:\d{2}:\d{2}
+$/;ESv=/(^|[^\w/.-])((?:\+\d{1,3}[ \t.-]?)?\(?\d{2,4}\)?[ \t.-]\d{2,4}[ \t.-]\d{2,4}(?:[ \t.-]\d{2,4}(?![ \t.-]\d))?)(?!\w)/g,ASv=/^\s*\d{4}[-.]\d{2}[-.]\d{2}(?:[ T]\d{1,2})?\s*$/,TSv=/\+\d{7,15}\b/g;
+CSv=[...Lxa,[/\barn:(aws[\w-]*):([\w-]*):([\w-]*):\d*:[^\s"')\],]*/g,"arn:$1:$2:$3:<redacted>"],...Nxa,[/(?<![A-Za-z0-9+_-])(?!mcp__)(?=[a-z_]*[A-Z0-9+-])[A-Za-z0-9+_-]{40,}={0,2}\b/g,"<blob>"]];Q1t=/
+[^"'\n]*(?:['"](?=[^\s"',;:)\]}])[^"'\n]*)*/.source,ISv=new RegExp(String.raw`~[\\/]`+Q1t,"g"),HSv=new RegExp(String.raw`<drv>:\\`+Q1t,"g"),PSv=new RegExp(String.raw`[A-Za-z]:\\`+Q1t,"g"),DSv=new RegE
+xp(String.raw`<unc>[\\/]?`+Q1t,"g"),MSv=new RegExp(String.raw`\\\\(?=[^"

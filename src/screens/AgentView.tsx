@@ -75,6 +75,7 @@ import {
   partitionArchivedSessions,
   buildCwdBasenameMap,
   expandPastedTextRefs,
+  shouldFleetViewVimHandleEscape,
   formatPastedTextPlaceholder,
   countNewlines,
   FLEET_MIN_INTENT_LEN,
@@ -105,6 +106,8 @@ const voiceModule: { useVoice: typeof import('../hooks/useVoice.js').useVoice } 
 import { generateCommandSuggestions } from '../utils/suggestions/commandSuggestions.js';
 import type { Command } from '../types/command.js';
 import type { SuggestionItem } from '../components/PromptInput/PromptInputFooterSuggestions.js';
+import { isVimModeEnabled } from '../components/PromptInput/utils.js';
+import type { VimMode } from '../types/textInputTypes.js';
 import { LineView } from '../components/LineView.js';
 import { SuggestionList } from '../components/SuggestionList.js';
 import { Clawd } from '../components/LogoV2/Clawd.js';
@@ -538,6 +541,8 @@ function AgentViewApp({
   const [resumePicker, setResumePicker] = useState<ResumePickerState | null>(null);
   /** Official Ld / yp — prompt vs bash (`!`) composer mode. */
   const [dispatchMode, setDispatchMode] = useState<'prompt' | 'bash'>('prompt');
+  /** Official JIy `vimMode:d` — undefined when vim is off (Esc still clears). */
+  const [vimMode, setVimMode] = useState<VimMode>('INSERT');
   /** Official paste map for `[Pasted text #N]` expand on submit. */
   const pastesRef = useRef<Record<number, string>>({});
   const pasteIdRef = useRef(1);
@@ -1582,6 +1587,7 @@ function AgentViewApp({
       setDispatchInput('');
       setCursorOffset(0);
       setDispatchMode('prompt');
+      setVimMode('INSERT');
       pastesRef.current = {};
       pasteIdRef.current = 1;
       setError(null);
@@ -2264,13 +2270,23 @@ function AgentViewApp({
         }
         return;
       }
-      // densable escape cascade: clear dispatch/bash → pending delete → Gnm/Tt.
-      // Empty list does NOT fall back to list focus — exit immediately (not CJ arm).
+      // Official JIy Esc: vim INSERT/nonempty → NORMAL and keep text.
       if (key.escape) {
+        const fleetVim = isVimModeEnabled() ? vimMode : undefined;
+        if (shouldFleetViewVimHandleEscape(fleetVim, true, dispatchInput)) {
+          if (deleteConfirmSessionId || ungroupConfirmSessionId) {
+            clearPending();
+          }
+          if (vimMode === 'INSERT') {
+            setVimMode('NORMAL');
+          }
+          return;
+        }
         if (dispatchInput || dispatchMode === 'bash') {
           setDispatchInput('');
           setCursorOffset(0);
           setDispatchMode('prompt');
+          setVimMode('INSERT');
         } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
           // densable MD.current → NO(null): cancel delete/ungroup arm first.
           clearPending();
@@ -2278,6 +2294,16 @@ function AgentViewApp({
           handleEscExit();
         }
         return;
+      }
+      // Official JIy `u(t)`: NORMAL does not insert. `i` returns to INSERT.
+      if (isVimModeEnabled() && vimMode === 'NORMAL') {
+        if (input === 'i' && !key.ctrl && !key.meta) {
+          setVimMode('INSERT');
+          return;
+        }
+        if (input && !key.ctrl && !key.meta && !key.return && !key.tab && !key.escape) {
+          return;
+        }
       }
       // Official: empty bash + backspace → exit bash mode
       if (key.backspace && !dispatchInput && dispatchMode === 'bash') {
@@ -2514,6 +2540,7 @@ function AgentViewApp({
         setDispatchInput('');
         setCursorOffset(0);
         setDispatchMode('prompt');
+        setVimMode('INSERT');
       } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
         clearPending();
       } else {

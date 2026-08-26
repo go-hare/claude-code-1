@@ -1,0 +1,31 @@
+
+##### async function cmp(
+--- @304929919 ---
+async function cmp(e,t,{noFollowSymlink:r=!1,expectPeerPid:n,preflightedJson:o}={}){let i=o??lmp(t);if(!ELe(e))throw new _1e("non-local",`Refusing to connect to non-local IPC path: ${e}`);let s=mti(),a=await IWd(e,{requireLiveOwner:s}),l=a.kind==="token"?a.token:void 0;if(s&&a.kind!=="token"){if(!(a.kind==="no-key"&&await rvv(e)))throw new Sli(a.kind,`No running session has registered an inbox at ${e} (${Jfp}: ${a.kind}) \u2014 refusing to send to an unvouched pipe`);l=void 0}let c=l!==void 0?H_a(l):"";if(r&&!(Wt()==="windows"&&jWe(e)!==void 0)){let d;try{d=(await Y1t.lstat(e)).isSymbolicLink()}catch(p){if(lr(p))throw p;throw E(`[uds-client] reply target unvettable: ${dt(p)??"lstat failed"}`),new _1e("unvettable","Refusing to send: cannot vet reply target")}if(d)throw new _1e("symlink","Refusing to send: reply target is a symlink")}let u=c+i+`
+`;return new Promise((d,p)=>{let f=sxa.connect({path:e}),m=!1;f.setTimeout(5000,()=>{m=!0,f.destroy(),p(Error(`Timed out sending to ${e}`))}),f.on("error",(h)=>{m=!0,p(h)}),f.on("connect",()=>{if(n!==void 0&&Wt()!=="windows"){let h=mli(f);if(h===void 0){m=!0,f.destroy(),p(new _1e("endpoint-unverifiable","Refusing to send: connected endpoint identity could not be read"));return}if(h!==n){m=!0,f.destroy(),E(`[uds-client] connected endpoint is pid ${h}, expected ${n} \u2014 refusing to write`),p(new _1e("wrong-endpoint","Refusing to send: connected endpoint is not the expected process"));return}}if(f.write(u),Wt()==="macos")setTimeout((h)=>{if(!h.destroyed)h.end()},tvv,f);else f.end()}),f.on("close",()=>{if(!m)E(`[uds-client] Sent to ${LD(e)}`);d()})})}function ump(e){return new Promise((t)=>{if(!ELe(e)){t(!1);return}let r=sxa.connect({path:e}),n=(o)=>{r.destroy(),t(o)};r.on("connect",()=>n(!0)),r.on("error",(o)=>n(dt(o)==="EBUSY")),r.setTimeout(250,()=>n(!1))})}function $jn(e){return typeof e==="number"&&Number.isFinite(e)&&e>=0&&e<=dmp}function Ljn(e){return $jn(e)?e:void 0}async function k4r(e){let t=kLe(),r;try{r=await Y1t.readdir(t)}catch(o){if(e?.rejectUnreadable&&!lr(o))throw new Fjn(dt(o));return[]}return(await Promise.all(r.filter((o)=>/^\d+\.json$/.test(o)).map((o)=>pmp(t,o)))).filter((o)=>o!==null)}async function pmp(e,t){try{let r=t.replace(/\.json$/,""),n=parseInt(r,10);if(isNaN(n))return null;let o=rmp.join(e,t);if(String(n)!==r)return Y1t.unlink(o).catch(()=>{}),null;let i=await zC(o,262144);if(i===null)return null;let s=er(i);return{sock:typeof s.messagingSocketPath==="string"?s.messagingSocketPath:"",cwd:typeof s.cwd==="string"?s.cwd:"?",startedAt:Ljn(s.startedAt)??0,...Ljn(s.nameSince)!==void 0&&{nameSince:Ljn(s.nameSince)},procStart:typeof s.procStart==="string"?s.procStart:void 0,...typeof s.procStartFt==="string"&&{procStartFt:s.procStartFt},name:typeof s.name==="string"?s.name:void 0,nameSource:s.nameSource==="derived"||s.nameSource==="collision"?s.nameSource:void 0,formerNames:Zbv(s.formerNames),kind:Kbv(s.kind),sessionId:typeof s.sessionId==="string"?s.sessionId:void 0,jobId:typeof s.jo
+(shown 1)
+
+##### function Tli(
+--- @304928787 ---
+function Tli(e,t,r=q3e(),{expectPeerPid:n}={}){return E(`[uds-client] Sending control:${t.action} to ${LD(e)}`),await cmp(e,{type:"control",...t,...r},{noFollowSymlink:!0,...n!==void 0&&{expectPeerPid:n}}),{msgId:r.msg_id}}async function uxa(e){let t=lQ(e);if(t===void 0)return;for(let r of await k4r()){if(!r.sock||lQ(r.sock)!==t)continue;if(await pxa(r))return{pid:r.pid,features:r.peerFeatures}}return}async function dxa(e){let t=Gn(e),r=new Map;if(t.length===0)return r;let n=kLe(),i=(await Promise.all(t.map((a)=>pmp(n,`${a}.json`)))).filter((a)=>a!==null&&Boolean(a.sock)),s=await Promise.all(i.map((a)=>pxa(a)));return i.forEach((a,l)=>{if(s[l]&&a.sock)r.set(a.pid,a.sock)}),r}async function p
+(shown 1)
+
+##### function T4r(
+--- @304928721 ---
+function T4r(e,t,r={}){return Tli(e,t,q3e(),r).then(()=>{})}async function Tli(e,t,r=q3e(),{expectPeerPid:n}={}){return E(`[uds-client] Sending control:${t.action} to ${LD(e)}`),await cmp(e,{type:"control",...t,...r},{noFollowSymlink:!0,...n!==void 0&&{expectPeerPid:n}}),{msgId:r.msg_id}}async function uxa(e){let t=lQ(e);if(t===void 0)return;for(let r of await k4r()){if(!r.sock||lQ(r.sock)!==t)continue;if(await pxa(r))return{pid:r.pid,features:r.peerFeatures}}return}async function dxa(e){let t=Gn(e),r=new Map;if(t.length===0)return r;let n=kLe(),i=(await Promise.all(t.map((a)=>pmp(n,`${a}.json`)))).filter((a)=>a!==null&&Boolean(a.sock)),s=await Promise.all(i.map((a)=>pxa(a)));return i.forEac
+(shown 1)
+
+##### function q3e(
+--- @304915142 ---
+function q3e(){return{msgV:Rbv,msg_id:Ibv()}}var Rbv=1,Hbv;var Vir=A(()=>{VCn();Hbv=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i});class Lfp{getCurrentMode=null;modeAtUnwire=void 0;onPeerHeld=null;onPeerHoldReleased=null;onPeerHoldDropped=null;sendPeerReceipt=null;recordCorrespo
+--- @333462980 ---
+function q3e(e,t,r){if(e==="linkplain"||e==="linkcode"||e==="link"){let i=t.indexOf(" "),n=t;if(i>0){let s=V5(t,i);n=t.substring(s),t=t.substring(0,i)}return(e==="linkcode"||e==="link"&&r.link==="code")&&(n=`\`${n}\``),r.renderLink?.(t,n)??U3e(t,n)}}function U3e(e,t){try{return fo.parse(e,!0),`[${t}
+(shown 2)
+
+##### async function ump(
+(shown 0)
+
+##### function amp(
+--- @304927875 ---
+function amp(e){let t=Ym().receipts.outstandingSends,r=t.findIndex((n)=>n.msgId===e);if(r!==-1)t.splice(r,1)}function lxa(e,t){if(typeof e!=="string")return;let{outstandingSends:r,awaitingTerminal:n}=Ym().receipts,o=r.findIndex((s)=>s.msgId===e);if(o!==-1){let[s]=r.splice(o,1);if(!s)return;if(t==="held"){if(n.length>=imp)n.shift();n.push(s)}return{destination:s.to,wasHeld:!1}}let i=n.findIndex((s)
+(shown 1)

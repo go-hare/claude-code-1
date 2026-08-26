@@ -1,0 +1,3 @@
+OFFSET=293764642
+
+,r[0],this.lexer,this.rules)}}emStrong(e,t,r=""){let n=this.rules.inline.emStrongLDelim.exec(e);if(!n)return;if(n[3]&&r.match(this.rules.other.unicodeAlphaNumeric))return;if(!(n[1]||n[2])||!r||this.rules.inline.punctuation.exec(r)

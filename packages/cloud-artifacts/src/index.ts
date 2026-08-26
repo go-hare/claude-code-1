@@ -80,29 +80,37 @@ async function handleUpload(
   }
 
   const hashParam = url.searchParams.get('hash')
-  let id: string
-  if (hashParam !== null) {
-    if (!HASH_PATTERN.test(hashParam)) {
-      return json({ error: 'invalid_hash' }, 400)
-    }
-    id = hashParam
-    // 覆盖：先删所有 ttl prefix 下可能的旧 key（R2 delete 不存在的 key 不报错）
-    await Promise.all(
-      TTL_PREFIXES.map(p => env.BUCKET.delete(`${p}/${id}.html`)),
-    )
-  } else {
-    id = nanoid(21)
+  if (hashParam !== null && !HASH_PATTERN.test(hashParam)) {
+    return json({ error: 'invalid_hash' }, 400)
   }
 
+  // Read + validate body BEFORE any R2 mutate. Previous order deleted both
+  // TTL prefixes first, then arrayBuffer(); a 0-byte POST (or a crash between
+  // delete and put) published a blank page / 404 at the stable ?hash= URL.
   const body = await req.arrayBuffer()
   if (body.byteLength > maxBytes) {
     return json({ error: 'payload_too_large' }, 413)
   }
+  if (body.byteLength === 0) {
+    return json({ error: 'empty_body' }, 400)
+  }
 
-  const key = `${ttl}d/${id}.html`
+  const id = hashParam ?? nanoid(21)
+  const prefix = `${ttl}d`
+  const key = `${prefix}/${id}.html`
   await env.BUCKET.put(key, body, {
     httpMetadata: { contentType: HTML_CONTENT_TYPE },
   })
+
+  // Overwrite: same-TTL is in-place PUT (do not self-delete). After the new
+  // object is durable, drop the *other* TTL prefix so lifecycle matches ttl=.
+  if (hashParam !== null) {
+    await Promise.all(
+      TTL_PREFIXES.filter(p => p !== prefix).map(p =>
+        env.BUCKET.delete(`${p}/${id}.html`),
+      ),
+    )
+  }
 
   const expiresAt = new Date(Date.now() + ttl * 24 * 60 * 60 * 1000)
   return json(

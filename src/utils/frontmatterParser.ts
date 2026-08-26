@@ -123,6 +123,11 @@ function quoteProblematicValues(frontmatterText: string): string {
 
 export const FRONTMATTER_REGEX = /^---\s*\n([\s\S]*?)---\s*\n?/
 
+/** densable HG — UTF-8 BOM so `^---` still matches agents/skills/commands .md */
+export function stripUtf8Bom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+}
+
 /**
  * Parses markdown content to extract frontmatter and content
  * @param markdown The raw markdown content
@@ -132,18 +137,21 @@ export function parseFrontmatter(
   markdown: string,
   sourcePath?: string,
 ): ParsedMarkdown {
-  const match = markdown.match(FRONTMATTER_REGEX)
+  // densable bf: n=e; e=HG(e); match Dme; no match → content stays n (BOM kept)
+  const raw = markdown
+  const stripped = stripUtf8Bom(markdown)
+  const match = stripped.match(FRONTMATTER_REGEX)
 
   if (!match) {
     // No frontmatter found
     return {
       frontmatter: {},
-      content: markdown,
+      content: raw,
     }
   }
 
   const frontmatterText = match[1] || ''
-  const content = markdown.slice(match[0].length)
+  const content = stripped.slice(match[0].length)
 
   let frontmatter: FrontmatterData = {}
   try {

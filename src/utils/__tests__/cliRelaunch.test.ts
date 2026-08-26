@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   acceptTuiRelaunch,
   applyTuiRelaunchPlanToProcessEnv,
@@ -189,30 +191,12 @@ describe('cliRelaunch densables', () => {
     expect(env2.CLAUDE_CODE_TUI_JUST_SWITCHED).toBe('default')
   })
 
-  test('acceptTuiRelaunch spawn densable via injectable spawnSync path', () => {
-    // spawnCliRelaunch uses real spawnSync; when spawn:true, mode is spawned
-    // even if binary fails (spawn.ok may be false). Plan env still applied.
-    const env: NodeJS.ProcessEnv = {
-      CLAUDE_CODE_SPAWN_TUI_RELAUNCH: '1',
-      PATH: process.env.PATH,
-    }
-    const result = acceptTuiRelaunch({
-      target: 'fullscreen',
-      hasNonEmptyTranscript: false,
-      screenReaderEnv: {},
-      env,
-      // Force spawn path without requiring SPAWN_TUI_RELAUNCH re-read after inject
-      spawn: true,
-      skipFlush: true,
-      cwd: process.cwd(),
-    })
-    expect(result.mode).toBe('spawned')
-    if (result.mode === 'spawned') {
-      expect(result.plan.injectEnv.CLAUDE_CODE_TUI_JUST_SWITCHED).toBe(
-        'fullscreen',
-      )
-      expect(typeof result.spawn.ok).toBe('boolean')
-    }
+  test('acceptTuiRelaunch defaults to oyt spawn unless spawn:false', () => {
+    const src = readFileSync(join(import.meta.dir, '../cliRelaunch.ts'), 'utf8')
+    const accept = src.slice(src.indexOf('export function acceptTuiRelaunch'))
+    expect(accept).toContain('input.spawn === false')
+    expect(accept).not.toContain('isTuiRelaunchSpawnEnabled')
+    expect(src).toContain('spawnCliRelaunch({')
   })
 
   test('flushStreamsBeforeRelaunchExit densable', () => {

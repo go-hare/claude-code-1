@@ -1,0 +1,5 @@
+OFFSET=99156768
+
+y must carry "path" (a helper executable) or "script" + "interpreter" (an inline helper), and/or "defaultSettings" (a static settings payload)..............I.......https://code.claude.com/docs/en..........F......canonicalRootOwnerUids..........	.......hasCanonicalRootOwnerUids...............	.......clearCanonicalRootOwnerUids.............	.......normalizedRealHomeDir...........	.......clearNormalizedRealHomeDir........ .............	...#...CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION.............I...	...startLoad...............	.
+.
+...C:\Windows......................C:\Program Files........I...z...PowerShell not found at any of its stock install locations on C: (fixed absolute candidates only; PATH is never consulted)..................&...CLAUDE_CODE_POLICY_HELPER_PSMODULEPATH..........	..."...CLAUDE_CODE_POLICY_HELPER_PS1_PATH......................if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {} }; ........	...5....COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC.................../usr/bin

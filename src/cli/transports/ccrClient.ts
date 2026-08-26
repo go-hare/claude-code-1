@@ -18,6 +18,7 @@ import {
 } from '../../utils/sessionIngressAuth.js'
 import type {
   RequiresActionDetails,
+  RestoredWorkerState,
   SessionState,
 } from '../../utils/sessionState.js'
 import { sleep } from '../../utils/sleep.js'
@@ -274,6 +275,7 @@ type ListInternalEventsResponse = {
 type WorkerStateResponse = {
   worker?: {
     external_metadata?: Record<string, unknown>
+    internal_metadata?: Record<string, unknown>
   }
 }
 
@@ -499,7 +501,7 @@ export class CCRClient {
    * registered the worker themselves and there is no parent process
    * setting env vars.
    */
-  async initialize(epoch?: number): Promise<Record<string, unknown> | null> {
+  async initialize(epoch?: number): Promise<NonNullable<RestoredWorkerState>> {
     const startMs = Date.now()
     if (Object.keys(this.getAuthHeaders()).length === 0) {
       throw new CCRInitError('no_auth_headers')
@@ -571,7 +573,7 @@ export class CCRClient {
     if (!this.closed) {
       logForDiagnosticsNoPII('info', 'cli_worker_state_restored', {
         duration_ms: durationMs,
-        had_state: metadata !== null,
+        had_state: Boolean(metadata.external || metadata.internal),
       })
     }
     return metadata
@@ -580,13 +582,16 @@ export class CCRClient {
   // Control_requests are marked processed and not re-delivered on
   // restart, so read back what the prior worker wrote.
   private async getWorkerState(): Promise<{
-    metadata: Record<string, unknown> | null
+    metadata: NonNullable<RestoredWorkerState>
     durationMs: number
   }> {
     const startMs = Date.now()
     const authHeaders = this.getAuthHeaders()
     if (Object.keys(authHeaders).length === 0) {
-      return { metadata: null, durationMs: 0 }
+      return {
+        metadata: { external: null, internal: null, readFailed: true },
+        durationMs: 0,
+      }
     }
     const data = await this.getWithRetry<WorkerStateResponse>(
       `${this.sessionBaseUrl}/worker`,
@@ -594,7 +599,11 @@ export class CCRClient {
       'worker_state',
     )
     return {
-      metadata: data?.worker?.external_metadata ?? null,
+      metadata: {
+        external: data?.worker?.external_metadata ?? null,
+        internal: data?.worker?.internal_metadata ?? null,
+        ...(data === null ? { readFailed: true } : {}),
+      },
       durationMs: Date.now() - startMs,
     }
   }
@@ -800,6 +809,11 @@ export class CCRClient {
   /** Report external metadata to CCR via PUT /worker. */
   reportMetadata(metadata: Record<string, unknown>): void {
     this.workerState.enqueue({ external_metadata: metadata })
+  }
+
+  /** Official `reportInternalMetadata` — RFC 7396 merge on internal_metadata. */
+  reportInternalMetadata(metadata: Record<string, unknown>): void {
+    this.workerState.enqueue({ internal_metadata: metadata })
   }
 
   /**

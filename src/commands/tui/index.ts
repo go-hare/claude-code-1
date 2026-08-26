@@ -227,8 +227,8 @@ export function getTuiRelaunchSavedBlockerMessage(
 
 /**
  * densable bsr/OVe residual after /tui setting save — inject TUI_JUST_SWITCHED
- * and (when SPAWN_TUI_RELAUNCH) process-relaunch with Cmt+Rmt carry argv
- * (permission mode / tools / model / effort / agent flags).
+ * then oyt process-relaunch with Cmt+Rmt carry argv (permission mode / tools /
+ * model / effort / agent flags).
  */
 async function applyTuiRelaunchAfterSwitch(
   target: 'fullscreen' | 'default',

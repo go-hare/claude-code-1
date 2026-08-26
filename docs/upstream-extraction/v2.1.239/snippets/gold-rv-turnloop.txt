@@ -1,0 +1,82 @@
+### region 326864000..326878500
+ages,vr);if(Ur!==this.mutableMessages)this.mutableMessages.length=0,this.mutableMessages.push(...Ur)},persistSession:Y}),we=this.hasHandledOrphanedPermission?void 0:D,Ie=this.hasHa
+ndledDeferredToolResume?void 0:F;if(we)this.hasHandledOrphanedPermission=!0;if(Ie)this.hasHandledDeferredToolResume=!0;if(yield*JNs({orphanedPermission:we,deferredToolUse:Ie,tools:
+B,mutableMessages:this.mutableMessages,processUserInputContext:fe,canUseTool:ie,persistSession:Y,earlyResult:{startedAt:G,usage:this.totalUsage,permissionDenials:K,mainLoopModel:te
+,fastMode:X.fastMode,origin:t?.origin}}))return;let $e=Ru("before_processUserInput",{once:!0}),Ye=t?.hearthRelayMessageIds!==void 0||t?.hearthRelayRows!==void 0||t?.hearthRelayThre
+adTs!==void 0,Fe=XEn(t?.uuid,t?.verifiedSlackHumanTurn||Ye),{messages:Be,shouldQuery:je,allowedTools:ze,model:We,effort:De,resultText:Ge}=await E6t({input:e,mode:"prompt",setToolJS
+X:()=>{},context:{...fe,messages:this.mutableMessages},messages:this.mutableMessages,uuid:Fe,isMeta:t?.isMeta,shouldQuery:t?.shouldQuery,querySource:"sdk",origin:t?.origin,skipSlas
+hCommands:t?.skipSlashCommands,skipAttachments:t?.skipAttachments,skipSubmissionHooks:t?.skipSubmissionHooks,bridgeOrigin:t?.bridgeOrigin,modelScheduledOrigin:t?.modelScheduledOrig
+in,wakeupSource:t?.wakeupSource,pollEventDelivery:t?.pollEventDelivery,pollEventProvenance:t?.pollEventProvenance,skipSkillPermissionReset:t?.skipSkillPermissionReset,inlinedImageP
+aths:t?.inlinedImagePaths});if($e)Ru("after_processUserInput");let Ze=je&&t?.shouldQuery!==!1;if(t?.origin)dsn(Be,t.origin);if(t?.verifiedSlackHumanTurn&&Fe)YEn(Be,Fe);if(Ye&&Fe)l$
+s(Be,Fe,{messageIds:t?.hearthRelayMessageIds,rows:t?.hearthRelayRows,threadTs:t?.hearthRelayThreadTs});this.mutableMessages.push(...Be);let ot=[...this.mutableMessages],Kt=XNs({con
+versation:this.mutableMessages,messages:ot,persistSession:Y,storageV5:this.config.storageV5});if(Y&&Be.length>0){let vr=Kt.record();if(eg());else if(await vr,V.CLAUDE_CODE_EAGER_FL
+USH||V.CLAUDE_CODE_IS_COWORK)await ow()}let mt=C?qNs(Be):[];rgi(k,ze,t);let at=We!=null&&(qH(We)||Gu(We));if(We&&!at)E(`Skill/command model "${We}" is not in the availableModels al
+lowlist; keeping the session model`,{level:"warn"});let bt=at?We:te,Rt=fe.options.activeSkill,yt=De!==void 0?[...fe.permissionLayers??[],{kind:"effort",effort:De}]:fe.permissionLay
+ers,xt=T(),lt=B;try{let vr=i?.()??B;lt=vr.length===B.length&&vr.every((Ur,Jr)=>Ur.name===B[Jr]?.name)?B:vr}catch(vr){Te(vr)}if(lt!==B)try{({systemPrompt:ee,userContext:se,systemCon
+text:Se}=await DTn({...oe,tools:lt}))}catch(vr){if(!jl(vr))Te(vr)}fe=MTn({...he,tools:lt,renderedSystemPrompt:ee},{phase:"query",messages:ot,mainLoopModel:bt,appState:xt,abortContr
+oller:r,permissionLayers:yt,activeSkill:Rt});let[pr,Mt]=await ZNs(this.config.storageV5),Bt;try{Bt=_ue(pr,T().mcp.commands)}catch(vr){Te(vr),Bt=pr.filter((Ur)=>Ur.loadedFrom!=="syn
+cedSkills")}if(yield i$s({session:this.config.session,tools:lt,mcpClients:W,model:bt,permissionMode:X.toolPermissionContext.mode,commands:o,agents:I,skills:Bt,plugins:Mt,fastMode:X
+.fastMode,proactivityState:X,capabilities:this.config.capabilities}),QNs({shouldQuery:Ze,fromUserInput:je,fromOptions:t?.shouldQuery}),yield*PTn(Be,Vt()),!Ze){if(yield*t$s(Be),Y){i
+f(await Kt.record(),V.CLAUDE_CODE_EAGER_FLUSH||V.CLAUDE_CODE_IS_COWORK)await ow()}yield*YNs(mt,t),yield $5({startedAt:G,common:{is_error:!1,duration_api_ms:0,num_turns:0,stop_reaso
+n:null,session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origi
+n:t?.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"success",result:Ge??""}});return}if(yield*e$s(Be),b2()&&Y)Be.filter(RUe).forEach((vr)=>{hIe(fe.getFileHistoryS
+tate,fe.applyFileHistoryOp,vr.uuid)});let vt=Fx,Gt=1,Dt=mt.length===0,hr=[],dr=0,ur=new Set,ke,Pe=null,et=zNs(x),ct=s$s(),Ke=(vr)=>l$o(vr,Vt()),nt=(vr)=>Ke(ct.settle(vr)),Ct=Zke().
+at(-1),_t=w?usn(this.mutableMessages,Qy):0,Ft={},Qe,zt=new Map,qt=LPr.randomUUID();try{for await(let vr of soT(uue({messages:ot,systemPrompt:ee,userContext:se,systemContext:Se,canU
+seTool:ie,toolUseContext:fe,fallbackModel:S,querySource:"sdk",maxTurns:c,taskBudget:d,stopHookActive:t?.stopHookActive}),Ft)){let Ur=vr.type==="assistant"||vr.type==="user"||vr.typ
+e==="system"&&vr.subtype==="compact_boundary";if(Ur){if(vr.type==="assistant"&&!q)q=performance.now();if(Y&&vr.type==="system"&&vr.subtype==="compact_boundary")await Kt.flushBefore
+CompactBoundary(vr);if(ot.push(vr),Y)if(vr.type==="assistant")Kt.record();else await Kt.record()}if(!Dt&&(Ur||x&&vr.type==="stream_event"&&!pAt(vr.event)))Dt=!0,yield*KNs(mt,t);if(
+vr.type==="user")Gt++;switch(vr.type){case"sdk_status":yield{type:"system",subtype:"status",status:vr.status,...vr.metadata?.compactResult!==void 0&&{compact_result:vr.metadata.com
+pactResult},...vr.metadata?.compactError!==void 0&&{compact_error:vr.metadata.compactError},session_id:Vt(),uuid:LPr.randomUUID()};continue;case"compact_progress":case"stream_mode"
+:case"response_length":continue;case"tombstone":{if(yield*et.onTombstone(vr),vr.message.type==="assistant"){let Xn=vr.message.message.content,Jt=Array.isArray(Xn)?Xn.flatMap((Kr)=>
+Kr.type==="tool_use"&&Kr.name===Qy?[Kr.id]:[]):[];if(Jt.length>0){dr++;for(let Mr of Jt)ur.add(Mr);let Kr=(Mr)=>Mr.toolUseID===void 0||Jt.includes(Mr.toolUseID),Nn=hr.filter(Kr);hr
+=hr.filter((Mr)=>!Kr(Mr));for(let Mr of Nn)Kt.evict(Mr.attachmentUuid);N("tengu_structured_output_retracted",{retracted_results:Nn.length,surviving_results:hr.length,tombstoned_cal
+ls:dr})}}ct.dropHeld(vr.message.uuid),Kt.evict(vr.message.uuid);break}case"assistant":{if(vr.message.stop_reason!=null)Pe=vr.message.stop_reason;this.mutableMessages.push(vr);let X
+n=await $1s(this.config.session,vr,qt,T,r.signal);if(Xn!==vr)zt.set(vr,Xn);if(vr.isApiErrorMessage)yield*nt("stream_error");if(yield*lqe(Xn,Q,i?.()??B),vr.message.stop_reason!=null
+&&vr.message.stop_reason!=="refusal")yield*nt("served");break}case"progress":if(this.mutableMessages.push(vr),Y)ot.push(vr),Kt.record();yield*lqe(vr,Q,i?.()??B);break;case"user":if
+(o9(vr))yield*nt("interrupted");this.mutableMessages.push(vr),Kt.settlePreservedTail(vr.uuid),yield*lqe(vr,Q,i?.()??B);break;case"stream_event":if(yield*et.onStreamEvent(vr.event,v
+t),vr.event.type==="message_start"){if(!j)j=performance.now();if(!U&&vr.requestSentAtMs)U=vr.requestSentAtMs;if(!Z&&vr.requestSentWallMs)Z=vr.requestSentWallMs;vt=Fx,vt=uEe(vt,vr.e
+vent.message.usage)}if(vr.event.type==="message_delta"){if(vt=eyr(vr.event.usage)?.servedFallbackModel?gfo(vt,vr.event.usage):uEe(vt,vr.event.usage),vr.event.delta.stop_reason!=nul
+l){if(Pe=vr.event.delta.stop_reason,vr.event.delta.stop_reason!=="refusal")yield*nt("served")}if(Y)Kt.record()}if(vr.event.type==="message_stop")this.totalUsage=DJr(this.totalUsage
+,vt);let Jr=jfs(this.thinkingTokenEstimate,vr.event);if(this.thinkingTokenEstimate=Jr.estimate,Jr.emission)yield{type:"system",subtype:"thinking_tokens",estimated_tokens:Jr.emissio
+n.estimatedTokens,estimated_tokens_delta:Jr.emission.estimatedTokensDelta,uuid:LPr.randomUUID(),session_id:Vt()};if(x)yield WNs(vr,{uuid:LPr.randomUUID(),session_id:Vt()});break;ca
+se"attachment":if(this.mutableMessages.push(vr),Y)ot.push(vr),Kt.record();if(vr.attachment.type==="relevant_memories"){let Xn=_ls(vr.attachment.memories);if(Xn)yield Xn}else if(vr.
+attachment.type==="structured_output")if(vr.attachment.toolUseID!==void 0?ur.has(vr.attachment.toolUseID):ur.size>0)Kt.evict(vr.uuid),N("tengu_structured_output_late_retraction_dro
+p",{});else hr=[...hr,{toolUseID:vr.attachment.toolUseID,attachmentUuid:vr.uuid,data:vr.attachment.data}];else if(vr.attachment.type==="hook_deferred_tool")ke={id:vr.attachment.too
+lUseID,name:vr.attachment.toolName,input:vr.attachment.toolInput};else if(vr.attachment.type==="max_turns_reached"){Qe={turnCount:vr.attachment.turnCount,maxTurns:vr.attachment.max
+Turns};continue}else if(vr.attachment.type==="hook_system_message")yield*PTn([vr],Vt());else if(C&&vr.attachment.type==="queued_command")yield VQn(vr.attachment,vr);break;case"stre
+am_request_start":if(x)yield{type:"system",subtype:"status",status:"requesting",uuid:LPr.randomUUID(),session_id:Vt()};break;case"notification":{let Xn=vr.notification;yield{type:"
+system",subtype:"notification",key:Xn.key,text:Xn.text,priority:Xn.priority,...Xn.color!==void 0&&{color:Xn.color},...Xn.timeoutMs!==void 0&&{timeout_ms:Xn.timeoutMs},uuid:LPr.rand
+omUUID(),session_id:Vt()};break}case"set_expanded_view":break;case"post_turn_summary":this.config.setAppState((Xn)=>Xn.postTurnSummary===vr.value?Xn:{...Xn,postTurnSummary:vr.value
+});break;case"active_goal":this.config.setAppState((Xn)=>Xn.activeGoal===vr.value?Xn:{...Xn,activeGoal:vr.value});break;case"set_in_progress_tool_use_ids":break;case"hint_clears":b
+reak;case"refusal_continuation":break;case"query_model_change":break;case"interruptible_tool_in_progress":break;case"api_metrics":break;case"os_notification":break;case"open_messag
+e_selector":break;case"command_lifecycle":this.config.onCommandLifecycle?.(vr.uuid,vr.state);break;case"system":{if(this.mutableMessages.push(vr),Y&&vr.subtype==="model_refusal_fal
+lback")ot.push(vr),N("tengu_refusal_fallback_entry_recorded",{request_id:dn(vr.requestId)});if(vr.subtype==="compact_boundary"&&vr.compactMetadata)Kt.applyCompactBoundary(vr),yield
+{type:"system",subtype:"compact_boundary",session_id:Vt(),uuid:vr.uuid,compact_metadata:Dhr(vr.compactMetadata),...vr.logicalParentUuid!==void 0&&{logical_parent_uuid:vr.logicalPar
+entUuid}};if(vr.subtype==="api_error")yield{type:"system",subtype:"api_retry",attempt:vr.retryAttempt,max_retries:vr.maxRetries,retry_delay_ms:vr.retryInMs,error_status:vr.error.st
+atus??null,error:XQr(vr.error),session_id:Vt(),uuid:vr.uuid};if(vr.subtype==="model_refusal_fallback"){if(yield*et.onRefusalFallbackBanner(vr.direction,vt),DX())yield*Ke(ct.accept(
+vr))}if(vr.subtype==="model_refusal_no_fallback")yield*nt("exhausted"),yield{type:"system",subtype:"model_refusal_no_fallback",original_model:vr.originalModel,request_id:vr.request
+Id,api_refusal_category:vr.apiRefusalCategory??null,api_refusal_explanation:vr.apiRefusalExplanation??null,refused_user_message_uuid:vr.refusedUserMessageUuid??null,content:vr.cont
+ent,session_id:Vt(),uuid:vr.uuid};if(vr.subtype==="model_fallback")yield*nt("availability_switch"),yield{type:"system",subtype:"model_fallback",trigger:vr.trigger,original_model:vr
+.originalModel,fallback_model:vr.fallbackModel,content:vr.content,session_id:Vt(),uuid:vr.uuid};if(vr.subtype==="model_consent_fallback")yield{...JLi(vr),session_id:Vt(),uuid:vr.uu
+id};break}case"tool_use_summary":yield{...ZLi(vr),session_id:Vt(),uuid:vr.uuid};break}if(Y$e(u)){if(yield*et.takePendingClose(),yield*nt("turn_end"),Y){if(await Kt.record(!0),V.CLA
+UDE_CODE_EAGER_FLUSH||V.CLAUDE_CODE_IS_COWORK)await ow()}yield $5({startedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns:Gt,stop_reason:Pe,session_id:Vt(),total_cost_usd:w
+w(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:"budget_exhausted",fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?
+.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"error_max_budget_usd",errors:[SPi(u)]}});return}if(vr.type==="user"&&w){let Xn=usn(this.mutableMessages,Qy)+dr-_t,
+Jt=V.MAX_STRUCTURED_OUTPUT_RETRIES??UQr;if(Xn>=Jt&&hr.length===0){if(Y){if(await Kt.record(!0),V.CLAUDE_CODE_EAGER_FLUSH||V.CLAUDE_CODE_IS_COWORK)await ow()}yield*et.takePendingClo
+se(),yield*nt("turn_end"),yield $5({startedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns:Gt,stop_reason:Pe,session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,model
+Usage:pD(),permission_denials:K,terminal_reason:"structured_output_retry_exhausted",fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subage
+nt_stats:m5(this.config.session)},variant:{subtype:"error_max_structured_output_retries",errors:[aji(Jt,dr)]}});return}}}}finally{Kt.flushUnanchoredPreservedTail();try{let vr=lsn(t
+his.mutableMessages,B,0,!0);if(vr!==this.mutableMessages)for(let Ur=0;Ur<vr.length;Ur++)this.mutableMessages[Ur]=vr[Ur]}catch(vr){Te(vr)}}yield*et.takePendingClose(),yield*nt("turn
+_end");let fn=ot.findLast((vr)=>vr.type==="assistant"||vr.type==="user"),jr=fn;if(Y){if(await Kt.record(!0),V.CLAUDE_CODE_EAGER_FLUSH||V.CLAUDE_CODE_IS_COWORK)await ow()}if(ke){yie
+ld $5({startedAt:G,common:{is_error:!1,duration_api_ms:w1(),num_turns:Gt,stop_reason:"tool_deferred",session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permi
+ssion_denials:K,terminal_reason:Ft.value?.reason,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},v
+ariant:{subtype:"success",result:"",deferred_tool_use:ke}});return}if(Qe){yield $5({startedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns:Qe.turnCount,stop_reason:Pe,sessi
+on_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:Ft.value?.reason,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reas
+on:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"error_max_turns",errors:[`Reached maximum number of turns (${Qe.maxTurns})`]}});return}if
+(!QLi(fn,Pe)){yield $5({startedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns:Gt,stop_reason:Pe,session_id:Vt(),total_cost_usd:ww(),usage:this.totalUsage,modelUsage:pD(),p
+ermission_denials:K,terminal_reason:Ft.value?.reason,fast_mode_state:cG(bt,X.fastMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session
+)},variant:{subtype:"error_during_execution",errors:t1i(jr,Pe,Ct)}});return}if(w&&hr.length===0&&dr>0&&!(fn.type==="assistant"&&fn.isApiErrorMessage)){N("tengu_structured_output_re
+traction_exhausted",{tombstoned_calls:dr,num_turns:Gt}),yield $5({startedAt:G,common:{is_error:!0,duration_api_ms:w1(),num_turns:Gt,stop_reason:Pe,session_id:Vt(),total_cost_usd:ww
+(),usage:this.totalUsage,modelUsage:pD(),permission_denials:K,terminal_reason:mLe(Ft.value?.reason)?Ft.value?.reason:"structured_output_retry_exhausted",fast_mode_state:cG(bt,X.fas
+tMode),fast_mode_disabled_reason:D4()??void 0,origin:t?.origin,subagent_stats:m5(this.config.session)},variant:{subtype:"error_max_structured_output_retries",errors:[sji]}});return
+}let cn="",wn=!1,en=null;if(fn.type==="assistant")cn=e1i(fn,zt.get(fn)??fn)??"",wn=Boolean(fn.isApiE

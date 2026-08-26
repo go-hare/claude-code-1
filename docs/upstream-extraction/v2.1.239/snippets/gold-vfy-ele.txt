@@ -1,0 +1,16 @@
+if(e.trim().length===0)return"to must not be empty";let r=xD(e);if((r.scheme==="bridge"||r.scheme==="uds")&&r.target.trim().length===0)return"address target must not be empty";if(!ELe(r.target)||!ELe(
+e))return`'${e}' is not a local socket address. Use an address from ${t}.`;return}function ELe(e){if(!Yc(e))return!0;return jWe(e)!==void 0}function HFn(e,t){return eWd(e,t)==="same"}function eti(e,t)
+{return eWd(e,t)!=="different"}function eWd(e,t){let r=jWe(e),n=jWe(t);if(r!==void 0||n!==void 0){if(r===void 0||n===void 0)return"different";if(h_a(r)===h_a(n))return"same";return Zei(r)===Zei(n)?"ma
+ybe":"different"}if(e===t)return"same";if(IMr(e)||IMr(t))return Jei(IFn(RZe.resolve(e)))===Jei(IFn(RZe.resolve(t)))?"maybe":"different";let o=IFn(RZe.resolve(e)),i=IFn(RZe.resolve(t));if(o===i)return"
+same";let s=Wt(),a=s==="macos"||s==="windows";return Jei(o)===Jei(i)||a&&Zei(o)===Zei(i)?"maybe":"different"}function Jei(e){let t=Wt();return t==="macos"||t==="windows"?IFn(h_a(lYb(e))):e}function h_
+a(e){let t="";for(let r of e){let n=r.toUpperCase(),o=Z4d(n)?n:r,i=o.toLowerCase();t+=Z4d(i)?i:o}return t}function Z4d(e){let t=e.codePointAt(0);return t!==void 0&&e.length===(t>65535?2:1)}function Ze
+i(e){return e.toUpperCase().toLowerCase()}function lYb(e){return Wt()==="macos"?e.normalize("NFC"):e}function IFn(e){if(Wt()!=="macos")return e;let t=nft(e),r=/^\/private(\/(?:var|tmp|etc)(?:\/.*)?)$/
+.exec(t);return r?r[1]:t}function jWe(e){let t=/^[\\/]{2}[.?][\\/]pipe[\\/](?:(LOCAL)[\\/])?([^\\/]+)$/i.exec(e);if(t===null||t[2]==="."||t[2]==="..")return;if(/[. ]$/.test(t[2]))return;if(e.startsWit
+h("\\\\?\\")&&e.includes("/"))return;return t[1]===void 0?t[2]:`${rti}\\${t[2]}`}function y_a(e,t){if(jWe(t)!==void 0){let r=jWe(e);return r!==void 0&&cYb.test(r)}if(IMr(e))return!1;return RZe.dirname
+(RZe.resolve(e))===RZe.dirname(RZe.resolve(t))&&e.endsWith(".sock")}function tWd(e,t){let r=jWe(e),n=jWe(t);if(r!==void 0&&n!==void 0&&Q4d.test(n)&&!Q4d.test(r))return!1;return y_a(e,t)}var RZe,oYb,iY
+b,sYb,aYb,tti="cc-msg-",rti="LOCAL",cYb,Q4d;var Zfe=A(()=>{Y8();gl();ki();RZe=require("path"),oYb=new RegExp(`^(?:uds|bridge|did):[${Yei}]{1,200}$`);iYb=/^\/\S*\.sock$/,sYb=/^[\\/]{2}[.?][\\/]pipe[\\/
+]/i,aYb=/^\/\S*\.sock/;cYb=new RegExp(`^(?:${rti}\\\\)?${tti}[0-9a-f]{32}$`,"i"),Q4d=new RegExp(`^${tti}[0-9a-f]{32}$`,"i")});function nti(e){let t=typeof e==="string"?e.trim():"",r=ALe(t);return!t||!
+r||r==="untitled session"&&t.toLowerCase()!=="untitled session"}function PFn(e){return e.environmentKind!==void 0&&e.environmentKind!=="bridge"}function Vu(e){return e.normalize("NFKC").replace(/[\p{C
+c}\p{Cf}]/gu,(t)=>/\s/.test(t)?t:"").trim().toLowerCase().replace(/\s+/g,"-")}function WCe(e){let t=uYb.exec(e.trim());return t?{name:t[1],ref:t[2]}:null}function GCe(e,t){let r=[];r.push({name:dL,id:
+Di(),kind:"main",where:"in-process",lastActive:void 0,sock:void 0});let n=new Set;for(let[f,m]of Object.entries(e.teamContext?.teammates??{}))n.add(f),r.push({name:m.name,id:f,kind:"teammate",where:"i
+n-process",lastActive:void 0,sock:void 0});for(let[f,m]of e.agentNameRegistry){let h=e.tasks[m],g=h?.type==="local_agent"?h:void 0;r.push({name:f,id:m,kind:"subagent",where:"in-process",lastActive:g?.

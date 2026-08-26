@@ -1,0 +1,220 @@
+#### "function OLp(" 1 [306341013]
+
+==== function OLp( 306341013 ====
+ngth>0)n(u)}continue}if(s.type==="text")n(s.text||"");if(s.tokens)o(s.tokens);if(s.items)o(s.items)}}return o(e),[...r]}function OLp(e,t){if(t!=="User"&&t!=="Project"&&t!=="Local")return!1;let r=Jo().claudeMdExcludes;if(!r||r.length===0)return!1;let n={dot:!0},o=e.replaceAll("\\","/"),i=b4v(r).filter((s)=>s.length>0);if(i.length===0)return!1;return xLp.default.isMatch(o,i,n)}function b4v(e){let t=Cr(),r=e.map((n)=>n.replaceAll("\\","/"));for(let n of r){if(!n.startsWith("/"))continue;let o=n.search(/[*?{[]/),i=o===-1?n:n.slice(0,o),s=r0.dirname(i);try{let{resolvedPath:a}=Wy(t,s);if(Yc(a)&&!cb(a)||Ou(a)||XA(a))continue;let l=a.replaceAll("\\","/");if(l!==s){let c=l+n.slice(s.length);r.push(c)}}catch{}}return r}async function cRe(e,t,r,n,o=0,i,s){let a=FC(e);if(r.has(a)||o>=_4v)return[];if(OLp(e,t))return[];let l=n&&(t!=="User"||LLp());if(Yc(e)&&!cb(e)||Ou(e)||XA(e))return[];let{resolvedPath:c,isSymlink:u}=Wy(Cr(),e);if(Yc(c)&&!cb(c)||Ou(c)||XA(c))return[];if(o>0&&!l&&!t5r(c))return[];if(t==="User"&&!l)try{
+
+#### "function b4v(" 1 [306341271]
+
+==== function b4v( 306341271 ====
+0},o=e.replaceAll("\\","/"),i=b4v(r).filter((s)=>s.length>0);if(i.length===0)return!1;return xLp.default.isMatch(o,i,n)}function b4v(e){let t=Cr(),r=e.map((n)=>n.replaceAll("\\","/"));for(let n of r){if(!n.startsWith("/"))continue;let o=n.search(/[*?{[]/),i=o===-1?n:n.slice(0,o),s=r0.dirname(i);try{let{resolvedPath:a}=Wy(t,s);if(Yc(a)&&!cb(a)||Ou(a)||XA(a))continue;let l=a.replaceAll("\\","/");if(l!==s){let c=l+n.slice(s.length);r.push(c)}}catch{}}return r}async function cRe(e,t,r,n,o=0,i,s){let a=FC(e);if(r.has(a)||o>=_4v)return[];if(OLp(e,t))return[];let l=n&&(t!=="User"||LLp());if(Yc(e)&&!cb(e)||Ou(e)||XA(e))return[];let{resolvedPath:c,isSymlink:u}=Wy(Cr(),e);if(Yc(c)&&!cb(c)||Ou(c)||XA(c))return[];if(o>0&&!l&&!t5r(c))return[];if(t==="User"&&!l)try{let m=await Cr().lstat(e);if(o===0&&m.isSymbolicLink()||(m.nlink??1)>1&&m.isFile())return[]}catch{}if(u){let m=FC(c);if(r.has(m))return[];r.add(m)}r.add(a);let{info:d,includePaths:p}=await nFa(e,t,c,s);if(!d||!d.content.trim())return[];if(i)d.parent=i;let f=
+
+#### "function YY(" 2 [301819817, 337239353]
+
+==== function YY( 301819817 ====
+tail:t.tail}}function JY_(e){return Math.abs(Nft(e)).toString(36)}function iNr(e){return e.replace(/[^a-zA-Z0-9]/g,"-")}function YY(e){let t=iNr(e);if(t.length<=Mae)return t;return`${t.slice(0,Mae)}-${JY_(e)}`}function rtr(e,t){let r=e.replaceAll("\\","/");return t?r.toLowerCase():r}function QZs(e,t,r){let n=xu(e),o=xu(t),i=(s)=>r?s.toLowerCase():s;if(i(iNr(n))!==i(iNr(o)))return!1;return rtr(n,r)!==rtr(o,r)}async function lNr(e,t,r,n){if(!QZs(e,t,r))return!1;if(fxn(e)||fxn(t))return!1;if(await n(e)||await n(t))return!1;let o;try{o=xu(await S4.realpath(e))}catch{return!1}let i=await BI(t);return QZs(o,i,r)}function cNr(e,t,r){if(t===void 0)return!1;let n=rtr(xu(e),r);return t.some((o)=>{let i=rtr(xu(o),r);return n===i||n.startsWith(i.endsWith("/")?i:i+"/")})}function tmt(){return!0}function Bv(){return H1.join(En(),"projects")}function uU(e){return nPu()??YY(e)}function uNr(e){let t=YY(e);return t===uU(e)?void 0:t}function DM(e){return H1.join(Bv(),uU(e))}function rmt(e,t){let r=H1.basename(e);return H1.d
+
+==== function YY( 337239353 ====
+/[\u0000-\u0008\u000b-\u001f\u007f]/g,"").slice(0,rpe),yx=e=>typeof e=="string"&&/^[A-Za-z0-9_-]{1,40}$/.test(e)?e:null;function YY(e){if(e===null||typeof e!="object")return null;let t=e,n=yx(t.id);if(n===null)return null;let r=(o,a)=>typeof o=="number"&&Number.isFinite(o)?o:a;return{id:n,x:xm(r(t.x,0),-Mf,Mf),y:xm(r(t.y,0),-Mf,Mf),w:xm(r(t.w,xx),H2,B2),text:V2(t.text),...yx(t.page)!==null?{page:yx(t.page)}:{}}}function XY(e){if(!Array.isArray(e))return[];let t=[],n=new Set;for(let r of e){if(t.length>=40)break;if(r===null||typeof r!="object")continue;let o=r,a=yx(o.id);a===null||n.has(a)||(n.add(a),t.push({id:a,name:Ex(o.name)??"Page "+String(t.length+1)}))}return t}var $Y=(e,t,n)=>{if(e===null||typeof e!="object")return;let r=e.view;if(r==="canvas"){let o=e.page;return typeof o=="string"&&n!==void 0&&n.length>1&&n.some(i=>i.id===o)?{view:"canvas",page:o}:{view:"canvas"}}if(r==="focused"){let o=e.file;if(typeof o=="string"&&t.some(a=>a.file===o))return{view:"focused",file:o}}};function F2(e){let t=(i,s)=
+
+#### "replace(/[^a-zA-Z0-9]/g" 3 [301153978, 301819788, 309233483]
+
+==== replace(/[^a-zA-Z0-9]/g 301153978 ====
+zo(e){return Bun.hash(e).toString()}function jOu(e,t){return Bun.hash(t,Bun.hash(e)).toString()}function WOu(e){let t=e.replace(/[^a-zA-Z0-9]/g,"-");if(t.length<=zOu)return t;return`${t.slice(0,zOu)}-${Math.abs(Nft(e)).toString(36)}`}function IHn(){try{return Cr().cwd()}catch{return $n()}}function g9s(){return Qzo.join(t0_.cache,WOu(IHn()))}var Qzo,t0_,zOu=200,vPt;var e4o=A(()=>{BOu();tt();hs();Qzo=require("path"),t0_=h9s("claude-cli");vPt={baseLogs:()=>g9s(),errors:()=>Qzo.join(g9s(),"errors"),mcpLogs:(e)=>Qzo.join(g9s(),`mcp-logs-${WOu(e)}`)}});function HHn(e){return e.replace(qOu,"").trim()||e}function ELr(e){return e.replace(qOu,"").trim()}function KOu(e){let t=e,r=t.indexOf(GOu);while(r>=0){let n=t.indexOf(VOu,r);if(n<0)break;t=t.slice(0,r)+t.slice(n+VOu.length),r=t.indexOf(GOu)}return t}function YOu(e){return e.replace(r0_,"").trim()}var qOu,GOu="<system-reminder>",VOu="</system-reminder>",r0_;var cer=A(()=>{qOu=/<([a-z][\w-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>\n?/g;r0_=/<(ide_opened_file|ide_selection)(?:
+
+==== replace(/[^a-zA-Z0-9]/g 301819788 ====
+ize:t.totalBytes,head:t.head,tail:t.tail}}function JY_(e){return Math.abs(Nft(e)).toString(36)}function iNr(e){return e.replace(/[^a-zA-Z0-9]/g,"-")}function YY(e){let t=iNr(e);if(t.length<=Mae)return t;return`${t.slice(0,Mae)}-${JY_(e)}`}function rtr(e,t){let r=e.replaceAll("\\","/");return t?r.toLowerCase():r}function QZs(e,t,r){let n=xu(e),o=xu(t),i=(s)=>r?s.toLowerCase():s;if(i(iNr(n))!==i(iNr(o)))return!1;return rtr(n,r)!==rtr(o,r)}async function lNr(e,t,r,n){if(!QZs(e,t,r))return!1;if(fxn(e)||fxn(t))return!1;if(await n(e)||await n(t))return!1;let o;try{o=xu(await S4.realpath(e))}catch{return!1}let i=await BI(t);return QZs(o,i,r)}function cNr(e,t,r){if(t===void 0)return!1;let n=rtr(xu(e),r);return t.some((o)=>{let i=rtr(xu(o),r);return n===i||n.startsWith(i.endsWith("/")?i:i+"/")})}function tmt(){return!0}function Bv(){return H1.join(En(),"projects")}function uU(e){return nPu()??YY(e)}function uNr(e){let t=YY(e);return t===uU(e)?void 0:t}function DM(e){return H1.join(Bv(),uU(e))}function rmt(e,t){let
+
+==== replace(/[^a-zA-Z0-9]/g 309233483 ====
+veryState)}async refreshAuthorization(e){let t=hy(this.serverName,this.serverConfig),r=p7();await Cr().mkdir(r);let n=t.replace(/[^a-zA-Z0-9]/g,"_"),o=yHf.join(r,`mcp-refresh-${n}.lock`),i;for(let s=0;s<atl;s++)try{Ht(this.serverName,`Acquiring refresh lock (attempt ${s+1})`),i=await Zb(o,{realpath:!1,stale:60000,update:5000,onCompromised:()=>{Ht(this.serverName,"Refresh lock was compromised")}}),Ht(this.serverName,"Acquired refresh lock");break}catch(a){let l=dt(a);if(l==="ELOCKED"){Ht(this.serverName,`Refresh lock held by another process, waiting (attempt ${s+1}/${atl})`),await Pr(1000+Math.random()*1000);continue}Ht(this.serverName,`Failed to acquire refresh lock: ${l}; skipping refresh`);return}if(!i){Ht(this.serverName,`Could not acquire refresh lock after ${atl} retries; skipping refresh`);return}try{hne();let l=(await nl().readAsync())?.mcpOAuth?.[t];if(l){let c=l.expiresAt!=null?(l.expiresAt-Date.now())/1000:void 0;if(l.accessToken&&(c==null||c>300))return Ht(this.serverName,c!=null?`Another proce
+
+#### "We don't expand" 0 []
+
+#### "anchorless" 0 []
+
+#### "dirsToExpand" 0 []
+
+#### "normalized.search" 0 []
+
+#### "includes(\"**/\")" 0 []
+
+#### "startsWith(\"**/\")" 1 [317192918]
+
+==== startsWith("**/") 317192918 ====
+m.startsWith(p))return!0;let h=m.search(/[*?[]/);if(h>0){let y=m.slice(0,h);if(p.startsWith(y))return!0}let g=m;while(g.startsWith("**/"))g=g.slice(3);if(g!==m){let y=Cs(g,"/"),_=y.search(/[*?[]/),S=(_===-1?y:y.slice(0,_)).replace(/\\/g,"").toLowerCase();if(S.length>0){let w=p.slice(0,-1).split("/").map((T)=>T.toLowerCase());if(_===-1?w.includes(S):w.some((T)=>T.startsWith(S)))return!0}}return!1}))return!0;if(s.ignores(p.slice(0,-1))||s.ignores(p))return!0;return!1});if(c.length>0){let p=await wo(Io(),[...Qs,"ls-files","--others","--ignored","--exclude-standard","--",...c],{cwd:e,env:Om()});if(p.code===0&&p.stdout.trim()){for(let f of p.stdout.trim().split(`
+`).filter(Boolean))if(s.ignores(f))l.push(f)}}let u=[],d;try{d=await Mc.realpath(t)}catch(p){return E(`Skipping .worktreeinclude copy: realpath(${t}) failed: ${le(p)}`,{level:"warn"}),u}for(let p of l){let f=Oc.join(e,p),m=Oc.join(t,p);try{if((await Mc.lstat(f)).isSymbolicLink()){E(`Skipping symlink in .worktreeinclude: ${p}`,{level:"warn"});continue}
+
+#### "function copyWorktreeInclude" 0 []
+
+#### ".worktreeinclude" 3 [165851960, 165852393, 165852532]
+
+==== .worktreeinclude 165851960 ====
+�.......
+.......�������.(.......................�������.�������..r}�����	.......��~�����I.......................	........worktreeinclude........	.......utf-8.........��......���������.�������..............��........	.......ls-files........	.......--others........	...	...--ignored...............	.......--exclude-standard..............	.......--directory...........��........	.......
+...............	.......worktreeinclude.........	.......--............��........	...+...Iterator result interface is not an object............��........	...)...Skipping .worktreeinclude copy: realpath(...............	...
+...) failed: ..............	.......warn..........��........	...&...Skipping symlink in .worktreeinclude: ........��........	...U...Skipping .worktreeinclude entry: destination escapes worktree via committed symlink: .................��......��........	.......Failed to copy .........	....... to worktree: ..........	.......Copied .........	....... files from .worktreeinclude: ..........	......., ..................
+
+==== .worktreeinclude 165852393 ====
+.......--............��........	...+...Iterator result interface is not an object............��........	...)...Skipping .worktreeinclude copy: realpath(...............	...
+...) failed: ..............	.......warn..........��........	...&...Skipping symlink in .worktreeinclude: ........��........	...U...Skipping .worktreeinclude entry: destination escapes worktree via committed symlink: .................��......��........	.......Failed to copy .........	....... to worktree: ..........	.......Copied .........	....... files from .worktreeinclude: ..........	......., ..................................................�...................0..�P.��.����4��.��@p4��ᛟ�SB..�@�.�F..��aL�.�<�.ET���<��zT�@P9U.��@.D�G.L��0���0���.����<����O.��@.ܟ�p���.�d.����.l�..��@.��E..�.�3�@�$�G..�.r4�BS4�@0��G..�.r4�BS4��#<�EeL��V<���4�I�����<��.��.4�D#<���4��@��@ ����.���S�_�;�@�:�@PG�G..�.rT�@�=�G..�%rT�@�>�G....��.rT..��@.<�G..�.�+���=��0���.����<����C.��@.����.�@�d��p���.�`�����.lz..��@.��E..�@�T�G..�.r4�BS4�@ m�G..�
+
+==== .worktreeinclude 165852532 ====
+py: realpath(...............	...
+...) failed: ..............	.......warn..........��........	...&...Skipping symlink in .worktreeinclude: ........��........	...U...Skipping .worktreeinclude entry: destination escapes worktree via committed symlink: .................��......��........	.......Failed to copy .........	....... to worktree: ..........	.......Copied .........	....... files from .worktreeinclude: ..........	......., ..................................................�...................0..�P.��.����4��.��@p4��ᛟ�SB..�@�.�F..��aL�.�<�.ET���<��zT�@P9U.��@.D�G.L��0���0���.����<����O.��@.ܟ�p���.�d.����.l�..��@.��E..�.�3�@�$�G..�.r4�BS4�@0��G..�.r4�BS4��#<�EeL��V<���4�I�����<��.��.4�D#<���4��@��@ ����.���S�_�;�@�:�@PG�G..�.rT�@�=�G..�%rT�@�>�G....��.rT..��@.<�G..�.�+���=��0���.����<����C.��@.����.�@�d��p���.�`�����.lz..��@.��E..�@�T�G..�.r4�BS4�@ m�G..�.r4�BS4��#<�EeL��V<���4�I��`.��p��9��.L��.�..��@ ��H.L�@�4�C�.�@PT�E..�@p4���.����`.��p�.�%..�GT����..��.��@�4���W..��@�����@ ����.R.��
+
+#### "spawn(command" 0 []
+
+#### "homedir()" 3 [70478635, 85949532, 85953212]
+
+==== homedir() 70478635 ====
+}
+  [kResolveHistoryPath]() {
+    if (!this[kHistoryPath])
+      try {
+        return this[kHistoryPath] = path.join(os.homedir(), ".node_repl_history"), this[kHistoryPath];
+      } catch (err) {
+        return debug(err.stack), null;
+      }
+    return this[kHistoryPath];
+  }
+  [kHasWritePermission]() {
+    return !(permission.isEnabled() && permission.has("fs.write", this[kHistoryPath]) === !1);
+  }
+  [kValidateOptions](options) {
+    if (typeof options.history < "u")
+      validateArray(options.history, "history");
+    if (typeof options.size < "u")
+      validateNumber(options.size, "size", 0);
+  }
+  async[kInitializeHistory](onReadyCallback) {
+    try {
+      await (await fs.promises.open(this[kHistoryPath], "a+", 384)).close();
+      let data;
+      try {
+        data = await fs.promises.readFile(this[kHistoryPath], "utf8");
+      } catch (err) {
+        return this[kHandleHistoryInitError](err, onReadyCallback);
+      }
+      if (data)
+        this[kHistory] = RegExpPrototypeSymbolSplit(/\r?\n+/, d
+
+==== homedir() 85949532 ====
+ you@example.com`;console.log([J,"",Q,"",q,"",N].join(`
+`))}async function Xq(){let J=process.env.BUN_INSTALL??j.join(C.homedir(),".bun"),Q=j.join(J,"feedback");try{let N=(await I.readFile(Q,"utf8")).trim();return N.length>0?N:void 0}catch(q){if(q.code!=="ENOENT")console.warn(`Unable to read ${Q}:`,q.message);return}}async function Zq(J){let Q=process.env.BUN_INSTALL;if(!Q)return;let q=j.join(Q,"feedback");try{await I.mkdir(j.dirname(q),{recursive:!0}),await I.writeFile(q,`${J.trim()}
+`,"utf8")}catch(N){console.warn(`Unable to persist email to ${q}:`,N.message)}}function $q(){let J=s("git",["config","user.email"],{encoding:"utf8",stdio:["ignore","pipe","ignore"]});if(J.status!==0)return;let Q=J.stdout.trim();return Q.length>0?Q:void 0}async function Hq(J,Q){if(!J)return Q&&S(Q)?Q:void 0;let q=Q;for(;;){let N=await Oq(J,q);if(typeof N==="string"&&S(N))return N.trim();J.output.write(`${P.cross} Please provide a valid email address containing "@" and ".".
+`),q=void 0}}async function Oq(J,Q){let{input:q,outpu
+
+==== homedir() 85953212 ====
+udes("/")||J.includes(j.sep)||j.extname(J).length>1))return;let q=new Set;if(q.add(J),J.startsWith("~/"))q.add(j.join(C.homedir(),J.slice(2)));q.add(j.join(process.cwd(),J));for(let N of q)try{if((await I.stat(N)).isFile())return N}catch(Y){let _=Y.code;if(_&&(_==="ENOENT"||_==="ENOTDIR"))continue;console.warn(`Unable to inspect ${N}:`,Y.message)}return}async function Gq(J){let Q=[],q=[],N=[],Y=()=>{if(N.length>0)Q.push(N.join(" ")),N=[]};for(let _ of J){let W=await jq(_);if(W)try{let U=await Bun.file(W).bytes();if(U.length>10485760)U=U.slice(0,10485760);Y(),q.push({filename:j.normalize(j.relative(process.cwd(),W)),content:U});continue}catch{}N.push(_)}return Y(),{messageParts:Q,files:q}}function v(J,Q){if(J.family==="IPv4")switch(Q){case"none":return"ipv4";case"ipv4":return"ipv4_and_ipv6";case"ipv6":return"ipv4_and_ipv6";case"ipv4_and_ipv6":return"ipv4_and_ipv6"}else if(J.family==="IPv6")switch(Q){case"none":return"ipv6";case"ipv4":return"ipv4_and_ipv6";case"ipv6":return"ipv4_and_ipv6";case"ipv4_and_ipv6
+
+#### "pl()" 3 [70283389, 70945066, 70945145]
+
+==== pl() 70283389 ====
+are not implemented in Bun. It will return 0 every time.");
+function executionAsyncId() {
+  return executionAsyncIdNotImpl(), 0;
+}
+function triggerAsyncId() {
+  return 0;
+}
+var executionAsyncResourceWarning = createWarning("async_hooks.executionAsyncResource is not implemented in Bun. It returns a reference to process.stdin every time.");
+function executionAsyncResource() {
+  return executionAsyncResourceWarning(), process.stdin;
+}
+var asyncWrapProviders = {
+  NONE: 0,
+  DIRHANDLE: 1,
+  DNSCHANNEL: 2,
+  ELDHISTOGRAM: 3,
+  FILEHANDLE: 4,
+  FILEHANDLECLOSEREQ: 5,
+  FIXEDSIZEBLOBCOPY: 6,
+  FSEVENTWRAP: 7,
+  FSREQCALLBACK: 8,
+  FSREQPROMISE: 9,
+  GETADDRINFOREQWRAP: 10,
+  GETNAMEINFOREQWRAP: 11,
+  HEAPSNAPSHOT: 12,
+  HTTP2SESSION: 13,
+  HTTP2STREAM: 14,
+  HTTP2PING: 15,
+  HTTP2SETTINGS: 16,
+  HTTPINCOMINGMESSAGE: 17,
+  HTTPCLIENTREQUEST: 18,
+  JSSTREAM: 19,
+  JSUDPWRAP: 20,
+  MESSAGEPORT: 21,
+  PIPECONNECTWRAP: 22,
+  PIPESERVERWRAP: 23,
+  PIPEWRAP: 24,
+  PROCESSWRAP: 25,
+  PROMISE: 26,
+  QUERYWRAP: 27,
+  SHUT
+
+==== pl() 70945066 ====
+if (!fileWriteRequested)
+    return;
+  let prevSuppress = suppressFsEvents;
+  suppressFsEvents = !0;
+  try {
+    flushImpl();
+  } finally {
+    suppressFsEvents = prevSuppress;
+  }
+}
+function flushImpl() {
+  let fileName = filePattern ?? "node_trace.${rotation}.log";
+  if (fileName = fileName.replaceAll("${pid}", @String(process.pid)).replaceAll("${rotation}", "1"), !Bun.isMainThread) {
+    try {
+      (@getInternalField(@internalModuleRegistry, 154) || @createInternalModuleById(154)).writeFileSync(`${fileName}.${process.pid}.${tid}.part`, JSON.stringify(events));
+    } catch {}
+    return;
+  }
+  if (isCategoryGroupEnabled(kEnvironmentCat)) {
+    let names = [
+      "Environment",
+      "RunAndClearNativeImmediates",
+      "CheckImmediate",
+      "RunTimers",
+      "BeforeExit",
+      "RunCleanup",
+      "AtExit"
+    ];
+    for (let name of names)
+      emitEvent("b", kEnvironmentCat, name), emitEvent("e", kEnvironmentCat, name);
+  }
+  if (isCategoryGroupEnabled(kBootstrapCat)) {
+    let names = ["nodeSta
+
+==== pl() 70945145 ====
+uppressFsEvents = !0;
+  try {
+    flushImpl();
+  } finally {
+    suppressFsEvents = prevSuppress;
+  }
+}
+function flushImpl() {
+  let fileName = filePattern ?? "node_trace.${rotation}.log";
+  if (fileName = fileName.replaceAll("${pid}", @String(process.pid)).replaceAll("${rotation}", "1"), !Bun.isMainThread) {
+    try {
+      (@getInternalField(@internalModuleRegistry, 154) || @createInternalModuleById(154)).writeFileSync(`${fileName}.${process.pid}.${tid}.part`, JSON.stringify(events));
+    } catch {}
+    return;
+  }
+  if (isCategoryGroupEnabled(kEnvironmentCat)) {
+    let names = [
+      "Environment",
+      "RunAndClearNativeImmediates",
+      "CheckImmediate",
+      "RunTimers",
+      "BeforeExit",
+      "RunCleanup",
+      "AtExit"
+    ];
+    for (let name of names)
+      emitEvent("b", kEnvironmentCat, name), emitEvent("e", kEnvironmentCat, name);
+  }
+  if (isCategoryGroupEnabled(kBootstrapCat)) {
+    let names = ["nodeStart", "v8Start", "environment", "loopStart", "loopExit", "bootstrapComplete"];
+ 

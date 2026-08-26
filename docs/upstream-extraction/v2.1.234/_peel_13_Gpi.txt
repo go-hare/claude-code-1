@@ -1,0 +1,29 @@
+=== Gpi ===
+function Gpi(e){let t=new Map;for(let{scope:n,servers:o,displayServers:i}of e)for(let[s,a]of Object.entries(o)){let l=WJe(a,{includeEnv:!1});if(!l)continue;let c=t.get(s);if(!c)t.set(s,c=[]);let u=i[s];c.push({scope:n,sig:l,endpoint:u?xLv(u):a.type??"unknown"})}let r=[];for(let[n,o]of t){if(o.length<2)continue;if(new Set(o.map((s)=>s.sig)).size<2)continue;let i=o.map((s)=>K0("mcp remove",n,`-s ${s.scope}`)).filter((s)=>s!==null);r.push({path:`mcpServers.${n}`,message:`Server "${n}" is defined in multiple scopes with different endpoints: ${o.map((s)=>`${s.scope} (${s.endpoint})`).join(", ")}. OAuth tokens are stored per endpoint, so authenticating in one context will not carry over.`,severity:"warning",suggestion:i.length>0?`Keep the correct endpoint and remove the others: ${i.map((s)=>`\`${s}\``).join(" or ")}`:"Keep the correct endpoint and remove the others from the scopes listed above.",mcpErrorMetadata:{scope:o[0].scope,serverName:n,severity:"warning"}})}return r}
+
+=== WJe ===
+function WJe(e,t){if("configError"in e&&e.configError)return null;let r=jpi(e);if(r){if(t?.includeEnv===!1)return`stdio:${Ie(r)}`;let i=Object.entries(e.env??{}).filter(([a])=>!kLv.has(a)).sort(([a],[l])=>a<l?-1:a>l?1:0),s=i.length>0?`:${Ie(Object.fromEntries(i))}`:"";return`stdio:${Ie(r)}${s}`}let n=zpi(e);if(n)return`url:${Wpi(n)}`;return null}
+
+=== getMcpScopeConflicts ===
+MISS getMcpScopeConflicts
+
+=== getMcpServerSignature ===
+MISS getMcpServerSignature
+
+b'MCP Config Diagnostics': -1
+b'Scope Conflicts': -1
+b'scope conflict': -1
+b'Scope conflicts': -1
+b'defined in multiple': 136489269
+f<.....................................mcpServers......................Server "............:..." is defined in multiple scopes with different endpoints: ......................, ..................].... OAuth tokens are stored per endpoint, so authenticating in one context will not carry over....................warning.....................1...Keep the correct endpoint and remove the others: ....................... or ................M...Keep the correct endpoint and remove the others from the scop
+b'also defined in': -1
+b'winning scope': -1
+b'loses to': -1
+pat b'function \\w+\\(e\\)\\{[^}]{0,400}\\$\\{': function At(e){var t="Error";e.on.build&&(t="BuildError");var n=(e.data.text??"").split(`
+`),r="";if(e?.on?.resolve)r+=`**ResolveError**: "${
+pat b'replace\\(/\\\\$\\{': MISS
+pat b'configuredEnv': MISS
+pat b'unexpand': unexpand
+pat b'deExpand': deExpand
+pat b'rehydrateEnv': MISS
+pat b'originalEnv': MISS

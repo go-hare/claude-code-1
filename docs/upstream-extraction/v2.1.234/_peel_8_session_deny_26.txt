@@ -1,0 +1,3 @@
+OFFSET=309320813
+
+=H(De(),1)});function dyg(e,t,r,n){switch(e.type){case"accept-once":return{behavior:"allow",updatedInput:t.input,...n&&{feedback:n}};case"accept-session":{if(e.scope==="claude-folder"||e.scope==="global-claude-folder"){let o=e.scope==="global-claude-folder"?tUo:eUo;return{behavior:"allow",updatedInput:t.input,permissionUpdates:[{type:"addRules",rules:[{toolName:Rl,ruleContent:o}],behavior:"allow",destination:"session"}]}}return{behavior:"allow",updatedInput:t.input,permissionUpdates:r9r(t.filePath,t.operationType,r)}}case"reject":return{behavior:"deny",...n&&{feedback:n}}}}function pyg(e){if(e.kind==="plain")return hA.jsx(_,{children:e.text});return hA.jsxs(_,{children:["Do you want to ",e.v

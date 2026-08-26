@@ -1,0 +1,29 @@
+e,procStartCaches:()=>vWd,provenSameProcessAsync:()=>cBr,sigtermThenKill:()=>IZe,startTokensEqualOrCrossFormat:()=>BFn});function qS(e){if(e<=1)return!1;try{return process.kill(e,0),!0}catch{return!1}
+}function gWd(e){return Number.isInteger(e)&&e>1&&e<=SYb}function b7(e){if(!gWd(e))return!1;try{return process.kill(e,0),!1}catch(t){return dt(t)==="ESRCH"}}async function E_a(){let e=Wt();if(e!=="lin
+ux"&&e!=="wsl")return!0;let t=Cr(),r=await t.readlink("/proc/self").catch(()=>null);if(r===null||r!==String(process.pid))return!1;let n=await t.readdir("/proc").catch(()=>null);if(!n)return!1;return n
+.filter((i)=>/^\d+$/.test(i.name)).length>=wYb}function IZe(e,t){let r=e.filter((n)=>Math.abs(n)>1);for(let n of r){try{process.kill(n,"SIGTERM")}catch{continue}return setTimeout((o,i,s)=>{if(!UFn(i,s
+))return;try{process.kill(o,"SIGKILL")}catch{}},5000,n,Math.abs(r[0]),t).unref(),!0}return!1}function A_a(e){return}function T_a(e,t=12){return[]}async function k_a(e,t=10){return(await FFn(e,t)).ance
+stors}async function FFn(e,t=10){{let i=`
+      $currentPid = ${String(e)}
+      $ancestors = @()
+      for ($i = 0; $i -lt ${t}; $i++) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$currentPid" -ErrorAction SilentlyContinue
+        if (-not $proc -or -not $proc.ParentProcessId -or $proc.ParentProcessId -eq 0) { break }
+        $currentPid = $proc.ParentProcessId
+        $ancestors += $currentPid
+      }
+      $ancestors -join ','
+    `.trim(),s=await wo("powershell.exe",["-NoProfile","-Command",i],{timeout:3000});return{ancestors:s.code!==0||!s.stdout?.trim()?[]:s.stdout.trim().split(",").filter(Boolean).map((l)=>parseInt(l,10
+)).filter((l)=>!isNaN(l)),readFailed:!1,truncated:!1}}let r=`pid=${String(e)}; for i in $(seq 1 ${t}); do ppid=$(ps -o ppid= -p $pid 2>/dev/null | tr -d ' '); if [ -z "$ppid" ]; then echo FAIL; exit 0
+; fi; if [ "$ppid" = "0" ] || [ "$ppid" = "1" ]; then echo END; exit 0; fi; echo $ppid; pid=$ppid; done`,n=await wo("sh",["-c",r],{timeout:3000}),o=(n.stdout??"").trim().split(`
+`).filter(Boolean);return{ancestors:o.filter((i)=>i!=="END"&&i!=="FAIL").map((i)=>parseInt(i,10)).filter((i)=>!isNaN(i)),readFailed:n.code!==0||o.at(-1)==="FAIL",truncated:n.code===0&&o.at(-1)!=="END"
+&&o.at(-1)!=="FAIL"}}function C_a(e){try{let r=`powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \\"ProcessId=${String(e)}\\").CommandLine"`,n=ltr(r,{timeout:1000});return n?
+n.trim():null}catch{return null}}function Fht(e){try{if(Znr())return dti(e)?.toString();return ltr(`powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \\"ProcessId=${e}\\").Cre
+ationDate.Ticks"`,{timeout:1000})?.trim()||void 0}catch{return}}function UFn(e,t){if(t===void 0)return!0;return yWd(t,Fht(e))}function BFn(e,t){if(t===e)return!0;let r=Number(e),n=Number(t);return Num
+ber.isFinite(r)&&Number.isFinite(n)&&r>300000000000000000!==n>300000000000000000}function yWd(e,t){return t===void 0||t===e||EYb(e,t)}function EYb(e,t){if(!Znr())return!1;let r=Number(e),n=Number(t);r
+eturn Number.isFinite(r)&&Number.isFinite(n)&&r>300000000000000000!==n>300000000000000000}async function TU(e,t){if(t===void 0)return!0;return yWd(t,await sk(e))}async function cBr(e,t){let r=await sk
+(e,{skipCache:!0});return r===void 0?void 0:BFn(t,r)}class _Wd{#e=void 0;get token(){return this.#e}set(e){return this.#e=e,e}reset(){this.#e=void 0}}class bWd{#e=new Map;get(e){return this.#e.get(e)}
+set(e,t){this.#e.set(e,t)}}function WWe(){return $Fn.token??$Fn.set(Fht(process.pid))}async function eme(){return $Fn.token??$Fn.set(await sk(process.pid))}function Cve(e){if(Znr())return e.procStart!
+==void 0?void 0:e.procStartFt;return e.procStart}function GWe(e){return Znr()?{procStart:void 0,procStartFt:e}:{procStart:e,procStartFt:void 0}}async function sk(e,t){let r=Date.now(),n=vWd.of(ar().ho
+st);if(!t?.skipCache){let a=n.get(e),l=a?.miss?TYb:AYb;if(a&&r-a.at<l)return a.p}let o=kYb(e),i={at:r,p:o};n.set(e,i);let s=await o;if(s===void 0&&n.get(e)===i)i.miss=!0;return s}async function jFn(e)
+{let t=await sk(e,{skipCache:!0});if(t!==void 0)return t;return await Pr(hWd+Math.floor(Math.random()*hWd)),sk(e,{skipCache:!0})}async function kYb(e){try{{if(Znr())r

@@ -105,12 +105,18 @@ export async function listCloudPeerSessions(): Promise<CloudPeerListResult> {
       inFlight = undefined
     })
   }
+  let timer: ReturnType<typeof setTimeout> | undefined
   const raced = await Promise.race([
     pending,
     new Promise<undefined>(resolve => {
-      setTimeout(() => resolve(undefined), CLOUD_PEER_LIST_SOFT_TIMEOUT_MS)
+      timer = setTimeout(
+        () => resolve(undefined),
+        CLOUD_PEER_LIST_SOFT_TIMEOUT_MS,
+      )
+      timer.unref?.()
     }),
   ])
+  if (timer) clearTimeout(timer)
   if (raced === undefined) {
     logForDebugging(
       `[agents:cloud] session list not ready within ${CLOUD_PEER_LIST_SOFT_TIMEOUT_MS}ms — not searched this call, disclosing`,

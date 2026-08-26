@@ -23,6 +23,12 @@ describe('densable 2.1.218 #12 interrupt suppress', () => {
         createAbortErrorReason('refusal-fallback-edit'),
       ),
     ).toBe(true)
+    expect(shouldSuppressInterruptionMessage('remote-cancel')).toBe(true)
+    expect(
+      shouldSuppressInterruptionMessage(
+        createAbortErrorReason('remote-cancel'),
+      ),
+    ).toBe(true)
   })
 
   test('m0e: user-cancel / undefined / empty do not suppress', () => {
@@ -40,6 +46,10 @@ describe('densable 2.1.218 #12 interrupt suppress', () => {
   test('Ede: shutdown abort reason', () => {
     expect(isShutdownAbortReason('shutdown')).toBe(true)
     expect(isShutdownAbortReason(createAbortErrorReason('shutdown'))).toBe(true)
+    expect(isShutdownAbortReason('remote-cancel')).toBe(true)
+    expect(isShutdownAbortReason(createAbortErrorReason('remote-cancel'))).toBe(
+      true,
+    )
     expect(isShutdownAbortReason('user-cancel')).toBe(false)
   })
 

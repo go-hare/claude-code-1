@@ -11,6 +11,7 @@ import {
   persistPermissionUpdates,
 } from './PermissionUpdate.js'
 import { permissionUpdateSchema } from './PermissionUpdateSchema.js'
+import { stripWholeToolGrantsForAsk } from './permissions.js'
 
 export const inputSchema = lazySchema(() =>
   z.object({
@@ -86,6 +87,7 @@ export function permissionPromptToolResultToPermissionDecision(
   tool: Tool,
   input: { [key: string]: unknown },
   toolUseContext: ToolUseContext,
+  opts?: { askSuppressesAlwaysAllowRule?: boolean },
 ): PermissionDecision {
   const decisionReason: PermissionDecisionReason = {
     type: 'permissionPromptTool',
@@ -95,14 +97,30 @@ export function permissionPromptToolResultToPermissionDecision(
   if (result.behavior === 'allow') {
     const updatedPermissions = result.updatedPermissions
     if (updatedPermissions) {
+      // densable 2.1.235 #12 — strip bare whole-tool allows when tool/ask
+      // suppresses persistent DAA (same accept-path OR as jze).
+      const finalInput =
+        Object.keys(result.updatedInput).length > 0
+          ? result.updatedInput
+          : input
+      const shouldStrip =
+        tool.suppressesAlwaysAllowRule?.(finalInput) === true ||
+        opts?.askSuppressesAlwaysAllowRule === true
+      const updatesToPersist = shouldStrip
+        ? stripWholeToolGrantsForAsk(
+            updatedPermissions,
+            tool,
+            toolUseContext.getAppState().toolPermissionContext,
+          )
+        : updatedPermissions
       toolUseContext.setAppState(prev => ({
         ...prev,
         toolPermissionContext: applyPermissionUpdates(
           prev.toolPermissionContext,
-          updatedPermissions,
+          updatesToPersist,
         ),
       }))
-      persistPermissionUpdates(updatedPermissions)
+      persistPermissionUpdates(updatesToPersist)
     }
     // Mobile clients responding from a push notification don't have the
     // original tool input, so they send `{}` to satisfy the schema. Treat an

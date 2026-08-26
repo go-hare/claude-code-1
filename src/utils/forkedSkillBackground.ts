@@ -33,6 +33,7 @@ import type { CommandBase, PromptCommand } from '../types/command.js'
 import type { AgentId } from '../types/ids.js'
 import { asAgentId } from '../types/ids.js'
 import type { Message } from '../types/message.js'
+import type { FileStateCache } from './fileStateCache.js'
 import {
   getAgentContext,
   runWithAgentContext,
@@ -115,6 +116,12 @@ export type LaunchBackgroundForkedSkillParams = {
   canUseTool: CanUseToolFn
   getAppState: () => AppState
   setAppState: (f: (prev: AppState) => AppState) => void
+  availableTools?: ToolUseContext['options']['tools']
+  webFetchReadmissionAllowed?: boolean
+  /** Official Lto `forkReadFileState` (`g`) → R2i `readFileState`. */
+  readFileState?: FileStateCache
+  /** Official R2i `recordInvocationOnSuccess` → zqe `onTerminalSuccess`. */
+  recordInvocationOnSuccess?: () => void
 }
 
 export type LaunchBackgroundForkedSkillResult = {
@@ -137,6 +144,10 @@ export async function launchBackgroundForkedSkill({
   canUseTool,
   getAppState,
   setAppState,
+  availableTools,
+  webFetchReadmissionAllowed,
+  readFileState,
+  recordInvocationOnSuccess,
 }: LaunchBackgroundForkedSkillParams): Promise<LaunchBackgroundForkedSkillResult | null> {
   const startTime = Date.now()
   const shortDescription = truncateDescription(description)
@@ -239,15 +250,18 @@ export async function launchBackgroundForkedSkill({
           toolUseContext: {
             ...context,
             getAppState,
+            permissionLayers: context.permissionLayers,
           },
           canUseTool,
           isAsync: true,
           querySource: 'agent:custom',
           model: command.model as ModelAlias | undefined,
-          availableTools: context.options.tools,
+          availableTools: availableTools ?? context.options.tools,
+          webFetchReadmissionAllowed,
           override: {
             agentId: asAgentId(agentBackgroundTask.agentId),
             abortController: agentBackgroundTask.abortController!,
+            ...(readFileState !== undefined && { readFileState }),
           },
           onCacheSafeParams,
           description: shortDescription,
@@ -260,6 +274,7 @@ export async function launchBackgroundForkedSkill({
       agentIdForCleanup: agentId,
       enableSummarization: getSdkAgentProgressSummariesEnabled(),
       getWorktreeResult: async () => ({}),
+      onTerminalSuccess: recordInvocationOnSuccess,
     }),
   )
 

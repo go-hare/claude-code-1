@@ -14,6 +14,7 @@ import {
   type AutoCompactTrackingState,
 } from './services/compact/autoCompact.js'
 import { buildPostCompactMessages } from './services/compact/compact.js'
+import { applyStreamMediaReplay } from './services/compact/streamMediaReplay.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const reactiveCompact = feature('REACTIVE_COMPACT')
   ? (require('./services/compact/reactiveCompact.js') as typeof import('./services/compact/reactiveCompact.js'))
@@ -36,6 +37,7 @@ import type {
   Message,
   RequestStartEvent,
   StreamEvent,
+  SystemAPIErrorMessage,
   ToolUseSummaryMessage,
   UserMessage,
   TombstoneMessage,
@@ -47,6 +49,7 @@ import {
 } from './services/api/errors.js'
 import { logAntError, logForDebugging } from './utils/debug.js'
 import {
+  isRemoteCancelAbortReason,
   isShutdownAbortReason,
   shouldSuppressInterruptionMessage,
 } from './utils/abortController.js'
@@ -1292,6 +1295,11 @@ async function* queryLoop(
         attemptWithFallback = false
         try {
           let streamingFallbackOccured = false
+          // densable Ji — media-size (EFi) withheld AND buffered; flushed on
+          // next !Gm only. Stream end does not drain leftover Ji.
+          const withheldMediaBuffer: Array<
+            StreamEvent | AssistantMessage | SystemAPIErrorMessage
+          > = []
           queryCheckpoint('query_api_streaming_start')
           // densable: messages = kRd(wr!==void 0 ? [...pe,wr] : pe, n)
           const callMessages =
@@ -1841,10 +1849,12 @@ async function* queryLoop(
                 } as typeof message
               }
             }
-            // Withhold recoverable errors (prompt-too-long, max-output-tokens)
-            // until we know whether recovery (collapse drain / reactive
-            // compact / truncation retry) can succeed. Still pushed to
-            // assistantMessages so the recovery checks below find them.
+            // Withhold recoverable errors (prompt-too-long, media-size,
+            // max-output-tokens) until we know whether recovery (collapse
+            // drain / reactive compact / truncation retry) can succeed.
+            // Still pushed to assistantMessages so recovery finds them.
+            // Media (EFi) is also buffered in Ji and replayed on the next
+            // non-withheld message; leftover Ji is not flushed at stream end.
             // Either subsystem's withhold is sufficient — they're
             // independent so turning one off doesn't break the other's
             // recovery path.
@@ -1852,7 +1862,8 @@ async function* queryLoop(
             // feature() only works in if/ternary conditions (bun:bundle
             // tree-shaking constraint), so the collapse check is nested
             // rather than composed.
-            let withheld = false
+            // densable Gm/Ji: ztm/EFi/Jsm withhold; only EFi pushes Co.
+            let withholdPtl = false
             if (feature('CONTEXT_COLLAPSE')) {
               if (
                 contextCollapse?.isWithheldPromptTooLong(
@@ -1861,21 +1872,22 @@ async function* queryLoop(
                   querySource,
                 )
               ) {
-                withheld = true
+                withholdPtl = true
               }
             }
             if (reactiveCompact?.isWithheldPromptTooLong(message as Message)) {
-              withheld = true
+              withholdPtl = true
             }
-            if (
-              mediaRecoveryEnabled &&
-              reactiveCompact?.isWithheldMediaSizeError(message as Message)
-            ) {
-              withheld = true
-            }
-            if (isWithheldMaxOutputTokens(message)) {
-              withheld = true
-            }
+            const { withheld, replay: withheldMediaReplay } =
+              applyStreamMediaReplay(withheldMediaBuffer, message, {
+                ptl: withholdPtl,
+                media:
+                  mediaRecoveryEnabled &&
+                  reactiveCompact?.isWithheldMediaSizeError(
+                    message as Message,
+                  ) === true,
+                maxOutputTokens: isWithheldMaxOutputTokens(message),
+              })
             // densable: (Gt||Yt) soft/exact land BEFORE yield so consumers
             // see joined text + supersedesUuids on first delivery.
             // Yt → exact Yt.text+Ki.text + supersedes lane server_stitch
@@ -1961,6 +1973,10 @@ async function* queryLoop(
               }
             }
             if (!withheld) {
+              // densable: if(Ji.length>0) yield*Ji, Ji.length=0; yield Kl
+              for (const replayed of withheldMediaReplay) {
+                yield replayed
+              }
               yield yieldMessage
             }
             if (message.type === 'assistant') {
@@ -2429,7 +2445,9 @@ async function* queryLoop(
             yield update.message
           }
         }
-      } else {
+      } else if (
+        !isRemoteCancelAbortReason(toolUseContext.abortController.signal.reason)
+      ) {
         yield* yieldMissingToolResultBlocks(
           assistantMessages,
           'Interrupted by user',
@@ -2885,6 +2903,7 @@ async function* queryLoop(
     }
 
     let shouldPreventContinuation = false
+    let toolWasDeferred = false
     let updatedToolUseContext = toolUseContext
 
     queryCheckpoint('query_tool_execution_start')
@@ -2911,11 +2930,12 @@ async function* queryLoop(
       if (update.message) {
         yield update.message
 
-        if (
-          update.message.type === 'attachment' &&
-          update.message.attachment!.type === 'hook_stopped_continuation'
-        ) {
-          shouldPreventContinuation = true
+        if (update.message.type === 'attachment') {
+          if (update.message.attachment!.type === 'hook_stopped_continuation') {
+            shouldPreventContinuation = true
+          } else if (update.message.attachment!.type === 'hook_deferred_tool') {
+            toolWasDeferred = true
+          }
         }
 
         // densable 2.1.228 St (vs 227 only read_truncation_notice): push all
@@ -3060,7 +3080,11 @@ async function* queryLoop(
       return { reason: 'aborted_tools' }
     }
 
-    // If a hook indicated to prevent continuation, stop here
+    // densable: toolWasDeferred before shouldPreventContinuation so a turn
+    // with both attachments reports tool_deferred, not hook_stopped.
+    if (toolWasDeferred) {
+      return { reason: 'tool_deferred' }
+    }
     if (shouldPreventContinuation) {
       return { reason: 'hook_stopped' }
     }

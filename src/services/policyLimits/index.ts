@@ -507,6 +507,15 @@ const ESSENTIAL_TRAFFIC_DENY_ON_MISS = new Set(['allow_product_feedback'])
  * Exception: policies in ESSENTIAL_TRAFFIC_DENY_ON_MISS fail closed when
  * essential-traffic-only mode is active and the cache is unavailable.
  */
+/**
+ * densable eya — `restrictions[policy].allowed === true`.
+ * No cache / unknown key is not enforced (fail-closed), unlike isPolicyAllowed.
+ */
+export function isPolicyEnforced(policy: string): boolean {
+  const restrictions = getRestrictionsFromCache()
+  return restrictions?.[policy]?.allowed === true
+}
+
 export function isPolicyAllowed(policy: string): boolean {
   const restrictions = getRestrictionsFromCache()
   if (!restrictions) {

@@ -1,0 +1,25 @@
+@300895758
+R commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive
+
+1. Run the following bash commands in parallel, each using the ${_i} tool:
+  - Run a git status command to see all untracked files. IMPORTANT
+
+====
+
+@300897402
+uentially after the commit.
+4. If the commit fails due to pre-commit hook: fix the issue and create a NEW commit
+
+Important notes:
+- NEVER run additional commands to read or explore code, besides git bash commands
+- NEVER use the ${n} or ${di} tools
+- DO NOT push to the remote repository unless the user explicitly asks
+
+====
+
+@300898496
+ and releases. If given a Github URL use the gh command to get the information needed.
+
+IMPORTANT: When the user asks you to create a pull request, follow these steps carefully:
+
+1. Run the following bash commands in parallel using the ${_i} tool, in order to understand the current state of the branch since it diverged

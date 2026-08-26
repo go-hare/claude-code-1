@@ -1,0 +1,46 @@
+
+==== "fable5:" hits=1 ====
+@305039803:
+tion:`${r}${Pyp()}`}}function URa(){let e=!R_(),t=`Fable 5 \xB7 ${Hyp}${Pyp()}`;return{value:e?zv().fable5:"fable",label:"Fable",description:t,descriptionForModel:"Fable 5 - most capable for your hardest and longest-running tasks"}}function Eyp(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(Rci()&&e){let t=H0(e);return{value:"opus",label:V.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME??e,description:V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" (1M context)":""}`,descriptionForModel:`${V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" with 1M context":""}`} (${e})`}}}function m0v(){return{value:zv().opus41,label:"Opus 4.1",description:"Opus 4.1 \xB7 Legacy",descriptionForModel:"Opus 4.1 - legacy version"}}function h0v(){return{value:!R_()?zv().opus46:"claude-opus-4-6",label:"Opus 4.6",description:"Opus 4.6 \xB7 Legacy",descriptionForModel:"Opus 4.6 - previous Opus 
+
+
+==== "fable5:" hits=1 ====
+@305039803:
+tion:`${r}${Pyp()}`}}function URa(){let e=!R_(),t=`Fable 5 \xB7 ${Hyp}${Pyp()}`;return{value:e?zv().fable5:"fable",label:"Fable",description:t,descriptionForModel:"Fable 5 - most capable for your hardest and longest-running tasks"}}function Eyp(){let e=V.ANTHROPIC_DEFAULT_OPUS_MODEL;if(Rci()&&e){let t=H0(e);return{value:"opus",label:V.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME??e,description:V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" (1M context)":""}`,descriptionForModel:`${V.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION??`Custom Opus model${t?" with 1M context":""}`} (${e})`}}}function m0v(){return{value:zv().opus41,label:"Opus 4.1",description:"Opus 4.1 \xB7 Legacy",descriptionForModel:"Opus 4.1 - legacy version"}}function h0v(){return{value:!R_()?zv().opus46:"claude-opus-4-6",label:"Opus 4.6",description:"Opus 4.6 \xB7 Legacy",descriptionForModel:"Opus 4.6 - previous Opus 
+
+
+==== "us.anthropic.claude-fable-5" hits=2 ====
+@212356056:
+33.?................claude-fable-5..................fable...................Fable 5.................us.anthropic.claude-fable-5.....................anthropic.claude-fable-5................VERTEX_REGION_CLAUDE_FABLE_5....................tier_10_50......................rejects_disabled_thinking.......................fable_5_mitigations.....................................................................................................................................(...............8...............P...............................effort..................max_effort......................xhigh_effort....................adaptive_thinking.......................rejects_disabled_thinking.......................mid_conv_system.................context_management......................lean_prompt.....................fable_5_mitigations.....................refusal_fallback333333.?.p=....?..p=...?...(\..@
+
+@300836549:
+_name:"Fable 5",knowledge_cutoff:"January 2026",provider_ids:{first_party:"claude-fable-5",bedrock:"us.anthropic.claude-fable-5",vertex:"claude-fable-5",foundry:"claude-fable-5",anthropic_aws:"claude-fable-5",anthropic_google_cloud:"claude-fable-5",mantle:"anthropic.claude-fable-5",gateway:"claude-fable-5"},eager_input_streaming:{bedrock:!0,vertex:!0},vertex_region_env_var:"VERTEX_REGION_CLAUDE_FABLE_5",fallback_3p:"claude-opus-5",context:{window:1e6,native_1m:!0,supports_1m_beta:!0},max_output_tokens:{default:64000,upper:128000},pricing:"tier_10_50",capabilities:["effort","max_effort","xhigh_effort","adaptive_thinking","rejects_disabled_thinking","mid_conv_system","context_management","lean_prompt","fable_5_mitigations","refusal_fallback"],default_effort:"high",effort_cost_index:{low:0.6,medium:0.77,high:1,xhigh:1.74,max:1.91},image_limits:{maxWidth:2000,maxHeight:2000},advisor_rank:5},
+
+
+==== "anthropic.claude-fable-5" hits=4 ====
+@212356059:
+?................claude-fable-5..................fable...................Fable 5.................us.anthropic.claude-fable-5.....................anthropic.claude-fable-5................VERTEX_REGION_CLAUDE_FABLE_5....................tier_10_50......................rejects_disabled_thinking.......................fable_5_mitigations.....................................................................................................................................(...............8...............P...............................effort..................max_effort......................xhigh_effort....................adaptive_thinking.......................rejects_disabled_thinking.......................mid_conv_system.................context_management......................lean_prompt.....................fable_5_mitigations.....................refusal_fallback333333.?.p=....?..p=...?...(\..@...
+
+@212356104:
+....fable...................Fable 5.................us.anthropic.claude-fable-5.....................anthropic.claude-fable-5................VERTEX_REGION_CLAUDE_FABLE_5....................tier_10_50......................rejects_disabled_thinking.......................fable_5_mitigations.....................................................................................................................................(...............8...............P...............................effort..................max_effort......................xhigh_effort....................adaptive_thinking.......................rejects_disabled_thinking.......................mid_conv_system.................context_management......................lean_prompt.....................fable_5_mitigations.....................refusal_fallback333333.?.p=....?..p=...?...(\..@................claude-mythos-5.................
+
+@300836552:
+me:"Fable 5",knowledge_cutoff:"January 2026",provider_ids:{first_party:"claude-fable-5",bedrock:"us.anthropic.claude-fable-5",vertex:"claude-fable-5",foundry:"claude-fable-5",anthropic_aws:"claude-fable-5",anthropic_google_cloud:"claude-fable-5",mantle:"anthropic.claude-fable-5",gateway:"claude-fable-5"},eager_input_streaming:{bedrock:!0,vertex:!0},vertex_region_env_var:"VERTEX_REGION_CLAUDE_FABLE_5",fallback_3p:"claude-opus-5",context:{window:1e6,native_1m:!0,supports_1m_beta:!0},max_output_tokens:{default:64000,upper:128000},pricing:"tier_10_50",capabilities:["effort","max_effort","xhigh_effort","adaptive_thinking","rejects_disabled_thinking","mid_conv_system","context_management","lean_prompt","fable_5_mitigations","refusal_fallback"],default_effort:"high",effort_cost_index:{low:0.6,medium:0.77,high:1,xhigh:1.74,max:1.91},image_limits:{maxWidth:2000,maxHeight:2000},advisor_rank:5},{id
+
+@300836706:
+dry:"claude-fable-5",anthropic_aws:"claude-fable-5",anthropic_google_cloud:"claude-fable-5",mantle:"anthropic.claude-fable-5",gateway:"claude-fable-5"},eager_input_streaming:{bedrock:!0,vertex:!0},vertex_region_env_var:"VERTEX_REGION_CLAUDE_FABLE_5",fallback_3p:"claude-opus-5",context:{window:1e6,native_1m:!0,supports_1m_beta:!0},max_output_tokens:{default:64000,upper:128000},pricing:"tier_10_50",capabilities:["effort","max_effort","xhigh_effort","adaptive_thinking","rejects_disabled_thinking","mid_conv_system","context_management","lean_prompt","fable_5_mitigations","refusal_fallback"],default_effort:"high",effort_cost_index:{low:0.6,medium:0.77,high:1,xhigh:1.74,max:1.91},image_limits:{maxWidth:2000,maxHeight:2000},advisor_rank:5},{id:"claude-mythos-5",family:"mythos",display_name:"Mythos 5",knowledge_cutoff:"January 2026",provider_ids:{first_party:"claude-mythos-5",bedrock:null,vertex
+
+
+==== "Inherit from parent" hits=0 ====
+
+==== "inherit from parent" hits=0 ====
+
+==== "Use the same model as the main conversation" hits=0 ====
+
+==== "Fast and efficient for simple tasks" hits=0 ====
+
+==== "function getAgentModelOptions" hits=0 ====
+
+==== "value:\"inherit\"" hits=0 ====
+
+==== "value:\"inherit\"" hits=0 ====

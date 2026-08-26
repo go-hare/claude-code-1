@@ -1,0 +1,111 @@
+er named "${e}". Run \`claude mcp add\` to add one.`;let o=8,i=r.slice(0,o).join(", "),s=r.length>o?` (and ${r.length-o} more \u2014 run \`claude mcp list\` to see all)`:"";return`No MCP server named 
+"${e}". Configured servers: ${i}${s}`}function nos(e,t,r){if(r&&t.length===0)return`No MCP server named "${e}". ${".mcp.json servers are awaiting approval \u2014 run `claude` in this directory to revi
+ew them."}`;return U6l(e,t)+(r?` (${".mcp.json servers are awaiting approval \u2014 run `claude` in this directory to review them."})`:"")}var B6l=()=>{};class mkh{verdicts=new Map;lookup(e){let t=thi
+s.verdicts.get(e);if(t!==void 0)this.verdicts.delete(e),this.verdicts.set(e,t);return t}remember(e,t){if(this.verdicts.size>=A$E){let r=this.verdicts.keys().next().value;if(r!==void 0)this.verdicts.de
+lete(r)}this.verdicts.set(e,t)}}function x$E(e,t=process.pid){if(t===1)return!1;return Array.isArray(e)&&e.includes(t)}async function R$E(e,t=C$E){if(e===void 0||!Number.isInteger(e)||e<=0)return"no-e
+vidence";let r;try{r=await t.readStartToken(e)}catch{r=void 0}if(r===void 0)return"no-evidence";let n=`${e}:${r}`,o=k$E.of(ar().host),i=o.lookup(n);if(i!==void 0)return i?"self":"not-self";let s;try{s
+=await t.readAncestors(e)}catch{return"no-evidence"}let a;try{a=await t.readStartToken(e)}catch{a=void 0}if(a!==r)return"no-evidence";let l=process.pid!==1&&s.includes(process.pid);return o.remember(n
+,l),l?"self":"not-self"}async function hkh(e){let t=e.selfPid??process.pid;if(e.selfSentAncestry!==void 0&&t!==1)return x$E(e.selfSentAncestry,t);if(!e.needsVerdict)return!1;if(t===1||e.platform==="wi
+ndows")return e.childTokenPresented;if(e.platform!=="macos")return!1;let r=await(e.verdictOf??R$E)(e.verifiedPeerPid);return r==="self"||r==="no-evidence"&&e.childTokenPresented}var A$E=500,T$E=32,k$E
+,C$E;var gkh=A(()=>{tt();Dw();k$E=new Ar(()=>new mkh),C$E={readAncestors:async(e)=>{let{ancestors:t,readFailed:r,truncated:n}=await FFn(e);if(n&&!r&&!t.includes(process.pid))({ancestors:t,readFailed:r
+,truncated:n}=await FFn(e,T$E));if(!t.includes(process.pid)){if(r)throw Error("ancestry walk failed");if(n)throw Error("ancestry walk truncated (maxDepth) above the prefix")}return t},readStartToken:(
+e)=>sk(e,{skipCache:!0})}});class ykh{activeSocketPath=void 0;connectedClients=new Set;onEnqueue=null;onRename=null;onEnableRemoteControl=null;onPeerMessageStatus=null;processingChain=Promise.resolve(
+);activeTokens=void 0;activeKeyFile=void 0;authRequired=!1;authOkReported=!1;authDropReported=!1;lastStartFailureCause=void 0;lastStartDegradedCause=void 0;reset(){this.onEnqueue=null,this.onRename=nu
+ll,this.onEnableRemoteControl=null,this.onPeerMessageStatus=null,this.activeSocketPath=void 0,this.connectedClients.clear(),this.processingChain=Promise.resolve(),this.activeTokens=void 0,this.activeK
+eyFile=void 0,this.authRequired=!1,this.authOkReported=!1,this.authDropReported=!1,this.lastStartFailureCause=void 0,this.lastStartDegradedCause=void 0}}var _kh;var bkh=A(()=>{_kh=new Ar(()=>new ykh)}
+);var $Er={};Et($Er,{currentSenderClass:()=>G6l,getDefaultUdsSocketPath:()=>Tkh,getUdsMessagingSocketPath:()=>U$E,getUdsStartDegradedCause:()=>H$E,getUdsStartFailureCause:()=>I$E,setOnEnableRemoteCont
+rol:()=>P$E,setOnEnqueue:()=>M$E,setOnPeerMessageStatus:()=>cos,setOnRename:()=>los,startCrossSessionInbox:()=>W$E,startUdsMessaging:()=>Ckh,vettedPeerReplyTarget:()=>uos});function aw(){return _kh.of
+(ar().host)}function I$E(){return aw().lastStartFailureCause}function H$E(){return aw().lastStartDegradedCause}function W6l(e){if(typeof e!=="object"||e===null)return!1;if(!("type"in e))return!1;retur
+n typeof e.type==="string"}function los(e){aw().onRename=e}function P$E(e){aw().onEnableRemoteControl=e}function vkh(e){return Gir(e)?e:e===void 0?"(none)":"(malformed)"}function D$E(e){if(!Array.isAr
+ray(e))return[];let t=[];for(let r of e){if(t.length>=txa)break;if(Gir(r))t.push(r)}return t}function cos(e){aw().onPeerMessageStatus=e}function M$E(e){aw().onEnqueue=e}function Ekh(e){if(e.session_id
+!==void 0&&e.session_id!==Vt())return E(`[uds-messaging] Dropping ${LD(e.type)} message: session_id mismatch (got "${LD(String(e.session_id))}", expected "${Vt()}")`,{level:"warn"}),!1;return!0}async 
+function O$E(e,t,r,n){let o=e.message?.content;if(typeof o!=="string"||o.length===0){E("[uds-messaging] Ignoring user message with missing or non-string content",{level:"warn"});return}if(!Ekh(e))retu
+rn;let i=typeof e.uuid==="string"?e.uuid:sos.randomUUID(),s=ltn();if(s!==void 0){uWt("uds: dropped before attachment materialization",s),gEm({kind:"peer",from:e.from??"unknown",...t!==void 0&&{verifie
+dPeerPid:t},...Gir(e.msg_id)&&{msg_id:e.msg_id}},"refused");return}let a=e.priority==="now"||e.priority==="next"||e.priority==="later"?e.priority:"next",l=o;if(e.file_attachments!==void 0&&ren())try{l
+et{emitPeerFileReceiveTelemetry:p,injectPeerFilePrefix:f,materializeLocalPeerFiles:m}=await Promise.resolve().then(() => (Rso(),O0m)),h=await m(e.file_attachments);if(h.received>0)l=f(o,h.prefix),p("u
+ds",h.received,h.verified)}catch(p){E(`[uds-messaging] Failed to materialize file_attachments: ${vQe(String(p))}`,{level:"warn"})}let c=await z6l(t,r,n),u=Ynr({kind:"peer",from:e.from??"unknown",...t!
+==void 0&&{verifiedPeerPid:t},...c&&{selfSent:c},...Gir(e.msg_id)&&{msg_id:e.msg_id},...KOt(o)},l,o),d={mode:"prompt",agentId:Di(),value:l,uuid:i,priority:a,origin:u,skipSlashCommands:!0,isMeta:!0};if
+(dso(d)!=="accept")return;Pce(d),E(`[uds-messaging] Routed user message to queue (priority=${a}): ${LD(l,80)}`),aw().onEnqueue?.(),Akh(d)}function Akh(e){let t=e.origin?.kind==="peer"?e.origin:void 0,
+r=aw().activeSocketPath;if(t!==void 0&&t.selfSent!==!0&&t.verifiedPeerPid!==void 0&&typeof t.from==="string"&&r!==void 0&&uos(t.from,r)!==void 0)_xa(t.from,t.verifiedPeerPid)}function uos(e,t){if(!e.s
+tartsWith("uds:")||!XOt(e))return;let r=xD(e).target;return r&&y_a(r,t)?r:void 0}async function Skh(e,t,r,n){if(!W6l(e)){E("[uds-messaging] Ignoring message without valid type field",{level:"warn"});r
+eturn}if(e.type==="user")await O$E(e,t,r,n);else if(e.type==="control"){if(!Ekh(e))return;if(e.action==="rename"&&typeof e.name==="string")aw().onRename?.(e.name);else if(e.action==="peer_message_stat
+us"&&(e.status==="held"||e.status==="denied"||e.status==="expired"||e.status==="delivered"||e.status==="refused"||e.status==="dropped")){let o=e.status==="expired"&&e.status_detail==="refused"?"refuse
+d":e.status,i=lxa(e.orig_msg_id,o),s=i?.destination;if(e.status==="dropped"){let a=Vfp(e.drop_reason),l=cxa(D$E(e.dropped_msg_ids));if(s!==void 0){let c=l.get(s)??{dropped:0,wereHeld:0};if(c.dropped++
+,i?.wasHeld)c.wereHeld++;l.set(s,c)}if(a==="queue-full")for(let[c,{wereHeld:u}]of l)for(let d=0;d<u;d++)Ali(c);if(l.size===0)E(`[uds-messaging] peer_message_status dropped: neither orig_msg_id=${vkh(e
+.orig_msg_id)} nor any named id matches an outstanding send`);for(let[c,{dropped:u}]of l)aw().onPeerMessageStatus?.("dropped",c,{dropReason:a,droppedCount:u})}else if(s===void 0)E(`[uds-messaging] pee
+r_message_status dropped: no outstanding send matches orig_msg_id=${vkh(e.orig_msg_id)}`);else{if(o==="held")axa(s);else if(o==="delivered"&&i?.wasHeld)Ali(s);aw().onPeerMessageStatus?.(o,s)}}else if(
+e.action==="notify_when_idle"){let o=xTl().safeParse(e);if(!o.success){E("[uds-messaging] notify_when_idle dropped: malformed frame"),be("cross_session_notify_idle","malformed_frame");return}let i=aw(
+).activeSocketPath,s=o.data.from,a=i!==void 0?uos(s,i):void 0;if(i===void 0)E("[uds-messaging] notify_when_idle dropped: own inbox not bound (shutting down)"),be("cross_session_notify_idle","own_inbox
+_unbound");else if(a===void 0)E(`[uds-messaging] notify_when_idle dropped: reply address unshaped or outside our socket namespace (${LD(s)})`),be("cross_session_notify_idle","unvettable_reply_target")
+;else if(lQ(a)===lQ(i))E("[uds-messaging] notify_when_idle dropped: reply target is this session (self-target)"),be("cross_session_notify_idle","self_target_frame");else{let l=await z6l(t,r,n),c=ITl(s
+,a,o.data.msg_id,t,n==="peer",wkh(o.data.from_mode),l);if(E(`[uds-messaging] notify_when_idle from ${LD(s)}: ${c}`),c==="full")Sso(a,o.data.msg_id,t,n==="peer")}}else if(e.action==="peer_idle_notice")
+{let o=RTl().safeParse(e);if(!o.success){E("[uds-messaging] peer_idle_notice dropped: malformed frame"),be("cross_session_notify_idle","malformed_notice");return}if(!bso(o.data.orig_msg_id)){E("[uds-m
+essaging] peer_idle_notice: dropped (uncorrelated / already delivered / expired)");return}let i=await z6l(t,r,n);if(!DTl(o.data.orig_msg_id,o.data.state,o.data.finished_at,o.data.detail,wkh(o.data.fro
+m_mode),i))E(`[uds-messaging] peer_idle_notice not admitted: subscription for orig_msg_id=${LD(o.data.orig_msg_id)} was already consumed`)}else E(`[uds-messaging] Unhandled control action: ${LD(String
+(e.action))}`)}else E(`[uds-messaging] Received unhandled message type: ${LD(e.type)}`)}function L$E(e,t,r,n){if(W6l(e)&&(e.type==="control"&&e.action!=="notify_when_idle"||e.type==="user"&&e.priority
+==="now"&&e.file_attachments===void 0)){Skh(e,t,r,n).catch((o)=>{E(`[uds-messaging] Failed to process message: ${o}`,{level:"warn"})});return}aw().processingChain=aw().processingChain.then(()=>Skh(e,t
+,r,n)).catch((o)=>{E(`[uds-messaging] Failed to process message: ${o}`,{level:"warn"})})}function $$E(e=3000){return Promise.race([aw().processingChain,Pr(e,void 0,{unref:!0})])}function F$E(e){e.setE
+ncoding("utf8");let t,r=!1,n,o,i=process.pid!==1&&pTl(),s="",a,l=!1,c=(p)=>{if(E(`[uds-messaging] Dropped ${p} from a connection that did not authenticate; closing it`,{level:"warn"}),!aw().authDropRe
+ported)aw().authDropReported=!0,pe("cross_session_inbox_auth","unauthed_drop");e.destroy()},u=(p)=>{let f=!l;if(l=!0,PWd(p)){if(f){if(a=DWd(p.token,aw().activeTokens),a!==void 0&&!aw().authOkReported)
+aw().authOkReported=!0,Ee("cross_session_inbox_auth");if(a===void 0&&aw().authRequired)c("a bad auth frame")}return}if(aw().authRequired&&a===void 0){c(W6l(p)?`a '${LD(p.type)}' line`:"a line");return
+}if(!r){if(t=mli(e),r=!0,t!==void 0&&i)n=o!==void 0&&o.pid===t&&A_a(t)===o.token?T_a(t):void 0}L$E(p,t,n,a)},d=(p)=>{try{u(p)}catch(f){E(`[uds-messaging] Failed to handle line: ${f}`,{level:"warn"})}}
+;e.on("data",(p)=>{if(s+=p,s.length>S4r){E(`[uds-messaging] Line exceeded ${S4r} chars; dropping connection`,{level:"warn"}),e.destroy(),s="";return}let f;while((f=s.indexOf(`
+`))!==-1){let m=s.slice(0,f);if(s=s.slice(f+1),!m.trim()){if(aw().authRequired&&a===void 0){l=!0,c("a blank line"),s="";return}continue}let h;try{h=rT(m)}catch{if(E(`[uds-messaging] Failed to parse JS
+ON line: ${vQe(m)}`,{level:"warn"}),aw().authRequired&&a===void 0){l=!0,c("an unparseable line"),s="";return}continue}if(d(h),e.destroyed){s="";return}}}),e.on("end",()=>{if(s.trim()&&!e.destroyed){le
+t p,f=!1;try{p=rT(s),f=!0}catch{if(E(`[uds-messaging] Failed to parse final buffer: ${vQe(s)}`,{level:"warn"}),aw().authRequired&&a===void 0)c("an unparseable final fragment")}if(f)d(p)}e.end()}),e.on
+("error",(p)=>{E(`[uds-messaging] Connection error: ${p.message}`,{level:"warn"})})}function U$E(){return aw().activeSocketPath}function Tkh(){return`\\\\.\\pipe\\${rti}\\${tti}${sos.randomBytes(16).t
+oString("hex")}`}async function ios(e,t,{settleHeld:r=!0}={}){for(let s of aw().connectedClients)s.destroy();if(aw().connectedClients.clear(),e.close(),r)NTl();let n=r?lso():void 0;await $$E();let o=r
+?Dp(ZWi("exited"),N$E):void 0;if(await n,await o,r)await hPf();try{await I5t.unlink(t)}catch{}let i=aw();if(i.activeKeyFile!==void 0){let s=i.activeKeyFile;i.activeKeyFile=void 0,await RWd(s)}j6l()}fu
+nction j6l(){aw().activeSocketPath=void 0,aw().activeTokens=void 0,delete process.env.CLAUDE_CODE_MESSAGING_SOCKET,A8.unset("CLAUDE_CODE_MESSAGING_TOKEN"),rxa(void 0),sTl(null),aTl(null),r3i(null),o3i
+(null),P$().senderMode=null}function j$E(e,t,r){return async()=>{await ios(e,t),r()}}function z$E(e){return new Promise((t)=>{let r=new aos.Socket,n=(o)=>{r.destroy(),t(o)};r.on("connect",()=>n("live"
+)),r.on("error",()=>n("dead")),r.setTimeout(250,()=>n("dead")),r.connect({path:e})})}function W$E(e){return Ckh(e??Tkh(),{isExplicit:e!==void 0})}function oos(){A8.unset("CLAUDE_CODE_MESSAGING_SOCKET"
+),A8.unset("CLAUDE_CODE_MESSAGING_TOKEN")}async function Ckh(e,t={}){if(aw().lastStartFailureCause="bind_failed",aw().lastStartDegradedCause=void 0,!ELe(e)){E(`[uds-messaging] Refusing non-local socke
+t path: ${e}`,{level:"error"}),oos();return}t.isExplicit;let n=eTt.join(e,"..");if(t.isExplicit){if(await z$E(e)==="live")throw new l4e(`--messaging-socket-path points to a live socket: ${e}. Another 
+process is listening there. Remove it or choose a different path.`)}try{await I5t.unlink(e)}catch{}aw().activeSocketPath=e;let o,i;try{o=aos.createServer({allowHalfOpen:!0},(a)=>{aw().connectedClients
+.add(a),E("[uds-messaging] Client connected"),F$E(a),a.on("close",()=>{aw().connectedClients.delete(a),E("[uds-messaging] Client disconnected")})})}catch(a){j6l(),E(`[uds-messaging] Failed to create s
+erver: ${String(a)}`,{level:"error"}),oos();return}o.on("error",(a)=>{E(`[uds-messaging] Server error: ${a.message}`,{level:"error"})}),aw().authRequired=t.requireAuth??mti();let s=kWd();aw().activeTo
+kens=s;try{await new Promise((c,u)=>{o.once("error",u),o.listen(e,()=>{o.removeListener("error",u),c()})}),o.unref();let a=Sa(async()=>{E("[uds-messaging] Shutting down"),await ios(o,e)});i=a;try{aw()
+.activeKeyFile=await xWd(e,s.peerToken,{sweepPermitted:await fBr()})}catch(c){if(aw().authRequired){E(`[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authen
+ticate to): ${c}`,{level:"error"}),aw().lastStartFailureCause="key_publish_failed",await ios(o,e,{settleHeld:!1}),a(),oos();return}E(`[uds-messaging] Failed to publish the inbox auth key; peers will s
+end unauthenticated (accepted: auth is optional on this platform): ${c}`,{level:"warn"}),aw().lastStartDegradedCause="key_publish_failed"}process.env.CLAUDE_CODE_MESSAGING_SOCKET=e,A8.set("CLAUDE_CODE
+_MESSAGING_TOKEN",s.childToken),rxa($ht(e));let l=$ht(e);return aTl(Akh),P$().senderMode=G6l,r3i((c,u,d,p)=>T4r(c,{action:"peer_idle_notice",...u,from:l,...p?V$E():{}},{...d!==void 0&&{expectPeerPid:d
+}})),o3i((c)=>dxa(c)),sTl((c,u,d)=>{let p=c.origin?.kind==="peer"?c.origin:void 0,f=p?.from;if(typeof f!=="string")return;let m=uos(f,e);if(m===void 0){E(`[uds-messaging] hold-receipt skipped: reply a
+ddress unshaped or outside our socket namespace (${LD(f)})`);return}return T4r(m,{action:"peer_message_status",...u==="refused"?{status:"expired",status_detail:"refused"}:{status:u},reason:G$E(u),from
+:l,...typeof p?.msg_id==="string"&&{orig_msg_id:p.msg_id},...u==="dropped"&&d!==void 0&&{drop_reason:d.dropReason,dropped_msg_ids:d.droppedMsgIds}},{...p?.verifiedPeerPid!==void 0&&{expectPeerPid:p.ve
+rifiedPeerPid}}).catch((h)=>E(`[uds-messaging] hold-receipt send failed to ${LD(f)}: ${vQe(String(h))}`))}),E(`[uds-messaging] Listening: ${e}`,{level:"info"}),E(`[uds-messaging] Inject messages (auth
+ line REQUIRED here; a pipe is not reachable via socat/AF_UNIX): node -e "const c=require('net').connect(process.argv[1],()=>{c.write(JSON.stringify({type:'auth',token:process.env.CLAUDE_CODE_MESSAGIN
+G_TOKEN})+'\\n'+JSON.stringify({type:'user',message:{role:'user',content:'hello'}})+'\\n');c.end()})" "${e}"`,{level:"info"}),aw().lastStartFailureCause=void 0,j$E(o,e,a)}catch(a){if(i!==void 0)await 
+ios(o,e,{settleHeld:!1}),i(),aw().lastStartFailureCause="post_bind_setup_failed";if(dt(a)==="ENAMETOOLONG")E(`[uds-messaging] Socket path too long (${e.length} bytes, max ~104): ${e}. Try a shorter --
+messaging-socket-path, or set CLAUDE_CODE_TMPDIR or $XDG_RUNTIME_DIR to a shorter directory.`,{level:"error"});else E(`[uds-messaging] Failed to start: ${a}`,{level:"error"});j6l(),oos();return}}funct
+ion G$E(e){switch(e){case"held":return"Your message is held for the recipient user's approval before it reaches their Claude session (permission-mode parity).";case"denied":return"The recipient user d
+eclined your message; it was not delivered to their Claude session.";case"expired":return"Your held message expired without approval and was not delivered to the recipient's Claude session.";case"deli
+vered":return"Your previously-held message was approved and released to the recipient's Claude session.";case"refused":return"The recipient session is not accepting cross-session messages (the feature
+ is off there, or a setting or policy there refuses them); your message was not delivered to its Claude.";case"dropped":return"The recipient's session dropped your message at its inbox (rate limit, du
+plicate, relay loop, or full queue); it was not delivered and will not be."}}function V$E(){let e=G6l();return e===void 0?{}:{from_mode:e}}function G6l(){if(!otn())return;let e=Ym().inbound.getCurrent
+Mode;if(e)try{return itn(e())}catch{return}let t=Ym().inbound.modeAtUnwire;return t!==void 0?itn(t):void 0}function wkh(e){return W4d(e)?e:void 0}function z6l(e,t,r){return hkh({selfSentAncestry:t,ver
+ifiedPeerPid:e,childTokenPresented:r==="child",needsVerdict:pTl(),platform:Wt()})}var sos,I5t,aos,eTt,N$E=3000,B$E=103,kkh="Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory yo
+u own to use a different location.",ZnM,QnM;var Kst=A(()=>{tt();tt();hli();Dw();Df();su();Wir();XEt();wso();qe();Zt();mr();st();qw();Vir();K1t();Zfe();s_r();Y8();gkh();ki();K1t();SQe();MWi();dBr();H$(
+);K3e();wr();rP();bkh();sos=require("crypto"),I5t=require("fs/promises"),aos=require("net"),eTt=require("path");ZnM=`A component of the sockets path is not a directory (a regular file is in the way). 
+${kkh}`,QnM=`The sockets path runs through a symlink loop. ${kkh}`});function xkh(e){let t=!1,r=wG(()=>{if(t||yS()||Jl()||!rg())return;return t=!0,r(),q$E(e)});return Sa(async()=>r()),r}async function
+ q$E(e){let t=await Promise.resolve().then(() => (Kst(),$Er)),r;try{r=await t.startCrossSessionInbox(e)}catch(s){if(s instanceof l4e)E(`[uds-messaging] Late bind refused: ${s.message}`,{level:"warn"})
+;else Te(s);pe("agents_cross_session_inbox","bind_failed_late");return}if(!r){pe("agents_cross_session_inbox",`${t.getUdsStartFailureCause()??"bind_failed"}_late`);return}E("[uds-messaging] Late bind:
+ gate enabled by a GrowthBook refresh after startup"),$_r();let n=t.getUdsStartDegradedCause();if(n)be("agents_cross_session_inbox",n,{bind_late:!0});else Ee("agents_cross_session_inbox",{bind_late:!0
+});let{updateSessionMessagingSocketPath:o}=await Promise.resolve().then(() => (su(),XFn)),i=t.getUdsMessagingSocketPath();if(i!==void 0)await o(i)}var Rkh=A(()=>{Zt();bn();tt();eO();XEt();qe();st();Df
+();K_();$r()});function V6l(){return Xho.join(En(),"cache","changelog.md")}function q6l(){return Pn.cache("changelog","changelog.md")}class Hkh{content=null;remember(e){this.content=e}}async function 
+Pkh(e){let t=cr();if(!t.cachedChangelog)return;if($t()&&e){let r=await e.write(q6l(),t.cachedChangelog,{precondition:{type:"ifAbsent"},mode:438&~process.umask()});if(!r.ok&&r.error.code!=="AlreadyExis
+ts")E(`migrateChangelogFromConfig: ${r.error.code}`)}else{let r=V6l();try{await Gl().mkdir(Xho.dirname(r)),await Gl().writeExclusive(r,t.cachedChangelog)}catch{}}await ln(({cachedChangelog:r,...n})=>n
+,e)}async function K6l(e){if(jn())return;if(fa())return;let t=Y$E,r=await Tw.get(t);if(r.status===200){let n=r.data,o=X6l();if(n===o.content)return;let i=V6l();if(await Gl().mkdir(Xho.dirname(i)),$t()
+&&e){let a=await e.write(q6l(),n,{publishDiscipline:"inPlace"});if(!a.ok)throw E(`fetchAndStoreChangelog: ${a.error.code}`),Error("fetchAndStoreChangelog: v5 write failed")}else await Gl().write(i,n);
+o.remember(n);let s=Date.now();await ln((a)=>({...a,changelogLastFetched:s}),e)}}async function Jho(e){let t=X6l();if(t.content!==null)return t.content;if($t()&&e){let n=await e.readText([q6l()]),o=n.
+ok&&n.value.items[0].found?n.value.items[0].value:"";return t.remember(o),o}let r=V6l();try{let n=await Gl().read(r);return t.remember(n),n}catch{return t.remember(""),""}}function pos(){return X6l().
+content??""}function Zho(e){try{if(!e)return{};let t={},r=e.split(/^## /gm).slice(1);for(let n of r){let o=n.trim().split(`
+`);if(o.length===0)continue;let i=o[0];if(!i)continue;let s=Cs(i," - ").trim();if(!s)continue;let a=o.slice(1).filter((l)=>l.trim().startsWith("- ")).map((l)=>l.trim().substring(2).trim()).filter(Bool
+ean);if(a.length>0)t[s]=a}return t}catch(t){return Te(Tn(t)),{}}}function Dkh(e,t,r=pos()){try{let n=Zho(r),o=dos.coerce(e),i=t?dos.coerce(t):null;if(!i||o&&tP(o.version,i.version))return Object.entri
+es(n).filter(([s])=>!i||tP(s,i.version)).sort(([s],[a])=>tP(s,a)?-1:1).flatMap(([s,a])=>a).filter(Boolean).slice(0,K$E)}catch(n){return Te(Tn(n)),[]}return[]}function fos(e=pos()){try{let t=Zho(e);ret
+urn Object.keys(t).sort((n,o)=>tP(n,o)?1:-1).map((n)=>{let o=t[n];if(!o||o.length===0)return null;let i=o.filter(Boolean);if(i.length===0)return null;return[n,i]}).filter((n)=>n!==null)}catch(t){retur
+n Te(Tn(t)),[]}}async function Mkh(e,t={ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.
+com/docs/en/overview",VERSION:"2.1.239",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-21T04:40:30Z",GIT_SHA:"9bf8e9521fe06414183309865310e27c9b8db3dd",DD_SOUR
+CEMAP_GROUP:"win32"}.VERSION,r){let n=await Jho(r);if(e!==t||!n||J$E(n,t))K6l(r).catch((s)=>E(`Failed to fetch changelog: ${Tn(s).message}`,{level:"error"}));let o=Dkh(t,e,n);return{hasReleaseNotes:o.
+length>0,releaseNotes:o}}function Y6l(e,t={ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.clau
+de.com/docs/en/overview",VERSION:"2.1.239",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-21T04:40:30Z",GIT_SHA:"9bf8e9521fe06414183309865310e27c9b8db3dd",DD_S
+OURCEMAP_GROUP:"win32"}.VERSION){let r=Dkh(t,e);return{hasReleaseNotes:r.length>0,releaseNotes:r}}fu

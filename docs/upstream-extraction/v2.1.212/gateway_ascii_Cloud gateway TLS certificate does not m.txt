@@ -1,0 +1,28 @@
+offset=124977936 needle=b'Cloud gateway TLS certificate does not match stored pin'
+count=25
+
+Authentication required for remote settings
+Remote settings: Using cached settings (304)
+Remote settings: No settings found (
+Remote settings: Invalid response format - 
+Invalid remote settings format
+parse_error
+remote managed settings
+Remote settings: Settings validation failed - no fields could be salvaged
+Invalid settings structure
+invalid_settings
+Remote settings: Payload contains 
+ invalid entries; applying the salvaged subset
+Remote settings: Fetched successfully
+Cloud gateway TLS certificate does not match stored pin
+gateway_cert_mismatch
+Cannot destructure property 'kind' from null or undefined value
+tengu_remote_settings_401_force_refresh_retry
+Not authorized for remote settings
+Remote settings request timeout
+Cannot connect to server
+network_error
+unknown_error
+Remote settings: Saved to 
+Remote settings: Failed to save - 
+unknown error

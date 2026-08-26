@@ -1,0 +1,23 @@
+@111000032
+actEnabled......................precomputeCompactionEnabled.....................switchModelsOnFlag......................autoContinueAtUsageLimit................autoScrollEnabled.......................wheelScrollAccelerationEnabled..................fileCheckpointingEnabled................showTurnDuration................showMessageTimestamp
+
+@152712984
+........................#..................................&.....i...... ...............8...............................autoContinueAtUsageLimit...................................................=.........................................J......q...n.......Y.......}............H..H...............................................p.......h...
+
+@152719192
+hDO.....i........DO...............T..............DO.....)........DO..............CU.....I...............................autoContinueAtUsageLimit........................................unknowable......................idle........................................,....................@`l.. ..@...J....02'....@..U....@.\.e.....6.@ ......@.,.X..
+
+@152721576
+......G......i..P...............H...............`...............X...............P.......................................autoContinueAtUsageLimit................................userSettings.......................................$.......=..8L.@.].@.<..../...2...=...................0.........................V..........J..............~.......
+
+@152871568
+........autoCompact.....................Auto-compact....................boolean.................S.......................autoContinueAtUsageLimit............%...Continue automatically at usage limit...................r...............................switchModelsOnFlag......................tips....................Show tips...................
+
+@152886392
+ingAvailable....................workflowsToggleable.....................workflowSizeGuidelineToggleable............."...autoContinueAtUsageLimitToggleable......................artifactToggleable.................. ...shouldShowExternalIncludesToggle................autoUpdaterDisabledReason.......................setTheme................setG
+
+@275974920
+reduceMotion....................model...................fast....................switchModelsOnFlag......................autoContinueAtUsageLimit................outputStyle.....................defaultView.....................verbose.................autoCompact.....................thinking................permissionMode..................useA
+
+@275975456
+@...............................model...................fast....................switchModelsOnFlag......................autoContinueAtUsageLimit................outputStyle.....................defaultView.....................verbose.................autoCompact.....................thinking................permissionMode..................useA

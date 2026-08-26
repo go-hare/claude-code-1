@@ -1,0 +1,50 @@
+t).
+
+\`hard_deny\` is almost always \`[]\` \u2014 only propose an entry when the
+recon shows a clear-cut destructive footgun. Hard blocks are never cleared
+by stated intent at runtime, so prefer \`soft_deny\` when in doubt.
+
+When a rule array is non-empty its FIRST entry is the literal string
+\`"$defaults"\`; when nothing was suggested, emit \`[]\`. NEVER emit a
+bare or wildcard \`Bash\` rule, an interpreter/shell/wrapper prefix
+(\`Bash(python:*)\`, \`Bash(sudo:*)\`), or any \`Agent\` rule in \`allow\`
+\u2014 those are auto-stripped at runtime and rejected here.
+
+## What goes in \`remove_from_permissions_allow\`
+
+The "Existing auto-mode settings" section lists (a) classifier-bypassing
+entries auto mode already ignores at runtime and (b) destructive entries
+that auto-approve dangerous commands. Copy those rule strings VERBATIM into
+this array so the review UI can offer to remove them. If none were listed,
+emit \`[]\`. Never write a redaction marker or a count line into this
+array \u2014 only strings you saw verbatim in the two flagged lists.
+
+## What goes in \`notes\`
+
+A few short bullets \u2014 each note one line of plain text, no newlines or
+special characters \u2014 ONLY: any recon section marked NOT GATHERED,
+INCOMPLETE, or FAILED (say what that means for the proposal); any slot you
+left at the shipped default; the mandatory "config-derived, not
+usage-corroborated" provenance flag for each Trusted cloud buckets entry
+adopted on config-scan evidence alone (required by the bucket carve-out in
+the environment section above \u2014 name the entry in the note). Do NOT put
+questions, follow-up offers, or
+audience-mapping suggestions here \u2014 the flow does not ask anything after
+this. If the "Existing auto-mode settings" section reports its recon step
+FAILED, put that in \`notes\` and DO NOT propose a
+\`remove_from_permissions_allow\`.
+
+If that section's "Project \`.claude/settings.local.json\`" sub-block shows
+\`autoMode.*\` keys, add ONE recon-status note: "Found N inert autoMode
+entries in .claude/settings.local.json \u2014 they no longer apply; re-add any
+you want to keep." (a status observation, not a follow-up offer).
+
+## Shipped defaults for empty environment slots
+
+${n}
+`}function NAy(){let e={type:"array",items:{type:"string"}};return{type:"object",properties:{environment:e,allow:e,soft_deny:e,hard_deny:e,remove_from_permissions_allow:e,notes:e},required:["environment","allow","soft_deny","hard_deny","remove_from_permissions_allow","notes"],additionalProperties:!1}}var IAy,RAy=4096,DAy=28672,PAy;var dSo=b(()=>{vy();lt();Kt();po();TAs();yAs();vQr();$ar();Be();st();Gf();fo();znr();YC();yRt();VJ();Fze();Or();IAy=be(()=>Me.object({environment:Me.array(Me.string()).min(1).describe('Markdown bullets and `### ` section separators. Never carries "$defaults".'),allow:Me.array(Me.string()).describe('Optional carve-outs. Empty when nothing was suggested. When non-empty, MUST start with the literal entry "$defaults".'),soft_deny:Me.array(Me.string()).describe('Optional extra soft blocks. Empty when nothing was suggested. When non-empty, MUST start with "$defaults".'),hard_deny:Me.array(Me.string()).describe('Optional extra hard blocks. Almost always empty \u2014 only propose one when the recon shows a clear-cut destructive footgun. When non-empty, MUST start with "$defaults".'),remove_from_permissions_allow:Me.array(Me.string()).describe('Exact permissions.allow rule strings from the flagged lists in the "Existing auto-mode settings" section that should be removed. Empty when none were flagged.'),notes:Me.array(Me.string()).describe("Short notes for the user: sections that were NOT GATHERED / INCOMPLETE, slots left at the shipped default because nothing was found, and anything you would have asked about."),mode:Me.enum(["append","replace"]).default("append")})),PAy="Please fix up the formatting of this incorrect JSON: your previous reply could not be parsed as a proposal. Re-emit the same proposal as a single raw JSON object with exactly the six required keys (environment, allow, soft_deny, hard_deny, remove_from_permissions_allow, notes), each an "+"array of strings \u2014 no surrounding prose, no code fence, no other keys."});var ycd={};nt(ycd,{parseNonInteractiveArgs:()=>gcd,isAllowedApplyFilePath:()=>hcd,call:()=>$Ay});async function hcd(e){let t=Oct.resolve(e),r=new Set;for(let n of[mcd.tmpdir(),rn()]){r.add(Oct.resolve(n));try{r.add(await fcd.realpath(n))}catch{}}for(let n of r){let o=Oct.relative(n,t);if(o!==""&&!o.startsWith("..")&&!Oct.isAbsolute(o))return!0}return!1}function gcd(e){let t=e.trim();if(t===""||t==="--help"||t==="-h")return{mode:"usage",message:HQr};if(/^--apply-file(?:\s|$)/.test(t)){let s=t.match(/^--apply-file\s+(.+)$/s);if(s)return{mode:"apply-file",path:FAy(s[1].trim())};return{mode:"usage",message:`--apply-file needs a path to the reviewed proposal JSON.
+`+HQr}}let r=t.match(/^--wizard posture=(\S+) scope=(\S+) depth=(\S+)\s+--propose$/);if(!r){if(/--apply\b/.test(t))return{mode:"usage",message:"One-shot --apply isn\u2019t available (it would write model output with no review). Use --propose, show the result to the user, then --apply-file <path>."};return{mode:"usage",message:`Couldn\u2019t parse arguments.
+${HQr}`}}let n=xAs(r[1],["personal","open-source","enterprise","mixed"]),o=xAs(r[2],["all","project"]),i=xAs(r[3],["both","shell","repos","here"]);if(!n||!o||!i)return{mode:"usage",message:`Couldn\u2019t parse arguments.
+${HQr}`};return{mode:"propose",answers:{posture:n,scope:o,depth:i}}}function FAy(e){return e.startsWith('"')&&e.endsWith('"')||e.startsWith("'")&&e.endsWith("'")?e.slice(1,-1):e}function xAs(e,t){return t.find((r)=>r===e)}function c$e(e){return{type:"text",value:Pe(e,null,2)}}var fcd,mcd,Oct,HQr=`Usage:
+  /auto-mode-setup --wizard posture=<personal|open-source|enterprise|mixed> scope=<all|project> depth=<both|shell|repos|here> --propose
+  /auto-mode-setup --apply-file <absolute-path>   (reads a proposal JSON from a file under the system temp dir or the Claude config dir \u2014 the caller must have shown it to the user first)`,pcd=1e6,$Ay=async(e,t)=>{let r=gcd(e);if(r.mode==="usage")return c$e({ok:!1,code:"usage",reason:r.message,usage:HQr});let n=wn(t);if(r.mode==="propose"){let s=await Far(r.answers,n,t.options.mainLoopModel,t.abortController.signal);if(!s.ok)return c$e({ok:!1,code:s.code,reason:s.reason});return c$e({ok:!0,proposal:s.proposal})}if(!Oct.isAbsolute(r.path)||r6e(r.path)||!await hcd(r.path))return me("auto_mode_setup_write","bad_path"),c$e({ok:!1,code:"bad_path",reason:"Pass an absolute path under the system temp directory or the Claude config directory \u2014 --apply-file only reads proposal files the reviewing host wrote there."});if(gQ(r.path,n))return me("auto_mode_setup_write","read_denied"),c$e({ok:!1,code:"read_denied",reason:"That path is covered by a permissions.deny read rule. Write the proposal somewhere the session can read."});let o=await hHe(r.path,pcd,{noFollow:!0,requireNlink1:!0,sniffEncoding

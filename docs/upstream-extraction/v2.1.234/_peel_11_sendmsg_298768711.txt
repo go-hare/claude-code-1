@@ -1,0 +1,46 @@
+**: Present continuous form shown in spinner when in_progress (e.g., "Running tests")
+- **owner**: Change the task owner (agent name)
+- **metadata**: Merge metadata keys into the task (set a key to null to delete it)
+- **addBlocks**: Mark tasks that cannot start until this one completes
+- **addBlockedBy**: Mark tasks that must complete before this one can start
+
+## Status Workflow
+
+Status progresses: \`pending\` \u2192 \`in_progress\` \u2192 \`completed\`
+
+Use \`deleted\` to permanently remove a task.
+
+## Staleness
+
+Make sure to read a task's latest state using \`TaskGet\` before updating it.
+
+## Examples
+
+Mark task as in progress when starting work:
+\`\`\`json
+{"taskId": "1", "status": "in_progress"}
+\`\`\`
+
+Mark task as completed after finishing work:
+\`\`\`json
+{"taskId": "1", "status": "completed"}
+\`\`\`
+
+Delete a task:
+\`\`\`json
+{"taskId": "1", "status": "deleted"}
+\`\`\`
+
+Claim a task by setting owner:
+\`\`\`json
+{"taskId": "1", "owner": "my-name"}
+\`\`\`
+
+Set up task dependencies:
+\`\`\`json
+{"taskId": "2", "addBlockedBy": ["1"]}
+\`\`\`
+`;var Jzv,Zzv,Xcf;var Jcf=A(()=>{Vn();Rs();Ze();pt();uP();Mg();wn();vr();aF();hg();_6();Ose();Sxa();Jzv=Se(()=>{let e=qrr().or(Ct("deleted"));return ui({taskId:F().describe("The ID of the task to update"),subject:F().optional().describe("New subject for the task"),description:F().optional().describe("New description for the task"),activeForm:F().optional().describe('Present continuous form shown in spinner when in_progress (e.g., "Running tests")'),status:e.optional().describe("New status for the task"),addBlocks:_t(F()).optional().describe("Task IDs that this task blocks"),addBlockedBy:_t(F()).optional().describe("Task IDs that block this task"),owner:F().optional().describe("New owner for the task"),metadata:ho(F(),no()).optional().describe("Metadata keys to merge into the task. Set a key to null to delete it.")})}),Zzv=Se(()=>ye({success:zt(),taskId:F(),updatedFields:_t(F()),error:F().optional(),statusChange:ye({from:F(),to:F()}).optional()})),Xcf=Wi({name:oG,searchHint:"update a task",maxResultSizeChars:1e5,async description(){return Kcf},async prompt(){return Ycf},get inputSchema(){return Jzv()},get outputSchema(){return Zzv()},userFacingName(){return"TaskUpdate"},coerceInput:FFn,shouldDefer:!0,isEnabled(){return _te()},isConcurrencySafe(){return!0},toAutoClassifierInput(e){let t=FFn(e)?.input??e,r=[t.taskId];if(t.status)r.push(t.status);if(t.subject)r.push(t.subject);return r.join(" ")},renderToolUseMessage(){return null},async call({taskId:e,subject:t,description:r,activeForm:n,status:o,owner:i,addBlocks:s,addBlockedBy:a,metadata:l},c,u,d,p){let f=e6();p?.({type:"set_expanded_view",expandedView:"tasks"});let m=c.storageV5,h=await KMe(f,e,m);if(!h)return{data:{success:!1,taskId:e,updatedFields:[],error:"Task not found"}};let g=[],y={};if(t!==void 0&&t!==h.subject)y.subject=t,g.push("subject");if(r!==void 0&&r!==h.description)y.description=r,g.push("description");if(n!==void 0&&n!==h.activeForm)y.activeForm=n,g.push("activeForm");if(i!==void 0&&i!==h.owner)y.owner=i,g.push("owner");if(fd()&&o==="in_progress"&&i===void 0&&!h.owner){let b=IC();if(b)y.owner=b,g.push("owner")}if(l!==void 0){let b={...h.metadata??{}};for(let[v,S]of Object.entries(l))if(S===null)delete b[v];else b[v]=S;y.metadata=b,g.push("metadata")}if(o!==void 0){if(o==="deleted"){let b=await Zoi(f,e,m);return{data:{success:b,taskId:e,updatedFields:b?["deleted"]:[],error:b?void 0:"Failed to delete task",statusChange:b?{from:h.status,to:"deleted"}:void 0}}}if(o!==h.status){if(o==="completed"){let b=[],v=iir(e,h.subject,h.description,IC(),Pg(),void 0,c?.abortController?.signal,void 0,c);try{for await(let S of v)if(S.blockingError)b.push(vjn(S.blockingError))}catch(S){if(!(S instanceof sw))throw S;E("TaskCompleted hooks cancelled (control stream closed)")}if(b.length>0)return{data:{success:!1,taskId:e,updatedFields:[],error:b.join(`
+`)}}}y.status=o,g.push("status")}}if(Object.keys(y).length>0)await Nft(f,e,y,m);if(y.owner&&fd()){let b=IC()||"team-lead",v=K2(),S=Ie({type:"task_assignment",taskId:e,subject:h.subject,description:h.description,assignedBy:b,timestamp:new Date().toISOString()});await PL(y.owner,{from:b,text:S,timestamp:new Date().toISOString(),color:v},f)}if(s&&s.length>0){let b=s.filter((v)=>!h.blocks.includes(v));for(let v of b)await Pka(f,e,v,m);if(b.length>0)g.push("blocks")}if(a&&a.length>0){let b=a.filter((v)=>!h.blockedBy.includes(v));for(let v of b)await Pka(f,v,e,m);if(b.length>0)g.push("blockedBy")}return{data:{success:!0,taskId:e,updatedFields:g,statusChange:y.status!==void 0?{from:h.status,to:y.status}:void 0}}},mapToolResultToToolResultBlockParam(e,t){let{success:r,taskId:n,updatedFields:o,error:i,statusChange:s}=e;if(!r)return{tool_use_id:t,type:"tool_result",content:i||`Task #${n} not found`};let a=`Updated task #${n} ${o.join(", ")}`;if(s?.to==="completed"&&mq()&&fd())a+=`
+
+Task completed. Call TaskList now to find your next available task or see if your work unblocked other

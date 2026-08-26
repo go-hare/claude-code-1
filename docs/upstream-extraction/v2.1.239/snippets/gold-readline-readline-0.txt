@@ -1,0 +1,115 @@
+# readline offset=70431919
+
+nterruptions when running asynchronously"));
+}
+function ERR_INSPECTOR_NOT_AVAILABLE() {
+  return decorateNodeErrorStack(@makeErrorWithCode(358, "Inspector is not available"));
+}
+function ERR_INVALID_REPL_EVAL_CONFIG() {
+  return decorateNodeErrorStack(@makeErrorWithCode(359, 'Cannot specify both "breakEvalOnSigint" and "eval" for REPL'));
+}
+function ERR_INVALID_REPL_INPUT(message) {
+  return decorateNodeErrorStack(@makeErrorWithCode(360, message));
+}
+function AbortError(message = "The operation was aborted", options = @undefined) {
+  return @makeAbortError(message, options);
+}
+for (let fn of [
+  ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  ERR_MISSING_ARGS,
+  ERR_USE_AFTER_CLOSE,
+  ERR_INVALID_CURSOR_POS,
+  ERR_SCRIPT_EXECUTION_INTERRUPTED,
+  ERR_INVALID_STATE,
+  ERR_CANNOT_WATCH_SIGINT,
+  ERR_INSPECTOR_NOT_AVAILABLE,
+  ERR_INVALID_REPL_EVAL_CONFIG,
+  ERR_INVALID_REPL_INPUT
+])
+  Object.defineProperty(fn, Symbol.hasInstance, {
+    __proto__: null,
+    value: (e) => typeof e === "object" && e !== null && e.code === fn.name
+  });
+function isErrorStackTraceLimitWritable() {
+  let desc = Object.getOwnPropertyDescriptor(Error, "stackTraceLimit");
+  if (desc === @undefined)
+    return Object.isExtensible(Error);
+  return Object.prototype.hasOwnProperty.@call(desc, "writable") ? desc.writable : desc.set !== @undefined;
+}
+$ = {
+  isErrorStackTraceLimitWritable,
+  AbortError,
+  codes: {
+    ERR_INVALID_ARG_TYPE,
+    ERR_INVALID_ARG_VALUE,
+    ERR_MISSING_ARGS,
+    ERR_USE_AFTER_CLOSE,
+    ERR_INVALID_CURSOR_POS,
+    ERR_SCRIPT_EXECUTION_INTERRUPTED,
+    ERR_INVALID_STATE,
+    ERR_CANNOT_WATCH_SIGINT,
+    ERR_INSPECTOR_NOT_AVAILABLE,
+    ERR_INVALID_REPL_EVAL_CONFIG,
+    ERR_INVALID_REPL_INPUT
+  }
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/readline/utils.ts
+var $, primordials = @getInternalField(@internalModuleRegistry, 64) || @createInternalModuleById(64), __node_module__ = { exports: {} }, {
+  ArrayPrototypeToSorted,
+  RegExpPrototypeExec,
+  StringFromCharCode,
+  StringPrototypeCharCodeAt,
+  StringPrototypeCodePointAt,
+  StringPrototypeSlice,
+  StringPrototypeSplit,
+  StringPrototypeToLowerCase,
+  Symbol
+} = primordials, kUTF16SurrogateThreshold = 65536, kEscape = "\x1B", kSubstringSearch = Symbol("kSubstringSearch");
+function CSI(strings, ...args) {
+  let ret = `${kEscape}[`;
+  for (let n = 0;n < strings.length; n++)
+    if (ret += strings[n], n < args.length)
+      ret += args[n];
+  return ret;
+}
+CSI.kEscape = kEscape;
+CSI.kClearToLineBeginning = CSI`1K`;
+CSI.kClearToLineEnd = CSI`0K`;
+CSI.kClearLine = CSI`2K`;
+CSI.kClearScreenDown = CSI`0J`;
+function charLengthLeft(str, i) {
+  if (i <= 0)
+    return 0;
+  if (i > 1 && StringPrototypeCodePointAt(str, i - 2) >= kUTF16SurrogateThreshold || StringPrototypeCodePointAt(str, i - 1) >= kUTF16SurrogateThreshold)
+    return 2;
+  return 1;
+}
+function charLengthAt(str, i) {
+  if (str.length <= i)
+    return 1;
+  return StringPrototypeCodePointAt(str, i) >= kUTF16SurrogateThreshold ? 2 : 1;
+}
+function* emitKeys(stream) {
+  while (!0) {
+    let ch = yield, s = ch, escaped = !1, key = {
+      sequence: null,
+      name: @undefined,
+      ctrl: !1,
+      meta: !1,
+      shift: !1
+    };
+    if (ch === kEscape) {
+      if (escaped = !0, s += ch = yield, ch === kEscape)
+        s += ch = yield;
+    }
+    if (escaped && (ch === "O" || ch === "[")) {
+      let code = ch, modifier = 0;
+      if (ch === "O") {
+        if (s += ch = yield, ch >= "0" && ch <= "9")
+          modifier = (ch >> 0) - 1, s += ch = yield;
+        code += ch;
+      } else if (ch === "[") {
+        

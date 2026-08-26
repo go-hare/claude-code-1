@@ -1,13 +1,26 @@
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import type { PermissionUpdate } from 'src/types/permissions.js'
-import { formatFileSize } from 'src/utils/format.js'
+import { getAgentContext } from 'src/utils/agentContext.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
-import { getRuleByContentsForTool } from 'src/utils/permissions/permissions.js'
+import {
+  getDenyRuleForTool,
+  getRuleByContentsForTool,
+} from 'src/utils/permissions/permissions.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import {
+  isWebFetchArtifactExceptionEnabled,
+  OFFICIAL_ARTIFACT_TOOL_NAME,
+  tryArtifactWebFetchFail,
+} from 'src/utils/artifactUrl.js'
+import { isWebFetchAgentRuntimeContext } from '../AgentTool/built-in/webFetchAgent.js'
 import { isPreapprovedHost } from './preapproved.js'
-import { DESCRIPTION, WEB_FETCH_TOOL_NAME } from './prompt.js'
+import { getWebFetchPrompt, WEB_FETCH_TOOL_NAME } from './prompt.js'
+import {
+  formatWebFetchBinaryNote,
+  wrapRawFetchedWebContent,
+} from './rawWrap.js'
 import {
   getToolUseSummary,
   renderToolResultMessage,
@@ -180,15 +193,11 @@ export const WebFetchTool = buildTool({
       suggestions: buildSuggestions(ruleContent),
     }
   },
-  async prompt(_options) {
-    // Always include the auth warning regardless of whether SearchExtraTools is
-    // currently in the tools list. Conditionally toggling this prefix based
-    // on SearchExtraTools availability caused the tool description to flicker
-    // between SDK query() calls (when SearchExtraTools enablement varies due to
-    // MCP tool count thresholds), invalidating the Anthropic API prompt
-    // cache on each toggle — two consecutive cache misses per flicker event.
-    return `IMPORTANT: WebFetch WILL FAIL for authenticated or private URLs. Before using this tool, check if the URL points to an authenticated service (e.g. Google Docs, Confluence, Jira, GitHub). If so, look for a specialized MCP tool that provides authenticated access.
-${DESCRIPTION}`
+  async prompt({ model, tools }) {
+    return getWebFetchPrompt(
+      model,
+      await isWebFetchArtifactExceptionEnabled(tools),
+    )
   },
   async validateInput(input) {
     const { url } = input
@@ -207,11 +216,22 @@ ${DESCRIPTION}`
   renderToolUseMessage,
   renderToolUseProgressMessage,
   renderToolResultMessage,
-  async call(
-    { url, prompt },
-    { abortController, options: { isNonInteractiveSession } },
-  ) {
+  async call({ url, prompt }, context) {
+    const {
+      abortController,
+      options: { isNonInteractiveSession, tools },
+    } = context
     const start = Date.now()
+    const artifactFail = await tryArtifactWebFetchFail(
+      url,
+      tools,
+      isWebFetchAgentRuntimeContext(getAgentContext() ?? {}),
+      start,
+      getDenyRuleForTool(context.getAppState().toolPermissionContext, {
+        name: OFFICIAL_ARTIFACT_TOOL_NAME,
+      }) !== null,
+    )
+    if (artifactFail) return artifactFail
 
     // Select backend: settings.webFetchAdapter → default 'tavily'
     const settings = getSettings_DEPRECATED()
@@ -250,22 +270,20 @@ Please use WebFetch again with the redirect URL.`
         persistedSize,
       } = response as FetchedContent
 
-      let result = content
-      if (prompt && prompt.trim()) {
-        // Tavily extract returns raw Markdown — if user provided a prompt,
-        // still run secondary model call for content processing
-        result = await applyPromptToMarkdown(
-          prompt,
-          content,
-          abortController.signal,
-          isNonInteractiveSession,
-          isPreapprovedUrl(url),
-        )
-      }
-
-      if (persistedPath) {
-        result += `\n\n[Binary content (${contentType}, ${formatFileSize(persistedSize ?? bytes)}) also saved to ${persistedPath}]`
-      }
+      const result = prompt
+        ? await formatFetchedWebResult({
+            url,
+            prompt,
+            content,
+            contentType,
+            code,
+            bytes,
+            persistedPath,
+            persistedSize,
+            abortController,
+            isNonInteractiveSession,
+          })
+        : content
 
       const output: Output = {
         bytes,
@@ -326,31 +344,18 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
       persistedSize,
     } = response as FetchedContent
 
-    const isPreapproved = isPreapprovedUrl(url)
-
-    let result: string
-    if (
-      isPreapproved &&
-      contentType.includes('text/markdown') &&
-      content.length < MAX_MARKDOWN_LENGTH
-    ) {
-      result = content
-    } else {
-      result = await applyPromptToMarkdown(
-        prompt,
-        content,
-        abortController.signal,
-        isNonInteractiveSession,
-        isPreapproved,
-      )
-    }
-
-    // Binary content (PDFs, etc.) was additionally saved to disk with a
-    // mime-derived extension. Note it so Claude can inspect the raw file
-    // if the Haiku summary above isn't enough.
-    if (persistedPath) {
-      result += `\n\n[Binary content (${contentType}, ${formatFileSize(persistedSize ?? bytes)}) also saved to ${persistedPath}]`
-    }
+    const result = await formatFetchedWebResult({
+      url,
+      prompt,
+      content,
+      contentType,
+      code,
+      bytes,
+      persistedPath,
+      persistedSize,
+      abortController,
+      isNonInteractiveSession,
+    })
 
     const output: Output = {
       bytes,
@@ -373,6 +378,74 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
     }
   },
 } satisfies ToolDef<InputSchema, Output>)
+
+async function formatFetchedWebResult({
+  url,
+  prompt,
+  content,
+  contentType,
+  code,
+  bytes,
+  persistedPath,
+  persistedSize,
+  abortController,
+  isNonInteractiveSession,
+}: {
+  url: string
+  prompt: string
+  content: string
+  contentType: string
+  code: number
+  bytes: number
+  persistedPath?: string
+  persistedSize?: number
+  abortController: AbortController
+  isNonInteractiveSession: boolean
+}): Promise<string> {
+  const isWebFetchAgent = isWebFetchAgentRuntimeContext(getAgentContext() ?? {})
+  const isPreapproved = isPreapprovedUrl(url)
+  let result: string
+  if (isWebFetchAgent) {
+    result = await wrapRawFetchedWebContent({
+      url,
+      code,
+      contentType,
+      content,
+      isPreapproved,
+      summarizeRemainder: remainder =>
+        applyPromptToMarkdown(
+          prompt,
+          remainder,
+          abortController.signal,
+          isNonInteractiveSession,
+          isPreapproved,
+        ),
+    })
+  } else if (
+    isPreapproved &&
+    contentType.includes('text/markdown') &&
+    content.length < MAX_MARKDOWN_LENGTH
+  ) {
+    result = content
+  } else {
+    result = await applyPromptToMarkdown(
+      prompt,
+      content,
+      abortController.signal,
+      isNonInteractiveSession,
+      isPreapproved,
+    )
+  }
+  if (persistedPath) {
+    result += formatWebFetchBinaryNote(
+      isWebFetchAgent,
+      contentType,
+      persistedSize ?? bytes,
+      persistedPath,
+    )
+  }
+  return result
+}
 
 function buildSuggestions(ruleContent: string): PermissionUpdate[] {
   return [

@@ -1,0 +1,29 @@
+&s.location.uri);if(n.length===0)return"No symbols found in workspace. This may occur if the workspace is empty, or if the LSP server has not finished indexing the project.";let o=[`Found ${n.length} ${Rt(n.length,"symbol")} in workspace:`],i=jlf(n,t);for(let[s,a]of i){o.push(`
+${s}:`);for(let l of a){let c=W3r(l.kind),u=l.location.range.start.line+1,d=`  ${l.name} (${c}) - Line ${u}`;if(l.containerName)d+=` in ${l.containerName}`;o.push(d)}}return o.join(`
+`)}function Ulf(e,t){if(!e.uri)return E("formatCallHierarchyItem: CallHierarchyItem has undefined URI",{level:"warn"}),`${e.name} (${W3r(e.kind)}) - <unknown location>`;let r=v3n(e.uri,t),n=e.range.start.line+1,o=W3r(e.kind),i=`${e.name} (${o}) - ${r}:${n}`;if(e.detail)i+=` [${e.detail}]`;return i}function qlf(e,t){if(!e||e.length===0)return"No call hierarchy item found at this position";if(e.length===1)return`Call hierarchy item: ${Ulf(e[0],t)}`;let r=[`Found ${e.length} call hierarchy items:`];for(let n of e)r.push(`  ${Ulf(n,t)}`);return r.join(`
+`)}function Klf(e,t){if(!e||e.length===0)return"No incoming calls found (nothing calls this function)";let r=[`Found ${e.length} incoming ${Rt(e.length,"call")}:`],n=new Map;for(let o of e){if(!o.from){E("formatIncomingCallsResult: CallHierarchyIncomingCall has undefined from field",{level:"warn"});continue}let i=v3n(o.from.uri,t),s=n.get(i);if(s)s.push(o);else n.set(i,[o])}for(let[o,i]of n){r.push(`
+${o}:`);for(let s of i){if(!s.from)continue;let a=W3r(s.from.kind),l=s.from.range.start.line+1,c=`  ${s.from.name} (${a}) - Line ${l}`;if(s.fromRanges&&s.fromRanges.length>0){let u=s.fromRanges.map((d)=>`${d.start.line+1}:${d.start.character+1}`).join(", ");c+=` [calls at: ${u}]`}r.push(c)}}return r.join(`
+`)}function Ylf(e,t){if(!e||e.length===0)return"No outgoing calls found (this function calls nothing)";let r=[`Found ${e.length} outgoing ${Rt(e.length,"call")}:`],n=new Map;for(let o of e){if(!o.to){E("formatOutgoingCallsResult: CallHierarchyOutgoingCall has undefined to field",{level:"warn"});continue}let i=v3n(o.to.uri,t),s=n.get(i);if(s)s.push(o);else n.set(i,[o])}for(let[o,i]of n){r.push(`
+${o}:`);for(let s of i){if(!s.to)continue;let a=W3r(s.to.kind),l=s.to.range.start.line+1,c=`  ${s.to.name} (${a}) - Line ${l}`;if(s.fromRanges&&s.fromRanges.length>0){let u=s.fromRanges.map((d)=>`${d.start.line+1}:${d.start.character+1}`).join(", ");c+=` [called from: ${u}]`}r.push(c)}}return r.join(`
+`)}var Blf;var Xlf=A(()=>{Ze();pt();jr();Blf=require("path")});var L1t="LSP",pBa=`Interact with Language Server Protocol (LSP) servers to get code intelligence features.
+
+Supported operations:
+- goToDefinition: Find where a symbol is defined
+- findReferences: Find all references to a symbol
+- hover: Get hover information (documentation, type info) for a symbol
+- documentSymbol: Get all symbols (functions, classes, variables) in a document
+- workspaceSymbol: Search for symbols matching a query across the entire workspace
+- goToImplementation: Find implementations of an interface or abstract method
+- prepareCallHierarchy: Get call hierarchy item at a position (functions/methods)
+- incomingCalls: Find all functions/methods that call the function at a position
+- outgoingCalls: Find all functions/methods called by the function at a position
+
+All operations require:
+- filePath: The file to operate on
+- line: The line number (1-based, as shown in editors)
+- character: The character offset (1-based, as shown in editors)
+
+The workspaceSymbol operation also takes:
+- query: The symbol name or partial name to search for. Always provide it \u2014 most language servers return no results for an empty query.
+
+Note: LSP servers must be configured for the file type. If no server is available, an error will be returned.`;var Jlf;var Zlf=A(()=>{Vn();wn();Jlf=Se(()=>{let e=ui({operation:Ct("goToDefinition"),filePath:F().describe("The absolute or relative path to the file"),line:ct().int().positive().describe("The line number (1-based, as shown in editors)"),character:ct().int().positive().describe("The character offset (1-based, as shown in editors)"),query:F().optional()}),t=ui({operation:Ct("findReferences"),filePath:F().describe("The absolute or relative path to the file"),line:ct().int().positive().describe("The line number (1-based, as shown in editors)"),character:ct().int().positive().describe("The character offset (1-based, as shown in editors)"),query:F().optional()}),r=ui({operation:Ct("hover"),filePath:F().describe("The absolute or relative pa

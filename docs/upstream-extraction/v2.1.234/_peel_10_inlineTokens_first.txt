@@ -1,0 +1,7 @@
+OFFSET=293767386
+
+t).lex(e)}static lexInline(e,t){return new qie(t).inlineTokens(e)}lex(e){e=e.replace(spe.carriageReturn,`
+`),this.blockTokens(e,this.tokens);for(let t=0;t<this.inlineQueue.length;t++){let r=this.inlineQueue[t];this.inlineTokens(r.src,r.tokens)}return this.inlineQueue=[],this.tokens}blockTokens(e,t=[],r=!1){if(this.options.pedantic)e=e.replace(spe.tabCharGlobal,"    ").replace(spe.spaceLine,"");while(e){let n;if(this.options.extensions?.block?.some((i)=>{if(n=i.call({lexer:this},e,t))return e=e.substring(n.raw.length),t.push(n),!0;return!1}))continue;if(n=this.tokenizer.space(e)){e=e.substring(n.raw.length);let i=t.at(-1);if(n.raw.length===1&&i!==void 0)i.raw+=`
+`;else t.push(n);continue}if(n=this.tokenizer.code(e)){e=e.substring(n.raw.length);let i=t.at(-1);if(i?.type==="paragraph"||i?.type==="text")i.raw+=`
+`+n.raw,i.text+=`
+`+n.text,this.inlineQueue.at(-1).src=i.text;else t.push(n);continue}if(n=this.tokenizer.fences(e)){e=e.substring

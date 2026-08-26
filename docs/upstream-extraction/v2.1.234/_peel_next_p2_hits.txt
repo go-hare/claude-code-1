@@ -1,0 +1,128 @@
+--- needle=b'missing thinking' hits=0 ---
+--- needle=b'thinking block' hits=6+ ---
+@117416357: ...........................`.......................................signature in thinking block.............................thinking.signature......................field required..................thinking block..................redacted_thinking.......................cannot be modified...............
+
+@117416472: ........thinking.signature......................field required..................thinking block..................redacted_thinking.......................cannot be modified......................invalid signature................................................@.$.L...B.4..#<...d.@.<.I.....L.@.f.I.....L
+
+@161135767: _block_type_mismatch_thinking_signature..............%...Content block is not a thinking block...............*...content_block_type_mismatch_thinking_delta......................content_block_not_found_stop....................partial_message_not_found.......................Message not found..........
+
+--- needle=b'type==="thinking"' hits=6+ ---
+@288520202: this._emit("inputJson",t.delta.partial_json,o)}break}case"thinking_delta":{if(n.type==="thinking")this._emit("thinking",t.delta.thinking,n.thinking);break}case"signature_delta":{if(n.type==="thinking")this._emit("signature",n.signature);break}case"compaction_delta":{if(n.type==="compaction"&&n.conte
+
+@288520305: _emit("thinking",t.delta.thinking,n.thinking);break}case"signature_delta":{if(n.type==="thinking")this._emit("signature",n.signature);break}case"compaction_delta":{if(n.type==="compaction"&&n.content)this._emit("compaction",n.content);break}default:B9c(t.delta)}break}case"message_stop":{this._addMes
+
+@288522647: elta.partial_json;r.content[t.index]=BAo(n,o)}break}case"thinking_delta":{if(n?.type==="thinking")r.content[t.index]={...n,thinking:n.thinking+t.delta.thinking};break}case"signature_delta":{if(n?.type==="thinking")r.content[t.index]={...n,signature:t.delta.signature};break}case"compaction_delta":{if
+
+--- needle=b'type==="text"' hits=6+ ---
+@288469689: ss Nv extends Error{constructor(e){let t=typeof e==="string"?e:e.map((r)=>{if(r.type==="text")return r.text;return`[${r.type}]`}).join(" ");super(t);this.name="ToolError",this.content=e}}});function d0s(e){return"name"in e?e.name:e.mcp_server_name}function cmy(e){return e instanceof Nv?e.content:`Er
+
+@288471374: e==="string")return[{type:"text",text:e||"(no output)"}];let t=e.map((r)=>{if(r.type==="text")return{type:"text",text:r.text||"(no output)"};if(r.type==="image"||r.type==="document")return r;if(r.type==="search_result")return{type:"search_result",source:r.source,title:r.title,content:r.content.map((
+
+@288510571: =L9c(t);if(!t||!("parse"in(n??{})))return{...e,content:e.content.map((o)=>{if(o.type==="text"){let i=Object.defineProperty({...o},"parsed_output",{value:null,enumerable:!1});return Object.defineProperty(i,"parsed",{get(){return r.logger.warn("The `parsed` property on `text` blocks is deprecated, ple
+
+--- needle=b'function Tym' hits=1 ---
+@303748131: tent:Array.isArray(e.message.content)?Tym(e.message.content):e.message.content}}function Tym(e){let t;for(let r=0;r<e.length;r++){let n=e[r];if(n.type==="text"&&(typeof n.text!=="string"||n.text.trim()===""))t??=e.slice(0,r);else t?.push(n)}if(t===void 0)return[...e];return t.length>0?t:[{type:"text
+
+--- needle=b'Ran 1 shell command' hits=0 ---
+--- needle=b'horizontal rule' hits=2 ---
+@302950714: w-up as collaboration, not corrections...   After the code block, add a \`---\` horizontal rule and a \`**Review**\` heading so the guide is visually separated from your questions. Under the heading, number these three questions:..   1. "I went with '[X]' for the team name \u2014 let me know if that
+
+@302952158: ader from step 5, bridge directly from the link into the numbered questions (no horizontal rule):..   Here's a draft \u2014 a few quick questions to finish it up:..   <share URL>..   Then ask the three numbered questions from step 5 as normal. Save the \`short_code\` from the tool result \u2014 you'
+
+--- needle=b'---' hits=6+ ---
+@21472369: H9.H.B.H........k...E1..o...L9.......H......B..4(.....H......L1.H......H..ukH.Eh---.H..L)...+...H...vQH......D..EhfF3.)D..MjF2L).E...fE..u,M.E.I9...P...B....H.. w.H..&......H.....1....}@.......L...........I.E.H9.......H..........H.. w.H..&......H.........H.O H..t0H.W..|...v%.H..."w.H.........H......
+
+@21483543: ......H.........I9.......H.M8.......I9.......H9.......A..T.......H;M.ugM..ubH.E.---.H..L).......H...vH..E.fC3D5...M.C2L5....f..u-I.F.H9...p...A..D..H.. w.H..&......H.....P...I9...G...H.M8.-.!L...E{.E1.I..H.M.H..1../...1.H.M8.....<.......I..1.L9.L.B.L......L........C..T5.L......... L.M.unH.E`E1.H..t"
+
+@21487384: I.E.H9.s.....H.. w.H..&......H.....X...H.](H;].u.L.......H.E .....}L;.....uZH.E.---.H..L).......H...v@..E.f3.D..E.D2B.A...f..u'I.E.H9.s.....H.. w.H..&......H.........H.](H;].u.L...0...H.E ...-H..H.](I..L9.L.B.L.......Z...H;].u.L.......H.E ... H..H.](H.F8H....0...H.N0H......H;T.............H..H..L)..
+
+--- needle=b'account email' hits=1 ---
+@311137801: esign while.  respecting intellectual property. (A Claude Code session has no.  account email-domain signal, so this rests on what the user tells you.  about where they work \u2014 ask when it's unclear.).`;var F0g=()=>{};var Bas="B:/~BUN/root/payload.template.html.asset";var B0g=()=>{};var z0g=`// 
+
+--- needle=b'only to identify' hits=2 ---
+@122438769: .......................The user's email address is ..................... Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks......1....
+
+@293846084: :{...o&&{claudeMd:o},...s&&{userEmail:`The user's email address is ${s}. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.`},...a&&{
+
+--- needle=b'ListAgents' hits=6+ ---
+@99249048: ................ListPlugins.....................ListSkills......................ListAgents......................ListPeers...................!...Cancel a scheduled cron job by ID.......................List scheduled cron jobs................WaitForMcpServers.......................RefreshMcpTools.....
+
+@106605192: ................formatForUser...................listAllPeers....................ListAgentsTool..................ShareOnboardingGuideTool........I.0.....initBundledWorkflows....................ALL_AGENT_DISALLOWED_TOOLS......................ASYNC_AGENT_ALLOWED_TOOLS.......................COORDINATOR_
+
+@211262232: Agent...................TaskStop................TaskOutput......................ListAgents......................SendUserMessage.................ListMcpResourcesTool....................ReadMcpResourceTool.....................ReadMcpResourceDirTool..................mcp__...................__bash......
+
+--- needle=b'200' hits=6+ ---
+@897289: ..L..H...H.U..W....H.A.....H.A.......t.f.E.[\A..0t.A..xu4H.x80-\xbf.2f.E....EH.0200-\02H.E.f.E.77............H.200-\277H.E...........H..H...f...].H.E.H.E.H.M(D.M$.....f...|.H.u.H..H.M(H;u.......H.E.H.E.s.H..TD..H.D..H.E.H.u......1...fffff.........I..L..H.U0M...~d....;.H.U.H..H..H;U.H.U.......H.E....
+
+@897320: ......t.f.E.[\A..0t.A..xu4H.x80-\xbf.2f.E....EH.0200-\02H.E.f.E.77............H.200-\277H.E...........H..H...f...].H.E.H.E.H.M(D.M$.....f...|.H.u.H..H.M(H;u.......H.E.H.E.s.H..TD..H.D..H.E.H.u......1...fffff.........I..L..H.U0M...~d....;.H.U.H..H..H;U.H.U.......H.E.....H.E.:............Q...]w .P...;
+
+@902086: .......q!.E0\.E$..0H.u0t3..xuM.E1x80..L...f.E0[\D.M$A..0H.u0t.A..xu3f.E2x8.1.E10200.E5.......E20200A........E1200......f.E220.E40A........H.E1L..B.D.1....r...-H...2f..D..D.B.A..]w"D.A.A..;..f...I.........M.....R.....\A..0t#A..xuW.@.x.....L...1..B.....P.....a.@.0.....L...1..B.....P.........B.....P...
+
+--- needle=b'emoji' hits=6+ ---
+@69970145: pl.duployan.ebase.ecomp.egyp.egyptianhieroglyphs.elba.elbasan.elym.elymaic.emod.emoji.emojicomponent.emojimodifier.emojimodifierbase.emojipresentation.epres.ethi.ethiopic.ext.extendedpictographic.extender.extpict.gara.garay.geor.georgian.glag.glagolitic.gong.gonm.goth.gothic.gran.grantha.graphemebas
+
+@69970151: loyan.ebase.ecomp.egyp.egyptianhieroglyphs.elba.elbasan.elym.elymaic.emod.emoji.emojicomponent.emojimodifier.emojimodifierbase.emojipresentation.epres.ethi.ethiopic.ext.extendedpictographic.extender.extpict.gara.garay.geor.georgian.glag.glagolitic.gong.gonm.goth.gothic.gran.grantha.graphemebase.grap
+
+@69970166: mp.egyp.egyptianhieroglyphs.elba.elbasan.elym.elymaic.emod.emoji.emojicomponent.emojimodifier.emojimodifierbase.emojipresentation.epres.ethi.ethiopic.ext.extendedpictographic.extender.extpict.gara.garay.geor.georgian.glag.glagolitic.gong.gonm.goth.gothic.gran.grantha.graphemebase.graphemeextend.grap
+
+--- needle=b'too long to check' hits=6+ ---
+@100439048: another Claude session on this machine..................; your session list was too long to check completely, so a same-named session beyond what was searched would not have been seen.............r....Your session list was too long to check completely, so a session by that name may exist beyond what
+
+@100439191: at was searched would not have been seen.............r....Your session list was too long to check completely, so a session by that name may exist beyond what was searched...................2...your session list was too long to check completely..Q............Y..z...Remote Control is only available wi
+
+@100439326:  may exist beyond what was searched...................2...your session list was too long to check completely..Q............Y..z...Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account...p...........I.......Error: You must be logged 
+
+--- needle=b'userinfo' hits=6+ ---
+@112975296: ........................https:..................not_https.......................userinfo_or_port................untrusted_origin.................................................@.$..p..@ ....3.@...I.....3.@...I...@.L.I...@.L.E....P..@ .....A....@...G......................;...M...W...i...r...{.......
+
+@116190116: ................$...:\/\/[^\s/]*@(?=[^@\s]*(?:[/:\s]|$))....................://<userinfo>@......................................;...\b[\w][\w.+-]*@[\w.-]+:[^\s"')\]]*(?:\/[^\s"')\]]*|\.git\b).....................<url>...............6....................@...G.....,..@..@.$.F.....L.......;.@@F..`..@ .
+
+@146663952: ........................................................scheme..................userinfo................host....................port....................path....................query...................fragment........................normalization_only..........................K......................T
+
+--- needle=b'git@' hits=6+ ---
+@16252886: .I).......I...r.E....A..:/..E..T..A../fE..t;H..E1.A...L.E.L9.v(.....A.?httpt.A.?git@..]...I.....................?...H.^.H...Z...H......D.d$HL.t$@L.|$8L.l$0H......H.T$(H.L$ H.M.H..L.F.I.......f.}..........E.f..,....E...(..........H.. ............I..........ssh:A3.A..W...//..........H......H..........
+
+@110343529: ...............H...........................................................+...^git@([^:/@]+):([^/]+)\/([^/]+?)(?:\.git)?$.........................................................................V...^(https?|ssh|git):\/\/(?:[^@/?#]*@)?([^/:?#@]+(?::\d+)?)\/([^/]+)\/([^/]+?)(?:\.git)?$...............
+
+@110391961: .......@.......................................................................^git@([^:/@]+):(.+?)(?:\.git)?$................................./...........................................>...^(?:https?|ssh):\/\/(?:[^@/?#]*@)?([^/?#@]+)\/(.+?)(?:\.git)?$..................git/.........................
+
+--- needle=b'parseGitRemote' hits=6+ ---
+@106482216: isCachedGitHubRepo,...............,.....parseGitHubRepository...................parseGitRemote..................parseRepoSlug...................repoDetectionGuardsState..........,.....resolvePushRemoteUrl....................resolveRemote...................resolveRemoteUrl................setRepoDetec
+
+@110413845: ...............................................I...Cannot destructure property 'parseGitRemote' from null or undefined value...............................Local GitHub repo: unknown..............................e......................./.......................Local GitHub repo: ......................
+
+@130151173: ...............................................I...Cannot destructure property 'parseGitRemote' from null or undefined value...........................K...Cannot destructure property 'getDefaultBranch' from null or undefined value.....................HEAD....................................s........
+
+--- needle=b'repository detection' hits=0 ---
+--- needle=b'IDE diff' hits=2 ---
+@138281728: ........................y.......................t...............................IDE diff view failed: ..................error...................ide_diff_view...................ide_diff_view_failed.....................................@...@0..O.....4...5..y4.@.].@...@...E...@p\.H.....D.@ .....S....@0.
+
+@298094633: )}).catch((S)=>{if(y||t.toolUseContext.abortController.signal.aborted)return;E(`IDE diff view failed: ${S instanceof Error?S.message:String(S)}`,{level:"error"}),we("ide_diff_view","ide_diff_view_failed")}),{closeTab:b}}var Irf,Prf;var Orf=A(()=>{Hrf();tr();Ut();rf();_rr();Aft();Gl();$n();Ze();pt();
+
+--- needle=b'diff tab' hits=4 ---
+@138254744: ................u...........................................!...Failed to close diff tab in IDE: .......................error...................beforeExit......................abort............................................@Pl.....@...@.d...E.@ ..@ ..........@`..@...E...@p\.H.....D.@ .....^....@..
+
+@138258576: ................ide_close_diff_tab..........................!...Failed to close diff tab in IDE: .......................error...................ide_close_diff_tab_failed................................................@.l.@0..E.....3.@A&.\.....=.....@...@0...P..........@.V.@`..@...E...@p\.H.....D.@ .
+
+@298090280: nc function c(){if(i)return;i=!0;try{await XFa(n,u)}catch(d){E(`Failed to close diff tab in IDE: ${d instanceof Error?d.message:String(d)}`,{level:"error"})}process.off("beforeExit",c),r.abortController.signal.removeEventListener("abort",c)}r.abortController.signal.addEventListener("abort",c),proces
+
+--- needle=b'previous input' hits=0 ---
+--- needle=b'elapsed' hits=6+ ---
+@35916765: ....."H..x........H..x....t.H..........................H........H.ed_totalH.H.H.elapsed_H..H..........H......H..........H..........H.....................F...H....k.....secsH.. .......H..(...H..0.......H..........L.............H..p...H......L.. ...L.......P......p........vC.....t&...t.=....t0H..x....
+
+@35952054: .o..."H........~..H.......t.H.. .....I..............3..H........H.ed_totalH.H.H.elapsed_H..H..........H......H..........H..........H.....................m3..H...._.....secsH..........H......H..........H..........H.............H......H......L......L.......wR..............vC.....t&...t.=....t0H.......
+
+@71642336: e;.            throw error2;.          }.      }.      throw error;.    }.  let elapsed = (performance.now() - initial).toFixed(2), enableANSIColors = Bun.enableANSIColors;.  function printInitialMessage(isFirst) {.    let pathnameToPrint;.    if (servePaths.length === 1).      pathnameToPrint = ser
+
+--- needle=b'dimmed' hits=1 ---
+@295804558: ot remove colors. Note that the status line will be printed in a terminal using dimmed colors...5. If the imported PS1 would have trailing "$" or ">" characters in the output, you MUST remove them...6. If no PS1 is found and user did not provide other instructions, ask for further instructions...How
+
+--- needle=b'unrecoverable' hits=6+ ---
+@135324150: ..................active_goal.........................+...Goal cleared after an unrecoverable error (.....................i.......................): "....................". Run /goal again to continue..................warning.....................................8..................."............@.U.@
+
+@151005200: e...............................e.......................t.......................unrecoverable...........................strippable_media................compactable............................................. .....0..........@ ....3...<.@ ..D.4.XAT...;.@.^.@ ......@P4.....@pM.....@...@.4.@.4........
+
+@151113160: e is unavailable for your plan..................prompt_too_long.................unrecoverable...................strippable_media................request_too_large: .............................................toolu_[A-Za-z0-9_]+.................................)... Run /rewind to recover the conversa
+
+--- needle=b'goal clears' hits=0 ---
+--- needle=b'clears itself' hits=0 ---

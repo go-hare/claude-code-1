@@ -1,0 +1,3 @@
+OFFSET=309299895
+
+g();bhg();mB();vBt();wkc();bEt();Vgo();ras();Dt();cn();Ly();Ut();rf();iZe();q7t();S1t();yTa();Jni();dU();RS();hce=H(It(),1),FZ=H(be(),1)});function Xhg(e,t){switch(e){case"allow":return{behavior:"allow",updatedInput:t.input};case"allow-domain":return{behavior:"allow",updatedInput:t.input,permissionUpdates:t.chrome?[{type:"addRules",rules:[{toolName:vLt,ruleContent:t.chrome.host}],behavior:"allow",destination:"session"}]:[]};case"deny":return{behavior:"deny"}}}function Jhg(e){return e.showAlwaysAllow&&!e.isAskCappedByOrg&&!!e.chrome}function Hkc(LVO){let zEt=Zhg.c(26),{payload:jEt,answer:Kgo}=LVO,{verbPhrase:fl0,chrome:Sqe}=jEt,ml0;if(zEt[0]!==jEt)ml0=Jhg(jEt),zEt[0]=jEt,zEt[1]=ml0;else ml0=z

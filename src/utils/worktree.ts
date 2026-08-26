@@ -801,6 +801,59 @@ async function getOrCreateWorktree(
  * .worktreeinclude pattern explicitly targets a path inside a collapsed directory,
  * that directory is expanded with a second scoped `ls-files` call.
  */
+// densable 2.1.239 Cs — first path segment before sep.
+function firstPathSegment(s: string, sep: string): string {
+  const i = s.indexOf(sep)
+  return i === -1 ? s : s.slice(0, i)
+}
+
+// densable 2.1.239 — expand a --directory collapsed gitignored dir when a
+// .worktreeinclude pattern names it (literal / anchored glob / globstar first
+// segment) or ignore() already matches the dir.
+export function shouldExpandCollapsedWorktreeIncludeDir(
+  dir: string,
+  patterns: string[],
+  matcher: { ignores: (path: string) => boolean },
+): boolean {
+  if (
+    patterns.some(p => {
+      const normalized = p.startsWith('/') ? p.slice(1) : p
+      if (normalized.startsWith(dir)) return true
+      const globIdx = normalized.search(/[*?[]/)
+      if (globIdx > 0) {
+        const literalPrefix = normalized.slice(0, globIdx)
+        if (dir.startsWith(literalPrefix)) return true
+      }
+      let rest = normalized
+      while (rest.startsWith('**/')) rest = rest.slice(3)
+      if (rest !== normalized) {
+        const head = firstPathSegment(rest, '/')
+        const headGlob = head.search(/[*?[]/)
+        const needle = (headGlob === -1 ? head : head.slice(0, headGlob))
+          .replace(/\\/g, '')
+          .toLowerCase()
+        if (needle.length > 0) {
+          const segs = dir
+            .slice(0, -1)
+            .split('/')
+            .map(s => s.toLowerCase())
+          if (
+            headGlob === -1
+              ? segs.includes(needle)
+              : segs.some(s => s.startsWith(needle))
+          ) {
+            return true
+          }
+        }
+      }
+      return false
+    })
+  ) {
+    return true
+  }
+  return matcher.ignores(dir.slice(0, -1)) || matcher.ignores(dir)
+}
+
 export async function copyWorktreeIncludeFiles(
   repoRoot: string,
   worktreePath: string,
@@ -848,32 +901,12 @@ export async function copyWorktreeIncludeFiles(
   // Edge case: a .worktreeinclude pattern targets a path inside a collapsed dir
   // (e.g. pattern `config/secrets/api.key` when all of `config/secrets/` is
   // gitignored with no tracked siblings). Expand only dirs where a pattern has
-  // that dir as its explicit path prefix (stripping redundant leading `/`), the
-  // dir falls under an anchored glob's literal prefix (e.g. `config/**/*.key`
-  // expands `config/secrets/`), or the dir itself matches a pattern. We don't
-  // expand for `**/` or anchorless patterns -- those match files in tracked dirs
-  // (already listed individually) and expanding every collapsed dir for them
-  // would defeat the perf win.
-  const dirsToExpand = collapsedDirs.filter(dir => {
-    if (
-      patterns.some(p => {
-        const normalized = p.startsWith('/') ? p.slice(1) : p
-        // Literal prefix match: pattern starts with the collapsed dir path
-        if (normalized.startsWith(dir)) return true
-        // Anchored glob: dir falls under the pattern's literal (non-glob) prefix
-        // e.g. `config/**/*.key` has literal prefix `config/` → expand `config/secrets/`
-        const globIdx = normalized.search(/[*?[]/)
-        if (globIdx > 0) {
-          const literalPrefix = normalized.slice(0, globIdx)
-          if (dir.startsWith(literalPrefix)) return true
-        }
-        return false
-      })
-    )
-      return true
-    if (matcher.ignores(dir.slice(0, -1))) return true
-    return false
-  })
+  // that dir as its explicit path prefix, an anchored glob's literal prefix,
+  // a globstar whose first literal segment lands in the dir (2.1.239), or the
+  // dir itself matches a pattern.
+  const dirsToExpand = collapsedDirs.filter(dir =>
+    shouldExpandCollapsedWorktreeIncludeDir(dir, patterns, matcher),
+  )
   if (dirsToExpand.length > 0) {
     const expanded = await execFileNoThrowWithCwd(
       gitExe(),

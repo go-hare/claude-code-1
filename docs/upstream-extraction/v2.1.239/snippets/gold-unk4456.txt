@@ -1,0 +1,1321 @@
+#### "organization policy check" count=0 []
+#### "organization policy" count=3 [185574005,321688044,326596774]
+--- 185574005 ---
+...	...A...Cannot destructure property 'reason' from null or undefined value...............	.......NPL.....
+...............................	...(...Git is required to install marketplaces.........	...+...Please install git and restart Claude Code......................	...B...Your organization policy does not allow any external marketplaces...............	.......Contact your administrator......................	...<...Your organization restricts which marketplaces can be added.............	...7...Switch to the Marketplaces tab to view allowed sources..................	... ...Failed to load marketplace data.........	.......Check your network connection...................	...,...All available plugins are already installed.............	...5...Check for new plugins later or add more marketplaces....................	...5...All available plugins are installed for this project............	...,...Use the Browse tab to install at user scope.....................	...3...Add a marketplace first using the Marketplaces tab..............	.......No plugins available...............................................................=.....C!L..@=...|...N.......4..`........4......pU.....@`4E.......H......<.....@`4H......................<..`....... E.......4...........4..`........4......pU.....@`4_.......b......<.....@`4 ......................<..`....... E.......4...........4..`........4......pU.....@`4Y.......\......<.....@`4T........L.............<..`....... E.......4...........4..`........4......pU.....@`4 .......@......<.....@`4 ......................<..`....... E.......4...........4..`........4......pU.....@`4I.......L......<.....@`4R........L.............<..`....... E.....
+--- 321688044 ---
+ is required to install marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Please install git and restart Claude Code."})]}),dbn[0]=kJ;else kJ=dbn[0];return kJ}case"all-blocked-by-policy":{let kJ;if(dbn[1]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization policy does not allow any external marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Contact your administrator."})]}),dbn[1]=kJ;else kJ=dbn[1];return kJ}case"policy-restricts-sources":{let kJ;if(dbn[2]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization restricts which marketplaces can be added."}),Pu.jsx(v,{dimColor:!0,children:"Switch to the Marketplaces tab to view allowed sources."})]}),dbn[2]=kJ;else kJ=dbn[2];return kJ}case"all-marketplaces-failed":{let kJ;if(dbn[3]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Failed to load marketplace data."}),Pu.jsx(v,{dimColor:!0,children:"Check your network connection."})]}),dbn[3]=kJ;else kJ=dbn[3];return kJ}case"all-plugins-installed":{let kJ;if(dbn[4]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"All available plugins are already installed."}),Pu.jsx(v,{dimColor:!0,children:"Check for new plugins later or add more marketplaces."})]}),dbn[4]=kJ;else kJ=dbn[4];return kJ}case"all-plugins-project-installed":{let kJ;if(dbn[5]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"All available plugins are installed for this project."}),Pu.jsx(v,{dimColor:!0,children:"Use the Browse tab to install at user scope."})]}),dbn[5]=kJ;else kJ=dbn[5];return kJ}case"no-marketplaces-configured":default:{let kJ;if(dbn[6]===ue)kJ=Pu.
+#### "org policy" count=20 [115309456,115309524,148856800,161741921,179893955,182965420,230389110,230573794,264843972,299189054,303455515,303509927,303510180,304189141,304189189,312580448]
+--- 115309456 ---
+................................	.......DISABLE_GROWTHBOOK..............	.......tengu_ccr_bridge................	...2...Connected to the Anthropic API (api.anthropic.com)..............	...6...Not connected to the Anthropic API (api.anthropic.com)..........	...1...Not disabled by org policy (disableRemoteControl)...............	...-...Disabled by org policy (disableRemoteControl)...........	.......Signed in to claude.ai..........	.......Not signed in to claude.ai..............	.......claude.ai subscription active...........	...&...claude.ai subscription auth not active..........	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disabled........	.......disabled by ............	...'...Remote Control enabled for this account.........	...+...Remote Control not enabled for this account.............	...1...Remote Control availability could not be verified...............	.......no server response this session.....................................................N...................4.....`........T....(..............,....D.......D........@`T.S....@........<.......;...........<.......<.......<.....R!T...[...............<.......<....
+--- 115309524 ---
+....	.......tengu_ccr_bridge................	...2...Connected to the Anthropic API (api.anthropic.com)..............	...6...Not connected to the Anthropic API (api.anthropic.com)..........	...1...Not disabled by org policy (disableRemoteControl)...............	...-...Disabled by org policy (disableRemoteControl)...........	.......Signed in to claude.ai..........	.......Not signed in to claude.ai..............	.......claude.ai subscription active...........	...&...claude.ai subscription auth not active..........	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disabled........	.......disabled by ............	...'...Remote Control enabled for this account.........	...+...Remote Control not enabled for this account.............	...1...Remote Control availability could not be verified...............	.......no server response this session.....................................................N...................4.....`........T....(..............,....D.......D........@`T.S....@........<.......;...........<.......<.......<.....R!T...[...............<.......<....,........@.\s....@...@.Ti....@...@.T.@...@.TN....@...@.T[....@...@.T
+#### "policy check" count=10 [120231848,206203704,206204248,206204320,303509832,305480326,328285489,328285847,328285984,328286051]
+--- 120231848 ---
+..................6.....	.......(.E.....I...............	.......error...........	...+...Iterator result interface is not an object..............	.......half....1...............	.......malformed request: .............	.......deny....................................	.......sandbox policy check failed: ...........	.......allow...........	.......[request-filter] allow .........	....... ......................................................."....@...G...@@......@ ..H...R.4.@PM.H...U.4...1C......<.....@`4.....@.<.@0............K.@.;.@`E.C.L..1l.@ -.E...@p4...K...,.......4.@.4...K.@.<.D...BA4..P;...L...l....#........@....`........4.@.4.....@.<.@...@@D.C.L..1l.@ -.C...%1l.@pw.@@..@.<.....@ ..@.....4.@ ......@.l.@P....K...AR....@...H...@.l.@@..@ ..@ ........T.@ ..@....`2.@.-.H.4.B.4.."<.HdT.@.T.H...B.4.@@,.@@........$.@ ..@ ......@PV.@ ..C..F....@...H...@...@@..I...@.L.G....r4.."<..dT.@.,.G.....U.@...@PL.....@`..@P..@@..@ ..@ ..G.....L......pU.@ ..@ ......@p,.H...B.4.@@,.@@........$.@ ..@ .........>...........................T...W...u...y.......F...I.......................I...v...|...................U...\..._...................................................h.5.....................P.F.....................p.<.......................F......................................................................X......................`y6.....................8...............................................(.6.....................P.J.......................C.......................I.....................X.......................0l......................p&6......................&6.......................I.......................E.....................h./.............................
+--- 206203704 ---
+................	.......r...............	.......POST............	.......application/json................................	.......[^\x21-\x7e]............	...............	.......n...............	.......policy webhook timed out........................	.......warn............	...&...policy check failed: webhook returned ..........	...'...policy webhook returned a non-OK status.................	.......object..................	...-...policy webhook returned a non-object decision...........	.......boolean.........	.......o...............	...2...policy webhook decision has no boolean block field..................P...p.o.l.i.c.y. .c.h.e.c.k.:. .w.e.b.h.o.o.k. .d.e.c.i.s.i.o.n. .h.a.s. .n.o. .b.o.o.l.e.a.n. .b.l.o.c.k. .f.i.e.l.d. ..  .a.l.l.o.w.i.n.g. .(.f.a.i.l.-.o.p.e.n.).........	.......decision_shape..........	.......policy check failed: ...........	.......engine_error............	.......policy check unavailable................	...
+...policy_hit..............	.......string..............................................q...................q........@ .KD...@...@@..D...HA4.T.d.....@...E...@.d.F...@.e.H...@.d.....@.o........_....@...C...@.L.E....QL...4..$<..eT...T.@ ..G.....hB....@.,.k.........>.@...E....Q4M........@`5.@.$.H...@.4.C...@.T.q.....?.@p..@...F.....K.@...@...v..A.....`?....`.......b....@.,.R.4..pf.. ..@ ........q.@...@...@ ..D...@`4.@...E...@p4.@ ..~0.G....@.L.P.4.@.=.F.....3.@.6.@ ..D...@`4.@`..G...@Pm.G....r4...)...'.@ ..G.....3...L.@ ..E...@p4.@ ..@...H...@Pm.H...L...@.\................!.......!...................f...x...~...................0...6...i...............................M...].......................................0.......................
+#### "rejected by an organization" count=0 []
+#### "re-sent before" count=0 []
+#### "resent before" count=0 []
+#### "before the rejection" count=0 []
+#### "policy_violation" count=0 []
+#### "policy-violation" count=0 []
+#### "organization_policy" count=0 []
+#### "org_policy" count=6 [113791032,115352952,119945184,303661667,304195444,305437660]
+--- 113791032 ---
+................................................................................ ...............
+..............P...............`...............x.......................................	...............	.......plan_unreadable.........	.......policy_unavailable..............	.......org_policy_unverifiable.........	...
+...org_denied..............	...
+...cache_miss......................._..i.i.i.i.i.i.`...............................(.......................................................................	...>...Artifacts can't check the signed-in Claude account's organization settings from this session: the account belongs to a Claude organization (Team or Enterprise), and this session's API access uses a different credential that can't read those settings. Run /login with a personal Claude account (Pro or Max), then retry...........	.......The signed-in Claude account's plan couldn't be read from this session. Run /login again to refresh the signed-in account, then retry...........	...q...Artifacts are disabled by your organization's policy. Contact your organization admin to enable them, then retry................	...f...Couldn't verify your organization's policy for artifacts. Check your network connection and try again...........	.......Artifacts can't check the organization settings that apply to this session: the session's configuration (such as a custom ANTHROPIC_BASE_URL) prevents the policy lookup. Remove that configuration, then retry.
+........................................@......................
+............................\...........\.......\...].......H..H.......................@,......................(,......h...............................
+--- 115352952 ---
+................................................................................................................................	...
+...remote_env......................	.......persistent_remote_session...............	.......remote_control_at_startup.......
+...............	...
+...org_policy..............	.......tengu_cobalt_harbor.............	...
+...growthbook.................................................$............@............@ >.....@.E..P.............0...J...\...z............................m...............................................................................................	......................(...................#~6..........~6...../~6.:~6......H..H.......................................................h................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................i..................................................................................;~6.........#~6.....G~6.R~6......H..H.......................P_	.....................8_	.....h...............................................................................................................................................................................................................................
+#### "POLICY_BLOCKED" count=18 [134780776,135683944,184704432,201524040,202170784,203772472,203787416,281219672,281220264,309436731,309616619,318097992,321560109,321561283,326775481,326901070]
+--- 134780776 ---
+
+.	...
+.
+...Q...................F.................
+....Q..	...F....
+.............i.....p...............h...............`...............h...............p.......................................................
+...............	.......policy..........	.......failed..........	.......POLICY_BLOCKED..........	.......DISABLED.................... ......................%.@ ..@ ........<......!<..%5.@`4.......e......!<..%5.@`4.....@P,...$.@ ..@ .......R<..cT...,.@...@pe.@.4...$..@..@..ql..........Q...S...........................	...................................................8.......................H.......................h|X.......................X.....................8.........................e.............................................0.Y.....................H.c.....................`.W......................6................................................S.................................................Aw..{.......{.......Aw..Fw.......D..H.......................................................x.......................................@...............................................................P.Y......gW..............................................................................................................................................................................................................................................................................................................................................................................................................................................................i......................
+...................................................h........w..+*.......w.......w..fx..
+--- 135683944 ---
+
+.	...
+.
+...Q...................F.................
+....Q..	...F....
+.............i.....p...............h...............`...............h...............p.......................................................
+...............	.......policy..........	.......failed..........	.......POLICY_BLOCKED..........	.......DISABLED.................... ......................%.@ ..@ ........<......!<..%5.@`4.......e......!<..%5.@`4.....@P,...$.@ ..@ .......R<..cT...,.@...@pe.@.4...$..@..@..ql..........Q...S...........................	...................................................8%......................H......................h.J......................#K...............................................X.............................................0VK.....................H'V.....................`.I......................n................................................E......................I...........................5..{.......{........5...5.......D..H.......................................................x.......................................@...............................................................P.K.......I..............................................................................................................................................................................................................................................................................................................................................................................................................................................................i......................
+...................................................o.......n6..E"......\6.......6...7..
+#### "policy_hit" count=2 [206204368,328286165]
+--- 206204368 ---
+c.i.s.i.o.n. .h.a.s. .n.o. .b.o.o.l.e.a.n. .b.l.o.c.k. .f.i.e.l.d. ..  .a.l.l.o.w.i.n.g. .(.f.a.i.l.-.o.p.e.n.).........	.......decision_shape..........	.......policy check failed: ...........	.......engine_error............	.......policy check unavailable................	...
+...policy_hit..............	.......string..............................................q...................q........@ .KD...@...@@..D...HA4.T.d.....@...E...@.d.F...@.e.H...@.d.....@.o........_....@...C...@.L.E....QL...4..$<..eT...T.@ ..G.....hB....@.,.k.........>.@...E....Q4M........@`5.@.$.H...@.4.C...@.T.q.....?.@p..@...F.....K.@...@...v..A.....`?....`.......b....@.,.R.4..pf.. ..@ ........q.@...@...@ ..D...@`4.@...E...@p4.@ ..~0.G....@.L.P.4.@.=.F.....3.@.6.@ ..D...@`4.@`..G...@Pm.G....r4...)...'.@ ..G.....3...L.@ ..E...@p4.@ ..@...H...@Pm.H...L...@.\................!.......!...................f...x...~...................0...6...i...............................M...].......................................0.................................................&.....................`;y.....................0"........................=......................!......................`....................... ?..............................................x.&.....................pR......................X!......................0................................................ ......................P6........................................................................%.....................8.#.....................@A......................P.................................................'......................-........................!.............................................................
+--- 328286165 ---
+boolean block field \u2014 allowing (fail-open)"),f("decision_shape"),null}}catch(m){if(cd("warn",`policy check failed: ${le(m)}`),o)return i(s.sub,l,"engine_error","policy check unavailable",c.path,u,d);return f("engine_error"),null}if(p.block!==!0)return null;return i(s.sub,l,"policy_hit",typeof p.reason==="string"&&p.reason.length>0?vIT(p.reason):wn_,c.path,u,d,typeof p.rule_id==="string"?p.rule_id:void 0)}}}var wn_="blocked by your organization's policy",Sn_=500;var An_=A(()=>{st();wr();OBs();Mpe();WIt()});function Tn_(e){let t=e.oidcConfigured?`# Claude Code gateway protocol
+
+This is the wire contract the Claude Code CLI uses to talk to this gateway:
+sign-in, inference, managed settings, and telemetry. It's served from the
+gateway itself so it always matches the version you're running.
+
+> **Stability:** this protocol exists to give you a more stable target than
+> proxying raw CLI traffic. Auth is standard OAuth 2.0, inference is the
+> Messages API, and headers are the lowest common denominator across
+> backends. We keep it backwards compatible within reason to support older
+> clients, but not forever \u2014 expect changes, managed settings in particular,
+> with notice.
+
+A developer points Claude Code at your gateway's base URL via \`/login\` and
+the client does the rest. All paths below are relative to that base URL, and
+the client does not follow cross-origin redirects.
+
+## Flow
+
+1. Client fetches \`GET {base}/.well-known/oauth-authorization-server\`.
+2. On first contact, client fingerprints your TLS certificate and asks the
+   user to trust it.
+3. Client runs the RFC 8628 device flow: \`POST device_authorization_endpoint\`
+   -> user approves in
+#### "policy_blocked" count=20 [139598416,139637808,161129368,173033716,173152503,173152668,173723360,175280888,185625495,185676208,197429528,197438672,198059864,198067936,198073536,198075488]
+--- 139598416 ---
+........	...............................	........m......................I...............)...............................I.......................
+...............(.......................................(y......	.......................	.......allow_remote_sessions...........	.......policy_blocked..........	.......bg_remote_eligibility_check.............	.......n...............	.......t...............................	...+...Iterator result interface is not an object......................	......not_logged_in...........	.......r.......................	.......e...............	.......tengu_ccr_bundle_seed_enabled...........................	.......not_in_git_repo.........	......no_git_remote...................	.......github_app_not_installed............................................h...
+...............-............@ V.E....Q....-.....@ /..q........4.@ .......`<.@ .......RkV......L...l....#........@0..@ ..E....Q....>.@ ..@ .....J....E....Q... ......C!<.@.3...D.@ ....K.@`T..pK.@P=.....@.=.E....QT.@.W.@@..Q...@@M.R.....M....4....@ .....3....E...@0...@........i.@.?..@..@ ...@........;...;.@.6.@.$.E....Q..@0>..@..@ ..E.....3...m.@ ..F...@.4.E....`3.....M...@.L.E...@ ..J....1a.@./.G.....L......p>.@...C....14...1.@ /2.......T....@..C.......T....@P.!....@`.............;...e...|...............2..._...e...j...............@...................A.......................d...|...............................................%.......................................................................X.......................pi.......................Y......................................................................8.......................x.......................................
+--- 139637808 ---
+................ ......................_.......P...............h...............x.......................................]...............	.......github_app_not_installed........	.......not_in_git_repo.........	......not_logged_in...........	......no_git_remote...........	.......policy_blocked..........h.............._..i................j...i.i.......H........................j...F.......................j...i.i.i.................................................(............................... ...............h.......................................	...H...Please run /login and sign in with your Claude.ai account (not Console).........	...0...Cloud agents require a git repository (checked: ........	.../...). Initialize git or run from a git repository..........	...T...Cloud agents require a GitHub remote. Add one with `git remote add origin REPO_URL`.............	.......Couldn't verify the Claude GitHub app on this repository (the check failed in a way that may be temporary). Retry in a moment; if it persists, install the app:
+........	...B...The Claude GitHub app must be installed on this repository first.
+..............	...j...Cloud sessions are disabled by your organization's policy. Contact your organization admin to enable them.......
+........................................@...E.......@.t.D.......@...J.........dK...........
+.......!...#...,...H...b...d...f...........................................P........................vk......................E..........7...............................;........H..H.......................Hl......................0l......h........................................H.....................................................
+#### "blocked_by_policy" count=2 [311390118,311433548]
+--- 311390118 ---
+erdict === false) banner.hidden = true;
+          return;
+        }
+        if (ev.type === 'error') {
+          var code = ev.error ? ev.error.code : undefined;
+          switch (code) {
+            case 'needs_reauth':
+            case 'server_not_connected':
+            case 'blocked_by_policy':
+            case 'approval_required':
+            case 'not_in_manifest':
+            case 'not_granted':
+            case 'capability_disabled':
+            case 'capability_removed':
+            case 'selection_required':
+            case 'server_not_found':
+              banner.hidden = true;
+              denied = true;
+              if (typeof stop === 'function') { stop(); stop = null; }
+              return;
+            default:
+              return;
+          }
+        }
+      },
+      { refetchInterval: 120000, cache: { staleTime: 60000 } }
+    );
+    /* A denial delivered synchronously during watchTool() runs before \`stop\`
+       exists; the flag carries that cancel across the assignment. Nulling
+       after every stop() makes the cancel single-shot even if the runtime
+       delivers another denial to an already-dead watch. */
+    if (denied && typeof stop === 'function') { stop(); stop = null; }
+  }).catch(function () {
+    return;
+  });
+})();
+</script>
+
+<!-- DECISIONS ISLAND (publish-time data island). Fill ONLY the values, per SKILL.md \xA7 Step 3c:
+     one entry per "Needs your call" item \u2014 id (the concern's id, e.g. "q1"), opts (the pill
+     tokens in order: "opt1".."optN" then "skip"), state "open", choice null. Identifier
+     tokens only (grammar ^[a-z0-9-]{1,24}$) \u2014 NEVER PR title, prose, pill labels, or URLs.
+     When the
+--- 311433548 ---
+remedy (the author republishes) is the opposite of a policy denial's, so it gets
+           its own note. */
+        return ['denied', isWrite ? 'blocked' : 'unavail'];
+      case 'server_not_connected':
+      case 'server_not_found':
+      case 'selection_required':
+      case 'blocked_by_policy':
+      case 'approval_required':
+      case 'not_granted':
+      case 'capability_disabled':
+      case 'capability_removed':
+      case 'bad_request':
+      case 'transform_error':
+        return ['denied', 'unavail'];
+      case 'tool_error':
+        return ['denied', isWrite ? 'refused' : 'unavail'];
+      default:
+        return isWrite ? ['denied', 'unclear'] : ['retry', 'precheck'];
+    }
+  }
+
+  btn.addEventListener('click', function () {
+    if (!mcp) return;
+    if (state !== 'ready' && state !== 'retry') return;
+    if (moved || banner.hidden === false) {
+      render();
+      return;
+    }
+    settle('checking', null);
+    mcp.callTool(server, live.tool, liveInput, { cache: { refresh: true } })
+      .then(function (readResult) {
+        var sha = walk(readResult ? readResult.payload : undefined, shaPath);
+        if (sha === null || !HEX40.test(sha)) {
+          settle('retry', 'precheck');
+          return;
+        }
+        if (sha.toLowerCase() !== anchorSha) {
+          moved = true;
+          settle('ready', null);
+          return;
+        }
+        settle('busy', null);
+        return mcp.callTool(server, stamp.tool, stampInput).then(
+          function (writeResult) {
+            var outcome = walk(writeResult ? writeResult.payload : undefined, statePath);
+            if (outcome === 'APPROVED') {
+              settle('done', 'done');
+     
+#### "blocked by your organization" count=20 [104908912,124997366,127061368,129162989,129163141,129163284,173034509,173034636,173075229,173077665,173152421,173152596,173201653,238406695,304973858,307020692]
+--- 104908912 ---
+size:22px}}
+.................... ..%.%.%.%.%.%.%
+..%.%.%.%.%.%.%.%.%
+. . ..%.% ..%.%............I./.....https://api.anthropic.com./.................$...event: ping
+data: {"type": "ping"}
+
+............	......./v1/organizations/spend_limits..........	.......fanout..........	...%...blocked by your organization's policy...Z...............	A......x-request-id............I.0.2...cloud session was archived before producing output..............	.......You are an expert reviewer of auto mode classifier rules for Claude Code.
+
+Claude Code has an "auto mode" that uses an AI classifier to decide whether tool calls should be auto-approved or require user confirmation. Users can write custom rules in four categories:
+
+- **allow**: Actions the classifier should auto-approve
+- **soft_deny**: Destructive/irreversible actions the classifier should block unless clear user intent authorizes them
+- **hard_deny**: Security-boundary actions the classifier should block unconditionally (user intent does not clear these)
+- **environment**: Context about the user's setup that helps the classifier make decisions
+
+Your job is to critique the user's custom rules for clarity, completeness, and potential issues. The classifier is an LLM that reads these rules as part of its system prompt.
+
+For each rule, evaluate:
+1. **Clarity**: Is the rule unambiguous? Could the classifier misinterpret it?
+2. **Completeness**: Are there gaps or edge cases the rule doesn't cover?
+3. **Conflicts**: Do any of the rules conflict with each other?
+4. **Actionability**: Is the rule specific enough for the classifier to act on?
+
+Be concise and constructive. Only comment on rules that could be improved. If 
+--- 124997366 ---
+.......................................................................................................................................................................................j...i...... ...............0.......................	......Plugins from ...........	......./ are blocked by your organization's managed settings (strictKnownMarketplaces or blockedMarketplaces). Ask your administrator to add {"source":"skills-dir"} to strictKnownMarketplaces, or remove it from blockedMarketplaces..................................@.%........p.........a.....9.....a.:.....a...a......H..H.......................X.e.....................@.e.....h...................................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...................................................................................................................................P......................................................................................................................................./..................................K........F........i..0...............@...............8.......................	.......policySettings..
+.........................................................%U........&...)........................>t.....................x...........p.........a.3.........a.....$.a...a......H..H.......................(.i.......................i.....h.......................................0.............................................................................................
+#### "blocked by organization" count=0 []
+#### "violates your organization" count=0 []
+#### "violates organization" count=0 []
+#### "content_policy" count=0 []
+#### "output_blocked" count=0 []
+#### "request_blocked" count=0 []
+#### "isPolicyError" count=0 []
+#### "isOrgPolicy" count=0 []
+#### "orgPolicyReject" count=0 []
+#### "organization_disabled" count=3 [230995480,230995816,303606871]
+--- 230995480 ---
+	.......invalid_request_error...........	.......authentication_error............	.......permission_error........	.......not_found_error.........	.......rate_limit_error........	.......ip_not_in_allowed_range.........	..."...claude_code_key_creator_not_member..............	.......organization_disabled...........	.......restricted_regime_endpoint..............	..."...oauth_not_allowed_for_organization......................P...............h.......................................................................	.......ip_not_in_allowed_range.........	..."...claude_code_key_creator_not_member..............	.......organization_disabled...........	.......restricted_regime_endpoint..............	..."...oauth_not_allowed_for_organization......
+.................................................p.......P,......`d..0.E..........;L......|*.......N......|...,m......|...,..............................(....................../......................h.'..............................................#%.....................8........................u......................P....................... ........................D......................................	.......monitoring_notice...............@...........u.-.....C.......C...u.-...-......D..H.......................................................h........................................H..........................................................................................*.......3...................2...h...h...h...h...h...h...h...h...h...h...h.................................................................................................. ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ...................
+--- 230995816 ---
+e_endpoint..............	..."...oauth_not_allowed_for_organization......................P...............h.......................................................................	.......ip_not_in_allowed_range.........	..."...claude_code_key_creator_not_member..............	.......organization_disabled...........	.......restricted_regime_endpoint..............	..."...oauth_not_allowed_for_organization......
+.................................................p.......P,......`d..0.E..........;L......|*.......N......|...,m......|...,..............................(....................../......................h.'..............................................#%.....................8........................u......................P....................... ........................D......................................	.......monitoring_notice...............@...........u.-.....C.......C...u.-...-......D..H.......................................................h........................................H..........................................................................................*.......3...................2...h...h...h...h...h...h...h...h...h...h...h.................................................................................................. ... ... ... ... ... ... ... ... ... ... ... ... ... ... ... ...........................................................................................................................................................................!........................!..........................................................!..........................
+.................	.
+...................
+...............................
+#### "permission_error" count=20 [123064952,123105566,142195512,142725376,142725416,175272912,230995016,230995288,260266088,260266608,300287784,300288352,300292168,303606746,306338753,306343863]
+--- 123064952 ---
+........................................................................................................................................................	.......ENOENT..........	.......EISDIR..........	.......ENOTDIR.
+...............	.......EACCES..........	... ...tengu_claude_md_permission_error................................	.......context_claude_md_load..........	.......read_eacces.............	.......read_failed..............................................@.$.@.$.@.$.@.5.@.$E....@...I.....4.......;ZL...@..d......,.....@p<.@ %.Q...@0M.T....p5.....@0?.Q...@0M.T....p5................................]...b...e...p............................................................................................Q.......................................................................V......................x.......................8.......................h...............	.......is_access_error.........	.......has_home_dir............	.......memoryReadEacces........	.......memoryReadFailed............?3W..
+..
+...-3W.....Q3W.[5W.....	H..H.......................................................h.......................................p,
+.........................................................................$...............................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...............................................................................................................................................(...............................
+...............
+...............................................................................................................................................
+--- 123105566 ---
+..	.......w...............................	.......T...............	.......r...............	.......o.......................	........md.....................	.......rules...................	...+...Iterator result interface is not an object..............	...&...tengu_claude_rules_md_permission_error..........................	.......context_claude_md_load..........	.......rules_walk_failed.......................................................
+................@Pl.D...@`4.C..-..............?.@ ..@ ..............@ ....3...T.@ ....3..pT.@ ....3..pT.@ ....3.@...D...@`4.C...@P,.@ 4.D...@`4.C.3.@.,.@@........<.....@.T.@...F...@.4.........B.4...T.@ ....3.@...@ 4.@.\.@04.@.\.@@......@.$.@....`......@.|6....@...H...@.4.C.3......P..@ ......@.<.@.$.@.$.@.e.....@.,.......L....,............@p4.@ ..E.....3...?.@ ..@ ..................@p4.@0..@ ..E.....3.@ =.@@........$.@ ..@ .......@m.@ ....3...T.@ ....3..pl.@ ....3..pl.@ ....3.@@m.@.4.E...@p4...3.....@ ..L...B.4.@@L.L...B.4.@`<.@ ..G....r4.@@L.G....r4.@`<.....@.$.@04..@4.@ ..E.....3.@.T..P........4.....@p<.H.....3.@...E.....Z.@.n.H.....3.@...E...@ ..@`......@.$..P......@p4.@ ..E.....3...:.@P&..`..@ ....3.@.l.E.... 5.@...@pL.@...@ ..@ ..@...@...@0..@.<.H...@ e.@...@@......@p$.......tP.....p..............@.\.@0..E....Q4...L.@.l.....@.$..P......@p4.@ ..E.....3...:.@P&..`..@ ....3...m.@ ..@ 4.@ ..@ ..@...@0..@.<.H.....d.....@.M..d.R..... .,....@...E...@.4.G....rT...;............a....@...@.T.@...E...@.\.H...I.4...L.@.TK....@...I.....4.......;`....@..j......,.....@.<.J...@.L.M.....5....e.....D......@..............T...............Q...........K...S...............c......................................................./...5...:.
+#### "x-should-retry" count=20 [142743192,158159544,158223456,206161504,213558024,260275496,260276752,301021215,310725132,310738125,315012389,315020769,328279597,328285000,328295356,328296382]
+--- 142743192 ---
+equired.........	...3...anthropic-ratelimit-unified-overage-disabled-reason.............	.......fetch_error.............	.......org_level_disabled_until................	......."type":"overloaded_error"...............................	.......proxy-authenticate..............	.......x-should-retry..........	.......true............	.......false...................	.......BedrockUnexpectedContentType............	.......TestEgressBlocked..........................................................................$.@ ......@.e.G...@.U.F....aL..sL...L.@@~.H...M.L...4.	&<.^.L.@.V.H...M.L...4.	&<.[.L.@Pn.H...E.L..SL.@.g.....@@%....A......4.@ .......0e......pT.@ .......0e.@ ......@.e.H...J.L...L...f.@ ....... e......`T.....!T.@.M.G.... U.@ .......Pe......`T.....@`T.G.... U.@ .......@e.....@PT.G...@.e.G.... U.......T.@ ..H...E.L..SL...k.@.?.H...E.L..SL.@pe...$......pT......pT.@ ......@ e.@0=.G.....3.@@=.G.....2.@.N.....B.....t.@ ......@.<..P......@`4.E.....3.@`e.F...@P..F...@@..G...@P].G...@.e.G...@.e.G.....U.......<.@ ......@.e.G....pU.......;...4......pT.@ ......@.L.G...@.L.G....P3........!...#...-...P...S...W..........................................*...,...I...K...g...i..................................."...,...I...K...e...o...q...{...................................!...>...@...D...^...c...~...............................................................................4...Q...S...]...............................).......................8vf......................)...................... &.......................X...............................................................................................
+.......................P.......................(e.............
+--- 158159544 ---
+d. .t.h.e. .r.e.t.r.y. .w.i.t.h.o.u.t. .i.t. .s.u.c.c.e.e.d.e.d. ..  .d.r.o.p.p.i.n.g. .t.h.e. .b.e.t.a. .f.o.r. .t.h.e. .r.e.s.t. .o.f. .t.h.e. .s.e.s.s.i.o.n.........	.......warn............	.......permission_auto_mode_classifier.........	...	..._rejected...............	.......x-should-retry..........	.......false...........	.......tengu_auto_mode_beta_latch..............	.......http_400_no_retry...............	.......http_400....................%......................T.....@p<.\...@P^._.....6.....@p4.@.......@P........,.@p....i.@./.....B...@P\.H...E.L..SL.@.......@ ..P.....3..`n.@ ..P.....3...n.@ ....[.,...@.l........*...,...............L...Q...T........................V}.....................X.......................0.x......................b......................8.o.....................x\......................$i.....................H.y...............................................y......................*m.......................s.......................k......................:|.......................k.......................O.............	.......controlMonitorsBetaRejected.....P....I......@...................R...........	H..H.........................n.......................n.....h...................................................................................................................$...................	..........................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...x...x...........................................................................................................................(.......X...............(.......	...............	.......................................
+#### "x-should-retry" count=20 [142743192,158159544,158223456,206161504,213558024,260275496,260276752,301021215,310725132,310738125,315012389,315020769,328279597,328285000,328295356,328296382]
+--- 142743192 ---
+equired.........	...3...anthropic-ratelimit-unified-overage-disabled-reason.............	.......fetch_error.............	.......org_level_disabled_until................	......."type":"overloaded_error"...............................	.......proxy-authenticate..............	.......x-should-retry..........	.......true............	.......false...................	.......BedrockUnexpectedContentType............	.......TestEgressBlocked..........................................................................$.@ ......@.e.G...@.U.F....aL..sL...L.@@~.H...M.L...4.	&<.^.L.@.V.H...M.L...4.	&<.[.L.@Pn.H...E.L..SL.@.g.....@@%....A......4.@ .......0e......pT.@ .......0e.@ ......@.e.H...J.L...L...f.@ ....... e......`T.....!T.@.M.G.... U.@ .......Pe......`T.....@`T.G.... U.@ .......@e.....@PT.G...@.e.G.... U.......T.@ ..H...E.L..SL...k.@.?.H...E.L..SL.@pe...$......pT......pT.@ ......@ e.@0=.G.....3.@@=.G.....2.@.N.....B.....t.@ ......@.<..P......@`4.E.....3.@`e.F...@P..F...@@..G...@P].G...@.e.G...@.e.G.....U.......<.@ ......@.e.G....pU.......;...4......pT.@ ......@.L.G...@.L.G....P3........!...#...-...P...S...W..........................................*...,...I...K...g...i..................................."...,...I...K...e...o...q...{...................................!...>...@...D...^...c...~...............................................................................4...Q...S...]...............................).......................8vf......................)...................... &.......................X...............................................................................................
+.......................P.......................(e.............
+--- 158159544 ---
+d. .t.h.e. .r.e.t.r.y. .w.i.t.h.o.u.t. .i.t. .s.u.c.c.e.e.d.e.d. ..  .d.r.o.p.p.i.n.g. .t.h.e. .b.e.t.a. .f.o.r. .t.h.e. .r.e.s.t. .o.f. .t.h.e. .s.e.s.s.i.o.n.........	.......warn............	.......permission_auto_mode_classifier.........	...	..._rejected...............	.......x-should-retry..........	.......false...........	.......tengu_auto_mode_beta_latch..............	.......http_400_no_retry...............	.......http_400....................%......................T.....@p<.\...@P^._.....6.....@p4.@.......@P........,.@p....i.@./.....B...@P\.H...E.L..SL.@.......@ ..P.....3..`n.@ ..P.....3...n.@ ....[.,...@.l........*...,...............L...Q...T........................V}.....................X.......................0.x......................b......................8.o.....................x\......................$i.....................H.y...............................................y......................*m.......................s.......................k......................:|.......................k.......................O.............	.......controlMonitorsBetaRejected.....P....I......@...................R...........	H..H.........................n.......................n.....h...................................................................................................................$...................	..........................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...x...x...........................................................................................................................(.......X...............(.......	...............	.......................................
+#### "shouldRetry===false" count=0 []
+#### "shouldRetry=!1" count=0 []
+#### "function Cew" count=1 [310737348]
+--- 310737348 ---
+urn!1;return t.invalidate(),!0}return!1}function Cew(e){if(d9p(e))return!1;if(e.status===429&&(e.error?.error?.details?.error_code==="credits_required"||e.message?.toLowerCase().includes("usage credits are required")||e.message?.toLowerCase().includes("extra usage is required"))){let r=e.headers?.get("anthropic-ratelimit-unified-overage-disabled-reason");if(r!=="fetch_error"&&r!=="org_level_disabled_until")return!1}if(Rew(e))return!1;if(Cnt()&&J8f(e))return!0;if(JQn(e))return!0;if(e.message?.includes('"type":"overloaded_error"'))return!0;if(Q8f(e))return!0;if(qE()&&ma()?.accessToken&&(e.status===401||n5e(e)))return!0;if(!fve()&&GM()&&(e.status===401||n5e(e)))return!0;if(CXr()&&e.status===401)return!0;if(e.status===407&&brr())return ila(e.headers?.get("proxy-authenticate")??void 0),!0;let t=e.headers?.get("x-should-retry");if(t==="true"&&(!ls()||cjr()||K8f(e)))return!0;if(t==="false"){let r=e.status!==void 0&&e.status>=500;return!1}if(e instanceof MC){let r=GU(e);if(r&&cyi.has(r.code))return!1;if(r?.code==="BedrockUnexpectedContentType")return!1;if(r?.code==="TestEgressBlocked")return!1;return!0}if(!e.status)return!1;if(e.status===408)return!0;if(e.status===409)return!0;if(e.status===401)return ojr(),!0;if(n5e(e))return!0;if(e.status===429)return!ls()||cjr()||K8f(e);if(e.status&&e.status>=500)return!0;return!1}function K8f(e){return e.status===429&&!r5n(e)&&!e.headers?.get?.(t5n)}function Rew(e){if(e.status!==429)return!1;if(e.message.includes("service_spend_limit_reached"))return!0;let t=e.headers?.get?.(t5n);if(t&&(n9f.has(t)||!r5n(e)&&Y8f.has(t)))return!0;let r=e.message.includes("exceeded_limit")?xew.exec(e.message)?.[1]:void 0;return r!==void 0&&Y8f.has(r)}function Hpl(){let e=Cnt(),t=V.CLAUDE_CODE_MAX_RETRIES;if(t!==void 0&&Number.isFinite(t)&&t>=0){if(t>Cpl&&!e){if(OD().once("max_retries_clamp_warning"))E(`CLAUDE_CODE_MAX_RETRIES=${t} clamped to ${Cpl}`,{level:"warn"});return Cpl}return t}return e?lew:aew}function Iew(e){return e.maxRetries??Hpl()}function Mew(e){let t=Z8f(e);if(t){let r=parseInt(t,10);if(!isNaN(r))return r*1000}return null}function Oew(e){let t=e.headers?.get?.("anthropic-ratelimit-unified-reset");if(!t)return null;let r=Number(t);if(!Number.isFinite(r))return null;let n=Math.round(r*1000-Date.now());if(n<=0)return null;return Math.min(n,X8f)}var ZQn=()=>new FS,aew=10,lew=300,Cpl=15,z8f=3000,d1i=3,cew=2,uew=1000,dew=2,pew=2,few=2,mew=2,hew=2,gew=60000,yew=300000,X8f=21600000,_ew=30000,TW,wew,Eew,n9f,Y8f,xew,Hew=1800000,Pew=20000,Dew=600000;var Ppl=A(()=>{IV();Mke();W8();OZe();Yft();qe();gg();$r();ci();Fs();tt();oi();Pa();nLe();st();pT();Li();eG();my();Zt();jt();lj();esr();Gqn();oLe();iht();Y9();XQ();n1i();Tpl();XQn();V3e();dRe();n1i();TW=class TW extends Error{originalError;retryContext;constructor(e,t){let r=le(e);super(r);this.originalError=e;this.retryContext=t;if(this.name="RetryError",e instanceof Error&&e.stack)this.stack=e.stack}};wew=new Set([401,407,429,404,403,413]),Eew=[xXr,Mhr,Dpl,f1i,e9f,eeo,__t];n9f=new Set(["org_spend_cap_reached","org_level_disabled_until"]),Y8f=new Set([...n9f,"out_of_credits","org_level_disabled","org_service_level_disabled"]),xew=/\\?"overageDisabledReason\\?":\s*\\?"([a-z_]+)\\?"/});function RXr(){bp.compactWarningSuppres
+#### "function Rew" count=1 [310738710]
+--- 310738710 ---
+===429&&!r5n(e)&&!e.headers?.get?.(t5n)}function Rew(e){if(e.status!==429)return!1;if(e.message.includes("service_spend_limit_reached"))return!0;let t=e.headers?.get?.(t5n);if(t&&(n9f.has(t)||!r5n(e)&&Y8f.has(t)))return!0;let r=e.message.includes("exceeded_limit")?xew.exec(e.message)?.[1]:void 0;return r!==void 0&&Y8f.has(r)}function Hpl(){let e=Cnt(),t=V.CLAUDE_CODE_MAX_RETRIES;if(t!==void 0&&Number.isFinite(t)&&t>=0){if(t>Cpl&&!e){if(OD().once("max_retries_clamp_warning"))E(`CLAUDE_CODE_MAX_RETRIES=${t} clamped to ${Cpl}`,{level:"warn"});return Cpl}return t}return e?lew:aew}function Iew(e){return e.maxRetries??Hpl()}function Mew(e){let t=Z8f(e);if(t){let r=parseInt(t,10);if(!isNaN(r))return r*1000}return null}function Oew(e){let t=e.headers?.get?.("anthropic-ratelimit-unified-reset");if(!t)return null;let r=Number(t);if(!Number.isFinite(r))return null;let n=Math.round(r*1000-Date.now());if(n<=0)return null;return Math.min(n,X8f)}var ZQn=()=>new FS,aew=10,lew=300,Cpl=15,z8f=3000,d1i=3,cew=2,uew=1000,dew=2,pew=2,few=2,mew=2,hew=2,gew=60000,yew=300000,X8f=21600000,_ew=30000,TW,wew,Eew,n9f,Y8f,xew,Hew=1800000,Pew=20000,Dew=600000;var Ppl=A(()=>{IV();Mke();W8();OZe();Yft();qe();gg();$r();ci();Fs();tt();oi();Pa();nLe();st();pT();Li();eG();my();Zt();jt();lj();esr();Gqn();oLe();iht();Y9();XQ();n1i();Tpl();XQn();V3e();dRe();n1i();TW=class TW extends Error{originalError;retryContext;constructor(e,t){let r=le(e);super(r);this.originalError=e;this.retryContext=t;if(this.name="RetryError",e instanceof Error&&e.stack)this.stack=e.stack}};wew=new Set([401,407,429,404,403,413]),Eew=[xXr,Mhr,Dpl,f1i,e9f,eeo,__t];n9f=new Set(["org_spend_cap_reached","org_level_disabled_until"]),Y8f=new Set([...n9f,"out_of_credits","org_level_disabled","org_service_level_disabled"]),xew=/\\?"overageDisabledReason\\?":\s*\\?"([a-z_]+)\\?"/});function RXr(){bp.compactWarningSuppressed.setState(()=>!0)}function o9f(){bp.compactWarningSuppressed.setState(()=>!1)}var teo=A(()=>{_ee()});function Lpl(){return process.env.CLAUDE_CODE_ENTRYPOINT==="claude-desktop"}function hFe(){if(V.CLAUDE_CODE_IS_COWORK)return!0;return Lpl()}function azt(){return OD().promptCacheBreak}function l9f(){return V.CLAUDE_CODE_IS_COWORK||Lpl()}function c9f(){let e=m_(Vt());if(e===null)return null;return a9f.join(V4(),`cache-break-state-${e}.json`)}function g1i(e){return Object.hasOwn(Kfa,e)}function Npl(){let e=azt();if(e.hydrationAttempted||!l9f())return;e.hydrationAttempted=!0;let t=e.previousStateBySource;try{WLt(V4());let r=c9f();if(r===null)return;let n=EWd(r,$ew);if(n===null)return;let o=Few().safeParse(er(n));if(!o.success)return;for(let[i,s]of Object.entries(o.data)){if(t.size>=u9f)break;if(!g1i(i))continue;if(t.has(i))continue;t.set(i,{...s,pendingChanges:null,baselineFromDisk:!0,buildDiffContent:()=>""})}}catch{}}function szt(){if(!l9f())return;try{let e=azt(),t={};for(let[o,i]of e.previousStateBySource){if(!g1i(o))continue;let{buildDiffContent:s,pendingChanges:a,baselineFromDisk:l,...c}=i;t[o]=c}let r=c9f();if(r===null)return;let n=Object.keys(t).length===0?{action:"remove"}:{action:"write",payload:He(t)};e.latestQueuedPersist=n,e.pendingPersist=e.pendingPersist.then(async()=>{if(n.action==="remove"){WLt(V4()),await h1i.rm(r,{force:!0
+#### "function tah" count=1 [316767111]
+--- 316767111 ---
+age.toLowerCase().includes("x-api-key")}function tah(e){return e instanceof Os&&(e.status===401||e.status===403)&&e.message.includes("OAuth authentication is currently not allowed for this organization")}function rah(e){return V.CLAUDE_CODE_USE_BEDROCK&&e instanceof Error&&e.message.toLowerCase().includes("model id")}function ZZi(){let e=ao();if(e==="firstParty"){if(Vm())return` If it persists, check ${Q2l}.`;let t=V.ANTHROPIC_BASE_URL??"";return` If it persists, check your inference gateway (${URL.parse(t)?.host||t}).`}if(e==="anthropicAws")return` If it persists, check ${Q2l}.`;if(e==="anthropicGoogleCloud")return` If it persists, check ${Q2l} and Google Cloud's status page.`;return` If it persists, check your ${Kae[e]} service status.`}function nBl(){let e=`max ${Q9p} pages, ${Ia(Yqn)}`;return jn()?`PDF too large (${e}). Try reading the file a different way (e.g., extract text with pdftotext).`:`PDF too large (${e}). Double press esc to go back and try again, or use pdftotext to convert to text first.`}function oBl(){return jn()?"PDF is password protected. Try using a CLI tool to extract or convert the PDF.":"PDF is password protected. Please double press esc to edit your message and try again."}function iBl(){return jn()?"The PDF file was not valid. Try converting it to text first (e.g., pdftotext).":"The PDF file was not valid. Double press esc to go back and try again with a different file."}function QZi(){return jn()?"Image was too large. Try resizing the image or using a different approach.":"Image was too large. Double press esc to go back and try again with a smaller image."}function rsn(e){let t=e==="document"?"a document":"an image",r=jn()?"Re-read the file with a different approach if you still need it.":"Double press esc to edit your message, or re-read the file if you still need it.";return`${X0}: ${t} in the conversation could not be processed and was removed. ${r}`}function ObE(){return jn()?"Your account does not have access to Claude. Please login again or contact your administrator.":tsn}function LbE(){return MbE}function Osh(){return V.CLAUDE_CODE_REMOTE}function NbE(e,t,r){try{let n=(p)=>p==="user"||p==="assistant"||p==="system"?p:"unknown",o=(p)=>typeof p==="object"&&p!==null,i=-1;for(let p=0;p<r.length;p++){let f=r[p];if(!f)continue;let m=f.message.content;if(Array.isArray(m)){for(let h of m)if(o(h)&&h.type==="tool_use"&&"id"in h&&h.id===e){i=p;break}}if(i!==-1)break}let s=-1;for(let p=0;p<t.length;p++){let f=t[p];if(!f)continue;if(f.type==="assistant"&&"message"in f){let m=f.message.content;if(Array.isArray(m)){for(let h of m)if(o(h)&&h.type==="tool_use"&&"id"in h&&h.id===e){s=p;break}}}if(s!==-1)break}let a=[];for(let p=i+1;p<r.length;p++){let f=r[p];if(!f)continue;let m=f.message.content;if(Array.isArray(m))for(let h of m){let g=n(f.message.role);if(!o(h))a.push(`${g}:unknown`);else if(h.type==="tool_use"&&"id"in h)a.push(`${g}:tool_use:${dn(h.id)??"nonconforming"}`);else if(h.type==="tool_result"&&"tool_use_id"in h)a.push(`${g}:tool_result:${dn(h.tool_use_id)??"nonconforming"}`);else if(h.type==="text")a.push(`${g}:text`);else if(h.type==="thinking")a.push(`${g}:thinking`);else if(h.type==="image")a.push(`${g}:image`);else a.push(`${g}:${lNt(h.type)?h.ty
+#### "function bew" count=1 [310726574]
+--- 310726574 ---
+of Os&&(e.status===401||e.status===403)}function bew(e){if(!(e instanceof MC))return!1;let t=GU(e);return t!==null&&Zle.has(t.code)}function vew(e){if(!(e instanceof MC))return!1;let t=GU(e);if(t===null)return!1;let{code:r}=t;return Zle.has(r)||r==="EPROTO"||r==="FailedToOpenSocket"||r.startsWith("ERR_OSSL_")||r.startsWith("ERR_SSL_")}async function Sew(e){if(!V.CLAUDE_CODE_CLIENT_CERT||V.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION)return{reportedFailure:!1,attempted:!1};try{let{changed:t,readFailed:r,mismatched:n}=await kJe();if(t)FJe(),sne();if(r){if(e)be("api_mtls_cert_reload",n?"material_mismatched":"material_read_failed");return{reportedFailure:e,attempted:!0}}if(t)E("Stale connection \u2014 reloaded rotated mTLS client material"),Ee("api_mtls_cert_reload");return{reportedFailure:!1,attempted:!0}}catch(t){if(Te(t),e)pe("api_mtls_cert_reload","reload_failed");return{reportedFailure:e,attempted:!0}}}async function*p1i(e,t,r){let n=Iew(r),o={model:r.model,...Zu()&&{fastMode:r.fastMode}},i=null,s=r.initialConsecutive529Errors??0,a,l=0,c=0,u=0,d=0,p=0,f=0,m=0,h=!1,g,y=new Set,_=!1,b=!1,S=r.lowPriorityWait??myi(),w=r.lowPriorityWait===void 0;try{for(let T=1;T<=n+1;T++){if(r.signal?.aborted)throw new FS;let k=Date.now();b=!1;let C=Zu()?o.fastMode&&!AWe():!1;try{let x=bew(a);if(x)E("Stale connection \u2014 disabling keep-alive for retry"),tla();let R=!1;if(vew(a)){let M=await Sew(!h);if(R=M.attempted,M.reportedFailure)h=!0}if(i===null||a instanceof Os&&a.status===401||a instanceof Os&&a.status===407&&brr()||n5e(a)||t9f(a,o.model)||u1i(a)||x||R){if(a instanceof Os&&a.status===401||n5e(a)||CXr()&&(Ipl(a,o.model)||u1i(a))){if(!fve()&&GM())await Dfa(i?.authToken);if(g){await H4(g,r.credentials);let M=Aor();if(M)throw pe("api_request","api_request_account_on_hold"),new TW(new rht(M.url),o);if(ma()?.accessToken===g){if(rQt()!==null||!JQn(a)&&++p>=dew)throw pe("api_request","api_request_oauth_refresh_exhausted"),new TW(a,o)}else p=0}else if(CXr()){let M=process.env[o1i()],O=null,D,F=!1,B=!1;try{({authToken:O,materialUnchanged:D}=await UMr()())}catch(Q){if(E(`host getHostAuthToken callback failed: ${le(Q)}`,{level:"error"}),Q instanceof zE)throw new TW(a,o);if(jl(Q))B=!0;else F=!0,pe("host_auth_recovery","callback_failed")}let W=(Q)=>{if(++f>=pew)throw pe("host_auth_recovery",Q),new TW(a,o)};if(F);else if(B)W("callback_aborted");else if(typeof O==="string"&&O&&O!==M)process.env[o1i()]=O,f=0,Ee("host_auth_recovery");else if(O===null)if(D===!0)W("material_unchanged");else f=0,Ee("host_auth_recovery");else W("bearer_unchanged")}else if(V.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST&&id()&&!GM()&&Yk().source!=="apiKeyHelper"&&!JQn(a))throw pe("api_request","api_request_host_managed_auth_fail"),new TW(a,o)}i=await e(),g=qE()?ma()?.accessToken:void 0}b=UV()&&f5r();let I=await t(i,T,o);if(Ee("api_request"),w)u5n(S);return I}catch(x){if(x instanceof TW)throw x;if(x instanceof FS)throw x;if(__t(x))throw pe("api_request","api_request_dlp_denied"),new TW(x,o);a=x,E(`API error (attempt ${T}/${n+1}): ${x instanceof Os?`${x.status} ${x.message}`:le(x)}`,{level:"error"});let R=await r.onError?.(x);if(R&&!y.has(R)){y.add(R),T--;continue}let I=_yi(x,{markedAtDispatch:b,querySource:r.querySource,wait:S});if(I!
+#### "stop_reason" count=20 [108223600,116360624,136701408,142523697,147262310,149236993,151245392,158183081,166708366,166758820,166904248,192574992,194438916,199435800,230128282,230222020]
+--- 108223600 ---
+....K........F........i.0...............H...............@.......................	.......session.status_idle.....
+...............	.......end_turn.................................@...E...@.n.L...F.L............"...&...................X,......................................	.......stop_reason.........-............h......i...........R........H..H.........................t.......................t.....h.......................................0...........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...(...(...(...(...(...(...(...(...(...(...(...X...X...X...X...X...X...X...X...X...X...X...X...x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...................................................................h...............`.......................................................................................S..............Q..(!...
+...........
+.....
+.....
+.....i.!...
+...........
+.....
+.....
+.....i......0...............H...............`.......................	.......agent.custom_tool_use...........	.......user.custom_tool_result.........	.......user.tool_result.................................@...E..Z....@...C...@.d.@.4.@...C...@.d.@.4............/.......................((......................0lp.....................P.......................`........................e......................H...............	.......custom_tool_use_id..............	.......is_error........	.......tool_use_id.....@...-.......S....i......;......._...K........H..H.........................h.......................h.....h.......................................`.......
+--- 116360624 ---
+................................................................................................................................................................
+...............................	.......response.has_tool_call..........	.......gen_ai.response.id..............	.......stop_reason.............	.......gen_ai.response.finish_reasons..................	...	...parent_of................................................@.T...-.....@`4.....@.<.@0..F...@.\.I....A5.......L......"5......C4.@@<.J.....2...3.-2;.@ ?.O....0M.@ ..O...@.U.H...@...@.4.M...@...N...@...Q...@p..U...@...I...@...G...@...P...@@..S...@...K...@...Q..YM......a......,.....@...@`L.@`..L.....3.@.%.@...L...[.3.@.6.M.....3.@.%.@...M...].3.@ 6.P.....3.@.%.@@..P...d.2.@.6.T.....3.@.&.@...T...l.2.@.7.H.....3.@@%.@...H...R`3.@p5.K.....3.@p%.@...K...Y 3.@.5.F.....3.@ %.@...F...N.3.@05.H.....3.@@%.@...H...R`3.@p5.L.....3.@.%.@.5.L...h@2.@.6.J.....3.@`%.@...J...W03.@.5.@.5.J...b.2.@p6.P.....3.@.%.@@..P...d.2.@.6.G.....3.@0%.@...G...Q`3..P5.@ ..@ ......@.,.E....Q4.@.5.....@P,.L.....[.@.%.E....Q4.@.M.K.....3.@.-.E....Q4.@.O.K.....a.@`/.I...@.}.E....Q4..0U.....F.4.@.e.F...0.a.@P/.O.....e.@ ..N.....3.@`=.@ ..E....Q4.@0U..S..@@/.E....Q4..B4...........2...;...=.......................................-...0...A...D...U...X...i...l...}...........................................................*...4...C...M...\...f...u............................................... ...;...Z...]...a...............................J..........._............................7......................`.........................l.......................|.....................0.j.....................Hc.......................x..............
+#### "refusal" count=20 [99450792,99450880,99450968,99451072,100899709,107265072,107348848,107350584,107351440,113435492,120494279,129166960,136331248,136331336,136703264,142484158]
+--- 99450792 ---
+........I.......initialMainLoopModel............	.......replaceInitialMainLoopModel.............	.......resolvedOrgDefault..............I.......replaceResolvedOrgDefaulte..............	.......initialEnvDefaultModel..........	.......replaceInitialEnvDefaultModel...........I$......refusalFallbackOccurred.........	.......markRefusalFallbackOccurred.............	.......refusalFallbackHeaderArmed..............	.......armRefusalFallbackHeader........I(..#...refusalFallbackLatchOriginRequestId.............	.......forgetRefusalFallbackOccurred...........	.......refusalFallbackModelLatch...............	... ...replaceRefusalFallbackModelLatch........	.......unlatchRefusalFallbackModel.............(...................
+...........h.......P.......K.......................P.......................K.......H...............P.......................................................(.........................
+...............
+.............	#......sections........	......recordSection...........	.......forgetAllSections...............I.......noteInvalidation................epoch...........	.......registerWordingLatchClear...............	.......clearWordingLatch...............	.......lastEmittedDate.................replaceLastEmittedDate..........(..................
+...................0............... .......K.......(............................................................... .......................K...............K...............................................................................................H...............................@...............................8...............X...............................................X......................................
+--- 99450880 ---
+........	.......resolvedOrgDefault..............I.......replaceResolvedOrgDefaulte..............	.......initialEnvDefaultModel..........	.......replaceInitialEnvDefaultModel...........I$......refusalFallbackOccurred.........	.......markRefusalFallbackOccurred.............	.......refusalFallbackHeaderArmed..............	.......armRefusalFallbackHeader........I(..#...refusalFallbackLatchOriginRequestId.............	.......forgetRefusalFallbackOccurred...........	.......refusalFallbackModelLatch...............	... ...replaceRefusalFallbackModelLatch........	.......unlatchRefusalFallbackModel.............(...................
+...........h.......P.......K.......................P.......................K.......H...............P.......................................................(.........................
+...............
+.............	#......sections........	......recordSection...........	.......forgetAllSections...............I.......noteInvalidation................epoch...........	.......registerWordingLatchClear...............	.......clearWordingLatch...............	.......lastEmittedDate.................replaceLastEmittedDate..........(..................
+...................0............... .......K.......(............................................................... .......................K...............K...............................................................................................H...............................@...............................8...............X...............................................X..............................................................lastAPIRequest..........I.......replaceLastAPIRequest...........
+#### "safety_violation" count=0 []
+#### "safety_filter" count=0 []
+#### "prompt_blocked" count=0 []
+#### "input_blocked" count=0 []
+#### "blocked_reason" count=0 []
+#### "policy_reject" count=0 []
+#### "policyReject" count=0 []
+#### "do_not_retry" count=0 []
+#### "doNotRetry" count=0 []
+#### "no_retry" count=10 [158159657,158182473,158223521,204384344,204395000,315012549,315015581,315020820,327142439,327143764]
+--- 158159657 ---
+.t.h.e. .r.e.s.t. .o.f. .t.h.e. .s.e.s.s.i.o.n.........	.......warn............	.......permission_auto_mode_classifier.........	...	..._rejected...............	.......x-should-retry..........	.......false...........	.......tengu_auto_mode_beta_latch..............	.......http_400_no_retry...............	.......http_400....................%......................T.....@p<.\...@P^._.....6.....@p4.@.......@P........,.@p....i.@./.....B...@P\.H...E.L..SL.@.......@ ..P.....3..`n.@ ..P.....3...n.@ ....[.,...@.l........*...,...............L...Q...T........................V}.....................X.......................0.x......................b......................8.o.....................x\......................$i.....................H.y...............................................y......................*m.......................s.......................k......................:|.......................k.......................O.............	.......controlMonitorsBetaRejected.....P....I......@...................R...........	H..H.........................n.......................n.....h...................................................................................................................$...................	..........................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...x...x...........................................................................................................................(.......X...............(.......	...............	.......................................8.......	........................................................................................................
+--- 158182473 ---
+.......& ......................................	.......
+...............	...@...Cannot destructure property 'value' from null or undefined value........	.......both............	.......unprobed........	.......W.......................	.......B...............................	...	..._no_retry......................?........	.......Auto mode classifier: primary ..........	....... unavailable (..........	.......); outer retry .........	......./...............	....... after .........	.......ms..............	.......warn............	.......tengu_auto_mode_outer_retry.............................	...	...confirmed...............	.......demoted.........	...9...Got error trying Sonnet 5 as auto mode classifier, using ...............	...8...Auto mode classifier: Sonnet 5 probe demotion errorKind=........	.......thinking........	.......fast............	....... ...............	.......refused (stop_reason=refusal)...........	......unavailable (...........	.......)...............	.......; trying fallback ..............	....... with ..........	.......ms remaining............	...A...Cannot destructure property 'signal' from null or undefined value...............	.......re..............2...............	.......de..................................................................................J..................f........@ ........<.@ ..@ ......@.<Y............@.|.O.....3.@P5.V.....M.....@pT.Q....PM..@......@@<.M.....3.@.b...G.@ ..@ ....K*.....@E.@ ....K...<.@ ..@ ..@ ..O...@0M.O.....3.......>.....@`<.@0..@...@.D.G...@.t.@PDG....@.|.......L......@........3...L.........@ ...0......@p4..@...0=...%......p.......0..............@.4.E...@PU.C.....2..p&.@ ..C.....3.@.T.B...@@,.E.L.
+#### "skipRetry" count=13 [113479064,303614101,303614453,303615598,315353342,315353705,315353997,315354256,315355693,315356058,315357045,315357515,315357902]
+--- 113479064 ---
+.................................................................................................................:...............................................
+...............................................W.......................X..............	.......attempts........	...	...skipRetry...................g.-..\..s...U.-.t...y.-...-.....	H..H........................x ......................w .....h........................................t..........................................................................$...............................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...p...p...p...p...p...p...p...p.......0...0...0...0...`...`...`...`...`...`...`...`...`...`...`...`...`...`...`...h...h...h...h...................................................................................x...............................................................................................................................................................................................................6...x.......^....................p...........$.......$............~...a...~...~...~............................5....Q.................F ..............F...............i.....F...p.......................................................................................................................(...............................................I.........-.....	.......
+.......................8.......@.......9.......................................H...t.......................6...h...x........................... .-.................................................~.-.....o.......o...~.-...-......D..H.......................
+--- 303614101 ---
+ion b9b(){let e=null;try{e=EU({skipRetrievingKeyFromApiKeyHelper:!0}).key}catch{}if(!e&&GM())return"wif";if(ls()&&ma()?.accessToken)return"oauth";return e?"api_key":"oauth"}async function v9b(e,t){let r=null;for(let n=1;n<=oya+1;n++){if(r=await S9b(e,t),r.attempts=n,r.success||r.skipRetry||n>oya)return r;let o=bZe(n);E(`Policy limits: Retry ${n}/${oya} after ${o}ms`),await Pr(o)}return r}async function S9b(e,t){let r;try{r=await aei({credentials:t});let n=await lnr();if(n.error)return{success:!1,error:"Authentication required for policy limits",errorCode:"auth_failed",authUnavailableReason:n.reasonCode,tokenRefreshOutcome:r,skipRetry:!0};let o=y9b(),i={...n.headers,"User-Agent":XT()};if(e)i["If-None-Match"]=`"${e}"`;let s=await di.get(o,{headers:i,timeout:m9b,validateStatus:(l)=>l===200||l===304||l===404});if(s.status===304)return E("Policy limits: Using cached restrictions (304)"),{success:!0,response:null,etag:e};if(s.status===404)return E("Policy limits: No restrictions found (404)"),{success:!0,response:Jga,etag:void 0};let a=tei().safeParse(s.data);if(!a.success){let l=w9b(a.error.issues[0]?.path[0]),c=(s.headers["content-type"]??"").toString().toLowerCase(),u=E9b.find(([d])=>c.includes(d))?.[1]??"other";return E(`Policy limits: Invalid response format - field=${l} ct=${u} - ${a.error.message}`),{success:!1,error:"Invalid policy limits format",errorCode:"parse_failed",parseErrorField:l,parseErrorContentType:u}}return E("Policy limits: Fetched successfully"),{success:!0,response:a.data}}catch(n){let{kind:o,status:i,message:s}=A0(n),a=Tzd(n);switch(E(`Policy limits: fetch failed (${o}${i?` ${i}`:""}) \u2014 ${s}`),o){case"auth":return{success:!1,err
+#### "alreadyShown" count=0 []
+#### "rejection shown" count=0 []
+#### "shown_error" count=0 []
+#### "pendingRejection" count=0 []
+#### "errorAlready" count=0 []
+#### "shownBeforeRetry" count=0 []
+#### "retryAfterPolicy" count=0 []
+#### "policy_check_failed" count=0 []
+#### "policyLimits" count=2 [179397151,320697756]
+--- 179397151 ---
+.................................................................................................	.......hipaa...........	.......zdr.............	.......HIPAA...........	.......ZDR (Zero Data Retention)...............	.......Unknown compliance_taint '..............	.......' from policyLimits.............	.......warn....
+........................................@..X....@.t.@..D....@..F....@.,...............@.......................(.+.....................hN..........uZ......6L2..+......$L2.....HL2.+M2.....	H..H....................... .3.......................3.....h...................................................................................................................$...............................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...x...x...........................................................................................................................(...............................	...............	.......................................`...............................p...................................................................................................................................................=.......R...M...........R.............................~...p..............!...2...Q...!.......!...p.......a...~...~...~............................5....Q.................F ..............F...............i.....F.....F...............i..............................................................................................................................................................................................................(..............
+--- 320697756 ---
+);ec();B2e();Nt();ca();rs();oi();Sk();$j();LPe();EGt();Wn();qe();mr();bo();$r();Fug();B9e=P(Lt(),1),Af=P(Ae(),1),Yug=P(Me(),1)});function HTr(e){switch(e){case"hipaa":return"HIPAA";case"zdr":return"ZDR (Zero Data Retention)";default:return E(`Unknown compliance_taint '${e}' from policyLimits`,{level:"warn"}),e}}var tgs=A(()=>{qe()});async function Xmn(e,t={}){try{process.kill(e,"SIGTERM")}catch(n){if(dt(n)==="EPERM")return"eperm";return"exited"}let r=Date.now()+(t.gracefulMs??2000);while(Date.now()<r){try{process.kill(e,0)}catch{return"exited"}await Pr(50)}return"timed-out"}var Ogc=A(()=>{st()});function H6(){return Jug.join(En(),Mv0)}function bkt(){return Pn.state("daemon-lock")}function Ov0(e){return e==="EISDIR"||e==="ENXIO"}class Zug{logged=!1;markLogged(){if(this.logged)return!1;return this.logged=!0,!0}}function Nv0(){return Lv0.of(ar().host)}async function $v0(){let e=await Ste.lstat(H6()).catch(()=>{return});return e!==void 0&&e.isSymbolicLink()}async function Qug(e){let t=H6(),r=await Ste.lstat(t).catch(()=>{return});if(r===void 0||r.isFile())return;let n=r.isDirectory()?"directory":r.isFIFO()?"fifo":r.isSocket()?"socket":r.isSymbolicLink()?"symlink":"other non-regular node";if(Nv0().markLogged())E(`[DaemonLock] ${n} at the lock path (${e}) \u2014 removing it as the legacy path does`,{level:"warn"});await Ste.rm(t,{recursive:!0,force:!0}).catch(()=>{})}async function edg(e,t){if($t()&&t!==void 0){let r=()=>t.write(bkt(),He(e,null,2),{precondition:{type:"ifAbsent"},mode:438&~process.umask()}),n=await r();for(let o of[0,1]){if(n.ok)return!0;if(n.error.code==="AlreadyExists")return!1;let i="telemetryCode"in n.error?n.error.telemetryCode:void 0;if
+#### "waitForPolicy" count=7 [106547328,174953285,210201325,303613275,303628824,318855334,328884748]
+--- 106547328 ---
+........	.......primePolicyLimitsCache..........	.3.$...recordPolicyLimitsStartupAwaitResult............	.......refreshPolicyLimits................. ...shouldAwaitPolicyLimitsOnStartup........I.3.....startBackgroundPolling..........	.......stopBackgroundPolling.............3.....waitForPolicyLimitsToLoad.3.............I.3. ...CLOUD_CANNOT_REACH_ELEVATED_HINT..........3.%...PROACTIVE_ENROLLMENT_DISABLED_MESSAGE...........	.......TrustedDeviceState..............	U......clearTrustedDeviceToken.........	.......clearTrustedDeviceTokenCache............	.......enrollTrustedDevice.............I.3.....enrollTrustedDeviceIfNeeded.....................ensureTrustedDeviceTokenForBind..........v.. ...formatUnreachableElevatedRefusal..........3.....getAttestationFilterPolicy3.............	.3.....getTrustedDeviceToken...........	... ...getTrustedDeviceUnenrolledReason........	.......isProactiveEnrollmentDisabled...........	...&...isRemoteControlPeerUnreachableFromHere..........I.......isTrustedDeviceActiveForOrg...............3.....isTrustedDeviceGateEnabled3...............3.....isTrustedDeviceUnenrolled.3.............I.3.....preflightTrustedDeviceBlocking..................readStoredTrustedDeviceToken............	|......recoverFromUntrustedDevice3.............I.3.....trustedDeviceStates.............	.......untrustedDeviceHint.............	.......withUntrustedDeviceRecovery....................CCR_BYOC_BETA...........	.3.....CodeSessionSchema...............	.......archiveRemoteSession............I.......axiosGetWithRetry...............	.......ccrSessionToResource............	r.. ...fetchCodeSessionsFromSessionsAPI........I.......fetchSession............IN......getAcces
+--- 174953285 ---
+...	...J...Cannot destructure property 'evalReportTitle' from null or undefined value..............	.......o...............	...4...Skipped publishing because the run was interrupted.
+............	.......publish_interrupted.....................	...T...Cannot destructure property 'waitForPolicyLimitsToLoad' from null or undefined value............	.......b.......................	.......policy limits load timed out............................	...P...Cannot destructure property 'isArtifactToolEnabled' from null or undefined value........	.......S...............	.......Publishing is unavailable: claude.ai artifacts are turned off for this account, provider, or privacy mode. A local copy is written instead.
+............	.......Publishing is unavailable: claude.ai artifacts are turned off for this account, provider, or privacy mode. Use --report <path> to write the report locally.
+............	.......publish_unavailable.............	.......render..........	.......m...............	.......s...............	.......report.html.............	.......h...............	...............	.......publish.........	.......l.......................................	.......Report: ........	.......Couldn't write the report to ...........	.......: ..............	.......write_failed....................	...J...Cannot destructure property 'publishArtifact' from null or undefined value......	...............	...U...Cannot destructure property 'makeLocalOwnPublishesStore' from null or undefined value...............1...P.u.b.l.i.s.h.i.n.g. .r.e.p.o.r.t. .t.o. .c.l.a.u.d.e...a.i. .(.p.r.i.v.a.t.e. .t.o. .y.o.u.).& 
+...............	.......T...............	.......k.......................E.v.a
+#### "policyLimitsReady" count=0 []
+#### "allow_remote" count=20 [115310034,115310138,115310218,115333144,139598376,141906360,142183288,142183384,142304672,143156184,159039080,160926824,161046704,161129280,168451024,175174064]
+--- 115310034 ---
+......	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disabled........	.......disabled by ............	...'...Remote Control enabled for this account.........	...+...Remote Control not enabled for this account.............	...1...Remote Control availability could not be verified...............	.......no server response this session.....................................................N...................4.....`........T....(..............,....D.......D........@`T.S....@........<.......;...........<.......<.......<.....R!T...[...............<.......<....,........@.\s....@...@.Ti....@...@.T.@...@.TN....@...@.T[....@...@.T.@...@.TH....@.L.....@....pU.....E!<..RL.@..J....@...@.4.@.5.@0..@.Fg....@...@.4C....@...@.e...... .........................................>...A...........................5...8...P...S...k...n...........................................9...<...N...V...Y...m...p.......................................................................P.......................X........................................................................$......................P...............................................h.........
+--- 115310138 ---
+e scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disabled........	.......disabled by ............	...'...Remote Control enabled for this account.........	...+...Remote Control not enabled for this account.............	...1...Remote Control availability could not be verified...............	.......no server response this session.....................................................N...................4.....`........T....(..............,....D.......D........@`T.S....@........<.......;...........<.......<.......<.....R!T...[...............<.......<....,........@.\s....@...@.Ti....@...@.T.@...@.TN....@...@.T[....@...@.T.@...@.TH....@.L.....@....pU.....E!<..RL.@..J....@...@.4.@.5.@0..@.Fg....@...@.4C....@...@.e...... .........................................>...A...........................5...8...P...S...k...n...........................................9...<...N...V...Y...m...p.......................................................................P.......................X........................................................................$......................P...............................................h.......................HRy......................*......................0........................S................
+#### "function KFy" count=1 [326563346]
+--- 326563346 ---
+h.min(200*2**s,2000))}throw i})()}async function KFy(e){let t=e.getToken??(()=>e.token),r={connectHeader:()=>"Basic "+Buffer.from(`${e.sessionId}:${t()}`).toString("base64"),wsHeader:()=>`Bearer ${t()}`},n={...WJA,...e.limits},o={statusProvider:e.statusProvider,failures:[],selective:e.selective},i=tZA(e.wsUrl,r,n,o);if(e.startupProbe)eZA(e.wsUrl,r,n.openTimeoutMs,n.openMaxAttempts).then(()=>{E("[agent-proxy] startup reachability probe: ok")}).catch((s)=>{o.startupError=`hosted agent-proxy unreachable at startup: ${s?.message??String(s)}. All traffic (including normal-networking hosts) 502s until the `+"relay restarts \u2014 inference is force-tunneled, so a session "+"without the hosted proxy is non-functional regardless. Check network egress to the CCR base URL.",E(`[agent-proxy] ${o.startupError}`,{level:"error"}),pe("agent_proxy_init","agent_proxy_startup_probe_failed")});return E(`[agent-proxy] relay listening on 127.0.0.1:${i.port}`),i}function tZA(e,t,r,n){let o=[],i=Bun.listen({hostname:"127.0.0.1",port:0,socket:{open(s){s.data={...QJA(r,o,n),writeBuf:[],endAfterDrain:!1,destroyAfterDrain:!1}},data(s,a){let l=s.data;if(l.closed)return;rZA({write:(u)=>{let d=typeof u==="string"?Buffer.from(u,"utf8"):u;if(l.writeBuf.length>0){l.writeBuf.push(d);return}let p=s.write(d);if(p<d.length)l.writeBuf.push(d.subarray(p))},end:()=>{if(l.writeBuf.length>0){l.endAfterDrain=!0;return}s.end()},destroy:()=>{if(l.writeBuf.length>0){l.destroyAfterDrain=!0;return}s.terminate()}},l,a,e,t)},drain(s){let a=s.data;while(a.writeBuf.length>0){let l=a.writeBuf[0],c=s.write(l);if(c<l.length){a.writeBuf[0]=l.subarray(c);return}a.writeBuf.shift()}if(a.destroyAfterDrain){a.destroyAfterDrain=!1,s.terminate();return}if(a.endAfterDrain)a.endAfterDrain=!1,s.end()},close(s){let a=s.data;if(XFy(a))return;if(a.localClosed&&a.finCloseTimer)return;if(!a.closed&&eUy(a))return;eMe(a)},error(s,a){E(`[agent-proxy] client socket error: ${a.message}`);let l=s.data;if(l.localClosed&&l.finCloseTimer)return;eMe(l)}}});return{port:i.port,stop:()=>{lZA(o),i.stop(!0)}}}function rZA(e,t,r,n,o){if(!t.ws&&!t.directUpstream&&!t.directDialing){if(t.connectBuf=Buffer.concat([t.connectBuf,r]),t.connectBuf[0]===22){E("[agent-proxy] client sent TLS to the relay port (HTTPS_PROXY must be an http:// URL)",{level:"warn"}),pe("agent_proxy_request","agent_proxy_request_tls_to_relay"),ore(t.ctx,"tls_to_relay","client opened TLS to the relay port; HTTPS_PROXY must be an http:// URL pointing at this port"),t.closed=!0,e.end();return}let i=t.connectBuf.indexOf(`\r
+\r
+`);if(i===-1){if(t.connectBuf.length>8192)t.closed=!0,M_e(e,400,"Bad Request","request headers exceeded 8 KiB before the end of the CONNECT request"),e.end(),pe("agent_proxy_request","agent_proxy_request_header_too_long"),ore(t.ctx,"header_too_long","headers exceeded 8 KiB");return}let s=t.connectBuf.subarray(0,i).toString("utf8"),a=Cs(s,`\r
+`),l=a.match(/^CONNECT\s+(\S+)\s+HTTP\/1\.[01]$/i);if(!l){if(/^GET\s+\/__agentproxy\/status(\?\S*)?\s+HTTP\/1\.[01]$/i.test(a)){let h={...t.ctx.statusProvider?.()??{},startupError:t.ctx.startupError,recentRelayFailures:t.ctx.failures};qFy(e,200,"OK","application/json",He(h,null,2)+`
+`),t.closed=!0,e.end();return}t.closed=!0,M_e(e,405,"Method N
+#### "function c0T" count=1 [327909306]
+--- 327909306 ---
+.ANTHROPIC_API_HOST="api.anthropic.com";function c0T(e){let t=e.replace(/\.$/,"").toLowerCase();return t==="anthropic.com"||t.endsWith(".anthropic.com")}Wm.PLATFORM_CLAUDE_HOST="platform.claude.com";Wm.SEGMENT_CDN_HOST="a-cdn.anthropic.com";Wm.SEGMENT_API_HOST="a-api.anthropic.com";Wm.FAVICON_PROXY_HOST="www.google.com";Wm.GSTATIC_WILDCARD="*.gstatic.com";Wm.ARTIFACT_IFRAME_HOST="www.claudeusercontent.com";Wm.MCP_APP_SANDBOX_WILDCARD_HOST="*.claudemcpcontent.com";Wm.ANTHROPIC_ASSETS_HOST="assets.claude.ai";Wm.SENTRY_WILDCARD_HOST="*.sentry.io";Wm.SENTRY_INGEST_HOST="o1158394.ingest.us.sentry.io";Wm.MICROSOFT_LOGIN_HOST="login.microsoftonline.com";Wm.GOOGLE_ACCOUNTS_HOST="accounts.google.com";Wm.GOOGLE_OAUTH2_HOST="oauth2.googleapis.com";Wm.GOOGLE_STS_HOST="sts.googleapis.com";Wm.GOOGLE_IAMCRED_HOST="iamcredentials.googleapis.com";Wm.DATADOG_INTAKE_HOSTS=["browser-intake-datadoghq.com","browser-intake-us3-datadoghq.com","browser-intake-us5-datadoghq.com","browser-intake-ap1-datadoghq.com","browser-intake-ap2-datadoghq.com","browser-intake-datadoghq.eu","browser-intake-ddog-gov.com"];Wm.VERTEX_AUTH_HOSTS=[Wm.GOOGLE_OAUTH2_HOST,Wm.GOOGLE_STS_HOST,Wm.GOOGLE_ACCOUNTS_HOST,Wm.GOOGLE_IAMCRED_HOST];function Kwu(e){if(typeof e!=="string"||e==="")return;let t=/^[a-z][a-z0-9+.-]*:\/\//i.test(e)?e:`https://${e}`;try{return new URL(t).hostname||void 0}catch(r){return}}function u0T(e,t){var r;return(r=Kwu(t))!==null&&r!==void 0?r:e==="global"?"aiplatform.googleapis.com":e==="eu"||e==="us"?`aiplatform.${e}.rep.googleapis.com`:`${e}-aiplatform.googleapis.com`}function JQy(e){return`bedrock-runtime${e.startsWith("us-gov-")?"-fips":""}.${e}.amazonaws.com`}function d0T(e){return`bedrock-mantle.${e}.api.aws`}function ZQy(e){return`bedrock${e.startsWith("us-gov-")?"-fips":""}.${e}.amazonaws.com`}Wm.AWS_REGION_RE=/^[a-z]{2}(-[a-z]+)+-\d{1,2}$/;function QQy(e){return`oidc.${e}.amazonaws.com`}function ee_(e){return`portal.sso.${e}.amazonaws.com`}function te_(e){return[ee_(e),QQy(e)]}function p0T(e,t,r,n=!0){var o;let i=(o=Kwu(r))!==null&&o!==void 0?o:JQy(e),s=n?[ZQy(e)]:[];if(t)return[i,...s];return[i,...s,"sts.amazonaws.com",`sts.${e}.amazonaws.com`,...te_(e)]}Wm.PYTHON_EXTENSION_RUNTIME_HOSTS=["github.com","objects.githubusercontent.com","pypi.org","files.pythonhosted.org"];Wm.DEPENDENCY_INSTALL_DOMAINS=["registry.npmjs.org","npmjs.com","www.npmjs.com","npmjs.org","www.npmjs.org","yarnpkg.com","registry.yarnpkg.com","pypi.org","files.pythonhosted.org","pythonhosted.org","github.com","objects.githubusercontent.com","archive.ubuntu.com","security.ubuntu.com","crates.io","index.crates.io","static.crates.io","playwright.download.prss.microsoft.com","cdn.playwright.dev"];var f0T=/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/i,m0T=/^[1-9][0-9]{0,4}$/;function h0T(e){if(e==="localhost")return!0;let t=e.startsWith("*.")?e.slice(2):e;return f0T.test(t)&&t.includes(".")}function Ywu(e){let t=e,r,n=e.lastIndexOf(":");if(n!==-1){let i=e.slice(n+1);if(!m0T.test(i))return null;if(r=Number(i),r>65535)return null;t=e.slice(0,n)}if(t==="*")return r===void 0?{host:t}:null;if(!h0T(t))return null;let o=t.toLowerCase();return r===void 0?{host:o}:{host:o,port:r}}function g0T(e){var t,r;return(r=(t=Ywu(e))===null||t===void 0?void 0:t.host
+#### "function qJA" count=1 [326558904]
+--- 326558904 ---
+===168||t[0]===100&&t[1]>=64&&t[1]<=127}function qJA(e,t){let r=bNo(e);for(let n of t){let o=bNo(n);if(o==="")continue;if(o==="*")return!0;if(o.startsWith("*.")){let s=o.slice(1);if(r.endsWith(s))return!0;continue}if(!o.includes("*")){if(r===o)return!0;continue}if(new RegExp("^"+o.split("*").map((s)=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("[^.]+")+"$").test(r))return!0}return!1}function KJA(e){let t=bNo(e);if(t==="localhost"||t==="ip6-localhost"||t==="ip6-loopback"||t==="metadata.google.internal"||t==="instance-data"||t==="instance-data.ec2.internal"||t.endsWith(".localhost"))return"blocked_hostname";let r=t.normalize("NFKC");if(r.includes("[")||r.includes(":"))return"ipv6_literal";let n=t.split("."),o=/^(0|[1-9]\d{0,2})$/;if(!(n.length===4&&n.every((a)=>o.test(a)&&Number(a)<=255)))return V7u(t)!==null||G7u(t)?"noncanonical_ipv4":null;let s=n.map(Number);if(s[0]===0)return"unspecified";if(s[0]===127)return"loopback";if(s[0]===169&&s[1]===254)return"link_local";if(t==="100.100.100.200")return"metadata_alibaba";if(t==="168.63.129.16")return"metadata_azure";if(t==="192.0.0.192")return"metadata_reserved";return null}function YJA(e){if(!e)return"peer_unreadable";if(e.includes(":"))return XJA(e);let t=e.split(".").map(Number);if(t.length!==4||t.some((r)=>!Number.isFinite(r)||r<0||r>255))return"peer_unreadable";return GFy(t,e)}function GFy(e,t){if(e[0]===0)return"unspecified";if(e[0]===127)return"loopback";if(e[0]===169&&e[1]===254)return"link_local";if(t==="100.100.100.200")return"metadata_alibaba";if(t==="168.63.129.16")return"metadata_azure";if(t==="192.0.0.192")return"metadata_reserved";return null}function XJA(e){let t=JJA(e);if(!t)return"peer_unreadable";let r=t.slice(0,12),n=r.every((a,l)=>a===(l===10||l===11?255:0)),o=r.every((a)=>a===0),i=t[0]===0&&t[1]===100&&t[2]===255&&t[3]===155&&r.slice(4).every((a)=>a===0);if(n||o||i){let a=[t[12],t[13],t[14],t[15]],l=a.join(".");if(o&&a.every((c)=>c===0))return"unspecified";if(o&&a[0]===0&&a[1]===0&&a[2]===0&&a[3]===1)return"loopback";return GFy(a,l)}if(((t[0]??0)&224)===32)return null;if((t[0]??0)===254&&((t[1]??0)&192)===128)return"link_local";if(((t[0]??0)&254)===252)return"unique_local";return"v6_non_global"}function JJA(e){let t=e.indexOf("%"),n=(t>=0?e.slice(0,t):e).toLowerCase().split("::");if(n.length>2)return null;let o=n[0]?n[0].split(":"):[],i=n.length===2&&n[1]?n[1].split(":"):[],s=n.length===2?i:o,a=s.at(-1),l=[];if(a&&a.includes(".")){let g=a.split(".").map(Number);if(g.length!==4||g.some((y)=>!Number.isFinite(y)||y<0||y>255))return null;l=g,s.pop()}let c=(g)=>{let y=[];for(let _ of g){if(!/^[0-9a-f]{1,4}$/.test(_))return null;let b=parseInt(_,16);y.push(b>>8,b&255)}return y},u=c(n.length===2?o:[]),d=c(s);if(u===null||d===null)return null;let p=n.length===2?u:d,f=n.length===2?(d??[]).concat(l):l,m=16-p.length-f.length;if(m<0||n.length===1&&m!==0)return null;let h=p.concat(Array(m).fill(0),f);return h.length===16?h:null}function VFy(e,t,r){let n=t.directUpstream;if(!n)return;if(n.writeBuf.length>0)n.writeBuf.push(r),n.writeBufBytes+=r.length;else{let o=n.write(r);if(o<r.length)n.writeBuf.push(r.subarray(o)),n.writeBufBytes+=r.length-o}if(n.writeBufBytes>t.limits.pendingBytesCap){ore(t.ctx,"direct_writebuf_cap",`direct-u
+#### "function bNo" count=1 [326558586]
+--- 326558586 ---
+nBytes(n,o){if(n===1)t.data=o}})?t:null}function bNo(e){let t=A$r(e);if(t.startsWith("*."))return"*."+bNo(t.slice(2));let r=t.replace(/\.+$/,"").toLowerCase(),n=T$r(r).replace(/\.+$/,"");return n!==""?n:r}function VJA(e){let t=e.split(".").map(Number);return t[0]===10||t[0]===172&&t[1]>=16&&t[1]<=31||t[0]===192&&t[1]===168||t[0]===100&&t[1]>=64&&t[1]<=127}function qJA(e,t){let r=bNo(e);for(let n of t){let o=bNo(n);if(o==="")continue;if(o==="*")return!0;if(o.startsWith("*.")){let s=o.slice(1);if(r.endsWith(s))return!0;continue}if(!o.includes("*")){if(r===o)return!0;continue}if(new RegExp("^"+o.split("*").map((s)=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("[^.]+")+"$").test(r))return!0}return!1}function KJA(e){let t=bNo(e);if(t==="localhost"||t==="ip6-localhost"||t==="ip6-loopback"||t==="metadata.google.internal"||t==="instance-data"||t==="instance-data.ec2.internal"||t.endsWith(".localhost"))return"blocked_hostname";let r=t.normalize("NFKC");if(r.includes("[")||r.includes(":"))return"ipv6_literal";let n=t.split("."),o=/^(0|[1-9]\d{0,2})$/;if(!(n.length===4&&n.every((a)=>o.test(a)&&Number(a)<=255)))return V7u(t)!==null||G7u(t)?"noncanonical_ipv4":null;let s=n.map(Number);if(s[0]===0)return"unspecified";if(s[0]===127)return"loopback";if(s[0]===169&&s[1]===254)return"link_local";if(t==="100.100.100.200")return"metadata_alibaba";if(t==="168.63.129.16")return"metadata_azure";if(t==="192.0.0.192")return"metadata_reserved";return null}function YJA(e){if(!e)return"peer_unreadable";if(e.includes(":"))return XJA(e);let t=e.split(".").map(Number);if(t.length!==4||t.some((r)=>!Number.isFinite(r)||r<0||r>255))return"peer_unreadable";return GFy(t,e)}function GFy(e,t){if(e[0]===0)return"unspecified";if(e[0]===127)return"loopback";if(e[0]===169&&e[1]===254)return"link_local";if(t==="100.100.100.200")return"metadata_alibaba";if(t==="168.63.129.16")return"metadata_azure";if(t==="192.0.0.192")return"metadata_reserved";return null}function XJA(e){let t=JJA(e);if(!t)return"peer_unreadable";let r=t.slice(0,12),n=r.every((a,l)=>a===(l===10||l===11?255:0)),o=r.every((a)=>a===0),i=t[0]===0&&t[1]===100&&t[2]===255&&t[3]===155&&r.slice(4).every((a)=>a===0);if(n||o||i){let a=[t[12],t[13],t[14],t[15]],l=a.join(".");if(o&&a.every((c)=>c===0))return"unspecified";if(o&&a[0]===0&&a[1]===0&&a[2]===0&&a[3]===1)return"loopback";return GFy(a,l)}if(((t[0]??0)&224)===32)return null;if((t[0]??0)===254&&((t[1]??0)&192)===128)return"link_local";if(((t[0]??0)&254)===252)return"unique_local";return"v6_non_global"}function JJA(e){let t=e.indexOf("%"),n=(t>=0?e.slice(0,t):e).toLowerCase().split("::");if(n.length>2)return null;let o=n[0]?n[0].split(":"):[],i=n.length===2&&n[1]?n[1].split(":"):[],s=n.length===2?i:o,a=s.at(-1),l=[];if(a&&a.includes(".")){let g=a.split(".").map(Number);if(g.length!==4||g.some((y)=>!Number.isFinite(y)||y<0||y>255))return null;l=g,s.pop()}let c=(g)=>{let y=[];for(let _ of g){if(!/^[0-9a-f]{1,4}$/.test(_))return null;let b=parseInt(_,16);y.push(b>>8,b&255)}return y},u=c(n.length===2?o:[]),d=c(s);if(u===null||d===null)return null;let p=n.length===2?u:d,f=n.length===2?(d??[]).concat(l):l,m=16-p.length-f.length;if(m<0||n.length===1&&m!==0)return null;let h=p.concat(Array(m).fill(0),f);return h.length
+#### "function iZA" count=1 [326570322]
+--- 326570322 ---
+,o.connectHeader());return}khu(e,t,n,o)}function iZA(e,t,r,n){let o=KJA(r);if(o){t.closed=!0,M_e(e,403,"Forbidden",`agent-proxy selective relay: normal-networking refused ${r} (${o})`),e.end(),pe("agent_proxy_request","agent_proxy_direct_blocked_"+o),ore(t.ctx,"direct_blocked",o,r);return}if(!Number.isInteger(n)||n<1||n>65535){t.closed=!0,M_e(e,400,"Bad Request","invalid CONNECT port"),e.end();return}t.directDialing=!0;let i=!1,s=setTimeout(()=>{if(t.closed)return;i=!0,t.closed=!0,t.directDialing=!1,M_e(e,504,"Gateway Timeout",`agent-proxy selective relay: direct dial to ${r}:${n} timed out after ${t.limits.openTimeoutMs}ms`),e.end(),ore(t.ctx,"direct_dial_timeout",`${r}:${n}`,r)},t.limits.openTimeoutMs);Bun.connect({hostname:r,port:n,socket:{open(a){if(clearTimeout(s),t.closed||i){a.end();return}let l=YJA(a.remoteAddress);if(l){a.end(),t.closed=!0,t.directDialing=!1,M_e(e,403,"Forbidden",`agent-proxy selective relay: normal-networking refused ${r} `+`\u2014 resolved to a blocked address (${l})`),e.end(),pe("agent_proxy_request","agent_proxy_direct_peer_blocked_"+l),ore(t.ctx,"direct_peer_blocked",l,r);return}t.directUpstream={write:(c)=>a.write(c),end:()=>a.end(),writeBuf:[],writeBufBytes:0},t.directDialing=!1,e.write(`HTTP/1.1 200 Connection Established\r
+\r
+`),t.established=!0;for(let c of t.pending)VFy(e,t,c);t.pending=[],t.pendingBytes=0},data(a,l){if(t.closed)return;e.write(l)},drain(){let a=t.directUpstream;if(!a)return;while(a.writeBuf.length>0){let l=a.writeBuf[0];if(!l){a.writeBuf.shift();continue}let c=a.write(l);if(a.writeBufBytes-=c,c<l.length){a.writeBuf[0]=l.subarray(c);return}a.writeBuf.shift()}},close(){if(!t.closed)t.closed=!0,e.end()},error(a,l){if(clearTimeout(s),!t.established&&!t.closed)M_e(e,502,"Bad Gateway",`normal-networking dial failed: ${l?.message??String(l)}`);if(!t.closed)t.closed=!0,e.end();ore(t.ctx,"direct_dial_failed",l?.message??String(l),r)}}}).catch((a)=>{if(clearTimeout(s),t.directDialing=!1,t.closed)return;t.closed=!0,M_e(e,502,"Bad Gateway",`normal-networking dial failed: ${a?.message??String(a)}`),e.end(),ore(t.ctx,"direct_dial_failed",a?.message??String(a),r)})}function sZA(e){let{pool:t,limits:r}=e;while(t.length>0){let n=t.pop();if(n.ws.readyState!==WebSocket.OPEN){clearInterval(n.pinger);continue}if(Date.now()-n.idleSince>r.poolIdleTtlMs||Date.now()-n.meta.openedAt>r.poolMaxAgeMs){clearInterval(n.pinger);try{n.ws.close()}catch{}continue}return n}return}function XFy(e){let{ws:t,wsMeta:r}=e;if(!t||!r?.v2||!e.finSeen||t.readyState!==WebSocket.OPEN||!e.established||e.closed||!e.pinger||e.pool.length>=e.limits.poolMax||Date.now()-r.openedAt>e.limits.poolMaxAgeMs)return!1;uTn(e),t.onmessage=null,t.onerror=null;let n=e.pool;return t.onclose=()=>aZA(n,t),n.push({ws:t,pinger:e.pinger,idleSince:Date.now(),meta:r}),e.ws=void 0,e.pinger=void 0,e.wsMeta=void 0,!0}function aZA(e,t){let r=e.findIndex((n)=>n.ws===t);if(r>=0)clearInterval(e[r].pinger),e.splice(r,1)}function lZA(e){for(let t of e){clearInterval(t.pinger),t.ws.onclose=null;try{t.ws.close()}catch{}}e.length=0}function JFy(e,t,r,n){r.onmessage=(o)=>{let i=o.data instanceof ArrayBuffer?new Uint8Array(o.data):new Uint8Array(Buffer.from(o.data)),s=GJA(i);if(!s)return;if(s.control!==WFy){cZA(e,
+#### "isAnthropicHost" count=3 [298611544,327908763,328129081]
+--- 298611544 ---
+GOOGLE_STS_HOST.........	.......GOOGLE_IAMCRED_HOST.............	.......DATADOG_INTAKE_HOSTS............	.......VERTEX_AUTH_HOSTS...............	......AWS_REGION_RE...........	.......PYTHON_EXTENSION_RUNTIME_HOSTS..........	.......DEPENDENCY_INSTALL_DOMAINS..............	.......isAnthropicHost.........	.......safeHostname............	.......vertexInferenceHost.............	.......bedrockRuntimeHost..............	.......mantleRuntimeHost...............	.......bedrockControlPlaneHost.........	.......awsSsoOidcHost..........	.......awsSsoPortalHost........	.......bedrockSsoHosts.........	.......bedrockHosts............	.......parseEgressHostEntry............	.......stripEgressEntryPort............	.......dropPortScopedEgressEntries.....p................	............................................... ......0#......h)..............x4.......8...................V......d.......e...)V...V.......H..H.......................................................h...................................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................................................................................................................................................................................x...............p.......................................................................................C..................................................G.....................i......P...............H...............P...............P...............`.......................................
+--- 327908763 ---
+NTHROPIC_ASSETS_HOST=Wm.MCP_APP_SANDBOX_WILDCARD_HOST=Wm.ARTIFACT_IFRAME_HOST=Wm.GSTATIC_WILDCARD=Wm.FAVICON_PROXY_HOST=Wm.SEGMENT_API_HOST=Wm.SEGMENT_CDN_HOST=Wm.PLATFORM_CLAUDE_HOST=Wm.ANTHROPIC_API_HOST=Wm.UPDATE_FEED_HOST=Wm.VM_BUNDLE_HOST=Wm.MINIMAL_EGRESS_DOMAINS=void 0;Wm.isAnthropicHost=c0T;Wm.safeHostname=Kwu;Wm.vertexInferenceHost=u0T;Wm.bedrockRuntimeHost=JQy;Wm.mantleRuntimeHost=d0T;Wm.bedrockControlPlaneHost=ZQy;Wm.awsSsoOidcHost=QQy;Wm.awsSsoPortalHost=ee_;Wm.bedrockSsoHosts=te_;Wm.bedrockHosts=p0T;Wm.parseEgressHostEntry=Ywu;Wm.stripEgressEntryPort=g0T;Wm.dropPortScopedEgressEntries=y0T;Wm.MINIMAL_EGRESS_DOMAINS=["*.anthropic.com","anthropic.com","claude.com","*.claude.com"];Wm.VM_BUNDLE_HOST="downloads.claude.ai";Wm.UPDATE_FEED_HOST="releases.claude.com";Wm.ANTHROPIC_API_HOST="api.anthropic.com";function c0T(e){let t=e.replace(/\.$/,"").toLowerCase();return t==="anthropic.com"||t.endsWith(".anthropic.com")}Wm.PLATFORM_CLAUDE_HOST="platform.claude.com";Wm.SEGMENT_CDN_HOST="a-cdn.anthropic.com";Wm.SEGMENT_API_HOST="a-api.anthropic.com";Wm.FAVICON_PROXY_HOST="www.google.com";Wm.GSTATIC_WILDCARD="*.gstatic.com";Wm.ARTIFACT_IFRAME_HOST="www.claudeusercontent.com";Wm.MCP_APP_SANDBOX_WILDCARD_HOST="*.claudemcpcontent.com";Wm.ANTHROPIC_ASSETS_HOST="assets.claude.ai";Wm.SENTRY_WILDCARD_HOST="*.sentry.io";Wm.SENTRY_INGEST_HOST="o1158394.ingest.us.sentry.io";Wm.MICROSOFT_LOGIN_HOST="login.microsoftonline.com";Wm.GOOGLE_ACCOUNTS_HOST="accounts.google.com";Wm.GOOGLE_OAUTH2_HOST="oauth2.googleapis.com";Wm.GOOGLE_STS_HOST="sts.googleapis.com";Wm.GOOGLE_IAMCRED_HOST="iamcredentials.googleapis.com";Wm.DATADOG_INTAKE_HOSTS=["browser-intake-datadoghq.com"
+#### "non-API" count=0 []
+#### "nonApi" count=0 []
+#### "www.anthropic.com" count=18 [100910994,100958560,100961744,163318556,163318652,163319220,163319316,187200648,187205368,316792320,316792407,316792934,316793016,317263698,321237803,321389824]
+--- 100910994 ---
+easures for dual-use capabilities, while Claude Mythos 5 is available without those measures to only approved organizations. Fable 5 is the most advanced generally available Claude model. If the person asks about the differences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.............(.u...O.b.j.e.c.t. .a.n.d. .a.r.r.a.y. .p.a.r.a.m.e.t.e.r. .v.a.l.u.e.s. .m.u.s.t. .b.e. .a. .s.i.n.g.l.e. .J.S.O.N. .v.a.l.u.e. ..  .n.e.v.e.r. .w.r.i.t.e. .p.a.r.a.m.e.t.e.r.-.t.a.g. .m.a.r.k.u.p. .i.n.s.i.d.e. .a. .J.S.O.N. .v.a.l.u.e...(...............(.e...W.h.e.n. .y.o.u. .u.s.e. .a. .p.r.o.n.o.u.n. .f.o.r. .s.o.m.e.o.n.e. ..  .t.h.e. .u.s.e.r. .o.r. .a.n.y.o.n.e. .e.l.s.e. .y.o.u. .m.e.n.t.i.o.n. ..  .a.n.d. .t.h.e.i.r. .p.r.o.n.o.u.n.s. .h.a.v.e.n.'.t. .b.e.e.n. .s.t.a.t.e.d.,. .u.s.e. .t.h.e.y./.t.h.e.m... .A. .n.a.m.e. .d.o.e.s.n.'.t. .t.e.l.l. .y.o.u. .s.o.m.e.o.n.e.'.s. .p.r.o.n.o.u.n.s.;. .a. .w.r.o.n.g. .g.u.e.s.s. .m.i.s.g.e.n.d.e.r.s. .a. .r.e.a.l. .p.e.r.s.o.n. .i.n. .a. .w.a.y. .t.h.e. .n.e.u.t.r.a.l. .d.e.f.a.u.l.t. .n.e.v.e.r. .d.o.e.s.,. .s.o. .n.e.v.e.r. .i.n.f.e.r. .p.r.o.n.o.u.n.s. .f.r.o.m. .a. .n.a.m.e... .T.h.i.s. .a.p.p.l.i.e.s. .t.o. .a.l.l. .u.s.e.r.-.v.i.s.i.b.l.e. .t.e.x.t.,. .i.n.c.l.u.d.i.n.g. .v.i.s.i.b.l.e. .t.h.i.n.k.i.n.g.................	...a...You are an agent working with the user toward their goals, using your own judgment along the way................	.......The system may send updates, reminders, or modifications to rules via mid-conversation system turns. These are system-controlled, unlike function results...............	.......When you have enough infor
+--- 100958560 ---
+vailable in coordinator sessions. Use /branch instead.&.........(.....................P.................(.......................IN).	...normalize................N).....notePending.............	O).....refreshPending...........O).....tengu-top-of-feed-tip...........	.../...https://www.anthropic.com/legal/promotion-terms.........	.......markRestored............	...7...Auto mode is now Claude Code's default permission mode..........IQ).....Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest...............	...0...https://code.claude.com/docs/en/permission-modes........	.......auto-mode-defaultJ
+.............	T).....tengu_velvet_harbor_owl.........	.......https://claude.com/enterprise...........	.......remote-control-auto-on..........	.......setup...........	.......suspend..........U).....syncViewport............	V).....draw............	......computeLayout...........	.......handleResize............	.......tickPump........	W).....consumeBackfillNeeded...........	.......consumeGapRange.........	......primeBackfill...........	.......switchTranscript........	.......restoreUnderContentOverlay..............	.......resetTransientState.............	Y).	...clearLineY).....................writeOverlayLines...............	.......commitImmediate.........	...	..._onScreen...............	......_committedTop...........	......._pumpCursor.............	......._nativeHistory..........	......._commitForTest..........	...
+..._transient..............	........[K..............[).x...Vivere omnes beate volunt sed ad pervide
+#### "docs.anthropic.com" count=4 [213219200,213468488,300980940,301007352]
+--- 213219200 ---
+........	...@...Cannot destructure property 'betas' from null or undefined value1.......................	.......i...............	.......The model '.............	.......' is deprecated and will reach end-of-life on ..........	...}...
+Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information............	.......enabled.........	.......Using Claude with ..............	....... and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking......
+...............	......./v1/messages?beta=true...'	.....2...............	.......n...............	.......o...........................................X........................@ ......@`>".... ...@pF.F.....4.......D.....@PM.F.....g.@ ..F.....3.........T.....,.....@.4.F...	.3.@.T.I...@.L.I.....4...U.....@.M.F.................,.	.4.H.4.@.4.G...@.L...5.@ ..F.....3...}...4.@.5.K...@.4.P.....=.@ ..F...@.4.I....`3...>...4.@`n.@.L.@.|...K...,.@p..J.L...4.@...J.L...4....D....@.<.@PV.....@./.@ ..I...............@.l.G...,...@......;...}...................L...j...m...............A...D...G...c...f...n...q.............................................*.....................@r.......................}.......................~.......................n-......................W.......................W......................0!,...............................................[.....................0.......................X!......................(...............................................(........................5,.....................
+--- 213468488 ---
+Cannot destructure property 'user_profile_id' from null or undefined value......1.......................	.......n...............	.......The model '.............	.......' is deprecated and will reach end-of-life on ..........	...}...
+Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information............	.......enabled.........	.......Using Claude with ..............	....... and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking......
+...............	......./v1/messages.....'	.....2...............	.......r...........................................L....................@0...`..@.E.F.....4.......D.....@PM.F.....g.@ ..F.....3.........T.....,.....@.4.F...	.3.@.T.I...@.L.I.....4...U.....@.M.F.................,.	.4.H.4.@.4.G...@.L...5.@ ..F.....3...}...4.@.5.K...@.4.P.....=.@ ..F...@.4.I....`3...>...4.@.m.@.L.@.|...K...,.@p..@PV..`..@P?.@ ..I..D.....p.M....@.l.G...L...@..........W...................&...D...G...o...........	...........3...6...U.......................`...............................................0.!.....................................................................@.......................p.......................X.X......................?......................(T...............................................................................................h(......................3......................P........................k2.............................................x................................................]......
+#### "console.anthropic.com" count=0 []
+#### "support.claude.com" count=16 [99650504,99650760,100898784,100898848,100898912,100898976,186832120,186832208,306956982,306957192,316759007,316759061,316759115,316759168,321876493,321876568]
+--- 99650504 ---
+leapis.com/auth/cloud-platform..........Ij......global..........	...b...Set `project` or the `ANTHROPIC_GOOGLE_CLOUD_PROJECT` environment variable (or provide `baseURL`)."..............,......vertex-2023-10-16...............	.......x-client-request-id.................Q...https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans...............	...:...https://claude.ai/settings/usage?from=cc_cli_limit_message..............	...2...claude.ai/settings/usage?from=cc_cli_limit_message..............	#"./...https://support.claude.com/en/articles/12429409.ffffff.?........	.......individual spend limit..........	$".....individual usage limit..........	.......isFromPreviousAccount............$".....isStaleObservation..............	.......resetCurrentLimits".............	.......emitStatusChange........I.
+.....probeQuotaStatus................extractQuotaStatusFromHeaders...........I&".....resetGraceState..........&".....resetNearLimitWrapUpState'"..............x......extractGraceStatusFromHeaders............j......consumePendingGraceWrapUpHint...........	:..!...consumePendingNearLimitWrapUpHint...............	.......extractQuotaStatusFromError.............	.......tengu_lantern_wick_mode..........	......tengu_vellum_anchor..............t......[Usage limit approaching. Checkpoint now: finish the current step, then list up to 3 short bullets of the most impactful remaining work. Don't start subagents or long-running work.]...ffffff.?.........$
+.K...A.p.p.r.o.a.c.h.i.n.g. .y.o.u.r. .5.-.h.o.u.r. .u.s.a.g.e. .l.i.m.i.t. ..  .C.l.a.u.d.e. .w.i.l.l. .w.r.a.p. .u.p. .t.h.e. .c.u.r.r.e.n.t. .s.t.e.p.............	.......notice..........	-".....memdir_r
+--- 99650760 ---
+............Q...https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans...............	...:...https://claude.ai/settings/usage?from=cc_cli_limit_message..............	...2...claude.ai/settings/usage?from=cc_cli_limit_message..............	#"./...https://support.claude.com/en/articles/12429409.ffffff.?........	.......individual spend limit..........	$".....individual usage limit..........	.......isFromPreviousAccount............$".....isStaleObservation..............	.......resetCurrentLimits".............	.......emitStatusChange........I.
+.....probeQuotaStatus................extractQuotaStatusFromHeaders...........I&".....resetGraceState..........&".....resetNearLimitWrapUpState'"..............x......extractGraceStatusFromHeaders............j......consumePendingGraceWrapUpHint...........	:..!...consumePendingNearLimitWrapUpHint...............	.......extractQuotaStatusFromError.............	.......tengu_lantern_wick_mode..........	......tengu_vellum_anchor..............t......[Usage limit approaching. Checkpoint now: finish the current step, then list up to 3 short bullets of the most impactful remaining work. Don't start subagents or long-running work.]...ffffff.?.........$
+.K...A.p.p.r.o.a.c.h.i.n.g. .y.o.u.r. .5.-.h.o.u.r. .u.s.a.g.e. .l.i.m.i.t. ..  .C.l.a.u.d.e. .w.i.l.l. .w.r.a.p. .u.p. .t.h.e. .c.u.r.r.e.n.t. .s.t.e.p.............	.......notice..........	-".....memdir_relevance..........0.....X........................-".....reservedSpellingsFor............	...#...markLoadedResultMissingTrustedNames.............I.".!...loadedResultIsMissingTrustedNames...............	.......clearLoadCaches.........	.......invalidateComman
+#### "claude.com" count=20 [99500901,99650512,99650768,99654976,99676629,99676705,99676752,99676800,100869349,100898792,100898856,100898920,100898984,100902399,100940856,100958965]
+--- 99500901 ---
+d..................heldOf..........	.......take............	.......queue...........	.......read............	w......fill............	...	...standDown...............	.......remote-settings.json...... .............	.......remote-settings-helper-consent..........	.......https://code.claude.com/docs/en.........	.......canonicalRootOwnerUids..........	.......hasCanonicalRootOwnerUids...............	.......clearCanonicalRootOwnerUids.............	.......normalizedRealHomeDir...........	.......clearNormalizedRealHomeDir..............	...#...CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION.............	...	...startLoad...................
+...C:\Windows......................C:\Program Files............z...PowerShell not found at any of its stock install locations on C: (fixed absolute candidates only; PATH is never consulted)..................&...CLAUDE_CODE_POLICY_HELPER_PSMODULEPATH..........	..."...CLAUDE_CODE_POLICY_HELPER_PS1_PATH......................if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {} }; ........	...5....COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC...........I......./usr/bin:/bin:/usr/sbin:/sbin...........I...b...C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0..............	.......C:\Windows\System32\cmd.exe.............	...]...C:\Program Files\WindowsPowerShell\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules...........	...$.../var/empty/claude-code-policy-helper............I...$...C:\Windows\claude-code-policy-helper............	.......claimInitialize.........	.......apply................
+--- 99650512 ---
+om/auth/cloud-platform..........Ij......global..........	...b...Set `project` or the `ANTHROPIC_GOOGLE_CLOUD_PROJECT` environment variable (or provide `baseURL`)."..............,......vertex-2023-10-16...............	.......x-client-request-id.................Q...https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans...............	...:...https://claude.ai/settings/usage?from=cc_cli_limit_message..............	...2...claude.ai/settings/usage?from=cc_cli_limit_message..............	#"./...https://support.claude.com/en/articles/12429409.ffffff.?........	.......individual spend limit..........	$".....individual usage limit..........	.......isFromPreviousAccount............$".....isStaleObservation..............	.......resetCurrentLimits".............	.......emitStatusChange........I.
+.....probeQuotaStatus................extractQuotaStatusFromHeaders...........I&".....resetGraceState..........&".....resetNearLimitWrapUpState'"..............x......extractGraceStatusFromHeaders............j......consumePendingGraceWrapUpHint...........	:..!...consumePendingNearLimitWrapUpHint...............	.......extractQuotaStatusFromError.............	.......tengu_lantern_wick_mode..........	......tengu_vellum_anchor..............t......[Usage limit approaching. Checkpoint now: finish the current step, then list up to 3 short bullets of the most impactful remaining work. Don't start subagents or long-running work.]...ffffff.?.........$
+.K...A.p.p.r.o.a.c.h.i.n.g. .y.o.u.r. .5.-.h.o.u.r. .u.s.a.g.e. .l.i.m.i.t. ..  .C.l.a.u.d.e. .w.i.l.l. .w.r.a.p. .u.p. .t.h.e. .c.u.r.r.e.n.t. .s.t.e.p.............	.......notice..........	-".....memdir_relevance
+#### "INCLUDE_HOSTS" count=8 [106509152,200123456,251193352,251195080,301323935,307783366,326587353,326587433]
+--- 106509152 ---
+OINT_URL_STS............	.......AWS_PROFILE.............	...
+...AWS_REGION..............	.......AWS_SECRET_ACCESS_KEY...........	.2.....AWS_SESSION_TOKEN...............	.......AWS_SHARED_CREDENTIALS_FILE.............	.......CCR_AGENT_PROXY_ENABLED.................CCR_AGENT_PROXY_INCLUDE_HOSTS...........	.......CCR_AGENT_PROXY_RELAY_MODE2...............2.....CCR_ENABLE_BUNDLE...............	.......CCR_FORCE_BUNDLE........	.......CCR_ON_BRANCH_DEFAULT_GUARD.............	.......CLAUDE_CODE_AGENT_PROXY_GH_SHIM.........	..."...CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG2.............	.2.....CLAUDE_CODE_API_BASE_URL........	...*...CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY..............	.......CLAUDE_CODE_GB_BASE_URL.........I.2."...CLAUDE_CODE_GB_REFRESH_INTERVAL_MS..............	...$...CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST.............!.. ...CLAUDE_CODE_PROXY_RESOLVES_HOSTS..........2. ...CLAUDE_CODE_SIMULATE_PROXY_USAGE............"...CLAUDE_CODE_SKIP_HFI_VERSION_CHECK..............	.......CLAUDE_CODE_USE_ANTHROPIC_AWS...........	...&...CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD............2.....CLAUDE_CODE_USE_BEDROCK.........	.......CLAUDE_CODE_USE_FOUNDRY...........2.....CLAUDE_CODE_USE_GATEWAY.........	.......CLAUDE_CODE_USE_MANTLE...........,......CLAUDE_CODE_USE_VERTEX..........	.......CLAUDE_GATEWAY_ALLOW_LOOPBACK...........	.......CLAUDE_GATEWAY_LOG_LEVEL..........2.....CLOUD_ML_REGION.............(..._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL........	.......CLAUDE_CODE_MESSAGING_SOCKET............	.......CLAUDE_CODE_MESSAGING_TOKEN.............	......udsInboxShape...........	.......JETBRAINS_IDES..........	.......antEnv............2.....detectDeploymentEnvironm
+--- 200123456 ---
+........I.......XB......I.......
+...............(.........................................s.....I.........r.....	.......................	.......AGENT_PROXY_URL.........	.......AGENT_PROXY_AUTH_TOKEN..........	.......CCR_AGENT_PROXY_RELAY_MODE..............	.......CCR_AGENT_PROXY_INCLUDE_HOSTS...........	...A...[agent-proxy] CLAUDE_CODE_REMOTE_SESSION_ID unset; proxy disabled...............	.......warn............	.......agent_proxy_init........	.......agent_proxy_init_no_session_id..........................	.......[agent-proxy] no session token; proxy disabled..........	.......agent_proxy_init_no_token...............	.......[agent-proxy] token via ........	.......sessionIngressAuth..............	.......https://api.anthropic.com...............	.......ccr.............	......ca-bundle.crt...........	........ccr............	.......utf8....................................	.......
+.......................	........aws............	.......config..................	...	...selective...............	...............	.......,.......................	.......[agent-proxy] selective relay: .........	....... include hosts; unlisted use normal networking..........	...D...[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host ................4...l.i.s.t. .i.s. .e.m.p.t.y./.u.n.p.a.r.s.a.b.l.e. ..  .F.A.I.L.-.C.L.O.S.E.D. .t.o. .t.u.n.n.e.l.-.a.l.l.........	...#...agent_proxy_selective_empty_include.............(...................
+...................@.......................	.......@.......I.......X...............................................	.......^http...........	.......ws..............	......./ws.............	.......................	...	...README.md.......
+#### "include-host" count=2 [200124399,326588807]
+--- 200124399 ---
+.config..................	...	...selective...............	...............	.......,.......................	.......[agent-proxy] selective relay: .........	....... include hosts; unlisted use normal networking..........	...D...[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host ................4...l.i.s.t. .i.s. .e.m.p.t.y./.u.n.p.a.r.s.a.b.l.e. ..  .F.A.I.L.-.C.L.O.S.E.D. .t.o. .t.u.n.n.e.l.-.a.l.l.........	...#...agent_proxy_selective_empty_include.............(...................
+...................@.......................	.......@.......I.......X...............................................	.......^http...........	.......ws..............	......./ws.............	.......................	...	...README.md.......................................(...................
+...................8.......	...............	...............	...+...Iterator result interface is not an object..............	.......agent_proxy_tool_scoped.........	...#...[agent-proxy] enabled on 127.0.0.1:.....1.......
+...............	..."...[agent-proxy] relay start failed: ..............	.......; proxy disabled........	...#...agent_proxy_init_relay_start_failed.........................................................................p...................E............@.;...E......B4...5......B4.@.5.F....aL.@P-.F....aL.@ ..[...@.5.^...@06.F....aL.@...F....aL..P...........B4..@3.@.V.F.L.@.D.X...@.N.F.L..AE......B4.@@6.@..T....@..W......,.....@p/.F.L.@.D.K.....M.....@ .....9....H...@.4.F...@.4..P......@.<.@@..@...r....P/.....@ /.F.L.@.D.@...@ ..w.z.../.....@P/.@04.L....Qu......B4.@@..N....@M......`T.......4.......k...N.......4.......4.&Bk.....@.<q....@.D.N....pM.....@.4.M.....K..x
+--- 326588807 ---
+(!r&&o==="selective"){let b=(i??"").split(",").map((S)=>S.trim()).filter((S)=>S.length>0);if(b.length>0)_={includeHosts:b},E(`[agent-proxy] selective relay: ${b.length} include hosts; unlisted use normal networking`);else E("[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host "+"list is empty/unparsable \u2014 FAIL-CLOSED to tunnel-all",{level:"warn"}),be("agent_proxy_init","agent_proxy_selective_empty_include")}try{let b=d.replace(/^http/,"ws")+aZn+"/ws",S=ire.join(p,"..","README.md"),w=n??u??"",T=await KFy({wsUrl:b,sessionId:s,token:w,getToken:n?()=>w:()=>P0()||w,selective:_,startupProbe:!0,statusProvider:()=>({...t.state,readmePath:S,gitConfigInjection:Mhu(),gitSshRewrite:Mhu()&&Nhu()})});Sa(async()=>T.stop());let k={enabled:!0,port:T.port,caBundlePath:p,hasSystemCa:f!=="",noProxy:_?yUy:r?gUy:G1s,selective:Boolean(_),standalone:Boolean(r),toolScoped:g,installedProxyPreconfiguredClis:await y};if(t.activate(k,T),g){let C=!1,[x,R]=await Promise.all([V.CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG?kZA(T.port,p).catch((I)=>(E(`[agent-proxy] governed git config append failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","git_config_append_failed"),C=!0,!1)):!1,V.CLAUDE_CODE_AGENT_PROXY_GH_SHIM?RZA(T.port,p).catch((I)=>{E(`[agent-proxy] gh shim write failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","gh_shim_write_failed"),C=!0;return}):void 0]);if(R)k.ghShimDir=R;if(!C)Ee("agent_proxy_tool_scoped",{git_config:x,gh_shim:Boolean(R)})}if(E(`[agent-proxy] enabled on 127.0.0.1:${T.port}`),Ee("agent_proxy_init"),j2n(Dhu(p,void 0)),Xz.writeFile(S,DZA(T.port,p),"utf8").then(()=>{if(t.state!==k)return;j2n(Dhu(p,S))}).catch((C)=>{if(E(`[
+#### "agent_proxy_selective" count=2 [200124552,326588921]
+--- 200124552 ---
+	....... include hosts; unlisted use normal networking..........	...D...[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host ................4...l.i.s.t. .i.s. .e.m.p.t.y./.u.n.p.a.r.s.a.b.l.e. ..  .F.A.I.L.-.C.L.O.S.E.D. .t.o. .t.u.n.n.e.l.-.a.l.l.........	...#...agent_proxy_selective_empty_include.............(...................
+...................@.......................	.......@.......I.......X...............................................	.......^http...........	.......ws..............	......./ws.............	.......................	...	...README.md.......................................(...................
+...................8.......	...............	...............	...+...Iterator result interface is not an object..............	.......agent_proxy_tool_scoped.........	...#...[agent-proxy] enabled on 127.0.0.1:.....1.......
+...............	..."...[agent-proxy] relay start failed: ..............	.......; proxy disabled........	...#...agent_proxy_init_relay_start_failed.........................................................................p...................E............@.;...E......B4...5......B4.@.5.F....aL.@P-.F....aL.@ ..[...@.5.^...@06.F....aL.@...F....aL..P...........B4..@3.@.V.F.L.@.D.X...@.N.F.L..AE......B4.@@6.@..T....@..W......,.....@p/.F.L.@.D.K.....M.....@ .....9....H...@.4.F...@.4..P......@.<.@@..@...r....P/.....@ /.F.L.@.D.@...@ ..w.z.../.....@P/.@04.L....Qu......B4.@@..N....@M......`T.......4.......k...N.......4.......4.&Bk.....@.<q....@.D.N....pM.....@.4.M.....K..x=..jT.............@ ..@ ....K.....@ ..@ ..@P..@PL.@@d.@ .....p..J.....@...@...F.L...E.....@.<.....@ ..O....@M.......4.......4..Bk..P:.....@.....D.....@.T
+--- 326588921 ---
+Hosts:b},E(`[agent-proxy] selective relay: ${b.length} include hosts; unlisted use normal networking`);else E("[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host "+"list is empty/unparsable \u2014 FAIL-CLOSED to tunnel-all",{level:"warn"}),be("agent_proxy_init","agent_proxy_selective_empty_include")}try{let b=d.replace(/^http/,"ws")+aZn+"/ws",S=ire.join(p,"..","README.md"),w=n??u??"",T=await KFy({wsUrl:b,sessionId:s,token:w,getToken:n?()=>w:()=>P0()||w,selective:_,startupProbe:!0,statusProvider:()=>({...t.state,readmePath:S,gitConfigInjection:Mhu(),gitSshRewrite:Mhu()&&Nhu()})});Sa(async()=>T.stop());let k={enabled:!0,port:T.port,caBundlePath:p,hasSystemCa:f!=="",noProxy:_?yUy:r?gUy:G1s,selective:Boolean(_),standalone:Boolean(r),toolScoped:g,installedProxyPreconfiguredClis:await y};if(t.activate(k,T),g){let C=!1,[x,R]=await Promise.all([V.CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG?kZA(T.port,p).catch((I)=>(E(`[agent-proxy] governed git config append failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","git_config_append_failed"),C=!0,!1)):!1,V.CLAUDE_CODE_AGENT_PROXY_GH_SHIM?RZA(T.port,p).catch((I)=>{E(`[agent-proxy] gh shim write failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","gh_shim_write_failed"),C=!0;return}):void 0]);if(R)k.ghShimDir=R;if(!C)Ee("agent_proxy_tool_scoped",{git_config:x,gh_shim:Boolean(R)})}if(E(`[agent-proxy] enabled on 127.0.0.1:${T.port}`),Ee("agent_proxy_init"),j2n(Dhu(p,void 0)),Xz.writeFile(S,DZA(T.port,p),"utf8").then(()=>{if(t.state!==k)return;j2n(Dhu(p,S))}).catch((C)=>{if(E(`[agent-proxy] README write failed: ${C instanceof Error?C.message:String(C)}`),t.state!==k)return;j2n(Dhu(p,void 0)
+#### "selective relay" count=8 [199975588,199978316,199981116,200124246,326570410,326570828,326571197,326588667]
+--- 199975588 ---
+....(.........................................t.....I.......P.t..............8......	.......H.t.............
+...............(........................................0v.....I.........t.....	.......................................	...	...Forbidden...............	...7...agent-proxy selective relay: normal-networking refused .........	....... (..............	.......)...............	.......agent_proxy_request.............	.......agent_proxy_direct_blocked_.............	.......direct_blocked..................................	.......Bad Request.............	.......invalid CONNECT port........................................F...................4.....0..@ ....K.@.<.@0..J.L...4.@ .L....@...@`|X......lZ....@.,.D.L.BA4..P,.@`........2.../.@ ..D.L.@pM.@ ...PJ...>.....@.4...K.@`T...J.@.%..@J.@P&.J.L...4.@ ......@...D.L.BA4.@.<.Q.L.@p5...E.....@...G.L..r4M.....4.@P;.......D.....@@U.@p|K...................x......<..........`T....W.......9...F...S...........T.......................`5........................t.......................t.....................p.t.............................................x.m.....................p.......................h................................................{...............................................\u.....................................................................x.t.....................0................................................N.......................+v.....................................................................xI.......................L......................................................................(.......................P.........................p.....................h...........................
+--- 199978316 ---
+j.......................i..................................................................................................................................................................
+.......................................	.......Gateway Timeout.........	...,...agent-proxy selective relay: direct dial to ............	.......:...............	....... timed out after ...............	.......ms..............	.......direct_dial_timeout..............................................@...G...@...@...@PD.J...@.4.Q....P5.@ .G....@...@P..@P..G....r4}............@.,.D...BA4..`,.@ ..D...@.M.@P..@@...`.......................................t.......................m.....................H.t.............................................P........................+........................t.......................t..................... ........................F..............................................hr......................h.......@...........~.......S.......`................L..H....................... |.......................|......h...........................................................................................................................................1................../...h...h...h...............................................................................@...@...@...@...@................	..@...X...X...h...x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...x...........................(........	..............`...............................................x	..............p	..................................................................................................................................................................
+#### "tunnel-all" count=1 [326588870]
+--- 326588870 ---
+)).filter((S)=>S.length>0);if(b.length>0)_={includeHosts:b},E(`[agent-proxy] selective relay: ${b.length} include hosts; unlisted use normal networking`);else E("[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host "+"list is empty/unparsable \u2014 FAIL-CLOSED to tunnel-all",{level:"warn"}),be("agent_proxy_init","agent_proxy_selective_empty_include")}try{let b=d.replace(/^http/,"ws")+aZn+"/ws",S=ire.join(p,"..","README.md"),w=n??u??"",T=await KFy({wsUrl:b,sessionId:s,token:w,getToken:n?()=>w:()=>P0()||w,selective:_,startupProbe:!0,statusProvider:()=>({...t.state,readmePath:S,gitConfigInjection:Mhu(),gitSshRewrite:Mhu()&&Nhu()})});Sa(async()=>T.stop());let k={enabled:!0,port:T.port,caBundlePath:p,hasSystemCa:f!=="",noProxy:_?yUy:r?gUy:G1s,selective:Boolean(_),standalone:Boolean(r),toolScoped:g,installedProxyPreconfiguredClis:await y};if(t.activate(k,T),g){let C=!1,[x,R]=await Promise.all([V.CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG?kZA(T.port,p).catch((I)=>(E(`[agent-proxy] governed git config append failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","git_config_append_failed"),C=!0,!1)):!1,V.CLAUDE_CODE_AGENT_PROXY_GH_SHIM?RZA(T.port,p).catch((I)=>{E(`[agent-proxy] gh shim write failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","gh_shim_write_failed"),C=!0;return}):void 0]);if(R)k.ghShimDir=R;if(!C)Ee("agent_proxy_tool_scoped",{git_config:x,gh_shim:Boolean(R)})}if(E(`[agent-proxy] enabled on 127.0.0.1:${T.port}`),Ee("agent_proxy_init"),j2n(Dhu(p,void 0)),Xz.writeFile(S,DZA(T.port,p),"utf8").then(()=>{if(t.state!==k)return;j2n(Dhu(p,S))}).catch((C)=>{if(E(`[agent-proxy] README write failed: ${C instanceof Error?C.messag
+#### "FAIL-CLOSED" count=1 [326588855]
+--- 326588855 ---
+ap((S)=>S.trim()).filter((S)=>S.length>0);if(b.length>0)_={includeHosts:b},E(`[agent-proxy] selective relay: ${b.length} include hosts; unlisted use normal networking`);else E("[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host "+"list is empty/unparsable \u2014 FAIL-CLOSED to tunnel-all",{level:"warn"}),be("agent_proxy_init","agent_proxy_selective_empty_include")}try{let b=d.replace(/^http/,"ws")+aZn+"/ws",S=ire.join(p,"..","README.md"),w=n??u??"",T=await KFy({wsUrl:b,sessionId:s,token:w,getToken:n?()=>w:()=>P0()||w,selective:_,startupProbe:!0,statusProvider:()=>({...t.state,readmePath:S,gitConfigInjection:Mhu(),gitSshRewrite:Mhu()&&Nhu()})});Sa(async()=>T.stop());let k={enabled:!0,port:T.port,caBundlePath:p,hasSystemCa:f!=="",noProxy:_?yUy:r?gUy:G1s,selective:Boolean(_),standalone:Boolean(r),toolScoped:g,installedProxyPreconfiguredClis:await y};if(t.activate(k,T),g){let C=!1,[x,R]=await Promise.all([V.CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG?kZA(T.port,p).catch((I)=>(E(`[agent-proxy] governed git config append failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","git_config_append_failed"),C=!0,!1)):!1,V.CLAUDE_CODE_AGENT_PROXY_GH_SHIM?RZA(T.port,p).catch((I)=>{E(`[agent-proxy] gh shim write failed: ${le(I)}`,{level:"warn"}),be("agent_proxy_tool_scoped","gh_shim_write_failed"),C=!0;return}):void 0]);if(R)k.ghShimDir=R;if(!C)Ee("agent_proxy_tool_scoped",{git_config:x,gh_shim:Boolean(R)})}if(E(`[agent-proxy] enabled on 127.0.0.1:${T.port}`),Ee("agent_proxy_init"),j2n(Dhu(p,void 0)),Xz.writeFile(S,DZA(T.port,p),"utf8").then(()=>{if(t.state!==k)return;j2n(Dhu(p,S))}).catch((C)=>{if(E(`[agent-proxy] README write failed: ${C instanceof
+#### "function parseInclude" count=0 []
+#### "CCR_AGENT_PROXY_RELAY_MODE" count=10 [106509184,200123392,200124358,251193288,251195016,301323957,307783321,326587306,326587379,326588766]
+--- 106509184 ---
+AWS_PROFILE.............	...
+...AWS_REGION..............	.......AWS_SECRET_ACCESS_KEY...........	.2.....AWS_SESSION_TOKEN...............	.......AWS_SHARED_CREDENTIALS_FILE.............	.......CCR_AGENT_PROXY_ENABLED.................CCR_AGENT_PROXY_INCLUDE_HOSTS...........	.......CCR_AGENT_PROXY_RELAY_MODE2...............2.....CCR_ENABLE_BUNDLE...............	.......CCR_FORCE_BUNDLE........	.......CCR_ON_BRANCH_DEFAULT_GUARD.............	.......CLAUDE_CODE_AGENT_PROXY_GH_SHIM.........	..."...CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG2.............	.2.....CLAUDE_CODE_API_BASE_URL........	...*...CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY..............	.......CLAUDE_CODE_GB_BASE_URL.........I.2."...CLAUDE_CODE_GB_REFRESH_INTERVAL_MS..............	...$...CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST.............!.. ...CLAUDE_CODE_PROXY_RESOLVES_HOSTS..........2. ...CLAUDE_CODE_SIMULATE_PROXY_USAGE............"...CLAUDE_CODE_SKIP_HFI_VERSION_CHECK..............	.......CLAUDE_CODE_USE_ANTHROPIC_AWS...........	...&...CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD............2.....CLAUDE_CODE_USE_BEDROCK.........	.......CLAUDE_CODE_USE_FOUNDRY...........2.....CLAUDE_CODE_USE_GATEWAY.........	.......CLAUDE_CODE_USE_MANTLE...........,......CLAUDE_CODE_USE_VERTEX..........	.......CLAUDE_GATEWAY_ALLOW_LOOPBACK...........	.......CLAUDE_GATEWAY_LOG_LEVEL..........2.....CLOUD_ML_REGION.............(..._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL........	.......CLAUDE_CODE_MESSAGING_SOCKET............	.......CLAUDE_CODE_MESSAGING_TOKEN.............	......udsInboxShape...........	.......JETBRAINS_IDES..........	.......antEnv............2.....detectDeploymentEnvironment.....................env.....
+--- 200123392 ---
+.'.............P...............@B......I........;}.....)...............I.......XB......I.......
+...............(.........................................s.....I.........r.....	.......................	.......AGENT_PROXY_URL.........	.......AGENT_PROXY_AUTH_TOKEN..........	.......CCR_AGENT_PROXY_RELAY_MODE..............	.......CCR_AGENT_PROXY_INCLUDE_HOSTS...........	...A...[agent-proxy] CLAUDE_CODE_REMOTE_SESSION_ID unset; proxy disabled...............	.......warn............	.......agent_proxy_init........	.......agent_proxy_init_no_session_id..........................	.......[agent-proxy] no session token; proxy disabled..........	.......agent_proxy_init_no_token...............	.......[agent-proxy] token via ........	.......sessionIngressAuth..............	.......https://api.anthropic.com...............	.......ccr.............	......ca-bundle.crt...........	........ccr............	.......utf8....................................	.......
+.......................	........aws............	.......config..................	...	...selective...............	...............	.......,.......................	.......[agent-proxy] selective relay: .........	....... include hosts; unlisted use normal networking..........	...D...[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host ................4...l.i.s.t. .i.s. .e.m.p.t.y./.u.n.p.a.r.s.a.b.l.e. ..  .F.A.I.L.-.C.L.O.S.E.D. .t.o. .t.u.n.n.e.l.-.a.l.l.........	...#...agent_proxy_selective_empty_include.............(...................
+...................@.......................	.......@.......I.......X...............................................	.......^http...........	.......ws..............	.......
+#### "AGENT_PROXY_URL" count=9 [106507872,200123320,251193384,251195112,301322973,307783382,326587184,326587246,328760990]
+--- 106507872 ---
+	.......MAX_MCP_OUTPUT_TOKENS...........	.......MAX_STRUCTURED_OUTPUT_RETRIES...........	.......MAX_THINKING_TOKENS..............~2.....NO_PROXY........	...	...all_proxy...............	...
+...http_proxy..............	.......https_proxy.............	.......no_proxy........I.2.....AGENT_PROXY_URL.................ANTHROPIC_AWS_BASE_URL..........	.......ANTHROPIC_AWS_WORKSPACE_ID..............	.......ANTHROPIC_BASE_URL2...............2.....ANTHROPIC_BEDROCK_BASE_URL2.............	.2.!...ANTHROPIC_BEDROCK_MANTLE_BASE_URL...............	.......ANTHROPIC_BEDROCK_REGION_PREFIX.........	.......ANTHROPIC_BEDROCK_SERVICE_TIER..........	.......ANTHROPIC_FOUNDRY_BASE_URL..............	.......ANTHROPIC_FOUNDRY_RESOURCE..............	.......ANTHROPIC_GOOGLE_CLOUD_BASE_URL.........	.......ANTHROPIC_GOOGLE_CLOUD_LOCATION.........	.......ANTHROPIC_GOOGLE_CLOUD_PROJECT..........	...#...ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID.............	.2.%...ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION...........	.......ANTHROPIC_UNIX_SOCKET............S......ANTHROPIC_VERTEX_BASE_URL.2..............C......ANTHROPIC_VERTEX_PROJECT_ID...............2.....AWS_ACCESS_KEY_ID...............	.......AWS_CONFIG_FILE.........	.......AWS_DEFAULT_REGION................2.....AWS_ENDPOINT_URL........	.2.....AWS_ENDPOINT_URL_STS............	.......AWS_PROFILE.............	...
+...AWS_REGION..............	.......AWS_SECRET_ACCESS_KEY...........	.2.....AWS_SESSION_TOKEN...............	.......AWS_SHARED_CREDENTIALS_FILE.............	.......CCR_AGENT_PROXY_ENABLED.................CCR_AGENT_PROXY_INCLUDE_HOSTS...........	.......CCR_AGENT_PROXY_RELAY_MODE2...............2.....CCR_ENABLE_BUNDLE...............	.......
+--- 200123320 ---
+	........C..............p.......	........>..............pN......	........'.............P...............@B......I........;}.....)...............I.......XB......I.......
+...............(.........................................s.....I.........r.....	.......................	.......AGENT_PROXY_URL.........	.......AGENT_PROXY_AUTH_TOKEN..........	.......CCR_AGENT_PROXY_RELAY_MODE..............	.......CCR_AGENT_PROXY_INCLUDE_HOSTS...........	...A...[agent-proxy] CLAUDE_CODE_REMOTE_SESSION_ID unset; proxy disabled...............	.......warn............	.......agent_proxy_init........	.......agent_proxy_init_no_session_id..........................	.......[agent-proxy] no session token; proxy disabled..........	.......agent_proxy_init_no_token...............	.......[agent-proxy] token via ........	.......sessionIngressAuth..............	.......https://api.anthropic.com...............	.......ccr.............	......ca-bundle.crt...........	........ccr............	.......utf8....................................	.......
+.......................	........aws............	.......config..................	...	...selective...............	...............	.......,.......................	.......[agent-proxy] selective relay: .........	....... include hosts; unlisted use normal networking..........	...D...[agent-proxy] CCR_AGENT_PROXY_RELAY_MODE=selective but include-host ................4...l.i.s.t. .i.s. .e.m.p.t.y./.u.n.p.a.r.s.a.b.l.e. ..  .F.A.I.L.-.C.L.O.S.E.D. .t.o. .t.u.n.n.e.l.-.a.l.l.........	...#...agent_proxy_selective_empty_include.............(...................
+...................@.......................	.......@.......I.......X...............................
+#### "HTTPS_PROXY" count=20 [71157759,71158751,71158768,71226958,86666155,90149853,92451543,99630344,106507536,116201685,116201877,116202055,116203492,120164856,120165791,199953209]
+--- 71157759 ---
+artInt = ipToInt(startIP), endInt = ipToInt(endIP);
+          if (hostInt >= startInt && hostInt <= endInt)
+            return !1;
+        }
+      }
+    }
+    return !0;
+  }
+}
+function parseProxyUrl(env, protocol) {
+  let proxyUrl = protocol === "https:" ? env.https_proxy || env.HTTPS_PROXY : env.http_proxy || env.HTTP_PROXY;
+  if (!proxyUrl)
+    return null;
+  if (proxyUrl.includes("\r") || proxyUrl.includes(`
+`))
+    throw @makeErrorWithCode(203, `Invalid proxy URL: ${proxyUrl}`);
+  return proxyUrl;
+}
+function parseProxyConfigFromEnv(env, protocol, keepAlive) {
+  if (protocol !== "http:" && protocol !== "https:")
+    return null;
+  let proxyUrl = parseProxyUrl(env, protocol);
+  if (proxyUrl === null)
+    return null;
+  if (!proxyUrl.startsWith("http://") && !proxyUrl.startsWith("https://"))
+    return null;
+  return new ProxyConfig(proxyUrl, keepAlive, env.no_proxy || env.NO_PROXY);
+}
+function checkShouldUseProxy(proxyConfig, reqOptions) {
+  if (!proxyConfig)
+    return !1;
+  if (reqOptions.socketPath)
+    return !1;
+  return proxyConfig.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextI
+--- 71158751 ---
+ if (reqOptions.socketPath)
+    return !1;
+  return proxyConfig.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+  kReusedSocket,
+  kRes,
+  kRequest,
+  kRealListen,
+  kProxyConfig,
+  kProtocol,
+  kPort,
+  kPendingCallbacks,
+  kPath,
+  kParser,
+  kOutHeaders,
+  kOptions,
+  kNeedDrain,
+  kMethod,
+  kMaxHeadersCount,
+  kMaxHeaderSize,
+  kInternalSocketData,
+  kHost,
+  kHandle,
+  kFetchRequest,
+  kEmptyObject,
+  kEmitState,
+  kDeprecatedReplySymbol,
+  kCloseCallback,
+  kClearTimeout,
+  kBodyChunks,
+  kAgent,
+  kAbortController,
+  isTlsSymbol,
+  isAbortError,
+  headersTuple,
+  headersSymbol,
+  headerStateSymbol,
+  hasServerResponseFinished,
+  getRawKeys,
+  getMaxHTTPHeaderSize,
+  getIsNextIncomingMessageHTTPS,
+  getHeader,
+  getCompleteWebRequestOrResponseBodyValueAsArrayBuffer,
+  firstWriteSymbol,
+  filter
+#### "HTTP_PROXY" count=20 [71157795,71158685,71158701,71226894,86666135,92451555,99630376,106507568,116201653,116201837,116202015,116203452,120164784,120165743,120768113,205713400]
+--- 71157795 ---
+ipToInt(endIP);
+          if (hostInt >= startInt && hostInt <= endInt)
+            return !1;
+        }
+      }
+    }
+    return !0;
+  }
+}
+function parseProxyUrl(env, protocol) {
+  let proxyUrl = protocol === "https:" ? env.https_proxy || env.HTTPS_PROXY : env.http_proxy || env.HTTP_PROXY;
+  if (!proxyUrl)
+    return null;
+  if (proxyUrl.includes("\r") || proxyUrl.includes(`
+`))
+    throw @makeErrorWithCode(203, `Invalid proxy URL: ${proxyUrl}`);
+  return proxyUrl;
+}
+function parseProxyConfigFromEnv(env, protocol, keepAlive) {
+  if (protocol !== "http:" && protocol !== "https:")
+    return null;
+  let proxyUrl = parseProxyUrl(env, protocol);
+  if (proxyUrl === null)
+    return null;
+  if (!proxyUrl.startsWith("http://") && !proxyUrl.startsWith("https://"))
+    return null;
+  return new ProxyConfig(proxyUrl, keepAlive, env.no_proxy || env.NO_PROXY);
+}
+function checkShouldUseProxy(proxyConfig, reqOptions) {
+  if (!proxyConfig)
+    return !1;
+  if (reqOptions.socketPath)
+    return !1;
+  return proxyConfig.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  
+--- 71158685 ---
+xy(proxyConfig, reqOptions) {
+  if (!proxyConfig)
+    return !1;
+  if (reqOptions.socketPath)
+    return !1;
+  return proxyConfig.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+  kReusedSocket,
+  kRes,
+  kRequest,
+  kRealListen,
+  kProxyConfig,
+  kProtocol,
+  kPort,
+  kPendingCallbacks,
+  kPath,
+  kParser,
+  kOutHeaders,
+  kOptions,
+  kNeedDrain,
+  kMethod,
+  kMaxHeadersCount,
+  kMaxHeaderSize,
+  kInternalSocketData,
+  kHost,
+  kHandle,
+  kFetchRequest,
+  kEmptyObject,
+  kEmitState,
+  kDeprecatedReplySymbol,
+  kCloseCallback,
+  kClearTimeout,
+  kBodyChunks,
+  kAgent,
+  kAbortController,
+  isTlsSymbol,
+  isAbortError,
+  headersTuple,
+  headersSymbol,
+  headerStateSymbol,
+  hasServerResponseFinished,
+  getRawKeys,
+  getMaxHTTPHeaderSize,
+  getIsNextIncomingMessageHTTPS,
+  getHeader,
+  getCompleteWebReq
+#### "NO_PROXY" count=20 [71158366,71158813,71158827,86666177,90156433,92451566,99630440,106507728,106714432,106714464,106714504,106714544,114641316,116201917,120164720,200154264]
+--- 71158366 ---
+l !== "https:")
+    return null;
+  let proxyUrl = parseProxyUrl(env, protocol);
+  if (proxyUrl === null)
+    return null;
+  if (!proxyUrl.startsWith("http://") && !proxyUrl.startsWith("https://"))
+    return null;
+  return new ProxyConfig(proxyUrl, keepAlive, env.no_proxy || env.NO_PROXY);
+}
+function checkShouldUseProxy(proxyConfig, reqOptions) {
+  if (!proxyConfig)
+    return !1;
+  if (reqOptions.socketPath)
+    return !1;
+  return proxyConfig.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+  kReusedSocket,
+  kRes,
+  kRequest,
+  kRealListen,
+  kProxyConfig,
+  kProtocol,
+  kPort,
+  kPendingCallbacks,
+  kPath,
+  kParser,
+  kOutHeaders,
+  kOptions,
+  kNeedDrain,
+  kMethod,
+  kMaxHeadersCount,
+  kMaxHeaderSize,
+  kInternalSocketData,
+  kHost,
+  kHandle,
+  kFetchRequest,
+  kEmptyObject,
+  kEmitState,
+  kD
+--- 71158813 ---
+g.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+  kReusedSocket,
+  kRes,
+  kRequest,
+  kRealListen,
+  kProxyConfig,
+  kProtocol,
+  kPort,
+  kPendingCallbacks,
+  kPath,
+  kParser,
+  kOutHeaders,
+  kOptions,
+  kNeedDrain,
+  kMethod,
+  kMaxHeadersCount,
+  kMaxHeaderSize,
+  kInternalSocketData,
+  kHost,
+  kHandle,
+  kFetchRequest,
+  kEmptyObject,
+  kEmitState,
+  kDeprecatedReplySymbol,
+  kCloseCallback,
+  kClearTimeout,
+  kBodyChunks,
+  kAgent,
+  kAbortController,
+  isTlsSymbol,
+  isAbortError,
+  headersTuple,
+  headersSymbol,
+  headerStateSymbol,
+  hasServerResponseFinished,
+  getRawKeys,
+  getMaxHTTPHeaderSize,
+  getIsNextIncomingMessageHTTPS,
+  getHeader,
+  getCompleteWebRequestOrResponseBodyValueAsArrayBuffer,
+  firstWriteSymbol,
+  filterEnvForProxies,
+  fakeSocketSymbol,
+  eofInProgress,
+  emitErro
+#### "no_proxy" count=20 [71158350,71158785,71158799,86666185,91894171,106507848,108902408,120164752,200154288,264954832,274354336,274361974,301212082,301236370,301322019,302734032]
+--- 71158350 ---
+ttp:" && protocol !== "https:")
+    return null;
+  let proxyUrl = parseProxyUrl(env, protocol);
+  if (proxyUrl === null)
+    return null;
+  if (!proxyUrl.startsWith("http://") && !proxyUrl.startsWith("https://"))
+    return null;
+  return new ProxyConfig(proxyUrl, keepAlive, env.no_proxy || env.NO_PROXY);
+}
+function checkShouldUseProxy(proxyConfig, reqOptions) {
+  if (!proxyConfig)
+    return !1;
+  if (reqOptions.socketPath)
+    return !1;
+  return proxyConfig.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+  kReusedSocket,
+  kRes,
+  kRequest,
+  kRealListen,
+  kProxyConfig,
+  kProtocol,
+  kPort,
+  kPendingCallbacks,
+  kPath,
+  kParser,
+  kOutHeaders,
+  kOptions,
+  kNeedDrain,
+  kMethod,
+  kMaxHeadersCount,
+  kMaxHeaderSize,
+  kInternalSocketData,
+  kHost,
+  kHandle,
+  kFetchRequest,
+  kEmptyObject,
+  
+--- 71158785 ---
+turn !1;
+  return proxyConfig.shouldUseProxy(reqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+  kReusedSocket,
+  kRes,
+  kRequest,
+  kRealListen,
+  kProxyConfig,
+  kProtocol,
+  kPort,
+  kPendingCallbacks,
+  kPath,
+  kParser,
+  kOutHeaders,
+  kOptions,
+  kNeedDrain,
+  kMethod,
+  kMaxHeadersCount,
+  kMaxHeaderSize,
+  kInternalSocketData,
+  kHost,
+  kHandle,
+  kFetchRequest,
+  kEmptyObject,
+  kEmitState,
+  kDeprecatedReplySymbol,
+  kCloseCallback,
+  kClearTimeout,
+  kBodyChunks,
+  kAgent,
+  kAbortController,
+  isTlsSymbol,
+  isAbortError,
+  headersTuple,
+  headersSymbol,
+  headerStateSymbol,
+  hasServerResponseFinished,
+  getRawKeys,
+  getMaxHTTPHeaderSize,
+  getIsNextIncomingMessageHTTPS,
+  getHeader,
+  getCompleteWebRequestOrResponseBodyValueAsArrayBuffer,
+  firstWriteSymbol,
+  filterEnvForProxies,
+  fakeSocketSymbol,
+#### "@synced" count=0 []
+#### "name@synced" count=0 []
+#### "plugin enable/disable" count=0 []
+#### "@claude.ai" count=0 []
+#### "scope==="claudeai"" count=4 [308230652,309927968,321567001,326902703]
+--- 308230652 ---
+r(i)&&i.serverName===e)return!0;return!1}function Y9n(e){return oQ(e)||SLe(e)}function wce(e){let t={},r=[];for(let[n,o]of Object.entries(e)){let i=o;if(i.type==="sdk"||a$e(n,i))t[n]=o;else r.push(n)}return{allowed:t,blocked:r}}function Dy(e,t){if(!k_S.has(t.scope))return!1;if(t.scope==="claudeai"&&Vtr())return!0;if(t.type==="sdk")return!1;if(Y9n(e)||rQ(t)||t.type==="sse-ide"||t.type==="ws-ide")return S2t(e,t);return!a$e(e,t)}function Mpr(e){if(!e)return{configs:{},blocked:[]};let t={},r=[];for(let[n,o]of Object.entries(e))if(Dy(n,o))r.push(n);else t[n]=o;return{configs:t,blocked:r}}function C_S(e){let t=[],r=!1;function n(i){let{expanded:s,missingVars:a}=mce(i);return t.push(...a),s}let o;switch(e.type){case void 0:case"stdio":{let i=e;o={...i,command:n(i.command),args:i.args.map(n),env:i.env?I0(i.env,n):void 0};break}case"sse":case"http":case"ws":{let i=e,s=n(i.url);r=i.url.trim()!==""&&s.trim()==="",o={...i,url:s,headers:i.headers?I0(i.headers,n):void 0};break}case"sse-ide":case"ws-ide":o=e;break;case"sdk":o=e;break;case"claudeai-proxy":o=e;break}return{expanded:o,missingVars:Gn(t),urlExpandedToEmpty:r}}async function Swe(e,t,r,n){if(e.match(/[^a-zA-Z0-9_-]/))throw Ti(Error(`Invalid name ${e}. Names can only contain letters, numbers, hyphens, and underscores.`),Xff);if(Wnr(e))throw Error(`Cannot add MCP server "${e}": this name is reserved.`);if(d2())throw Error("Cannot add MCP server: enterprise MCP configuration is active and has exclusive control over MCP servers");let o=pJe().safeParse(t);if(!o.success){let s=o.error.issues.map((a)=>`${a.path.join(".")}: ${a.message}`).join(", ");throw Ti(Error(`Invalid configuration: ${s}`),"Invalid configurati
+--- 309927968 ---
+==="string"&&kmr(e)?"":String(J$e(e))}function J$e(e){let t=typeof e==="string"&&!kmr(e)?e:pjt;return oge(PUf(t))}function kmr(e){return e===""||or(So(e,zce))===0}function m4S(e){return e.replace(/_+/g," ").trim().replace(/\b\w/g,(t)=>t.toUpperCase())}function MUf(e){let t=So((e.scope==="claudeai"?e.displayName:void 0)??"",zce),r=So(e.title??"",zce),n=WPi(So(e.serverName,zce)),o=UVe(t)?WPi(t):zPi(n)?n:"(unnamed server)",i=So(e.toolName,zce),s=Tmr(m4S(i)),a=Tmr(i),l=UVe(r)?WPi(r):zPi(s)?s:zPi(a)?a:"(unnamed tool)";return oge(Hi(`${o} \u2014 ${l}`.replace(/\s+/g," ").trim(),VPi))}function OUf(e){let t=PUf(e);return oge(or(t.trim())===0?"(unnamed tool)":t)}function Tk(e){if(typeof e!=="string")return{text:oge(""),needsGutter:!1};let t=Ug(d4S(e));return{text:oge(t),needsGutter:Fq(t)}}function Wce(e){if(typeof e!=="string")return null;if(!BVe(e)||e.trim()===""||or(e)===0)return null;return{display:oge(DUf(e))}}function Xil(e,t,r=0){if(typeof e==="string"){if(e.length+2>t.unitsRemaining)throw Error("payload exceeds the serialization budget");let i=He(e);if(t.unitsRemaining-=i.length,t.unitsRemaining<0)throw Error("payload exceeds the serialization budget");return i}if(typeof e==="number"){let i=Number.isFinite(e)?String(e):"null";if(t.unitsRemaining-=i.length,t.unitsRemaining<0)throw Error("payload exceeds the serialization budget");return i}if(typeof e==="boolean"||e===null){if(t.unitsRemaining-=String(e).length,t.unitsRemaining<0)throw Error("payload exceeds the serialization budget");return String(e)}if(typeof e==="bigint")throw Error("bigint payload cannot be serialized");if(typeof e!=="object")return;if(r>=g4S)throw Error("payload exceeds the serializat
+#### "scope:"claudeai"" count=1 [308207773]
+--- 308207773 ---
+ ${m.display_name}`,g=h,y=Jc(g),_=1;while(f.has(y))_++,g=`${h} (${_})`,y=Jc(g);if(_>1)E(`[claudeai-mcp] Display-name collision on distinct upstreams: "${g}" (${m.id}, ${m.url})`);f.add(y),p[g]={type:"claudeai-proxy",url:m.url,id:m.id,displayName:m.display_name,iconUrl:m.icon_url,scope:"claudeai",toolPermissions:ZyS(m.tools),stateless:m.stateless,cachedInitResponse:m.cached_init_response,discoverSupport:m.discover_support,cachedDiscoverResponse:m.cached_discover_response,eligible:m.eligible,ineligibleReason:m.eligibility_reason}}return E(`[claudeai-mcp] Fetched ${Object.keys(p).length} servers`),N("tengu_claudeai_mcp_eligibility",{state:xe("eligible")}),Ee("mcp_claudeai_fetch_configs"),p}catch(n){let o=di.isAxiosError(n)?String(n.response?.status??n.code??"unknown"):"unknown";if(E(`[claudeai-mcp] Fetch failed (${o}) after ${t} attempt(s)`),N("tengu_claudeai_mcp_eligibility",{state:xe("fetch_failed"),status:o,attempts:t}),o==="401"||o==="403")be("mcp_claudeai_fetch_configs","fetch_needs_auth");else if(o==="429")be("mcp_claudeai_fetch_configs","fetch_rate_limited");else if(o==="ECONNABORTED"||o==="ETIMEDOUT")be("mcp_claudeai_fetch_configs","fetch_timeout");else if(/^\d+$/.test(o))pe("mcp_claudeai_fetch_configs",`fetch_failed_http_${o}`);else if(o!=="unknown")be("mcp_claudeai_fetch_configs","fetch_network_error");else pe("mcp_claudeai_fetch_configs","fetch_failed");return r.claudeAiConfigsFetch=null,{}}}function oTi(){let e=$s();e.claudeAiConfigsFetch=null,e.pendingCrossOrgNotice=void 0}function J6r(e,t){$s().claudeAiConnectedThisSession.add(e),ln((r)=>{let n=r.claudeAiMcpEverConnected??[];if(n.includes(e))return r;return{...r,claudeAiMcpEverConnected:[...
+#### "from claude.ai" count=19 [161339496,168256929,168362550,172712749,173740655,186324512,207228287,276846390,277150998,307755031,316342561,316398669,316448141,317607736,317616421,318550350]
+--- 161339496 ---
+ this machine...........	.......r...............	....... ...............	.......skill...........	...|... loaded but never invoked. Each one adds to the system prompt every turn. Disable in /skills, or remove from .claude/skills.............	.......n...............	...|... synced from claude.ai loaded but never invoked. Each one adds to the system prompt every turn. Disable in /skills, or turn ....................	.......it..............	.......them................L... .o.f.f. .o.n. .c.l.a.u.d.e...a.i. ..  .a. .d.e.l.e.t.e.d. .s.y.n.c.e.d. .c.o.p.y. .i.s. .r.e.-.d.o.w.n.l.o.a.d.e.d. .o.n. .t.h.e. .n.e.x.t. .s.y.n.c...........	.......o...............	....... plugin ........	... ... loaded but never invoked, from ........	......., ..................j..... .E.a.c.h. .o.n.e. .a.d.d.s. .t.o. .t.h.e. .s.y.s.t.e.m. .p.r.o.m.p.t. .e.v.e.r.y. .t.u.r.n... .P.l.u.g.i.n. .s.k.i.l.l.s. .c.a.n.'.t. .b.e. .t.u.r.n.e.d. .o.f.f. .i.n.d.i.v.i.d.u.a.l.l.y. ..  .d.i.s.a.b.l.e. .............	...
+...the plugin..............	......those plugins...........	....... in /plugin.............	.......i...............	.......s...............	......., from .........	....... MCP ...........	....... loaded but never invoked...................f..... .E.a.c.h. .o.n.e. .a.d.d.s. .t.o. .t.h.e. .s.y.s.t.e.m. .p.r.o.m.p.t. .e.v.e.r.y. .t.u.r.n... .M.C.P. .s.k.i.l.l.s. .l.i.v.e. .o.n. .t.h.e. .s.e.r.v.e.r.,. .n.o.t. .o.n. .d.i.s.k. ..  .t.u.r.n.i.n.g. .............	.......that server.............	......those servers...........	....... off in /mcp also removes ..............	.......its.............	.......their...........	....... tools..........	.../...All loaded skills have been used at leas
+--- 168256929 ---
+.......Hyc.....i.......`yc.............x.h.....	.......`yc.....).......pyc.............
+.......................................	...T...Cannot destructure property 'EXTERNAL_PERMISSION_MODES' from null or undefined value............	...s...
+Remote Control - Control local sessions from claude.ai/code or the Claude mobile app
+
+USAGE
+  claude remote-control [options]
+OPTIONS
+  --name <name>                    Name for the session (shown in claude.ai/code)
+  --remote-control-session-name-prefix <prefix>
+                                   Prefix for auto-generated session names
+                                   (default: hostname; env:
+                                   CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX)
+  -c, --continue                   Reattach to the session `claude remote-control`
+                                   last recorded for this directory (or one of its
+                                   git worktrees) instead of creating a new one.
+                                   Exits with an error if nothing was recorded
+                                   here within roughly the last 4 hours
+  --session-id <id>                Reattach to a specific session by ID (cannot be
+                                   used with spawn flags or --continue)
+  --permission-mode <mode>         Permission mode for spawned sessions
+                                   (.............	.......e...............	......., ..............	.......)
+  --debug-file <path>              Write debug logs to file
+  -v, --verbose                    Enable verbose output
+  -h, --help                       Show this help
+  --spawn <mode>                   Spawn mode: same-dir, worktre
+#### "synced from" count=11 [118724585,161339489,186324505,220352632,302000459,305197120,316398662,318576217,321799249,323974540,323976390]
+--- 118724585 ---
+.s. .a.l.r.e.a.d.y. .e.x.i.s.t. ..  .w.r.i.t.e. .t.o. .t.h.e.m. .d.i.r.e.c.t.l.y. .w.i.t.h. .t.h.e. .W.r.i.t.e. .t.o.o.l. .(.d.o. .n.o.t. .r.u.n. .m.k.d.i.r. .o.r. .c.h.e.c.k. .f.o.r. .t.h.e.i.r. .e.x.i.s.t.e.n.c.e.)...............	...s...You have read-only access to team memory synced from your project. You cannot persist new memories in this session..............	...............	...'...You also have read-only team memory at .........	......., ..............	........ Read from ............	.......it..............	.......these...............B... .w.h.e.n. .r.e.l.e.v.a.n.t.,. .b.u.t. .d.o. .n.o.t. .w.r.i.t.e. .t.h.e.r.e. ..  .c.h.a.n.g.e.s. .w.i.l.l. .n.o.t. .p.e.r.s.i.s.t...............	.......`...............	... ...the appropriate team directory (........	....... or ............	.......)...............	...'...the index file in that same directory (.........	.......## How to save memories.........	...&...Saving a memory is a two-step process:..............1...*.*.S.t.e.p. .1.*.*. ..  .w.r.i.t.e. .t.h.e. .m.e.m.o.r.y. .t.o. .i.t.s. .o.w.n. .f.i.l.e. .i.n. ...............	....... using this frontmatter format:.............+...*.*.S.t.e.p. .2.*.*. ..  .a.d.d. .a. .p.o.i.n.t.e.r. .t.o. .t.h.a.t. .f.i.l.e. .i.n. ..................... .E.a.c.h. .e.n.t.r.y. .s.h.o.u.l.d. .b.e. .o.n.e. .l.i.n.e.,. .u.n.d.e.r. .~.1.5.0. .c.h.a.r.a.c.t.e.r.s.:. .`.-. .[.T.i.t.l.e.].(.f.i.l.e...m.d.). ..  .o.n.e.-.l.i.n.e. .h.o.o.k.`... .T.h.e. .i.n.d.e.x. .h.a.s. .n.o. .f.r.o.n.t.m.a.t.t.e.r... .N.e.v.e.r. .w.r.i.t.e. .m.e.m.o.r.y. .c.o.n.t.e.n.t. .d.i.r.e.c.t.l.y. .i.n.t.o. .t.h.e. .i.n.d.e.x.................H...-. .T.h.e. .i.n.d.e.x. .f.i.l.e. .i.s. .l.o.a.d.e.d. .i.n.t.o. .y
+--- 161339489 ---
+ions on this machine...........	.......r...............	....... ...............	.......skill...........	...|... loaded but never invoked. Each one adds to the system prompt every turn. Disable in /skills, or remove from .claude/skills.............	.......n...............	...|... synced from claude.ai loaded but never invoked. Each one adds to the system prompt every turn. Disable in /skills, or turn ....................	.......it..............	.......them................L... .o.f.f. .o.n. .c.l.a.u.d.e...a.i. ..  .a. .d.e.l.e.t.e.d. .s.y.n.c.e.d. .c.o.p.y. .i.s. .r.e.-.d.o.w.n.l.o.a.d.e.d. .o.n. .t.h.e. .n.e.x.t. .s.y.n.c...........	.......o...............	....... plugin ........	... ... loaded but never invoked, from ........	......., ..................j..... .E.a.c.h. .o.n.e. .a.d.d.s. .t.o. .t.h.e. .s.y.s.t.e.m. .p.r.o.m.p.t. .e.v.e.r.y. .t.u.r.n... .P.l.u.g.i.n. .s.k.i.l.l.s. .c.a.n.'.t. .b.e. .t.u.r.n.e.d. .o.f.f. .i.n.d.i.v.i.d.u.a.l.l.y. ..  .d.i.s.a.b.l.e. .............	...
+...the plugin..............	......those plugins...........	....... in /plugin.............	.......i...............	.......s...............	......., from .........	....... MCP ...........	....... loaded but never invoked...................f..... .E.a.c.h. .o.n.e. .a.d.d.s. .t.o. .t.h.e. .s.y.s.t.e.m. .p.r.o.m.p.t. .e.v.e.r.y. .t.u.r.n... .M.C.P. .s.k.i.l.l.s. .l.i.v.e. .o.n. .t.h.e. .s.e.r.v.e.r.,. .n.o.t. .o.n. .d.i.s.k. ..  .t.u.r.n.i.n.g. .............	.......that server.............	......those servers...........	....... off in /mcp also removes ..............	.......its.............	.......their...........	....... tools..........	.../...All loaded skills have been used 
+#### "cloud-synced" count=0 []
+#### "cloudSynced" count=0 []
+#### "pluginSuffix" count=0 []
+#### "@cloud" count=1 [87137439]
+--- 87137439 ---
+hook
+@aws-amplify/cli
+@bahmutov/add-typescript-to-cypress
+@bazel/concatjs
+@bazel/cypress
+@bazel/esbuild
+@bazel/hide-bazel-files
+@bazel/jasmine
+@bazel/protractor
+@bazel/rollup
+@bazel/terser
+@bazel/typescript
+@bufbuild/buf
+@cdktf/node-pty-prebuilt-multiarch
+@ckeditor/ckeditor5-vue
+@cloudflare/wrangler
+@contrast/fn-inspect
+@cubejs-backend/cubestore
+@cubejs-backend/native
+@cypress/snapshot
+@danmarshall/deckgl-typings
+@datadog/mobile-react-native
+@discordjs/opus
+@eversdk/lib-node
+@evilmartians/lefthook
+@ffmpeg-installer/darwin-arm64
+@ffmpeg-installer/darwin-x64
+@ffmpeg-installer/linux-arm
+@ffmpeg-installer/linux-arm64
+@ffmpeg-installer/linux-ia32
+@ffmpeg-installer/linux-x64
+@ffprobe-installer/darwin-arm64
+@ffprobe-installer/darwin-x64
+@ffprobe-installer/linux-arm
+@ffprobe-installer/linux-arm64
+@ffprobe-installer/linux-ia32
+@ffprobe-installer/linux-x64
+@fingerprintjs/fingerprintjs-pro-react
+@ghaiklor/x509
+@go-task/cli
+@injectivelabs/sdk-ts
+@instana/autoprofile
+@intlify/vue-i18n-bridge
+@intlify/vue-router-bridge
+@matteodisabatino/gc_info
+@memlab/cli
+@microsoft.azure/autorest-core
+@microsoft/teamsfx-cli
+@microsoft/ts-command-line
+@napi-rs/pinyin
+@nativescript/core
+@netlify/esbuild
+@newrelic/native-metrics
+@notarize/qlc-cli
+@nx-dotnet/core
+@opensearch-project/oui
+@pact-foundation/pact-node
+@paloaltonetworks/postman-code-generators
+@pdftron/pdfnet-node
+@percy/core
+@pnpm/exe
+@prisma/client
+@prisma/engines
+@progress/kendo-licensing
+@pulumi/aws-native
+@pulumi/awsx
+@pulumi/command
+@pulumi/kubernetes
+@railway/cli
+@replayio/cypress
+@replayio/playwright
+@roots/bud-framework
+@sap/hana-client
+@sap/hana-performance-tools
+@sap/hana-theme-vscode
+@scarf/scarf
+@sematext/gc-st
+#### "same-named plugin" count=0 []
+#### "never override" count=4 [314124287,315120026,323356020,324443621]
+--- 314124287 ---
+ browser tab and gallery. A short, distinctive noun-phrase name \u2014 not a generic label, a summary, or a name with an appended explainer. Prefer a <title> tag at the top of the HTML itself; this parameter fills in only when the file lacks one in the first 8KB of the file, and never overrides the tag. HTML publishes only \u2014 Markdown pages keep their filename identity. Content always comes from file_path \u2014 there is no inline content parameter."),description:L().max(1000).optional().describe("One-sentence subtitle shown on the gallery card. Say what the page is or does."),...!1,label:L().max(60).optional().describe('Short human-readable name for this version, max 60 chars (e.g. "fixed-background"). Shown in the version picker. Not a description \u2014 keep it to a few words.'),url:L().optional().describe(`Existing artifact URL to update in place. Pass whenever the user wants to update an artifact this conversation did not publish \u2014 "update my artifact", "keep the same link", a pasted artifact URL \u2014 and find the URL with action: "list" or ask the user for the link if you don't have it; without this, the publish creates a separate artifact instead of updating the existing one. Omit for new artifacts and same-conversation redeploys. Must be an artifact the user owns. For 'read' and the other url-addressed actions: the artifact to act on.`),...l&&{type_url:L().max(2048).optional().describe("URL of an Artifact type to create this Artifact from (people may call a type a template or a starter). The new Artifact starts as a private copy of the type's current release, and `file_path`/`files` become its own files alongside the type's (omit the
+--- 315120026 ---
+ver instructions.
+
+The "${Lrn}" section comes from the authenticated gh
+API \u2014 treat it as authoritative for the **Repository visibility** and
+**Default / protected branches** bullets; repo-authored docs (CLAUDE.md,
+README, CONTRIBUTING) may only fill gaps its markers leave, never override
+it. \`Protected branches: none listed\` next to a non-empty Rulesets line
+does NOT mean unprotected \u2014 large orgs use rulesets instead of classic
+branch protection. List PUBLIC repos explicitly (any push there is
+publishing).
+
+### Org-wide (context, then trust, then sensitivity)
+- **Organization**, **Cloud provider(s)**, **Repository visibility**,
+  **Internal sharing / snippet hosting**, **Secrets management**,
+  **Default / protected branches**, **CI/CD deploy targets**,
+  **Network posture**
+- **Source control**, **Trusted internal domains**,
+  **Trusted cloud buckets**, **Key internal services**,
+  **Internal package registry**
+- **Sensitive data locations & audiences**,
+  **Data retention / declassification**, **Sensitive remote targets**,
+  **Protected deployment namespaces / environments**,
+  **Protected IaC scopes**
+
+### User-specific
+- **Primary use of Claude Code**, **Trusted repo**, **Org-specific CLIs**,
+  and any "routine under <user>/ prefix" qualifiers
+
+## What goes in \`allow\` / \`soft_deny\` / \`hard_deny\`
+
+Optional. From the "Non-standard CLIs by frequency" and "Recent auto-mode
+denial reasons" lists, propose 0\u20135 allow carve-outs (routine actions that
+would hit a default soft block) and 0\u20133 extra soft blocks (destructive
+subcommands of frequently-used CLIs, prod-namespace writes). Use the
+"Shipped default auto-mode rule labels" s
+#### "override a same-named" count=0 []
+#### "syncedPlugin" count=6 [99467192,106618008,107510064,300687676,300730744,308117871]
+--- 99467192 ---
+p...............X.......................	......inlinePlugins...........	.......replaceInlinePlugins............IN......inlinePluginsNoMcp..............	.......replaceInlinePluginsNoMcp...............	.......inlinePluginUrls........	.......replaceInlinePluginUrls.........IF......syncedPluginDirs........I}......replaceSyncedPluginDirs.........	... ...additionalDirectoriesForClaudeMd........	...'...replaceAdditionalDirectoriesForClaudeMd.........I~......allowedChannels..........|......replaceAllowedChannels..........	.......hasDevChannels..........	.......replaceHasDevChannels...........I.......sessionSkillAllowlist...........	.......replaceSessionSkillAllowlist............	.......chromeFlagOverride......................replaceChromeFlagOverride...............	.......teammateAgentId.........I.......replaceTeammateAgentId..........(...................
+...........H...............................K........................................................................................................
+.....modelStrings....................replaceModelStrings.............	...
+...invalidate..............	.......admin3PSteeringSnapshot.........I.......recordAdmin3PSteeringSnapshot...........(...................
+...........H....... ...............8.......K.......`...............h.......................................(...............0.......................	.......errorLog........I.......recordError.....................recordSlowOperation.............	.......slowOperations..........(...................
+...........h....... .......................K...............................................K...............................................................K.......
+--- 106618008 ---
+se..............	.......requireVersionParentContained...........	.......rescreenCachedPluginTree..........6.....resolveContainedPluginPath6...............6.....resolvePluginRoot...............	.......strictArchivePresent..............6.....strictCacheAddressable..........	.......syncedPluginMintedName............6.....unmarkBeforeArchiving...........	.......unvouchBeforeDependencyStep.............	.......versionParentContained............6.....versionParentState..............	..."...INVALID_MCP_NAME_TELEMETRY_MESSAGE..............	 6.....MAX_MCP_CONFIG_BYTES............	.......MCP_SCHEMA_BY_TYPE...............b......MCP_SETTINGS_SCOPES.............	.......addMcpConfig............	.......areMcpConfigsAllSdkType.........I!6.+...areMcpConfigsAllowedWithEnterpriseMcpConfig.............	"6.....consumeBridgeMcpCarrierMarker............"6.....dedupClaudeAiMcpServers.........	.......dedupPluginMcpServers...........I.
+.....doesEnterpriseMcpConfigExist............	#6.....emptyServerMap..........I#6.....enterpriseMcpConfigPresences............I=......filterDynamicMcpServersByPolicy..........#6.....filterMcpServersByPolicy........	.......getAllMcpConfigs........	.......getClaudeCodeMcpConfigs.........	.."...getConnectablePluginMcpServerNames..............	.......getEnterpriseMcpFilePath.........&6.....getMcpConfigByName..............	.......getMcpConfigsByScope.............'6.....getMcpScopeConflicts............	.......getMcpServerSignature...........I(6.....headlessSyncsClaudeAiConnectors.........	)6.....isBuiltinInProcessMcpServer..............)6.....isMcpServerAllowedByPolicy6.............I*6.....isMcpServerBlockedAtConnectTime.................isMcpServerDenie
+#### "plugin@synced" count=0 []
+#### "enable @" count=0 []
+#### "disable @" count=0 []
+#### UTF16 "@synced" count=0 []
+#### UTF16 "synced" count=8 [99728218,100362114,100362208,100362316,100362456,100362638,100362776,100363404]
+--- 99728218 ---
+e.s.s.i.o.n... .S.k.i.l.l. .f.i.l.e.s. .o.n. .d.i.s.k. ..  .i.n.c.l.u.d.i.n.g. .s.y.n.c.e.d. .c.o.p.i.e.s. .o.f. .t.h.e. .u.s.e.r.'.s. .a.c.c.o.u.n.t. .s.k.i.l.l.s. ..  .a.r.e. .a. .r.e.a.d.-.o.n.l.y. .c.a.c.h.e.:. .e.d.i.t.i.n.g. .t.h.e.m.,. .o.r. .w.r.i.t.i.n.g. .a. .n.e.w. .s.
+--- 100362114 ---
+[.i.d.].;.
+. . . . . . . . . . .}.
+. . . . . . . . .}.
+. . . . . . . . .v.a.r. .s.y.n.c.e.d. .=. .s.y.n.c.I.s.l.a.n.d.A.l.l.(.d.o.c.,. .o.p.e.n.).;.
+. . . . . . . . .i.f. .(.s.y.n.c.e.d. .=.=.=. .n.u.l.l.). .r.e.t.u.r.n. .n.u.l.l.;.
+. . . . . . . . .f.o.r. .(.v.a.r. .i.d.2. .i.n.
+#### UTF16 "name@synced" count=0 []

@@ -1,0 +1,385 @@
+
+######## "weekly limit resets" n=4 ########
+
+--- @316486971 jsish=true ---
+off. New messages wait for your usage limit as usual."};if(lpo("command")==="unavailable")return{type:"text",value:yyi()?`${ENe().budgetExhaustedCopy}. Lower-priority mode is offered again after your weekly limit resets.`:"Lower-priority mode isn't available right now."};return{type:"text",value:cpo(JU().resetsAt)}}var qth=A(()=>{ZU();upo();Y$t();dRe()});var bmE,Kth;var Yth=A(()=>{Y$t();dRe();oi();bmE={type:"local",name:Slr,description:"Continue now at lower priority after reaching your session limit; run again to stop",supportsNonInteractive:!1,isEnabled:()=>ls()&&(o5e()||i5n()),isHidden:!0,load:()=>Promise.resolve().then(() => (qth(),Vth))},Kth=bmE});var vmE,Xth;var Jth=A(()=>{yy();bo();vmE={type:"prompt",description:"Set up Claude Code's status line UI",contentLength:0,aliases:[],name:"statusline",progressMessage:"setting up statusLine",allowedTools:[Pi,"Read(~/**)","Edit(~/.claude/se
+
+--- @322980071 jsish=true ---
+weekly":return"Lower-priority mode ended \xB7 you have reached your weekly usage limit";case"budget":return`${ENe().budgetExhaustedCopy} \xB7 lower-priority mode ended; it is offered again after your weekly limit resets`;case"off":case"ineligible":case"wall":return"Lower-priority mode is no longer available \xB7 it has ended; new messages wait for your usage limit to reset";case"max_wait":return"No room for lower-priority work for a while \xB7 lower-priority mode stopped; new messages wait for your usage limit to reset"}}function seu(U71){let oDs=aeu.c(18),{setMessages:oeu}=U71,kut=IK(),JYe=HMo(),FPA;if(oDs[0]!==kut||oDs[1]!==JYe.phase)FPA=JYe.phase==="idle"&&jSr(kut),oDs[0]=kut,oDs[1]=JYe.phase,oDs[2]=FPA;else FPA=oDs[2];let QIr=FPA,UPA;if(oDs[3]!==kut||oDs[4]!==QIr||oDs[5]!==JYe)UPA=JYe.phase==="active"?hyi(JYe):QIr&&kut.resetsAt!==void 0?kut.resetsAt*1000:null,oDs[3]=kut,oDs[4]=QIr,oD
+
+######## "monthly spend limit" n=4 ########
+
+--- @124637078 jsish=false ---
+day_overage_included......................	.......org_spend_cap_reached...........	.......team............	...
+...enterprise..............	....... � your ........	....... resets ........	.......org's monthly spend limit...............	...J... � run /usage-credits to raise it, or visit claude.ai/admin-settings/usage..............	...:... � run /usage-credits to ask your admin for a higher limit..............	.......monthly spend limit.............	....... � raise it at .........	...!... � ask your admin to raise it at ...............	.......rejected........	.......out_of_credits..........	...0...Your org is out of usage � add funds to continue........	...-...Your org is out of usage � contact your admin...........	....... � progress saved...............	.......You're out of usage credits.............	.......org's monthly usage limit...............	.......seat_tier_level_disabled........	.
+
+--- @124637296 jsish=false ---
+t...............	...J... � run /usage-credits to raise it, or visit claude.ai/admin-settings/usage..............	...:... � run /usage-credits to ask your admin for a higher limit..............	.......monthly spend limit.............	....... � raise it at .........	...!... � ask your admin to raise it at ...............	.......rejected........	.......out_of_credits..........	...0...Your org is out of usage � add funds to continue........	...-...Your org is out of usage � contact your admin...........	....... � progress saved...............	.......You're out of usage credits.............	.......org's monthly usage limit...............	.......seat_tier_level_disabled........	.......seat_tier_zero_credit_limit.............	.......Your seat type doesn't include .........	.......usage...........	......usage credits...........	.......org_service_level_disabled..............	...%...This service
+
+--- @163323288 jsish=false ---
+age usage credits at ...........	.......,.......�������.	...............	...4...You're out of usage credits. Switch to another model............	...... to continue............	...<...You've hit your monthly spend limit. Switch to another model............	....... Switch to another model........	...a...You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models................	...5...You're out of usage credits. /model to switch models............	...�...You've hit your monthly spend limit. Run /usage-credits to manage your limit and keep using Fable 5 or switch models to continue this chat..............	...=...You've hit your monthly spend limit. /model to switch models............	...=... Run /usage-credits to continue or switch models with /model............	....... /model to switch models........
+...................................$...............
+
+--- @163323600 jsish=false ---
+ut of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models................	...5...You're out of usage credits. /model to switch models............	...�...You've hit your monthly spend limit. Run /usage-credits to manage your limit and keep using Fable 5 or switch models to continue this chat..............	...=...You've hit your monthly spend limit. /model to switch models............	...=... Run /usage-credits to continue or switch models with /model............	....... /model to switch models........
+...................................$...................�@�$M.��.\��.�������.��@`<�@�$��@O��P���.��@@n�@�U.��@.4�.��@.��@ ~�@�M�@�}��..��.��.��.���.��.��.���.��@pTD.��@.|���~��.��@pTD.��@.|................)...M...Q...V...f...�...�...�...�...�...�...�...�...�...�...�...�...................9...H...U...W...q...�...�...�.......&...�...�������.�������.��0�
+
+######## "function stripBom" n=0 ########
+
+######## "stripBom(" n=0 ########
+
+######## "posix_spawn" n=1 ########
+
+--- @87652476 jsish=false ---
+emmapmunmappreadpwritereadlinkstatstatfssymlinkatutimeutimensatgetcwdgetenvchdirfcopyfilerecvsendfilesendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollscandirkeventkqueueepoll_ctlkillwaitpidposix_spawnwritevpwritevreadvpreadvioctl_ficlonebind2connect2try_writesocketpairsetsockoptstatxuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfchownatioctlgetrlimitsetrlimitclone3..��%E............�9E............y�.E............?..E............�9E............�9E............��9E....	........�9E............��.E............�9E.............�9E............$�9E............*�9E............2�9E............8�9E............=�9E....	.......F�9E............K�9E............R�9E............W�9E....	.......`�9E............h�9E....
+.......r�9E............��9E............
+
+######## "no agent named" n=3 ########
+
+--- @313694772 jsish=true ---
+?{searchTruncated:!0}:void 0),{data:{success:!1,message:`No agent named '${e.to}' is reachable.${T}${C}${x}${R}${p.searchTruncated?rtn:""}${S!=="no"?Jen(e.to,g5(t)):""}
+${k}`,display:`Not sent \u2014 no agent named '${e.to}' is reachable.${p.closest.length>0?` Did you mean: ${p.closest.map((I)=>I.name).join(", ")}?`:""}${p.bridgeUnavailable||p.cloudUnavailable||p.localUnavailable?` Note: ${qAl(p)} \u2014 it may exist there; a retry searches again.`:""}${p.searchTruncated?` Note: ${YAl} \u2014 it may exist beyond what was searched.`:""}${p.pinnedIdentityClaimedLocally?` ${KAl(p.pinnedIdentityClaimedLocally)} \u2014 that is suspicious if you did not set it up.`:""}`}}}if(p.kind==="ambiguous"){let S=typeof e.message==="string"?Qen(e.to):"no";if(S==="categorical"&&p.matchedBy==="prefix"&&Zen(p))return s("unresolved","invalid_target"),{data:{success:!1,message:DEe(e.to,g5(t)),display:sWt(e.to
+
+--- @321115719 jsish=true ---
+session id; ignoring --session-id (use --resume <id> to continue an existing session)
+`);let Y=f?e$e((await uee(r??rr(),s)).activeAgents,f):void 0;if(f&&!Y&&t==="shell")process.stderr.write(`warning: no agent named '${f}' \u2014 spawning with default template
+`);let G=void 0,q=n?.intent??_??"",j=!Y?.initialPrompt&&!n?.exec&&!_&&!p.some((X,te)=>!b.has(te)&&X==="--reply-on-resume"),U=!1,Z;if(t!=="fleet"&&t!=="spare"){let X=u?null:await Uc(c,s);if(X===null)Z=S_(c,rot({template:{name:n?.exec?"exec":f??void 0??"bg",description:Y?.whenToUse??G?.description??"",initialPrompt:Y?.initialPrompt,color:Y?.color},routine:void 0,respawnFlags:F,intent:q,name:g,nameSource:h?"user":n?.nameSource,color:n?.color,detail:n?.detail??(j?G?`(idle \u2014 waiting for ${lSg(G.triggers)})`:uZr:void 0),tempo:j?G?"idle":"blocked":void 0,needs:j&&!G?bN:void 0,sessionId:a,cwd:r??rr(),worktreePath:n?.worktree?.path,work
+
+######## "(untitled)" n=4 ########
+
+--- @152464272 jsish=false ---
+�...............�...............�.......�������.�������.........�...............�������.........�������.................#.......�.��.....��......��..��....L�.��.i�.............................	...
+...(untitled)......................................���.�@ ����.........!...�������.�������.(�������....0D......X��.p�.�J...F��.K..�j��.���.....	H..H.......�������.�������.X��������������.�������.@�������h.......�������.............��������....��I������������.........�������.........�������.�������.............����....$.......����....................................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�.......�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�.......�������.�������.(.......�...............�.......
+...............
+...............�������.�������.........`...............����
+
+--- @155462944 jsish=false ---
+........�...............�...............�...............�...............................	.......session.
+.......�������......... ...............	.......^[^\s/\\\p{Cc}\p{Cf}]{1,64}$............	...
+...(untitled)..............	.......tmux ...........	.......started ........	....... ago................4...................�@�T�D.��@@M�E..�X.k�@�=�E..�.�3��.?�@p4�E..�.�3���T�@ ��E..���3�@�T�E..�� ]�@ ��@ .��@��ɀ���@=�@ ���@.�@ ����.��pL�@ ��E..���L��.��@�4�D..�.�3�ݰ:�@�n�@ .�E..�@p4�G..�@�4�@�e��.m�@ ��@ ��J..�.�3���3�.����.�....A...Z...z...�...�...�...�...*...7...J...O...\.......�������.�������.�..������������.�������.8.�������������.�������.�P�������������.�������...�������������.�������.8�.������������.�������.�V�������������.�������.���������������.�������.�c.������������.�������.���������������.�������.���������������.�������.pq�������������.�������.��.������������.�������..B����������
+
+--- @155464968 jsish=false ---
+"��....��....i�.�...............x...............�...............�...............�...............�...............�...............�...............................	.......cloud-session...........	...
+...(untitled)..............	......cloud session...
+...............	.......active .........	....... ago........................'...................�@�$�D.��@�M�C..�\�j��p>�@ ���@.�@ ����.��pL�@ ��F..���3�@�m�N..�� M��@��@ ��M..�@�4�M..���2�@.>�K..�����@ ��@ ��K..�.�3���3�@���T..���M�@���T..���U�l����.�........D...`...�...�...�...�...�...�...............1...;...M...P...�������.�������...������������.�������.`�������������.�������..��������������.�������.h��������������.�������.(j�������������.�������..��������������.�������.�4/������������.�������.�I�������������.�������.H/�������������.�������.p��������������.�������.h.�������������.�������.�G�������������.�������.�<�������������.�������.h[.�
+
+--- @155483544 jsish=false ---
+	.......(unknown directory).............	.......  �  ...........	.......  [.............	.......unknown.........	.......]  �  ..........	......  �  started ...........	....... ago............	...
+...(untitled)..............	.......cloud...�������.	...............
+...........................N...................�@�.�J..�@�şH..���4�@ ��E..���3���<�@ ��D..���3��@��@ ��@ .��@��ɀ��@�<�@ .�@ .��.L���4�����ŕ<�.WL���U�@ ��G..���3�@ ���`M�@ ��@ ��J..�.�3���3�@���H..���M�@ ��M..�@�4�M..���b���o�@ ��F..���3�@0��N..�� M�@�ğT..��0f...�@�.�T..���n(..�@�.�H..���M�@ ���@.�@ ��G..���3�ܠk���n�@ ��F..���3��P��@ ����.�@pT�T..���n....
+..._...�...L...z...�...�...�...�...�...�...�......."...%.......p...�...�...�...�...�...�...�������.�������.��.������������.�������.."N������������.�������.Ь�������������.�������.p7.������������.�������.�ͣ������������.�������.���������������.�������.H�.������������.����
+
+######## "organization policy" n=3 ########
+
+--- @321688044 jsish=true ---
+install git and restart Claude Code."})]}),dbn[0]=kJ;else kJ=dbn[0];return kJ}case"all-blocked-by-policy":{let kJ;if(dbn[1]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization policy does not allow any external marketplaces."}),Pu.jsx(v,{dimColor:!0,children:"Contact your administrator."})]}),dbn[1]=kJ;else kJ=dbn[1];return kJ}case"policy-restricts-sources":{let kJ;if(dbn[2]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Your organization restricts which marketplaces can be added."}),Pu.jsx(v,{dimColor:!0,children:"Switch to the Marketplaces tab to view allowed sources."})]}),dbn[2]=kJ;else kJ=dbn[2];return kJ}case"all-marketplaces-failed":{let kJ;if(dbn[3]===ue)kJ=Pu.jsxs(Pu.Fragment,{children:[Pu.jsx(v,{dimColor:!0,children:"Failed to load marketplace data."}),Pu.jsx(v,{dimColor:!0,children:"Check your network connection."})]
+
+######## "out-of-credits" n=2 ########
+
+--- @228250392 jsish=false ---
+e-limit.........	.......org-zero-credit-limit...........	.......overage-warning.........	.......session-limit-reached...........	...
+...opus-limit..............	.......overage-active..........	.......out-of-credits..........	.......fast-mode-short-limit...........	.......member-zero-credit-limit........	.......extra-usage-required............	.......opus-warning............	.......seat-tier-zero-credit-limit.............	.......approaching-weekly-limit........	.......sonnet-warning..........	.......weekly-limit-reached............	.......overage-exhausted...............	.......sonnet-limit....................�.....��.��.Q..%��.!�..
+�.�..
+.....
+.....
+.....i.
+......��.....��.�.....��....��.....��.�.....��....��....���....��....���....��.....��.�.....��.	..��.....��.�..
+..��....��....���....��...���...��.!�..
+�.�..
+.....
+......�....��...��..��....G�.��."�....
+�	�.._..��.!�..
+�
+..	.��.....�
+
+--- @303017038 jsish=false ---
+erageScenarioHeaders(t,"allowed");break;case"overage-warning":this.setOverageScenarioHeaders(t,"allowed_warning");break;case"overage-exhausted":this.setOverageScenarioHeaders(t,"rejected");break;case"out-of-credits":this.setOverageScenarioHeaders(t,"rejected","out_of_credits");break;case"org-zero-credit-limit":this.setOverageScenarioHeaders(t,"rejected","org_service_level_disabled");break;case"org-spend-cap-hit":this.setOverageScenarioHeaders(t,"rejected","org_level_disabled_until"),this.setOverages({isEnabled:!0,balanceCents:6532,spendLimitCents:4000,usedCents:4000});break;case"member-zero-credit-limit":this.setOverageScenarioHeaders(t,"rejected","member_zero_credit_limit");break;case"seat-tier-zero-credit-limit":this.setOverageScenarioHeaders(t,"rejected","seat_tier_zero_credit_limit");break;case"opus-limit":{this.exceededLimits=[{type:"seven_day_opus",resetsAt:r}],this.updateRepresent
+
+######## "spend-limit" n=0 ########
+
+######## "CLAUDE_CODE_RETRY_WATCHDOG" n=4 ########
+
+--- @301321502 jsish=true ---
+S:()=>nU_,CLAUDE_CODE_MAX_OUTPUT_TOKENS:()=>rU_,CLAUDE_CODE_MAX_RETRIES:()=>tU_,CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY:()=>iU_,CLAUDE_CODE_MAX_TURNS:()=>sU_,CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:()=>AU_,CLAUDE_CODE_RETRY_WATCHDOG:()=>bU_,CLAUDE_CODE_SLOW_OPERATION_THRESHOLD_MS:()=>EU_,CLAUDE_ENABLE_BYTE_WATCHDOG:()=>pU_,CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK:()=>fU_,CLAUDE_ENABLE_STREAM_WATCHDOG:()=>mU_,CLAUDE_MOCK_HEADERLESS_429:()=>wU_,CLAUDE_SLOW_FIRST_BYTE_MS:()=>_U_,CLAUDE_STREAM_IDLE_TIMEOUT_MS:()=>gU_,HTTPS_PROXY:()=>$F_,HTTP_PROXY:()=>NF_,MAX_MCP_OUTPUT_TOKENS:()=>cU_,MAX_STRUCTURED_OUTPUT_RETRIES:()=>lU_,MAX_THINKING_TOKENS:()=>aU_,NO_PROXY:()=>FF_,all_proxy:()=>WF_,http_proxy:()=>UF_,https_proxy:()=>BF_,no_proxy:()=>jF_});var NF_,$F_,FF_,UF_,BF_,jF_,zF_,WF_,GF_,VF_,qF_,KF_,YF_,XF_,JF_,ZF_,QF_,eU_,tU_,rU_,nU_,oU_,iU_,sU_,aU_,lU_,cU_,uU_,dU_,pU_,fU_,mU_,hU_,gU_,yU_,_U_,bU_,vU_,SU_,wU_,
+
+--- @310726389 jsish=true ---
+ gateway intercepting the request.${t.summary}`,"API returned an empty or malformed response");this.bodyKind=t.bodyKind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function Cnt(){return V.CLAUDE_CODE_RETRY_WATCHDOG}function J8f(e){return Jle(e)||e instanceof Os&&e.status===429}function JQn(e){return V.CLAUDE_CODE_REMOTE&&e instanceof Os&&(e.status===401||e.status===403)}function bew(e){if(!(e instanceof MC))return!1;let t=GU(e);return t!==null&&Zle.has(t.code)}function vew(e){if(!(e instanceof MC))return!1;let t=GU(e);if(t===null)return!1;let{code:r}=t;return Zle.has(r)||r==="EPROTO"||r==="FailedToOpenSocket"||r.startsWith("ERR_OSSL_")||r.startsWith("ERR_SSL_")}async function Sew(e){if(!V.CLAUDE_CODE_CLIENT_CERT||V.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION)return{reportedFailure:!1,attempted:!1};try{let{changed:t,readFailed:r,mismatched:n}=await kJe();if(t)FJe(),sne
+
+######## "own name" n=4 ########
+
+--- @92849926 jsish=true ---
+ hand side of operator '.request for '.' clause end delimiter '.Delimiter '.Missing { after '.Unexpected characters after '.Duplicate parameter '.'params' object must contain required parameter '.Unknown named parameter '.Cannot create bare named parameter '.Parameter '.Unexpected identifier '.Header '.Unexpected number '.bun:ffi cannot convert argument to '.WebSocket connection to '.Can't declare global function '.FFI: created JSFFIFunction '.' multiple times in '.' not found in '.Unrecognized token '.Unexpected token '.' does not have an export named 'default'. Did you mean '. is not a function. (In '.Cannot find scope for the label '.Cannot continue to the label '.Attempted to redeclare the label '.Cannot use the undeclared label '.Unterminated regular expression literal '.Unterminated string literal '.Unterminated numeric literal '.JSON.rawJSON cannot accept string starting with '.JS
+
+######## "application/vnd.amazon.eventstream" n=4 ########
+
+--- @124614304 jsish=false ---
+........	.......
+.............��........	.......identity......��......��......��........	.......bedrock.........	......./invoke-with-response-stream............	.......content-type............	..."...application/vnd.amazon.eventstream..............	.......vnd.amazon.eventstream..........	...
+...firstParty..............	.......gateway.........	.......anthropicAws............	.......text/event-stream...............	.......cf-ray..........	.......x-amzn-requestid......��........	......._chunkTimes.....................................................................4..��!.�@ ��I.����s�@.=��1��G���@�\�D.����D�@ ���ჟ� =�@ ��@ ����������@ ��@ ��@ 4�Ǡ.�@�,�D..���4�E���@ ��@@��D..���4�E���@pT�D..���4��@���.����4�V�:�@�-��`���.���pT��.���pT��.��@`l�D..���4�L����`-��@���.����;�@�<�.�.�@�$�D..���4�@ ��G�.���,�@ ����.��pT��.���pT��.��@@T�D..���4��@��I���@�,������.��@p<�.�.�@�$�D..���4�@ ��G�.�@0E
+
+--- @142628832 jsish=false ---
+�������. .......	..........."...........�g.�����........�...............�..............��E�����........��E�����........�.......	.......�..............�................�E�����	...............	..."...application/vnd.amazon.eventstream..............	.......application/xml.........	.......application/xhtml+xml...........	.......text/xml........	.......text/event-stream...............v.......���.H.<.��.....��......��.��..��.....��....��.....��....��....F.��._.�i.i.i.i.i.i.i.���.��...��..��....H�.��.F.��.i�i...�...............�...............�...............�...............�...............�...............�...............�............................................................... ...............(...............................	.......;.......�������.	...............	.......none............	.......json............	.......event-stream............	.......html............	.......text........
+
+--- @227339400 jsish=false ---
+......................��
+...............	...B...Cannot destructure property 'request' from null or undefined value..............	.......wrr.............	.......r.............��2.....��........	..."...application/vnd.amazon.eventstream..............	...!...STREAMING-AWS4-HMAC-SHA256-EVENTS.............��<.....��;.....��........................................�@`U���|��.��@�4���3�@�T�@ ��C�.�@�|�@�4�H..�.�K�.��@p��.��@.4�@`��.�.�@�<�R.K�.0ݟ..|....
+.......E...g...�...�...�...�������.�������.���������������.�������.�g`������������.�������.P�y������������.�������.Ȭc������������.�������.�}�������������.�������..�6������������.�������. Ǟ�����............��".۴.��...��".�..���".r�"......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....h.�������������.........�������.........�������.�������.............����............����....................
+
+--- @243666440 jsish=false ---
+�������.................T.......�.�....H�K.�.....��...��..��....K�2.��...��..��....H�..��.....��......��..��....i�i..... ...............0.......................	.......content-type............	..."...application/vnd.amazon.eventstream......................................�@�.�E..�@�L�H..�D�4�PCL�J.U��L��.W�@ ����.�@�L....
+...6...R...�������.�������.ș�������������.�������.H]�������������.�������.05a������������.�������.�.�������������.�������..�P�����@...........ȶY.�..�%...��Y.&..�ȶY.��Y......D..H.......�������.�������.�������.�������.�������.P�Z�����h.......�������.............��������....���������������.........�������.........�������.�������.............����............����................................	...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...h...h...h...x...�...�...�...�...�...�...�...�...�...�...�...�...�...
+
+######## "HTTPS_PROXY" n=4 ########
+
+--- @71157759 jsish=true ---
+rtInt && hostInt <= endInt)
+            return !1;
+        }
+      }
+    }
+    return !0;
+  }
+}
+function parseProxyUrl(env, protocol) {
+  let proxyUrl = protocol === "https:" ? env.https_proxy || env.HTTPS_PROXY : env.http_proxy || env.HTTP_PROXY;
+  if (!proxyUrl)
+    return null;
+  if (proxyUrl.includes("\r") || proxyUrl.includes(`
+`))
+    throw @makeErrorWithCode(203, `Invalid proxy URL: ${proxyUrl}`);
+  return proxyUrl;
+}
+function parseProxyConfigFromEnv(env, protocol, keepAlive) {
+  if (protocol !== "http:" && protocol !== "https:")
+    return null;
+  let proxyUrl = parseProxyUrl(env, protocol);
+  if (proxyUrl === null)
+    return null;
+  if (!proxyUrl.startsWith("http://") && !proxyUrl.startsWith("https://"))
+    return null;
+  return new ProxyConfig(proxyUrl, keepAlive, env.no_proxy || env.NO_PROXY);
+}
+function checkShouldUseProxy(proxyConfig, reqOptions) {
+  if (!proxyConfig)
+    
+
+--- @71158751 jsish=true ---
+eqOptions.host || "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+
+
+--- @71158768 jsish=true ---
+ "localhost", reqOptions.port);
+}
+function filterEnvForProxies(env) {
+  return {
+    http_proxy: env.http_proxy,
+    HTTP_PROXY: env.HTTP_PROXY,
+    https_proxy: env.https_proxy,
+    HTTPS_PROXY: env.HTTPS_PROXY,
+    no_proxy: env.no_proxy,
+    NO_PROXY: env.NO_PROXY
+  };
+}
+return{
+  webRequestOrResponseHasBodyValue,
+  webRequestOrResponse,
+  validateMsecs,
+  utcDate,
+  typeSymbol,
+  tlsSymbol,
+  timeoutTimerSymbol,
+  statusMessageSymbol,
+  statusCodeSymbol,
+  setServerIdleTimeout,
+  setServerCustomOptions,
+  setServerAppFlags,
+  setRequestTimeout,
+  setMaxHTTPHeaderSize,
+  setIsNextIncomingMessageHTTPS,
+  setHeader,
+  serverSymbol,
+  runSymbol,
+  reqSymbol,
+  parseProxyUrl,
+  parseProxyConfigFromEnv,
+  optionsSymbol,
+  onDataIncomingMessage,
+  noBodySymbol,
+  kWaitForProxyTunnel,
+  kUseDefaultPort,
+  kUpgradeOrConnect,
+  kTls,
+  kTimeoutTimer,
+  kSocketPath,
+  kSignal,
+  kReusedSocket,
+
+
+--- @71226958 jsish=true ---
+ODE_USE_ENV_PROXY;
+  if (Boolean(value) === !1 || value === "0")
+    return !1;
+  let httpProxy = process.env.http_proxy || process.env.HTTP_PROXY, httpsProxy = process.env.https_proxy || process.env.HTTPS_PROXY;
+  if (httpProxy && URL.canParse(httpProxy) === !1)
+    throw @makeErrorWithCode(144, httpProxy);
+  if (httpsProxy && URL.canParse(httpsProxy) === !1)
+    throw @makeErrorWithCode(144, httpsProxy);
+  return !0;
+}
+$ = {
+  Agent,
+  globalAgent: new Agent({
+    keepAlive: !0,
+    scheduling: "lifo",
+    timeout: 5000,
+    proxyEnv: shouldUseEnvProxy() ? process.env : @undefined
+  }),
+  shouldUseEnvProxy
+};
+return $})
+
+.(function (){"use strict";// build/release/tmp_modules/internal/freelist.ts
+var $;
+
+class FreeList {
+  name;
+  max;
+  ctor;
+  list;
+  constructor(name, max, ctor) {
+    this.name = name, this.ctor = ctor, this.max = max, this.list = [];
+  }
+  alloc() {
+    return this
+
+######## "removed worktree" n=4 ########
+
+--- @313232819 jsish=true ---
+ile":"files"}`);let g=h.length>0?` Discarded ${h.join(" and ")}.`:"";return{data:{action:"remove",originalCwd:n,worktreePath:i,worktreeBranch:s,discardedFiles:d,discardedCommits:p,message:`Exited and removed worktree at ${i}.${g} ${E0l(n,m)}`}}},mapToolResultToToolResultBlockParam({message:e},t){return{type:"tool_result",content:e,tool_use_id:t}}})});function KFe(e){return typeof e==="string"&&e.trim()!==""}function d4i(e){return"tasks"in e||"todos"in e}function p4i(e){return"prompt"in e||"subagent_type"in e}function TAw(e){let t=fp(e).trim(),r=Array.from(t);if(r.length<=80)return t;let n=r.slice(0,80).join(""),o=n.lastIndexOf(" ");return(o>40?n.slice(0,o):n).trim()}function e_m(e){if(!jo(e))return null;if(d4i(e))return null;let t=[],r={...e};if(p4i(r)&&!(KFe(r.subject)&&KFe(r.description)))return null;if(!("subject"in r)&&!("description"in r)&&"task"in r){let o=r.task;if(KFe(o))delete r
+
+--- @317603688 jsish=true ---
+ee] kept ${e.worktreePath} dirty=${o} commitsAhead=${i} gitError=${!!s}`);return}switch((await Xqe(e.worktreePath,e.worktreeBranch,e.gitRoot,e.hookBased,"bridge")).outcome){case"removed":t.logStatus(`removed worktree ${e.worktreePath}`);break;case"left_in_place":t.logStatus(`worktree directory left at ${e.worktreePath} (git no longer recognized it)`);break;case"failed":t.logStatus(`worktree removal failed, kept: ${e.worktreePath}`);break}}function MxE(e){if(e==="session")return"single-session";if(e==="same-dir")return"same-dir";if(e==="worktree")return"worktree";return`--spawn requires one of: ${DxE.join(", ")} (got: ${e??"<missing>"})`}function OxE(e){let t=e===void 0?NaN:zy(e);if(isNaN(t)||t<1)return`--capacity requires a positive integer (got: ${e??"<missing>"})`;return t}function LxE(e){let t=e===void 0?NaN:Number(e);if(!Number.isInteger(t)||t<1024||t>65535)return`--preview-port requ
+
+######## "config.worktree" n=4 ########
+
+--- @116247894 jsish=false ---
+�.(.......................�������.�������.xXr�����	...............
+...............	......./.git/hooks.............	......./.git/config............	......./.git/config.lock...............	......./.git/config.worktree...........	......./.git/config.worktree.lock..............	......./.git/commondir.........	......./.git/worktrees.........	....../.git/modules...........	......./.git/info/exclude..............	......./.git/glab-cli..........	......./.gitmodules............	......./.github........	......./.claude........	......./run/docker.sock........	......./run/containerd/containerd.sock.........	......./run/podman/podman.sock.........	......./run/buildkit/buildkitd.sock............	...	.../run/dbus...............	...	.../run/user.......................`...............p...............�...............�...............�...............�.......................	......./run/docker.sock........	.
+
+--- @116247934 jsish=false ---
+�.xXr�����	...............
+...............	......./.git/hooks.............	......./.git/config............	......./.git/config.lock...............	......./.git/config.worktree...........	......./.git/config.worktree.lock..............	......./.git/commondir.........	......./.git/worktrees.........	....../.git/modules...........	......./.git/info/exclude..............	......./.git/glab-cli..........	......./.gitmodules............	......./.github........	......./.claude........	......./run/docker.sock........	......./run/containerd/containerd.sock.........	......./run/podman/podman.sock.........	......./run/buildkit/buildkitd.sock............	...	.../run/dbus...............	...	.../run/user.......................`...............p...............�...............�...............�...............�.......................	......./run/docker.sock........	......./run/containerd/containerd.sock...
+
+--- @121585560 jsish=false ---
+	.......q.......
+...............	.......p...............	.......hooks...................	.......d...............	.......config..........	.......Q...............	.......config.lock.............	.......config.worktree.........	.......G...............	.......config.worktree.lock............	...	...commondir...............	...	...worktrees.............��........	...+...Iterator result interface is not an object............��............................x...................�@�T�D.���p4�D�.�@�d�D.���p4�D�.�.��@.L��0���.����4���3�[�k�@�-�E.����4��0���.����4���3�ր;���;�@�-�@ ��V.���e5���4��.����4���3�.�;�@ >�E.����4��0���.����4���3�ۀ;���;���.��.����4���3�@�=��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4���3���;��p.��0.��.����4���3���;��0.��.����4���3��PV��.����4���k���:��.L��.ğ�.���..���4��pT��..�B�4��PU��.����4��0.��..�ޡK�@.>��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4��0.��..��K���;
+
+--- @121585616 jsish=false ---
+	.......hooks...................	.......d...............	.......config..........	.......Q...............	.......config.lock.............	.......config.worktree.........	.......G...............	.......config.worktree.lock............	...	...commondir...............	...	...worktrees.............��........	...+...Iterator result interface is not an object............��............................x...................�@�T�D.���p4�D�.�@�d�D.���p4�D�.�.��@.L��0���.����4���3�[�k�@�-�E.����4��0���.����4���3�ր;���;�@�-�@ ��V.���e5���4��.����4���3�.�;�@ >�E.����4��0���.����4���3�ۀ;���;���.��.����4���3�@�=��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4���3���;��p.��0.��.����4���3���;��0.��.����4���3��PV��.����4���k���:��.L��.ğ�.���..���4��pT��..�B�4��PU��.����4��0.��..�ޡK�@.>��0��D�.�@`,�E.����4��0����.���;���,��0.��.����4��0.��..��K���;�@�.�E.����4��0���.����4��0.��..�ءK��;���;*����.�....
+
+######## "worktreeConfig" n=4 ########
+
+--- @165816267 jsish=false ---
+.....	...L...check ~/.claude/skills and other sensitive locations for unexpected content.....$.....��........	.......config..........	.......--local.........	.......--get...........	.......extensions.worktreeConfig.......%.....��........	.......true....&.....��........	.......sparse-checkout.........	.......set.............	.......--cone..........	.......--......'.....��........	......._...............	...%...git_worktree_create_sparse_set_failed...........	...%...Failed to configure sparse-checkout: ...........	.......b.......(.....��........	.......checkout................@...............H...............X...............`.......................	.......-c..............	.......core.fsmonitor=.........	.......checkout........	.......HEAD....).....��........	.......S...............	...*...git_worktree_create_sparse_checkout_failed..............	...$...Failed to checkout sparse worktree: ...
+
+--- @166077115 jsish=false ---
+...��......��......��........	...+...Iterator result interface is not an object............��........	.......config..........	.......--local.........	.......--unset-all.............	.......extensions.worktreeConfig.............��......��	.....��........	...&...Restored extensions.worktreeConfig in ..........	...(... after removing its last linked worktree........	...0...Could not restore extensions.worktreeConfig for ........	.......: ..............	.......warn........................................c...................��0͟@ �����`..����.�@ ����.^..��@�\���.�@ ���@.������.�Y..���.����4��.��@p4���3�.�;T..��. 1L.��.\�@ ����.��pT�@ ����.�.`;���g�@ �����I..���.L��.ğ�p��@ ��M..���3���~��.��@�4�M..�.�3�..=�fWt=..��@ ��K..���3s�.���..�.��@.�.�.���5��0���.����<����G.��@.ğ�p���.�\.����.l+..��@.��I..�.�3�@.%�I..�.�2���6��0���.����<������pf�@�̟�p���.�D.��.h...��@.��@��V.��@P�a.��@.T�@P
+
+--- @166077196 jsish=false ---
+..........��........	.......config..........	.......--local.........	.......--unset-all.............	.......extensions.worktreeConfig.............��......��	.....��........	...&...Restored extensions.worktreeConfig in ..........	...(... after removing its last linked worktree........	...0...Could not restore extensions.worktreeConfig for ........	.......: ..............	.......warn........................................c...................��0͟@ �����`..����.�@ ����.^..��@�\���.�@ ���@.������.�Y..���.����4��.��@p4���3�.�;T..��. 1L.��.\�@ ����.��pT�@ ����.�.`;���g�@ �����I..���.L��.ğ�p��@ ��M..���3���~��.��@�4�M..�.�3�..=�fWt=..��@ ��K..���3s�.���..�.��@.�.�.���5��0���.����<����G.��@.ğ�p���.�\.����.l+..��@.��I..�.�3�@.%�I..�.�2���6��0���.����<������pf�@�̟�p���.�D.��.h...��@.��@��V.��@P�a.��@.T�@P���p��@ ����.Q.��@@�...�@p�!..�@`�!..���...���!..�@�e..��.�a.��...�..��
+
+--- @166077317 jsish=false ---
+rktreeConfig.............��......��	.....��........	...&...Restored extensions.worktreeConfig in ..........	...(... after removing its last linked worktree........	...0...Could not restore extensions.worktreeConfig for ........	.......: ..............	.......warn........................................c...................��0͟@ �����`..����.�@ ����.^..��@�\���.�@ ���@.������.�Y..���.����4��.��@p4���3�.�;T..��. 1L.��.\�@ ����.��pT�@ ����.�.`;���g�@ �����I..���.L��.ğ�p��@ ��M..���3���~��.��@�4�M..�.�3�..=�fWt=..��@ ��K..���3s�.���..�.��@.�.�.���5��0���.����<����G.��@.ğ�p���.�\.����.l+..��@.��I..�.�3�@.%�I..�.�2���6��0���.����<������pf�@�̟�p���.�D.��.h...��@.��@��V.��@P�a.��@.T�@P���p��@ ����.Q.��@@�...�@p�!..�@`�!..���...���!..�@�e..��.�a.��...�..��F.��...�..��...........N...W...]...�...�...�...�...�...�.......$...*...1...3...�...�...�...�...�...�...$...6...<...[...n
+
+######## "inference_geo" n=4 ########
+
+--- @303256294 jsish=true ---
+okens,o=Math.min(t.cache_creation?.ephemeral_1h_input_tokens??0,r);if(n===void 0||o<=0)return r/1e6*e.promptCacheWriteTokens;return o/1e6*n+(r-o)/1e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCache,i=o?.[e]??o?.[r];if(i)return i;return rWb(e,r),uht[$o(GS())]??ONn}function rWb(e,t){N("tengu_unknown_model_cost",{model:e,shortName:t}),fBo()}function pve(e,t){let r=sma(e,t);return ima(r,t)}functio
+
+--- @303257240 jsish=true ---
+,output_tokens:t.outputTokens,cache_read_input_tokens:t.cacheReadInputTokens,cache_creation_input_tokens:t.cacheCreationInputTokens,...r?.speed!==void 0&&{speed:r.speed},...r?.inferenceGeo!==void 0&&{inference_geo:r.inferenceGeo},...r?.serverToolUse!==void 0&&{server_tool_use:r.serverToolUse}};return pve(e,n)}function cFd(e){if(Number.isInteger(e))return`$${e}`;return`$${e.toFixed(2)}`}function dht(e){return`${cFd(e.inputTokens)}/${cFd(e.outputTokens)} per Mtok`}function fFd(e){let t=$o(e),r=uht[t];if(!r)return;return dht(r)}function mFd(e){let{primaryUsage:t,usage:r,model:n,fallbackFrom:o}=e,i=t&&r?{inputTokens:r.inputTokens-t.inputTokens,outputTokens:r.outputTokens-t.outputTokens,cacheReadInputTokens:r.cacheReadInputTokens-t.cacheReadInputTokens,cacheCreationInputTokens:r.cacheCreationInputTokens-t.cacheCreationInputTokens}:r;if(!i||!n)return;return hOt(n,i)+(t&&o?hOt(o,t):0)}var Y4b,u
+
+--- @303553589 jsish=true ---
+cache_read_input_tokens:0,output_tokens:0,server_tool_use:{web_search_requests:0,web_fetch_requests:0},service_tier:"standard",cache_creation:{ephemeral_1h_input_tokens:0,ephemeral_5m_input_tokens:0},inference_geo:"",iterations:[],speed:"standard"}});function CQo(e){if(e===null||typeof e!=="object")return e;let t=e;if("requestId"in t&&!("request_id"in t))t.request_id=t.requestId,delete t.requestId;if("response"in t&&t.response!==null&&typeof t.response==="object"){let r=t.response;if("requestId"in r&&!("request_id"in r))r.request_id=r.requestId,delete r.requestId}return e}class Z2d{committed=!1}function um(){return Q2d.committed}function $$n(){Q2d.committed=!0}function cL(){return MVb}var Q2d,MVb;var gne=A(()=>{Q2d=new Z2d;MVb=new Promise(()=>{})});function kht(e){if(!Array.isArray(e))return[];return e.filter((t)=>typeof t==="string"&&t.length>0&&t.length<=64).slice(0,32)}var F$n=32;func
+
+######## "data-residency" n=4 ########
+
+--- @113685448 jsish=false ---
+	........+������).......(+�������.......82������I.......�1�������.......H2������	.......
+...............................	.......essential-traffic-only..........	...
+...firstParty..............	.......data-residency..................	.......teleport-org..........��......��......��........	.......no-auth.........	...E...OAuth refresh token is no longer valid; run /login to re-authenticate...........	.......No OAuth token in keychain............��........	...F...Cannot destructure property 'accessToken' from null or undefined value..........	.......d.......2.....��........	.......p...............	.......:orgUUID........	.......session-jwt.............	.......No session access token.........	.......Bearer .........	.......claude-ai-oauth.......��........	.......no claude.ai login..............	.......none..........��........	.......async.........��........	.......optional........	.......fram
+
+--- @128961544 jsish=false ---
+........	...6.../api/organizations/:orgUUID/marketplace/plugin-assets/..........	.......teleport-org............	.......stream..........	.......application/octet-stream......��......��........	.......data-residency..........	.......skipped_data_residency..........	.......essential-traffic-only..........	.......skipped_essential_traffic_only..........	.......skipped_no_claude_ai_auth...............	.......asset fetch skipped (...........	.......)...............	...A...Cannot destructure property 'status' from null or undefined value...............	.......i.......�.....���.....��........	.......asset not found (404)...........	.......asset_not_found.�.....��........	.......asset denylisted (410)..........	.......asset_denylisted�.....��........	.......asset fetch failed (............	.......asset_transient.........	.......unexpected asset response (.............	.......asset_http_error....
+
+--- @139531616 jsish=false ---
+`...............�������.�������.........�������.........�������.........�������.................�������. .......................	.......0...............@...............H.......................	.......data-residency..........	.......no-auth.........	.......essential-traffic-only..................�_..i.i.i.i.....@...............�...............................�...........................=...P.o.s.t.i.n.g. .n.e.e.d.s. .a. .C.l.a.u.d.e...a.i. .a.c.c.o.u.n.t. ..  .r.u.n. ./.l.o.g.i.n. .a.n.d. .t.r.y. .a.g.a.i.n.................	...V...Posting runs on Claude Code on the web, which is unavailable on third-party providers...........	...i...Posting runs on Claude Code on the web, which is unavailable while essential-traffic-only mode is active........
+.......................................�@�.....................
+...........4.......a<�.T.......I<�....�m<�.{?�......H..H.......�������.�������.�!��
+
+--- @141634987 jsish=false ---
+..��..��....s�i......P...............`...............�...............�...............�.......................	...
+...firstParty..............	...B...Files API is unavailable on third-party providers (data-residency)..............	.......hipaa...........	...:...Files API is unavailable for HIPAA-regulated organizations......
+.......................................���.��.��.�;�@�%F.��@.�QȈ��..<��`.��.��@QU�~.�I..�.�?........8...U...q.......�������.�������.. w������������.�������.�=�������������.�������.�.w�����....`.......���.|�..)...���.*..����.ᨗ......H..H.......�������.�������.H.u������������.�������.0.u�����h.......�������.............��������....���������������.........�������.........�������.�������.............����............����....................................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�..
+
+######## "1.1*" n=2 ########
+
+--- @334463379 jsish=true ---
+eline","middle").attr("dominant-baseline","middle").attr("text-anchor","middle").call(r7e,t.width).node().getBBox(),v=i.fontSize?.replace?i.fontSize.replace("px",""):i.fontSize;if(t.height=y.height+v*1.1*.5+t.padding,t.height=Math.max(t.height,t.maxHeight),t.width=t.width+2*t.padding,m.attr("transform","translate("+t.width/2+", "+t.padding/2+")"),u&&m.attr("transform",`translate(${t.width/2}, ${a?t.padding/2+3:t.padding})`),Kkt(p,t,d,n,i),l==="neo"&&(f.attr("data-look","neo"),u)){let x=s.includes("dark"),b=e.node()?.ownerSVGElement??e.node(),T=Je(b),w=T.attr("id")??"",C=w?`${w}-drop-shadow`:"drop-shadow";if(T.select(`#${C}`).empty()){let k=T.select("defs");(k.empty()?T.append("defs"):k).append("filter").attr("id",C).attr("height","130%").attr("width","130%").append("feDropShadow").attr("dx","4").attr("dy","4").attr("stdDeviation",0).attr("flood-opacity",x?"0.2":"0.06").attr("flood-color"
+
+######## "*1.1" n=4 ########
+
+--- @332066453 jsish=true ---
+,t),i=Qi(e.width,t),n=Qi(e.height,t),a=e.shift?Qi(e.shift,t):0;return r.style.borderRightWidth=It(i),r.style.borderTopWidth=It(n),r.style.bottom=It(a),r.width=i,r.height=n+a,r.depth=-a,r.maxFontSize=n*1.125*t.sizeMultiplier,r},mathmlBuilder(e,t){var r=Qi(e.width,t),i=Qi(e.height,t),n=e.shift?Qi(e.shift,t):0,a=t.color&&t.getColor()||"black",s=new Dt.MathNode("mspace");s.setAttribute("mathbackground",a),s.setAttribute("width",It(r)),s.setAttribute("height",It(i));var l=new Dt.MathNode("mpadded",[s]);return n>=0?l.setAttribute("height",It(n)):(l.setAttribute("height",It(n)),l.setAttribute("depth",It(-n))),l.setAttribute("voffset",It(n)),l}});o(Lj,"sizingGroup");MY=["\\tiny","\\sixptsize","\\scriptsize","\\footnotesize","\\small","\\normalsize","\\large","\\Large","\\LARGE","\\huge","\\Huge"],G9e=o((e,t)=>{var r=t.havingSize(e.size);return Lj(e.body,r,t)},"htmlBuilder");Bt({type:"sizing",nam
+
+--- @332516752 jsish=true ---
+ughness=0,v.fillStyle="solid");let x=[{x:-d/2-d/2*.1,y:-m/2},{x:-d/2-d/2*.1,y:m/2},...Bo(-d/2-d/2*.1,m/2,d/2+d/2*.1,m/2,p,.8),{x:d/2+d/2*.1,y:-m/2},{x:-d/2-d/2*.1,y:-m/2},{x:-d/2,y:-m/2},{x:-d/2,y:m/2*1.1},{x:-d/2,y:-m/2}],b=y.polygon(x.map(w=>[w.x,w.y]),v),T=l.insert(()=>b,":first-child");return T.attr("class","basic label-container outer-path"),g&&t.look!=="handDrawn"&&T.selectAll("path").attr("style",g),i&&t.look!=="handDrawn"&&T.selectAll("path").attr("style",i),T.attr("transform",`translate(0,${-p/2})`),h.attr("transform",`translate(${-d/2+(t.padding??0)+d/2*.1/2-(u.x-(u.left??0))},${-f/2+(t.padding??0)-p/2-(u.y-(u.top??0))})`),ft(t,T),t.intersect=function(w){return lt.polygon(t,x,w)},l}var dne=z(()=>{"use strict";Wt();Kt();jt();Ht();o(hne,"linedWaveEdgedRect")});async function fne(e,t){let{labelStyles:r,nodeStyles:i}=ct(t);t.labelStyle=r;let n=t.padding??0,a=t.look==="neo"?16:n,s=t
+
+--- @333135166 jsish=true ---
+nd-polygon","round-triangle","round-tag"].includes(fe)){var Ae=0,Ve=0,Pe=0;fe==="round-diamond"?Ae=(W+Q+V)*1.4:fe==="round-heptagon"?(Ae=(W+Q+V)*1.075,Pe=-(W/2+Q+V)/35):fe==="round-hexagon"?Ae=(W+Q+V)*1.12:fe==="round-pentagon"?(Ae=(W+Q+V)*1.13,Pe=-(W/2+Q+V)/15):fe==="round-tag"?(Ae=(W+Q+V)*1.12,Ve=(W/2+V+Q)*.07):fe==="round-triangle"&&(Ae=(W+Q+V)*(Math.PI/2),Pe=-(W+Q/2+V)/Math.PI),Ae!==0&&(ce=(l+Ae)/l,Re=l*ce,["round-hexagon","round-tag"].includes(fe)||(K=(u+Ae)/u,xe=u*K)),Y=Y==="auto"?pme(Re,xe):Y;for(var Ye=Re/2,le=xe/2,st=Y+(W+V+Q)/2,me=new Array(Oe.length/2),ot=new Array(Oe.length/2),kt=0;kt<Oe.length/2;kt++)me[kt]={x:ie.x+Ve+Ye*Oe[kt*2],y:ie.y+Pe+le*Oe[kt*2+1]};var Gt,Tt,Et,yt,oe=me.length;for(Tt=me[oe-1],Gt=0;Gt<oe;Gt++)Et=me[Gt%oe],yt=me[(Gt+1)%oe],ot[Gt]=LP(Tt,Et,yt,st),Tt=Et,Et=yt;s.drawRoundPolygonPath(be||e,ie.x+Ve,ie.y+Pe,l*ce,u*K,Oe,ot)}else if(["roundrectangle","round-rect
+
+--- @333135205 jsish=true ---
+"].includes(fe)){var Ae=0,Ve=0,Pe=0;fe==="round-diamond"?Ae=(W+Q+V)*1.4:fe==="round-heptagon"?(Ae=(W+Q+V)*1.075,Pe=-(W/2+Q+V)/35):fe==="round-hexagon"?Ae=(W+Q+V)*1.12:fe==="round-pentagon"?(Ae=(W+Q+V)*1.13,Pe=-(W/2+Q+V)/15):fe==="round-tag"?(Ae=(W+Q+V)*1.12,Ve=(W/2+V+Q)*.07):fe==="round-triangle"&&(Ae=(W+Q+V)*(Math.PI/2),Pe=-(W+Q/2+V)/Math.PI),Ae!==0&&(ce=(l+Ae)/l,Re=l*ce,["round-hexagon","round-tag"].includes(fe)||(K=(u+Ae)/u,xe=u*K)),Y=Y==="auto"?pme(Re,xe):Y;for(var Ye=Re/2,le=xe/2,st=Y+(W+V+Q)/2,me=new Array(Oe.length/2),ot=new Array(Oe.length/2),kt=0;kt<Oe.length/2;kt++)me[kt]={x:ie.x+Ve+Ye*Oe[kt*2],y:ie.y+Pe+le*Oe[kt*2+1]};var Gt,Tt,Et,yt,oe=me.length;for(Tt=me[oe-1],Gt=0;Gt<oe;Gt++)Et=me[Gt%oe],yt=me[(Gt+1)%oe],ot[Gt]=LP(Tt,Et,yt,st),Tt=Et,Et=yt;s.drawRoundPolygonPath(be||e,ie.x+Ve,ie.y+Pe,l*ce,u*K,Oe,ot)}else if(["roundrectangle","round-rectangle"].includes(fe))Y=Y==="auto"?Hd(Re

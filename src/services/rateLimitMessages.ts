@@ -153,6 +153,46 @@ const SPEND_CAP_DISABLED_REASONS = new Set([
 const CONSUMER_USAGE_SETTINGS_URL =
   'claude.ai/settings/usage?from=cc_cli_limit_message'
 
+/**
+ * densable 2.1.239 Kvi — when a monthly spend cap is hit, also say when the
+ * current session/weekly (or Opus/Sonnet) window resets. Official returns
+ * null for overage / missing resetsAt. seven_day_sonnet uses $Wa(): pro or
+ * enterprise → weekly limit, else Sonnet limit.
+ */
+function formatSessionOrWeeklyResetHint(limits: ClaudeAILimits): string {
+  const resetTime = limits.resetsAt
+    ? formatResetTime(limits.resetsAt, true)
+    : undefined
+  if (!resetTime) {
+    return ''
+  }
+  let limitName: string | null = null
+  switch (limits.rateLimitType) {
+    case 'five_hour':
+      limitName = 'session limit'
+      break
+    case 'seven_day':
+      limitName = 'weekly limit'
+      break
+    case 'seven_day_opus':
+      limitName = 'Opus limit'
+      break
+    case 'seven_day_sonnet': {
+      const subscriptionType = getSubscriptionType()
+      limitName =
+        subscriptionType === 'pro' || subscriptionType === 'enterprise'
+          ? 'weekly limit'
+          : 'Sonnet limit'
+      break
+    }
+    case 'overage':
+    case undefined:
+      limitName = null
+      break
+  }
+  return limitName ? ` · your ${limitName} resets ${resetTime}` : ''
+}
+
 function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
   const resetsAt = limits.resetsAt
   const resetTime = resetsAt ? formatResetTime(resetsAt, true) : undefined
@@ -171,6 +211,7 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     const isIndividualSpendCap = disabledReason === 'org_spend_cap_reached'
     const subscriptionType = getSubscriptionType()
     const hasBillingAccess = hasClaudeAiBillingAccess()
+    const sessionWeeklyHint = formatSessionOrWeeklyResetHint(limits)
     if (subscriptionType === 'team' || subscriptionType === 'enterprise') {
       const limit = isIndividualSpendCap
         ? 'individual spend limit'
@@ -178,7 +219,11 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
       const suffix = hasBillingAccess
         ? ' · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage'
         : ' · run /usage-credits to ask your admin for a higher limit'
-      return formatLimitReachedText(limit, suffix, model)
+      return formatLimitReachedText(
+        limit,
+        `${suffix}${sessionWeeklyHint}`,
+        model,
+      )
     }
     // Consumer / other: billing access → monthly spend limit + settings URL;
     // otherwise individual (spend cap) vs org monthly (disabled_until).
@@ -190,7 +235,7 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     const suffix = hasBillingAccess
       ? ` · raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
       : ` · ask your admin to raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
-    return formatLimitReachedText(limit, suffix, model)
+    return formatLimitReachedText(limit, `${suffix}${sessionWeeklyHint}`, model)
   }
 
   // if BOTH subscription (checked before this method) and overage are exhausted

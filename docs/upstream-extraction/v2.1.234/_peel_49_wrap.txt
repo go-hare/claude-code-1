@@ -1,0 +1,315 @@
+
+===== b'mode==="task-notification"' heap=[295680527, 295703456, 295704202, 297727109, 298489552, 308961913, 309194212, 309198827, 312838585, 313524105, 313534929, 315141050] all=[295680527, 295703456, 295704202, 297727109, 298489552, 308961913, 309194212, 309198827] =====
+
+
+----- @295680527 -----
+
+nction fdv(e){return!pdv.has(e)}function lJ(e){return fdv(e.mode)&&!e.isMeta&&see(e.origin)}function NMt(e,t){return lJ(e)&&(t||e.mode!=="bash")}function Zka(e,t){let r=e.origin?.kind;if(r==="task-notification"||r==="auto-continuation")return!0;return bte(e.origin,t)||lJ(e)}function mdv(e){return typeof e.value==="string"&&e.value.trim().startsWith("/")&&!e.skipSlashCommands}function Qka(e,{isMainThread:t,currentAgentId:r}){let n=!1,o=e.filter((i)=>{if(mdv(i))return!1;if(t)return YM(i);return i.mode==="task-notification"&&i.agentId===r});return hdv(o)}function hdv(e){let t=e.filter((n)=>n.mode==="poll-event");if(t.length===0)return e;let r=new Set(vya(t));if(r.size===t.length)return e;return e.filter((n)=>n.mode!=="poll-event"||r.has(n))}function OUr(e){return YM(e)&&e.mode==="prompt"}function Uft(e){return lJ(e)}function gdv(e){return typeof e==="string"?e:wd(e,`
+`)}function dNp(e,t){if(typeof e==="string")return[];let r=[],n=0;for(let o of e)if(o.type==="image"&&o.source.type==="base64")r.push({id:t+n,type:"image",content:o.source.data,mediaType:o.source.media_type,filename:`image${n+1}`}),n++;return r}function exa(e){let t=e?.recordOperation??ddv;function r(Fe,Pe){let Xe={type:"queue-operation",operation:Fe,timestamp:new Date().toISOString(),sessionId:Vt(),...Pe!==void 0&&{content:Pe}};t(Xe)}let n=[...e?.adopt??[]],o=Object.freeze([...n]),i=hs();hTe(()=>n.filter(lJ).map(He))
+
+----- @295703456 -----
+
+unction Tii(e){return(t,r)=>{let n=Krr(e,t);if(!n?.getActivityDescription)return;try{let o=V9(n,r);return o.success?n.getActivityDescription(o.data)??void 0:void 0}catch(o){E(`Activity description resolver failed for ${t}: ${ue(o)}`);return}}}function kdv(e,t){Ah.agentIdleWindowTimers.delete(e),BK(e,XMe,t);let r=t.get(e);if(ud(r)&&r.status==="completed"&&Bpe(r).size===0){if(t.update(e,(n)=>n.quietlyParked===!0?{...n,quietlyParked:!1}:n),Wx(e),Cii(e,t),r.notified){let n=!1;for(let o of RU())if(o.mode==="task-notification"&&o.agentId===Td(r.ownerAgentId)&&o.taskId===e){n=!0;break}if(!n)BK(r.ownerAgentId,`agent:${e}`,t)}}}function ID(e){return e.status==="completed"&&Bpe(e).size>0}function cxa(e,t){if(e.retain)return;if(t.park&&(e.keepaliveReasons?.size??0)>0)return;return Date.now()+dbe}function enr(e,t){if(!e)return;let r=t.get(e);return ud(r)&&r.agentType!=="main-session"?e:void 0}function rz(e){return ud(e)&&e.agentType!=="main-session"}function xNp(e,t){if(!e)return!1;let r=t.get(e);return ud(r)&&Bpe(r).size>0}function BUr(e,t){if(!e)return!1;let r=t.get(e);if(!ud(r))return!1;for(let n of Bpe(r))if(n.startsWith("agent:"))return!0;return!1}function kii(e,t){let r=t.get(e);if(!ud(r))return;let n=new Set;for(let o of RU())if(o.mode==="task-notification"&&o.agentId===Td(e)&&o.taskId)n.add(o.taskId);for(let o of Bpe(r)){let i;if(o.startsWith("agent:"))i=o.slice(6);else if(o.starts
+
+----- @295704202 -----
+
+eReasons?.size??0)>0)return;return Date.now()+dbe}function enr(e,t){if(!e)return;let r=t.get(e);return ud(r)&&r.agentType!=="main-session"?e:void 0}function rz(e){return ud(e)&&e.agentType!=="main-session"}function xNp(e,t){if(!e)return!1;let r=t.get(e);return ud(r)&&Bpe(r).size>0}function BUr(e,t){if(!e)return!1;let r=t.get(e);if(!ud(r))return!1;for(let n of Bpe(r))if(n.startsWith("agent:"))return!0;return!1}function kii(e,t){let r=t.get(e);if(!ud(r))return;let n=new Set;for(let o of RU())if(o.mode==="task-notification"&&o.agentId===Td(e)&&o.taskId)n.add(o.taskId);for(let o of Bpe(r)){let i;if(o.startsWith("agent:"))i=o.slice(6);else if(o.startsWith("workflow:"))i=o.slice(9);else continue;if(n.has(i))continue;let s=t.get(i);if(!s||ud(s)&&s.notified||s.type==="local_workflow"&&s.notified)BK(e,o,t)}}function jft(e,t,r,n={}){let o={text:t,origin:n.origin,isMeta:n.isMeta??!1};r.update(e,(i)=>({...i,pendingMessages:[...i.pendingMessages,o]}))}function xii(e,t,r){r.updateTranscript(e,(n)=>({...n,messages:[...n.messages,t]}))}function MFn(e,t){let r=t.get(e);if(!ud(r)||r.pendingMessages.length===0)return[];let n=r.pendingMessages;return t.update(e,(o)=>({...o,pendingMessages:[]})),n}function tnr({taskId:e,description:t,status:r,killedBy:n,error:o,taskRegistry:i,finalMessage:s,usage:a,toolUseId:l,worktreePath:c,worktreeBranch:u,ownerAgentId:d}){let{claimed:p,task:f}=xXe(e,i),m=f!==voi
+
+----- @297727109 -----
+
+agentId,Gn=Te+1,Or=u&&Gn>u?u:void 0,Xn=Z.messageQueue.isMidTurnFoldSuspended()||Or!==void 0?[]:Qka(Z.messageQueue.getCommandsByMaxPriority("next"),{isMainThread:Un,currentAgentId:Wn});Z.messageQueue.registerFoldInFlight(Xn);try{let Hr=0,An=0;for await(let go of yLt(null,gt,null,Xn,m,[...ve,...Ye,...Pt],l)){if(yield go,Pt.push(go),go.attachment.type==="queued_command"&&go.attachment.commandMode!==void 0)Hr++;if(go.attachment.type==="poll_events")An++}let Mo=Xn.filter((go)=>go.mode==="prompt"||go.mode==="task-notification");if(Mo.length>0&&Hr===0)E(`[query] queued_command attachments degraded to 0 for ${Mo.length} consumed command(s) \u2014 leaving them queued instead of dropping them`,{level:"warn"});else{if(Mo.length>0&&Hr<Mo.length)E(`[query] partial queued_command emission: ${Hr}/${Mo.length} \u2014 removing commands that were not all delivered`,{level:"error"});if(xLa(Mo),Mo.length>0)if(gt.abortController.signal.aborted)E(`[query] abort during mid-turn absorption \u2014 leaving ${Mo.length} command(s) queued`);else{Z.messageQueue.remove(Mo),JDr(Mo,Z.storageV5,{armUndo:!1});for(let go of Mo){let Pn=Fjp(go);if(Pn!==null)g.push(Pn);if(go.uuid)t.push(go.uuid),yield{type:"command_lifecycle",uuid:go.uuid,state:"started"}}}}let Co=Xn.filter(qj);if(Co.length>0)if(An===0)pJp("mid-turn",Co.length);else yield*dJp({events:Co,queue:Z.messageQueue,signal:gt.abortController.signal,phase:"m
+
+===== b'mode==="prompt"' heap=[295680807, 297727089, 304247014, 309195207, 312882958, 313472820, 313520504, 313522434, 313522672] all=[295680807, 297727089, 304247014, 309195207, 312882958, 313472820, 313520504, 313522434] =====
+
+
+----- @295680807 -----
+
+ion mdv(e){return typeof e.value==="string"&&e.value.trim().startsWith("/")&&!e.skipSlashCommands}function Qka(e,{isMainThread:t,currentAgentId:r}){let n=!1,o=e.filter((i)=>{if(mdv(i))return!1;if(t)return YM(i);return i.mode==="task-notification"&&i.agentId===r});return hdv(o)}function hdv(e){let t=e.filter((n)=>n.mode==="poll-event");if(t.length===0)return e;let r=new Set(vya(t));if(r.size===t.length)return e;return e.filter((n)=>n.mode!=="poll-event"||r.has(n))}function OUr(e){return YM(e)&&e.mode==="prompt"}function Uft(e){return lJ(e)}function gdv(e){return typeof e==="string"?e:wd(e,`
+`)}function dNp(e,t){if(typeof e==="string")return[];let r=[],n=0;for(let o of e)if(o.type==="image"&&o.source.type==="base64")r.push({id:t+n,type:"image",content:o.source.data,mediaType:o.source.media_type,filename:`image${n+1}`}),n++;return r}function exa(e){let t=e?.recordOperation??ddv;function r(Fe,Pe){let Xe={type:"queue-operation",operation:Fe,timestamp:new Date().toISOString(),sessionId:Vt(),...Pe!==void 0&&{content:Pe}};t(Xe)}let n=[...e?.adopt??[]],o=Object.freeze([...n]),i=hs();hTe(()=>n.filter(lJ).map(He));let s=new Set,a=new Set,l=256;function c(){o=Object.freeze([...n]),i.emit()}function u(Fe,Pe){if(s.delete(Fe))s.add(Fe);else{if(Pe?.terminalEmitted!==!0&&s.size>=l){let Xe;for(let Qe of s)if(!a.has(Qe)){Xe=Qe;break}if(Xe!==void 0)s.delete(Xe)}s.add(Fe)}if(Pe?.terminalEmitted!==!
+
+----- @297727089 -----
+
+:Hr}}}let Un=h,Wn=Z.agentId,Gn=Te+1,Or=u&&Gn>u?u:void 0,Xn=Z.messageQueue.isMidTurnFoldSuspended()||Or!==void 0?[]:Qka(Z.messageQueue.getCommandsByMaxPriority("next"),{isMainThread:Un,currentAgentId:Wn});Z.messageQueue.registerFoldInFlight(Xn);try{let Hr=0,An=0;for await(let go of yLt(null,gt,null,Xn,m,[...ve,...Ye,...Pt],l)){if(yield go,Pt.push(go),go.attachment.type==="queued_command"&&go.attachment.commandMode!==void 0)Hr++;if(go.attachment.type==="poll_events")An++}let Mo=Xn.filter((go)=>go.mode==="prompt"||go.mode==="task-notification");if(Mo.length>0&&Hr===0)E(`[query] queued_command attachments degraded to 0 for ${Mo.length} consumed command(s) \u2014 leaving them queued instead of dropping them`,{level:"warn"});else{if(Mo.length>0&&Hr<Mo.length)E(`[query] partial queued_command emission: ${Hr}/${Mo.length} \u2014 removing commands that were not all delivered`,{level:"error"});if(xLa(Mo),Mo.length>0)if(gt.abortController.signal.aborted)E(`[query] abort during mid-turn absorption \u2014 leaving ${Mo.length} command(s) queued`);else{Z.messageQueue.remove(Mo),JDr(Mo,Z.storageV5,{armUndo:!1});for(let go of Mo){let Pn=Fjp(go);if(Pn!==null)g.push(Pn);if(go.uuid)t.push(go.uuid),yield{type:"command_lifecycle",uuid:go.uuid,state:"started"}}}}let Co=Xn.filter(qj);if(Co.length>0)if(An===0)pJp("mid-turn",Co.length);else yield*dJp({events:Co,queue:Z.messageQueue,signal:gt.abortContro
+
+----- @304247014 -----
+
+outcome){if(s)if(this.credentials)this.credentials.discardSpentCredentialFile(s).catch(()=>{});else jfe.unlink(s).catch(()=>{});return}if(c)return this.patch({state:"crashed",detail:`source session ${a} not found`}),this.settle("crashed");if(!this.spawnPty)return this.patch({state:"crashed",detail:"Bun.Terminal unavailable (running under Node?)"}),L("tengu_bg_pty_unavailable",{short:bJ(this.dispatch.short)}),this.settle("crashed");let h=E0m(r,this.attempt,l,u,d,p);this.bootedViaResume=(r.launch.mode==="prompt"||r.launch.mode==="resume")&&(this.attempt===1||!l&&u===r.sessionId)?r.launch.restoresTranscript??h.includes("--resume"):h.includes("--resume");let g=w0m(r,n,i,this.rvSockPath??zjr(r.short),this.socketAuth());if(this.attempt>1&&l&&!t){if(g.CLAUDE_CODE_RESUME_INTERRUPTED_TURN="1",y0m()){if(g.CLAUDE_CODE_RESUME_PROMPT??=jnE,m)g.CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS??=String(znE)}}if(this.attempt>1&&!l&&u!==r.sessionId)g.CLAUDE_BG_POST_CLEAR_RESPAWN="1";if(e)Object.assign(g,e);if(s)delete g.CLAUDE_BG_RV_AUTH,delete g.CLAUDE_BG_PTY_AUTH,g.CLAUDE_BG_SOCKET_TOKENS_PATH=s;s2t(g),A0m(g,r);let y=this.ptyCols||(r.cols??200),b=this.ptyRows||(r.rows??50),v;try{let{cmd:S,prefixArgs:w}=r.launch.mode==="exec"?{cmd:a$(r.launch.cmd),prefixArgs:[]}:OD({pinToCurrentBinary:!0});v=this.spawnPty(S,[...w,...h],{cols:y,rows:b,cwd:f,env:g,ptySock:this.ptySockPath??ZM(r.short),short:r.shor
+
+----- @309195207 -----
+
+nds:Z.skipSlashCommands,bridgeOrigin:Z.bridgeOrigin,modelScheduledOrigin:Z.modelScheduledOrigin,wakeupSource:Z.wakeupSource,isMeta:Z.isMeta,skipAttachments:!le,origin:ee});if(ee)ELi(te.messages,ee);if(Z.priority==="later"){for(let re of te.messages)if(re.type==="user")re.queuePriority="later"}if(Z.origin?.kind==="task-notification"&&(Z.origin.source!==void 0||Z.origin.slug!==void 0)){for(let re of te.messages)if(re.type==="user")re.queueOrigin=Z.origin}if(Z.origin?.kind==="task-notification"&&Z.mode==="prompt"){for(let re of te.messages)if(re.type==="user")re.queueMode="prompt"}if(Z.verifiedSlackHumanTurn&&de)vss(te.messages,de);if(Z.slackTagOwnerTurn&&de){for(let re of te.messages)if(re.type==="user"&&re.uuid===de)re.slackTagOwnerTurn=!0}if(I.push(...te.messages),te.engineDeferredSlash)Q=te.engineDeferredSlash;if(le)P=te.shouldQuery,O=te.allowedTools,M=te.model,D=te.effort,U=te.nextInput,G=te.submitNextInput}if(bv("query_process_user_input_end"),Qj())bv("query_file_history_snapshot_start"),I.filter(pet).forEach((se)=>{if(q.has(se.uuid))return;rpg({getAppState:d,setAppState:p,messageUuid:se.uuid,storageV5:b})}),bv("query_file_history_snapshot_end");if(I.length){m(),C();let se=J[z],Z=se?.mode??"prompt",le=se&&typeof se.value==="string"?se.value:void 0,ee=Z==="prompt"||Z==="bash"&&P,ie=J.some((te)=>te.stopHookActive)?!0:void 0,de=se?.clientPlatform;S=W4f({turnUuids:w,isHumanTakeo
+
+===== b'between turns' heap=[311697168, 311959548, 311979000, 312130834, 312144531] all=[311697168, 311959548, 311979000, 312130834, 312144531] =====
+
+
+----- @311697168 -----
+
+a session is created \u2014 to run with a \`model\`, \`system\`, or \`skills\` other than the agent's values, use \`agent_with_overrides\` at create time (above). (\`title\`, \`metadata\`, and \`budget\` have their own session-update paths \u2014 see \xA7 Session operations / \xA7 Session budgets.) The agent's model configuration \u2014 including its \`inference_geo\` pin \u2014 and its configured \`system\` field are fixed for the session's lifetime; you can still **append system-level context between turns** by sending a \`system.message\` event (see \`shared/managed-agents-events.md\` \xA7 Adding system context mid-session).\r
+\r
+\`\`\`python\r
+client.beta.sessions.update(\r
+    session.id,\r
+    agent={\r
+        "tools": [\r
+            {"type": "agent_toolset_20260401"},\r
+            {"type": "mcp_toolset", "mcp_server_name": "linear"},\r
+        ],\r
+        "mcp_servers": [{"type": "url", "name": "linear", "url": "https://mcp.linear.app/sse"}],\r
+    },\r
+)\r
+\`\`\`\r
+\r
+`;var WTg=()=>{};var qTg=`# Managed Agents \u2014 Environments & Resources\r
+\r
+## Environments\r
+\r
+Creating a session requires an \`environment_id\`. Environments are **reusable configuration templates** for spinning up containers in Anthropic's infrastructure \u2014 you might create different environments for different use cases (e.g. data visualization vs web development, with different package set
+
+----- @311959548 -----
+
+` removes the migration you would otherwise owe when a pinned fallback model is deprecated. Note the header is \`server-side-fallback-2026-07-01\`, distinct from the \`-2026-06-01\` header that gates the array form; the array form's semantics (content blocks, \`usage.iterations\`, sticky routing) are unchanged and documented in the {{FABLE_NAME}} refusal section below.\r
+\r
+**2. Mid-conversation tool changes (beta \`mid-conversation-tool-changes-2026-07-01\`).** Change a conversation's tool set between turns without invalidating the prompt cache. Previously \`tools\` was fixed for the conversation's lifetime and any edit re-billed the whole prefix. Append a \`{"role": "system", "content": [...]}\` message carrying a \`tool_addition\` or \`tool_removal\` block:\r
+\r
+\`\`\`python\r
+messages = [\r
+    {"role": "user", "content": "What tools do you have for weather in Paris?"},\r
+    {"role": "system", "content": [\r
+        {"type": "tool_addition", "tool": {"type": "tool_reference", "name": "get_forecast"}},\r
+    ]},\r
+]\r
+\`\`\`\r
+\r
+The added tool must already be declared in \`tools[]\` with \`"defer_loading": True\` \u2014 declared up front, but not loaded into context until a \`tool_addition\` surfaces it. A \`tool_removal\` block must sit either immediately before an assistant message or at the end of \`messages\`. To *change* a tool's definition, remove the old one on one 
+
+----- @311979000 -----
+
+ation steps from the harness \u2014 including per-prompt *"double-check your answer"* phrasing, which inverts the usual self-check best practice on this model\r
+- [ ] **[TUNE]** Add the scope-discipline instruction if the model expands task scope\r
+- [ ] **[TUNE]** Vision pipelines: re-validate prompt-side workarounds written for a prior model's vision limitations\r
+- [ ] **[TUNE]** Consider mid-conversation tool changes (\`mid-conversation-tool-changes-2026-07-01\`) \u2014 changes the tool set between turns without invalidating the prompt cache. Note per-turn \`effort\` / \`task_budget\` are **not** in this launch; both stay request-level\r
+- [ ] **[TUNE]** Subagent-capable harnesses: this model delegates *more* readily than Opus 4.8 \u2014 remove any "delegate more" guidance you added for 4.8 and add an explicit cap\r
+- [ ] **[TUNE]** User-facing products: add the corrections instruction if self-correction narration reads as thrash\r
+- [ ] **[TUNE]** Any route running \`thinking: {type: "disabled"}\`: prefer turning thinking on at \`low\`/\`medium\` effort. Disabled thinking can emit tool calls as plain text (the call silently never runs) and leak \`<thinking>\` tags into output. If you must stay thinking-off, add *"You may say a brief sentence before using a tool"*, delete any don't-think/don't-reason rule, and use a generic *"no internal or system XML tags"* instruction\r
+-
+
+----- @312130834 -----
+
+ebFetch:\r
+\r
+- URL: \`https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool\`\r
+\r
+---\r
+\r
+## Mid-conversation tool changes (Beta)\r
+\r
+**Beta header \`mid-conversation-tool-changes-2026-07-01\`; {{OPUS_NAME}} onward.** Normally \`tools\` is fixed for a conversation's lifetime \u2014 editing it changes the very front of the prompt prefix and invalidates the entire cache (see \`prompt-caching.md\` \xA7 Invalidation hierarchy). This feature lets you add and remove tools between turns while the cached prefix survives.\r
+\r
+Both operations are content blocks on a \`{"role": "system", ...}\` message appended to \`messages[]\`, and both reference a tool by name via a \`tool_reference\`:\r
+\r
+\`\`\`python\r
+# Removal \u2014 must sit immediately before an assistant message, or last in messages.\r
+{"role": "system", "content": [\r
+    {"type": "tool_removal", "tool": {"type": "tool_reference", "name": "get_weather"}},\r
+]}\r
+\r
+# Addition \u2014 surfaces a tool declared up front with defer_loading.\r
+{"role": "system", "content": [\r
+    {"type": "tool_addition", "tool": {"type": "tool_reference", "name": "get_forecast"}},\r
+]}\r
+\`\`\`\r
+\r
+**A tool you plan to add must already be declared in \`tools[]\` with \`"defer_loading": True\`.** Deferred tools are known to the request but not loaded into the model's context until a \`tool_addition\` surfaces them:\r
+
+
+===== b'matching mid-turn' heap=[] all=[] =====
+
+
+===== b'HD({taskType' heap=[297810800, 297818158, 299376686, 299394147, 309109806] all=[297810800, 297818158, 299376686, 299394147, 309109806] =====
+
+
+----- @297810800 -----
+
+function LLv(e,t,r,n){return e==="auto-replied"?Vjn(t,r):e==="auto-edited"?qjn(t,r):MZp(t,r,n)}function NLv(e){let t=Jo().noticeCoalesce,r=t.get(e);if(r===void 0)return;if(t.delete(e),r.timer!==void 0)clearTimeout(r.timer);let n=LLv(r.family,r.artifactName,r.count,r.suppressedPrior>0),o=r.droppedDetails>0?`
+
+(${r.droppedDetails} earlier ${r.droppedDetails===1?"notice":"notices"} in this burst omitted \u2014 newest ${FZp} kept.)`:"";r.queue.enqueuePendingNotification({uuid:$Zp.randomUUID(),value:HD({taskType:r.family==="artifact-changed"?"artifact-changed":"artifact-auto-react",summary:Wa(n),body:`
+${Wa(r.details.join(`
+
+`)+o)}`}),mode:"task-notification",origin:{kind:"task-notification",source:r.family==="artifact-changed"?"artifact-changed":"artifact-auto-react",slug:r.slug,displayName:r.artifactName,coalesced:{family:r.family,count:r.count}},agentId:Ai()})}function CNa(e){let{queue:t,slug:r,family:n,artifactName:o,detail:i,mergeDetails:s}=e,l=(e.now??Date.now)(),c=e.settle?.settleMs??MLv,u=e.settle?.maxSettleMs??OLv,d=Jo().noticeCoalesce,p=`${n}
+${r}`,f=d.get(p);if(f===void 0)f={slug:r,family:n,artifactName:o,mergeDetails:s,count:0,threadIds:new Set,firstAt:l,details:[],droppedDetails:0,suppressedPrior:0,queue:t,timer:void 0},d.set(p,f);if(f.artifactName=o,f.queue=t,e.threadId!==void 0)f.threadIds.add(e.threadId);if(f.count=f.threadIds.size>0?f.threadIds.size:f.count+1,f.merg
+
+----- @297818158 -----
+
+n t}function QZp(e,t){for(let r of e){let n=r.origin;if(n?.kind==="task-notification"&&n.coalesced!==void 0&&n.coalesced.family!=="artifact-changed"&&n.slug!==void 0&&n.displayName!==void 0)t.push({slug:n.slug,family:n.coalesced.family,artifactName:n.displayName,count:n.coalesced.count})}}function Nbe(e,t=[],r){if(e<=0&&t.length===0)return;let n=Rt(e,"it","them"),o=r?.nameChordGesture===!0?"; use the kill-all-agents gesture to disarm auto-replies for the whole session":"";sp({agentId:Ai(),value:HD({taskType:"artifact-auto-react",summary:Wa(e>0?`${e} artifact auto-reply ${Rt(e,"subscription")} stopped`:"Artifact auto-reply activity stopped"),body:`
+${Wa(t.map(Xpi).concat(e>0?[`A future publish re-arms ${n}, and an explicitly requested watch reconnects on its own without auto-reply${o}. Do not republish to re-enable auto-replies unless the user asks.`]:[]).join(`
+
+`))}`}),mode:"task-notification",origin:{kind:"task-notification",source:"artifact-auto-react-stop-disclosure",nonDurableStop:!0,...t.length>0&&{carriesDiscardRecord:!0}}})}function NNa(e){return e.origin?.kind==="task-notification"&&e.origin.source==="artifact-auto-react"}function OLt(){let e=RNa();for(let r of e)nJe(r.slug);let t=u4e(NNa);for(let r of t)if(r.origin?.kind==="task-notification"&&r.origin.slug!==void 0)nJe(r.origin.slug);return QZp(t,e),e}function ofi(e){let t={disclosures:[],staleRows:[]};for(let r of e
+
+----- @299376686 -----
+
+gave_up"),s5r(e,i,"the live connection kept failing and reconnecting has stopped","connection lost");return}let s=Math.min(o.capMs,o.baseMs*2**Math.min(i.consecutiveFailures,5)),a=Math.max(0,Math.round(s*(0.75+Math.random()*0.5)));if(i.timer!==void 0)clearTimeout(i.timer);i.timer=setTimeout(C8v,a,e,t),i.timer.unref?.()}function s5r(e,t,r,n,o="watch it again if you still need that"){if(e.supervisors.get(t.slug)===t)eLe(e,t.slug);else VPn(t);let i=n5r(()=>t.autoReactWiring?.title,t.url);sp({value:HD({taskType:XAs,summary:Wa(NZp(i,n)),body:`
+<event>${Wa(`Watch on ${t.url} ended \u2014 ${r}. This session will no longer hear when it is republished; ${o}.`)}</event>`}),mode:"task-notification",priority:"next",origin:{kind:"task-notification",source:XAs,slug:t.slug,displayName:i},agentId:Ai()})}function U3a(e,t){s5r(e,t,"watching this artifact was stopped earlier in this session","stopped","do not watch it again unless the user asks you to")}function i5r(e,t,r,n){return uvi(e,t,r),{outcome:"skipped",reason:n}}function uvi(e,t,r){if(r)return;let n=e.supervisors.get(t);if(n!==void 0&&!n.stopped&&n.timer===void 0)dvi(e,t,0)}async function C8v(e,t){let r=e.supervisors.get(t);if(!r||r.stopped)return;if(r.timer=void 0,Jo().durable.stopLatches.isStopped(t)){we("artifact_live_subscribe","stop_latched"),U3a(e,r);return}if(r.autoReactWiring!==void 0&&Ute(t))delete r.autoReactWiring;_e("artifact
+
+----- @299394147 -----
+
+lishWiring===!0;if(ee?.freshPublishWiring===!0)S=ee.scanGeneration,w=ee.stopGeneration;let te=t.userResumeWiring===!0,re=()=>e.supervisors.get(r)?.autoReactWiring?.title??ie?.title,ce=ie===void 0||!ie.commentVerbsInSchema?void 0:{env:MH(),tool:ie.tool,context:ie.context,abort:le,getTitle:re,notify:(he)=>{if("coalesce"in he){CNa({queue:hbf,slug:r,family:he.coalesce.family,artifactName:he.coalesce.artifactName,threadId:he.coalesce.threadId,detail:he.detail,mergeDetails:"append"});return}sp({value:HD({taskType:"artifact-auto-react",summary:Wa(he.summary),body:`
+${Wa(he.detail)}`}),mode:"task-notification",origin:{kind:"task-notification",source:"artifact-auto-react",slug:r,displayName:n5r(re,n)},agentId:Ai()})}},fe=0;try{let he=await $hi({ws:{url:y,protocols:[y8v,P]},description:`live updates for artifact ${n} (${W?"watch requested":N.armedVia==="attach"?"attached via /artifacts":N.armedVia==="resume"?"resume requested":"auto-armed on publish"})`,timeout_ms:0,persistent:!0,quietLifecycle:!0,...z!==void 0&&{reuseTaskId:z},ambient:!0,autoReactArmed:ce!==void 0,autoReactSlug:ce!==void 0?r:void 0,frameLive:{slug:r,explicit:W,watchedSince:N.watchedSince},transform:R8v({slug:r,url:n,ownPublishes:i,getKnownVer:M,getTitle:re,...l!==void 0&&{seedSurfacedVer:l},onSurfaced:(ve)=>{let Ne=e.supervisors.get(r);if(Ne&&!Ne.stopped)Ne.carriedVer=ve,Ne.lastActivityAt=Date.now()},autoReact:ce}),keep
+
+===== b'function HD(' heap=[295700924, 322687236] all=[295700924, 322687236] =====
+
+
+----- @295700924 -----
+
+:e.toolUses,duration_ms:Date.now()-e.startTime},last_tool_name:e.lastToolName,summary:e.summary,workflow_progress:e.workflowProgress})}var Sii=A(()=>{j0()});function UK(e){return e.type==="local_agent"&&e.status==="completed"&&"keepaliveReasons"in e&&e.keepaliveReasons instanceof Set&&e.keepaliveReasons.size>0&&!xn()}var XMe="flag:idle-window";var p4e=A(()=>{bt()});function xXe(e,t){let r=!1,n;return t.update(e,(o)=>{if(n=o,o.notified)return o;return r=!0,{...o,notified:!0}}),{claimed:r,task:n}}function HD({taskId:e,toolUseId:t,taskType:r,outputFile:n,status:o,summary:i,body:s,trailing:a}){let l=[[O7,e],[T6t,t],[iyn,r],[syn,n],[WO,o],[y1,i]],c=`<${iv}>`;for(let[u,d]of l)if(d)c+=`
+<${u}>${d}</${u}>`;return`${c}${s??""}
+</${iv}>${a??""}`}var BTe=A(()=>{xy()});function ud(e){return typeof e==="object"&&e!==null&&"type"in e&&e.type==="local_agent"}function Bpe(e){return e.keepaliveReasons??new Set}function pbe(e,t,r){if(!e)return;r.update(e,(n)=>{if(!ud(n)||Bpe(n).has(t))return n;return{...n,keepaliveReasons:new Set(Bpe(n)).add(t)}})}function BK(e,t,r){if(!e)return;r.update(e,(n)=>{if(!ud(n)||!Bpe(n).has(t))return n;let o=new Set(Bpe(n));o.delete(t);let i=o.size===0&&vk(n.status)&&!n.retain;return{...n,keepaliveReasons:o,...i&&n.evictAfter===void 0&&{evictAfter:Date.now()+dbe}}})}var UUr=A(()=>{cJ()});function Eii(){return{toolUseCount:0,latestInputTokens:0,cumulativeOutputTokens:0
+
+----- @322687236 -----
+
+,l]=vg.useState(),u=vg.useMemo(()=>({labelId:c,setLabelId:l,items:i}),[c,l,i]),f=nt("div",t,{ref:n,props:[{role:"group","aria-labelledby":c},s]}),d=(0,zD.jsx)(LD.Provider,{value:u,children:f});return i?(0,zD.jsx)(eV,{items:i,children:d}):d})});var zV,FV,HV=j(()=>{"use client";zV=A(ne(),1);kn();si();ID();cn();FV=zV.forwardRef(function(t,n){let{render:r,className:o,style:a,id:i,...s}=t,{setLabelId:c}=OV(),l=br(i);return Ee(()=>(c(l),()=>{c(void 0)}),[l,c]),nt("div",t,{ref:n,props:[{id:l},s]})})});function HD(){let e=ik.useContext(FD);if(!e)throw new Error(fn(19));return e}var ik,FD,BD=j(()=>{"use client";wo();ik=A(ne(),1),FD=ik.createContext(void 0)});function BV(){return sk.useContext(UD)}var sk,UD,VD=j(()=>{"use client";sk=A(ne(),1),UD=sk.createContext(!1)});function VV(e){let{componentProps:t,forwardedRef:n,virtualized:r,indexFromFilter:o}=e,{render:a,className:i,style:s,value:c=null,index:l,disabled:u=!1,nativeButton:f=!1,...d}=t,p=Oc.useRef(!1),m=Oc.useRef(null),b=Fh({index:l,textRef:m,indexGuessBehavior:hA.GuessFromOrder}),x=Vn(),h=BV(),v=sU(),g=we(x,Se.open),y=we(x,Se.selectionMode),w=we(x,Se.readOnly),R=we(x,Se.isItemEqualToValue),k=y!=="none",C=l??(r?o??-1:b.index),P=b.index!==-1,D=we(x,Se.id),z=we(x,Se.isActive,C),O=we(x,Se.isSelected,c),I=we(x,Se.itemProps),M=Oc.useRef(null),V=D!=null&&P?`${D}-${C}`:void 0,H=O&&k;Ee(()=>{if(!(P&&(r||l!=null)))return;let G=x.state.listR
+
+===== b'taskType:' heap=[295700958, 295748220, 295749924, 295751193, 297810804, 297818162, 298374613, 298380023, 298380912, 298507894, 298508953, 298613997] all=[295700958, 295748220, 295749924, 295751193, 297810804, 297818162, 298374613, 298380023] =====
+
+
+----- @295700958 -----
+
+-e.startTime},last_tool_name:e.lastToolName,summary:e.summary,workflow_progress:e.workflowProgress})}var Sii=A(()=>{j0()});function UK(e){return e.type==="local_agent"&&e.status==="completed"&&"keepaliveReasons"in e&&e.keepaliveReasons instanceof Set&&e.keepaliveReasons.size>0&&!xn()}var XMe="flag:idle-window";var p4e=A(()=>{bt()});function xXe(e,t){let r=!1,n;return t.update(e,(o)=>{if(n=o,o.notified)return o;return r=!0,{...o,notified:!0}}),{claimed:r,task:n}}function HD({taskId:e,toolUseId:t,taskType:r,outputFile:n,status:o,summary:i,body:s,trailing:a}){let l=[[O7,e],[T6t,t],[iyn,r],[syn,n],[WO,o],[y1,i]],c=`<${iv}>`;for(let[u,d]of l)if(d)c+=`
+<${u}>${d}</${u}>`;return`${c}${s??""}
+</${iv}>${a??""}`}var BTe=A(()=>{xy()});function ud(e){return typeof e==="object"&&e!==null&&"type"in e&&e.type==="local_agent"}function Bpe(e){return e.keepaliveReasons??new Set}function pbe(e,t,r){if(!e)return;r.update(e,(n)=>{if(!ud(n)||Bpe(n).has(t))return n;return{...n,keepaliveReasons:new Set(Bpe(n)).add(t)}})}function BK(e,t,r){if(!e)return;r.update(e,(n)=>{if(!ud(n)||!Bpe(n).has(t))return n;let o=new Set(Bpe(n));o.delete(t);let i=o.size===0&&vk(n.status)&&!n.retain;return{...n,keepaliveReasons:o,...i&&n.evictAfter===void 0&&{evictAfter:Date.now()+dbe}}})}var UUr=A(()=>{cJ()});function Eii(){return{toolUseCount:0,latestInputTokens:0,cumulativeOutputTokens:0,recentActivities:[]}}function wii
+
+----- @295748220 -----
+
+}`:`The Claude GitHub app must be installed on this repository first.
+${zUr}`;case"policy_blocked":return"Cloud sessions are disabled by your organization's policy. Contact your organization admin to enable them."}}function Exa(e,t,r,n,o){if(!xXe(e,n).claimed)return;if(r==="completed")_e("task_remote_agent");else if(r==="failed")pe("task_remote_agent","task_remote_agent_failed");let i=r==="completed"?"completed successfully":r==="failed"?"failed":"was stopped";sp({value:HD({taskId:e,toolUseId:o,taskType:"remote_agent",outputFile:iE(e),status:r,summary:`Remote task "${t}" ${i}`}),mode:"task-notification",agentId:Ai(),priority:"next",taskId:e})}function hpv(e){let t=UFn(e);if(t!==null)return t;return e.filter((n)=>n.type==="assistant").map((n)=>wd(n.message.content,`
+`)).join(`
+`).trim()||null}function UFn(e){for(let n=e.length-1;n>=0;n--){let o=e[n];if(o?.type==="system"&&(o.subtype==="hook_progress"||o.subtype==="hook_response")){let i=au(o.stdout,pAr);if(i?.trim())return i.trim()}}for(let n=e.length-1;n>=0;n--){let o=e[n];if(o?.type!=="assistant")continue;let i=wd(o.message.content,`
+`),s=au(i,pAr);if(s?.trim())return s.trim()}let t=e.filter((n)=>n.type==="system"&&(n.subtype==="hook_progress"||n.subtype==="hook_response")).map((n)=>n.stdout).join(""),r=au(t,pAr);if(r?.trim())return r.trim();return null}function gpv(e){try{let t=Xt(e);if(t&&typeof t==="object"&&!Array.isArray(
+
+----- @295749924 -----
+
+findings_count:s}});let a=n?`
+
+This review was launched with --fix: apply these findings to the local working tree now. Skip findings that are wrong or not worth fixing, and run the relevant checks after.`:"",l=o?`
+
+This review was launched with a note, recorded at launch time: "${ei(o,$ii)}". The cloud review did not see the note \u2014 it ran a standard review of the diff. When presenting these findings, prioritize and relate them to that note.`:"",c=i?await _pv(i,t):"";sp({value:HD({taskId:e,taskType:"remote_agent",status:"completed",summary:"Cloud review completed",trailing:`
+The cloud review produced the following findings:
+
+${t}${a}${l}${c}`}),mode:"task-notification",agentId:Ai(),priority:"next",taskId:e})}async function _pv(e,t){let r=await Nii(e,t);return r.status==="posting"?`
+
+This review was launched with a request to post the findings to the pull request as a single comment from the user's own GitHub account, and that is happening now (the posting session is at ${r.sessionUrl}). Tell the user the findings are being posted to the PR as a comment and give them that link; do not apply the findings locally unless they also asked for that.`:`
+
+This review was launched with a request to post the findings to the pull request, but the post did not start: ${r.reason} Tell the user this plainly.`}function i$p(e,t,r,n){let o=xXe(e,r);if(!o.claimed)return;let i=o.task?.postRev
+
+----- @295751193 -----
+
+not start: ${r.reason} Tell the user this plainly.`}function i$p(e,t,r,n){let o=xXe(e,r);if(!o.claimed)return;let i=o.task?.postReviewTo?`
+
+This review was launched with a request to post the findings to the pull request as a comment from the user's account. The review failed, so nothing was posted.`:"";pe("task_remote_agent","task_remote_agent_review_failed",{remote_task_type:Ce("ultrareview"),reason:ge(t)});let s=n?`: ${n.replace(/[<>]/g,"").slice(0,200)}`:"",a=wxa[t]+s;sp({value:HD({taskId:e,taskType:"remote_agent",status:"failed",summary:`Cloud review failed: ${a}`,trailing:`
+Cloud review did not produce output (${a}). Tell the user to retry /code-review ultra, or use plain /code-review for a local review instead.${i}`}),mode:"task-notification",agentId:Ai(),priority:"next",taskId:e})}function Wft(e){let{remoteTaskType:t,session:r,command:n,context:o,toolUseId:i,isRemoteReview:s,postReviewTo:a,applyFixesOnComplete:l,reviewInstructions:c,isUltraplan:u,isLongRunning:d,remoteTaskMetadata:p}=e,f=tz("remote_agent");zMt(f);let m={...LR(f,"remote_agent",r.title,i),type:"remote_agent",remoteTaskType:t,status:"running",sessionId:r.id,command:n,title:r.title,todoList:[],log:[],isRemoteReview:s,postReviewTo:a,applyFixesOnComplete:l,reviewInstructions:c,isUltraplan:u,isLongRunning:d,pollStartedAt:Date.now(),remoteTaskMetadata:p};o.taskRegistry.register(m),mpv({taskId:f,remoteTaskType:t
+
+===== b'<task-notification>' heap=[293690250, 293735110, 293735411, 293735488, 293747645, 298350333, 298612358, 311194585, 311195999, 311203825] all=[121924022, 234434013, 293690250, 293735110, 293735411, 293735488, 293747645, 298350333] =====
+
+
+----- @293690250 -----
+
+_la(e,t)??m6d(e,t)??t}async function kRb(e,t,r){return _la(e,t)??await h6d(e,t,r)??t}var c6d,$Pn,bRb,gla,l6d="__autonomous_preamble__",d6d="<<loop.md>>",UPn="<<loop.md-dynamic>>",ZKo=25000;var l1r=A(()=>{sl();bt();cn();Ut();t6d();r6d();RDe();Gje();bde();cr();lo();pt();c6d=require("fs"),$Pn=require("path"),bRb=ula;gla=`
+
+If a ${qA} is armed (check ${Lq}), keep \`delaySeconds\` at 1200\u20131800s \u2014 the ${qA} is the wake signal and this is only the fallback heartbeat. If you were woken by a \`<task-notification>\`, handle the event before deciding whether to re-arm. To stop the loop, call ${yb} with \`stop: true\` and ${Bj} the monitor (use ${Lq} to find its task ID if no longer in context).`});function JZt(e,t){L("tengu_loop_ended",{reason:ge(e),...t}),Fmn(!0),Gwr()}function vla(){let e=m1().find((t)=>t.kind==="loop");if(e===void 0)return;return{at:e.scheduledFor,reason:e.reason,fires:Wwr(),...e.keepalive&&{keepalive:!0}}}function Ddt(){return tt("tengu_kairos_loop_dynamic",!1)}function c1r(){return tt("tengu_loop_noop_fold",!1)}function y6d(){if(K.CLAUDE_CODE_LOOP_KEEPALIVE)return!0;return tt("tengu_kairos_loop_keepalive",!1)}function _6d(e,t,r){return S6d(e,t,{viaKeepalive:!1,reason:r})}function b6d(e){if(!Ddt())return JZt("gate_off"),null;if(Qwo()>=HRb)return E("[loop] keepalive budget exhausted (model declined to reschedule twice) \u2014 ending loop"),JZt("model_stopped"
+
+----- @293735110 -----
+
+o take advantage of their loaded context
+- When the user has approved a specific action, quote their exact words in the worker's prompt. The worker's auto-mode check sees only the worker's own transcript \u2014 your approval is invisible unless you pass it through.
+- After launching agents, ${l} and end your response. Never fabricate or predict agent results in any format \u2014 results arrive as separate messages.
+
+### ${di} Results
+
+Worker results arrive as **user-role messages** containing \`<task-notification>\` XML, delivered as harness input, normally inside a \`<system-reminder>\` that opens with \`${pXs}\`. They are not the user speaking, and never something you write yourself \u2014 do not reproduce the reminder, the header, or the XML in your own output. Distinguish them by the \`<task-notification>\` opening tag.
+
+Format (inside the reminder):
+
+\`\`\`xml
+<task-notification>
+<task-id>{agentId}</task-id>
+<status>completed|failed|killed</status>
+<summary>{human-readable status summary}</summary>
+<result>{agent's final text response}</result>
+<usage>
+  <subagent_tokens>N</subagent_tokens>
+  <tool_uses>N</tool_uses>
+  <duration_ms>N</duration_ms>
+</usage>
+</task-notification>
+\`\`\`
+
+- \`<result>\` and \`<usage>\` are optional sections
+- The \`<summary>\` describes the outcome: "completed", "failed: {error}", or "was stopped"
+- The \`<task-id>\` value is the agent ID \u20
+
+----- @293735411 -----
+
+end your response. Never fabricate or predict agent results in any format \u2014 results arrive as separate messages.
+
+### ${di} Results
+
+Worker results arrive as **user-role messages** containing \`<task-notification>\` XML, delivered as harness input, normally inside a \`<system-reminder>\` that opens with \`${pXs}\`. They are not the user speaking, and never something you write yourself \u2014 do not reproduce the reminder, the header, or the XML in your own output. Distinguish them by the \`<task-notification>\` opening tag.
+
+Format (inside the reminder):
+
+\`\`\`xml
+<task-notification>
+<task-id>{agentId}</task-id>
+<status>completed|failed|killed</status>
+<summary>{human-readable status summary}</summary>
+<result>{agent's final text response}</result>
+<usage>
+  <subagent_tokens>N</subagent_tokens>
+  <tool_uses>N</tool_uses>
+  <duration_ms>N</duration_ms>
+</usage>
+</task-notification>
+\`\`\`
+
+- \`<result>\` and \`<usage>\` are optional sections
+- The \`<summary>\` describes the outcome: "completed", "failed: {error}", or "was stopped"
+- The \`<task-id>\` value is the agent ID \u2014 use SendMessage with that ID as \`to\` to continue that worker
+
+See Section 6 for a worked example.
+
+## 3. Workers
+
+When calling ${di}, prefer a specialized \`subagent_type\` when the task matches its described trigger (e.g. a reviewer, verifier, or planner surfaced by the environment); when in do
+
+----- @293735488 -----
+
+014 results arrive as separate messages.
+
+### ${di} Results
+
+Worker results arrive as **user-role messages** containing \`<task-notification>\` XML, delivered as harness input, normally inside a \`<system-reminder>\` that opens with \`${pXs}\`. They are not the user speaking, and never something you write yourself \u2014 do not reproduce the reminder, the header, or the XML in your own output. Distinguish them by the \`<task-notification>\` opening tag.
+
+Format (inside the reminder):
+
+\`\`\`xml
+<task-notification>
+<task-id>{agentId}</task-id>
+<status>completed|failed|killed</status>
+<summary>{human-readable status summary}</summary>
+<result>{agent's final text response}</result>
+<usage>
+  <subagent_tokens>N</subagent_tokens>
+  <tool_uses>N</tool_uses>
+  <duration_ms>N</duration_ms>
+</usage>
+</task-notification>
+\`\`\`
+
+- \`<result>\` and \`<usage>\` are optional sections
+- The \`<summary>\` describes the outcome: "completed", "failed: {error}", or "was stopped"
+- The \`<task-id>\` value is the agent ID \u2014 use SendMessage with that ID as \`to\` to continue that worker
+
+See Section 6 for a worked example.
+
+## 3. Workers
+
+When calling ${di}, prefer a specialized \`subagent_type\` when the task matches its described trigger (e.g. a reviewer, verifier, or planner surfaced by the environment); when in doubt, use \`worker\`. Workers execute tasks autonomously \u2014 especially res

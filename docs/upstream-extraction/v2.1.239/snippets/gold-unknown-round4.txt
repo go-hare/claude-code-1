@@ -1,0 +1,110 @@
+
+==== gdc keepDotPrefix 177895808 ====
+�������.Xl�������������.�������.��������������.�������.�������........	......keepDotPrefix...........�...................��..�..�&...�...'..���..��.......D..H.......�������.�������.�������.�������.�������.�������.�.......�������.............��������....@.......�������.........�������.........�������.�������..................�������................�.6.....�.�������.������8.�������.������`�������8.�������.������X�������....����............����....................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...x...x...x...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�������.�������.�������.�.......................�������.........�������.........�.......�������.�������.........�...............�������.........�������.................3.......�.�.....��....��.....��....��.....��.......��....i�.............................�@`.�E..��Q4���4�.%<�@�4���............�������.�������.P:�������������.�������.�l�������������.�������.`��������������.�������.�.������............��..�..�a...�...b..���..4�.......D..H.......�������.�������.�������.�������.�������.�������.h.......�������.............��������....x��������������.........�������.........�������.�������.............����............����....
+...............................h...h...h...h...h...h...h...h...h...h...h...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�...�....... ... ...
+
+==== function gdc 320468908 ====
+urn E(`Failed to scan directory for path completion: ${o}`,{level:"error"}),[]}}async function gdc(e,t,r={}){if(wa())return[];let{basePath:n=rr(),maxResults:o=10,keepDotPrefix:i=!1}=r,{directory:s,prefix:a}=nog(t,n),l=await hf0(e,s),c=a.toLowerCase(),u=l.filter((f)=>f.name.toLowerCase().startsWith(c)).slice(0,o),d=t.includes("/")||t.includes(U2e.sep),p="";if(d){let f=t.lastIndexOf("/"),m=t.lastIndexOf(U2e.sep),h=Math.max(f,m);p=t.substring(0,h+1)}if(!i&&(p.startsWith("./")||p.startsWith("."+U2e.sep)))p=p.slice(2);return u.map((f)=>{let m=p+f.name;return{id:m,displayText:f.type==="directory"?m+"/":m,metadata:{type:f.type}}})}var U2e,Jfs,tog=15000,rog=5000;var Zfs=A(()=>{Xi();hs();yh();zp();qe();st();Hyr();U2e=require("path"),Jfs=new Set(["add-dir","cd"])});function yd(RfO){let IfO=uog.c(7),{onKeyDown:oog,flexDirection:gf0,gap:iog,tabIndex:yf0,autoFocus:_f0,children:sog}=RfO,aog=gf0===void 0?"column":gf0,log=yf0===void 0?0:yf0,cog=_f0===void 0?!0:_f0,bf0;if(IfO[0]!==cog||IfO[1]!==sog||IfO[2]!==aog||IfO[3]!==iog||IfO[4]!==oog||IfO[5]!==log)bf0=ydc.jsx(H,{flexDirection:aog,gap:iog,tabIndex:log,autoFocus:cog,onKeyDown:oog,children:sog}),IfO[0]=cog,IfO[1]=sog,IfO[2]=aog,IfO[3]=iog,IfO[4]=oog,IfO[5]=log,IfO[6]=bf0;else bf0=IfO[6];return bf0}var ydc,uog;var e1=A(()=>{Nt();ydc=P(Ae(),1),uog=P(Me(),1)});function Eog(e){if(e.startsWith("file-"))return"+";if(e.startsWith("mcp-resource-"))return jH;if(e.startsWith("mcp-template"))return jH;if(e.startsWith("agent-"))ret
+
+==== untitled @313568778 313568778 ====
+()=>{Fv();qe();ZY();mr();st();Vir();Y8();gli();WEt();zx();yOi();xWe();KV();lWi();xP();qk();Djn();v$();Lwm=require("crypto")});function zAl(e){return PFn(e)?"cloud":dWi}function Fwm(e){return TLe(e)??"(untitled)"}class Uwm{listed=void 0;inFlight=void 0;record(e,t,r){this.listed={at:Date.now(),listed:e,identityKey:t,truncated:r}}forget(){this.listed=void 0}begin(e){this.inFlight=e}settle(e){if(this.inFlight===e)this.inFlight=void 0}}async function Ven(e={refresh:!0}){{let{primePeerIdentityOwner:t}=(xP(),pn(Deo));await t(e)}}function Vio(){let{getPeerBridgeIdentity:e}=(xP(),pn(Deo)),t=e();return t?.live?t.key:null}async function fWi(e,t){{let r=Vio();if(!r)return{rows:[],failed:!1,identityKey:null};let n=pWi.of(e),o=n.inFlight;if(o!==void 0&&o.identityKey===r)return o.promise;let{listBridgePeerSessions:i}=(Wio(),pn(zio)),s={record:void 0},a=Date.now(),l=(async()=>{try{let c={failed:!1,truncated:!1},u;try{u=await i(c,t)}catch(d){return E(`[bridge:population] fetch threw: ${le(d)} \u2014 tr
+
+==== untitled @314389869 314389869 ====
+1,64}$/u.test(f.tmux)&&!iBr(f.tmux)?f.tmux:void 0,g=$Hm(f,l,TLe);return Eao(m?VCe(m):TLe(f.name||IHm.basename(f.cwd))??"(untitled)",[g,f.kind,f.status,h===void 0?void 0:`tmux ${h}`,`started ${Abr(l-f.startedAt)} ago`])}),...r.map((f)=>{let m=t.get(`cloud-session\x00${f.id}`);return Eao(m?VCe(m):TLe(f.title)??"(untitled)",[f.remoteControl?dWi:"cloud session",ERl(f.workerStatus,f.workerStatus),f.lastActive===void 0?void 0:`active ${Abr(l-f.lastActive)} ago`,f.unreachableFromHere?HHm:void 0,f.acceptsPeerMessages===!1?Yen:void 0])}),...n.map(({session:f})=>{let m=t.get(`bridge-session\x00${f.id}`);return Eao(m?VCe(m)
+
+==== startsWith / @313617404 313617404 ====
+tring")n+=s.text}return n+(t??"")}function WWi(e){let t=0;for(let r of e){if(CSt(r))continue;if(r.priority==="later"||r.mode==="bash"||r.mode==="poll-event"||typeof r.value==="string"&&r.value.trim().startsWith("/")&&!r.skipSlashCommands)t++}return t}function LEm(e){return`Still backgrounding after the current tool \u2014 waiting for ${e} running ${At(e,"subagent")} so the work carries over. Press \u2190 again to skip ahead and restart ${e===1?"it":"them"} from the beginning.`}function OEm(e){if(e.type!=="user")return!1;let t=e.message?.content;return Array.isArray(t)&&t.length>0&&t.every((r)=>r.type==="tool_result")}function RRw(e){if(e.type==="system")return!0;if(e.type==="assistant"){let t=e.message?.stop_reason;return t===null||t==="tool_use"}if(e.type==="user")return o9(e);return!1}function mso(e){let t=e.length,r=!1;while(t>0){let o=e[t-1];if(o.type==="user")if(o9(o))r||=OEm(o);else if(r&&OEm(o));else break;else if(o.type==="assistant"){if(!RRw(o))break;r=!1}t--}let n=e.slice(t).
+
+==== Ldo voice 316284398 ====
+l=_uE});var yXm;var _Xm=A(()=>{yXm={isEnabled:()=>!1,isHidden:!0,name:"stub"}});function Ldo(e){return(e.voice?.enabled??e.voiceEnabled)===!0}function bXm(e){return e.voice?.enabled!==void 0||e.voiceEnabled!==void 0}function zXi(){try{if(!qE())return!1;return Vk()}catch{return!1}}function WXi(){return Ks("allow_voice_mode")}function tin(){return zXi()&&WXi()}var Ndo=A(()=>{hp();oi()});var EXm={};Et(EXm,{FINALIZE_TIMEOUTS_MS:()=>F$l,connectVoiceStream:()=>j$l,isTypedInterimsEnabled:()=>SXm,isVoiceStreamAvailable:()=>B$l,probeVoiceConnectivity:()=>U$l,sanitizeKeytermsForHeader:()=>wXm});function GXi(e,t,r){return typeof e==="number"&&Number.isInteger(e)&&e>=t&&e<=r?String(e):"unknown"}function wuE(e){return yf(e)?.toLowerCase()??"unknown"}async function U$l(){if(fa()||Jke())return"skipped_privacy";try{let e=await di.get(`${tl().BASE_API_URL}/api/hello`,{headers:{"User-Agent":sLe()},timeout:EuE,validateStatus:()=>!0,maxRedirects:0}),t=GXi(e.status,100,599);return e.headers["cf-mitigated"]!==void 0?`cf_mitigated_${t}`:`http_${t}`}catch(e){let t=di.isAxiosError(e)?e.code:void 0;return t==="ECONNABORTED"||t==="ETIMEDOUT"?"timeout":"fetch_failed"}}function SXm(){if(V.CLAUDE_CODE_VOICE_FORWARD_INTERIMS_TYPED)return!0;return it("tengu_brick_follow",!1)}function B$l(){if(!qE())return!1;let e=ma();return e!==null&&e.accessToken!==null}function wXm(e){let t=new Set,r=[],n=0;for(let o of e){let i=o.replace(/,/g," ").replace(/[^\x20-\x7E]/g,"").replace(/\s+/g," ").trim(
+
+==== voice?.enabled 316284423 ====
+(()=>{yXm={isEnabled:()=>!1,isHidden:!0,name:"stub"}});function Ldo(e){return(e.voice?.enabled??e.voiceEnabled)===!0}function bXm(e){return e.voice?.enabled!==void 0||e.voiceEnabled!==void 0}function zXi(){try{if(!qE())return!1;return Vk()}catch{return!1}}function WXi(){return Ks("allow_voice_mode")}function tin(){return zXi()&&WXi()}var Ndo=A(()=>{hp();oi()});var EXm={};Et(EXm,{FINALIZE_TIMEOUTS_MS:()=>F$l,connectVoiceStream:()=>j$l,isTypedInterimsEnabled:()=>SXm,isVoiceStreamAvailable:()=>B$l,probeVoiceConnectivity:()=>U$l,sanitizeKeytermsForHeader:()=>wXm});function GXi(e,t,r){return typeof e==="number"&&Number.isInteger(e)&&e>=t&&e<=r?String(e):"unknown"}function wuE(e){return yf(e)?.toLowerCase()??"unknown"}async function U$l(){if(fa()||Jke())return"skipped_privacy";try{let e=await di.get(`${tl().BASE_API_URL}/api/hello`,{headers:{"User-Agent":sLe()},timeout:EuE,validateStatus:()=>!0,maxRedirects:0}),t=GXi(e.status,100,599);return e.headers["cf-mitigated"]!==void 0?`cf_mitigated_${t}`:`http_${t}`}catch(e){let t=di.isAxiosError(e)?e.code:void 0;return t==="ECONNABORTED"||t==="ETIMEDOUT"?"timeout":"fetch_failed"}}function SXm(){if(V.CLAUDE_CODE_VOICE_FORWARD_INTERIMS_TYPED)return!0;return it("tengu_brick_follow",!1)}function B$l(){if(!qE())return!1;let e=ma();return e!==null&&e.accessToken!==null}function wXm(e){let t=new Set,r=[],n=0;for(let o of e){let i=o.replace(/,/g," ").replace(/[^\x20-\x7E]/g,"").replace(/\s+/g," ").trim();if(!i||t.has(i))continu
+
+#### "keepDotPrefix:!0" 1 [322623621] 
+
+==== keepDotPrefix:!0 322623621 ====
+s("/"))){ge.current=Ft;let zt=await gdc(G,Ft,{maxResults:10,keepDotPrefix:!0});if(ge.current!==Ft)return;if(zt.length>0){ie(void 0),k((qt)=>({suggestions:zt,selectedSuggestion:fut(qt.suggestions,qt.selectedSuggestion,zt),commandArgumentHint:void 0})),he.current="bash-path",x("directory");return}}if(C==="directory"&&he.current==="bash-path")We();we.current=ke;let Qe=await Sey(G,ke,q);if(we.current!==ke)return;if(Qe){ie({text:Qe.suffix,fullCommand:Qe.fullCommand,insertPosition:ke.length}),k(()=>({commandArgumentHint:void 0,suggestions:[],selectedSuggestion:-1})),x("none"),O(void 0);return}else ie(void 0)}let Ke=a!=="bash"?ke.substring(0,ct).match(kDo):null;if(Ke){let _t=(Ke[2]??"").toLowerCase(),Ft=B.getState(),Qe=[],zt=new Set;if(xd()&&Ft.teamContext)
+
+#### "keepDotPrefix:true" 0 [] 
+
+#### "keepDotPrefix:i" 1 [320468990] 
+
+==== keepDotPrefix:i 320468990 ====
+,r={}){if(wa())return[];let{basePath:n=rr(),maxResults:o=10,keepDotPrefix:i=!1}=r,{directory:s,prefix:a}=nog(t,n),l=await hf0(e,s),c=a.toLowerCase(),u=l.filter((f)=>f.name.toLowerCase().startsWith(c)).slice(0,o),d=t.includes("/")||t.includes(U2e.sep),p="";if(d){let f=t.lastIndexOf("/"),m=t.lastIndexOf(U2e.sep),h=Math.max(f,m);p=t.substring(0,h+1)}if(!i&&(p.startsWith("./")||p.startsWith("."+U2e.sep)))p=p.slice(2);return u.map((f)=>{let m=p+f.name;return{id:m,displayText:f.type==="directory"?m+"/":m,metadata:{type:f.type}}})}var U2e,Jfs,tog=15000,rog=5000;var Zfs=A(()=>{Xi();hs();yh();zp();qe();st();Hyr();U2e=require("path"),Jfs=new Set(["add-dir","cd"])});function yd(RfO){let IfO=uog.c(7),{onKeyDown:oog,flexDirection:gf0,gap:iog,tabIndex:yf0,autoFocu
+
+#### "i=!0" 12 [71866891,71880584,71882314,300662039,300694296,301421850,301513533,301522020,301599704,301636391,301694248,302164296] 
+
+==== i=!0 71866891 ====
+seRecoverable(this.lastTokStart,"Multiple default clauses"),i=!0,t.test=null),this.expect(a.colon)}else t||this.unexpected(),t.consequent.push(this.parseStatement(null));return this.exitScope(),t&&this.finishNode(t,"SwitchCase"),this.next(),this.labels.pop(),this.finishNode(e,"SwitchStatement")},l.parseThrowStatement=function(e){return this.next(),k.test(this.input.slice(this.lastTokEnd,this.start))&&this.raise(this.lastTokEnd,"Illegal newline after throw"),e.argument=this.parseExpression(),this.semicolon(),this.finishNode(e,"ThrowStatement")};var It=[];l.parseCatchClauseParam=function(){var e=this.parseBindingAtom(),t=e.type==="Identifier";return this.enterScope(t?Me:0),this.checkLValPattern(e,t?Ge:D),this.expect(a.parenR),e},l.parseTryStatement=fun
+
+#### "function Cnt(" 1 [310726365] 
+
+==== function Cnt( 310726365 ====
+ind,this.bodyBytes=t.bodyBytes,this.response=t.response}}});function Cnt(){return V.CLAUDE_CODE_RETRY_WATCHDOG}function J8f(e){return Jle(e)||e instanceof Os&&e.status===429}function JQn(e){return V.CLAUDE_CODE_REMOTE&&e instanceof Os&&(e.status===401||e.status===403)}function bew(e){if(!(e instanceof MC))return!1;let t=GU(e);return t!==null&&Zle.has(t.code)}function vew(e){if(!(e instanceof MC))return!1;let t=GU(e);if(t===null)return!1;let{code:r}=t;return Zle.has(r)||r==="EPROTO"||r==="FailedToOpenSocket"||r.startsWith("ERR_OSSL_")||r.startsWith("ERR_SSL_")}async function Sew(e){if(!V.CLAUDE_CODE_CLIENT_CERT||V.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION)return{reportedFailure:!1,attempted:!1};try{let{changed:t,readFailed:r,mismatched:n}=aw
+
+#### "Cnt()" 10 [310726374,310729984,310730301,310730751,310731295,310731441,310733278,310737749,310739018,317353849] 
+
+==== Cnt() 310726374 ====
+bodyBytes=t.bodyBytes,this.response=t.response}}});function Cnt(){return V.CLAUDE_CODE_RETRY_WATCHDOG}function J8f(e){return Jle(e)||e instanceof Os&&e.status===429}function JQn(e){return V.CLAUDE_CODE_REMOTE&&e instanceof Os&&(e.status===401||e.status===403)}function bew(e){if(!(e instanceof MC))return!1;let t=GU(e);return t!==null&&Zle.has(t.code)}function vew(e){if(!(e instanceof MC))return!1;let t=GU(e);if(t===null)return!1;let{code:r}=t;return Zle.has(r)||r==="EPROTO"||r==="FailedToOpenSocket"||r.startsWith("ERR_OSSL_")||r.startsWith("ERR_SSL_")}async function Sew(e){if(!V.CLAUDE_CODE_CLIENT_CERT||V.CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION)return{reportedFailure:!1,attempted:!1};try{let{changed:t,readFailed:r,mismatched:n}=await kJe()
+
+#### "org_spend_cap_reached" 12 [112602728,112604512,124636928,142511184,206175624,246191504,246191632,260286888,260287016,303250285,303250902,306959116] 
+
+==== org_spend_cap_reached 112602728 ====
+............	.......seat_tier_level_disabled........	.......org_spend_cap_reached...........	.......out_of_credits..........	.......seat_tier_zero_credit_limit.............	.......member_zero_credit_limit........	.......member_level_disabled...........	.......org_level_disabled_until................�_..i.i.i.i.i.i.i.i.....�...............�...............�...............(...............h...............�...............�............... .......................	...,...Fast mode disabled � usage credits exhausted............	...B...Fast mode disabled � usage credits turned off by your organization..............	.../...Fast mode disabled � usage credit limit reached.........	...>...Fast mode disabled � usage credits turned off for your account..........	...
+
+#### "out_of_credits" 12 [112602768,112604552,117979024,124637448,183680256,228252928,230112456,230113184,260287096,303017099,303250041,303250931] 
+
+==== out_of_credits 112602768 ====
+bled........	.......org_spend_cap_reached...........	.......out_of_credits..........	.......seat_tier_zero_credit_limit.............	.......member_zero_credit_limit........	.......member_level_disabled...........	.......org_level_disabled_until................�_..i.i.i.i.i.i.i.i.....�...............�...............�...............(...............h...............�...............�............... .......................	...,...Fast mode disabled � usage credits exhausted............	...B...Fast mode disabled � usage credits turned off by your organization..............	.../...Fast mode disabled � usage credit limit reached.........	...>...Fast mode disabled � usage credits turned off for your account..........	...>...Fast mode disabled � usage credits n
+
+#### "Zle=" 3 [306411847,332654565,336780876] 
+
+==== Zle= 306411847 ====
+DOWN","EAI_AGAIN","FailedToOpenSocket","ERR_PROXY_TUNNEL"]),Zle=new Set(["ECONNRESET","EPIPE","ConnectionClosed","UND_ERR_SOCKET","ETIMEDOUT","ECONNABORTED","ERR_SOCKET_CLOSED","StreamSuspended"]);EWv=new Set(["OAuth access token has expired. Re-authenticate to continue.","OAuth access token has been revoked.","OAuth access token is invalid.","API key is invalid.","Request exceeds the maximum size","Request not allowed"]);pyi=class pyi extends Error{constructor(){super("Stream ended without receiving any events");this.name="StreamNoEventsError"}}});function r5n(e){return Boolean(e.headers?.get?.("anthropic-ratelimit-unified-representative-claim")||e.headers?.get?.("anthropic-ratelimit-unified-overage-status"))}var cNp="anthropic-ratelimit-unified-rep
+
+#### "Zle.has" 8 [306406014,306406090,310726650,310726767,316785976,316791404,317347590,317448755] 
+
+==== Zle.has 306406014 ====
+turn 529;if(SWv(e))return 429;return}function e5n(e){return Zle.has(e)||lhe.has(e)?Pf(e):xe("other")}function uyi(e){return lhe.has(e)||Zle.has(e)||cyi.has(e)?Pf(e):void 0}function UFa(e){return e.status!==void 0||e.error!==void 0}function aNp(e,t){if(!UFa(e))return!1;let r=e.error,n=typeof r==="object"&&r!==null&&"request_id"in r?r.request_id:void 0,o=[t,e.requestID,n].some(COt),s=(BFa(e)?e:void 0)?.error?.error?.message,a=typeof s==="string"&&s!=="",l=a&&EWv.has(s);return!(o&&a)&&!l}function b_t(e,t){let r=/^[a-z][a-z0-9_]{0,63}$/.test(e)?e:"unknown";return Pf(`API error: type=${r} status=${typeof t==="number"?t:"none"}`)}function GU(e){if(!e||typeof e!=="object")return null;let t=e,r=5,n=0;while(t&&n<r){if(t instanceof Error){if("code"in t&&typeof
+
+#### "this session" 12 [99512049,99517173,99517246,99556228,99575849,99730284,99730382,99730493,99730621,99730757,99730872,99730952] 
+
+==== this session 99512049 ====
+rnal Running totals of the subagents the Agent tool started this session; see SDKSubagentStats.................�...C.u.m.u.l.a.t.i.v.e. .e.s.t.i.m.a.t.e.d. .c.o.s.t. .i.n. .U.S.D. .f.o.r. .t.h.i.s. .q.u.e.r.y.(.). .c.a.l.l.,. .c.o.v.e.r.i.n.g. .t.h.e. .s.a.m.e. .q.u.e.r.y.-.p.i.p.e.l.i.n.e. .c.a.l.l.s. .a.s. .m.o.d.e.l.U.s.a.g.e. .a.n.d. .s.h.a.r.i.n.g. .i.t.s. .l.i.f.e.c.y.c.l.e.:. .c.u.m.u.l.a.t.i.v.e. .a.c.r.o.s.s. .t.u.r.n.s. .i.n. .s.t.r.e.a.m.i.n.g.-.i.n.p.u.t. .s.e.s.s.i.o.n.s. ..  .e.a.c.h. .r.e.s.u.l.t. .c.a.r.r.i.e.s. .t.h.e. .r.u.n.n.i.n.g. .t.o.t.a.l. .s.o. .f.a.r.,. .s.o. .r.e.a.d. .t.h.e. .l.a.t.e.s.t. .r.e.s.u.l.t. .r.a.t.h.e.r. .t.h.a.n. .s.u.m.m.i.n.g. .a.c.r.o.s.s. .r.e.s.u.l.t.s... .C.r.a.s.h./.s.t.a.r.t.u.p.-.e.r.r.o.r. .r.e.s.u.l
+
+#### "your name is" 0 [] 
+
+#### "listed as" 4 [88704313,314915025,324277653,332387927] 
+
+==== listed as 88704313 ====
+. Values declared outside of a component/hook should not be listed as dependencies as the component will not re-render if they change.. Refs, setState functions, and other "stable" values generally do not need to be added as dependencies, but this variable may change over time to point to different values.Missing dependency `�.`�..Unexpected error category: �.BuiltInEffectEventFunctionCannot access ref value during renderReact refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef)Cannot access refs during renderCannot
+
+#### "sanitizeSessionTitle" 0 [] 
+
+#### "slash title" 0 [] 
+
+#### "leading slash" 8 [92920191,168518088,216604405,230051448,301394404,303355320,312550195,317640052] 
+
+==== leading slash 92920191 ====
+sh)
+  ugrep -e "/PATTERN"   # match /PATTERN (including the leading slash)
+  ugrep ""              # match all lines
+  ugrep --match         # match all lines
+. modules
+.# Ignore files and directories specified in .gitignore, default: no-ignore-files
+.  searched %zu new files
+.  searched %zu changed files
+.# Exclude specific files
+.unable to allocate thread local variables
+. entries
+.# Exclude specific directories
+.failed to reserve %zu GiB huge pages
+.holes: the sweeps walked %zu free blocks and skipped %zu unchanged pages
+.ures_swap(): unable to allocate memory for tracking resources
+.Can't JIT some patterns containing back references
+.#define __TINYC__ 9%.2s
+. %-11s %11s %11s %11s %11s %11s
+.%*sExplicit Text: %.*s
+.%*sOrganization: %.*s
+.%*sCPS: %

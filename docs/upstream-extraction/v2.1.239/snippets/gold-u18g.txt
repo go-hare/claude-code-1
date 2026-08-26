@@ -1,0 +1,104 @@
+#### "Hooks: cwd" count=0 []
+#### "falling back" count=4 [87136470,87136555,89561541,89585055]
+ for resolution "..".optionalpeerDependenciesMeta9warn: CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+..J.[33mwarn.[0m.[2m:.[0m CreateHardLinkW failed, falling back to CopyFileW: .. - ..
+../Refusing to install package with invalid name ".."..Refusing to install "..": tarball root directory ".." is not a valid folder name.Tried to delete root and stopped it."package.json" for ".." failed to resolve: ..."package.json" for ".." failed to open: ..!failed to resolve cache dir for "..": .. failed to verify cache dir for "..": ...moving ".." to cache dir failed
+.	
+  From: .	
+    To: ...moving ".." to cache dir failed
+..
+ From: ..
+   To: .. 
+	@airbnb/node-memwatch
+@anthropic-ai/claude-code
+@apollo/protobufjs
+@apollo/rover
+@appsignal/nodejs
+@arkweid/lefthook
+@aws-amplify/cli
+@bahmutov/add-typescript-to-cypress
+@bazel/concatjs
+@bazel/cypress
+@bazel/esbuild
+@bazel/hide-bazel-files
+@bazel/jasmine
+@bazel/protractor
+@bazel/rollup
+@bazel/terser
+@bazel/typescript
+@buf
+#### "safeCwd" count=0 []
+#### "hookCwd" count=0 []
+#### "spawn ENOENT" count=0 []
+#### "cwd not found" count=0 []
+#### "function dme" count=2 [304295810,337331314]
+0a,M0a,O0a]});function Ow(e){return e==="completed"||e==="failed"||e==="killed"}function dme(){let e=V.CLAUDE_CODE_TMPDIR;if(e)return e;return L0a.tmpdir()}function WLt(e){let t=process.getuid?.();if(t===void 0)return;let r=e.replace(/[\/]+$/,"")||e,n="Set CLAUDE_CODE_TMPDIR to a directory you control, or ask an administrator to remove it.",o;try{o=i9.openSync(r,i9.constants.O_RDONLY|i9.constants.O_DIRECTORY|i9.constants.O_NOFOLLOW)}catch(i){let s=dt(i);if(s==="ELOOP"||s==="ENOTDIR")throw Error(`Temp directory ${e} is not a directory (may be an attacker-planted symlink). Refusing to use it. ${n}`);if(s==="EACCES"){let a;try{let l=i9.lstatSync(r);if(l.uid!==t)a=l.uid}catch{}if(a!==void 0)throw new gt(`Temp directory ${e} is owned by uid ${a}, expected ${t}. Refusing to use it \u2014 another user may have pre-created it. ${n}`,"temp dir owned by another uid (EACCES at open); refusing to use it");throw new gt(`Temp directory ${e} is not readable (its mode may have been
+#### "getProjectRoot()" count=0 []
+#### "existsSync(e.cwd)" count=0 []
+#### "existsSync(t.cwd)" count=0 []
+#### "all-projects" count=0 []
+#### "resumeSession" count=4 [145358152,168810616,188485304,188563005]
+........(.......................`.......................................	.......resumeSessionId.........	.......linkScanPath............	.......linkScanOffset.......................t..'.......'........t...t.......D..H.......................................................x.......................................@................................................................:..........................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......H...H...h...........................................................................................................................................................................................................................................................8..................................G..........................i.................
+............................................@ .......`T.@ .............6...
+#### "queuedCommands.length" count=0 []
+#### "abortQuery" count=0 []
+#### "cancelAndAbort" count=4 [148794336,312572172,312574984,312575015]
+h.I.......................X.............	.......logDecision.............	.......cancelAndAbort..........	.......handleUserAllow..............Q...................Q...Q.......D..H.......................................................h...................................................................................................................................................................h...h...h...h...h...h...h...h...............................................................................`...@...@.......0...0...0...@...@...@...@...@...@...@...@...@...@...@...@...@...@...@...@...@...................................................P...............p...............h...................................................................................................................G.1...........................................H..i.........................................
+	.H........F....	......	.................j...!...
+.
+...................................i...
+#### "onEscape" count=4 [170343064,178739800,318015255,318036216]
+(.......................8...............	......onExitMessage...........	.......onEscapeMessage.........	.......historyOnClear..........	.......onLeftArrowOnEmpty..............	.......leftArrowConfirmHint............	.......onHistoryUp.............	......onHistoryDown...........	.......onHistoryReset..........	.......mask............	.......disableBackslashReturn..........	......clearOnSubmit...........	.......disableCtrlCClear...............	...
+...cursorChar..............	.......preserveTrailingWhitespace..............	.......invert..........	.......onImagePaste............	..."...disableCursorMovementForUpDownKeys..............	.......disableEscapeDoublePress........	.......maxVisibleLines.........	.......externalOffset..........	.......onOffsetChange..........	.......inputFilter.............	.......getPastedContents...............	.......getInputMode............	.......inlineGhostText.........	.......selectionAnchor.........	.......selectionLinewise...........
+#### "keepAlive" count=4 [71033577,71033692,71033750,71040491]
+NoDelay)
+    _socket[kSetNoDelay] = !0, clientHandle.setNoDelay(!0);
+  if (self.keepAlive && clientHandle.setKeepAlive)
+    _socket[kSetKeepAlive] = !0, _socket[kSetKeepAliveInitialDelay] = self.keepAliveInitialDelay, clientHandle.setKeepAlive(!0, self.keepAliveInitialDelay);
+  if (self._connections++, _socket.server = self, _socket._server = self, pauseOnConnect && !isTLS)
+    _socket.pause();
+  if (typeof connectionListener === "function") {
+    if (clientHandle.pauseOnConnect = pauseOnConnect, !isTLS)
+      self.prependOnceListener("connection", connectionListener);
+  }
+  if (isTLS)
+    initAcceptedTLSSocket(self, _socket);
+  if (self.emit("connection", _socket), !pauseOnConnect && !isTLS)
+    _socket.read(0);
+}
+var SocketHandlers2 = {
+  open(socket) {
+    let { self, req } = socket.data;
+    socket[owner_symbol] = self;
+    {
+      let options = self[bunTLSConnectOptions];
+      if (options) {
+        let { session } = options;
+        if (session)
+          sel
+#### "heartbeatMs" count=0 []
+#### "hookHeartbeat" count=0 []
+#### "startActiveSpan" count=4 [100861576,228415664,228419872,228422392]
+onStart.........	.......onEnd...........	
+.	...startSpan................V'.....startActiveSpan.........	.......getGeneralLimits...............getSpanLimits...........IW'.	...getTracer...............	...
+..._sendSpans...............W'.....transformMetricsForInternal.............	?......extractDataPoints...............	.......convertAttributesX'.............	s......hrTimeToISOString...............	.......selectAggregationTemporality............	.......setDelegate.............	.......[3P telemetry] OTEL diag error:.........	...0...https://slack.com/marketplace/A08SF47R6P4-claude........	...[...Usage: /mcp [reconnect|enable|disable [<server>|all]]. With no server name, applies to all..............	.......{"type":"KeepAlive"}............	z......{"type":"CloseStream"}..........	...#.../api/ws/speech_to_text/voice_stream..............Y
+.....3%......................Y.o.u. .a.r.e. .n.a.m.i.n.g. .a. .c.o.d.i.n.g. .s.e.s.s.i.o.n. .s.o. .t.h.e. .u.s.e.r. .c.a.n. .p.i.c.k. .i.
+#### "withActiveSpan" count=0 []
+#### "traceContext" count=0 []
+#### "context.with" count=4 [303126026,315440917,315444479,316160486]
+rt=void 0;var aLd=Wu(),dLb=X1n();function pLb(e,t){return new Promise((r)=>{aLd.context.with((0,dLb.suppressTracing)(aLd.context.active()),()=>{e.export(t,(n)=>{r(n)})})})}$Xo._export=pLb});var Gk=ae(function(bc){Object.defineProperty(bc,"__esModule",{value:!0});bc.internal=bc.diagLogLevelFromString=bc.BindOnceFuture=bc.urlMatches=bc.isUrlIgnored=bc.callWithTimeout=bc.TimeoutError=bc.merge=bc.TraceState=bc.unsuppressTracing=bc.suppressTracing=bc.isTracingSuppressed=bc.setRPCMetadata=bc.getRPCMetadata=bc.deleteRPCMetadata=bc.RPCType=bc.parseTraceParent=bc.W3CTraceContextPropagator=bc.TRACE_STATE_HEADER=bc.TRACE_PARENT_HEADER=bc.CompositePropagator=bc.otperformance=bc.getStringListFromEnv=bc.getNumberFromEnv=bc.getBooleanFromEnv=bc.getStringFromEnv=bc._globalThis=bc.SDK_INFO=bc.parseKeyPairsIntoRecord=bc.ExportResultCode=bc.unrefTimer=bc.timeInputToHrTime=bc.millisToHrTime=bc.isTimeInputHrTime=bc.isTimeInput=bc.hrTimeToTimeStamp=bc.hrTimeToNanoseconds=bc.hrTimeToMilli
+#### "AgentDetail" count=0 []
+#### "vimMode" count=4 [146118360,189262072,289352016,289352392]
+........ ...@................... .........................;.............	.......vimMode.@...(<......
+..../..J.......K.......`........H..H.........................,.......................,.....h........................................j..........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...x...x...x...x...x...x...................(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...................................`...............................................................................................................@.......................2........p...........$.........................a........i....... ...............P.......................(.........................................;.....	.......
+.........................................`........T............................p.;.........
+#### "setVimMode" count=0 []
+#### "ignoreFocusClick" count=0 []
+#### "focusGained" count=0 []
+#### "button press" count=3 [134274646,309360394,337116065]
+..................................................................	.......Mouse button pressed........................%.....................p.....H.......X......L.@ ..@ ..@ ..........@...@...I.....4..'5.....@ ..@ ..@ ..@ ..B...@@4.B....@K.....@...@...I.....4...4..........p|......pD.........@@..............@........`.........H.......................^...m...u............................=......................(........................_...............................................c_.....................0E_......................U.......................G.......................
+........................o.....................`.o.....................P...............................................h.......................PJo.............	...	...mouseDown...........g........M..........mM../....M...N......	H..H.......................................................h........................................ _.......................................................................
+==== getOriginalCwd 313432026 ====
+etOauthConfig:h}=await Promise.resolve().then(() => (kp(),eer)),{getOAuthHeaders:g}=await Promise.resolve().then(() => (JH(),vLe)),{getMainLoopModel:y}=await Promise.resolve().then(() => (Li(),kZo)),{getOriginalCwd:_}=await Promise.resolve().then(() => (tt(),aXe)),{default:b}=await Promise.resolve().then(() => (Fv(),AFu)),{isFirstPartyProvider:S}=await Promise.resolve().then(() => (Fs(),Sda));if(!S())return E("[bridge] Session create skipped on non-firstParty provider"),pe("bridge_session_create","bridge_session_create_3p_provider"),null;let w=l?.()??($t()&&c!==void 0?(await f(c))?.accessToken:p()?.accessToken);if(!w)return E("[bridge] No access token for session creation"),pe("bridge_session_create","bridge_session_create_no_token"),null;let T=await m();if(!T)return E("[bridge] No org UUID for session creation"),pe("bridge_session_create","bridge_session_create_no_org"),null;let{sources:k,outcomes:C,report:x}=await fga(n,o,i),R={...t!==void 0&&{title:t},events:r,session_context:{sources:k,outcomes:C,model:y(),cwd:_(),reuse_outcome_branches:!0},...F7r(e),source:"remote-control",...u&&{permission_mode:u},...d?.length&&{tags:d}},I={...g(w),"anthropic-beta":"ccr-byoc-2025-07-29","x-organization-uuid":T},M=`${a??h().BASE_API_URL}/v1/sessions`,O;try{O=await b.post(M,R,{headers:I,signal:s,validateStatus:(B)=>B<500})}catch(B){return E(`[bridge] Session creation request failed: ${le(B)}`),pe("bridge_session_create","bridge_session_create_request_failed"),null}if(!(O.status===200||O.status===201)){let B=z1(O.data);return E(`[bridge] Session creation failed with status ${O.status}${B?`: ${B}`:""}`),pe("bridge_session_create","bridge_session_create_http_error"),null}let F=O.data;if(!F||typeof F!=="object"||!("id"in F)||typeof F.id!=="string")return E("[bridge] No session ID in response"),pe("bridge_session_create","bridge_session_create_bad_response"),null;return aAl(x),Ee("bridge_session_create"),F.id}async function x_r(e,t){return(await B4i(e,t)).session}async function B4i(e,t){let{getClaudeAIOAuthTokens:r,getClaudeAIOAuthTokensAsync:n}=await Promise.resolve().then(() => (oi(),_ne)),{getOauthConfig:o}=await Promise.resolve().then(() => (kp(),eer)),{getCodeSession:i}=awai
+==== getOriginalCwd 313515404 ====
+Ge=n,Ze=!!Be,ot=await hAl(),Kt=h();if(!Kt)return E("[remote-bridge] No OAuth token"),pe("bridge_connect","bridge_connect_no_token"),null;let mt=()=>h()??Kt,at=()=>f?.ownerToken()??h()??Kt,bt=new Set,{getOriginalCwd:Rt}=await Promise.resolve().then(() => (tt(),aXe)),{getMainLoopModel:yt}=await Promise.resolve().then(() => (Li(),kZo)),xt=fe??he,lt=he;async function pr(){let rn={},Fo=async()=>{if(we){let{buildGitSessionContext:Fu}=await Promise.resolve().then(() => (cQo(),mga)),{reportGitSessionContext:lu}=await Promise.resolve().then(() => (lAl(),hSm)),{report:Rg}=await Fu(we,Ie,Re??void 0);lu(Rg)}},Us=(Fu)=>jAl((lu,Rg)=>dQo(t,lu,Ge,ot.http_timeout_ms,ge,we?{gitRepoUrl:we,branch:Ie,defaultBranch:Re??void 0}:void 0,Rt(),yt(),Fu,rn,Rg).then((fg)=>{if(typeof fg==="string")f?.noteAcceptedToken(lu);return fg}),"createCodeSession",ot,{getAccessToken:mt,onAuth401:g,recoveryAttemptedTokens:bt}),Ps=await Us(xt);if(uQo(Ps)&&Ps.reason==="grouping_rejected"&&fe===void 0&&xt!==void 0){let Fu=await Us(void 0);if(typeof Fu==="string")return lt=void 0,await Fo(),fr("info","bridge_repl_v2_grouping_dropped",{status:Ps.status}),E("[bridge:core] persisted Project no longer available; recreated session outside it"),E(`[remote-bridge] Created session ${Fu}`),fr("info","bridge_repl_v2_session_created"),Fu;return Ps}if(typeof Ps==="string")lt=xt,await Fo(),E(`[remote-bridge] Created session ${Ps}`),fr("info","bridge_repl_v2_session_created");return Ps}function Mt(rn){if(rn?.reason==="grouping_rejected"&&xt!==void 0){let Fo=rn.detail?`: ${rn.detail}`:"";return fe!==void 0?`Couldn't create a session in the requested Project (server ${rn.status}${Fo}). The Project may not exist or may not be available to you.`:`Couldn't recreate the session in its previous Project (server ${rn.status}${Fo}) \u2014 the Project may have been deleted or is no longer available.`}if(rn?.reason==="request_rejected")return`Session creation failed (server ${rn.status}) \u2014 see debug log`;if(rn?.reason==="malformed_response")return $en;return"Session creation failed \u2014 see debug log"}function Bt(rn){if(rn!==null&&rn.terminal===!1){ee?.("failed",Gt,"auth"),qV("v2_session_create_oauth_rejected",void 0,!0),pe("b

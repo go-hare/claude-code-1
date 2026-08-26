@@ -423,12 +423,25 @@ export type HookAttachment =
     }
   | HookSystemMessageAttachment
   | HookPermissionDecisionAttachment
+  | HookDeferredToolAttachment
 
 export type HookPermissionDecisionAttachment = {
   type: 'hook_permission_decision'
   decision: 'allow' | 'deny'
   toolUseID: string
   hookEvent: HookEvent
+}
+
+/** Official 2.1.239 PreToolUse `permissionDecision: "defer"` (print/SDK only). */
+export type HookDeferredToolAttachment = {
+  type: 'hook_deferred_tool'
+  toolUseID: string
+  toolName: string
+  toolInput: unknown
+  hookName: string
+  hookEvent: HookEvent
+  permissionMode: string
+  traceparent?: string
 }
 
 export type HookSystemMessageAttachment = {

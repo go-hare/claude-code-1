@@ -1,0 +1,3 @@
+# COE= offset=318012989
+
+COE=new RegExp("^"+lVl),xOE=new RegExp(lVl,"g")});var uVl={};Et(uVl,{getModifiers:()=>IOE,isModifierPressed:()=>HOE,prewarm:()=>POE});function ROE(e){return typeof e==="object"&&e!==null&&"getModifiers"in e&&typeof e.getModifiers==="function"&&"isModifierPressed"in e&&typeof e.isModifierPressed==="function"}function cVl(){if(ans)return ans;return null}function IOE(){let e=cVl();if(!e)return[];try{

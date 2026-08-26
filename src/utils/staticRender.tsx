@@ -1,8 +1,11 @@
 import * as React from 'react';
-import { useLayoutEffect } from 'react';
+import { createContext, useLayoutEffect } from 'react';
 import { PassThrough } from 'stream';
 import stripAnsi from 'strip-ansi';
 import { wrappedRender as render, useApp } from '@anthropic/ink';
+
+/** densable ros — true while Oln/F6l stringify a tree (skip tool-use path clamp). */
+export const StaticRenderContext = createContext(false);
 
 // This is a workaround for the fact that Ink doesn't support multiple <Static>
 // components in the same render tree. Instead of using a <Static> we just render
@@ -67,10 +70,15 @@ export async function renderToAnsiString(node: React.ReactNode, columns?: number
 
   // Render the component wrapped in RenderOnceAndExit
   // Non-TTY stdout (PassThrough) gives full-frame output instead of diffs
-  const instance = await render(<RenderOnceAndExit>{node}</RenderOnceAndExit>, {
-    stdout: stream as unknown as NodeJS.WriteStream,
-    patchConsole: false,
-  });
+  const instance = await render(
+    <RenderOnceAndExit>
+      <StaticRenderContext.Provider value={true}>{node}</StaticRenderContext.Provider>
+    </RenderOnceAndExit>,
+    {
+      stdout: stream as unknown as NodeJS.WriteStream,
+      patchConsole: false,
+    },
+  );
 
   // Wait for the component to exit naturally
   await instance.waitUntilExit();

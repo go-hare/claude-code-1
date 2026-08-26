@@ -1,0 +1,37 @@
+# offset=324962869 (0x135e8a35) kw="/claude-api upgrade"
+
+th exponential backoff. You can configure this with \`max_retries\` (default: 2). Only implement custom retry logic if you need behavior beyond what the SDK provides.\r
+\r
+\`\`\`python\r
+import time\r
+import random\r
+import anthropic\r
+\r
+def call_with_retry(\r
+    client: anthropic.Anthropic,\r
+    max_retries: int = 5,\r
+    base_delay: float = 1.0,\r
+    max_delay: float = 60.0,\r
+    **kwargs\r
+):\r
+    """Call the API with exponential backoff retry."""\r
+    last_exception = None\r
+\r
+    for attempt in range(max_retries):\r
+        try:\r
+            return client.messages.create(**kwargs)\r
+        except anthropic.RateLimitError as e:\r
+            last_exception = e\r
+        except anthropic.APIStatusError as e:\r
+            if e.status_code >= 500:\r
+                last_exception = e\r
+            else:\r
+                raise  # Client errors (4xx except 429) should not be retried\r
+\r
+        delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)\r
+        print(f"Retry {attempt + 1}/{max_retries} after {delay:.1f}s")\r
+        time.sleep(delay)\r
+\r
+    raise last_exception\r
+\`\`\`\r
+`;var W0y=()=>{};var q0y="# Upgrading the `anthropic` Python SDK: 0.x \u2192 1.x\r\n\r\n> **If you arrived via `/claude-api upgrade`:** this is the right file. Execute the steps below in order \u2014 do not summarize them back to the user. Start with Step 0 before touching any file.\r\n\r\n`anthropic` 1.x is deliberately a small step from the last 0.x release: no method was restructured and no new pattern is required. Long-deprecated surface was removed, the HTTP layer moved from `httpx` to its maintained fork `httpx2`, and the minimum Python version is now 3.10. Almost every required edit is mechanical, and a type checker flags nearly all of them once 1.x is installed \u2014 which makes `pyright` / `mypy` output a good cross-check for the inventory below.\r\n\r\nThe SDK repository's `MIGRATION.md` is the authoritative change list \u2014 WebFetch it (URL in `shared/live-sources.md` \u2192 SDK major-version upgrade guides) when you can, and if it disagrees with this file, follow `MIGRATION.md` and say so in your report. The other Python files in this skill may still show 0.x-era details; for a project on 1.x, this file takes precedence.\r\n\r\n<!-- Maintenance: this file is the executable form of anthropic-sdk-python's MIGRATION.md. Re-check it against that file whenever .sdk-hashes.json moves the Python SDK pin across a 1.x release. Last re

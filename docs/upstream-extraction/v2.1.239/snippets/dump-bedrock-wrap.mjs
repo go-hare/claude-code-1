@@ -1,0 +1,13 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+
+const buf = readFileSync(
+  'C:/Users/Administrator/AppData/Local/Temp/official-239/package/claude.exe',
+)
+function printable(s) {
+  return s.replace(/[^\x09\x0a\x0d\x20-\x7e\u00a0-\uffff]/g, '.')
+}
+writeFileSync(
+  new URL('./gold-bedrock-wrap.txt', import.meta.url),
+  printable(buf.slice(306954200, 306954750).toString('utf8')),
+)
+console.log('ok')

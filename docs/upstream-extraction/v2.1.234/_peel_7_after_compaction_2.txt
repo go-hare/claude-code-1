@@ -1,0 +1,4 @@
+offset=246745685
+needle=b'after compaction'
+window=
+tive files or data to avoid, operations that must not be performed, credential or secret handling rules). These MUST be preserved verbatim in the summary so they continue to apply after compaction..2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.................N.....Your summary should include the following sections:..1. Primary Request and Int

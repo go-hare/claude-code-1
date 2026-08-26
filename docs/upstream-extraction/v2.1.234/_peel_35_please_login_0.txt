@@ -1,0 +1,3 @@
+OFFSET=290877180
+
+sToken;if(e===void 0)throw Error("Claude Code web sessions require authentication with a Claude.ai account. API key authentication is not sufficient. Please run /login to authenticate, or check your authentication status with /status.");let t=await nie();if(!t)throw Error("Unable to get organization UUID");return{accessToken:e,orgUUID:t}}function rB_(e){if(!e?.url)return null;let t=x8t(e.url);if(!t)return null;let[r,n]=t.split("/");if(!r||!n)return null;return{name:n,owner:{login:r},default_branch:e.revision||void 0}}async function J3s(){return _d("teleport_sessions_list",async()=>{let{accessToken:e}=await Vue(),t=`${za().BASE_API_URL}/v1/code/sessions`;try{let r=await X3s(t,{headers:Tj(e)});if(r.status!==200)throw Error(`Failed to fetch co

@@ -286,6 +286,14 @@ export type PluginError =
       source: string
       plugin?: string
       error: string
+      orphan?: boolean
+    }
+  | {
+      /** densable `synced-plugin-shadowed` — local copy wins over claude.ai */
+      type: 'synced-plugin-shadowed'
+      source: string
+      shadowedBy: string
+      orphan?: boolean
     }
 
 export type PluginLoadResult = {
@@ -295,13 +303,41 @@ export type PluginLoadResult = {
 }
 
 /**
- * Helper function to get a display message from any PluginError
- * Useful for logging and simple error displays
+ * leftover N0 — `claude plugin enable <src>`, null when source is not a ref.
  */
+export function formatPluginEnableCommand(source: string): string | null {
+  if (!/^[\w@./:-]+$/.test(source)) return null
+  return `claude plugin enable ${source}`
+}
+
+/** densable leftover xpS — short shadowed status. */
+export function formatSyncedPluginShadowedStatus(
+  source: string,
+  shadowedBy: string,
+): string {
+  return `Synced plugin "${source}" is shadowed by local "${shadowedBy}"`
+}
+
+/**
+ * densable Dhe / leftover RpS — `To use the claude.ai copy instead…`
+ * Official: `t = N0("plugin enable", e.source)`.
+ */
+export function formatSyncedPluginShadowedMessage(
+  source: string,
+  shadowedBy: string,
+): string {
+  const cmd = formatPluginEnableCommand(source)
+  return cmd
+    ? `To use the claude.ai copy instead, run \`${cmd}\`, then disable or remove "${shadowedBy}"`
+    : `To use the claude.ai copy instead, enable it from /plugin, then disable or remove "${shadowedBy}"`
+}
+
 export function getPluginErrorMessage(error: PluginError): string {
   switch (error.type) {
     case 'generic-error':
       return error.error
+    case 'synced-plugin-shadowed':
+      return formatSyncedPluginShadowedMessage(error.source, error.shadowedBy)
     case 'path-not-found':
       return `Path not found: ${error.path} (${error.component})`
     case 'git-auth-failed':

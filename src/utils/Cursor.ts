@@ -123,6 +123,17 @@ type Position = {
   column: number
 }
 
+/** densable 2.1.239 `lVl` — Pasted/Image/Audio/Truncated chips hop as one unit. */
+const PLACEHOLDER_RE_SRC =
+  '\\[(?:Pasted text|Image|Audio|\\.\\.\\.Truncated text) #\\d+(?: \\+\\d+ lines)?\\.*\\]'
+const PLACEHOLDER_ENDING_RE = new RegExp(`${PLACEHOLDER_RE_SRC}$`)
+const PLACEHOLDER_STARTING_RE = new RegExp(`^${PLACEHOLDER_RE_SRC}`)
+const PLACEHOLDER_GLOBAL_RE = new RegExp(PLACEHOLDER_RE_SRC, 'g')
+/** densable 2.1.239 `TOE` — digit segments count as word-like. */
+const WORD_LIKE_NUMBER_RE = /\p{N}/u
+/** densable 2.1.239 `AOE` — readline words; punctuation separates. */
+const READLINE_WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu
+
 export class Cursor {
   readonly offset: number
   constructor(
@@ -276,7 +287,7 @@ export class Cursor {
   left(): Cursor {
     if (this.offset === 0) return this
 
-    const chip = this.imageRefEndingAt(this.offset)
+    const chip = this.placeholderEndingAt(this.offset)
     if (chip) return new Cursor(this.measuredText, chip.start)
 
     const prevOffset = this.measuredText.prevOffset(this.offset)
@@ -286,43 +297,55 @@ export class Cursor {
   right(): Cursor {
     if (this.offset >= this.text.length) return this
 
-    const chip = this.imageRefStartingAt(this.offset)
+    const chip = this.placeholderStartingAt(this.offset)
     if (chip) return new Cursor(this.measuredText, chip.end)
 
     const nextOffset = this.measuredText.nextOffset(this.offset)
     return new Cursor(this.measuredText, Math.min(nextOffset, this.text.length))
   }
 
-  /**
-   * If an [Image #N] chip ends at `offset`, return its bounds. Used by left()
-   * to hop the cursor over the chip instead of stepping into it.
-   */
-  imageRefEndingAt(offset: number): { start: number; end: number } | null {
-    const m = this.text.slice(0, offset).match(/\[Image #\d+\]$/)
+  placeholderEndingAt(offset: number): { start: number; end: number } | null {
+    if (this.text[offset - 1] !== ']') return null
+    const m = this.text.slice(0, offset).match(PLACEHOLDER_ENDING_RE)
     return m ? { start: offset - m[0].length, end: offset } : null
   }
 
-  imageRefStartingAt(offset: number): { start: number; end: number } | null {
-    const m = this.text.slice(offset).match(/^\[Image #\d+\]/)
+  placeholderStartingAt(offset: number): { start: number; end: number } | null {
+    if (this.text[offset] !== '[') return null
+    const m = this.text.slice(offset).match(PLACEHOLDER_STARTING_RE)
     return m ? { start: offset, end: offset + m[0].length } : null
   }
 
-  /**
-   * If offset lands strictly inside an [Image #N] chip, snap it to the given
-   * boundary. Used by word-movement methods so Ctrl+W / Alt+D never leave a
-   * partial chip.
-   */
-  snapOutOfImageRef(offset: number, toward: 'start' | 'end'): number {
-    const re = /\[Image #\d+\]/g
-    let m
-    while ((m = re.exec(this.text)) !== null) {
+  placeholderContaining(offset: number): { start: number; end: number } | null {
+    PLACEHOLDER_GLOBAL_RE.lastIndex = 0
+    for (const m of this.text.matchAll(PLACEHOLDER_GLOBAL_RE)) {
       const start = m.index
       const end = start + m[0].length
-      if (offset > start && offset < end) {
-        return toward === 'start' ? start : end
-      }
+      if (offset > start && offset < end) return { start, end }
+      if (start >= offset) break
     }
-    return offset
+    return null
+  }
+
+  snapOutOfPlaceholder(offset: number, toward: 'start' | 'end'): number {
+    const chip = this.placeholderContaining(offset)
+    if (!chip) return offset
+    return toward === 'start' ? chip.start : chip.end
+  }
+
+  /** @deprecated densable 2.1.239 — chips are placeholder*, not Image-only. */
+  imageRefEndingAt(offset: number): { start: number; end: number } | null {
+    return this.placeholderEndingAt(offset)
+  }
+
+  /** @deprecated densable 2.1.239 — chips are placeholder*, not Image-only. */
+  imageRefStartingAt(offset: number): { start: number; end: number } | null {
+    return this.placeholderStartingAt(offset)
+  }
+
+  /** @deprecated densable 2.1.239 — use snapOutOfPlaceholder. */
+  snapOutOfImageRef(offset: number, toward: 'start' | 'end'): number {
+    return this.snapOutOfPlaceholder(offset, toward)
   }
 
   up(): Cursor {
@@ -538,18 +561,66 @@ export class Cursor {
       return this
     }
 
-    // Use Intl.Segmenter for proper word boundary detection (including CJK)
-    const wordBoundaries = this.measuredText.getWordBoundaries()
+    const chip =
+      this.placeholderStartingAt(this.offset) ??
+      this.placeholderContaining(this.offset)
+    if (chip) return new Cursor(this.measuredText, chip.end)
 
-    // Find the next word start boundary after current position
+    const wordBoundaries = this.measuredText.getWordBoundaries()
     for (const boundary of wordBoundaries) {
       if (boundary.isWordLike && boundary.start > this.offset) {
-        return new Cursor(this.measuredText, boundary.start)
+        const snapped = this.snapOutOfPlaceholder(boundary.start, 'end')
+        return new Cursor(this.measuredText, snapped)
       }
     }
 
-    // If no next word found, go to end
     return new Cursor(this.measuredText, this.text.length)
+  }
+
+  /** densable 2.1.239 readline Alt+F / Ctrl·Option+→ — stop at word end. */
+  forwardWord(): Cursor {
+    if (this.isAtEnd()) return this
+    const chip =
+      this.placeholderStartingAt(this.offset) ??
+      this.placeholderContaining(this.offset)
+    if (chip) return new Cursor(this.measuredText, chip.end)
+    for (const boundary of this.measuredText.getReadlineWordBoundaries()) {
+      if (boundary.end > this.offset) {
+        const snapped = this.snapOutOfPlaceholder(boundary.end, 'end')
+        return new Cursor(this.measuredText, snapped)
+      }
+    }
+    return new Cursor(this.measuredText, this.text.length)
+  }
+
+  /** densable 2.1.239 readline Alt+B / Ctrl·Option+←. */
+  backwardWord(): Cursor {
+    if (this.isAtStart()) return this
+    const chip =
+      this.placeholderEndingAt(this.offset) ??
+      this.placeholderContaining(this.offset)
+    if (chip) return new Cursor(this.measuredText, chip.start)
+    const bounds = this.measuredText.getReadlineWordBoundaries()
+    for (let i = bounds.length - 1; i >= 0; i--) {
+      const boundary = bounds[i]
+      if (boundary && boundary.start < this.offset) {
+        const snapped = this.snapOutOfPlaceholder(boundary.start, 'start')
+        return new Cursor(this.measuredText, snapped)
+      }
+    }
+    return new Cursor(this.measuredText, 0)
+  }
+
+  killWord(): { cursor: Cursor; killed: string } {
+    const next = this.forwardWord()
+    if (next.offset === this.offset) return { cursor: this, killed: '' }
+    return this.killRange(this.offset, next.offset)
+  }
+
+  backwardKillWord(): { cursor: Cursor; killed: string } {
+    const prev = this.backwardWord()
+    if (prev.offset === this.offset) return { cursor: this, killed: '' }
+    return this.killRange(prev.offset, this.offset)
   }
 
   endOfWord(): Cursor {
@@ -597,29 +668,29 @@ export class Cursor {
       return this
     }
 
-    // Use Intl.Segmenter for proper word boundary detection (including CJK)
-    const wordBoundaries = this.measuredText.getWordBoundaries()
+    const ending = this.placeholderEndingAt(this.offset)
+    if (ending) return new Cursor(this.measuredText, ending.start)
+    const containing = this.placeholderContaining(this.offset)
+    if (containing) return new Cursor(this.measuredText, containing.start)
 
-    // Find the previous word start boundary before current position
-    // We need to iterate in reverse to find the previous word
+    const wordBoundaries = this.measuredText.getWordBoundaries()
     let prevWordStart: number | null = null
 
     for (const boundary of wordBoundaries) {
       if (!boundary.isWordLike) continue
 
-      // If we're at or after the start of this word, but this word starts before us
       if (boundary.start < this.offset) {
-        // If we're inside this word (not at the start), go to its start
         if (this.offset > boundary.start && this.offset <= boundary.end) {
-          return new Cursor(this.measuredText, boundary.start)
+          const snapped = this.snapOutOfPlaceholder(boundary.start, 'start')
+          return new Cursor(this.measuredText, snapped)
         }
-        // Otherwise, remember this as a candidate for previous word
         prevWordStart = boundary.start
       }
     }
 
     if (prevWordStart !== null) {
-      return new Cursor(this.measuredText, prevWordStart)
+      const snapped = this.snapOutOfPlaceholder(prevWordStart, 'start')
+      return new Cursor(this.measuredText, snapped)
     }
 
     return new Cursor(this.measuredText, 0)
@@ -872,9 +943,7 @@ export class Cursor {
     // Use startOfLine() so that at column 0 of a wrapped visual line,
     // the cursor moves to the previous visual line's start instead of
     // getting stuck.
-    const startCursor = this.startOfLine()
-    const killed = this.text.slice(startCursor.offset, this.offset)
-    return { cursor: startCursor.modifyText(this), killed }
+    return this.killRange(this.startOfLine().offset, this.offset)
   }
 
   deleteToLineEnd(): { cursor: Cursor; killed: string } {
@@ -883,9 +952,7 @@ export class Cursor {
       return { cursor: this.modifyText(this.right()), killed: '\n' }
     }
 
-    const endCursor = this.endOfLine()
-    const killed = this.text.slice(this.offset, endCursor.offset)
-    return { cursor: this.modifyText(endCursor), killed }
+    return this.killRange(this.offset, this.endOfLine().offset)
   }
 
   deleteToLogicalLineEnd(): Cursor {
@@ -894,17 +961,14 @@ export class Cursor {
       return this.modifyText(this.right())
     }
 
-    return this.modifyText(this.endOfLogicalLine())
+    return this.killRange(this.offset, this.endOfLogicalLine().offset).cursor
   }
 
   deleteWordBefore(): { cursor: Cursor; killed: string } {
     if (this.isAtStart()) {
       return { cursor: this, killed: '' }
     }
-    const target = this.snapOutOfImageRef(this.prevWord().offset, 'start')
-    const prevWordCursor = new Cursor(this.measuredText, target)
-    const killed = this.text.slice(prevWordCursor.offset, this.offset)
-    return { cursor: prevWordCursor.modifyText(this), killed }
+    return this.killRange(this.prevWord().offset, this.offset)
   }
 
   /**
@@ -915,10 +979,18 @@ export class Cursor {
     if (this.isAtStart()) {
       return { cursor: this, killed: '' }
     }
-    const target = this.snapOutOfImageRef(this.prevWORD().offset, 'start')
-    const prevWORDCursor = new Cursor(this.measuredText, target)
-    const killed = this.text.slice(prevWORDCursor.offset, this.offset)
-    return { cursor: prevWORDCursor.modifyText(this), killed }
+    return this.killRange(this.prevWORD().offset, this.offset)
+  }
+
+  killRange(start: number, end: number): { cursor: Cursor; killed: string } {
+    const from = this.snapOutOfPlaceholder(start, 'start')
+    const to = this.snapOutOfPlaceholder(end, 'end')
+    const startCursor = new Cursor(this.measuredText, from)
+    const endCursor = new Cursor(this.measuredText, to)
+    return {
+      cursor: startCursor.modifyText(endCursor),
+      killed: this.text.slice(from, to),
+    }
   }
 
   /**
@@ -935,7 +1007,7 @@ export class Cursor {
   deleteTokenBefore(): Cursor | null {
     // Cursor at chip.start is the "selected" state — backspace deletes the
     // chip forward, not the char before it.
-    const chipAfter = this.imageRefStartingAt(this.offset)
+    const chipAfter = this.placeholderStartingAt(this.offset)
     if (chipAfter) {
       const end =
         this.text[chipAfter.end] === ' ' ? chipAfter.end + 1 : chipAfter.end
@@ -954,9 +1026,9 @@ export class Cursor {
 
     const textBefore = this.text.slice(0, this.offset)
 
-    // Check for pasted/truncated text refs: [Pasted text #1] or [...Truncated text #1 +50 lines...]
+    // densable 2.1.239 — include Audio chips
     const pasteMatch = textBefore.match(
-      /(^|\s)\[(Pasted text #\d+(?: \+\d+ lines)?|Image #\d+|\.\.\.Truncated text #\d+ \+\d+ lines\.\.\.)\]$/,
+      /(^|\s)\[(Pasted text #\d+(?: \+\d+ lines)?|Image #\d+|Audio #\d+|\.\.\.Truncated text #\d+ \+\d+ lines\.\.\.)\]$/,
     )
     if (pasteMatch) {
       const matchStart = pasteMatch.index! + pasteMatch[1]!.length
@@ -971,8 +1043,7 @@ export class Cursor {
       return this
     }
 
-    const target = this.snapOutOfImageRef(this.nextWord().offset, 'end')
-    return this.modifyText(new Cursor(this.measuredText, target))
+    return this.killRange(this.offset, this.nextWord().offset).cursor
   }
 
   private graphemeAt(pos: number): string {
@@ -1179,11 +1250,50 @@ export class MeasuredText {
         this.wordBoundariesCache.push({
           start: segment.index,
           end: segment.index + segment.segment.length,
-          isWordLike: segment.isWordLike ?? false,
+          isWordLike:
+            (segment.isWordLike ?? false) ||
+            WORD_LIKE_NUMBER_RE.test(segment.segment),
         })
       }
     }
     return this.wordBoundariesCache
+  }
+
+  private readlineWordBoundariesCache?: Array<{ start: number; end: number }>
+
+  /**
+   * densable 2.1.239 — readline word bounds. Punctuation separates words
+   * (`foo,bar` / `foo.bar` are two words).
+   */
+  public getReadlineWordBoundaries(): Array<{ start: number; end: number }> {
+    if (!this.readlineWordBoundariesCache) {
+      const out: Array<{ start: number; end: number }> = []
+      let prevSnapExpanded = false
+      for (const boundary of this.getWordBoundaries()) {
+        const slice = this.text.slice(boundary.start, boundary.end)
+        READLINE_WORD_RE.lastIndex = 0
+        for (const match of slice.matchAll(READLINE_WORD_RE)) {
+          const rawStart = boundary.start + (match.index ?? 0)
+          const start = this.snapToGraphemeBoundary(rawStart)
+          const rawEnd = rawStart + match[0].length
+          const snappedEnd = this.snapToGraphemeBoundary(rawEnd)
+          const end =
+            snappedEnd === rawEnd ? rawEnd : this.nextOffset(snappedEnd)
+          const last = out.at(-1)
+          if (
+            last &&
+            (start < last.end || (start === last.end && prevSnapExpanded))
+          ) {
+            last.end = Math.max(last.end, end)
+          } else {
+            out.push({ start, end })
+          }
+          prevSnapExpanded = end !== rawEnd
+        }
+      }
+      this.readlineWordBoundariesCache = out
+    }
+    return this.readlineWordBoundariesCache
   }
 
   /**

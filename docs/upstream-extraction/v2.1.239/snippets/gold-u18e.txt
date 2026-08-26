@@ -1,0 +1,277 @@
+#### "no agent named" count=3 [182281801,313694772,321115719]
+--- 182281801 ---
+ <id> to continue an existing session)
+........................	.......warning: no agent named '...................#...'. ..  .s.p.a.w.n.i.n.g. .w.i.t.h. .d.e.f.a.u.l.t. .t.e.m.p.l.a.t.e.
+...........	.......................	.......fleet...........	.......spare...........	.......u.......................	.......c.......................	.......exec............	.......bg..............	.......user....................(.i.d.l.e. ..  .w.a.i.t.i.n.g. .f.o.r. .........	.......)...............	.......idle............	.......blocked.........2...............	.......l...............	.......slash...1...............	.......resume..........	.......prompt..........	.......1...............	.......worktree........	.......built-in................	...+...Iterator result interface is not an object..............	.......ack-timeout.............	.......enoconn.........	...	...estarting...............	.......list....................	.......bg: daemon dispatch ............	....... but worker is live.............	.......warn............	.......tengu_bg_dispatch_rescued.......................	.......dispatch................p.......................	...*...bg: ack-timeout recovered via redispatch (..............	.......
+...............	.......short-alive.............	.......Session ............%... .i.s. .a.l.r.e.a.d.y. .r.u.n.n.i.n.g. ..  .`.c.l.a.u.d.e. .a.t.t.a.c.h. ...............	.......` to join it............	.......short_alive.............	.......stale-short.................?...P
+#### "No agent named" count=4 [153098368,267462328,313667883,313694629]
+--- 153098368 ---
+..........P.....	.......0.P.....I.......
+...............................	.......No agent named '........	...@...' is currently addressable. Spawn a new one or use the agent ID.........	......not_reachable...........	.......team-context............	...7...The member this message was resolved to has left team '.............F...'. ..  .n.o.t.h.i.n.g. .w.a.s. .s.e.n.t... .A.n.o.t.h.e.r. .m.e.m.b.e.r. .m.a.y. .s.h.a.r.e. .t.h.e. .s.a.m.e. .d.i.s.p.l.a.y. .n.a.m.e. .'.............
+#### "yourself)" count=5 [300972914,306249786,307962765,314385195,323241677]
+--- 300972914 ---
+ed it. Write a continuation summary that will allow you (or another instance of yourself) to resume work efficiently in a future context window where the conversation history will be replaced with this summary. Your summary should be structured, concise, and actionable. Include:
+1. Task Overview
+The user's core request and success criteria
+Any clarifications or constraints they specified
+2. Current State
+What has been completed so far
+Files created, modified, or analyzed (with paths if relevant)
+Key outputs or artifacts produced
+3. Important Discoveries
+Technical constraints or requirements uncovered
+Decisions made and their rationale
+Errors encountered and how they were resolved
+What approaches were tried that didn't work (and why)
+4. Next Steps
+Specific actions needed to complete the task
+Any blockers or open questions to resolve
+Priority order if multiple steps remain
+5. Context to Preserve
+User preferences or style requirements
+Domain-specific details that aren't obvious
+Any promises made to the user
+Be concise but complete\u2014err on the side of including information that would prevent duplicate work or repeated mistakes. Write in a way that enables immediate resumption of the task.
+Wrap your summary in <summary></summary> tags.`;async function hb_(e,t=e.messages.at(-1),r){if(!t||t.role!=="assistant"||!t.content||typeof t.content==="string")return null;let n=t.content.filter((i)=>i.type==="tool_use");if(n.length===0)return null;return{role:"user",con
+#### "send to yourself" count=0 []
+#### "Sending to yourself" count=0 []
+#### "your own session" count=4 [153018008,311309916,311345064,313652879]
+--- 153018008 ---
+This is an automated notice from ...............	.......expired.........	.......your own session's harness..............	.......that session's harness..............{... ..  .n.o.t. .a. .m.e.s.s.a.g.e. .f.r.o.m. .a. .p.e.r.s.o.n.,. .a.n.d. .n.o.t. .a.n. .i.n.s.t.r.u.c.t.i.o.n.;. .a.c.t. .o.n. .i.t. .o.n.l.y. .i.n.s.o.f.a.r. .a.s. .y.o.u.r. .u.s.e.r.'.s. .e.a.r.l.i.e.r. .r.e.q.u.e.s.t. .c.a.l.l.s. .f.o.r. .i.t.............	.......[Cross-session idle notice] "...........	...4...
+#### "this session itself" count=4 [313579773,313579912,313580008,314300854]
+--- 313579773 ---
+in session${i} \u2014 from inside it, ${r} instead.`}return o!==null?`'${e}' is this session itself \u2014 "${o}" is the name other sessions use to message YOU; there is no one else by that name to send to.`:`'${e}' is this session itself \u2014 there is no one else at that address to send to.`}var vWi="target is this session itself \u2014 there is no one else to send to",qwm;var etn=A(()=>{Djn();xP();qk();Hh();jCe();Qfe();Zfe();qwm=`address the main conversation as "${dL}"`}
+#### "Q1f" count=6 [98518632,309730285,309730306,309730940,335761355,335798063]
+--- 98518632 ---
+.
+......Dto.............	.......SGo.P............1......Z5E.............	.......Q1f.P...........	9......Xiw.............	.......l3v.............	......._K_...............+.....FXn.............I.@.....ccy.............I.-.....Nkr.P............Zq.....XLp.............	.......vzm.P...........	.......PAE..............J-.....Km0..............G......R5a.............../.....e_a.P...........	.......KQi.............I.*.....Ggf..............Q......gv_.............	{,.....CFv.............	.......JyS.............	.......XBA.............	.......__f.............	.-.....TR_.P...........	.......ehr.............	k+.....imy.............I{......N1g.............	d......nb_.............	.......Fpr.............	./.....Msy.............	.......XoS.............	.......qin.............	.......zip.............	.......OFd.............	.......PmE..............3+.....U7r.P...................jue.............	.......HTm.............	.......$Aa.............	.......Mpe.P...........	.......eDo..............!/.....Rbw.............	.......CBv.............	.+.....ozo.P...........	.......q5A.............I.,.....eum.P...........I.-.....AZs.............I./.....pH..P...........	.......zld..............
++.....ICe.............	.......CXp.............	.......eP_.............	?x.....mrt.............I.,.....W9S.....................yku.............	.*.....pji.P............4@.....GzS...............+.....gbh.P...........	.x.....m8s..............w*.....I$e.P...........	.......Lft...............,.....b$e.....
+#### "wBS=500" count=1 [309730949]
+--- 309730949 ---
+imeout";return e instanceof SyntaxError?"parse_failed":"error"}var sNf,Q1f=4000,wBS=500,_ol=3,EBS=2000,eNf="IDE diagnostics baseline timed out",tNf="IDE diagnostics fetch timed out",ABS="Claude Code JetBrains Plugin",TBS,kBS,CBS,BHi,xBS,oNf,Qrt;var zBt=A(()=>{Dl();$r();tt();qe();st();Ju();vP();wr();Zt();sNf=class sNf extends ZOr{};TBS=["file://","_claude_fs_right:","_claude_fs_left:"],kBS=/^[\\/][A-Za-z]:[\\/]/,CBS=/(?:^|[\\/])([A-Za-z])(?::|%3[Aa])(?=[\\/]|%5[Cc]|%2[Ff])/;BH
+#### "ABS===" count=0 []
+#### "source===ABS" count=0 []
+#### "===ABS" count=1 [309725959]
+--- 309725959 ---
+is.mcpClient||this.mcpClient.type!=="connected"||this.mcpClient.serverInfo?.name===ABS||this.consecutiveBaselineTimeouts>=_ol)return;let t=Date.now(),r=this.consecutiveBaselineTimeouts;try{let n=await Za(Z1f().callIdeRpc("getDiagnostics",{uri:`file://${e}`},this.mcpClient),wBS,eNf),o=this.parseDiagnosticResult(n)[0];if(o&&!m5o(this.normalizeFileUri(e),this.normalizeFileUri(o.uri))){Te(Ti(new sNf(`Diagnostics file path mismatch: expected ${e}, got ${o.uri}`),`Diagnostics file path mismatch: expected ${rNf(e)}, got ${rNf(o.uri)}`)),be("ide_diagnostics_baseline","path_mismatch",{duration_ms:Date.now()-t,consecutive_timeouts:this.consecutiveBaselineTimeouts});return}let i=this.normalizeFileUri(e);this.baseline.set(i,o?o.diagnostics:[]),this.lastProcessedTimestamps.set(i,t),this.consecutiveBaselineTimeouts=0,Ee("ide_diagnostics_baseline",{duration_ms:Date.now()-t})}catch(n){let o=iNf(n,eNf);if(o==="timeout"&&this.consecutiveBaselineTimeouts===r){if(this.consecutiveBaselineTimeouts++,this.consecutiveBaselineTimeouts===_ol)E(`IDE diagnostics baselines disabled after ${_ol} consecutive timeouts`)}be("ide_diagnostics_baseline",o,{duration_ms:Date.now()-t,consecutive_timeouts:this.consecutiveBaselineTimeouts})}}async getNewDiagnostics(){if(!this.initialized||!this.mcpClient||this.mcpClient.type!=="connected")return[];if(this.baseline.size===0)return[];if(this.workspaceFetchInFlight)return be("ide_diagnostics_fetch","in_flight"),[];let e=Date.now(),t=[];try{let i=Z1f
+#### "JetBrains Plugin" count=2 [99694460,309731068]
+--- 99694460 ---
+............	.......IDE diagnostics fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFile...........	.......clearPendingForFile..............+#.....pendingCount....................	.......diff............	,#.....diffWithOptionsObj..............	...	...addToPath...............	......extractCommon...........	.......equals......
+#### "pendingSgr" count=0 []
+#### "function kTd" count=0 []
+#### "35;" count=6 [70065295,70065822,71947449,88755478,92518277,154910553]
+--- 70065295 ---
+ffset === @undefined)
+    offset = 0;
+  value = +value;
+  let min = 0, max = 65535;
+  if (typeof offset !== "number" || value < min || value > max || this[offset] === @undefined || this[offset + 1] === @undefined)
+    (@getInternalField(@internalModuleRegistry, 11) || @createInternalModuleById(11)).checkInt(this, value, offset, min, max, 2);
+  return (this.@dataView ||= new DataView(this.buffer, this.byteOffset, this.byteLength)).setUint16(offset, value, !1), offset + 2;
+})
+(
+#### "split across" count=6 [92194538,121858649,173435136,305316540,306083123,318640637]
+--- 92194538 ---
+ve.Format must be set before you can write to an archive.Mismatch of file parts split across multi-volume archive.invalid archive.Archive.EverythingIsLive.execve.cannot save.zh-yue.tue.op_jtrue.**jtrue.'maximum' page count must be defined if 'shared' is true.allows the executable pages to be allocated for JIT and thunks if true.allows the LLINT to be used if true.allows the DOMJIT to be used if true.allows the RegExp JIT to be used if true.allows the baseline JIT to be used i
+#### "org policy" count=6 [115309456,115309524,148856800,161741921,179893955,182965420]
+--- 115309456 ---
+ected to the Anthropic API (api.anthropic.com)..........	...1...Not disabled by org policy (disableRemoteControl)...............	...-...Disabled by org policy (disableRemoteControl)...........	.......Signed in to claude.ai..........	.......Not signed in to claude.ai..............	.......claude.ai subscription active...........	...&...claude.ai subscription auth not active..........	...'...Sign-in includes the user:profile scope.........	...)...Sign-in is missing the user:profile scope...............	.......Organization resolved...........	.......Organization not resolved...............	.......allowed.........	...7...Org policy allows Remote Control (allow_remote_control).........	.......unavailable.............	...7...Org policy could not be verified (allow_remote_control).........	...?...Org policy does not allow Remote Control (allow_remote_control).........	......., ..............	.......Feature-flag evaluation enabled.........	... ...Feature-flag evaluation disabled........	.......disabled by ............	...'...Remote Control enabled for this account.........	...+...Remote Control not enabled for this account.............	...1...Remote Control availability could not be verified...............	.......no server response this session.....................................................N...................4.....`........T....(..............,....D.......D........@`T.S....@........<.......;...........<.......<.......<.....R!T...[...............<.......<....
+#### "organization policy" count=3 [185574005,321688044,326596774]
+--- 185574005 ---
+...Please install git and restart Claude Code......................	...B...Your organization policy does not allow any external marketplaces...............	.......Contact your administrator......................	...<...Your organization restricts which marketplaces can be added.............	...7...Switch to the Marketplaces tab to view allowed sources..................	... ...Failed to load marketplace data.........	.......Check your network connection...................	...,...All available plugins are already installed.............	...5...Check for new plugins later or add more marketplaces....................	...5...All available plugins are installed for this project............	...,...Use the Browse tab to install at user scope.....................	...3...Add a marketplace first using the Marketplaces tab..............	.......No plugins available...............................................................=.....C!L..@=...|...N.......4..`........4......pU.....@`4E.......H......<.....@`4H......................<..`....... E.......4...........4..`........4......pU.....@`4_.......b......<.....@`4 ......................<..`....... E.......4...........4..`........4......pU.....@`4Y.......\......<.....@`4T........L.............<..`....... E.......4...........4..`........4......pU.....@`4 .......@......<.....@`4 ......................<..`....... E.......4...........4..`........4......pU.....@`4I.......L......<.....@`4R........L.............<..`....... E.....
+#### "policy_rejection" count=0 []
+#### "keep-alive" count=6 [71225377,71265795,71268959,71296275,71319916,71320649]
+--- 71225377 ---
+s = socket._httpMessage?.res;
+  if (res) {
+    let keepAliveHint = res.headers["keep-alive"];
+    if (keepAliveHint) {
+      let hint = /^timeout=(\d+)/.exec(keepAliveHint)?.[1];
+      if (hint) {
+        let serverHintTimeout = Number.parseInt(hint) * 1000 - this.agentKeepAliveTimeoutBuffer;
+        if (serverHintTimeout = serverHintTimeout > 0 ? serverHintTimeout : 0, serverHintTimeout === 0)
+          canKeepSocketAlive = !1;
+        else if (serverHintTimeout < agentTimeout)
+          agentTimeout = serverHintTimeout;
+      }
+    }
+  }
+  if (socket.timeout !== agentTimeout)
+    socket.setTimeout(agentTimeout);
+  return canKeepSocketAlive;
+};
+Agent.prototype.reuseSocket = function reuseSocket(socket, req) {
+  socket.removeListener("error", freeSocketErrorListener), req.reusedSocket = !0, socket.ref();
+};
+Agent.prototype.destroy = function destroy() {
+  let sets = [this.freeSockets, this.sockets];
+  for (let s = 0;s < sets.length; s++) {
+    let set = sets[s], keys = Object.keys(set);
+    for (let v = 0;v < keys.length; v++) {
+      let setName = set[keys[v]];
+      for (let n = 0;n < setName.length; n++)
+        setName[n].destroy();
+    }
+  }
+};
+function setRequestSocket(agent, req, socket) {
+  req.onSocket(socket);
+  let agentTimeout = agent.options.timeout || 0;
+  if (req.timeout === @undefined || req.timeout === agentTimeout)
+    return;
+  socket.setTimeout(req.timeout);
+}
+function shouldUseEnvProxy() {
+  let value = process.env.NODE_USE_ENV_PROXY;
+
+#### "keepalive" count=6 [72590121,85706167,85856019,85938583,93029538,112107344]
+--- 72590121 ---
+"manual",
+    maxRedirects: followRedirects ? maxRedirections : @undefined,
+    keepalive: !reset
+  }), { status: statusCode, headers, trailers } = resp;
+  if (throwOnError && statusCode >= 400 && statusCode < 600)
+    throw Error(`Request failed with status code ${statusCode}`);
+  let body = resp.body ? new BodyReadable(resp) : null;
+  return { statusCode, headers: headers.toJSON(), body, trailers, opaque: kEmptyObject, context: kEmptyObject };
+}
+function stream() {
+  notImplemented();
+}
+function pipeline() {
+  notImplemented();
+}
+function connect() {
+  notImplemented();
+}
+function upgrade() {
+  notImplemented();
+}
+
+class MockClient {
+  constructor() {}
+}
+
+class MockPool {
+  constructor() {}
+}
+
+class MockAgent {
+  constructor() {}
+}
+function mockErrors() {}
+
+class Dispatcher extends EventEmitter {
+}
+
+class Agent extends Dispatcher {
+}
+
+class Pool extends Dispatcher {
+  request() {}
+}
+
+class BalancedPool extends Dispatcher {
+}
+
+class Client extends Dispatcher {
+  request() {}
+}
+
+class DispatcherBase extends EventEmitter {
+}
+
+class ProxyAgent extends DispatcherBase {
+  constructor() {
+    super();
+  }
+}
+
+class EnvHttpProxyAgent extends DispatcherBase {
+  constructor() {
+    super();
+  }
+}
+
+class RetryAgent extends Dispatcher {
+  constructor() {
+    super();
+  }
+}
+
+class RetryHandler {
+  constructor() {}
+}
+
+class DecoratorHandler {
+  constructor() {}
+}
+
+class RedirectHandler {
+  constructor() {}
+}
+function createRedirectInterceptor() {
+  return new RedirectH
+#### "idle-reap" count=0 []
+#### "idle_reap" count=0 []
+#### "SessionStart hook" count=6 [157297838,157298312,162514757,173329654,208358521,230021180]
+--- 157297838 ---
+ins from your settings............	..._...Warning: Failed to load plugin hooks. SessionStart hooks from plugins will not execute. Error: .........	........ ..............	.......error...........	.......o...............	.......r...............	.......n...............	.......i...............	.......s...............	...
+...attachment..............	.......hook_blocking_error.............	.......SessionStart............	......SessionStart:...................................	...+.
+#### "deleted directory" count=0 []
+#### "resume in the current" count=0 []
+#### "pathExists(session" count=0 []
+#### "plan mode" count=6 [100904091,112871864,118050332,120106730,139328522,148626865]
+--- 100904091 ---
+ agent proposed a plan that was rejected by the user. The user chose to stay in plan mode rather than proceed with implementation.
+
+Rejected plan:
+..........	.......IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. ...........	.'.+...[Tool result missing due to internal error]...............'.W...Permission for this action was denied by the Claude Code auto mode classifier. Reason: .........	...4...Permission for this action has been denied. Reason: ............I.	...... If you have other tasks.'.................h...If it keeps failing, continue with other tasks that don't require this action and come back to it later.........	...x...Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used................., so auto mode cannot determine the safety of ........... ..X...Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherw
+#### "leavePlanMode" count=0 []
+#### "idle worker" count=0 []
+#### "5xx" count=6 [11505329,86656781,86665119,86665634,86665721,87147222]
+--- 11505329 ---
+...5...M..$M1.I.lHTTP404M3T$.M	...e...M..$M1.I.lHTTP4xxM3T$.M	.......M3.$I.lHTTP5xxM3L$.M	.......L......L.. ...H......H......H..;.%.H......H.E`H......H..B.W.H......H....z..q...L......L.. ...H......H......H....%.H......H.E`H......H....W.H......H..|.z.."...L.=..z...........L......L.. ...H......H......H....%.H......H.E`H......H....W.H......H....z......L......L.. ...H......H......H..=.%.H......H.E`H......H..D.W.H......H....z.H......L.......#...H....u.........Q......d...H....[...H
+#### "mid-session reconnect" count=0 []
+#### "mobile image" count=0 []
+#### "saved file path" count=0 []
+#### "anthropic.com" count=6 [99536739,100910998,100935304,100958564,100961748,104905764]
+--- 99536739 ---
+.............	...I...Remote Control is only available when using Claude via api.anthropic.com................	...>...unset it (or run in a shell without it) to use Remote Control...........	...B...unset them (or run in a shell without them) to use Remote Control...............I".......external-refresh...............	.../...The corrupted file has already been backed up.
+.........	...6...https://http-intake.logs.us5.datadoghq.com/api/v2/logs..........	$..#...pubea5604404508cdd3
+#### "CCR_PROXY" count=6 [106484169,106484226,301291458,301291502,310781778,313100164]
+--- 106484169 ---
+LAUDE_CODE_WEBFETCH_CACHE_TTL_MS...............	..."...CLAUDE_CODE_WEBFETCH_USE_CCR_PROXY1.............	.1.#...CLAUDE_CODE_WEBSEARCH_USE_CCR_PROXY.............	.......CLAUDE_CODE_WEB_FETCH_AGENT.............	.......CLAUDE_CODE_WORKFLOWS............	..&...CLAUDE_CODE_WORKFLOW_PREFIX_STAGGER_MS..........	...(...CLAUDE_CODE_WORKFLOW_SIZE_WARNING_AGENTS............(...CLAUDE_CODE_WORKFLOW_SIZE_WARNING_TOKENS........	.......CLAUDE_DISABLE_ADOPT..............1.....CLAUDE_IMPORT_CONVERSATIONS.............I.1.....CLAUDE_PREVIEW_CLASSIFIER_FLOOR.................CLAUDE_RUNNER_DISABLE_AWAITING_ACTION_OVERRIDE..................CLAUDE_WORKFLOW_NAME_ONLY/................1.....DISABLE_AUTOUPDATER.............	.......DISABLE_AUTO_COMPACT.............G......DISABLE_BRIEF_MODE_STOP_HOOK.............z......DISABLE_BUG_COMMAND.............	.......DISABLE_COMPACT.........	.......DISABLE_COST_WARNINGS...........	.1.....DISABLE_DOCTOR_COMMAND..........	.......DISABLE_ERROR_REPORTING.........I.......DISABLE_EXTRA_USAGE_COMMAND...............1.....DISABLE_FEEDBACK_COMMAND........	.......DISABLE_GROWTHBOOK..............I}......DISABLE_INSTALLATION_CHECKS.............I.1."...DISABLE_INSTALL_GITHUB_APP_COMMAND..............	.......DISABLE_INTERLEAVED_THINKING............	.......DISABLE_LOGIN_COMMAND.............1.....DISABLE_LOGOUT_COMMAND..........	.......DISABLE_PROMPT_CACHING..........I.1.....DISABLE_PROMPT_CACHING_FABLE.............U......DISABLE_PROMPT_CACHING_HAIKU.............
+#### "WEBFETCH_USE_CCR" count=3 [106484156,301291445,310781765]
+--- 106484156 ---
+........!...CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS...............	..."...CLAUDE_CODE_WEBFETCH_USE_CCR_PROXY1.............	.1.#...CLAUDE_CODE_WEBSEARCH_USE_CCR_PROXY.............	.......CLAUDE_CODE_WEB_FETCH_AGENT.............	.......CLAUDE_CODE_WORKFLOWS............	..&...CLAUDE_CODE_WORKFLOW_PREFIX_STAGGER_MS..........	...(...CLAUDE_CODE_WORKFLOW_SIZE_WARNING_AGENTS............(...CLAUDE_CODE_WORKFLOW_SIZE_WARNING_TOKENS........	.......CLAUDE_DISABLE_ADOPT..............1.....CLAUDE_IMPORT_CONVERSATIONS.............I.1.....CLAUDE_PREVIEW_CLASSIFIER_FLOOR.................CLAUDE_RUNNER_DISABLE_AWAITING_ACTION_OVERRIDE..................CLAUDE_WORKFLOW_NAME_ONLY/................1.....DISABLE_AUTOUPDATER.............	.......DISABLE_AUTO_COMPACT.............G......DISABLE_BRIEF_MODE_STOP_HOOK.............z......DISABLE_BUG_COMMAND.............	.......DISABLE_COMPACT.........	.......DISABLE_COST_WARNINGS...........	.1.....DISABLE_DOCTOR_COMMAND..........	.......DISABLE_ERROR_REPORTING.........I.......DISABLE_EXTRA_USAGE_COMMAND...............1.....DISABLE_FEEDBACK_COMMAND........	.......DISABLE_GROWTHBOOK..............I}......DISABLE_INSTALLATION_CHECKS.............I.1."...DISABLE_INSTALL_GITHUB_APP_COMMAND..............	.......DISABLE_INTERLEAVED_THINKING............	.......DISABLE_LOGIN_COMMAND.............1.....DISABLE_LOGOUT_COMMAND..........	.......DISABLE_PROMPT_CACHING..........I.1.....DISABLE_PROMPT_CACHING_FABLE.............U......DISABLE_PROMPT_CACHING_HAIKU
+#### "traceparent" count=6 [116278760,134738896,135652376,168802744,228798256,243793568]
+--- 116278760 ---
+	.......getSpanContext..........	.......isSpanContextValid..............	.......traceparent.............	...
+...tracestate..............	.......defaultTextMapGetter..... ..........
+.8.....F.....8.G.....8.a.8.....	H..H........................~......................p~......h.......................................p.q.........................................................................$...............&.......B...................@...h...h...h...0...0...0...@...@...@...@...@...`... ... ... ... ... ... ... ...@...@...@..........................@...@...@...........................................................................................................H.......P	......"........................................................	...............	......#...........................................................................................................................................................................&.......R.......B.......S...B...^.......R...A...........Q...................................2...Q...!......2..................................................................
+............................".............	.
+...................
+..........................."........... .....	............
+.	...
+.
+.............................H.	
+.........................H.".........................
+..................................................... ............................................................! ...........\z........."$#".G......%
+#### "PreToolUse" count=6 [100779304,100779488,102361000,102361892,102362090,102363116]
+--- 100779304 ---
+	...7...The message for the user. Supports markdown formatting..........	.......PreToolUse hook did not respond before its timeout (host client may be unreachable). The tool call was not executed; other configured hooks may not have completed..............	.......PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed..........(...................
+...................0............... .......K.......`.......
+#### "vim mode" count=3 [263601495,307947806,312455423]
+--- 263601495 ---
+
+## Examples
+
+1. Initial task: "Search for and understand the implementation of vim mode in the codebase" - Do not use the exit plan mode tool because you are not planning the implementation steps of a task.
+2. Initial task: "Help me implement yank mode for vim" - Use the exit plan mode tool after you have finished planning the implementation steps of the task.
+3. Initial task: "Add a new feature to handle user authentication" - If unsure about auth method (OAuth, JWT, etc.),
+#### "AgentView" count=6 [106568591,111276343,115257923,176606255,302068793,304180948]
+--- 106568591 ---
+.bgSupervisorNoun.........A......bgSupervisorNounCap.............	.......consumeAgentViewRelaunchMarker..........	.......daemonColdStartGbDefault..........4.
+...daemonHint	.............	.......ensureFleetGateHydrated.........	.......fleetGateRejected.4...............4.....isAgentsFleetEnabled............	.......isDaemonCliEnabled..............I.4.....isDaemonServiceInstallEnabled...................isDaemonServiceRecalled.........	.......isDaemonWorkerRegistryEnabled...........	.......isLaunchComposerEnabled...........4.....isListReturnRelaunch............	.......isPastSessionsExperimentEnabled.........	.......shouldShowLaunchComposer............!...applyAutoUploadSessionsToAppState...............	.......applyRemoteControlToAppState............	.......checkBridgeMinVersion.............4.....describeAuthPrecedenceBlocker...........	.4.....getBridgeAuthDebugInfo..........	.......getBridgeDisabledReason...........4.....getBridgeDoctorInfo.............	.......getBridgeEntitlementBlocker.............	.......getCcrAutoConnectDefault........	.4.....getRemoteControlPolicyVerdict.............4.....hasBridgeEntitlement............	.......isBridgeAuthReviveEnabled...............	.......isBridgeEffortSyncEnabled...............	.......isBridgeEnabled.........	.......isBridgeEnabledBlocking.........I.4.....isBridgeFirstParty..............	.......isBridgeHostDeclinedEndEnabled..........	... ...isBridgeNonOrigin403RetryEnabled........	.......isBridgeOwnerPinnedEndEnabled..
+#### "escape to NORMAL" count=0 []

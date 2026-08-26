@@ -1,0 +1,83 @@
+#### "startup-hook-hold" count=2 [100908976,317110669]
+--- 100908976 ---
+nalSubagentEventReader..........	.......getInternalEventReader..........I.......getInternalSubagentEventReader..........	.'......session-aliases$...............	.......hook-agent-.............	.......startup-hook-hold...............I.'.....CLAUDE_BASE.............	.../...resolution changed since ownership verification.........	.'.2...has files but no repository to verify them against..............	...)...unremovable reparse point in the worktree...............	.......claude..........	8......enabledWorktreeConfigExtension..........I.(.....IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques
+--- 317110669 ---
+:n,hookInput:s,matchQuery:t,signal:i,timeoutMs:res});for(let l of a)if(!l.succeeded&&l.output)process.stderr.write(`SessionEnd hook [${l.command}] failed: ${l.output}
+`);if(o)Z_l(o,e.id)}var tes,ees="startup-hook-hold";var Buh=A(()=>{E0();Xi();Jy();ZVe();Fl();IFe();tes=require("crypto")});function juh(e){let t=[];for(let r of Object.values(e)){if(!bO(r))continue;let n={id:r.id,type:oyr[r.type]??r.type,status:r.status,description:W3(r.description,Kjl)};switch(r.type){case"local_bash":n.command=W3(r.command,Kjl);break;case"local_agent":n.agent_type=r.agentType;break;case"monitor_mcp":n.server=r.server,n.tool=r.tool;break;case"mcp_task":n.server=r.serverName,n.tool=r.toolName;break;case"local_w
+#### "function ihr(" count=1 [310381813]
+--- 310381813 ---
+t().mainLoopActivityListener=e}function Gcl(e){bnt().nestedChainDropListener=e}function q3f(e){bnt().nestedChainDropListener?.(e)}function ohr(){return bnt().currentStateOrNull()?.mainLoopRefcount??0}function ihr(e,t){let r=bnt(),n=r.currentStateOrCreate();if(!n)return;if(n.refcount++,t===void 0)n.mainLoopRefcount++,r.mainLoopActivityListener?.(n.mainLoopRefcount);if(n.activeReasons.set(e,(n.activeReasons.get(e)??0)+1),n.refcount===1){if(n.oldestActivityStartedAt=Date.now(),n.activityCallback!==null&&n.heartbeatTimer===null)j3f(n)}if(n.cleanupHandle===null){let o=r.activityKey();n.cleanupHandle=Sa(async()=>{fr("info","session_activity_at_shutdown",{owner_key:o,refcount:n.refcount,active:Obje
+#### "function shr(" count=1 [310382458]
+--- 310382458 ---
+_shutdown",{owner_key:o,refcount:n.refcount,active:Object.fromEntries(n.activeReasons),oldest_activity_ms:n.refcount>0&&n.oldestActivityStartedAt!==null?Date.now()-n.oldestActivityStartedAt:null})})}}function shr(e,t){let r=bnt(),n=r.currentStateOrNull();if(!n)return;if(n.refcount>0)n.refcount--;if(t===void 0)if(n.mainLoopRefcount>0)n.mainLoopRefcount--,r.mainLoopActivityListener?.(n.mainLoopRefcount);else fr("warn","session_activity_main_loop_underflow",{reason:e});let o=(n.activeReasons.get(e)??0)-1;if(o>0)n.activeReasons.set(e,o);else n.activeReasons.delete(e);if(n.refcount===0&&n.heartbeatTimer!==null)clearInterval(n.heartbeatTimer),n.heartbeatTimer=null,h8S(n)}var U3f=30000,F3f="cli",f8
+#### "ihr=" count=0 []
+#### ""hook_exec"" count=4 [317109585,317109734,317109845,317109994]
+--- 317109585 ---
+);async function*flo(e,t,r,n,o,i,s,a=Q_,l){let c=r!==void 0?{id:Uk(r),project:e.project}:e,u={...b_(c,rr()),hook_event_name:"SessionStart",source:t,agent_type:o,model:i,session_title:n??EA(c.id)};ihr("hook_exec",ees);try{yield*S2({session:e,hookInput:u,toolUseID:tes.randomUUID(),matchQuery:t,signal:s,timeoutMs:a,forceSyncExecution:l})}finally{shr("hook_exec",ees)}}async function*mlo(e,t,r,n=Q_,o){let i={...b_(e,rr()),hook_event_name:"Setup",trigger:t};ihr("hook_exec",ees);try{yield*S2({session:e,hookInput:i,toolUseID:tes.randomUUID(),matchQuery:t,signal:r,timeoutMs:n,forceSyncExecution:o})}finally{shr("hook_exec",ees)}}async function*dno(e,t,r,n,o=Q_,i,s,a){let l={...b_(e.session,rr()),hook_
+--- 317109734 ---
+gent_type:o,model:i,session_title:n??EA(c.id)};ihr("hook_exec",ees);try{yield*S2({session:e,hookInput:u,toolUseID:tes.randomUUID(),matchQuery:t,signal:s,timeoutMs:a,forceSyncExecution:l})}finally{shr("hook_exec",ees)}}async function*mlo(e,t,r,n=Q_,o){let i={...b_(e,rr()),hook_event_name:"Setup",trigger:t};ihr("hook_exec",ees);try{yield*S2({session:e,hookInput:i,toolUseID:tes.randomUUID(),matchQuery:t,signal:r,timeoutMs:n,forceSyncExecution:o})}finally{shr("hook_exec",ees)}}async function*dno(e,t,r,n,o=Q_,i,s,a){let l={...b_(e.session,rr()),hook_event_name:"SubagentStart",agent_id:t,agent_type:r};yield*S2({session:e.session,hookInput:l,toolUseID:tes.randomUUID(),matchQuery:r,signal:n,timeoutM
+--- 317109845 ---
+ID:tes.randomUUID(),matchQuery:t,signal:s,timeoutMs:a,forceSyncExecution:l})}finally{shr("hook_exec",ees)}}async function*mlo(e,t,r,n=Q_,o){let i={...b_(e,rr()),hook_event_name:"Setup",trigger:t};ihr("hook_exec",ees);try{yield*S2({session:e,hookInput:i,toolUseID:tes.randomUUID(),matchQuery:t,signal:r,timeoutMs:n,forceSyncExecution:o})}finally{shr("hook_exec",ees)}}async function*dno(e,t,r,n,o=Q_,i,s,a){let l={...b_(e.session,rr()),hook_event_name:"SubagentStart",agent_id:t,agent_type:r};yield*S2({session:e.session,hookInput:l,toolUseID:tes.randomUUID(),matchQuery:r,signal:n,timeoutMs:o,getAppState:i,agentContext:s,managedHooksOnly:a?.managedHooksOnly})}async function cvr(e,t,r){let{getAppSta
+#### "pathExists" count=8 [70415906,70416093,70416141,70416236,70416303,70416324,235974200,235974232]
+--- 70415906 ---
+it checkParentPaths(src, srcStat, dest);
+  return checkParentDir(destStat, src, dest, opts);
+}
+async function checkParentDir(destStat, src, dest, opts) {
+  let destParent = dirname(dest);
+  if (await pathExists(destParent))
+    return getStatsForCopy(destStat, src, dest, opts);
+  return await mkdir(destParent, { recursive: !0 }), getStatsForCopy(destStat, src, dest, opts);
+}
+function pathExistsFulfilled() {
+  return !0;
+}
+function pathExistsRejected(err) {
+  return err.code === "ENOENT" ? !1 : PromiseReject(err);
+}
+function pathExists(dest) {
+  return PromisePrototypeThen.@call(stat(dest), pathExistsFulfilled, pathExistsRejected);
+}
+async function getStatsForCopy(destStat, src, dest, opts) {
+--- 70416093 ---
+
+  if (await pathExists(destParent))
+    return getStatsForCopy(destStat, src, dest, opts);
+  return await mkdir(destParent, { recursive: !0 }), getStatsForCopy(destStat, src, dest, opts);
+}
+function pathExistsFulfilled() {
+  return !0;
+}
+function pathExistsRejected(err) {
+  return err.code === "ENOENT" ? !1 : PromiseReject(err);
+}
+function pathExists(dest) {
+  return PromisePrototypeThen.@call(stat(dest), pathExistsFulfilled, pathExistsRejected);
+}
+async function getStatsForCopy(destStat, src, dest, opts) {
+  let srcStat = await (opts.dereference ? stat : lstat)(src);
+  if (srcStat.isDirectory() && opts.recursive)
+    return onDir(srcStat, destStat, src, dest, opts);
+  else if (srcStat.isDi
+--- 70416141 ---
+getStatsForCopy(destStat, src, dest, opts);
+  return await mkdir(destParent, { recursive: !0 }), getStatsForCopy(destStat, src, dest, opts);
+}
+function pathExistsFulfilled() {
+  return !0;
+}
+function pathExistsRejected(err) {
+  return err.code === "ENOENT" ? !1 : PromiseReject(err);
+}
+function pathExists(dest) {
+  return PromisePrototypeThen.@call(stat(dest), pathExistsFulfilled, pathExistsRejected);
+}
+async function getStatsForCopy(destStat, src, dest, opts) {
+  let srcStat = await (opts.dereference ? stat : lstat)(src);
+  if (srcStat.isDirectory() && opts.recursive)
+    return onDir(srcStat, destStat, src, dest, opts);
+  else if (srcStat.isDirectory())
+    throw fsEisdirError({
+      messa
+#### "safeCwd" count=0 []
+#### "hookCwd" count=0 []

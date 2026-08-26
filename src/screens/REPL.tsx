@@ -439,6 +439,7 @@ import {
   getCommandQueueLength,
   getMainThreadQueueLength,
   removeByFilter,
+  someInFlightDrainCommand,
 } from '../utils/messageQueueManager.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
@@ -546,6 +547,9 @@ import type { RemoteSessionConfig } from '../remote/RemoteSessionManager.js';
 import { REMOTE_SAFE_COMMANDS } from '../commands.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
+import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
+import { computeDiffSidebarWidth, diffSidebarHasGitRepo, useReplDiffAutoOpenBaseline } from '../utils/replDiffTab.js';
+import { isWillowCrateEnabled } from '../utils/willowCrate.js';
 import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, mouseTrackingProp } from '../utils/fullscreen.js';
 import { isCommandImmediate } from '../utils/immediateCommand.js';
 import { AlternateScreen } from '@anthropic/ink';
@@ -1178,6 +1182,11 @@ export function REPL({
   const ultraplanLaunchPending = useAppState(s => s.ultraplanLaunchPending);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const setAppState = useSetAppState();
+  // densable NDr / TZt / H$y — willow crate diff tab baseline
+  const willowCrateEnabled = isWillowCrateEnabled();
+  const replTab = useAppState(s => s.replTab);
+  const trackedFilesForDiff = useAppState(s => (willowCrateEnabled ? s.fileHistory.trackedFiles.size : 0));
+  const replDiffAutoOpenBaseline = useReplDiffAutoOpenBaseline(willowCrateEnabled, trackedFilesForDiff, setAppState);
 
   // Bootstrap: retained local_agent that hasn't loaded disk yet → read
   // sidechain JSONL and UUID-merge with whatever stream has appended so far.
@@ -2980,8 +2989,8 @@ export function REPL({
           void copyPlanForResume(log, asSessionId(sessionId));
         }
 
-        // Restore file history and attribution state from the resumed conversation
-        restoreSessionStateFromLog(log, setAppState);
+        // Copy file-history snapshots before the session switch. AppState
+        // restore (densable OMo) waits until after S1 so Vt() is the target id.
         if (log.fileHistorySnapshots) {
           void copyFileHistoryForResume(log);
         }
@@ -3032,6 +3041,9 @@ export function REPL({
         const { renameRecordingForSession } = await import('../utils/asciicast.js');
         await renameRecordingForSession();
         await resetSessionFilePointer();
+
+        // densable 2.1.239 OMo after S1 switchSession (print.ts already did).
+        restoreSessionStateFromLog(log, setAppState);
 
         // Clear then restore session metadata so it's re-appended on exit via
         // reAppendSessionMetadata. clearSessionMetadata must be called first:
@@ -4588,6 +4600,16 @@ export function REPL({
           },
           onActiveGoal: value => {
             // densable yEt active_goal — clear or replace AppState.activeGoal.
+            // densable 1:1 — cancel idle check-in timer on teardown (M4).
+            if (value === undefined || value === null) {
+              try {
+                const { cancelPendingGoalIdleCheckin } =
+                  require('../services/goal/goalIdleCheckin.js') as typeof import('../services/goal/goalIdleCheckin.js');
+                cancelPendingGoalIdleCheckin();
+              } catch {
+                // optional when GOAL feature / module unavailable
+              }
+            }
             setAppState(prev => {
               if (value === undefined || value === null) {
                 if (prev.activeGoal === undefined) return prev;
@@ -5227,9 +5249,9 @@ export function REPL({
         // use 'background'/'interrupt' and must not rewind — note abort() with
         // no args sets reason to a DOMException, not undefined), !isActive (no
         // newer query started — cancel+resubmit race), empty input (don't
-        // clobber text typed during loading), no queued commands (user queued
-        // B while A was loading → they've moved on, don't restore A; also
-        // avoids removeLastFromHistory removing B's entry instead of A's),
+        // clobber text typed during loading), no queued commands AND no
+        // in-flight drain (official Cuy `w`: B is already dequeued but still
+        // the next turn — restoring A would finish B early / repeat actions),
         // not viewing a teammate (messagesRef is the main conversation — the
         // old Up-arrow quick-restore had this guard, preserve it).
         if (
@@ -5237,6 +5259,7 @@ export function REPL({
           !queryGuard.isActive &&
           inputValueRef.current === '' &&
           getCommandQueueLength() === 0 &&
+          !someInFlightDrainCommand() &&
           !store.getState().viewingAgentTaskId
         ) {
           const msgs = messagesRef.current;
@@ -5668,7 +5691,7 @@ export function REPL({
             const context = getToolUseContext(messagesRef.current, [], createAbortController(), mainLoopModel);
 
             const mod = await matchingCommand.load();
-            const jsx = await mod.call(onDone, context, commandArgs);
+            const jsx = await mod.call(onDone, { ...context, dispatchedAsImmediate: true }, commandArgs);
 
             // Skip if onDone already fired — prevents stuck isLocalJSXCommand
             // (see processSlashCommand.tsx local-jsx case for full mechanism).
@@ -7440,6 +7463,16 @@ export function REPL({
     : isFullscreenEnvEnabled()
       ? peerInboundApprovalDialog
       : null;
+  // densable BUo — willow crate sidebar width (0 when GB off / not main / no git)
+  const replDiffSidebarWidth = computeDiffSidebarWidth({
+    willowCrateEnabled,
+    isFullscreen: isFullscreenEnvEnabled(),
+    isThinClient: false,
+    isMain: viewedAgentTask === undefined,
+    replTab,
+    columns: transcriptCols,
+    hasGitRepo: diffSidebarHasGitRepo(),
+  });
   // <AlternateScreen> at the root: everything below is inside its
   // <Box height={rows}>. Handlers/contexts are zero-height so ScrollBox's
   // flexGrow in FullscreenLayout resolves against this Box. The transcript
@@ -7495,6 +7528,10 @@ export function REPL({
           hidePill={!!viewedAgentTask}
           hideSticky={!!viewedTeammateTask}
           newMessageCount={unseenDivider?.count ?? 0}
+          sidebarWidth={replDiffSidebarWidth}
+          sidebar={
+            <ReplDiffSidebarController width={replDiffSidebarWidth} autoOpenBaseline={replDiffAutoOpenBaseline} />
+          }
           onPillClick={() => {
             setCursor(null);
             jumpToNew(scrollRef.current);

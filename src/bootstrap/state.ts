@@ -197,6 +197,9 @@ type State = {
   inlinePlugins: Array<string>
   // densable inlinePluginsNoMcp — --plugin-dir-no-mcp (load plugin, skip .mcp.json)
   inlinePluginsNoMcp: Array<string>
+  // densable syncedPluginDirs / lQt / qMr — claude.ai-synced plugin directories.
+  // Who downloads into these dirs is cloud-side; CLI only consumes the list.
+  syncedPluginDirs: Array<string>
   // Explicit --chrome / --no-chrome flag value (undefined = not set on CLI)
   chromeFlagOverride: boolean | undefined
   // Full chrome system prompt active for this session (launch --chrome or /chrome This session On).
@@ -505,6 +508,8 @@ function getInitialState(): State {
     inlinePlugins: [],
     // densable --plugin-dir-no-mcp
     inlinePluginsNoMcp: [],
+    // densable syncedPluginDirs
+    syncedPluginDirs: [],
     // Explicit --chrome / --no-chrome flag value (undefined = not set on CLI)
     chromeFlagOverride: undefined,
     claudeInChromeSessionPromptActive: false,
@@ -1750,6 +1755,16 @@ export function setInlinePluginsNoMcp(plugins: Array<string>): void {
 /** densable `Hfe` — paths from `--plugin-dir-no-mcp`. */
 export function getInlinePluginsNoMcp(): Array<string> {
   return STATE.inlinePluginsNoMcp
+}
+
+/** densable `qMr` — replace the claude.ai-synced plugin directory list. */
+export function setSyncedPluginDirs(dirs: Array<string>): void {
+  STATE.syncedPluginDirs = dirs
+}
+
+/** densable `lQt` — directories of plugins synced from claude.ai. */
+export function getSyncedPluginDirs(): Array<string> {
+  return STATE.syncedPluginDirs
 }
 
 export function setChromeFlagOverride(value: boolean | undefined): void {

@@ -1,0 +1,3 @@
+OFFSET=307364913
+
+it Wow(e,b,c,r))u="in_use",E(`deleteJob: ${c} is claimed by another running job's state.json \u2014 not ours to remove`,{level:"warn"});else if(await Nbn(c)===null&&(p=await nwh(c))!=="gone"&&(d=p==="unreadable"?"unreadable":await Vow(e,b,c,r))!==null)u=d==="claimed"?"shared_record":"records_unreadable",E(d==="claimed"?`deleteJob: ${c} is also recorded by another settled job's state.json \u2014 not removing another session's output`:`deleteJob: could not verify ${c} against sibling records \u2014 refusing until records are readable`,{level:"war

@@ -224,8 +224,26 @@ async function executeForkedSkill(
     }),
   })
 
-  const { modifiedGetAppState, baseAgent, promptMessages, skillContent } =
-    await prepareForkedCommandContext(command, args || '', context)
+  const background = shouldBackgroundForkedSkill(command)
+  const {
+    modifiedGetAppState,
+    baseAgent,
+    promptMessages,
+    skillContent,
+    availableTools,
+    webFetchReadmissionAllowed,
+    contextLayers,
+    recordInvocation,
+    forkReadFileState,
+  } = await prepareForkedCommandContext(command, args || '', context, {
+    replaceCommandRules: background,
+    freezeCommandDenies: background,
+    deferInvocationRecording: background,
+  })
+  const permissionLayers =
+    contextLayers.length > 0
+      ? [...(context.permissionLayers ?? []), ...contextLayers]
+      : context.permissionLayers
 
   // Merge skill's effort into the agent definition so runAgent applies it
   const agentDefinition =
@@ -240,7 +258,7 @@ async function executeForkedSkill(
   // densable 2.1.218: context:fork skills default to background (Cvo/wvo).
   // Opt out with frontmatter `background: false`. Returns immediately with
   // "Running in the background as @name"; findings arrive via task-notification.
-  if (shouldBackgroundForkedSkill(command)) {
+  if (background) {
     const setAppState = context.setAppStateForTasks ?? context.setAppState
     try {
       const launched = await launchBackgroundForkedSkill({
@@ -253,10 +271,15 @@ async function executeForkedSkill(
         context: {
           ...context,
           getAppState: modifiedGetAppState,
+          permissionLayers,
         },
         canUseTool,
         getAppState: modifiedGetAppState,
         setAppState,
+        availableTools,
+        webFetchReadmissionAllowed,
+        readFileState: forkReadFileState,
+        recordInvocationOnSuccess: recordInvocation,
       })
       if (launched) {
         return {
@@ -270,8 +293,10 @@ async function executeForkedSkill(
           },
         }
       }
-      // null = live-duplicate → fall through to sync path
+      // Official: live-duplicate → T() then fall through to sync
+      recordInvocation()
     } catch (err) {
+      recordInvocation()
       logError(err)
       // fall through to sync on unexpected launch failure
     }
@@ -288,13 +313,15 @@ async function executeForkedSkill(
       toolUseContext: {
         ...context,
         getAppState: modifiedGetAppState,
+        permissionLayers,
       },
       canUseTool,
       isAsync: false,
       querySource: 'agent:custom',
       model: command.model as ModelAlias | undefined,
-      availableTools: context.options.tools,
-      override: { agentId },
+      availableTools,
+      webFetchReadmissionAllowed,
+      override: { agentId, readFileState: forkReadFileState },
     })) {
       agentMessages.push(message)
 

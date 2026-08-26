@@ -107,13 +107,18 @@ import {
   extractLastJsonStringField,
   extractTypedJsonlField,
   getProjectDirNameOverride,
+  isSlugCollisionCollapsedCwd,
+  lastMessageAtMsFromTail,
   LITE_READ_BUF_SIZE,
   MAX_SANITIZED_LENGTH,
   projectDirNameOverrideCacheKey,
   readHeadAndTail,
   readTranscriptForLoad,
+  recordedCwdCollidesWithProjectResolved,
+  recordedCwdIsWithinOwnWorktrees,
   sanitizePathRaw,
   SKIP_PRECOMPACT_THRESHOLD,
+  slugCollisionGuardFoldsCase,
 } from './sessionStoragePortable.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
@@ -6083,7 +6088,12 @@ async function getStatOnlyLogsForWorktrees(
   if (worktreePaths.length <= 1) {
     const cwd = getOriginalCwd()
     const projectDir = getProjectDir(cwd)
-    return getSessionFilesLite(projectDir, undefined, cwd)
+    return getSessionFilesLite(
+      projectDir,
+      undefined,
+      cwd,
+      worktreePaths.length > 0 ? worktreePaths : undefined,
+    )
   }
 
   // On Windows, drive letter case can differ between git worktree list
@@ -6120,7 +6130,12 @@ async function getStatOnlyLogsForWorktrees(
       `Failed to read projects dir ${projectsDir}, falling back to current project: ${e}`,
     )
     const projectDir = getProjectDir(getOriginalCwd())
-    return getSessionFilesLite(projectDir, limit, getOriginalCwd())
+    return getSessionFilesLite(
+      projectDir,
+      limit,
+      getOriginalCwd(),
+      worktreePaths.length > 0 ? worktreePaths : undefined,
+    )
   }
 
   for (const dirent of allDirents) {
@@ -6145,7 +6160,12 @@ async function getStatOnlyLogsForWorktrees(
 
       seenDirs.add(dirName)
       allLogs.push(
-        ...(await getSessionFilesLite(candidateDir, undefined, wtPath)),
+        ...(await getSessionFilesLite(
+          candidateDir,
+          undefined,
+          wtPath,
+          worktreePaths,
+        )),
       )
       break
     }
@@ -6576,6 +6596,10 @@ type LiteMetadata = {
   gitBranch?: string
   isSidechain: boolean
   projectPath?: string
+  /** densable `sNr` — first-line `cwd`, not relocated. */
+  headCwdStrict?: string
+  /** densable `Llh` — last user/assistant timestamp in the tail. */
+  lastMessageAtMs?: number
   /** densable 2.1.223 #8 — last relocated stamp (if any). */
   relocatedCwd?: string
   teamName?: string
@@ -6770,7 +6794,9 @@ async function readLiteMetadata(
     head.includes('"isSidechain":true') || head.includes('"isSidechain": true')
   // densable 2.1.223 #8 — lite projectPath prefers last relocated stamp
   const relocatedCwd = extractTypedJsonlField(tail, 'relocated', 'relocatedCwd')
-  const projectPath = relocatedCwd || extractJsonStringField(head, 'cwd')
+  const headCwdStrict = extractJsonStringField(head, 'cwd')
+  const projectPath = relocatedCwd || headCwdStrict
+  const lastMessageAtMs = lastMessageAtMsFromTail(tail)
   const teamName = extractJsonStringField(head, 'teamName')
   const agentSetting = extractJsonStringField(head, 'agentSetting')
 
@@ -6823,6 +6849,8 @@ async function readLiteMetadata(
     gitBranch,
     isSidechain,
     projectPath,
+    headCwdStrict,
+    lastMessageAtMs,
     relocatedCwd,
     teamName,
     customTitle,
@@ -6998,6 +7026,7 @@ export async function getSessionFilesLite(
   projectDir: string,
   limit?: number,
   projectPath?: string,
+  ownWorktrees?: string[],
 ): Promise<LogOption[]> {
   const sessionFilesMap = await getSessionFilesWithMtime(projectDir)
 
@@ -7026,6 +7055,7 @@ export async function getSessionFilesLite(
       isSidechain: false,
       sessionId,
       projectPath,
+      ownWorktrees,
     })
   }
 
@@ -7050,6 +7080,35 @@ async function enrichLog(
 
   const meta = await readLiteMetadata(log.fullPath, log.fileSize ?? 0, readBuf)
 
+  // densable `_uh` — slug collision before building the picker row.
+  const recordedCwd = meta.relocatedCwd ?? meta.headCwdStrict
+  if (
+    log.projectPath !== undefined &&
+    recordedCwd !== undefined &&
+    !recordedCwdIsWithinOwnWorktrees(
+      recordedCwd,
+      log.ownWorktrees,
+      slugCollisionGuardFoldsCase(),
+    ) &&
+    (await recordedCwdCollidesWithProjectResolved(
+      recordedCwd,
+      log.projectPath,
+      slugCollisionGuardFoldsCase(),
+      isSlugCollisionCollapsedCwd,
+    ))
+  ) {
+    logForDebugging(
+      `Session ${log.sessionId} filtered from /resume: recorded cwd is a different directory with the same project slug`,
+    )
+    return null
+  }
+
+  // densable `Llh` — touch/reopen must not rank above last user/assistant.
+  const lastMessageAt =
+    meta.lastMessageAtMs !== undefined
+      ? new Date(Math.min(meta.lastMessageAtMs, log.modified.getTime()))
+      : undefined
+
   const enriched: LogOption = {
     ...log,
     isLite: false,
@@ -7068,6 +7127,9 @@ async function enrichLog(
     // densable 2.1.223 #8 — surface stamp for restoreSessionMetadata
     relocatedCwd: meta.relocatedCwd ?? log.relocatedCwd,
     sessionKind: meta.sessionKind,
+    ...(lastMessageAt !== undefined
+      ? { date: lastMessageAt.toISOString(), modified: lastMessageAt }
+      : {}),
   }
 
   // Provide a fallback title for sessions where we couldn't extract the first

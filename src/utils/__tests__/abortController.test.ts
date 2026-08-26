@@ -107,11 +107,12 @@ describe('createChildAbortController', () => {
 })
 
 describe('shouldSuppressInterruptionMessage densable m0e', () => {
-  test('suppresses interrupt and refusal-fallback-edit only', () => {
+  test('suppresses interrupt, refusal-fallback-edit, and remote-cancel', () => {
     expect(shouldSuppressInterruptionMessage('interrupt')).toBe(true)
     expect(shouldSuppressInterruptionMessage('refusal-fallback-edit')).toBe(
       true,
     )
+    expect(shouldSuppressInterruptionMessage('remote-cancel')).toBe(true)
     expect(shouldSuppressInterruptionMessage('user-cancel')).toBe(false)
   })
 })

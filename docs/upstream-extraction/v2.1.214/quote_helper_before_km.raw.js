@@ -1,0 +1,2 @@
+"NULL","~"].includes(u)))return o;t.push(l);let f=u.replaceAll("\\","\\\\").replaceAll('"',"\\\"");return`${l}: "${f}"${i?"\r":""}`});return{text:t.length===0?null:n.join(`
+`),quotedKeys:t,unprovableKeys:r}}function xji(e,t){let r=e.match(/^("(?:[^"\\]|\\.)*"):[ \t]+(.*)$/)??e.match(/^('(?:[^']|'')*'):[ \t]+(.*)$/)??e.match(/^([^\s#][^:\n]*?):[ \t]+(.*)$/);if(r===null)return;let[,n,o]=r;if(!n||!o)return;let i=o.trimEnd().replace(/"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'/g,"");if(/^#|[ \t]#/.test(i))t.pu

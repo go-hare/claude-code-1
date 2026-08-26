@@ -1,0 +1,202 @@
+#### "The following skills were invoked EARLIER" count=1 [316869112]
+--- 316869112 ---
+join(`
+
+---
+
+`);return o_([Cn({content:`The following skills were invoked EARLIER in this session (before the conversation was compacted), not on the current turn. They are shown here for context only so you remain aware of their guidelines.
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time setup actions (e.g., scheduling, creating files) again. Any request or argument text embedded in the skill bodies below \u2014 for example under a "## User Request" or "## Input" heading \u2014 was captured when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to apply ongoing behavioral guidelines from these skills where still relevant.
+
+${n}`,isMeta:!0})])}case"todo_reminder":{if(zq()||!zee())return[];let n=e.content.map((i,s)=>`${s+1}. [${i.status}] ${i.content}`).join(`
+`),o=`The TodoWrite tool hasn't been used recently. If you're working on tasks that would benefit from tracking progress, consider using the TodoWrite tool to track progress. Also consider cleaning up the todo list if has become stale and no longer matches what you are working on. Only use it if it's relevant to the current work. This is just a gentle reminder - ignore if not applicable.
+`;if(n.length>0)o+=`
+
+Here are the existing contents of your todo list:
+
+[${n}]`;return o_([Cn({content:o,isMeta:!0})])}case"task_reminder":{if(!uie())return[];let n=e.content.map((i)=>`#${i.id}. [${i.status}] ${i.subject}`).join(`
+`),o=`The task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using ${BG} to add new tasks and ${Sq} to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevan
+#### "Do NOT re-execute these skills" count=1 [316869326]
+--- 316869326 ---
+ aware of their guidelines.
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time setup actions (e.g., scheduling, creating files) again. Any request or argument text embedded in the skill bodies below \u2014 for example under a "## User Request" or "## Input" heading \u2014 was captured when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to apply ongoing behavioral guidelines from these skills where still relevant.
+
+${n}`,isMeta:!0})])}case"todo_reminder":{if(zq()||!zee())return[];let n=e.content.map((i,s)=>`${s+1}. [${i.status}] ${i.content}`).join(`
+`),o=`The TodoWrite tool hasn't been used recently. If you're working on tasks that would benefit from tracking progress, consider using the TodoWrite tool to track progress. Also consider cleaning up the todo list if has become stale and no longer matches what you are working on. Only use it if it's relevant to the current work. This is just a gentle reminder - ignore if not applicable.
+`;if(n.length>0)o+=`
+
+Here are the existing contents of your todo list:
+
+[${n}]`;return o_([Cn({content:o,isMeta:!0})])}case"task_reminder":{if(!uie())return[];let n=e.content.map((i)=>`#${i.id}. [${i.status}] ${i.subject}`).join(`
+`),o=`The task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using ${BG} to add new tasks and ${Sq} to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. This is just a gentle reminder - ignore if not applicable.
+`;if(n.length>0)o+=`
+
+Here are the existing tasks:
+
+${n}`;return o_([Cn({content:o,isMeta:!0})])}case"tool_search_usage_reminder":{l
+#### "## User Request" count=8 [195133010,195140954,195161530,195345672,195353352,195502512,195537600,195555658]
+--- 195133010 ---
+_MD' from null or undefined value.............	.......r...............	.......
+
+## User Request
+
+.............	.......text.............................................@`..H...P.L.@@M.H...V.L.@.M.H....PU.@ ..S....55...2B......,....3.....p..@ ....3.H1<.J.4...4.@p<.E....Q4.....@..*....@......5...W...................[...................8.......................x1.......................b0......................b0......................F......................0.@..............................................V........................F...............................................D...
+--- 195140954 ---
+_MD' from null or undefined value.............	.......t...............	.......
+
+## User Request
+
+.............	.......text....................................................3.....p..@ ....3.H1<.J.4...4.@p<.E....Q4.....@..*....@......8...G...P.............................B...............................................C......................(..............................................0.N......................$...............................................{......................8............h......^.[.j...k...F.[.l...j.[...[......H..H.......................XHF...........
+#### "NOT a new request" count=1 [316869666]
+--- 316869666 ---
+red when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to apply ongoing behavioral guidelines from these skills where still relevant.
+
+${n}`,isMeta:!0})])}case"todo_reminder":{if(zq()||!zee())return[];let n=e.content.map((i,s)=>`${s+1}. [${i.status}] ${i.content}`).join(`
+`),o=`The TodoWrite tool hasn't been used recently. If you're working on tasks that would benefit from tracking progress, consider using the TodoWrite tool to track progress. Also consider cleaning up the todo li
+#### "async function gSm" count=1 [313435123]
+--- 313435123 ---
+:u.updated_at,tags:u.tags},notFound:!1}}async function gSm(e,t,r,n){let{getClaudeAIOAuthTokens:o,getClaudeAIOAuthTokensAsync:i}=await Promise.resolve().then(() => (oi(),_ne)),{getOauthConfig:s}=await Promise.resolve().then(() => (kp(),eer)),{updateCodeSession:a}=await Promise.resolve().then(() => (xWe(),P$n)),{isCcrV2SessionCrudEnabled:l}=await Promise.resolve().then(() => (zx(),wjr)),c=n?.getAccessToken?.()??($t()&&n?.credentials!==void 0?(await i(n.credentials))?.accessToken:o()?.accessToken);if(!c)return E(`[bridge] No access token for session ${r} update`),"failed";let u=l(),d;if(!u){let{getOrganizationUUID:f}=await Promise.resolve().then(() => (hG(),_Br));if(d=await f()??void 0,!d)return E(`[bridge] No org UUID for session ${r} update`),"failed"}E(`[bridge] Updating session ${r}: ${e}`);let p=await a(n?.baseUrl??s().BASE_API_URL,c,e,t,1e4,{useV2:u,orgUUID:d});if(p==="invalid")return pe("bridge_session_patch","bridge_session_patch_invalid_id"),"rejected";else if(typeof p!=="number")return pe("bridge_session_patch","bridge_session_patch_request_failed"),"failed";else if(p===200)return E(`[bridge] Session ${r} updated successfully`),Ee("bridge_session_patch"),"landed";else return be("bridge_session_patch","bridge_session_patch_http_error"),"failed"}async function uAl(e,t,r){return gSm(e,{title:t},"title",r)}async function dAl(e,t,r,n){let o=t==="default",i=r.filter((a)=>o||a!==t).map((a)=>cAl+a),s=o?void 0:[cAl+t];await gSm(e,{add_tags:s,remove_tags:i},"color tag",n)}async function DCw(e,t,r){return!1}var cAl="color:";var Lot=A(()=>{Zt();qe();st();lFe();KV();cQo();lAl()});async function _Sm(){if(fa())return!1;let{getFeatureValue_CACHED_MAY_BE_STALE:e}=await Promise.resolve().then(() => (bn(),$Le));return e("tengu_bridge_placeholder_sweep",!0)}function bSm(e){let t=Zf();return t.placeholderWriteChain=t.place
+#### "function gSm" count=1 [313435129]
+--- 313435129 ---
+ated_at,tags:u.tags},notFound:!1}}async function gSm(e,t,r,n){let{getClaudeAIOAuthTokens:o,getClaudeAIOAuthTokensAsync:i}=await Promise.resolve().then(() => (oi(),_ne)),{getOauthConfig:s}=await Promise.resolve().then(() => (kp(),eer)),{updateCodeSession:a}=await Promise.resolve().then(() => (xWe(),P$n)),{isCcrV2SessionCrudEnabled:l}=await Promise.resolve().then(() => (zx(),wjr)),c=n?.getAccessToken?.()??($t()&&n?.credentials!==void 0?(await i(n.credentials))?.accessToken:o()?.accessToken);if(!c)return E(`[bridge] No access token for session ${r} update`),"failed";let u=l(),d;if(!u){let{getOrganizationUUID:f}=await Promise.resolve().then(() => (hG(),_Br));if(d=await f()??void 0,!d)return E(`[bridge] No org UUID for session ${r} update`),"failed"}E(`[bridge] Updating session ${r}: ${e}`);let p=await a(n?.baseUrl??s().BASE_API_URL,c,e,t,1e4,{useV2:u,orgUUID:d});if(p==="invalid")return pe("bridge_session_patch","bridge_session_patch_invalid_id"),"rejected";else if(typeof p!=="number")return pe("bridge_session_patch","bridge_session_patch_request_failed"),"failed";else if(p===200)return E(`[bridge] Session ${r} updated successfully`),Ee("bridge_session_patch"),"landed";else return be("bridge_session_patch","bridge_session_patch_http_error"),"failed"}async function uAl(e,t,r){return gSm(e,{title:t},"title",r)}async function dAl(e,t,r,n){let o=t==="default",i=r.filter((a)=>o||a!==t).map((a)=>cAl+a),s=o?void 0:[cAl+t];await gSm(e,{add_tags:s,remove_tags:i},"color tag",n)}async function DCw(e,t,r){return!1}var cAl="color:";var Lot=A(()=>{Zt();qe();st();lFe();KV();cQo();lAl()});async function _Sm(){if(fa())return!1;let{getFeatureValue_CACHED_MAY_BE_STALE:e}=await Promise.resolve().then(() => (bn(),$Le));return e("tengu_bridge_placeholder_sweep",!0)}function bSm(e){let t=Zf();return t.placeholderWriteChain=t.placeholder
+#### "bridge_session_patch" count=8 [151780608,151780648,151780744,151780912,168026704,313435988,313436011,313436095]
+--- 151780608 ---
+........	.......s........'......................	.......invalid.........	.......bridge_session_patch............	.......bridge_session_patch_invalid_id.........	.......rejected........	.......number..........	...#...bridge_session_patch_request_failed.....................	.......[bridge] Session ...............	....... updated successfully...........	.......landed..........	.......bridge_session_patch_http_error.....................................................`...................J..............4.E$<..UT9.....1........4.E$<..UTU.....a........4.E$<..UTf..............4.E$<
+--- 151780648 ---
+........	.......invalid.........	.......bridge_session_patch............	.......bridge_session_patch_invalid_id.........	.......rejected........	.......number..........	...#...bridge_session_patch_request_failed.....................	.......[bridge] Session ...............	....... updated successfully...........	.......landed..........	.......bridge_session_patch_http_error.....................................................`...................J..............4.E$<..UT9.....1........4.E$<..UTU.....a........4.E$<..UTf..............4.E$<..UTw....@`..P....$M..pT.....@PT.M.....[
+#### "titleDedup" count=0 []
+#### "lastTitlePatch" count=0 []
+#### "titlePatchAt" count=0 []
+#### "rateLimitTitle" count=0 []
+#### "session-title" count=0 []
+#### "title updates" count=0 []
+#### "deduplicat" count=8 [99694496,106673944,151313952,165500448,258008544,258010522,258010642,258017426]
+--- 99694496 ---
+fetch timed out.........	.......Claude Code JetBrains Plugin............	.......deduplicateDiagnosticFiles..............	.......takePending.............	.......resetAll.........*#.....clearDeliveredForFile...........	.......clearPendingForFile..............+#.....pendingCount....................	.......diff............	,#.....diffWithOptionsObj..............	...	...addToPath...............	......extractCommon...........	.......equals..........I-#.....removeEmpty.................	...castInput-#..............-#.....tokenize........	.......join............I......buildValues.
+--- 106673944 ---
+buildExportData.........	.7.....buildInsightsResponsePrompt...............7.....deduplicateSessionBranches7.............Iu......detectMultiClauding.............	.......extractToolStats........	.......generateUsageReport...............7.....loadCachedFacets................loadCachedSessionMeta...........	.......normalizeSessionMeta............I.7.
+...saveFacets..............I.......saveSessionMeta..........[......summarizeTranscriptChunk........	.......createWorkflowCommand...........I.7.....getWorkflowCommands.............	.......invalidateWorkflowCache.........I.7....warm
+#### "MODAL_TRANSCRIPT_PEEK" count=0 []
+#### "transcript peek" count=0 []
+#### "FULLSCREEN_BOTTOM" count=0 []
+#### "slash-command panels" count=0 []
+#### "pinned above the panel" count=0 []
+#### "bottom={0}" count=0 []
+#### "function _bl" count=1 [312192612]
+--- 312192612 ---
+Offset:null}})}function hyr(e){IW.setState((t)=>t.active===e?t:{...t,active:e})}function _bl(e){IW.setState((t)=>t.vimMode===e?t:{...t,vimMode:e})}function cim(e){IW.setState((t)=>t.savedCursorOffset===e?t:{...t,savedCursorOffset:e})}function uim(){return IW.getState().launchWarning}function nEt(e){IW.setState((t)=>t.launchWarning?.type===e.type&&t.launchWarning.prefillLength===e.prefillLength?t:{...t,launchWarning:e})}var yhw,IW;var Dqe=A(()=>{VRe();yhw={value:"",active:!1,launchWarning:null,vimMode:"INSERT",savedCursorOffset:null},IW=yP({...yhw})});class dim{resolver=null
+#### "vimMode:"INSERT"" count=1 [312193030]
+--- 312193030 ---
+:e})}var yhw,IW;var Dqe=A(()=>{VRe();yhw={value:"",active:!1,launchWarning:null,vimMode:"INSERT",savedCursorOffset:null},IW=yP({...yhw})});class dim{resolver=null;registerResolver(e){this.resolver=e}}function IZr(e,t){pim.of(e).registerResolver(t)}function fim(e,t){return pim.of(e).resolver?.(t)??!1}var pim;var bbl=A(()=>{pim=new Ar(()=>new dim)});var FUi={};Et(FUi,{RendezvousServer:()=>Sbl,clearCommandParkBlocked:()=>Abl,clearStartupDialogBlocked:()=>Thw,disarmStartupWedgeWatchdog:()=>wbl,markCommandParkBlocked:()=>Ebl,markReplayNoOp:()=>Tbl,markStartupDialogBlocked:()=>Ah
+#### "vimMode:"NORMAL"" count=0 []
+#### "keeps your text" count=0 []
+#### "instead of clearing" count=0 []
+#### "clearing the prompt" count=0 []
+#### "resume in the current directory" count=0 []
+#### "deleted directory" count=0 []
+#### "cd into" count=8 [85698765,85698921,160962658,161056055,165814770,316315652,316339188,317189466]
+--- 85698765 ---
+ The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again.......[0m.[31merror.[0m.[2m:.[0m The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again...SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)..a.[0m.[31me
+--- 85698921 ---
+ The current working directory was deleted, so that command didn't work. Please cd into a different directory and try again...SystemFdQuotaExceedederror: Your computer ran out of file descriptors (SystemFdQuotaExceeded).[0m.[31merror.[0m: Your computer ran out of file descriptors .[2m(.[31mSystemFdQuotaExceeded.[0m.[2m).[0mProcessFdQuotaExceeded?error: bun ran out of file descriptors (ProcessFdQuotaExceeded)..a.[0m.[31merror.[0m: bun ran out of file descriptors .[2m(.[31mProcessFdQuotaExceeded.[0m.[2m).[0m.."error: An unknown error occurred (..)..@.[0m.[31merror.[0m.[2m:.[0
+#### "worktree-gone" count=8 [193617936,193627008,204696072,322994817,322997061,322997136,322998718,322998793]
+--- 193617936 ---
+................................`.......................................	......worktree-gone...........	.......Your worktree ..........	....... no longer exists, so this session is working in the current directory without worktree isolation. The worktree binding has been cleared................	.......pin-is-own-launch-tree..........	...!...Could not re-enter your worktree ...............	.......: ..............	....... The worktree binding is kept...........	.......Did not re-enter your worktree .........	...w... This session's worktree binding has been cleared; you are w
+--- 193627008 ---
+can never be a local isolation worktree.........	.......gone............	......worktree-gone...........	...'...the worktree directory no longer exists.........	.......inaccessible............	.......[worktree] could not examine ...........	....... on resume; keeping the binding.........	.......error...........	.......unverifiable............	...6...the worktree directory could not be examined right now..................	.......pin-is-own-launch-tree..........	...$...[worktree] declining to resume into ............	....... (..............	.......): .............	.......pres
+#### "existsSync(" count=8 [70406729,71527594,71533398,213659779,301041115,301041143,301041171,301274913]
+--- 70406729 ---
+ParentDir(destStat, src, dest, opts) {
+  let destParent = dirname(dest);
+  if (!existsSync(destParent))
+    mkdirSync(destParent, { recursive: !0 });
+  return getStats(destStat, src, dest, opts);
+}
+function getStats(destStat, src, dest, opts) {
+  let srcStat = (opts.dereference ? statSync : lstatSync)(src);
+  if (srcStat.isDirectory() && opts.recursive)
+    return onDir(srcStat, destStat, src, dest, opts);
+  else if (srcStat.isDirectory())
+    throw fsEisdirError({
+      message: `${src} is a directory (not copied)`,
+      path: src,
+      syscall: "cp",
+      errno: EISDIR
+--- 71527594 ---
+tInternalField(@internalModuleRegistry, 154) || @createInternalModuleById(154)).existsSync(pathWithSocket))
+        path = pathWithSocket;
+    }
+  }
+  switch (adapter) {
+    case "mysql": {
+      username ||= options.username || options.user || env.MYSQL_USER || env.MYSQLUSER || env.USER || "root";
+      break;
+    }
+    case "mariadb": {
+      username ||= options.username || options.user || env.MARIADB_USER || env.MARIADBUSER || env.USER || "root";
+      break;
+    }
+    case "postgres": {
+      username ||= options.username || options.user || env.PG_USER || env.PGUSER ||
+#### "cwdGone" count=0 []
+#### "organization policy check" count=0 []
+#### "policy_violation" count=0 []
+#### "organization_policy" count=0 []
+#### "do not retry" count=8 [154198636,166380666,268111606,268117182,268119147,268123542,268130669,268135138]
+--- 154198636 ---
+)...........	.......watching this artifact was stopped earlier in this session; do not retry on your own. If the user asks you to resume watching it, call the watch action (in permission modes that prompt, they confirm it there)........	...%...remote sessions do not hold the watch...........	...\...the artifact control plane is overridden to a local stack, so the live edge is not reachable............	.......network egress to the claude.ai edge is denied by policy, so you will not be notified here when this artifact is republished elsewhere..........	...[...no such artifact
+--- 166380666 ---
+t process this ...............	...{.... The file may be unsupported or corrupt; do not retry reading it. If you need to inspect it, use a shell command instead.]..............................................@.T..Pf.@ ..H...z.dC......?K......d[......=c......do......<t.....P4|l.....T.....@.<.G.....+.@.=.@ ..@.N.@@4.....................................................H........................u.....................`.u.....@....U.......8...#.......8.......8...9.......H..H........................_......................._......h........................................;u...........
+#### "shouldRetry:!1,error" count=0 []
+#### "US-only inference" count=0 []
+#### "us only inference" count=0 []
+#### "dataResidency" count=0 []
+#### "inference_geo" count=8 [112644352,303256294,303257240,303553589,309848269,309848285,312484506,316811956]
+--- 112644352 ---
+............ ................... .......................h...............	......inference_geo...............d)(.........L)(.....p)(.W*(......H..H.........................-.......................-.....h........................................0.........................................................................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......................................(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...(...............
+--- 303256294 ---
+kens;return o/1e6*n+(r-o)/1e6*e.promptCacheWriteTokens}function tWb(e){return e.inference_geo==="us"?eWb:1}function ima(e,t){let r=t.input_tokens/1e6*e.inputTokens+t.output_tokens/1e6*e.outputTokens+(t.cache_read_input_tokens??0)/1e6*e.promptCacheReadTokens+Q4b(e,t),n=(t.server_tool_use?.web_search_requests??0)*e.webSearchRequests;return r*tWb(t)+n}function sma(e,t){let r=$o(e);if(t.speed==="fast"){if(r==="claude-opus-4-8"||r==="claude-opus-5")return cZo;if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return uFd}let n=uht[r];if(n)return n;let o=cr().additionalModelCostsCach
+#### "costEstimate" count=0 []
+#### "1.1 *" count=1 [336945374]
+--- 336945374 ---
+r.width <= sw && r.height <= sh) return false;
+    return r.width * r.height >= 1.1 * sw * sh;
+  }
+  // Deck-stage is a managed stage, not a drop container: elements may only
+  // live INSIDE a slide (a child of the deck), never at the deck's own child
+  // level \u2014 and a drop that would escape a slide upward is refused outright
+  // (no falling through to the page root above the deck).
+  function isDeckRoot(el){
+    return (el.tagName || '').toLowerCase() === 'deck-stage';
+  }
+  // The deck mount in every rendered form: the literal deck-stage element,
+  // the authored
+#### "* 1.1" count=0 []
+#### "1.1," count=7 [330623611,332440351,332440424,334457268,334772342,334773008,334773664]
+--- 330623611 ---
+s/generate-hljs-browser-bundle.ts ... do not edit by hand.
+// highlight.js 11.11.1, 192 grammars, browser IIFE exposing globalThis.hljs.
+var yl=Object.create;var{getPrototypeOf:vl,defineProperty:ct,getOwnPropertyNames:xl}=Object;var wl=Object.prototype.hasOwnProperty;function kl(e){return this[e]}var Cl,Ll,ql=(e,t,r)=>{var a=e!=null&&typeof e==="object";if(a){var o=t?Cl??=new WeakMap:Ll??=new WeakMap,_=o.get(e);if(_)return _}r=e!=null?yl(vl(e)):{};let i=t||!e||!e.__esModule?ct(r,"default",{value:e,enumerable:!0}):r;for(let n of xl(e))if(!wl.call(i,n))ct(i,n,{get:kl.bind(e
+--- 332440351 ---
+.1");n&&u.attr("text-anchor","middle");let h=0;for(let d of r){let f=o(m=>iqe(s,1.1,m)<=e,"checkWidth"),p=f(d)?[d]:Cre(d,f);for(let m of p){let g=oN(u,h,1.1,n);lN(g,m),h++}}if(i){let d=u.node().getBBox(),f=2;return l.attr("x",d.x-f).attr("y",d.y-f).attr("width",d.width+2*f).attr("height",d.height+2*f),s.node()}else return u.node()}function Ere(e){let t=/&(amp|lt|gt);/g;return e.replace(t,(r,i)=>{switch(i){case"amp":return"&";case"lt":return"<";case"gt":return">";default:return r}})}function lN(e,t){e.text(""),t.forEach((r,i)=>{let n=e.append("tspan").attr("font-style",r.typ
+#### "literal `" count=1 [315274876]
+--- 315274876 ---
++\}/g,"").includes("!`"))return{body:t,hasShellExec:!0,untranslatable:"It has a literal `` !` `` outside any `!{\u2026}` block (inert in Gemini, live in Claude Code \u2014 and it may pair with a translated block's backtick to run something other than the block). Port it manually."};let n=[...t.matchAll(/!\{([^}]+)\}/g)].map((u)=>u[1].trim()).filter((u)=>u.length>0),o=t.replace(/@\{([^}]+)\}/g,(u,d)=>"@"+d.replaceAll(" ","\\ ")).replace(/!\{([^}]+)\}/g,"!`$1`");if(o.includes("```!"))return{body:t,hasShellExec:!0,untranslatable:"Its body contains a ```! fenced shell block (in
+#### "/insights" count=4 [162268162,277453692,316593225,316605024]
+--- 162268162 ---
+y 'insightsJson' from null or undefined value.........	...~...The user just ran /insights to generate a usage report analyzing their Claude Code sessions.
+
+Here is the full insights data:
+..........	.......e...............	.......
+
+Report URL: ..........	.......t...............	.......
+HTML file: ............	.......r...............	.......
+Facets directory: .............	.......n...................V...
+.
+.A.t.-.a.-.g.l.a.n.c.e. .s.u.m.m.a.r.y. .(.f.o.r. .y.o.u.r. .c.o.n.t.e.x.t. .o.n.l.y. ..  .t.h.e. .u.s.e.r. .h.a.s. .n.o.t. .s.e.e.n. .a.n.y. .o.u.t.p.u.t. .y.e.t.).:.
+...
+--- 277453692 ---
+.....C..............
+.......................	.......text............	...L...The /insights report is generated only when the command is invoked directly.....................................	...C...Cannot destructure property 'insights' from null or undefined value.............	.......file://.........	.......s...............	.......a...............	....... sessions total . ..............	...	... analyzed...............	...	... sessions...............	...	... messages...............	.......h...............	....... commits........	....... . .............	...............	.......
+#### "empty tag" count=0 []

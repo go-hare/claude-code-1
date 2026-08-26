@@ -148,7 +148,11 @@ export type { Progress } from './core/terminal.js'
 // ============================================================
 // Core modules
 // ============================================================
-export { ClickEvent } from './core/events/click-event.js'
+export {
+  ClickEvent,
+  MOUNT_SETTLE_MS,
+  type MouseClickResult,
+} from './core/events/click-event.js'
 export { EventEmitter } from './core/events/emitter.js'
 export { Event } from './core/events/event.js'
 export { InputEvent } from './core/events/input-event.js'
@@ -236,6 +240,7 @@ export { wrapAnsi } from './core/wrapAnsi.js'
 export { default as styles } from './core/styles.js'
 export { clamp } from './core/layout/geometry.js'
 export {
+  getTerminalFocusGainedAt,
   getTerminalFocusState,
   getTerminalFocused,
   subscribeTerminalFocus,
@@ -256,6 +261,7 @@ export {
 } from './components/Button.js'
 export { default as Link } from './components/Link.js'
 export type { Props as LinkProps } from './components/Link.js'
+export { ClockContext, type Clock } from './components/ClockContext.js'
 export { default as Newline } from './components/Newline.js'
 export type { Props as NewlineProps } from './components/Newline.js'
 export { default as Spacer } from './components/Spacer.js'

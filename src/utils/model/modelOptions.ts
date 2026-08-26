@@ -29,6 +29,7 @@ import {
   getDefaultSonnetModel,
   getDefaultOpusModel,
   getDefaultHaikuModel,
+  getDefaultFableModel,
   getDefaultMainLoopModelSetting,
   getMarketingNameForModel,
   getUserSpecifiedModelSetting,
@@ -38,6 +39,13 @@ import {
   type ModelSetting,
 } from './model.js'
 import { applyFableCreditsLabel } from './fableCreditsLabel.js'
+import {
+  applyPinnedFablePickerValue,
+  insertFablePickerOption,
+  isFablePickerInsertValue,
+  isSameFablePickerRow,
+  maybeInsertFablePickerRow,
+} from './fablePicker.js'
 import { DRAWS_FROM_USAGE_CREDITS_SUFFIX } from '../extraUsage.js'
 import { has1mContext } from '../context.js'
 import { getGlobalConfig } from '../config.js'
@@ -551,6 +559,8 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     // Keep previous Sonnet as a pin-able concrete version.
     payg1POptions.push(getSonnet46Option())
     payg1POptions.push(getHaiku45Option())
+    // Official C0v R_() arm: wyp, else URa only when BZ (anthropicAws).
+    maybeInsertFablePickerRow(payg1POptions, { isSubscriber: false })
     return payg1POptions
   }
 
@@ -582,6 +592,8 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   } else {
     payg3pOptions.push(getHaikuOption())
   }
+  // Official C0v: R_() uses wyp / BZ+URa; true 3P uses wyp ?? URa.
+  maybeInsertFablePickerRow(payg3pOptions, { isSubscriber: false })
   return payg3pOptions
 }
 
@@ -596,6 +608,14 @@ function getModelFamilyInfo(
   model: string,
 ): { alias: string; currentVersionName: string } | null {
   const canonical = getCanonicalName(model)
+
+  // Official Cci — fable before sonnet/opus/haiku.
+  if (canonical.includes('fable')) {
+    const currentName = getMarketingNameForModel(getDefaultFableModel())
+    if (currentName) {
+      return { alias: 'Fable', currentVersionName: currentName }
+    }
+  }
 
   // Sonnet family
   if (
@@ -687,20 +707,20 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     })
   }
 
-  // Official mkr densable — merge cached gateway /v1/models options when $5l.
-  // Full q5l download/write remains denser (bootstrap path).
-  for (const opt of readGatewayModelOptionsFromCache()) {
-    if (!options.some(existing => existing.value === opt.value)) {
-      options.push(opt)
+  // Official I0v: $Nn via W4r, then pZe via f0v+W4r. z4r Iyp treats fable
+  // aliases and claude-fable-5 as the same row.
+  // densable 2.1.219 #9: hug() strip/reapply so stale cache cannot bake P5i.
+  for (const opt of getGlobalConfig().additionalModelOptionsCache ?? []) {
+    const refreshed = applyFableCreditsLabel(opt)
+    if (!options.some(existing => isSameFablePickerRow(existing, refreshed))) {
+      insertFablePickerOption(options, refreshed)
     }
   }
 
-  // densable 2.1.219 #9: U1e additional options pass through hug() strip/reapply
-  // of " · Requires usage credits" so stale bootstrap cache cannot bake the label.
-  for (const opt of getGlobalConfig().additionalModelOptionsCache ?? []) {
+  for (const opt of readGatewayModelOptionsFromCache()) {
     const refreshed = applyFableCreditsLabel(opt)
-    if (!options.some(existing => existing.value === refreshed.value)) {
-      options.push(refreshed)
+    if (!options.some(existing => isSameFablePickerRow(existing, refreshed))) {
+      insertFablePickerOption(options, refreshed)
     }
   }
 
@@ -718,6 +738,13 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     return filterModelOptionsByAllowlist(options)
   } else if (customModel === 'opusplan') {
     return filterModelOptionsByAllowlist([...options, getOpusPlanOption()])
+  } else if (
+    typeof customModel === 'string' &&
+    isFablePickerInsertValue(customModel)
+  ) {
+    // Official I0v G4r(s): rewrite Iyp-same row, else W4r({...URa(), value:s}).
+    applyPinnedFablePickerValue(options, customModel)
+    return filterModelOptionsByAllowlist(options)
   } else if (customModel === 'opus' && getAPIProvider() === 'firstParty') {
     return filterModelOptionsByAllowlist([
       ...options,

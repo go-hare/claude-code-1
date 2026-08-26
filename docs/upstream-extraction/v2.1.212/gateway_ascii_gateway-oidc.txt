@@ -1,0 +1,6 @@
+offset=99878160 needle=b'gateway-oidc'
+count=3
+
+base64url
+gateway-oidc
+123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz

@@ -1,20 +1,22 @@
 /**
- * Official Npf densable — should the fullscreen TUI upsell dialog show?
+ * Official V1y densable — should the fullscreen TUI upsell dialog show?
  *
  * Full dialog + /tui relaunch accept path remains denser; this is the pure gate.
  *
- * Official logic:
- *   if (bs()) return false;                         // non-interactive / demo-like
+ * Official V1y (2.1.239):
+ *   if (As()) return false;                         // non-interactive / demo-like
  *   if (FORCE_FULLSCREEN_UPSELL) return true;
- *   if (zi()) return false;                         // already fullscreen env
- *   if (uU()) return false;                         // tmux -CC etc. (caller injects)
- *   if (settings.tui !== undefined) return false;   // user already chose a renderer
- *   if (!tengu_ochre_hollow GB) return false;
- *   if (fullscreenUpsellSeenCount >= 3) return false;
+ *   if (Vs()) return false;                         // already fullscreen env
+ *   if (CU()) return false;                         // screen-reader
+ *   if (settings.tui !== undefined) return false;
+ *   if ((seen ?? 0) >= M4r=3) return false;
  *   return true;
+ *
+ * Official V1y has NO tengu_ochre_hollow — that GB excluded Bedrock/Vertex/Foundry.
+ * Unidentified official extras not invented: Jl / aj / D4r trial / jli(OQ) /
+ * Nhp GB-fallback / Jpe / Vfs sticky-off.
  */
 
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
 import { isFullscreenEnvEnabled } from './fullscreen.js'
@@ -22,27 +24,28 @@ import { isForceFullscreenUpsellEnabled } from './residualUiEnvGates.js'
 import { isScreenReaderModeEnabled } from './screenReaderGate.js'
 import { getSettingsForSource } from './settings/settings.js'
 
-/** Official Ufn — max times the fullscreen upsell may be shown. */
+/** Official M4r — max times the fullscreen upsell may be shown. */
 export const FULLSCREEN_UPSELL_MAX_SEEN = 3
+
+/** Official Mhp.upsellImpression — one increment per process. */
+let upsellImpression: number | undefined
 
 export type FullscreenUpsellGateInput = {
   env?: NodeJS.ProcessEnv
-  /** Official bs() — non-interactive / demo skip. Default: NODE_ENV=test or IS_DEMO. */
+  /** Official As() — non-interactive / demo skip. Default: NODE_ENV=test or IS_DEMO. */
   isNonInteractiveOrDemo?: boolean
-  /** Official zi() — already in fullscreen env. Default: isFullscreenEnvEnabled(). */
+  /** Official Vs() — already in fullscreen env. Default: isFullscreenEnvEnabled(). */
   isFullscreenAlready?: boolean
-  /** Official uU() — hard-disable environments (e.g. tmux -CC). Default false. */
+  /** Official CU() — hard-disable environments (e.g. screen-reader). Default false. */
   isHardDisabled?: boolean
   /** User already set settings.tui. Default: read userSettings.tui. */
   hasExplicitTuiSetting?: boolean
-  /** GB tengu_ochre_hollow. When unset, reads cached GB (default false). */
-  gbOchreHollow?: boolean
   /** Seen count from global config. Default: config.fullscreenUpsellSeenCount. */
   seenCount?: number
 }
 
 /**
- * Official Npf — densable pure gate for fullscreen upsell eligibility.
+ * Official V1y — densable pure gate for fullscreen upsell eligibility.
  */
 export function shouldShowFullscreenUpsell(
   input?: FullscreenUpsellGateInput,
@@ -77,11 +80,6 @@ export function shouldShowFullscreenUpsell(
   }
   if (hasTui) return false
 
-  const gb =
-    input?.gbOchreHollow ??
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_ochre_hollow', false)
-  if (!gb) return false
-
   const seen =
     input?.seenCount ?? getGlobalConfig().fullscreenUpsellSeenCount ?? 0
   if (seen >= FULLSCREEN_UPSELL_MAX_SEEN) return false
@@ -114,4 +112,31 @@ export function incrementFullscreenUpsellSeen(prev: {
     return { fullscreenUpsellSeenCount: cur }
   }
   return { fullscreenUpsellSeenCount: cur + 1 }
+}
+
+/**
+ * Official udc / Zng — count a dialog impression once per process.
+ * Unanswered prompts still increment so the offer stops after M4r=3 launches.
+ */
+export function recordFullscreenUpsellImpression(prev: {
+  fullscreenUpsellSeenCount?: number
+}): { fullscreenUpsellSeenCount: number } {
+  if (upsellImpression !== undefined) {
+    return {
+      fullscreenUpsellSeenCount:
+        prev.fullscreenUpsellSeenCount ?? upsellImpression,
+    }
+  }
+  const cur = prev.fullscreenUpsellSeenCount ?? 0
+  const next = Math.min(cur + 1, FULLSCREEN_UPSELL_MAX_SEEN)
+  upsellImpression = next
+  if (cur >= next) {
+    return { fullscreenUpsellSeenCount: cur }
+  }
+  return { fullscreenUpsellSeenCount: next }
+}
+
+/** Test-only: clear official Mhp.upsellImpression latch. */
+export function _resetFullscreenUpsellImpressionForTesting(): void {
+  upsellImpression = undefined
 }

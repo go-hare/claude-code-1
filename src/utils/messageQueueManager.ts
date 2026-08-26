@@ -57,6 +57,12 @@ const commandQueue: QueuedCommand[] = []
 let snapshot: readonly QueuedCommand[] = Object.freeze([])
 const queueChanged = createSignal()
 
+/**
+ * Official Ntl `w` / Cuy — commands already dequeued but still executing.
+ * Esc restore must see this so a queued turn is not treated as "user moved on".
+ */
+let inFlightDrainBatch: QueuedCommand[] | null = null
+
 function notifySubscribers(): void {
   snapshot = Object.freeze([...commandQueue])
   queueChanged.emit()
@@ -381,6 +387,36 @@ export function clearCommandQueue(): void {
 export function resetCommandQueue(): void {
   commandQueue.length = 0
   snapshot = Object.freeze([])
+  inFlightDrainBatch = null
+}
+
+/**
+ * Official `setInFlightDrainBatch` — mark a dequeued batch as still executing.
+ * Cuy sets this synchronously after dequeue, before executeInput.
+ */
+export function setInFlightDrainBatch(batch: QueuedCommand[]): void {
+  inFlightDrainBatch = batch
+}
+
+/**
+ * Official `clearInFlightDrainBatch` — only clears when `batch` is omitted
+ * or is the same reference currently held (a newer drain must not be wiped).
+ */
+export function clearInFlightDrainBatch(batch?: QueuedCommand[]): void {
+  if (batch === undefined || inFlightDrainBatch === batch) {
+    inFlightDrainBatch = null
+  }
+}
+
+/**
+ * Official `someInFlightDrainCommand`. No predicate → any in-flight drain.
+ */
+export function someInFlightDrainCommand(
+  pred?: (cmd: QueuedCommand) => boolean,
+): boolean {
+  if (inFlightDrainBatch === null) return false
+  if (pred === undefined) return inFlightDrainBatch.length > 0
+  return inFlightDrainBatch.some(pred)
 }
 
 // ============================================================================

@@ -19,6 +19,7 @@ import { Box, ScrollBox, type ScrollBoxHandle, Text, instances, stringWidth, use
 import type { Message } from '../types/message.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { openBrowser, openPath } from '../utils/browser.js';
+import { getAutoScrollEnabled } from '../utils/config.js';
 import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fullscreen.js';
 import { getPlatform } from '../utils/platform.js';
 import { recordJumpToBottomClick } from '../utils/scrollTelemetry.js';
@@ -29,6 +30,16 @@ import type { StickyPrompt } from './VirtualMessageList.js';
 
 /** Rows of transcript context kept visible above the modal pane's ▔ divider. */
 const MODAL_TRANSCRIPT_PEEK = 2;
+/**
+ * densable Wrn `zrn` — fullscreen chrome rows subtracted from bottom maxHeight.
+ * Gold: `Kxh=uKr()?g4t-zrn:Math.floor(g4t/2)`, consumed only inside `if(Ns())`.
+ * `uKr()` has no definition in the 2.1.234 extract dump (call sites only:
+ * Wrn Kxh + eso `a=uKr(); l=t&&!a`). This branch is already
+ * `isFullscreenEnvEnabled()` (= Ns), so we take the uKr-true arm (rows-zrn).
+ * Do not invent a local uKr. Gold's 50% arm is uKr-false still inside Ns;
+ * that cap clipped PromptInput in the empty-transcript screenshot.
+ */
+const FULLSCREEN_BOTTOM_CHROME_ROWS = 2;
 
 /** Context for scroll-derived chrome (sticky header, pill). StickyTracker
  *  in VirtualMessageList writes via this instead of threading a callback
@@ -74,6 +85,13 @@ type Props = {
   newMessageCount?: number;
   /** Called when the user clicks the "N new" pill. */
   onPillClick?: () => void;
+  /**
+   * densable Tyn `sidebar` / `sidebarWidth`. Main column is
+   * `max(1, columns - sidebarWidth)`. Always mount `sidebar` (even at
+   * width 0) so nhu auto-open + keybinding hooks stay alive.
+   */
+  sidebar?: ReactNode;
+  sidebarWidth?: number;
 };
 
 /**
@@ -297,6 +315,8 @@ export function FullscreenLayout({
   hideSticky = false,
   newMessageCount = 0,
   onPillClick,
+  sidebar,
+  sidebarWidth = 0,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
   // Scroll-derived chrome state lives HERE, not in REPL. StickyTracker
@@ -317,10 +337,18 @@ export function FullscreenLayout({
     [scrollRef],
   );
   const pillVisible = useSyncExternalStore(subscribe, () => {
+    // densable Wrn Ddw: sticky never shows the pill; dividerY is the unseen
+    // snapshot; without a divider, pill only when auto-scroll is off and the
+    // viewport is short of content (user scrolled up with followGrowth false).
     const s = scrollRef?.current;
+    if (!s) return false;
+    if (s.isSticky()) return false;
+    const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
     const dividerY = dividerYRef?.current;
-    if (!s || dividerY == null) return false;
-    return s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight() < dividerY;
+    if (dividerY != null) {
+      return viewportBottom < dividerY && viewportBottom < s.getScrollHeight();
+    }
+    return !getAutoScrollEnabled() && viewportBottom < s.getScrollHeight();
   });
   // Wire up hyperlink click handling — in fullscreen mode, mouse tracking
   // intercepts clicks before the terminal can open OSC 8 links natively.
@@ -371,10 +399,11 @@ export function FullscreenLayout({
     // isn't covered — not a densable invent; pad still follows sticky!=null.
     const headerPrompt = sticky != null && sticky !== 'clicked' && overlay == null ? sticky : null;
     const padCollapsed = sticky != null;
+    const mainColumns = Math.max(1, columns - sidebarWidth);
     return (
       <PromptOverlayProvider>
         <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
-          <Box flexDirection="column" flexGrow={1} width={columns} overflow="hidden">
+          <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
             <Box flexGrow={1} flexDirection="column" overflow="hidden">
               {headerPrompt && <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />}
               <ScrollBox
@@ -383,6 +412,7 @@ export function FullscreenLayout({
                 flexDirection="column"
                 paddingTop={padCollapsed ? 0 : 1}
                 stickyScroll
+                followGrowth={getAutoScrollEnabled()}
               >
                 <ScrollChromeContext value={chromeCtx}>{scrollable}</ScrollChromeContext>
                 {overlay}
@@ -403,14 +433,24 @@ export function FullscreenLayout({
                 </Box>
               )}
             </Box>
-            <Box flexDirection="column" flexShrink={0} width="100%" maxHeight="50%">
+            <Box
+              flexDirection="column"
+              flexShrink={0}
+              width="100%"
+              maxHeight={Math.max(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS)}
+            >
               <SuggestionsOverlay />
               <DialogOverlay />
-              <Box flexDirection="column" width="100%" flexGrow={1} overflowY="hidden">
+              <Box flexDirection="column" width="100%" flexGrow={1} flexShrink={0} overflowY="hidden">
                 {bottom}
               </Box>
             </Box>
           </Box>
+          {sidebar != null && (
+            <Box flexDirection="column" width={sidebarWidth} flexShrink={0} overflow="hidden">
+              {sidebar}
+            </Box>
+          )}
         </Box>
         {modal != null && (
           <ModalContext

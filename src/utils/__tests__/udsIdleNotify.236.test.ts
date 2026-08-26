@@ -26,19 +26,23 @@ import {
   correlatePeerIdleNotice,
   flushIdleSubscribers,
   hasOutstandingIdleSubscription,
+  idleNoticeModelText,
   idleSelfTargetMessage,
   idleSubscribeDisplayLine,
   idleSubscribeFailedLine,
   idleSubscribedLine,
+  MAX_OUTSTANDING_PER_TARGET,
   MAX_PENDING_IDLE_SUBSCRIPTIONS,
   notifyWhenIdleActionSchema,
   peerIdleNoticeActionSchema,
   parseControlAction,
   resetUdsIdleNotifyForTests,
   sameSocketNamespace,
+  seedOutstandingIdleSubscriptionForTests,
   setIdleNoticeHandler,
   setPeerIdleNoticeSender,
   subscribeToPeerIdle,
+  type IdleNoticeForModel,
 } from '../udsIdleNotify.js'
 
 let inboundPolicy: 'accept' | 'hold' | 'refuse' | undefined = 'accept'
@@ -447,5 +451,64 @@ describe('densable 2.1.236 one-shot peer_idle_notice fire', () => {
       await stopUdsMessaging().catch(() => {})
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  test('crossSessionInbound=hold yields modelVisible:false; held text observable without model enqueue', () => {
+    inboundPolicy = 'hold'
+    const held: IdleNoticeForModel[] = []
+    const enqueued: string[] = []
+    setIdleNoticeHandler(notice => {
+      held.push(notice)
+      // densable consumer-side hold surface: observe text, do not enqueue prompt.
+      if (!notice.modelVisible) {
+        expect(idleNoticeModelText(notice)).toContain(
+          '[Cross-session idle notice]',
+        )
+        return
+      }
+      enqueued.push(idleNoticeModelText(notice))
+    })
+
+    const msgId = 'hold-sub-1'
+    seedOutstandingIdleSubscriptionForTests({
+      msgId,
+      label: 'worker',
+      target: join(tmpdir(), 'cc-idle-hold-peer', 'messaging.sock'),
+    })
+    expect(hasOutstandingIdleSubscription(msgId)).toBe(true)
+    expect(
+      correlatePeerIdleNotice({
+        origMsgId: msgId,
+        state: 'idle',
+        finishedAt: '2026-08-20T12:00:00.000Z',
+        detail: 'turn done',
+      }),
+    ).toBe(true)
+    expect(held).toHaveLength(1)
+    expect(held[0]!.modelVisible).toBe(false)
+    expect(held[0]!.kind).toBe('idle')
+    expect(held[0]!.label).toBe('worker')
+    expect(enqueued).toEqual([])
+    expect(idleSubscribedLine('worker', true)).toMatch(
+      /shown to your user in the transcript|only logged here/,
+    )
+  })
+
+  test('recordOutstanding trims to MAX_OUTSTANDING_PER_TARGET after push (M7)', () => {
+    expect(MAX_OUTSTANDING_PER_TARGET).toBe(3)
+    const target = join(tmpdir(), 'cc-idle-cap-peer', 'messaging.sock')
+    const ids = ['a', 'b', 'c', 'd']
+    for (const msgId of ids) {
+      seedOutstandingIdleSubscriptionForTests({
+        msgId,
+        label: 'peer',
+        target,
+      })
+    }
+    // After 4 inserts with cap 3, at most 3 outstanding for this target.
+    const alive = ids.filter(id => hasOutstandingIdleSubscription(id))
+    expect(alive.length).toBe(MAX_OUTSTANDING_PER_TARGET)
+    // Oldest non-first (or mid) rows drop; newest must remain.
+    expect(hasOutstandingIdleSubscription('d')).toBe(true)
   })
 })

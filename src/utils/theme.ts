@@ -104,11 +104,84 @@ export type ThemeName = (typeof THEME_NAMES)[number]
 
 export const THEME_SETTINGS = ['auto', ...THEME_NAMES] as const
 
+/** densable IKa — custom theme setting prefix (`custom:${slug}`). */
+export const CUSTOM_THEME_PREFIX = 'custom:'
+
 /**
  * A theme preference as stored in user config. `'auto'` follows the system
  * dark/light mode and is resolved to a ThemeName at runtime.
+ * densable `custom:${slug}` selects a user theme from ~/.claude/themes.
  */
-export type ThemeSetting = (typeof THEME_SETTINGS)[number]
+export type ThemeSetting =
+  | (typeof THEME_SETTINGS)[number]
+  | `${typeof CUSTOM_THEME_PREFIX}${string}`
+
+/** densable X1p — named ANSI colors accepted after `ansi:`. */
+const ANSI_COLOR_NAMES = new Set([
+  'black',
+  'red',
+  'green',
+  'yellow',
+  'blue',
+  'magenta',
+  'cyan',
+  'white',
+  'gray',
+  'grey',
+  'blackBright',
+  'redBright',
+  'greenBright',
+  'yellowBright',
+  'blueBright',
+  'magentaBright',
+  'cyanBright',
+  'whiteBright',
+])
+
+/**
+ * densable wNe — accept rgb() / #hex / ansi256() / ansi:name only.
+ */
+export function isValidThemeColor(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  if (/^rgb\(\s?\d{1,3},\s?\d{1,3},\s?\d{1,3}\s?\)$/.test(value)) return true
+  if (/^#[0-9a-fA-F]{6}$/.test(value) || /^#[0-9a-fA-F]{3}$/.test(value)) {
+    return true
+  }
+  if (/^ansi256\(\d{1,3}\)$/.test(value)) return true
+  if (value.startsWith('ansi:')) return ANSI_COLOR_NAMES.has(value.slice(5))
+  return false
+}
+
+/**
+ * densable ZGn — merge custom overrides onto a base theme.
+ * Only keys that exist on the base (incl. effortUltra) and pass wNe.
+ */
+export function mergeThemeOverrides(
+  base: Theme,
+  overrides: Record<string, unknown> | undefined,
+): Theme {
+  if (!overrides) return base
+  const next = { ...base }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (Object.hasOwn(base, key) && isValidThemeColor(value)) {
+      next[key as keyof Theme] = value
+    }
+  }
+  return next
+}
+
+let customThemeOverrides: Record<string, unknown> | undefined
+
+/** Ink / ThemeProvider injects the active custom-theme overrides (d$e). */
+export function setCustomThemeOverrides(
+  overrides: Record<string, unknown> | undefined,
+): void {
+  customThemeOverrides = overrides
+}
+
+export function isBuiltinThemeName(name: string): name is ThemeName {
+  return (THEME_NAMES as readonly string[]).includes(name)
+}
 
 /**
  * Light theme using explicit RGB values to avoid inconsistencies
@@ -328,7 +401,9 @@ const darkAnsiTheme: Theme = {
   clawd_body: 'ansi:redBright',
   clawd_background: 'ansi:black',
   userMessageBackground: 'ansi:blackBright',
-  userMessageBackgroundHover: 'ansi:white',
+  // Official fWv 2.1.239: expanded tool rows (VirtualMessageList) tint
+  // userMessageBackgroundHover. white-on-whiteBright was fg=bg in fullscreen.
+  userMessageBackgroundHover: 'ansi:black',
   messageActionsBackground: 'ansi:blackBright',
   selectionBg: 'ansi:blue', // darker named bg for dark-ansi; bright fgs stay readable
   bashMessageBackgroundColor: 'ansi:black',
@@ -604,20 +679,28 @@ const darkDaltonizedTheme: Theme = {
 }
 
 export function getTheme(themeName: ThemeName): Theme {
+  let base: Theme
   switch (themeName) {
     case 'light':
-      return lightTheme
+      base = lightTheme
+      break
     case 'light-ansi':
-      return lightAnsiTheme
+      base = lightAnsiTheme
+      break
     case 'dark-ansi':
-      return darkAnsiTheme
+      base = darkAnsiTheme
+      break
     case 'light-daltonized':
-      return lightDaltonizedTheme
+      base = lightDaltonizedTheme
+      break
     case 'dark-daltonized':
-      return darkDaltonizedTheme
+      base = darkDaltonizedTheme
+      break
     default:
-      return darkTheme
+      base = darkTheme
   }
+  // densable d$e — ZGn(base, custom overrides) so effortUltra etc. apply.
+  return mergeThemeOverrides(base, customThemeOverrides)
 }
 
 // Create a chalk instance with 256-color level for Apple Terminal

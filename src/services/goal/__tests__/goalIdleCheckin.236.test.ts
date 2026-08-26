@@ -2,6 +2,8 @@
  * densable 2.1.236 #25 — SEA Bqn / Wsv idle+parked goal check-in backoff.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { AppState } from '../../../state/AppStateStore.js'
 import {
   DEFAULT_GOAL_CHECKIN_MINUTES,
@@ -22,6 +24,7 @@ import {
   getGoalIdleArmGeneration,
   getPendingGoalIdleCheckin,
   isGoalCheckinQueuedCommand,
+  replacePendingGoalIdleCheckin,
   type GoalIdleCheckinContext,
 } from '../goalIdleCheckin.js'
 
@@ -235,5 +238,75 @@ describe('goalIdleCheckin densable 2.1.236 (#25)', () => {
     fireGoalIdleCheckin(ctx, genBefore)
     expect(delivered).toHaveLength(0)
     expect(getPendingGoalIdleCheckin()).toBeUndefined()
+  })
+
+  test('L15: replacePendingGoalIdleCheckin clears prior timer before assign', async () => {
+    let firstFired = false
+    const first = setTimeout(() => {
+      firstFired = true
+    }, 40)
+    replacePendingGoalIdleCheckin(first)
+    const second = setTimeout(() => {}, 60_000)
+    replacePendingGoalIdleCheckin(second)
+    expect(getPendingGoalIdleCheckin()).toBe(second)
+    await Bun.sleep(80)
+    expect(firstFired).toBe(false)
+    cancelPendingGoalIdleCheckin()
+    expect(getPendingGoalIdleCheckin()).toBeUndefined()
+  })
+
+  test('/goal clear cancels pending idle check-in before clearing activeGoal', async () => {
+    replacePendingGoalIdleCheckin(setTimeout(() => {}, 60_000))
+    expect(getPendingGoalIdleCheckin()).toBeDefined()
+
+    const goalCommand = (await import('../../../commands/goal.js')).default
+    const loaded = await goalCommand.load!()
+    let state: {
+      activeGoal?: GoalCheckinActiveGoal
+      sessionHooks?: Map<string, unknown>
+    } = {
+      activeGoal: goal({ condition: 'ship tests' }),
+      sessionHooks: new Map(),
+    }
+    const result = await loaded.call('clear', {
+      getAppState: () => state as unknown as AppState,
+      setAppState: (updater: (prev: AppState) => AppState): void => {
+        state = updater(state as unknown as AppState) as typeof state
+      },
+      setMessages: () => {},
+      agentId: 'goal-clear-test-session',
+    } as never)
+
+    expect(getPendingGoalIdleCheckin()).toBeUndefined()
+    expect(state.activeGoal).toBeUndefined()
+    expect(result).toEqual({
+      type: 'text',
+      value: 'Goal cleared: ship tests',
+    })
+  })
+
+  test('M4 wiring: goal.ts and REPL onActiveGoal teardown cancel pending check-in', () => {
+    const goalSrc = readFileSync(
+      join(import.meta.dir, '../../../commands/goal.ts'),
+      'utf8',
+    )
+    const clearIdx = goalSrc.indexOf('CLEAR_KEYWORDS.has(input.toLowerCase())')
+    expect(clearIdx).toBeGreaterThanOrEqual(0)
+    const clearBlock = goalSrc.slice(clearIdx, clearIdx + 900)
+    expect(clearBlock).toContain('cancelPendingGoalIdleCheckin')
+    expect(clearBlock.indexOf('cancelPendingGoalIdleCheckin')).toBeLessThan(
+      clearBlock.indexOf('activeGoal: undefined'),
+    )
+
+    const replSrc = readFileSync(
+      join(import.meta.dir, '../../../screens/REPL.tsx'),
+      'utf8',
+    )
+    const onActiveIdx = replSrc.indexOf('onActiveGoal:')
+    expect(onActiveIdx).toBeGreaterThanOrEqual(0)
+    const onActiveBlock = replSrc.slice(onActiveIdx, onActiveIdx + 900)
+    expect(onActiveBlock).toMatch(
+      /value === undefined \|\| value === null[\s\S]*cancelPendingGoalIdleCheckin/,
+    )
   })
 })

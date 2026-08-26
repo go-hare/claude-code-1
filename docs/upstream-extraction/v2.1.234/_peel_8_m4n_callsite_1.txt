@@ -1,0 +1,3 @@
+OFFSET=298425446
+
+ls:s.options.tools});if(s.requestDialog!==void 0){let h=qhi.of(s.session).permissionContextSetter,y=m4n(o,i,s,a,l,n,(w)=>{h?.(w,{preserveMode:!0})}),b=await Kzn({ctx:y,updatedInput:u.updatedInput,suggestions:u.suggestions,permissionMode:p.mode});if(b)return b;if(t.signal.aborted)

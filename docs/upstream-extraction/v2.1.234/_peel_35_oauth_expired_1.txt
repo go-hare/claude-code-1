@@ -1,0 +1,3 @@
+OFFSET=308628126
+
+idgeOauthDeadFailCount} times)`),null;await Lb();let er=Czo();if(er!==null&&er<=Date.now()){r6("oauth_expired_unrefreshable","[bridge:repl] Skipping: OAuth token expired and refresh failed (re-login required)"),T?.("failed",jsr,"auth");let On=er;return await tn((so)=>({...so,bridgeOauthDeadExpiresAt:On,bridgeOauthDeadFailCount:so.bridgeOauthDeadExpiresAt===On?(so.bridgeOauthDeadFailCount??0)+1:1}),Z),null}}let Dr=Xor(),Yr=`${lLt()}-${OUe()}`,Jt=!1,dr=!1;if(C)Yr=C,Jt=!0,dr=!0;else if(!re){let St=fe(LA),er=fe(kWe);if(St)Yr=St,Jt=!0,dr=!0;else if(er)Yr=er,Jt=!0;else if(k&&k.length>0)for(let On=k.length-1;On>=0;On--){let so=k[On];if(!VRr(so)||kke(so))continue;let Un=UOe(so.message.content);if(!Un)continue;let Wn=Kqw(Un);if(!Wn)continue;Yr=Wn,Jt

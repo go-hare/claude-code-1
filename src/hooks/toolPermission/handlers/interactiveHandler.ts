@@ -38,7 +38,10 @@ import {
 } from '../../../utils/pipePermissionRelay.js'
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js'
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
-import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.js'
+import {
+  hasPermissionsToUseTool,
+  stripWholeToolGrantsForAsk,
+} from '../../../utils/permissions/permissions.js'
 import type { PermissionContext } from '../PermissionContext.js'
 import {
   createResolveOnce,
@@ -356,7 +359,19 @@ function handleInteractivePermission(
       if (response.behavior === 'allow') {
         void (async () => {
           if (response.permissionUpdates?.length) {
-            void ctx.persistPermissions(response.permissionUpdates)
+            // densable 2.1.235 #12 — strip bare whole-tool allows on pipe accept.
+            const finalInput = response.updatedInput ?? displayInput
+            const shouldStrip =
+              ctx.tool.suppressesAlwaysAllowRule?.(finalInput) === true ||
+              result.suppressAlwaysAllowRule === true
+            const updates = shouldStrip
+              ? stripWholeToolGrantsForAsk(
+                  response.permissionUpdates,
+                  ctx.tool,
+                  ctx.toolUseContext.getAppState().toolPermissionContext,
+                )
+              : response.permissionUpdates
+            void ctx.persistPermissions(updates)
           }
           ctx.logDecision(
             {
@@ -435,7 +450,19 @@ function handleInteractivePermission(
 
         if (response.behavior === 'allow') {
           if (response.updatedPermissions?.length) {
-            void ctx.persistPermissions(response.updatedPermissions)
+            // densable 2.1.235 #12 — strip bare whole-tool allows on bridge accept.
+            const finalInput = response.updatedInput ?? displayInput
+            const shouldStrip =
+              ctx.tool.suppressesAlwaysAllowRule?.(finalInput) === true ||
+              result.suppressAlwaysAllowRule === true
+            const updates = shouldStrip
+              ? stripWholeToolGrantsForAsk(
+                  response.updatedPermissions,
+                  ctx.tool,
+                  ctx.toolUseContext.getAppState().toolPermissionContext,
+                )
+              : response.updatedPermissions
+            void ctx.persistPermissions(updates)
           }
           ctx.logDecision(
             {
@@ -606,6 +633,9 @@ function handleInteractivePermission(
         result.suggestions,
         result.updatedInput,
         permissionPromptStartTimeMs,
+        {
+          askSuppressesAlwaysAllowRule: result.suppressAlwaysAllowRule === true,
+        },
       )
       if (!hookDecision) return
       if (isPermissionHookReprompt(hookDecision)) {

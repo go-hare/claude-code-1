@@ -1307,6 +1307,14 @@ export const SettingsSchema = lazySchema(() =>
               .boolean()
               .optional()
               .describe('Enable voice mode (hold-to-talk dictation)'),
+            voice: z
+              .object({
+                enabled: z
+                  .boolean()
+                  .optional()
+                  .describe('Enable voice mode (hold-to-talk dictation)'),
+              })
+              .optional(),
             voiceProvider: z
               .enum(['anthropic', 'doubao'])
               .optional()
