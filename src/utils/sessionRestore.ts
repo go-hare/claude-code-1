@@ -55,6 +55,7 @@ import { fileHistoryRestoreStateFromLog } from './fileHistory.js'
 import { createSystemMessage } from './messages.js'
 import { parseUserSpecifiedModel } from './model/model.js'
 import { getPlansDirectory } from './plans.js'
+import { isCoordinatorModeEnvEnabled } from './residualFinalEnvGates.js'
 import { setCwd } from './Shell.js'
 import {
   adoptResumedSessionFile,
@@ -674,9 +675,14 @@ export async function processResumedConversation(
       context.agentDefinitions,
     )
 
-  // Persist the current mode so future resumes know what mode this session was in
+  // Persist the current mode so future resumes know what mode this session was in.
+  // Prefer result.mode (transcript) so a null modeApi that skipped matchSessionMode
+  // cannot persist 'normal' for a coordinator session. Fall back to the densable
+  // env gate for older transcripts that omit mode.
   if (feature('COORDINATOR_MODE')) {
-    saveMode(context.modeApi?.isCoordinatorMode() ? 'coordinator' : 'normal')
+    saveMode(
+      result.mode ?? (isCoordinatorModeEnvEnabled() ? 'coordinator' : 'normal'),
+    )
   }
 
   // Compute initial state before render (per CLAUDE.md guidelines)

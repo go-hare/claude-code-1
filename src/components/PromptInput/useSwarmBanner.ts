@@ -14,9 +14,13 @@ import { getStandaloneAgentName } from '../../utils/standaloneAgent.js'
 import { isInsideTmux } from '../../utils/swarm/backends/detection.js'
 import {
   getCachedDetectionResult,
+  getResolvedTeammateMode,
   isInProcessEnabled,
 } from '../../utils/swarm/backends/registry.js'
-import { getSwarmSocketName } from '../../utils/swarm/constants.js'
+import {
+  getSwarmSocketName,
+  TEAM_LEAD_NAME,
+} from '../../utils/swarm/constants.js'
 import {
   getAgentName,
   getTeammateColor,
@@ -33,13 +37,13 @@ type SwarmBannerInfo = {
 
 /**
  * Hook that returns banner information for swarm, standalone agent, or --agent CLI context.
- * - Leader (not in tmux): Returns "tmux -L ... attach" command with cyan background
- * - Leader (in tmux / in-process): Falls through to standalone-agent check — shows
- *   /rename name + /color background if set, else null
- * - Teammate: Returns "teammate@team" format with their assigned color background
- * - Viewing a background agent (CoordinatorTaskPanel): Returns agent name with its color
- * - Standalone agent: Returns agent name with their color background (no @team)
- * - --agent CLI flag: Returns "@agentName" with cyan background
+ * - Leader with real teammates (excludes densable MQA lead-only seed), not in tmux /
+ *   not in-process / not native panes: "tmux -L … a" or Windows Terminal tabs hint
+ * - Leader (in tmux / in-process) viewing a teammate: `@name` with their color
+ * - Teammate process: `@name` with assigned color (in-process teammates are headless)
+ * - Viewing a background agent (CoordinatorTaskPanel): agent name with its color
+ * - Standalone agent: name and/or /color background (no @team)
+ * - --agent CLI flag: agent type with cyan/prompt border
  */
 export function useSwarmBanner(): SwarmBannerInfo {
   const teamContext = useAppState(s => s.teamContext)
@@ -73,17 +77,22 @@ export function useSwarmBanner(): SwarmBannerInfo {
 
   // Leader with spawned teammates: tmux-attach hint when external, else show
   // the viewed teammate's name when inside tmux / native panes / in-process.
+  // densable MQA seeds teamContext with only team-lead — exclude it so the
+  // attach hint matches TeamStatus / footer (real teammates only).
   const hasTeammates =
-    teamContext?.teamName &&
-    teamContext.teammates &&
-    Object.keys(teamContext.teammates).length > 0
+    !!teamContext?.teamName &&
+    Object.values(teamContext.teammates ?? {}).some(
+      t => t.name !== TEAM_LEAD_NAME,
+    )
   if (hasTeammates) {
     const viewedTeammate = getViewedTeammateTask(state)
     const viewedColor = toThemeColor(viewedTeammate?.identity.color)
     const inProcessMode = isInProcessEnabled()
     const detection = getCachedDetectionResult()
     const nativePanes = detection?.isNative ?? false
-    const backendType = detection?.backend.type
+    // detection cache may be empty before first spawn; resolve from session mode
+    // so Windows auto does not flash the tmux attach string.
+    const backendType = detection?.backend.type ?? getResolvedTeammateMode()
 
     if (insideTmux === false && !inProcessMode && !nativePanes) {
       const hint =

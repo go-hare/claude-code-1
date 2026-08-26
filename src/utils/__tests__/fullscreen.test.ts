@@ -7,6 +7,9 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   _resetTmuxControlModeProbeForTesting,
   _setWindowsPlatformForTesting,
@@ -65,22 +68,25 @@ const realGetSettingsForSource =
 const realGetInitialSettings =
   settingsSnap.getInitialSettings as typeof realSettings.getInitialSettings
 
+/**
+ * Pin tui for this suite. `undefined` means "tui unset" — strip the key so
+ * the developer's real settings.tui (often fullscreen) cannot leak into the
+ * unset-baseline cases (ant_default / GB default-off).
+ */
+function withPinnedTui<T extends { tui?: unknown }>(settings: T): T {
+  if (settingsTui !== undefined) {
+    return { ...settings, tui: settingsTui }
+  }
+  const { tui: _omit, ...rest } = settings
+  return rest as T
+}
+
 // Relative specifier matches fullscreen.ts dynamic require('./settings/settings.js').
 const settingsMock = createSettingsMock(settingsSnap, {
   getSettingsForSource: (
     source: Parameters<typeof realGetSettingsForSource>[0],
-  ) => {
-    if (settingsTui !== undefined) {
-      return { ...(realGetSettingsForSource(source) ?? {}), tui: settingsTui }
-    }
-    return realGetSettingsForSource(source)
-  },
-  getInitialSettings: () => {
-    if (settingsTui !== undefined) {
-      return { ...realGetInitialSettings(), tui: settingsTui }
-    }
-    return realGetInitialSettings()
-  },
+  ) => withPinnedTui(realGetSettingsForSource(source) ?? {}),
+  getInitialSettings: () => withPinnedTui(realGetInitialSettings() ?? {}),
 })
 mock.module('../settings/settings.js', settingsMock)
 mock.module('src/utils/settings/settings.js', settingsMock)
@@ -93,6 +99,7 @@ afterAll(() => {
 
 beforeEach(() => {
   for (const k of GATE_ENV_KEYS) delete process.env[k]
+  settingsTui = undefined
   _setWindowsPlatformForTesting(undefined)
   _resetTmuxControlModeProbeForTesting()
 })
@@ -230,8 +237,21 @@ describe('isFullscreenEnvEnabled', () => {
     delete process.env.CLAUDE_CODE_SESSION_KIND
     delete process.env.TMUX
     settingsTui = undefined
-    // P8t path (renderer) defaults on; densable xse → ant_default (tip default-on)
-    expect(getFullscreenGateReason()).toMatch(/ant_default|default_on/)
+    // isTuiModeMarkerPresent reads ~/.claude/.tui-mode (or CLAUDE_CONFIG_DIR).
+    // A leftover /tui on marker would report upsell_trial_on instead of ant_default.
+    const isolatedConfig = mkdtempSync(
+      join(tmpdir(), 'fullscreen-ant-default-'),
+    )
+    const prevConfigDir = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = isolatedConfig
+    try {
+      // P8t path (renderer) defaults on; densable xse → ant_default (tip default-on)
+      expect(getFullscreenGateReason()).toMatch(/ant_default|default_on/)
+    } finally {
+      if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = prevConfigDir
+      rmSync(isolatedConfig, { recursive: true, force: true })
+    }
   })
 
   test('t3e reason: env_off when NO_FLICKER=0', () => {

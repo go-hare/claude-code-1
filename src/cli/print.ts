@@ -489,7 +489,7 @@ import { isExtractModeActive } from '../memdir/paths.js'
 // Lazy accessor — top-level require() can yield an incomplete ESM namespace
 // under Bun (empty keys); calling `.isCoordinatorMode` then throws in REPL.
 type CoordinatorModeModule = typeof import('../coordinator/coordinatorMode.js')
-let coordinatorModeModuleCache: CoordinatorModeModule | null | undefined
+let coordinatorModeModuleCache: CoordinatorModeModule | undefined
 function getCoordinatorModeModule(): CoordinatorModeModule | null {
   if (!feature('COORDINATOR_MODE')) return null
   if (coordinatorModeModuleCache !== undefined) {

@@ -8,6 +8,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as cliRelaunchModule from '../../../utils/cliRelaunch.js'
 import { getClaudeConfigHomeDir } from '../../../utils/envUtils.js'
 
 mock.module('bun:bundle', () => ({
@@ -17,6 +18,27 @@ mock.module('bun:bundle', () => ({
 mock.module('src/services/analytics/index.js', () => ({
   logEvent: () => {},
   stripProtoFields: (v: unknown) => v,
+}))
+
+// `/tui on|off` runs the official oyt relaunch: acceptTuiRelaunch spawnSyncs a
+// replacement CLI and applyTuiRelaunchAfterSwitch then process.exit()s. Under
+// `bun test` the relaunch argv points at this file, so the child re-loads it
+// outside the runner and the parent exits mid-suite. Default spawn to false so
+// the command still exercises plan-build and env inject without either effect.
+//
+// mock.module is process-global, so this also reaches cliRelaunch.test.ts —
+// forcing only the *unspecified* case keeps its explicit `spawn: false` call
+// (and every other export) behaving exactly as the real module.
+const realCliRelaunch = { ...cliRelaunchModule }
+mock.module('src/utils/cliRelaunch.ts', () => ({
+  ...realCliRelaunch,
+  acceptTuiRelaunch: (
+    input: Parameters<typeof cliRelaunchModule.acceptTuiRelaunch>[0],
+  ) =>
+    realCliRelaunch.acceptTuiRelaunch({
+      ...input,
+      spawn: input.spawn ?? false,
+    }),
 }))
 
 let tmpDir: string

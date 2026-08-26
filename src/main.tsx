@@ -138,16 +138,19 @@ function isCoordinatorModeEnv(): boolean {
   return feature('COORDINATOR_MODE') ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE) : false;
 }
 type CoordinatorModeModule = typeof import('./coordinator/coordinatorMode.js');
-let coordinatorModeModuleCache: CoordinatorModeModule | null | undefined;
+let coordinatorModeModuleCache: CoordinatorModeModule | undefined;
 async function loadCoordinatorModeModule(): Promise<CoordinatorModeModule | null> {
   if (!feature('COORDINATOR_MODE')) return null;
-  if (coordinatorModeModuleCache === undefined) {
-    const mod = await import('./coordinator/coordinatorMode.js');
-    // Reject incomplete circular-init namespaces (empty / missing API).
-    coordinatorModeModuleCache =
-      typeof mod.isCoordinatorMode === 'function' && typeof mod.matchSessionMode === 'function' ? mod : null;
+  if (coordinatorModeModuleCache !== undefined) {
+    return coordinatorModeModuleCache;
   }
-  return coordinatorModeModuleCache;
+  const mod = await import('./coordinator/coordinatorMode.js');
+  // Incomplete circular-init namespace — do not cache; retry on later calls.
+  if (typeof mod.isCoordinatorMode !== 'function' || typeof mod.matchSessionMode !== 'function') {
+    return null;
+  }
+  coordinatorModeModuleCache = mod;
+  return mod;
 }
 // Dead code elimination: conditional import for KAIROS (assistant mode)
 /* eslint-disable @typescript-eslint/no-require-imports */
