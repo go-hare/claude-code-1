@@ -38,6 +38,13 @@ import {
   getShownArchiveHeadersHelperFromOverlay,
   type HeadersHelperPaneShown,
 } from './marketplaceHeadersHelper.js'
+import {
+  EntryHelperPolicyError,
+  PluginCommandRefusedError,
+  classifyPluginCommandRefusal,
+  entryHelperPaneMismatchFailureCode,
+  entryHelperPolicyFailureCode,
+} from './pluginCommandRefusal.js'
 import { denyCommandProducerDir } from './commandProducerDirs.js'
 import {
   addInstalledPlugin,
@@ -264,8 +271,9 @@ export async function cacheAndRegisterPlugin(
         marketplaceName,
       )
       if (refusal !== null) {
-        throw new Error(
+        throw new EntryHelperPolicyError(
           formatEntryHelperPolicyRefusalMessage(pluginName, refusal),
+          entryHelperPolicyFailureCode(refusal),
         )
       }
     }
@@ -276,7 +284,11 @@ export async function cacheAndRegisterPlugin(
       kind: 'install',
     })
     if (!qhi.ok) {
-      throw new Error(formatHeadersHelperPaneMismatch(qhi))
+      // densable ayi: throw new cwe(E0i(O, name, "install"), v0i[O])
+      throw new EntryHelperPolicyError(
+        formatHeadersHelperPaneMismatch(qhi),
+        entryHelperPaneMismatchFailureCode(qhi.code),
+      )
     }
   }
 
@@ -703,7 +715,7 @@ export type InstallPluginResult =
       /** densable: full install closure (root + deps) for activate VQS. */
       closure: string[]
     }
-  | { success: false; error: string }
+  | { success: false; error: string; failureCode?: string }
 
 /**
  * Parameters for installing a plugin from marketplace
@@ -850,6 +862,12 @@ export async function installPluginFromMarketplace({
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
     logError(toError(err))
-    return { success: false, error: `Failed to install: ${errorMessage}` }
+    return {
+      success: false,
+      error: `Failed to install: ${errorMessage}`,
+      ...(err instanceof PluginCommandRefusedError && {
+        failureCode: classifyPluginCommandRefusal(err).code,
+      }),
+    }
   }
 }

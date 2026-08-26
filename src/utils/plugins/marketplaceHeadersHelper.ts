@@ -20,6 +20,11 @@ import {
 import { jsonParse } from '../slowOperations.js'
 import { getAddDirExtraMarketplaces } from './addDirPluginSettings.js'
 import { areCommandPluginSourcesDisabledByPolicy } from './pluginCommandSource.js'
+import {
+  EntryHelperPolicyError,
+  PluginCommandRefusedError,
+  entryHelperPolicyFailureCode,
+} from './pluginCommandRefusal.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import {
   headersHelperPolicyRefusal,
@@ -672,8 +677,9 @@ export function overlayTrustedSettingsEntryAuth(options: {
       trusted.operatorTier === 'policySettings' &&
       !isRemoteManagedPolicyConsented()
     ) {
-      throw new Error(
+      throw new EntryHelperPolicyError(
         `This plugin's headersHelper was not run: ${ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED}.`,
+        'entry_helper_remote_policy_unconsented',
       )
     }
     return {
@@ -845,19 +851,21 @@ export async function resolveUrlMarketplaceHeaders(
     trusted.authoredBy === 'policySettings' &&
     !isRemoteManagedPolicyConsented()
   ) {
-    throw new Error(
+    throw new PluginCommandRefusedError(
       `${label}: headersHelper not run — ${ENTRY_HELPER_REMOTE_POLICY_UNCONSENTED}. The marketplace was not fetched.`,
+      'marketplace headersHelper from remote managed settings not yet verified and consented',
     )
   }
   if (
     areCommandPluginSourcesDisabledByPolicy() &&
     trusted.authoredBy !== 'policySettings'
   ) {
-    throw new Error(
+    throw new PluginCommandRefusedError(
       `${label}: your organization's managed settings disable marketplace-declared commands ` +
         `(disableCommandPluginSources / allowManagedHooksOnly), and this marketplace's headersHelper ` +
         `is not declared in managed settings. The marketplace was not fetched and the command was not run; ` +
         `ask your admin to allow it or to declare the marketplace in managed settings.`,
+      'marketplace headersHelper disabled by managed policy',
     )
   }
 
@@ -959,26 +967,25 @@ export function assertEntryHeadersHelperMayRun(
     options.marketplaceName,
   )
   if (refusal !== null) {
-    if (refusal === 'remote_policy_unconsented') {
-      throw new Error(
-        `This plugin's headersHelper was not run: remote managed settings not yet verified and consented.`,
-      )
-    }
-    throw new Error(
-      `Plugin "${options.pluginName}" fetches its archive through a marketplace-declared headersHelper command, and your organization's managed settings disable marketplace-declared commands (disableCommandPluginSources / allowManagedHooksOnly).`,
+    // densable Dcf → K8n (y5n) + cwe failureCode. Overlay WUt keeps O3n.
+    throw new EntryHelperPolicyError(
+      formatEntryHelperPolicyRefusalMessage(options.pluginName, refusal),
+      entryHelperPolicyFailureCode(refusal),
     )
   }
 
   if (options.requireInlinedManifest !== false && entry.strict !== false) {
-    throw new Error(
+    throw new EntryHelperPolicyError(
       `Plugin "${options.pluginName}" declares a headersHelper but is not strict:false — an entry with headersHelper must inline its manifest so its capabilities can be reviewed before the command runs.`,
+      'entry_helper_not_inlined',
     )
   }
 
   if (!options.runEntryHelper) {
-    throw new Error(
+    throw new EntryHelperPolicyError(
       `Plugin "${options.pluginName}" fetches its archive through a headersHelper, ` +
         'which only runs when you install or update it from its own details view — open this plugin in /plugin (or run `claude plugin install`/`update`), where the command is shown first.',
+      'entry_helper_deferred',
     )
   }
 }
@@ -1578,10 +1585,7 @@ export function planArchiveEntryHelperUpdate(options: {
         options.pluginName,
         refusal,
       ),
-      failureCode:
-        refusal === 'remote_policy_unconsented'
-          ? 'entry_helper_remote_policy_unconsented'
-          : 'entry_helper_disabled_by_policy',
+      failureCode: entryHelperPolicyFailureCode(refusal),
     }
   }
 
@@ -1608,10 +1612,7 @@ export function planArchiveEntryHelperUpdate(options: {
           options.pluginName,
           refusal,
         ),
-        failureCode:
-          refusal === 'remote_policy_unconsented'
-            ? 'entry_helper_remote_policy_unconsented'
-            : 'entry_helper_disabled_by_policy',
+        failureCode: entryHelperPolicyFailureCode(refusal),
       }
     }
     return {

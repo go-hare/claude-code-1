@@ -72,6 +72,12 @@ import {
   type HeadersHelperPaneShown,
 } from '../../utils/plugins/marketplaceHeadersHelper.js'
 import {
+  EntryHelperPolicyError,
+  PluginCommandRefusedError,
+  classifyPluginCommandRefusal,
+  entryHelperPaneMismatchFailureCode,
+} from '../../utils/plugins/pluginCommandRefusal.js'
+import {
   formatResolutionError,
   installResolvedPlugin,
   resolveMarketplaceArchiveAuth,
@@ -176,6 +182,8 @@ export type PluginOperationResult = {
   scope?: PluginScope
   /** Plugins that declare this plugin as a dependency (warning on uninstall/disable) */
   reverseDependents?: string[]
+  /** densable vun / w0i — typed i0/cwe classification when present. */
+  failureCode?: string
 }
 
 /**
@@ -191,6 +199,8 @@ export type PluginUpdateResult = {
   scope?: PluginScope
   /** SEA `ggw` — autoupdate treats this as skip, not fail. */
   skipReason?: 'entry_helper_deferred'
+  /** densable vun — cwe.failureCode or command_source_refused. */
+  failureCode?: string
 }
 
 // ============================================================================
@@ -516,13 +526,15 @@ export async function installPluginOp(
       marketplaceSource: known[foundMarketplace]?.source,
     })
     if (helper) {
-      return {
-        success: false,
-        message: formatEntryHelperCliUnconfirmedMessage(helper),
-      }
+      // densable zgh: throw new cwe(Sas + confirm-in-terminal, "entry_helper_unconfirmed")
+      throw new EntryHelperPolicyError(
+        formatEntryHelperCliUnconfirmedMessage(helper),
+        'entry_helper_unconfirmed',
+      )
     }
   }
 
+  // densable zgh: U9n is not wrapped — i0/cwe from ayi propagate.
   const result = await installResolvedPlugin({
     pluginId,
     entry,
@@ -1142,16 +1154,31 @@ export async function updatePluginOp(
     }
   }
 
-  return performPluginUpdate({
-    pluginId,
-    pluginName,
-    entry,
-    marketplaceInstallLocation,
-    installation,
-    scope,
-    projectPath,
-    options,
-  })
+  try {
+    return await performPluginUpdate({
+      pluginId,
+      pluginName,
+      entry,
+      marketplaceInstallLocation,
+      installation,
+      scope,
+      projectPath,
+      options,
+    })
+  } catch (error) {
+    // densable vun: i0 → failed + failureCode (cwe.failureCode else
+    // command_source_refused). Other throws stay exceptions.
+    if (error instanceof PluginCommandRefusedError) {
+      return {
+        success: false,
+        message: error.message,
+        pluginId,
+        scope,
+        failureCode: classifyPluginCommandRefusal(error).code,
+      }
+    }
+    throw error
+  }
 }
 
 /**
@@ -1288,6 +1315,7 @@ async function performPluginUpdate({
         message: plan.message,
         pluginId,
         scope,
+        failureCode: plan.failureCode,
       }
     }
     if (plan.kind === 'up_to_date') {
@@ -1349,11 +1377,13 @@ async function performPluginUpdate({
             kind: 'update',
           })
           if (!qhi.ok) {
+            // densable ggw: {outcome:"failed", message:E0i(...), failureCode:v0i[we]}
             return {
               success: false,
               message: formatHeadersHelperPaneMismatch(qhi),
               pluginId,
               scope,
+              failureCode: entryHelperPaneMismatchFailureCode(qhi.code),
             }
           }
         }

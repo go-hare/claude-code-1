@@ -95,11 +95,14 @@ import {
   mergeSameOriginArchiveHeaders,
   mintHeadersFromHelper,
   overlayTrustedSettingsEntryAuth,
+  formatEntryHelperPolicyRefusalMessage,
+  assertEntryHeadersHelperMayRun,
   promptEntryHeadersHelperConsent,
   resolvePluginArchiveHeaders,
   resolveShownArchiveHeadersHelper,
   resolveUrlMarketplaceHeaders,
 } from '../marketplaceHeadersHelper.js'
+import { EntryHelperPolicyError } from '../pluginCommandRefusal.js'
 import {
   headersHelperPolicyRefusal,
   isHeadersHelperDisabledByPolicy,
@@ -323,6 +326,73 @@ describe('marketplace headersHelper mint (densable 2.1.238 m5n)', () => {
 })
 
 describe('headersHelper policy (densable fgt/YLa)', () => {
+  test('J8p policy refusal throws y5n K8n, not the overlay O3n short string', () => {
+    const helper = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../marketplaceHeadersHelper.ts',
+      ),
+      'utf8',
+    )
+    const j8p = helper.slice(
+      helper.indexOf('export function assertEntryHeadersHelperMayRun'),
+      helper.indexOf('export function entryHasArchiveHeadersHelper'),
+    )
+    expect(j8p).toContain('formatEntryHelperPolicyRefusalMessage')
+    expect(j8p).toContain('EntryHelperPolicyError')
+    expect(j8p).toContain('entryHelperPolicyFailureCode')
+    expect(j8p).toContain('entry_helper_not_inlined')
+    expect(j8p).toContain('entry_helper_deferred')
+    expect(j8p).not.toContain(
+      "This plugin's headersHelper was not run: remote managed settings not yet verified",
+    )
+    expect(
+      formatEntryHelperPolicyRefusalMessage(
+        'demo-plugin',
+        'remote_policy_unconsented',
+      ),
+    ).toContain('The plugin was not installed or updated.')
+  })
+
+  test('J8p throws cwe for not_inlined and deferred', () => {
+    try {
+      assertEntryHeadersHelperMayRun(
+        { headersHelper: 'mint-headers', strict: true },
+        {
+          pluginName: 'demo-plugin',
+          runEntryHelper: true,
+          requireInlinedManifest: true,
+        },
+      )
+      throw new Error('expected throw')
+    } catch (error) {
+      expect(error).toBeInstanceOf(EntryHelperPolicyError)
+      expect((error as EntryHelperPolicyError).failureCode).toBe(
+        'entry_helper_not_inlined',
+      )
+      expect((error as EntryHelperPolicyError).kindDetail).toBe(
+        'plugin entry headersHelper requires strict:false (catalog authoring error)',
+      )
+    }
+
+    try {
+      assertEntryHeadersHelperMayRun(
+        { headersHelper: 'mint-headers', strict: false },
+        {
+          pluginName: 'demo-plugin',
+          runEntryHelper: false,
+          requireInlinedManifest: false,
+        },
+      )
+      throw new Error('expected throw')
+    } catch (error) {
+      expect(error).toBeInstanceOf(EntryHelperPolicyError)
+      expect((error as EntryHelperPolicyError).failureCode).toBe(
+        'entry_helper_deferred',
+      )
+    }
+  })
+
   test('refusal null when policy does not disable command sources', () => {
     expect(
       headersHelperPolicyRefusal({
@@ -762,6 +832,10 @@ describe('DNt/Ryt/vBa settings-source overlay (densable 2.1.238)', () => {
     try {
       overlayTrustedSettingsEntryAuth(options)
     } catch (error) {
+      expect(error).toBeInstanceOf(EntryHelperPolicyError)
+      expect((error as EntryHelperPolicyError).failureCode).toBe(
+        'entry_helper_remote_policy_unconsented',
+      )
       expect((error as Error).message).not.toContain(
         'The marketplace was not fetched.',
       )

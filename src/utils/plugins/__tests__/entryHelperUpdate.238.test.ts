@@ -239,7 +239,10 @@ describe('leftover #1+#2 gold-hard bind (source, densable 2.1.238)', () => {
     )
     expect(ops).toContain('shownEntryHelper?: HeadersHelperPaneShown')
     expect(ops).toContain('formatEntryHelperCliUnconfirmedMessage(helper)')
+    expect(ops).toContain('throw new EntryHelperPolicyError')
+    expect(ops).toContain("'entry_helper_unconfirmed'")
     expect(ops).toContain('consented: options?.consentedEntryHelper')
+    expect(ops).toContain('entryHelperPaneMismatchFailureCode(qhi.code)')
 
     const manage = readFileSync(
       join(import.meta.dir, '../../../commands/plugin/ManagePlugins.tsx'),
@@ -258,6 +261,8 @@ describe('leftover #1+#2 gold-hard bind (source, densable 2.1.238)', () => {
     )
     expect(install).toContain('compareConsentedEntryHelper')
     expect(install).toContain('consented: options?.consentedEntryHelper')
+    expect(install).toContain('throw new EntryHelperPolicyError')
+    expect(install).toContain('entryHelperPaneMismatchFailureCode(qhi.code)')
 
     const helper = readFileSync(
       join(import.meta.dir, '../marketplaceHeadersHelper.ts'),

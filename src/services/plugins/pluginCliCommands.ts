@@ -11,6 +11,11 @@ import { errorMessage } from '../../utils/errors.js'
 import { gracefulShutdown } from '../../utils/gracefulShutdown.js'
 import { logError } from '../../utils/log.js'
 import { getManagedPluginNames } from '../../utils/plugins/managedPlugins.js'
+import {
+  PluginCommandRefusedError,
+  classifyPluginCommandRefusal,
+  errorFromPluginFailureCode,
+} from '../../utils/plugins/pluginCommandRefusal.js'
 import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
 import type { PluginScope } from '../../utils/plugins/schemas.js'
 import { writeToStdout } from '../../utils/process.js'
@@ -85,9 +90,11 @@ function handlePluginCommandError(
   logEvent('tengu_plugin_command_failed', {
     command:
       command as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    error_category: classifyPluginCommandError(
-      error,
-    ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    error_category: (error instanceof PluginCommandRefusedError
+      ? classifyPluginCommandRefusal(error).code
+      : classifyPluginCommandError(
+          error,
+        )) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     ...telemetryFields,
   })
   // eslint-disable-next-line custom-rules/no-process-exit
@@ -117,7 +124,7 @@ export async function installPlugin(
     })
 
     if (!result.success) {
-      throw new Error(result.message)
+      throw errorFromPluginFailureCode(result.message, result.failureCode)
     }
 
     console.log(`${figures.tick} ${result.message}`)
@@ -351,7 +358,7 @@ export async function updatePluginCli(
     })
 
     if (!result.success) {
-      throw new Error(result.message)
+      throw errorFromPluginFailureCode(result.message, result.failureCode)
     }
 
     writeToStdout(`${figures.tick} ${result.message}\n`)
