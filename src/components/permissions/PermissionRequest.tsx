@@ -193,11 +193,10 @@ export function PermissionRequest({
   workerBadge,
   setStickyFooter,
 }: PermissionRequestProps): React.ReactNode {
-  // Handle Ctrl+C (app:interrupt) to reject
+  // densable interrupt → deny/cancel only (never answer allow via onDone)
   useKeybinding(
     'app:interrupt',
     () => {
-      onDone();
       onReject();
       toolUseConfirm.onReject();
     },

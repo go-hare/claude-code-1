@@ -10,6 +10,7 @@ import {
   cancelQuotaAutoResume,
   getQuotaAutoResumeState,
   getWaitThenContinueOption,
+  hasPendingQuotaContinuationInQueue,
   isQuotaAutoResumeEpisodeActive,
   offerArmQuotaAutoResume,
   subscribeQuotaAutoResumeChanged,
@@ -136,8 +137,10 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
   ]);
 
   function handleCancel(): void {
-    // densable RZi: if already armed/stale, cancel auto-resume instead of silent skip
-    if (episodeActive || quotaPhase === 'stale') {
+    // densable RZi: Klr() || Ado==="stale" → Nyr(); Klr = WXa pending
+    // continuation only — armed countdown must NOT cancel (use
+    // "Don't continue automatically" for that). Esc/Stop → prefill + skip.
+    if (hasPendingQuotaContinuationInQueue() || quotaPhase === 'stale') {
       logEvent('tengu_rate_limit_options_menu_cancel', {});
       cancelQuotaAutoResume('dialog');
       onDone(

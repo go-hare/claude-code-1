@@ -78,4 +78,20 @@ describe('densable print-mode SIGTERM ownership (#10)', () => {
     expect(gate).toBeGreaterThan(0)
     expect(gate).toBeLessThan(deny)
   })
+
+  test('query streaming drain is inside the same remote-cancel gate (236 #27)', () => {
+    const query = readFileSync(join(import.meta.dir, '../../query.ts'), 'utf8')
+    const abort = query.indexOf(
+      'if (toolUseContext.abortController.signal.aborted)',
+    )
+    const gate = query.indexOf('isRemoteCancelAbortReason', abort)
+    const stream = query.indexOf(
+      'streamingToolExecutor.getRemainingResults',
+      gate,
+    )
+    const pairing = query.indexOf("'Interrupted by user'", gate)
+    expect(gate).toBeGreaterThan(abort)
+    expect(stream).toBeGreaterThan(gate)
+    expect(pairing).toBeGreaterThan(stream)
+  })
 })

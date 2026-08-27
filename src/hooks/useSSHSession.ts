@@ -12,6 +12,11 @@
 import { randomUUID } from 'crypto'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
+import type { DialogStore } from '../dialog/dialogStore.js'
+import {
+  dequeuePermissionConfirm,
+  enqueuePermissionConfirm,
+} from './toolPermission/PermissionContext.js'
 import {
   createSyntheticAssistantMessage,
   createToolStub,
@@ -42,6 +47,7 @@ type UseSSHSessionProps = {
   setMessages: React.Dispatch<React.SetStateAction<MessageType[]>>
   setIsLoading: (loading: boolean) => void
   setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>
+  dialogStore?: DialogStore | null
   tools: Tool[]
 }
 
@@ -50,6 +56,7 @@ export function useSSHSession({
   setMessages,
   setIsLoading,
   setToolUseConfirmQueue,
+  dialogStore = null,
   tools,
 }: UseSSHSessionProps): UseSSHSessionResult {
   const isRemoteMode = !!session
@@ -134,8 +141,10 @@ export function useSSHSession({
               behavior: 'deny',
               message: 'User aborted',
             })
-            setToolUseConfirmQueue(q =>
-              q.filter(i => i.toolUseID !== request.tool_use_id),
+            dequeuePermissionConfirm(
+              setToolUseConfirmQueue,
+              dialogStore,
+              request.tool_use_id,
             )
           },
           onAllow(updatedInput) {
@@ -143,8 +152,10 @@ export function useSSHSession({
               behavior: 'allow',
               updatedInput,
             })
-            setToolUseConfirmQueue(q =>
-              q.filter(i => i.toolUseID !== request.tool_use_id),
+            dequeuePermissionConfirm(
+              setToolUseConfirmQueue,
+              dialogStore,
+              request.tool_use_id,
             )
             setIsLoading(true)
           },
@@ -153,14 +164,20 @@ export function useSSHSession({
               behavior: 'deny',
               message: feedback ?? 'User denied permission',
             })
-            setToolUseConfirmQueue(q =>
-              q.filter(i => i.toolUseID !== request.tool_use_id),
+            dequeuePermissionConfirm(
+              setToolUseConfirmQueue,
+              dialogStore,
+              request.tool_use_id,
             )
           },
           async recheckPermission() {},
         }
 
-        setToolUseConfirmQueue(q => [...q, toolUseConfirm])
+        enqueuePermissionConfirm(
+          setToolUseConfirmQueue,
+          dialogStore,
+          toolUseConfirm,
+        )
         setIsLoading(false)
       },
       onConnected: () => {
@@ -219,7 +236,7 @@ export function useSSHSession({
       session.proxy.stop()
       managerRef.current = null
     }
-  }, [session, setMessages, setIsLoading, setToolUseConfirmQueue])
+  }, [session, setMessages, setIsLoading, setToolUseConfirmQueue, dialogStore])
 
   const sendMessage = useCallback(
     async (content: RemoteMessageContent): Promise<boolean> => {

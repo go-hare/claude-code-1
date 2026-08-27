@@ -287,6 +287,22 @@ export function isPrintModeSignalHandlersRegistered(): boolean {
   return printModeSignalHandlersRegistered
 }
 
+/**
+ * Interactive REPL: abort in-flight query with remote-cancel on SIGTERM
+ * (print owns its own handlers via markPrintModeSignalHandlersRegistered).
+ */
+let interactiveShutdownAbort: (() => void) | null = null
+
+export function registerInteractiveShutdownAbort(
+  fn: (() => void) | null,
+): void {
+  interactiveShutdownAbort = fn
+}
+
+export function getInteractiveShutdownAbortForTests(): (() => void) | null {
+  return interactiveShutdownAbort
+}
+
 export const setupGracefulShutdown = memoize(() => {
   // Work around a Bun bug where process.removeListener(sig, fn) resets the
   // kernel sigaction for that signal even when other JS listeners remain —
@@ -351,6 +367,13 @@ export const setupGracefulShutdown = memoize(() => {
     // densable: if(Vwo)return — print/SDK handler aborts turn + Ts(143).
     if (printModeSignalHandlersRegistered) {
       return
+    }
+    // densable #27 interactive: abort in-flight query as remote-cancel
+    // before exit so StreamingToolExecutor does not emit synthetic denials.
+    try {
+      interactiveShutdownAbort?.()
+    } catch {
+      // abort must not block shutdown
     }
     preemptTerminalForShutdown()
     void gracefulShutdown(143) // Exit code 143 (128 + 15) for SIGTERM

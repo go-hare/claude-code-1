@@ -5,7 +5,17 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
+import type { Dispatch, SetStateAction } from 'react'
 import type { ToolUseConfirm } from '../../components/permissions/PermissionRequest.js'
+import type { DialogStore } from '../../dialog/dialogStore.js'
+import {
+  clearPermissionConfirms,
+  getPermissionConfirm,
+  registerPermissionConfirm,
+  unregisterPermissionConfirm,
+} from '../../dialog/permissionConfirmRegistry.js'
+import { shouldQueuePermissionBehind } from '../../dialog/permissionQueueBehind.js'
+import { permissionPromptDialogId } from '../../dialog/specs/permissionKinds.js'
 import type {
   ToolPermissionContext,
   Tool as ToolType,
@@ -458,22 +468,59 @@ type PermissionContext = ReturnType<typeof createPermissionContext>
 
 /**
  * Create a PermissionQueueOps backed by a React state setter.
- * This is the bridge between React's `setToolUseConfirmQueue` and the
- * generic queue interface used by PermissionContext.
+ * When dialogStore is provided, also mirrors densable bEt onto DialogStore so
+ * managed-settings queueBehind can wait under an open permission prompt.
  */
 function createPermissionQueueOps(
-  setToolUseConfirmQueue: React.Dispatch<
-    React.SetStateAction<ToolUseConfirm[]>
-  >,
+  setToolUseConfirmQueue: Dispatch<SetStateAction<ToolUseConfirm[]>>,
+  dialogStore?: DialogStore | null,
 ): PermissionQueueOps {
+  const mirrorOpen = (item: ToolUseConfirm) => {
+    if (!dialogStore) return
+    // densable doo path: requestDialog opens via mailbox — skip mirror
+    if (item.toolUseContext.requestDialog) return
+    registerPermissionConfirm(item)
+    void (async () => {
+      // densable foo order: Fwl → file Lno → Bash/sed → bEt
+      const {
+        selectBashPermissionDialog,
+        selectFilePermissionDialog,
+        selectPermissionDialog,
+        selectPermissionDialogFwl,
+      } = await import('../../dialog/selectPermissionDialog.js')
+      const fwl = selectPermissionDialogFwl(item)
+      const file = fwl ? null : await selectFilePermissionDialog(item)
+      const bash = fwl || file ? null : await selectBashPermissionDialog(item)
+      const selected = fwl ?? file ?? bash ?? selectPermissionDialog(item)
+      const stillQueued = getPermissionConfirm(item.toolUseID)
+      if (!stillQueued) return
+      dialogStore.open({
+        id: permissionPromptDialogId(item.toolUseID),
+        kind: selected.spec.kind,
+        payload: selected.descriptor,
+        queueBehind: shouldQueuePermissionBehind(item),
+      })
+    })()
+  }
+  const mirrorClose = (toolUseID: string) => {
+    unregisterPermissionConfirm(toolUseID)
+    if (!dialogStore) return
+    const id = permissionPromptDialogId(toolUseID)
+    if (dialogStore.getState().open.some(d => d.id === id)) {
+      dialogStore.dismiss(id)
+    }
+  }
   return {
     push(item: ToolUseConfirm) {
       setToolUseConfirmQueue(queue => [...queue, item])
+      registerPermissionConfirm(item)
+      mirrorOpen(item)
     },
     remove(toolUseID: string) {
       setToolUseConfirmQueue(queue =>
         queue.filter(item => item.toolUseID !== toolUseID),
       )
+      mirrorClose(toolUseID)
     },
     update(toolUseID: string, patch: Partial<ToolUseConfirm>) {
       setToolUseConfirmQueue(queue =>
@@ -481,7 +528,52 @@ function createPermissionQueueOps(
           item.toolUseID === toolUseID ? { ...item, ...patch } : item,
         ),
       )
+      const prev = getPermissionConfirm(toolUseID)
+      if (prev) registerPermissionConfirm({ ...prev, ...patch })
     },
+  }
+}
+
+/**
+ * densable tip bridge: enqueue onto React queue + DialogStore mirror so NMs
+ * (DialogHost) renders — same surface as local canUseTool. Do not invent a
+ * second PermissionRequest overlay.
+ */
+export function enqueuePermissionConfirm(
+  setToolUseConfirmQueue: Dispatch<SetStateAction<ToolUseConfirm[]>>,
+  dialogStore: DialogStore | null | undefined,
+  item: ToolUseConfirm,
+): void {
+  createPermissionQueueOps(setToolUseConfirmQueue, dialogStore).push(item)
+}
+
+export function dequeuePermissionConfirm(
+  setToolUseConfirmQueue: Dispatch<SetStateAction<ToolUseConfirm[]>>,
+  dialogStore: DialogStore | null | undefined,
+  toolUseID: string,
+): void {
+  createPermissionQueueOps(setToolUseConfirmQueue, dialogStore).remove(
+    toolUseID,
+  )
+}
+
+/**
+ * densable Esc / cancel: wipe React queue + tip permission_prompt mirrors.
+ * Does not dismiss doo mailbox ids (dialog-N).
+ */
+export function clearPermissionConfirmQueue(
+  setToolUseConfirmQueue: (
+    updater: (prev: ToolUseConfirm[]) => ToolUseConfirm[],
+  ) => void,
+  dialogStore: DialogStore | null | undefined,
+): void {
+  setToolUseConfirmQueue(() => [])
+  clearPermissionConfirms()
+  if (!dialogStore) return
+  for (const d of [...dialogStore.getState().open]) {
+    if (d.id.startsWith('permission_prompt:')) {
+      dialogStore.dismiss(d.id)
+    }
   }
 }
 

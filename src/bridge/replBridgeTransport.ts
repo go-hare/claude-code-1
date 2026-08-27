@@ -363,8 +363,17 @@ export async function createV2ReplTransport(opts: {
         void sse.connect()
       }
       void ccr.initialize(epoch).then(
-        () => {
+        restored => {
           ccrInitialized = true
+          // densable #13: keep CCR internal for interactive y_u (was discarded)
+          try {
+            const { stashRestoredWorkerForPlanResume } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../utils/permissions/planModeResume.js') as typeof import('../utils/permissions/planModeResume.js')
+            stashRestoredWorkerForPlanResume(restored)
+          } catch {
+            // optional
+          }
           logForDebugging(
             `[bridge:repl] v2 transport ready for writes (epoch=${epoch}, sse=${sse.isConnectedStatus() ? 'open' : 'opening'})`,
           )

@@ -281,20 +281,23 @@ export type ToolUseContext = {
     signal: AbortSignal,
   ) => Promise<ElicitResult>
   /**
-   * Official requestDialog (cvf host) — print/SDK parks host-rendered dialogs
-   * (refusal_fallback_prompt, fable_overage_consent_prompt, mcp_url_elicitation).
-   * REPL leaves this undefined and uses local Ink dialogs instead.
+   * Official requestDialog (cvf / densable Bgp host).
+   * Print/SDK: createPrintRequestDialog. REPL: createRequestDialog(mailbox).
+   * densable doo opens permission_prompt through this when set.
    */
   requestDialog?: (
     spec: {
       kind: string
       default: unknown
+      payload?: () => {
+        safeParse: (v: unknown) => { success: boolean; data?: unknown }
+      }
       result?: () => {
         safeParse: (v: unknown) => { success: boolean; data?: unknown }
       }
     },
     payload: unknown,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; queueBehind?: boolean },
   ) => Promise<unknown>
   setToolJSX?: SetToolJSXFn
   addNotification?: (notif: Notification) => void

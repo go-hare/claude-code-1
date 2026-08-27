@@ -8,7 +8,6 @@ import {
   buildTuiRelaunchEnv,
   buildTuiRelaunchPlan,
   flushStreamsBeforeRelaunchExit,
-  isTuiRelaunchSpawnEnabled,
   mergeRelaunchModelArgs,
   RELAUNCH_ALWAYS_DROP_ENV,
   resolveRelaunchCliArgs,
@@ -173,10 +172,6 @@ describe('cliRelaunch densables', () => {
   })
 
   test('acceptTuiRelaunch inject_only densable', () => {
-    expect(isTuiRelaunchSpawnEnabled({})).toBe(false)
-    expect(
-      isTuiRelaunchSpawnEnabled({ CLAUDE_CODE_SPAWN_TUI_RELAUNCH: '1' }),
-    ).toBe(true)
     const env: NodeJS.ProcessEnv = {
       CLAUDE_CODE_NO_FLICKER: '1',
       CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL: '1',
@@ -207,7 +202,8 @@ describe('cliRelaunch densables', () => {
     const src = readFileSync(join(import.meta.dir, '../cliRelaunch.ts'), 'utf8')
     const accept = src.slice(src.indexOf('export function acceptTuiRelaunch'))
     expect(accept).toContain('input.spawn === false')
-    expect(accept).not.toContain('isTuiRelaunchSpawnEnabled')
+    expect(src).not.toContain('isTuiRelaunchSpawnEnabled')
+    expect(src).not.toMatch(/CLAUDE_CODE_SPAWN_TUI_RELAUNCH\s*[=:]/)
     expect(src).toContain('spawnCliRelaunch({')
   })
 

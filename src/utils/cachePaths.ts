@@ -1,5 +1,6 @@
 import envPaths from 'env-paths'
 import { join } from 'path'
+import { getOriginalCwd } from '../bootstrap/state.js'
 import { getFsImplementation } from './fsOperations.js'
 import { djb2Hash } from './hash.js'
 
@@ -22,16 +23,28 @@ function getProjectDir(cwd: string): string {
   return sanitizePath(cwd)
 }
 
+/**
+ * densable `IHn` — cache-path slug from live `Cr().cwd()`; `$n()`
+ * (`getOriginalCwd`) when the switched-into directory is gone (ENOENT).
+ * `getCwd()` cannot substitute: it reads bootstrap state and never throws.
+ */
+export function getCachePathCwd(): string {
+  try {
+    return getFsImplementation().cwd()
+  } catch {
+    return getOriginalCwd()
+  }
+}
+
 export const CACHE_PATHS = {
-  baseLogs: () => join(paths.cache, getProjectDir(getFsImplementation().cwd())),
-  errors: () =>
-    join(paths.cache, getProjectDir(getFsImplementation().cwd()), 'errors'),
+  baseLogs: () => join(paths.cache, getProjectDir(getCachePathCwd())),
+  errors: () => join(paths.cache, getProjectDir(getCachePathCwd()), 'errors'),
   messages: () =>
-    join(paths.cache, getProjectDir(getFsImplementation().cwd()), 'messages'),
+    join(paths.cache, getProjectDir(getCachePathCwd()), 'messages'),
   mcpLogs: (serverName: string) =>
     join(
       paths.cache,
-      getProjectDir(getFsImplementation().cwd()),
+      getProjectDir(getCachePathCwd()),
       // Sanitize server name for Windows compatibility (colons are reserved for drive letters)
       `mcp-logs-${sanitizePath(serverName)}`,
     ),

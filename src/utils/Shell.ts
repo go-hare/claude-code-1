@@ -60,6 +60,17 @@ import { posixPathToWindowsPath } from './windowsPaths.js'
 const DEFAULT_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 
 /**
+ * densable `fe>0` user copy after deleted-cwd recovery to homedir (or a
+ * later candidate). `fe===0` (original cwd) continues without this message.
+ */
+export function shellCwdRecoveredReissueMessage(
+  goneCwd: string,
+  recovered: string,
+): string {
+  return `Working directory "${goneCwd}" was deleted; shell cwd recovered to "${recovered}". Re-issue your command (it will run from the recovered directory).`
+}
+
+/**
  * densable `$0f` — async unlink of `/tmp/claude-*-cwd`. ENOENT is silent;
  * anything else warns. Call immediately if the child already exited, else
  * `once('exit')` so kill/timeout/interrupt still clean up.
@@ -359,6 +370,13 @@ export async function exec(
       `Shell CWD "${cwd}" no longer exists, recovering to "${recovered}"`,
     )
     setCwdState(recovered)
+    // densable: setCwd(he) then fe>0 → fail so the user re-issues (homedir
+    // / later candidate). fe===0 (original cwd) continues from recovered.
+    if (recoveredIdx > 0) {
+      return createFailedCommand(
+        shellCwdRecoveredReissueMessage(cwd, recovered),
+      )
+    }
     cwd = recovered
   }
 

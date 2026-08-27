@@ -7,12 +7,17 @@ import {
 import {
   applyPlanModeResumeFromInternal,
   classifyPlanModeOnResume,
+  clearRestoredWorkerForPlanResumeForTests,
   createPlanModeResumeTracker,
+  hydratePlanModeFromRestoredWorker,
   isRestartedWorker,
   parseExternalPermissionMode,
   parseRecordedWorkerPermissionMode,
   restoredWorkerHasMetadata,
+  stashRestoredWorkerForPlanResume,
+  subscribeRestoredWorkerForPlanResume,
   syncWorkerPermissionModeRecord,
+  takeRestoredWorkerForPlanResume,
 } from '../planModeResume.js'
 
 function ctx(
@@ -268,5 +273,41 @@ describe('densable 2.1.239 #13 Ibu / XWy', () => {
     })
     expect(enabled).toBe(true)
     expect(writes).toEqual([])
+  })
+})
+
+describe('densable 2.1.239 #13 interactive hydrate helper', () => {
+  test('hydratePlanModeFromRestoredWorker returns classify result', () => {
+    clearRestoredWorkerForPlanResumeForTests()
+    let app = state('plan')
+    // already in plan → y_u no-ops → source none → classify none
+    const onResume = hydratePlanModeFromRestoredWorker(
+      f => {
+        app = f(app)
+      },
+      { external: null, internal: { worker_permission_mode: 'plan' } },
+      { lane: 'interactive' },
+    )
+    expect(onResume).toBe('none')
+    expect(app.toolPermissionContext.mode).toBe('plan')
+  })
+
+  test('stash/take/subscribe delivers CCR restore to interactive listener', () => {
+    clearRestoredWorkerForPlanResumeForTests()
+    const seen: unknown[] = []
+    const unsub = subscribeRestoredWorkerForPlanResume(r => {
+      seen.push(r.internal)
+    })
+    stashRestoredWorkerForPlanResume({
+      external: null,
+      internal: { worker_permission_mode: 'plan' },
+    })
+    expect(seen).toEqual([{ worker_permission_mode: 'plan' }])
+    expect(takeRestoredWorkerForPlanResume()?.internal).toEqual({
+      worker_permission_mode: 'plan',
+    })
+    expect(takeRestoredWorkerForPlanResume()).toBeNull()
+    unsub()
+    clearRestoredWorkerForPlanResumeForTests()
   })
 })

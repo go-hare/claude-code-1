@@ -1,10 +1,20 @@
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { logEvent } from 'src/services/analytics/index.js'
 import { readFileSync } from 'src/utils/fileRead.js'
 import { expandPath } from 'src/utils/path.js'
 import type { PermissionOption } from '../components/permissions/FilePermissionDialog/permissionOptions.js'
+import {
+  hasIdeDiffRacer,
+  subscribeIdeDiffRacers,
+} from '../dialog/ideDiffRacerRegistry.js'
 import type {
   MCPServerConnection,
   McpSSEIDEServerConfig,
@@ -45,6 +55,8 @@ type Props = {
     },
   ): void
   toolUseContext: ToolUseContext
+  /** densable requestId — for doo-owned IDE racer closeTab lookup */
+  toolUseID?: string
   filePath: string
   edits: FileEdit[]
   editMode: 'single' | 'multiple'
@@ -53,6 +65,7 @@ type Props = {
 export function useDiffInIDE({
   onChange,
   toolUseContext,
+  toolUseID,
   filePath,
   edits,
   editMode,
@@ -159,9 +172,23 @@ export function useDiffInIDE({
     }
   }
 
+  // densable: when requestDialog/doo owns idm/Mrf, React must not open a second
+  // diff tab — only drive ShowInIDEPrompt UI. closeTab goes through racer registry.
+  const dooOwnsIdeDiff = toolUseContext.requestDialog != null
+  const dooRacerActive = useSyncExternalStore(
+    onStoreChange => {
+      if (!dooOwnsIdeDiff || !toolUseID) return () => {}
+      return subscribeIdeDiffRacers(onStoreChange)
+    },
+    () =>
+      dooOwnsIdeDiff && toolUseID != null ? hasIdeDiffRacer(toolUseID) : false,
+  )
+
   // densable L4n onReprompt teardown+rebuild: when hook rewrites input,
   // filePath/edits change → close previous tab (`y`) and open a fresh diff
   // so the prior IDE accept cannot answer the new prompt (#24).
+  // After doo onReprompt, showingDiffInIDE is cleared and doo teardowns closeTab;
+  // post-reprompt terminal UI may open a local diff again (densable: no IDE on reprompt).
   const editsKey = useMemo(() => JSON.stringify(edits), [edits])
 
   useEffect(() => {
@@ -171,21 +198,32 @@ export function useDiffInIDE({
       tabName: `✻ [Claude Code] ${basename(filePath)} (${randomUUID().slice(0, 6)}) ⧉`,
     }
     sessionRef.current = session
-    void showDiff(session)
+    if (!dooOwnsIdeDiff) {
+      void showDiff(session)
+    }
 
     return () => {
       isUnmounted.current = true
       session.closed = true
+      if (dooOwnsIdeDiff) return
       const ideClient = getConnectedIdeClient(toolUseContext.options.mcpClients)
       if (ideClient && shouldShowDiffInIDE) {
         void closeTabInIDE(session.tabName, ideClient)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, editsKey, editMode])
+  }, [filePath, editsKey, editMode, dooOwnsIdeDiff])
 
   return {
     closeTabInIDE() {
+      if (dooOwnsIdeDiff) {
+        if (toolUseID) {
+          void import('../dialog/ideDiffRacer.js').then(m => {
+            m.getIdeDiffRacerCloseTab(toolUseID)?.()
+          })
+        }
+        return Promise.resolve()
+      }
       const session = sessionRef.current
       if (session.closed) {
         return Promise.resolve()
@@ -199,7 +237,8 @@ export function useDiffInIDE({
 
       return closeTabInIDE(session.tabName, ideClient)
     },
-    showingDiffInIDE: shouldShowDiffInIDE && !hasError,
+    showingDiffInIDE:
+      shouldShowDiffInIDE && !hasError && (!dooOwnsIdeDiff || dooRacerActive),
     ideName: ideName,
     hasError,
   }
@@ -255,7 +294,7 @@ export function computeEditsFromContents(
  * TODO: Update auto-approval UI when IDE exits
  * TODO: Close the IDE tab when the approval prompt is unmounted
  */
-async function showDiffInIDE(
+export async function showDiffInIDE(
   file_path: string,
   edits: FileEdit[],
   toolUseContext: ToolUseContext,
@@ -381,7 +420,7 @@ async function showDiffInIDE(
   }
 }
 
-async function closeTabInIDE(
+export async function closeTabInIDE(
   tabName: string,
   ideClient?: MCPServerConnection | undefined,
 ): Promise<void> {

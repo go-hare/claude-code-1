@@ -8,7 +8,10 @@ import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import { findToolByName, type Tools, type ToolUseContext } from '../../Tool.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
-import { createChildAbortController } from '../../utils/abortController.js'
+import {
+  createChildAbortController,
+  isRemoteCancelAbortReason,
+} from '../../utils/abortController.js'
 import { runToolUse } from './toolExecution.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 import type { LangfuseSpan } from '../langfuse/index.js'
@@ -263,6 +266,7 @@ export class StreamingToolExecutor {
     | 'user_interrupted'
     | 'streaming_fallback'
     | 'conversation_ended'
+    | 'remote_cancel'
     | null {
     if (this.discarded) {
       return 'streaming_fallback'
@@ -287,6 +291,11 @@ export class StreamingToolExecutor {
         return this.getToolInterruptBehavior(tool) === 'cancel'
           ? 'user_interrupted'
           : null
+      }
+      // densable 2.1.236 #27: print/SDK SIGTERM is nC("remote-cancel") —
+      // kill trees + exit 143, no Interrupted / REJECT synthetic denials.
+      if (isRemoteCancelAbortReason(reason)) {
+        return 'remote_cancel'
       }
       return 'user_interrupted'
     }
@@ -373,6 +382,13 @@ export class StreamingToolExecutor {
     const collectResults = async () => {
       // If already aborted (by error or user), generate synthetic error block instead of running the tool
       const initialAbortReason = this.getAbortReason(tool)
+      if (initialAbortReason === 'remote_cancel') {
+        tool.results = messages
+        tool.contextModifiers = contextModifiers
+        tool.status = 'completed'
+        this.updateInterruptibleState()
+        return
+      }
       if (initialAbortReason) {
         messages.push(
           this.createSyntheticErrorMessage(
@@ -435,7 +451,14 @@ export class StreamingToolExecutor {
         // Check if we were aborted by a sibling tool error or user interruption.
         // Only add the synthetic error if THIS tool didn't produce the error.
         const abortReason = this.getAbortReason(tool)
-        if (abortReason && !thisToolErrored) {
+        if (abortReason === 'remote_cancel' && !thisToolErrored) {
+          break
+        }
+        if (
+          abortReason &&
+          abortReason !== 'remote_cancel' &&
+          !thisToolErrored
+        ) {
           messages.push(
             this.createSyntheticErrorMessage(
               tool.id,

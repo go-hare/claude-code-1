@@ -155,6 +155,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
           fileDialogResult.onChange(option, transformedInput);
         },
         toolUseContext,
+        toolUseID: toolUseConfirm.toolUseID,
         filePath: ideDiffConfig.filePath,
         edits: (ideDiffConfig.edits || []).map(e => ({
           old_string: e.old_string,
@@ -166,6 +167,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
     : {
         onChange: () => {},
         toolUseContext,
+        toolUseID: toolUseConfirm.toolUseID,
         filePath: '',
         edits: [],
         editMode: 'single' as const,

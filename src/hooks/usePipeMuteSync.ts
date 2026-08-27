@@ -24,6 +24,7 @@ import {
   subscribeToSlaveClientRegistry,
   getSlaveClientRegistryVersion,
 } from './useMasterMonitor.js'
+import { removeLeaderToolUseConfirm } from '../utils/swarm/leaderPermissionBridge.js'
 
 type UsePipeMuteSyncDeps = {
   setToolUseConfirmQueue: (
@@ -90,10 +91,14 @@ export function usePipeMuteSync({
     for (const name of nextMuted) {
       if (!prevMuted.has(name)) {
         // Abort pending permission prompts for this slave
+        let abortedIds: string[] = []
         setToolUseConfirmQueue((queue: Record<string, unknown>[]) => {
           const toAbort = queue.filter(
             (item: Record<string, unknown>) => item.pipeName === name,
           )
+          abortedIds = toAbort
+            .map(item => String(item.toolUseID ?? ''))
+            .filter(Boolean)
           for (const item of toAbort) {
             try {
               ;(item.onAbort as (() => void) | undefined)?.()
@@ -105,6 +110,11 @@ export function usePipeMuteSync({
             (item: Record<string, unknown>) => item.pipeName !== name,
           )
         })
+        // densable NMs: ensure DialogStore mirror closed (onAbort may already
+        // dequeue; remove is idempotent)
+        for (const id of abortedIds) {
+          removeLeaderToolUseConfirm(id)
+        }
 
         // Send relay_mute to slave
         const client = slaves.get(name)

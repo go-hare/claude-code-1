@@ -36,6 +36,7 @@ import { getRetryDelay } from '../api/withRetry.js'
 import {
   checkManagedSettingsSecurity,
   handleSecurityCheckResult,
+  isPendingStandaloneManagedSettingsRender,
   showManagedSettingsSecurityDialog,
   type ShowSecurityDialog,
 } from './securityCheck.js'
@@ -95,6 +96,13 @@ export function initializeRemoteManagedSettingsLoadingPromise(): void {
       // This prevents deadlocks in Agent SDK tests and other non-CLI contexts
       setTimeout(() => {
         if (loadingCompleteResolve) {
+          // densable kMl / Z2m: defer timeout while standalone consent dialog pending
+          if (isPendingStandaloneManagedSettingsRender()) {
+            logForDebugging(
+              'Remote settings: Loading promise timeout deferred — consent dialog pending',
+            )
+            return
+          }
           logForDebugging(
             'Remote settings: Loading promise timed out, resolving anyway',
           )
@@ -526,6 +534,12 @@ async function fetchAndLoadRemoteManagedSettings(
         options?.showSecurityDialog,
       )
       if (!handleSecurityCheckResult(securityResult)) {
+        if (securityResult === 'superseded') {
+          logForDebugging(
+            'Remote settings: A newer fetch took over the pending consent review; leaving the decision to it',
+          )
+          return cachedSettings
+        }
         if (securityResult === 'deferred_no_consent_surface') {
           logForDebugging(
             'Remote settings: No consent surface in this interactive session; keeping the consented baseline',

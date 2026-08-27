@@ -2,20 +2,26 @@
  * usePipePermissionForward — Forward slave permission requests to master UI.
  *
  * Subscribes to slave pipe messages via subscribePipeEntries, and:
- * 1. permission_request → enqueue into toolUseConfirmQueue for master approval
+ * 1. permission_request → enqueue into toolUseConfirmQueue + DialogStore (NMs)
  * 2. permission_cancel → remove from queue
  * 3. stream/error/done → display as system messages
  */
 import { feature } from 'bun:bundle'
 import { useEffect } from 'react'
+import type { DialogStore } from '../dialog/dialogStore.js'
 import type { Tool, ToolUseContext } from '../Tool.js'
 import type { MessageType } from '../types/message.js'
+import {
+  dequeuePermissionConfirm,
+  enqueuePermissionConfirm,
+} from './toolPermission/PermissionContext.js'
 
 type Deps = {
   store: { getState: () => any }
   tools: Tool<any, any>[]
   setMessages: (action: React.SetStateAction<MessageType[]>) => void
   setToolUseConfirmQueue: (action: React.SetStateAction<any[]>) => void
+  dialogStore?: DialogStore | null
   getToolUseContext: (...args: any[]) => ToolUseContext
   mainLoopModel: string
 }
@@ -25,6 +31,7 @@ export function usePipePermissionForward({
   tools,
   setMessages,
   setToolUseConfirmQueue,
+  dialogStore = null,
   getToolUseContext,
   mainLoopModel,
 }: Deps): void {
@@ -81,66 +88,78 @@ export function usePipePermissionForward({
               new AbortController(),
               mainLoopModel,
             )
-            setToolUseConfirmQueue((queue: any[]) => [
-              ...queue,
-              {
-                assistantMessage,
-                tool,
-                description: payload.description,
-                input: payload.input,
-                toolUseContext,
-                toolUseID: `pipe:${payload.requestId}`,
-                pipeName,
-                permissionResult: payload.permissionResult,
-                permissionPromptStartTimeMs:
-                  payload.permissionPromptStartTimeMs,
-                workerBadge: {
-                  name: `${displayRole} / ${pipeName}`,
-                  color: 'cyan',
-                },
-                onUserInteraction() {},
-                onAbort() {
-                  client.send({
-                    type: 'permission_response',
-                    data: JSON.stringify({
-                      requestId: payload.requestId,
-                      behavior: 'deny',
-                      feedback: 'Permission request was aborted in main.',
-                    }),
-                  })
-                },
-                onAllow(
-                  updatedInput: any,
-                  permissionUpdates: any,
-                  feedback: any,
-                  contentBlocks: any,
-                ) {
-                  client.send({
-                    type: 'permission_response',
-                    data: JSON.stringify({
-                      requestId: payload.requestId,
-                      behavior: 'allow',
-                      updatedInput,
-                      permissionUpdates,
-                      feedback,
-                      contentBlocks,
-                    }),
-                  })
-                },
-                onReject(feedback: any, contentBlocks: any) {
-                  client.send({
-                    type: 'permission_response',
-                    data: JSON.stringify({
-                      requestId: payload.requestId,
-                      behavior: 'deny',
-                      feedback,
-                      contentBlocks,
-                    }),
-                  })
-                },
-                async recheckPermission() {},
+            const toolUseID = `pipe:${payload.requestId}`
+            enqueuePermissionConfirm(setToolUseConfirmQueue, dialogStore, {
+              assistantMessage,
+              tool,
+              description: payload.description,
+              input: payload.input,
+              toolUseContext,
+              toolUseID,
+              pipeName,
+              permissionResult: payload.permissionResult,
+              permissionPromptStartTimeMs: payload.permissionPromptStartTimeMs,
+              workerBadge: {
+                name: `${displayRole} / ${pipeName}`,
+                color: 'cyan',
               },
-            ])
+              onUserInteraction() {},
+              onAbort() {
+                client.send({
+                  type: 'permission_response',
+                  data: JSON.stringify({
+                    requestId: payload.requestId,
+                    behavior: 'deny',
+                    feedback: 'Permission request was aborted in main.',
+                  }),
+                })
+                dequeuePermissionConfirm(
+                  setToolUseConfirmQueue,
+                  dialogStore,
+                  toolUseID,
+                )
+              },
+              onAllow(
+                updatedInput: any,
+                permissionUpdates: any,
+                feedback: any,
+                contentBlocks: any,
+              ) {
+                client.send({
+                  type: 'permission_response',
+                  data: JSON.stringify({
+                    requestId: payload.requestId,
+                    behavior: 'allow',
+                    updatedInput,
+                    permissionUpdates,
+                    feedback,
+                    contentBlocks,
+                  }),
+                })
+                dequeuePermissionConfirm(
+                  setToolUseConfirmQueue,
+                  dialogStore,
+                  toolUseID,
+                )
+              },
+              onReject(feedback: any, contentBlocks: any) {
+                client.send({
+                  type: 'permission_response',
+                  data: JSON.stringify({
+                    requestId: payload.requestId,
+                    behavior: 'deny',
+                    feedback,
+                    contentBlocks,
+                  }),
+                })
+                dequeuePermissionConfirm(
+                  setToolUseConfirmQueue,
+                  dialogStore,
+                  toolUseID,
+                )
+              },
+              async recheckPermission() {},
+            } as never)
           } catch {
             // Malformed permission request — ignore
           }
@@ -150,10 +169,10 @@ export function usePipePermissionForward({
         if (entry.type === 'permission_cancel') {
           try {
             const payload = JSON.parse(content)
-            setToolUseConfirmQueue((queue: any[]) =>
-              queue.filter(
-                (item: any) => item.toolUseID !== `pipe:${payload.requestId}`,
-              ),
+            dequeuePermissionConfirm(
+              setToolUseConfirmQueue,
+              dialogStore,
+              `pipe:${payload.requestId}`,
             )
           } catch {
             // Malformed — ignore
@@ -190,6 +209,7 @@ export function usePipePermissionForward({
     mainLoopModel,
     setMessages,
     setToolUseConfirmQueue,
+    dialogStore,
     store,
     tools,
   ])

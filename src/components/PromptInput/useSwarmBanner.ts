@@ -14,13 +14,9 @@ import { getStandaloneAgentName } from '../../utils/standaloneAgent.js'
 import { isInsideTmux } from '../../utils/swarm/backends/detection.js'
 import {
   getCachedDetectionResult,
-  getResolvedTeammateMode,
   isInProcessEnabled,
 } from '../../utils/swarm/backends/registry.js'
-import {
-  getSwarmSocketName,
-  TEAM_LEAD_NAME,
-} from '../../utils/swarm/constants.js'
+import { getSwarmSocketName } from '../../utils/swarm/constants.js'
 import {
   getAgentName,
   getTeammateColor,
@@ -37,8 +33,9 @@ type SwarmBannerInfo = {
 
 /**
  * Hook that returns banner information for swarm, standalone agent, or --agent CLI context.
- * - Leader with real teammates (excludes densable MQA lead-only seed), not in tmux /
- *   not in-process / not native panes: "tmux -L … a" or Windows Terminal tabs hint
+ * densable zRr: teammates Object.keys.length > 1 (no teamName gate); external attach = tmux only.
+ * Fork: Windows Terminal copy only when detection cache already says windows-terminal
+ * (no getResolvedTeammateMode widen). prideGradient / hideSessionTitle not ported (0 tip hits).
  * - Leader (in tmux / in-process) viewing a teammate: `@name` with their color
  * - Teammate process: `@name` with assigned color (in-process teammates are headless)
  * - Viewing a background agent (CoordinatorTaskPanel): agent name with its color
@@ -75,24 +72,20 @@ export function useSwarmBanner(): SwarmBannerInfo {
     }
   }
 
-  // Leader with spawned teammates: tmux-attach hint when external, else show
-  // the viewed teammate's name when inside tmux / native panes / in-process.
-  // densable MQA seeds teamContext with only team-lead — exclude it so the
-  // attach hint matches TeamStatus / footer (real teammates only).
+  // Leader with teammates: densable zRr gate is Object.keys(teammates).length > 1
+  // (MQA lead-only seed has length 1 → no banner). No teamName prerequisite.
+  // External attach hint: gold is tmux only. Fork WT string only when detection
+  // cache already says windows-terminal — do NOT ?? getResolvedTeammateMode()
+  // (that invent-widened pre-spawn Windows auto to WT copy; gold shows tmux).
   const hasTeammates =
-    !!teamContext?.teamName &&
-    Object.values(teamContext.teammates ?? {}).some(
-      t => t.name !== TEAM_LEAD_NAME,
-    )
+    !!teamContext?.teammates && Object.keys(teamContext.teammates).length > 1
   if (hasTeammates) {
     const viewedTeammate = getViewedTeammateTask(state)
     const viewedColor = toThemeColor(viewedTeammate?.identity.color)
     const inProcessMode = isInProcessEnabled()
     const detection = getCachedDetectionResult()
     const nativePanes = detection?.isNative ?? false
-    // detection cache may be empty before first spawn; resolve from session mode
-    // so Windows auto does not flash the tmux attach string.
-    const backendType = detection?.backend.type ?? getResolvedTeammateMode()
+    const backendType = detection?.backend.type
 
     if (insideTmux === false && !inProcessMode && !nativePanes) {
       const hint =

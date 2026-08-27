@@ -367,19 +367,6 @@ export function applyTuiRelaunchPlanToProcessEnv(
   }
 }
 
-/**
- * Legacy opt-in leftover. Official `/tui` accept always oyt (spawn+exit).
- * `acceptTuiRelaunch` no longer reads this; tests may still force `spawn:false`.
- */
-export function isTuiRelaunchSpawnEnabled(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return (
-    env.CLAUDE_CODE_SPAWN_TUI_RELAUNCH === '1' ||
-    env.CLAUDE_CODE_SPAWN_TUI_RELAUNCH === 'true'
-  )
-}
-
 export type AcceptTuiRelaunchResult =
   | { mode: 'inject_only'; plan: ReturnType<typeof buildTuiRelaunchPlan> }
   | {
@@ -433,6 +420,9 @@ export function flushStreamsBeforeRelaunchExit(input?: {
  * 3. spawnSync replacement (pass `spawn: false` only in tests)
  * 4. multi-flush streams before caller process.exit
  * Caller may process.exit after mode==='spawned' if spawn.ok.
+ *
+ * Invent-ban: no leftover spawn opt-in env gate (official oyt always spawns;
+ * tests only pass spawn:false).
  */
 export function acceptTuiRelaunch(input: {
   target: TuiRelaunchTarget

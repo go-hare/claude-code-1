@@ -138,9 +138,23 @@ import {
   messagesAfterAreOnlySynthetic,
 } from '../components/MessageSelector.js';
 import { useIdeLogging } from '../hooks/useIdeLogging.js';
-import { PermissionRequest, type ToolUseConfirm } from '../components/permissions/PermissionRequest.js';
+import { type ToolUseConfirm } from '../components/permissions/PermissionRequest.js';
 import { ElicitationDialog } from '../components/mcp/ElicitationDialog.js';
 import { PromptDialog } from '../components/hooks/PromptDialog.js';
+import {
+  createDialogMailbox,
+  createRequestDialog,
+  DialogHost,
+  installManagedSettingsSxg,
+  isManagedSettingsSecurityDialog,
+  isPermissionPromptDialog,
+  PermissionDialogHostProvider,
+  permissionPromptDialogId,
+  useDialogMailboxBridge,
+  useDialogStore,
+  useHasOpenDialogs,
+  useTopDialogKind,
+} from '../dialog/index.js';
 import type { PromptRequest, PromptResponse } from '../types/hooks.js';
 import PromptInput from '../components/PromptInput/PromptInput.js';
 import { PromptInputQueuedCommands } from '../components/PromptInput/PromptInputQueuedCommands.js';
@@ -218,15 +232,24 @@ const useAntOrgWarningNotification: typeof import('../hooks/notifs/useAntOrgWarn
   process.env.USER_TYPE === 'ant'
     ? require('../hooks/notifs/useAntOrgWarningNotification.js').useAntOrgWarningNotification
     : () => {};
-// Dead code elimination: conditional import for coordinator mode
-const getCoordinatorUserContext: (
+// Dead code elimination: conditional import for coordinator mode.
+// Lazy require — top-level require() can yield an incomplete ESM namespace
+// under Bun (empty keys); calling `.getCoordinatorUserContext` then hangs
+// or throws (42120cd7 / print getCoordinatorModeModule pattern).
+function getCoordinatorUserContext(
   mcpClients: ReadonlyArray<{ name: string }>,
   scratchpadDir?: string,
-) => { [k: string]: string } = feature('COORDINATOR_MODE')
-  ? require('../coordinator/coordinatorMode.js').getCoordinatorUserContext
-  : () => ({});
+): { [k: string]: string } {
+  if (!feature('COORDINATOR_MODE')) return {};
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const mod = require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js');
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  if (typeof mod?.getCoordinatorUserContext !== 'function') return {};
+  return mod.getCoordinatorUserContext(mcpClients, scratchpadDir);
+}
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import useCanUseTool from '../hooks/useCanUseTool.js';
+import { clearPermissionConfirmQueue } from '../hooks/toolPermission/PermissionContext.js';
 import type { ToolPermissionContext, Tool } from '../Tool.js';
 import { notifyAutomationStateChanged } from '../utils/sessionState.js';
 import {
@@ -1476,6 +1499,29 @@ export function REPL({
   const abortControllerRef = useRef<AbortController | null>(null);
   abortControllerRef.current = abortController;
 
+  // densable 236 #27: SIGTERM must abort in-flight query as remote-cancel
+  // (print.ts owns its handlers; global gracefulShutdown calls this hook).
+  useEffect(() => {
+    const { registerInteractiveShutdownAbort } =
+      require('../utils/gracefulShutdown.js') as typeof import('../utils/gracefulShutdown.js');
+    const { createAbortErrorReason } =
+      require('../utils/abortController.js') as typeof import('../utils/abortController.js');
+    registerInteractiveShutdownAbort(() => {
+      const ac = abortControllerRef.current;
+      if (ac && !ac.signal.aborted) {
+        ac.abort(createAbortErrorReason('remote-cancel'));
+      }
+      try {
+        const { cancelLoopWakeupsOnUserAbort } =
+          require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js');
+        cancelLoopWakeupsOnUserAbort('remote_cancel');
+      } catch {
+        // optional
+      }
+    });
+    return () => registerInteractiveShutdownAbort(null);
+  }, []);
+
   // Timestamp (ms) of the most recent local-jsx panel dismissal (e.g. ESC on
   // /workflows). Used by onCancel's grace-period guard: the ESC that closes
   // a local-jsx panel (or any quick follow-up ESC within the grace window)
@@ -1722,6 +1768,37 @@ export function REPL({
     [],
   );
   const [toolUseConfirmQueue, setToolUseConfirmQueue] = useState<ToolUseConfirm[]>([]);
+  // densable sXg / kdy / Bgp — DialogStore host (236 #11); see DialogHost
+  const dialogMailboxRef = React.useRef(createDialogMailbox());
+  useDialogMailboxBridge(dialogMailboxRef.current);
+  const requestDialog = React.useMemo(() => createRequestDialog(dialogMailboxRef.current), []);
+  const topDialogKind = useTopDialogKind();
+  const hasOpenDialogs = useHasOpenDialogs();
+  const dialogStore = useDialogStore();
+  // densable #13: CCR bridge initialize stashes restored.internal — apply y_u
+  // when stash arrives (and any pending stash at mount).
+  useEffect(() => {
+    const { takeRestoredWorkerForPlanResume, subscribeRestoredWorkerForPlanResume, hydratePlanModeFromRestoredWorker } =
+      require('../utils/permissions/planModeResume.js') as typeof import('../utils/permissions/planModeResume.js');
+    const { externalMetadataToAppState } =
+      require('../state/onChangeAppState.js') as typeof import('../state/onChangeAppState.js');
+    const apply = (restored: NonNullable<ReturnType<typeof takeRestoredWorkerForPlanResume>>) => {
+      if (restored.external) {
+        setAppState(
+          externalMetadataToAppState(restored.external as import('../utils/sessionState.js').SessionExternalMetadata),
+        );
+      }
+      hydratePlanModeFromRestoredWorker(setAppState, restored, {
+        lane: 'interactive',
+      });
+    };
+    const pending = takeRestoredWorkerForPlanResume();
+    if (pending) apply(pending);
+    return subscribeRestoredWorkerForPlanResume(restored => {
+      takeRestoredWorkerForPlanResume();
+      apply(restored);
+    });
+  }, [setAppState]);
   // Sticky footer JSX registered by permission request components (currently
   // only ExitPlanModePermissionRequest). Renders in FullscreenLayout's `bottom`
   // slot so response options stay visible while the user scrolls a long plan.
@@ -1765,7 +1842,11 @@ export function REPL({
   const agentTitle = mainThreadAgentDefinition?.agentType;
   const terminalTitle = sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
   const isWaitingForApproval =
-    toolUseConfirmQueue.length > 0 || promptQueue.length > 0 || pendingWorkerRequest || pendingSandboxRequest;
+    toolUseConfirmQueue.length > 0 ||
+    promptQueue.length > 0 ||
+    pendingWorkerRequest ||
+    pendingSandboxRequest ||
+    hasOpenDialogs;
   // Local-jsx commands (like /plugin, /config) show user-facing dialogs that
   // wait for input. Require jsx != null — if the flag is stuck true but jsx
   // is null, treat as not-showing so TextInput focus and queue processor
@@ -1803,7 +1884,7 @@ export function REPL({
           ? 'worker request'
           : pendingSandboxRequest
             ? 'sandbox request'
-            : isShowingLocalJSXCommand
+            : isManagedSettingsSecurityDialog(topDialogKind) || isShowingLocalJSXCommand
               ? 'dialog open'
               : 'input needed';
 
@@ -1814,6 +1895,13 @@ export function REPL({
       void updateSessionActivity({ status: sessionStatus, waitingFor });
     }
   }, [sessionStatus, waitingFor]);
+
+  // densable sXg(Gm): cMl → Bgp(GSn, s_A, {queueBehind:true})
+  // useLayoutEffect: register before paint so fetch waiters drain to NMs
+  // instead of timing out into standalone Ink (236 #11 first-key race).
+  React.useLayoutEffect(() => {
+    return installManagedSettingsSxg(requestDialog);
+  }, [requestDialog]);
 
   // densable msf / Vce — bg job needs-input producers (agents --json "Needs input")
   // Priority: sandbox > worker-sandbox > elicitation > managed-settings > permission > dialog
@@ -1896,9 +1984,9 @@ export function REPL({
 
   // Register the leader's setToolUseConfirmQueue for in-process teammates
   useEffect(() => {
-    registerLeaderToolUseConfirmQueue(setToolUseConfirmQueue);
+    registerLeaderToolUseConfirmQueue(setToolUseConfirmQueue, dialogStore);
     return () => unregisterLeaderToolUseConfirmQueue();
-  }, [setToolUseConfirmQueue]);
+  }, [setToolUseConfirmQueue, dialogStore]);
 
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
@@ -2408,6 +2496,7 @@ export function REPL({
     setIsLoading: setIsExternalLoading,
     onInit: handleRemoteInit,
     setToolUseConfirmQueue,
+    dialogStore,
     tools: combinedInitialTools,
     setStreamingToolUses,
     setStreamMode,
@@ -2420,6 +2509,7 @@ export function REPL({
     setMessages,
     setIsLoading: setIsExternalLoading,
     setToolUseConfirmQueue,
+    dialogStore,
     tools: combinedInitialTools,
   });
 
@@ -2431,6 +2521,7 @@ export function REPL({
     setMessages,
     setIsLoading: setIsExternalLoading,
     setToolUseConfirmQueue,
+    dialogStore,
     tools: combinedInitialTools,
   });
 
@@ -2938,26 +3029,30 @@ export function REPL({
           const coordinatorModule =
             require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js');
           /* eslint-enable @typescript-eslint/no-require-imports */
-          const warning = coordinatorModule.matchSessionMode(log.mode);
-          if (warning) {
-            // Re-derive agent definitions after mode switch so built-in agents
-            // reflect the new coordinator/normal mode
-            /* eslint-disable @typescript-eslint/no-require-imports */
-            const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
-              require('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js');
-            /* eslint-enable @typescript-eslint/no-require-imports */
-            getAgentDefinitionsWithOverrides.cache.clear?.();
-            const freshAgentDefs = await getAgentDefinitionsWithOverrides(getOriginalCwd());
+          // Incomplete circular-init namespace — skip match; saveMode still
+          // persists log.mode below (sessionRestore alignment).
+          if (typeof coordinatorModule?.matchSessionMode === 'function') {
+            const warning = coordinatorModule.matchSessionMode(log.mode);
+            if (warning) {
+              // Re-derive agent definitions after mode switch so built-in agents
+              // reflect the new coordinator/normal mode
+              /* eslint-disable @typescript-eslint/no-require-imports */
+              const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
+                require('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js');
+              /* eslint-enable @typescript-eslint/no-require-imports */
+              getAgentDefinitionsWithOverrides.cache.clear?.();
+              const freshAgentDefs = await getAgentDefinitionsWithOverrides(getOriginalCwd());
 
-            setAppState(prev => ({
-              ...prev,
-              agentDefinitions: {
-                ...freshAgentDefs,
-                allAgents: freshAgentDefs.allAgents,
-                activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-              },
-            }));
-            messages.push(createSystemMessage(warning, 'warning'));
+              setAppState(prev => ({
+                ...prev,
+                agentDefinitions: {
+                  ...freshAgentDefs,
+                  allAgents: freshAgentDefs.allAgents,
+                  activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
+                },
+              }));
+              messages.push(createSystemMessage(warning, 'warning'));
+            }
           }
         }
 
@@ -3043,7 +3138,15 @@ export function REPL({
         await resetSessionFilePointer();
 
         // densable 2.1.239 OMo after S1 switchSession (print.ts already did).
-        restoreSessionStateFromLog(log, setAppState);
+        // Then y_u from CCR stash when present (interactive #13).
+        const { takeRestoredWorkerForPlanResume } =
+          require('../utils/permissions/planModeResume.js') as typeof import('../utils/permissions/planModeResume.js');
+        restoreSessionStateFromLog(log, setAppState, {
+          applyPlanModeResume: true,
+          restoredWorker: takeRestoredWorkerForPlanResume(),
+          forkSession: entrypoint === 'fork',
+          planModeResumeLane: 'interactive',
+        });
 
         // Clear then restore session metadata so it's re-appended on exit via
         // reAppendSessionMetadata. clearSessionMetadata must be called first:
@@ -3095,14 +3198,16 @@ export function REPL({
           if (ws) saveWorktreeState(ws);
         }
 
-        // Persist the current mode so future resumes know what mode this session was in
+        // Persist mode for future resumes — densable/sessionRestore: prefer
+        // transcript log.mode; fall back to env gate when older logs omit it.
+        // Do not require a complete coordinator module (may be null mid-init).
         if (feature('COORDINATOR_MODE')) {
           /* eslint-disable @typescript-eslint/no-require-imports */
           const { saveMode } = require('../utils/sessionStorage.js');
-          const { isCoordinatorMode } =
-            require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js');
+          const { isCoordinatorModeEnvEnabled } =
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
           /* eslint-enable @typescript-eslint/no-require-imports */
-          saveMode(isCoordinatorMode() ? 'coordinator' : 'normal');
+          saveMode(log.mode ?? (isCoordinatorModeEnvEnabled() ? 'coordinator' : 'normal'));
         }
 
         // Restore target session's costs from the data we read earlier
@@ -3393,6 +3498,7 @@ export function REPL({
   function getFocusedInputDialog():
     | 'message-selector'
     | 'sandbox-permission'
+    | 'managed-settings'
     | 'tool-permission'
     | 'prompt'
     | 'worker-sandbox-permission'
@@ -3431,10 +3537,15 @@ export function REPL({
 
     if (sandboxPermissionRequestQueue[0]) return 'sandbox-permission';
 
+    // densable DialogStore top — GSn / bEt via NMs (not tip-local queue peek)
+    if (isManagedSettingsSecurityDialog(topDialogKind)) return 'managed-settings';
+    if (isPermissionPromptDialog(topDialogKind)) return 'tool-permission';
+
     // Permission/interactive dialogs (show unless blocked by toolJSX)
     const allowDialogsWithAnimation = !toolJSX || toolJSX.shouldContinueAnimation;
 
-    if (allowDialogsWithAnimation && toolUseConfirmQueue[0]) return 'tool-permission';
+    // Queue may still hold items under DialogStore top; only use when store empty
+    if (allowDialogsWithAnimation && !hasOpenDialogs && toolUseConfirmQueue[0]) return 'tool-permission';
     if (allowDialogsWithAnimation && promptQueue[0]) return 'prompt';
     // Worker sandbox permission prompts (network access) from swarm workers
     if (allowDialogsWithAnimation && workerSandboxPermissions.queue[0]) return 'worker-sandbox-permission';
@@ -3487,6 +3598,7 @@ export function REPL({
   const hasSuppressedDialogs =
     isPromptInputActive &&
     (sandboxPermissionRequestQueue[0] ||
+      hasOpenDialogs ||
       toolUseConfirmQueue[0] ||
       promptQueue[0] ||
       workerSandboxPermissions.queue[0] ||
@@ -3629,7 +3741,7 @@ export function REPL({
     if (focusedInputDialog === 'tool-permission') {
       // Tool use confirm handles the abort signal itself
       toolUseConfirmQueue[0]?.onAbort();
-      setToolUseConfirmQueue([]);
+      clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore);
     } else if (focusedInputDialog === 'prompt') {
       // Reject all pending prompts and clear the queue
       for (const item of promptQueue) {
@@ -3977,7 +4089,7 @@ export function REPL({
     return () => unregisterLeaderSetToolPermissionContext();
   }, [setToolPermissionContext]);
 
-  const canUseTool = useCanUseTool(setToolUseConfirmQueue);
+  const canUseTool = useCanUseTool(setToolUseConfirmQueue, dialogStore);
 
   const requestPrompt = useCallback(
     (title: string, toolInputSummary?: string | null) =>
@@ -4153,6 +4265,8 @@ export function REPL({
         setConversationId,
         requestPrompt: feature('HOOK_PROMPTS') ? requestPrompt : undefined,
         contentReplacementState: contentReplacementStateRef.current,
+        // densable doo / Bgp — REPL DialogStore requestDialog host
+        requestDialog: requestDialog as NonNullable<ProcessUserInputContext['requestDialog']>,
       };
     },
     [
@@ -4176,6 +4290,7 @@ export function REPL({
       requestPrompt,
       disabled,
       customSystemPrompt,
+      requestDialog,
       appendSystemPrompt,
       appendSubagentSystemPrompt,
       setConversationId,
@@ -6701,7 +6816,15 @@ export function REPL({
   useSlaveNotifications();
   const _pipeIpcState = useAppState(s => getPipeIpc(s));
 
-  usePipePermissionForward({ store, tools, setMessages, setToolUseConfirmQueue, getToolUseContext, mainLoopModel });
+  usePipePermissionForward({
+    store,
+    tools,
+    setMessages,
+    setToolUseConfirmQueue,
+    dialogStore,
+    getToolUseContext,
+    mainLoopModel,
+  });
   usePipeMuteSync({ setToolUseConfirmQueue });
 
   // Pipe IPC lifecycle — extracted to usePipeIpc hook
@@ -7417,24 +7540,9 @@ export function REPL({
   const placeholderText =
     userInputOnProcessing && !viewedAgentTask && userMessagePending ? userInputOnProcessing : undefined;
 
-  const toolPermissionOverlay =
-    focusedInputDialog === 'tool-permission' ? (
-      <PermissionRequest
-        key={toolUseConfirmQueue[0]?.toolUseID}
-        onDone={() => setToolUseConfirmQueue(([_, ...tail]) => tail)}
-        onReject={handleQueuedCommandOnCancel}
-        toolUseConfirm={toolUseConfirmQueue[0]!}
-        toolUseContext={getToolUseContext(
-          messages,
-          messages,
-          abortController ?? createAbortController(),
-          mainLoopModel,
-        )}
-        verbose={verbose}
-        workerBadge={toolUseConfirmQueue[0]?.workerBadge}
-        setStickyFooter={isFullscreenEnvEnabled() ? setPermissionStickyFooter : undefined}
-      />
-    ) : null;
+  // densable NMs owns permission UI (jsu → Iiu). Tip overlay retired —
+  // queue-only pushers must mirror into DialogStore (createPermissionQueueOps).
+  const toolPermissionOverlay = null;
 
   // Narrow terminals: companion collapses to a one-liner that REPL stacks
   // on its own row (above input in fullscreen, below in scrollback) instead
@@ -7456,13 +7564,14 @@ export function REPL({
   // (immediate: /model, /mcp, /btw, ...) and scrollable (non-immediate:
   // /config, /theme, /diff, ...) both go here now.
   const toolJsxCentered = isFullscreenEnvEnabled() && toolJSX?.isLocalJSXCommand === true;
-  // densable rSh gGn: peer approval uses the same modal host as local-jsx when
-  // fullscreen; otherwise falls through to inline bottom render with toolJSX path.
-  const centeredModal: React.ReactNode = toolJsxCentered
-    ? toolJSX!.jsx
-    : isFullscreenEnvEnabled()
-      ? peerInboundApprovalDialog
-      : null;
+  // densable rSh gGn + ozs modal NMs: peer/local-jsx share modal slot; also
+  // mount DialogHost variant=modal (mLo filter; GSn stays inline).
+  const centeredModal: React.ReactNode = isFullscreenEnvEnabled() ? (
+    <>
+      {toolJsxCentered ? toolJSX!.jsx : peerInboundApprovalDialog}
+      <DialogHost variant="modal" suppressReason={isPromptInputActive ? 'typing' : null} />
+    </>
+  ) : null;
   // densable BUo — willow crate sidebar width (0 when GB off / not main / no git)
   const replDiffSidebarWidth = computeDiffSidebarWidth({
     willowCrateEnabled,
@@ -7649,6 +7758,31 @@ export function REPL({
                     <TaskListV2 tasks={tasksV2} isStandalone={true} />
                   </Box>
                 )}
+                {/* densable NMs inline — GSn + bEt (permission_prompt) */}
+                <PermissionDialogHostProvider
+                  value={{
+                    verbose,
+                    getToolUseContext: () =>
+                      getToolUseContext(messages, messages, abortController ?? createAbortController(), mainLoopModel),
+                    onReject: handleQueuedCommandOnCancel,
+                    dequeue: (toolUseID: string) => {
+                      setToolUseConfirmQueue(queue => queue.filter(item => item.toolUseID !== toolUseID));
+                      void import('../dialog/permissionConfirmRegistry.js').then(m => {
+                        m.unregisterPermissionConfirm(toolUseID);
+                      });
+                      // Tip mirror id only — doo mailbox uses dialog-N; dismissing
+                      // by requestId here races FilePermission onDone→onReject
+                      // (would cancel before Host can answer deny).
+                      const id = permissionPromptDialogId(toolUseID);
+                      if (dialogStore.getState().open.some(d => d.id === id)) {
+                        dialogStore.dismiss(id);
+                      }
+                    },
+                    setStickyFooter: isFullscreenEnvEnabled() ? setPermissionStickyFooter : undefined,
+                  }}
+                >
+                  <DialogHost variant="inline" suppressReason={isPromptInputActive ? 'typing' : null} />
+                </PermissionDialogHostProvider>
                 {focusedInputDialog === 'sandbox-permission' && (
                   <SandboxPermissionRequest
                     key={sandboxPermissionRequestQueue[0]!.hostPattern.host}

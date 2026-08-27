@@ -36,12 +36,18 @@ import {
   notifyPipePermissionCancel,
   tryRelayPipePermissionRequest,
 } from '../../../utils/pipePermissionRelay.js'
+import { SUBAGENT_REJECT_MESSAGE } from '../../../utils/messages.js'
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js'
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
 import {
   hasPermissionsToUseTool,
   stripWholeToolGrantsForAsk,
 } from '../../../utils/permissions/permissions.js'
+import { shouldQueuePermissionBehind } from '../../../dialog/permissionQueueBehind.js'
+import type {
+  PermissionDooReprompt,
+  PermissionDooSession,
+} from '../../../dialog/openPermissionDoo.js'
 import type { PermissionContext } from '../PermissionContext.js'
 import {
   createResolveOnce,
@@ -172,7 +178,7 @@ function handleInteractivePermission(
   let channelUnsubscribe: (() => void) | undefined
 
   const permissionPromptStartTimeMs = Date.now()
-  const displayInput = result.updatedInput ?? ctx.input
+  let displayInput = result.updatedInput ?? ctx.input
   let pipePermissionRequestId: string | null = null
 
   function forgetPipePermission(reason?: string): void {
@@ -190,6 +196,19 @@ function handleInteractivePermission(
     if (feature('BASH_CLASSIFIER')) {
       ctx.updateQueueItem({ classifierCheckInProgress: false })
     }
+  }
+
+  // densable doo — onReprompt + onWin O() dismissAndTeardown (mailbox + IDE).
+  // Boxed: the racer callbacks below assign it, and TS would otherwise keep the
+  // initial `null` narrowing inside every closure created after this point.
+  const permissionDoo: { current: PermissionDooSession | null } = {
+    current: null,
+  }
+  let pendingDooReprompt: PermissionDooReprompt | null = null
+
+  function dismissPermissionDoo(): void {
+    permissionDoo.current?.dismissAndTeardown()
+    permissionDoo.current = null
   }
 
   const toolUseConfirm: ToolUseConfirm = {
@@ -248,6 +267,7 @@ function handleInteractivePermission(
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
       channelUnsubscribe?.()
+      dismissPermissionDoo()
       ctx.logCancelled()
       ctx.logDecision(
         { decision: 'reject', source: { type: 'user_abort' } },
@@ -273,6 +293,7 @@ function handleInteractivePermission(
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
       channelUnsubscribe?.()
+      dismissPermissionDoo()
 
       resolveOnce(
         await ctx.handleUserAllow(
@@ -301,6 +322,7 @@ function handleInteractivePermission(
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
       channelUnsubscribe?.()
+      dismissPermissionDoo()
 
       ctx.logDecision(
         {
@@ -321,25 +343,191 @@ function handleInteractivePermission(
         ctx.toolUseID,
       )
       if (freshResult.behavior === 'allow') {
-        // claim() (atomic check-and-mark), not isResolved() — the async
-        // hasPermissionsToUseTool call above opens a window where CCR
-        // could have responded in flight. Matches onAllow/onReject/hook
-        // paths. cancelRequest tells CCR to dismiss its prompt — without
-        // it, the web UI shows a stale prompt for a tool that's already
-        // executing (particularly visible when recheck is triggered by
-        // a CCR-initiated mode switch, the very case this callback exists
-        // for after useReplBridge started calling it).
         if (!claim()) return
         forgetPipePermission('Permission request was resolved locally in sub.')
         if (bridgeCallbacks && bridgeRequestId) {
           bridgeCallbacks.cancelRequest(bridgeRequestId)
         }
         channelUnsubscribe?.()
+        dismissPermissionDoo()
         ctx.removeFromQueue()
         ctx.logDecision({ decision: 'accept', source: 'config' })
         resolveOnce(ctx.buildAllow(freshResult.updatedInput ?? ctx.input))
       }
     },
+  }
+
+  const requestDialog = ctx.toolUseContext.requestDialog
+  if (requestDialog) {
+    // densable doo — open via Bgp/requestDialog; W() handles allow|deny|cancelled
+    void Promise.all([
+      import('../../../dialog/openPermissionDoo.js'),
+      import('../../../dialog/ideDiffEligibility.js'),
+      import('../../../dialog/ideDiffRacer.js'),
+    ]).then(
+      ([
+        { startPermissionDoo },
+        { getIdeDiffEligibility },
+        { startIdeDiffRacer },
+      ]) => {
+        // Tip dynamic import gap vs densable sync doo: claim may already have
+        // won (classifier/bridge/pipe/hook) while modules were loading.
+        if (isResolved()) return
+        const session = startPermissionDoo({
+          requestDialog: requestDialog as never,
+          confirm: toolUseConfirm,
+          signal: ctx.toolUseContext.abortController.signal,
+          notifyBridge: msg => {
+            if (!bridgeCallbacks || !bridgeRequestId) return
+            if (msg.behavior === 'allow') {
+              bridgeCallbacks.sendResponse(bridgeRequestId, {
+                behavior: 'allow',
+                updatedInput: msg.updatedInput,
+              })
+            } else {
+              bridgeCallbacks.sendResponse(bridgeRequestId, {
+                behavior: 'deny',
+                message: msg.message ?? 'User denied permission',
+              })
+            }
+            bridgeCallbacks.cancelRequest(bridgeRequestId)
+          },
+          onRacersReady: api => {
+            // densable foo file arm: odm → idm/Mrf claim racer + addTeardown(closeTab)
+            const elig = getIdeDiffEligibility(
+              ctx.tool,
+              displayInput,
+              ctx.toolUseContext,
+            )
+            if (!elig) return
+            const localDisplayOnly =
+              (
+                toolUseConfirm.permissionResult as {
+                  localDisplayOnly?: boolean
+                }
+              )?.localDisplayOnly === true
+            const { closeTab } = startIdeDiffRacer({
+              toolUseID: ctx.toolUseID,
+              tool: ctx.tool,
+              input: displayInput as Record<string, unknown>,
+              toolUseContext: ctx.toolUseContext,
+              eligibility: elig,
+              localDisplayOnly,
+              claim,
+              dismissAndTeardown: api.dismissAndTeardown,
+              notifyBridge: api.notifyBridge,
+              resolveAllow: updatedInput => {
+                forgetPipePermission('Permission resolved via IDE diff racer')
+                channelUnsubscribe?.()
+                clearClassifierChecking(ctx.toolUseID)
+                clearClassifierIndicator()
+                ctx.removeFromQueue()
+                void (async () => {
+                  resolveOnce(
+                    await ctx.handleUserAllow(
+                      updatedInput,
+                      [],
+                      undefined,
+                      permissionPromptStartTimeMs,
+                    ),
+                  )
+                })()
+              },
+              resolveDeny: () => {
+                forgetPipePermission('Permission denied via IDE diff racer')
+                channelUnsubscribe?.()
+                clearClassifierChecking(ctx.toolUseID)
+                clearClassifierIndicator()
+                ctx.removeFromQueue()
+                ctx.logDecision(
+                  {
+                    decision: 'reject',
+                    source: { type: 'user_reject', hasFeedback: false },
+                  },
+                  { permissionPromptStartTimeMs, input: displayInput },
+                )
+                resolveOnce(ctx.cancelAndAbort(undefined))
+              },
+            })
+            api.addTeardown(closeTab)
+          },
+        })
+        permissionDoo.current = session
+        if (pendingDooReprompt) {
+          session.onReprompt(pendingDooReprompt)
+          pendingDooReprompt = null
+        }
+        void session.result.then(async result => {
+          if (!claim()) return
+          forgetPipePermission(
+            result.behavior === 'cancelled'
+              ? 'Permission dialog cancelled'
+              : 'Permission dialog resolved via requestDialog',
+          )
+          channelUnsubscribe?.()
+          if (bridgeCallbacks && bridgeRequestId) {
+            bridgeCallbacks.cancelRequest(bridgeRequestId)
+          }
+          clearClassifierChecking(ctx.toolUseID)
+          clearClassifierIndicator()
+          // densable W() settles the turn; tip queue must clear or REPL keeps
+          // a phantom tool-permission after typing-suppress Esc abort.
+          ctx.removeFromQueue()
+
+          switch (result.behavior) {
+            case 'allow': {
+              resolveOnce(
+                await ctx.handleUserAllow(
+                  (result.updatedInput as Record<string, unknown>) ??
+                    displayInput,
+                  (result.permissionUpdates as never) ?? [],
+                  result.feedback,
+                  permissionPromptStartTimeMs,
+                  result.contentBlocks as never,
+                ),
+              )
+              return
+            }
+            case 'deny': {
+              ctx.logDecision(
+                {
+                  decision: 'reject',
+                  source: {
+                    type: 'user_reject',
+                    hasFeedback: !!result.feedback,
+                  },
+                },
+                { permissionPromptStartTimeMs, input: displayInput },
+              )
+              resolveOnce(
+                ctx.cancelAndAbort(
+                  result.feedback,
+                  undefined,
+                  result.contentBlocks as never,
+                ),
+              )
+              return
+            }
+            case 'cancelled': {
+              ctx.logCancelled()
+              ctx.logDecision(
+                { decision: 'reject', source: { type: 'user_abort' } },
+                { permissionPromptStartTimeMs, input: displayInput },
+              )
+              if (shouldQueuePermissionBehind(toolUseConfirm)) {
+                resolveOnce({
+                  behavior: 'ask',
+                  message: SUBAGENT_REJECT_MESSAGE,
+                })
+                return
+              }
+              resolveOnce(ctx.cancelAndAbort(undefined, true))
+              return
+            }
+          }
+        })
+      },
+    )
   }
 
   ctx.pushToQueue(toolUseConfirm)
@@ -350,6 +538,7 @@ function handleInteractivePermission(
       forgetPipePermissionSilently()
       clearClassifierChecking(ctx.toolUseID)
       clearClassifierIndicator()
+      dismissPermissionDoo()
       ctx.removeFromQueue()
       channelUnsubscribe?.()
       if (bridgeCallbacks && bridgeRequestId) {
@@ -445,6 +634,7 @@ function handleInteractivePermission(
         signal.removeEventListener('abort', unsubscribe)
         clearClassifierChecking(ctx.toolUseID)
         clearClassifierIndicator()
+        dismissPermissionDoo()
         ctx.removeFromQueue()
         channelUnsubscribe?.()
 
@@ -580,6 +770,7 @@ function handleInteractivePermission(
           channelUnsubscribe?.() // both: map delete + listener remove
           clearClassifierChecking(ctx.toolUseID)
           clearClassifierIndicator()
+          dismissPermissionDoo()
           ctx.removeFromQueue()
           // Bridge is the other remote — tell it we're done.
           if (bridgeCallbacks && bridgeRequestId) {
@@ -639,8 +830,7 @@ function handleInteractivePermission(
       )
       if (!hookDecision) return
       if (isPermissionHookReprompt(hookDecision)) {
-        // Abort external racers and rebuild dialog input. Do not claim —
-        // user/IDE must answer the new prompt.
+        // densable tnf/L4n onReprompt: abort dialog+IDE racers, rebuild. Do NOT claim.
         if (isResolved()) return
         forgetPipePermission(
           'Permission request was rewritten by hook; re-prompting.',
@@ -651,11 +841,19 @@ function handleInteractivePermission(
         channelUnsubscribe?.()
         clearClassifierChecking(ctx.toolUseID)
         clearClassifierIndicator()
+        displayInput = hookDecision.finalInput
         ctx.updateQueueItem({
           input: hookDecision.finalInput,
           permissionResult: hookDecision.reprompted,
           description: hookDecision.reprompted.message || description,
         })
+        const reprompt = {
+          finalInput: hookDecision.finalInput,
+          permissionResult: hookDecision.reprompted,
+          description: hookDecision.reprompted.message || description,
+        }
+        if (permissionDoo.current) permissionDoo.current.onReprompt(reprompt)
+        else pendingDooReprompt = reprompt
         return
       }
       if (!claim()) return
@@ -666,6 +864,7 @@ function handleInteractivePermission(
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
       channelUnsubscribe?.()
+      dismissPermissionDoo()
       ctx.removeFromQueue()
       resolveOnce(hookDecision)
     })()
@@ -702,6 +901,7 @@ function handleInteractivePermission(
           }
           channelUnsubscribe?.()
           clearClassifierChecking(ctx.toolUseID)
+          dismissPermissionDoo()
 
           const matchedRule =
             decisionReason.type === 'classifier'

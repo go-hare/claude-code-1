@@ -8,6 +8,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js';
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js';
+import type { DialogStore } from '../dialog/dialogStore.js';
 import { Text } from '@anthropic/ink';
 import type { Tool as ToolType, ToolUseContext } from '../Tool.js';
 import {
@@ -48,7 +49,10 @@ export type CanUseToolFn<Input extends Record<string, unknown> = Record<string, 
   forceDecision?: PermissionDecision<Input>,
 ) => Promise<PermissionDecision<Input>>;
 
-function useCanUseTool(setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>): CanUseToolFn {
+function useCanUseTool(
+  setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>,
+  dialogStore?: DialogStore | null,
+): CanUseToolFn {
   return useCallback<CanUseToolFn>(
     async (tool, input, toolUseContext, assistantMessage, toolUseID, forceDecision) => {
       return new Promise(resolve => {
@@ -61,7 +65,7 @@ function useCanUseTool(setToolUseConfirmQueue: React.Dispatch<React.SetStateActi
           assistantMessage,
           toolUseID,
           undefined,
-          createPermissionQueueOps(setToolUseConfirmQueue),
+          createPermissionQueueOps(setToolUseConfirmQueue, dialogStore),
         );
 
         if (ctx.resolveIfAborted(resolve)) return;
@@ -320,7 +324,7 @@ function useCanUseTool(setToolUseConfirmQueue: React.Dispatch<React.SetStateActi
           });
       });
     },
-    [setToolUseConfirmQueue],
+    [setToolUseConfirmQueue, dialogStore],
   );
 }
 

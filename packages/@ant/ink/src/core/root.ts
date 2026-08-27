@@ -121,6 +121,10 @@ const wrappedRender = async (
   node: ReactNode,
   options?: NodeJS.WriteStream | RenderOptions,
 ): Promise<Instance> => {
+  // densable pAS: wait out claimed standalone consent render before mounting.
+  while (instances.pendingStandaloneRender) {
+    await instances.pendingStandaloneRender
+  }
   // Preserve the microtask boundary that `await loadYoga()` used to provide.
   // Without it, the first render fires synchronously before async startup work
   // (e.g. useReplBridge notification state) settles, and the subsequent Static
@@ -152,6 +156,10 @@ export async function createRoot({
 }: RenderOptions = {}): Promise<Root> {
   // See wrappedRender — preserve microtask boundary from the old WASM await.
   await Promise.resolve()
+  // densable createRoot: while (Yp.pendingStandaloneRender) await …
+  while (instances.pendingStandaloneRender) {
+    await instances.pendingStandaloneRender
+  }
   const instance = new Ink({
     stdout,
     stdin,

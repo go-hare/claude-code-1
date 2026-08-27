@@ -112,6 +112,14 @@ function extractTodosFromTranscript(messages: Message[]): TodoList {
 export function restoreSessionStateFromLog(
   result: ResumeResult,
   setAppState: (f: (prev: AppState) => AppState) => void,
+  options?: {
+    restoredInternal?: { worker_permission_mode?: unknown } | null
+    restoredWorker?: import('./permissions/planModeResume.js').RestoredWorkerMetadata
+    forkSession?: boolean
+    /** densable: continue must not pass this / must not call y_u */
+    applyPlanModeResume?: boolean
+    planModeResumeLane?: 'interactive' | 'print' | 'sdk_url'
+  },
 ): void {
   // densable 2.1.214 Ern(Brt(ur), setAppState) — hydrate EndConversation lock
   const endedByModel = Boolean(
@@ -188,6 +196,22 @@ export function restoreSessionStateFromLog(
       ...prev,
       mainLoopModel: sessionModel,
     }))
+  }
+
+  // densable #13 y_u after OMo — interactive / resume only (never continue)
+  if (options?.applyPlanModeResume) {
+    const { hydratePlanModeFromRestoredWorker } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./permissions/planModeResume.js') as typeof import('./permissions/planModeResume.js')
+    const restored =
+      options.restoredWorker ??
+      (options.restoredInternal
+        ? { external: null, internal: options.restoredInternal }
+        : null)
+    hydratePlanModeFromRestoredWorker(setAppState, restored, {
+      forkSession: !!options.forkSession,
+      lane: options.planModeResumeLane ?? 'interactive',
+    })
   }
 }
 
@@ -719,6 +743,38 @@ export async function processResumedConversation(
     forceRcOn = !opts.forkSession && !!result.bridgeSessionId && !alreadyFullRc
   }
 
+  // densable #13 y_u into initialState when CCR stash present (interactive
+  // --resume before REPL mount). continue never hits this function with stash
+  // from print; interactive continue also goes through here — only apply when
+  // stash exists (local continue has none).
+  let planHydratedState = context.initialState
+  {
+    const {
+      takeRestoredWorkerForPlanResume,
+      applyPlanModeResumeFromInternal,
+      createPlanModeResumeTracker,
+      recordPlanModeResumeTelemetry,
+      classifyPlanModeOnResume,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./permissions/planModeResume.js') as typeof import('./permissions/planModeResume.js')
+    const restored = takeRestoredWorkerForPlanResume()
+    if (restored?.internal || restored?.external) {
+      const tracker = createPlanModeResumeTracker()
+      planHydratedState = applyPlanModeResumeFromInternal<AppState>(
+        restored.internal as { worker_permission_mode?: unknown } | null,
+        tracker,
+        { forkSession: opts.forkSession },
+      )(planHydratedState)
+      recordPlanModeResumeTelemetry(tracker, {
+        lane: 'interactive',
+        hadExternal: !!restored.external,
+        hadInternal: !!restored.internal,
+      })
+      void classifyPlanModeOnResume(tracker)
+    }
+  }
+
   return {
     messages: result.messages,
     fileHistorySnapshots: result.fileHistorySnapshots,
@@ -729,7 +785,7 @@ export async function processResumedConversation(
       : result.agentColor) as AgentColorName | undefined,
     restoredAgentDef: restoredAgent,
     initialState: {
-      ...context.initialState,
+      ...planHydratedState,
       initialMessage: seededInitialMessage,
       // densable: ...e.endedByModel?{endedByModel:!0}:{}
       ...(result.endedByModel ? { endedByModel: true } : {}),

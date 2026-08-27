@@ -131,15 +131,21 @@ import {
   normalizeMessage,
 } from './utils/queryHelpers.js'
 
-// Dead code elimination: conditional import for coordinator mode
-/* eslint-disable @typescript-eslint/no-require-imports */
-const getCoordinatorUserContext: (
+// Dead code elimination: conditional import for coordinator mode.
+// Lazy require — top-level `.prop` on require() can hang under Bun incomplete
+// ESM namespace (42120cd7); print imports QueryEngine at startup.
+function getCoordinatorUserContext(
   mcpClients: ReadonlyArray<{ name: string }>,
   scratchpadDir?: string,
-) => { [k: string]: string } = feature('COORDINATOR_MODE')
-  ? require('./coordinator/coordinatorMode.js').getCoordinatorUserContext
-  : () => ({})
-/* eslint-enable @typescript-eslint/no-require-imports */
+): { [k: string]: string } {
+  if (!feature('COORDINATOR_MODE')) return {}
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const mod =
+    require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  if (typeof mod?.getCoordinatorUserContext !== 'function') return {}
+  return mod.getCoordinatorUserContext(mcpClients, scratchpadDir)
+}
 
 // Dead code elimination: conditional import for snip compaction
 /* eslint-disable @typescript-eslint/no-require-imports */

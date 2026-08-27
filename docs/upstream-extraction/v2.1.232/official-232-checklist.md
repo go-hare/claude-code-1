@@ -5,7 +5,7 @@
 > 基线：本地 tip densable **2.1.231**（HAVE 1 + cup/r8o residual）+ npm **2.7.39**。**本 pack 只对齐 2.1.232**。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。不 invent gateway-only / Desktop-only。  
-> 更新：2026-08-15 — residual 对齐 #4 strict YM_/procStart stamp、#16 v2 Era、#26 thinking-only re-stream、#39 remint 接线源锁；#46/#47 文案收口。**HAVE 45 · PARTIAL 0 · N/A 4**。
+> 更新：2026-08-27 — `#43` 假 HAVE 纠偏：**233 回滚 / 产品路径不调用** → **PARTIAL**（HAVE **44** · PARTIAL **1** · N/A **4**）。此前：2026-08-15 residual 对齐 #4/#16/#26/#39/#46/#47。
 
 ## 邻版关系
 
@@ -19,8 +19,8 @@
 
 | 状态 | 条数 | 说明 |
 | ---- | ---- | ---- |
-| **HAVE** | **45** | 产品主路径 + 测试/gold 已锁；部分条仍有 **标注 residual**（见下 residual 清单） |
-| **PARTIAL** | **0** | #39 remint Ls+flight 编排集成测已补（2026-08-15） |
+| **HAVE** | **44** | 产品主路径 + 测试/gold 已锁；不含 `#43`（233 回滚） |
+| **PARTIAL** | **1** | `#43` Bash `<`：233 回滚 / 产品路径不调用 |
 | **GAP** | **0** | — |
 | **N/A** | **4** | #10/#11/#22 gateway；#45 Cowork |
 | **UNKNOWN** | **0** | — |
@@ -109,7 +109,7 @@
 | 40 | RC resume 不静默抢同机另一 CC 的 RC | **HAVE** | densable/本地：`non-owner` / suppressed reattach（228 #5）+ pointer/owner 门；`Remote Control is already connected` 拒绝重复 Project 绑定。不静默抢已连接会话 |
 | 41 | agent panel：完成即隐 + `/tasks` footer；overflow 左移 | **HAVE** | densable `kye=30000`=`PANEL_GRACE_MS`；`kT` terminal→`evictAfter`；`isLocalAgentPanelActive` 完成且无 KA 不显示。Footer pill `getPillLabel` + ↓ view CTA；overflow `calculateHorizontalScrollWindow` 左右箭头（选中左移窗口）。`/tasks` 命令进 dialog |
 | 42 | RC 终端说明 takeover/end/delete | **HAVE** | densable 终端 hint 1:1：`space to show/hide QR code` · `w to toggle spawn mode`（`bridgeUI.ts`）；idle/active footer（`buildIdleFooterText`/`buildActiveFooterText`）；失败 `Run /remote-control to retry`（224+）。状态 Reconnecting/Failed/Reconnected。**residual**：changelog「takeover/end/delete」多为产品语义，非独立 slash 金句 |
-| 43 | Bash `< file` 重定向全平台权限检查 | **HAVE** | densable `auS`：AST `op==="<"` → `validateInputRedirections`；**DEFAULT_BUILD_FEATURES 含 `TREE_SITTER_BASH`**（默认构建可走 AST）。无 AST 时 **`extractInputRedirections` fallback** 仍门控简单 `< file`（`/dev/null` 跳过；`<<`/`<<<`/`<&` 不检）。测试 `inputRedirect.232.test.ts` |
+| 43 | Bash `< file` 重定向全平台权限检查 | **PARTIAL** | **233 回滚 / 产品路径不调用**：默认构建 **不含** `TREE_SITTER_BASH`（`defines.ts` 注释）；产品路径不跑 `validateInputRedirections`。helper + `inputRedirect.232.test.ts` 留作 residual / `FEATURE_TREE_SITTER_BASH=1` revive，**不当 232 产品 HAVE**。 |
 | 44 | resume 已完成 bg agent 文案缩短 | **HAVE** | densable `D5f`/`Y8a`/`hi`/`dle`：`formatResumedAgentMessage` + `resumeAgentBackground.finalText`（`awaitCompletion`→`extractTextContent`）；SendMessage stopped/evicted 走 `awaitCompletion:true` + D5f 短文案（`Resumed agent…Result:` / `Resuming agent…`；id 截 7）。测试 `formatResumedAgentMessage.232.test.ts`；snippet `gold-resume-completed-d5f.md` |
 | 45 | Cowork 不 inline 用户记忆外链 @-import | **N/A** | Cowork 产品面；go-hare 不发 |
 | 46 | cross-session socket dir：拒 symlink/他人目录 | **HAVE** | densable `refusing to bind` / `owned by uid` / `ENOTOWNED`：UDS `ensureSocketParent` + `assertPrivateDirectory`（拒 symlink/非目录/broad `0o077`/wrong uid；mkdir `0o700`）；错误前缀 `[uds-messaging] Failed to set up sockets directory (refusing to bind):`。capability 同门。测试 `udsMessaging` + `crossSessionSocketDir.232`；snippet `gold-cross-session-socket-dir.md`。daemon/Chrome MCP 0700 为**独立产品面**（非本条 residual） |
@@ -121,7 +121,8 @@
 
 | 优先级 | 项 | 状态 |
 | ------ | -- | ---- |
-| done | #1 FORK 默认 ON、#3–9、#12–16、#23–25、#28–30、#34–38、#43–44、#46、#48–49… | **HAVE** |
+| done | #1 FORK 默认 ON、#3–9、#12–16、#23–25、#28–30、#34–38、#44、#46、#48–49… | **HAVE** |
+| stay | **#43** Bash `<` | **PARTIAL**（233 回滚 / 产品路径不调用） |
 | done | Gateway #10–11/#22、Cowork #45 | **N/A** |
 | done | **#39 remint** Ls+flight 编排集成测 | **HAVE**（2026-08-15） |
 | open（可选） | residual 清单 #17/#31/#42/#47 深抽 | HAVE 内 residual（#4/#16/#26/#39 已收口） |

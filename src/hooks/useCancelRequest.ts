@@ -17,7 +17,9 @@ import type { ToolUseConfirm } from '../components/permissions/PermissionRequest
 import type { SpinnerMode } from '../components/Spinner/types.js'
 import { useNotifications } from '../context/notifications.js'
 import { useIsOverlayActive } from '../context/overlayContext.js'
+import { useDialogStore } from '../dialog/DialogStoreContext.js'
 import { useCommandQueue } from '../hooks/useCommandQueue.js'
+import { clearPermissionConfirmQueue } from '../hooks/toolPermission/PermissionContext.js'
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js'
 import { useKeybinding } from '../keybindings/useKeybinding.js'
 import type { Screen } from '../screens/REPL.js'
@@ -78,6 +80,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     streamMode,
   } = props
   const store = useAppStateStore()
+  const dialogStore = useDialogStore()
   const setAppState = useSetAppState()
   // Subscribe so isActive re-evaluates when the queue mutates (useSyncExternalStore).
   const queuedCommands = useCommandQueue()
@@ -161,7 +164,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     // This takes precedence over queue management so users can always interrupt Claude
     if (abortSignal !== undefined && !abortSignal.aborted) {
       logEvent('tengu_cancel', cancelProps)
-      setToolUseConfirmQueue(() => [])
+      clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore)
       onCancel()
       return
     }
@@ -185,7 +188,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
 
     // Fallback: nothing to cancel or pop (shouldn't reach here if isActive is correct)
     logEvent('tengu_cancel', cancelProps)
-    setToolUseConfirmQueue(() => [])
+    clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore)
     onCancel()
   }, [
     abortSignal,
@@ -197,6 +200,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     queuedCommands,
     inputValue,
     store,
+    dialogStore,
     setAppState,
   ])
 

@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { BoundedUUIDSet } from '../bridge/bridgeMessaging.js'
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
 import type { SpinnerMode } from '../components/Spinner/types.js'
+import type { DialogStore } from '../dialog/dialogStore.js'
 import type { SDKControlRequest } from '../entrypoints/sdk/controlTypes.js'
+import {
+  dequeuePermissionConfirm,
+  enqueuePermissionConfirm,
+} from './toolPermission/PermissionContext.js'
 import {
   type RemotePermissionResponse,
   type RemoteSessionConfig,
@@ -55,6 +60,8 @@ type UseRemoteSessionProps = {
   setIsLoading: (loading: boolean) => void
   onInit?: (slashCommands: string[]) => void
   setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>
+  /** densable NMs mirror — required for DialogHost (no tip overlay) */
+  dialogStore?: DialogStore | null
   tools: Tool[]
   setStreamingToolUses?: React.Dispatch<
     React.SetStateAction<StreamingToolUse[]>
@@ -93,6 +100,7 @@ export function useRemoteSession({
   setIsLoading,
   onInit,
   setToolUseConfirmQueue,
+  dialogStore = null,
   tools,
   setStreamingToolUses,
   setStreamMode,
@@ -466,8 +474,10 @@ export function useRemoteSession({
               message: 'User aborted',
             }
             manager.respondToPermissionRequest(requestId, response)
-            setToolUseConfirmQueue(queue =>
-              queue.filter(item => item.toolUseID !== request.tool_use_id),
+            dequeuePermissionConfirm(
+              setToolUseConfirmQueue,
+              dialogStore,
+              request.tool_use_id,
             )
           },
           onAllow(updatedInput, _permissionUpdates, _feedback) {
@@ -476,8 +486,10 @@ export function useRemoteSession({
               updatedInput,
             }
             manager.respondToPermissionRequest(requestId, response)
-            setToolUseConfirmQueue(queue =>
-              queue.filter(item => item.toolUseID !== request.tool_use_id),
+            dequeuePermissionConfirm(
+              setToolUseConfirmQueue,
+              dialogStore,
+              request.tool_use_id,
             )
             // Resume loading indicator after approving
             setIsLoading(true)
@@ -488,8 +500,10 @@ export function useRemoteSession({
               message: feedback ?? 'User denied permission',
             }
             manager.respondToPermissionRequest(requestId, response)
-            setToolUseConfirmQueue(queue =>
-              queue.filter(item => item.toolUseID !== request.tool_use_id),
+            dequeuePermissionConfirm(
+              setToolUseConfirmQueue,
+              dialogStore,
+              request.tool_use_id,
             )
           },
           async recheckPermission() {
@@ -497,7 +511,12 @@ export function useRemoteSession({
           },
         }
 
-        setToolUseConfirmQueue(queue => [...queue, toolUseConfirm])
+        // densable gPs → NMs: mirror into DialogStore (not tip overlay)
+        enqueuePermissionConfirm(
+          setToolUseConfirmQueue,
+          dialogStore,
+          toolUseConfirm,
+        )
         // Pause loading indicator while waiting for permission
         setIsLoading(false)
       },
@@ -506,8 +525,10 @@ export function useRemoteSession({
           `[useRemoteSession] Permission request cancelled: ${requestId}`,
         )
         const idToRemove = toolUseId ?? requestId
-        setToolUseConfirmQueue(queue =>
-          queue.filter(item => item.toolUseID !== idToRemove),
+        dequeuePermissionConfirm(
+          setToolUseConfirmQueue,
+          dialogStore,
+          idToRemove,
         )
         setIsLoading(true)
       },
@@ -579,6 +600,7 @@ export function useRemoteSession({
     setIsLoading,
     onInit,
     setToolUseConfirmQueue,
+    dialogStore,
     setStreamingToolUses,
     setStreamMode,
     setInProgressToolUseIDs,

@@ -1,3 +1,4 @@
+import { instances, wrappedRender as render } from '@anthropic/ink';
 import { getIsInteractive } from '../../bootstrap/state.js';
 import { ManagedSettingsSecurityDialog } from '../../components/ManagedSettingsSecurityDialog/ManagedSettingsSecurityDialog.js';
 import {
@@ -5,13 +6,19 @@ import {
   hasDangerousSettings,
   hasDangerousSettingsChanged,
 } from '../../components/ManagedSettingsSecurityDialog/utils.js';
-import { wrappedRender as render } from '@anthropic/ink';
 import { KeybindingSetup } from '../../keybindings/KeybindingProviderSetup.js';
 import { AppStateProvider } from '../../state/AppState.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
+import { logError } from '../../utils/log.js';
 import { getBaseRenderOptions } from '../../utils/renderOptions.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 import { logEvent } from '../analytics/index.js';
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js';
+import {
+  getManagedSettingsConsentRegistry,
+  waitForManagedSettingsRequester,
+  type ManagedSettingsConsentResult,
+} from './consentRequester.js';
 import { type ConsentBaseline, hasDangerousSettingsChangedAgainstBaseline } from './orgConsent.js';
 
 export type SecurityCheckResult =
@@ -22,7 +29,9 @@ export type SecurityCheckResult =
   // record consent for dangerous managed settings that never showed a dialog.
   | 'deferred_non_interactive'
   // densable YXd: interactive session without a dialog surface / callback
-  | 'deferred_no_consent_surface';
+  | 'deferred_no_consent_surface'
+  // densable X2m supersede — newer fetch took over pending review
+  | 'superseded';
 
 /**
  * densable showSecurityDialog — optional consent surface.
@@ -34,57 +43,75 @@ export type ShowSecurityDialog = (
 ) => Promise<'approved' | 'rejected'>;
 
 /**
- * densable default dialog surface (blocking Ink render).
- * Used by startup load when a surface is available.
+ * densable mSs / showStandaloneSecurityDialog.
+ * hasActiveInkSurface true → rerender(null) on answer (keep Ink instance for
+ * createRoot); false → unmount (standalone claim path).
+ * densable Te(err) on unanswered / render failure → tip logError.
  */
 export async function showManagedSettingsSecurityDialog(
   settings: SettingsJson,
-  _hasActiveInkSurface: boolean,
+  hasActiveInkSurface: boolean,
 ): Promise<'approved' | 'rejected'> {
-  return new Promise<'approved' | 'rejected'>(resolve => {
+  return new Promise<'approved' | 'rejected'>((resolve, reject) => {
+    let answered = false;
     void (async () => {
-      const { unmount } = await render(
+      const { rerender, unmount, waitUntilExit } = await render(
         <AppStateProvider>
           <KeybindingSetup>
             <ManagedSettingsSecurityDialog
+              key="managed-settings-security"
               settings={settings}
               onAccept={() => {
-                logEvent('tengu_managed_settings_security_dialog_accepted', {});
+                answered = true;
                 void import('../../utils/bgNeedsInputBridge.js').then(m => {
                   m.emitBgNeedsInput(null, 'managed-settings');
                 });
-                unmount();
-                void resolve('approved');
+                resolve('approved');
+                if (hasActiveInkSurface) {
+                  rerender(null);
+                } else {
+                  unmount();
+                }
               }}
               onReject={() => {
-                logEvent('tengu_managed_settings_security_dialog_rejected', {});
+                answered = true;
                 void import('../../utils/bgNeedsInputBridge.js').then(m => {
                   m.emitBgNeedsInput(null, 'managed-settings');
                 });
-                unmount();
-                void resolve('rejected');
+                resolve('rejected');
+                if (hasActiveInkSurface) {
+                  rerender(null);
+                } else {
+                  unmount();
+                }
               }}
             />
           </KeybindingSetup>
         </AppStateProvider>,
         getBaseRenderOptions(false),
       );
-    })();
+      await waitUntilExit();
+      if (!answered) {
+        const err = new Error('Managed-settings consent dialog exited without an answer');
+        logError(err);
+        reject(err);
+      }
+    })().catch(err => {
+      logError(err);
+      reject(err);
+    });
   });
 }
 
 /**
- * Check if new remote managed settings contain dangerous settings that require user approval.
+ * densable Q2m — managed-settings security check with Ink surface negotiation.
  *
- * densable YXd algorithm (2.1.224):
- * 1. no dangerous → no_check_needed
- * 2. unchanged vs baseline → no_check_needed
- * 3. non-interactive → deferred_non_interactive
- * 4. no showSecurityDialog surface → deferred_no_consent_surface
- * 5. else call surface
- *
- * densable 2.1.224 #24: prefer org_record / consented_payload baseline so
- * re-login does not re-prompt when the org dangerous projection is unchanged.
+ * 1. no dangerous / unchanged → no_check_needed
+ * 2. non-interactive → deferred_non_interactive
+ * 3. replRequester → review (same Ink)
+ * 4. Yp.has(stdout) → wait requester 5s → review
+ * 5. no showSecurityDialog → deferred_no_consent_surface
+ * 6. else showSecurityDialog; claimForStandaloneRender only when !hasInk
  */
 export async function checkManagedSettingsSecurity(
   cachedSettings: SettingsJson | null,
@@ -92,12 +119,10 @@ export async function checkManagedSettingsSecurity(
   consentBaseline?: ConsentBaseline | null,
   showSecurityDialog?: ShowSecurityDialog,
 ): Promise<SecurityCheckResult> {
-  // If new settings don't have dangerous settings, no check needed
   if (!newSettings || !hasDangerousSettings(extractDangerousSettings(newSettings))) {
     return 'no_check_needed';
   }
 
-  // densable BXd — org hash / consented payload compare first
   const changed = consentBaseline
     ? hasDangerousSettingsChangedAgainstBaseline(consentBaseline, newSettings)
     : hasDangerousSettingsChanged(cachedSettings, newSettings);
@@ -105,44 +130,89 @@ export async function checkManagedSettingsSecurity(
     return 'no_check_needed';
   }
 
-  // Official 2.1.207 / densable b2(): do not treat non-interactive as consented.
   if (!getIsInteractive()) {
     return 'deferred_non_interactive';
   }
 
-  // densable YXd: r === void 0 → deferred_no_consent_surface
-  // (no registered ink surface / no caller-provided dialog)
+  const reg = getManagedSettingsConsentRegistry();
+  if (reg.replRequester) {
+    return reg.review(reg.replRequester, newSettings);
+  }
+
+  if (instances.has(process.stdout)) {
+    const requester = await waitForManagedSettingsRequester();
+    if (requester) {
+      return reg.review(requester, newSettings);
+    }
+  }
+
   if (showSecurityDialog === undefined) {
     return 'deferred_no_consent_surface';
   }
 
-  // Log that dialog is being shown
   logEvent('tengu_managed_settings_security_dialog_shown', {});
 
-  // densable msf managed-settings → Needs input on bg job list
   void import('../../utils/bgNeedsInputBridge.js').then(m => {
     if (!m.isBgJobSession()) return;
     m.ensureBgNeedsPermissionBridge();
     m.emitBgNeedsInput(m.MANAGED_SETTINGS_NEEDS, 'managed-settings');
   });
 
-  // densable: hasActiveInk = Up.has(process.stdout); local has no iQs registry —
-  // pass false (blocking standalone render path).
-  const result = await showSecurityDialog(newSettings, false);
+  const hasActiveInk = instances.has(process.stdout);
+  const dialogPromise = showSecurityDialog(newSettings, hasActiveInk);
+  if (!hasActiveInk) {
+    instances.claimForStandaloneRender(dialogPromise);
+  }
+
+  let result: 'approved' | 'rejected';
+  try {
+    result = await dialogPromise;
+  } catch (err) {
+    logEvent('tengu_feature_bad', {
+      feature_name:
+        'remote_managed_settings_security_check' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code: 'dialog_unavailable' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    throw err;
+  }
+
+  logEvent(
+    result === 'approved'
+      ? 'tengu_managed_settings_security_dialog_accepted'
+      : 'tengu_managed_settings_security_dialog_rejected',
+    {},
+  );
+  if (result === 'approved') {
+    logEvent('tengu_feature_ok', {
+      feature_name:
+        'remote_managed_settings_security_check' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+  }
   return result;
 }
 
 /**
- * densable JXd — handle the security check result by exiting if rejected
+ * densable eBm / JXd — handle the security check result by exiting if rejected
  * Returns true if we should continue, false if we should stop
  */
 export function handleSecurityCheckResult(result: SecurityCheckResult): boolean {
-  if (result === 'rejected') {
-    gracefulShutdownSync(1);
-    return false;
+  switch (result) {
+    case 'rejected':
+      gracefulShutdownSync(1);
+      return false;
+    case 'deferred_no_consent_surface':
+    case 'superseded':
+      return false;
+    case 'approved':
+    case 'no_check_needed':
+    case 'deferred_non_interactive':
+      return true;
   }
-  if (result === 'deferred_no_consent_surface') {
-    return false;
-  }
-  return true;
 }
+
+/** densable Z2m — loading barrier should not fire while standalone dialog pending */
+export function isPendingStandaloneManagedSettingsRender(): boolean {
+  return instances.pendingStandaloneRender !== null;
+}
+
+export type { ManagedSettingsConsentResult };

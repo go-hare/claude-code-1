@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle';
 import React, { useContext, useEffect, useEffectEvent, useState, useSyncExternalStore } from 'react';
 import { MailboxProvider } from '../context/mailbox.js';
+import { DialogStoreProvider } from '../dialog/DialogStoreContext.js';
 import { useSettingsChange } from '../hooks/useSettingsChange.js';
 import { logForDebugging } from '../utils/debug.js';
 import {
@@ -90,12 +91,15 @@ export function AppStateProvider({ children, initialState, onChangeAppState }: P
   const onSettingsChange = useEffectEvent((source: SettingSource) => applySettingsChange(source, store.setState));
   useSettingsChange(onSettingsChange);
 
+  // densable Wrs: useState(bGl) → Srs.Provider around children (DialogStore).
   return (
     <HasAppStateContext.Provider value={true}>
       <AppStoreContext.Provider value={store}>
-        <MailboxProvider>
-          <VoiceProvider>{children}</VoiceProvider>
-        </MailboxProvider>
+        <DialogStoreProvider>
+          <MailboxProvider>
+            <VoiceProvider>{children}</VoiceProvider>
+          </MailboxProvider>
+        </DialogStoreProvider>
       </AppStoreContext.Provider>
     </HasAppStateContext.Provider>
   );

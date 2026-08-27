@@ -103,14 +103,10 @@ import {
   type SessionExternalMetadata,
 } from 'src/utils/sessionState.js'
 import {
-  applyPlanModeResumeFromInternal,
-  classifyPlanModeOnResume,
-  createPlanModeResumeTracker,
+  hydratePlanModeFromRestoredWorker,
   isRestartedWorker,
-  recordPlanModeResumeTelemetry,
   syncWorkerPermissionModeRecord,
   type PlanModeOnResume,
-  type PlanModeResumeTracker,
 } from 'src/utils/permissions/planModeResume.js'
 import { externalMetadataToAppState } from 'src/state/onChangeAppState.js'
 import { getInMemoryErrors, logError, logMCPDebug } from 'src/utils/log.js'
@@ -6868,24 +6864,12 @@ type LoadInitialMessagesResult = {
 function applyPrintPlanModeResume(
   setAppState: (f: (prev: AppState) => AppState) => void,
   restored: RestoredWorkerState,
-  tracker: PlanModeResumeTracker,
   options: { forkSession?: boolean; sdkUrl?: string },
 ): PlanModeOnResume {
-  setAppState(
-    applyPlanModeResumeFromInternal(
-      (restored?.internal ?? null) as {
-        worker_permission_mode?: unknown
-      } | null,
-      tracker,
-      { forkSession: !!options.forkSession },
-    ),
-  )
-  recordPlanModeResumeTelemetry(tracker, {
+  return hydratePlanModeFromRestoredWorker(setAppState, restored, {
+    forkSession: !!options.forkSession,
     lane: options.sdkUrl ? 'sdk_url' : 'print',
-    hadExternal: !!restored?.external,
-    hadInternal: !!restored?.internal,
   })
-  return classifyPlanModeOnResume(tracker)
 }
 
 async function loadInitialMessages(
@@ -6991,12 +6975,15 @@ async function loadInitialMessages(
           }
         }
 
-        // Write mode entry for the resumed session
-        if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
+        // Write mode entry for the resumed session — align sessionRestore:
+        // result.mode ?? env; do not skip when coordinator module is null.
+        if (feature('COORDINATOR_MODE')) {
+          const { isCoordinatorModeEnvEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
           saveMode(
-            getCoordinatorModeModule()?.isCoordinatorMode()
-              ? 'coordinator'
-              : 'normal',
+            result.mode ??
+              (isCoordinatorModeEnvEnabled() ? 'coordinator' : 'normal'),
           )
         }
 
@@ -7064,7 +7051,6 @@ async function loadInitialMessages(
         typeof options.resume === 'string' ? options.resume : '',
       )
       let restored: RestoredWorkerState = null
-      const planModeResumeTracker = createPlanModeResumeTracker()
 
       if (!parsedSessionId) {
         let errorMessage =
@@ -7220,7 +7206,6 @@ async function loadInitialMessages(
                 planModeOnResume: applyPrintPlanModeResume(
                   setAppState,
                   restored,
-                  planModeResumeTracker,
                   options,
                 ),
               }
@@ -7238,7 +7223,6 @@ async function loadInitialMessages(
             planModeOnResume: applyPrintPlanModeResume(
               setAppState,
               restored,
-              planModeResumeTracker,
               options,
             ),
           }
@@ -7310,7 +7294,6 @@ async function loadInitialMessages(
       const planModeOnResume = applyPrintPlanModeResume(
         setAppState,
         restored,
-        planModeResumeTracker,
         options,
       )
 
@@ -7334,12 +7317,15 @@ async function loadInitialMessages(
         }
       }
 
-      // Write mode entry for the resumed session
-      if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
+      // Write mode entry for the resumed session — align sessionRestore:
+      // result.mode ?? env; do not skip when coordinator module is null.
+      if (feature('COORDINATOR_MODE')) {
+        const { isCoordinatorModeEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
         saveMode(
-          getCoordinatorModeModule()?.isCoordinatorMode()
-            ? 'coordinator'
-            : 'normal',
+          result.mode ??
+            (isCoordinatorModeEnvEnabled() ? 'coordinator' : 'normal'),
         )
       }
 

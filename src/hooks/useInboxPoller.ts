@@ -16,6 +16,7 @@ import { getAllBaseTools } from '../tools.js'
 import type { PermissionUpdate } from '../types/permissions.js'
 import { logForDebugging } from '../utils/debug.js'
 import { createAssistantMessage } from '../utils/messages.js'
+import { getPermissionConfirm } from '../dialog/permissionConfirmRegistry.js'
 import { toExternalPermissionMode } from '../utils/permissions/PermissionMode.js'
 import { applyInheritedPermissionMode } from '../utils/permissions/permissionSetup.js'
 import { jsonStringify } from '../utils/slowOperations.js'
@@ -26,7 +27,10 @@ import {
 } from '../utils/swarm/backends/registry.js'
 import type { PaneBackendType } from '../utils/swarm/backends/types.js'
 import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js'
-import { getLeaderToolUseConfirmQueue } from '../utils/swarm/leaderPermissionBridge.js'
+import {
+  getLeaderToolUseConfirmQueue,
+  pushLeaderToolUseConfirm,
+} from '../utils/swarm/leaderPermissionBridge.js'
 import {
   sendPermissionResponseViaMailbox,
   sendSandboxPermissionResponseViaMailbox,
@@ -289,6 +293,12 @@ export function useInboxPoller({
             continue
           }
 
+          // Deduplicate: if markMessagesAsRead failed on a prior poll,
+          // the same message will be re-read — skip if already queued / mirrored.
+          if (getPermissionConfirm(parsed.tool_use_id)) {
+            continue
+          }
+
           const entry: ToolUseConfirm = {
             assistantMessage: createAssistantMessage({ content: '' }),
             tool,
@@ -368,14 +378,8 @@ export function useInboxPoller({
             },
           }
 
-          // Deduplicate: if markMessagesAsRead failed on a prior poll,
-          // the same message will be re-read — skip if already queued.
-          setToolUseConfirmQueue(queue => {
-            if (queue.some(q => q.toolUseID === parsed.tool_use_id)) {
-              return queue
-            }
-            return [...queue, entry]
-          })
+          // densable NMs: mirror DialogStore via leader bridge
+          pushLeaderToolUseConfirm(entry)
         } else {
           logForDebugging(
             `[InboxPoller] ToolUseConfirmQueue unavailable, dropping permission request from ${parsed.agent_id}`,

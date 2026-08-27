@@ -237,7 +237,7 @@ export function syncWorkerPermissionModeRecord(options: {
 export function recordPlanModeResumeTelemetry(
   tracker: PlanModeResumeTracker,
   options: {
-    lane: 'print' | 'sdk_url'
+    lane: 'print' | 'sdk_url' | 'interactive'
     hadExternal: boolean
     hadInternal: boolean
     isGuardEnabled?: () => boolean
@@ -261,4 +261,76 @@ export function recordPlanModeResumeTelemetry(
     had_internal: options.hadInternal,
     guard_enabled: guardEnabled,
   })
+}
+
+/**
+ * densable OMo-then-y_u hydrate — print + interactive share this.
+ * `continue` must not call (gold). Pass null restored when no CCR metadata.
+ */
+export function hydratePlanModeFromRestoredWorker<
+  T extends PlanModeResumeAppState,
+>(
+  setAppState: (f: (prev: T) => T) => void,
+  restored: RestoredWorkerMetadata,
+  options: {
+    forkSession?: boolean
+    lane: 'print' | 'sdk_url' | 'interactive'
+  },
+): PlanModeOnResume {
+  const tracker = createPlanModeResumeTracker()
+  setAppState(
+    applyPlanModeResumeFromInternal<T>(
+      (restored?.internal ?? null) as WorkerInternalMetadata | null,
+      tracker,
+      { forkSession: !!options.forkSession },
+    ),
+  )
+  recordPlanModeResumeTelemetry(tracker, {
+    lane: options.lane,
+    hadExternal: !!restored?.external,
+    hadInternal: !!restored?.internal,
+  })
+  return classifyPlanModeOnResume(tracker)
+}
+
+/** Bridge CCR initialize result — taken by REPL hydrate / resume. */
+let stashedRestoredWorker: RestoredWorkerMetadata = null
+const restoredWorkerListeners = new Set<
+  (restored: NonNullable<RestoredWorkerMetadata>) => void
+>()
+
+export function stashRestoredWorkerForPlanResume(
+  restored: RestoredWorkerMetadata,
+): void {
+  stashedRestoredWorker = restored
+  if (restored) {
+    for (const cb of restoredWorkerListeners) {
+      cb(restored)
+    }
+  }
+}
+
+export function takeRestoredWorkerForPlanResume(): RestoredWorkerMetadata {
+  const next = stashedRestoredWorker
+  stashedRestoredWorker = null
+  return next
+}
+
+export function peekRestoredWorkerForPlanResume(): RestoredWorkerMetadata {
+  return stashedRestoredWorker
+}
+
+/** Interactive REPL: apply pending CCR restore + future bridge connects. */
+export function subscribeRestoredWorkerForPlanResume(
+  cb: (restored: NonNullable<RestoredWorkerMetadata>) => void,
+): () => void {
+  restoredWorkerListeners.add(cb)
+  return () => {
+    restoredWorkerListeners.delete(cb)
+  }
+}
+
+export function clearRestoredWorkerForPlanResumeForTests(): void {
+  stashedRestoredWorker = null
+  restoredWorkerListeners.clear()
 }

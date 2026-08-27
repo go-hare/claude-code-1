@@ -123,6 +123,8 @@ import { TEAM_LEAD_NAME } from './constants.js'
 import {
   getLeaderSetToolPermissionContext,
   getLeaderToolUseConfirmQueue,
+  pushLeaderToolUseConfirm,
+  removeLeaderToolUseConfirm,
 } from './leaderPermissionBridge.js'
 import {
   createPermissionRequest,
@@ -233,127 +235,112 @@ function createInProcessCanUseTool(
           decisionMade = true
           reportPermissionWait()
           resolve({ behavior: 'ask', message: SUBAGENT_REJECT_MESSAGE })
-          setToolUseConfirmQueue(queue =>
-            queue.filter(item => item.toolUseID !== toolUseID),
-          )
+          removeLeaderToolUseConfirm(toolUseID)
         }
 
         abortController.signal.addEventListener('abort', onAbortListener, {
           once: true,
         })
 
-        setToolUseConfirmQueue(queue => [
-          ...queue,
-          {
-            assistantMessage,
-            tool: tool as Tool,
-            description,
-            input,
-            toolUseContext,
-            toolUseID,
-            permissionResult: result,
-            permissionPromptStartTimeMs: permissionStartMs,
-            workerBadge: identity.color
-              ? { name: identity.agentName, color: identity.color }
-              : undefined,
-            onUserInteraction() {
-              // No-op for teammates (no classifier auto-approval)
-            },
-            onAbort() {
-              if (decisionMade) return
-              decisionMade = true
-              abortController.signal.removeEventListener(
-                'abort',
-                onAbortListener,
-              )
-              reportPermissionWait()
-              resolve({ behavior: 'ask', message: SUBAGENT_REJECT_MESSAGE })
-            },
-            async onAllow(
-              updatedInput: Record<string, unknown>,
-              permissionUpdates: PermissionUpdate[],
-              feedback?: string,
-              contentBlocks?: ContentBlockParam[],
-            ) {
-              if (decisionMade) return
-              decisionMade = true
-              abortController.signal.removeEventListener(
-                'abort',
-                onAbortListener,
-              )
-              reportPermissionWait()
-              persistPermissionUpdates(permissionUpdates)
-              // densable m4n override path: s(Bie(Ina(un(r)), d)) with preserveMode
-              if (permissionUpdates.length > 0) {
-                const setToolPermissionContext =
-                  getLeaderSetToolPermissionContext()
-                if (setToolPermissionContext) {
-                  const currentAppState = toolUseContext.getAppState()
-                  const updatedContext = applyPermissionUpdates(
-                    restoreDangerousPermissions(
-                      currentAppState.toolPermissionContext,
-                    ),
-                    permissionUpdates,
-                  )
-                  // Preserve the leader's mode to prevent workers'
-                  // transformed 'acceptEdits' context from leaking back
-                  // to the coordinator
-                  setToolPermissionContext(updatedContext, {
-                    preserveMode: true,
-                  })
-                }
-              }
-              const trimmedFeedback = feedback?.trim()
-              resolve({
-                behavior: 'allow',
-                updatedInput,
-                userModified: false,
-                acceptFeedback: trimmedFeedback || undefined,
-                ...(contentBlocks &&
-                  contentBlocks.length > 0 && { contentBlocks }),
-              })
-            },
-            onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
-              if (decisionMade) return
-              decisionMade = true
-              abortController.signal.removeEventListener(
-                'abort',
-                onAbortListener,
-              )
-              reportPermissionWait()
-              const message = feedback
-                ? `${SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX}${feedback}`
-                : SUBAGENT_REJECT_MESSAGE
-              resolve({ behavior: 'ask', message, contentBlocks })
-            },
-            async recheckPermission() {
-              if (decisionMade) return
-              const freshResult = await hasPermissionsToUseTool(
-                tool,
-                input,
-                toolUseContext,
-                assistantMessage,
-                toolUseID,
-              )
-              if (freshResult.behavior === 'allow') {
-                decisionMade = true
-                abortController.signal.removeEventListener(
-                  'abort',
-                  onAbortListener,
+        // densable NMs: leader bridge mirrors DialogStore (not tip overlay)
+        pushLeaderToolUseConfirm({
+          assistantMessage,
+          tool: tool as Tool,
+          description,
+          input,
+          toolUseContext,
+          toolUseID,
+          permissionResult: result,
+          permissionPromptStartTimeMs: permissionStartMs,
+          workerBadge: identity.color
+            ? { name: identity.agentName, color: identity.color }
+            : undefined,
+          onUserInteraction() {
+            // No-op for teammates (no classifier auto-approval)
+          },
+          onAbort() {
+            if (decisionMade) return
+            decisionMade = true
+            abortController.signal.removeEventListener('abort', onAbortListener)
+            reportPermissionWait()
+            resolve({ behavior: 'ask', message: SUBAGENT_REJECT_MESSAGE })
+          },
+          async onAllow(
+            updatedInput: Record<string, unknown>,
+            permissionUpdates: PermissionUpdate[],
+            feedback?: string,
+            contentBlocks?: ContentBlockParam[],
+          ) {
+            if (decisionMade) return
+            decisionMade = true
+            abortController.signal.removeEventListener('abort', onAbortListener)
+            reportPermissionWait()
+            persistPermissionUpdates(permissionUpdates)
+            // densable m4n override path: s(Bie(Ina(un(r)), d)) with preserveMode
+            if (permissionUpdates.length > 0) {
+              const setToolPermissionContext =
+                getLeaderSetToolPermissionContext()
+              if (setToolPermissionContext) {
+                const currentAppState = toolUseContext.getAppState()
+                const updatedContext = applyPermissionUpdates(
+                  restoreDangerousPermissions(
+                    currentAppState.toolPermissionContext,
+                  ),
+                  permissionUpdates,
                 )
-                reportPermissionWait()
-                setToolUseConfirmQueue(queue =>
-                  queue.filter(item => item.toolUseID !== toolUseID),
-                )
-                resolve({
-                  ...freshResult,
-                  updatedInput: input,
-                  userModified: false,
+                // Preserve the leader's mode to prevent workers'
+                // transformed 'acceptEdits' context from leaking back
+                // to the coordinator
+                setToolPermissionContext(updatedContext, {
+                  preserveMode: true,
                 })
               }
-            },
+            }
+            const trimmedFeedback = feedback?.trim()
+            resolve({
+              behavior: 'allow',
+              updatedInput,
+              userModified: false,
+              acceptFeedback: trimmedFeedback || undefined,
+              ...(contentBlocks &&
+                contentBlocks.length > 0 && { contentBlocks }),
+            })
           },
-        ])
+          onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
+            if (decisionMade) return
+            decisionMade = true
+            abortController.signal.removeEventListener('abort', onAbortListener)
+            reportPermissionWait()
+            const message = feedback
+              ? `${SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX}${feedback}`
+              : SUBAGENT_REJECT_MESSAGE
+            resolve({ behavior: 'ask', message, contentBlocks })
+          },
+          async recheckPermission() {
+            if (decisionMade) return
+            const freshResult = await hasPermissionsToUseTool(
+              tool,
+              input,
+              toolUseContext,
+              assistantMessage,
+              toolUseID,
+            )
+            if (freshResult.behavior === 'allow') {
+              decisionMade = true
+              abortController.signal.removeEventListener(
+                'abort',
+                onAbortListener,
+              )
+              reportPermissionWait()
+              removeLeaderToolUseConfirm(toolUseID)
+              resolve({
+                ...freshResult,
+                updatedInput: input,
+                userModified: false,
+              })
+            }
+          },
+        })
       })
     }
 

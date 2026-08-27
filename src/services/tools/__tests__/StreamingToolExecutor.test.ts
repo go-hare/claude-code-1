@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createAbortErrorReason } from '../../../utils/abortController.js'
 import { StreamingToolExecutor } from '../StreamingToolExecutor.js'
 import type { ToolUseContext } from '../../../Tool.js'
 
@@ -125,5 +126,32 @@ describe('StreamingToolExecutor.discard()', () => {
     expect(internals.tools).toHaveLength(0)
     expect(internals.progressAvailableResolve).toBeUndefined()
     expect(internals.turnSpan).toBeNull()
+  })
+})
+
+describe('StreamingToolExecutor remote-cancel (236 #27)', () => {
+  test('getAbortReason maps remote-cancel DOMException to remote_cancel, not user_interrupted', () => {
+    const ctx = makeMinimalContext()
+    ctx.abortController.abort(createAbortErrorReason('remote-cancel'))
+    const executor = new StreamingToolExecutor([], () => true as any, ctx)
+    const reason = (
+      executor as unknown as {
+        getAbortReason: (tool: { block: { name: string } }) => string | null
+      }
+    ).getAbortReason({ block: { name: 'Bash' } })
+    expect(reason).toBe('remote_cancel')
+  })
+
+  test('getAbortReason string interrupt + default block interruptBehavior is null', () => {
+    const ctx = makeMinimalContext()
+    ctx.abortController.abort('interrupt')
+    const executor = new StreamingToolExecutor([], () => true as any, ctx)
+    const reason = (
+      executor as unknown as {
+        getAbortReason: (tool: { block: { name: string } }) => string | null
+      }
+    ).getAbortReason({ block: { name: 'Bash' } })
+    // interruptBehavior default is 'block' → null (do not cancel)
+    expect(reason).toBe(null)
   })
 })

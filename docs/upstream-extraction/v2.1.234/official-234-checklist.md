@@ -31,8 +31,8 @@
 
 | 状态 | 条数 | 说明 |
 | ---- | ---- | ---- |
-| **HAVE** | **44** | 51 − #35 GAP − 6 N/A（含 #20 LI/na/Io/Ne/F3i） |
-| **PARTIAL** | **0** | |
+| **HAVE** | **43** | 51 − #35 GAP − 6 N/A − `#4` PARTIAL |
+| **PARTIAL** | **1** | `#4` quota：仅 REPL；print 无 |
 | **GAP** | **1** | #35 profile `/login` invent-ban |
 | **N/A** | **6** | #25/#30–#33/#50 Desktop/cloud/Mantle |
 | **UNKNOWN** | **0** | |
@@ -46,7 +46,7 @@
 | 1 | `CLAUDE_CODE_PROJECT_DIR_NAME` | **HAVE** | SEA `T6c`/`XLe`/`bws`；`sessionStoragePortable` + memo `getProjectDir` | peel `_peel_project_dir_name.txt` |
 | 2 | `selection:clear` keybinding | **HAVE** | SEA `h8i`；`useSelectionClearKeybinding` + AgentView chrome | peel `_peel_selection_clear.txt` |
 | 3 | GitLab MR badge footer/statusline | **HAVE** | SEA `_pp`/`lpp`/`aWb`/`lWb`/`nWb=2500`；`fetchPrStatus` = gh `pWb` ?? glab；`PrBadge` `!N`；harbor_prism `yWb` 不移植 | `ghPrStatus.234.test.ts`；`_peel_3_notes.md` |
-| 4 | Continue at usage limit + `/config` | **HAVE** | SEA Wqn/BXa/vgt/M4f/qXa/Gis；`quotaAutoResume.ts` + Config toggle + rate-limit menu + REPL `useQuotaAutoResume` + Esc cancel | `quotaAutoResume.234.test.ts` |
+| 4 | Continue at usage limit + `/config` | **PARTIAL** | SEA Wqn/BXa/…；`quotaAutoResume.ts` + Config + rate-limit + REPL `useQuotaAutoResume`。**print.ts 无** → HAVE 写成全表面是假账；REPL 面绿 | `quotaAutoResume.234.test.ts` |
 | 5 | Account email only to identify you | **HAVE** | SEA `UPb`；`getUserContext` 注入 identify-only `userEmail`（`ANTHROPIC_UNIX_SOCKET` 跳过） | `userEmailContext.234.test.ts` |
 | 6 | `\??\` NT-namespace 更多预批准面 | **HAVE** | SEA `Jw`/`su`/`Yhe`/`yR`/`qh`/`s7t`/`lMp`/`k0c`/`dvr`/`gno`；path helpers + workflow scriptPath + Shell cwd + publish Artifact/SendUserFile + FileRead Jw + FileEdit skip + claudemd + sessionRestore | `ntNamespace.234.test.ts` + WorkflowTool s7t |
 | 7 | Auto mode 长会话 compact 后重复拒网络 | **HAVE** | SEA wkr/lVr/Jvr/zvb/KXt/LOr/W4g；sessionAllowedHosts + REPL/print/SDK/InboxPoller | `sandboxNetworkDecision.234.test.ts` + `sessionAllowedHosts.234.test.ts`；`_peel_7_notes.md` |

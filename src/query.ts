@@ -2437,21 +2437,25 @@ async function* queryLoop(
     // executor can generate synthetic tool_result blocks for queued/in-progress tools.
     // Without this, tool_use blocks would lack matching tool_result blocks.
     if (toolUseContext.abortController.signal.aborted) {
-      if (streamingToolExecutor) {
-        // Consume remaining results - executor generates synthetic tool_results for
-        // aborted tools since it checks the abort signal in executeTool()
-        for await (const update of streamingToolExecutor.getRemainingResults()) {
-          if (update.message) {
-            yield update.message
-          }
-        }
-      } else if (
+      // densable 2.1.236 #27: remote-cancel (print/SDK SIGTERM) skips
+      // Interrupted / REJECT synthetics on both streaming and pairing arms.
+      if (
         !isRemoteCancelAbortReason(toolUseContext.abortController.signal.reason)
       ) {
-        yield* yieldMissingToolResultBlocks(
-          assistantMessages,
-          'Interrupted by user',
-        )
+        if (streamingToolExecutor) {
+          // Consume remaining results - executor generates synthetic tool_results for
+          // aborted tools since it checks the abort signal in executeTool()
+          for await (const update of streamingToolExecutor.getRemainingResults()) {
+            if (update.message) {
+              yield update.message
+            }
+          }
+        } else {
+          yield* yieldMissingToolResultBlocks(
+            assistantMessages,
+            'Interrupted by user',
+          )
+        }
       }
       // chicago MCP: auto-unhide + lock release on interrupt. Same cleanup
       // as the natural turn-end path in stopHooks.ts. Main thread only —
