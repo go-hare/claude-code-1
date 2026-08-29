@@ -60,6 +60,8 @@ export function getPillLabel(tasks: BackgroundTaskState[]): string {
         return n === 1 ? '1 monitor' : `${n} monitors`
       case 'dream':
         return 'dreaming'
+      case 'auto_mode_scan':
+        return n === 1 ? '1 auto-mode scan' : `${n} auto-mode scans`
     }
   }
 

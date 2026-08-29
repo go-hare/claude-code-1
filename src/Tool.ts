@@ -6,6 +6,7 @@ export type { ToolResultBlockParam }
 import type {
   ElicitRequestURLParams,
   ElicitResult,
+  ScopedMcpServerConfig,
 } from './services/mcp/types.js'
 import type { UUID } from 'crypto'
 import type { z } from 'zod/v4'
@@ -299,6 +300,17 @@ export type ToolUseContext = {
     payload: unknown,
     options?: { signal?: AbortSignal; queueBehind?: boolean },
   ) => Promise<unknown>
+  /**
+   * densable Iby — Chrome install mounts claude-in-chrome MCP.
+   * Accepts a next map or an updater over the current dynamic config.
+   */
+  onChangeDynamicMcpConfig?: (
+    next:
+      | Record<string, ScopedMcpServerConfig>
+      | ((
+          prev: Record<string, ScopedMcpServerConfig> | undefined,
+        ) => Record<string, ScopedMcpServerConfig>),
+  ) => void
   setToolJSX?: SetToolJSXFn
   addNotification?: (notif: Notification) => void
   /** Append a UI-only system message to the REPL message list. Stripped at the

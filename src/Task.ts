@@ -11,6 +11,7 @@ export type TaskType =
   | 'local_workflow'
   | 'monitor_mcp'
   | 'dream'
+  | 'auto_mode_scan'
 
 export type TaskStatus =
   | 'pending'
@@ -95,6 +96,8 @@ const TASK_ID_PREFIXES: Record<string, string> = {
   local_workflow: 'w',
   monitor_mcp: 'm',
   dream: 'd',
+  // densable oyg auto_mode_scan:"e"
+  auto_mode_scan: 'e',
 }
 
 // Get task ID prefix

@@ -1,6 +1,7 @@
 // Union of all concrete task state types
 // Use this for components that need to work with any task type
 
+import type { AutoModeScanTaskState } from './AutoModeScanTask/AutoModeScanTask.js'
 import type { DreamTaskState } from './DreamTask/DreamTask.js'
 import type { InProcessTeammateTaskState } from './InProcessTeammateTask/types.js'
 import type { LocalAgentTaskState } from './LocalAgentTask/LocalAgentTask.js'
@@ -17,6 +18,7 @@ export type TaskState =
   | LocalWorkflowTaskState
   | MonitorMcpTaskState
   | DreamTaskState
+  | AutoModeScanTaskState
 
 // Task types that can appear in the background tasks indicator
 export type BackgroundTaskState =
@@ -27,6 +29,7 @@ export type BackgroundTaskState =
   | LocalWorkflowTaskState
   | MonitorMcpTaskState
   | DreamTaskState
+  | AutoModeScanTaskState
 
 /**
  * Check if a task should be shown in the background tasks indicator.

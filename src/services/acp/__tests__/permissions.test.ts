@@ -54,6 +54,14 @@ mock.module('../bridge.js', () => ({
 }))
 
 const { createAcpCanUseTool } = await import('../permissions.js')
+const {
+  ACP_ALLOW_ONCE,
+  ACP_ALLOW_WITH_UPDATES,
+  ACP_EXIT_PLAN_AUTO,
+  ACP_EXIT_PLAN_BYPASS,
+  ACP_EXIT_PLAN_DEFAULT,
+  ACP_REJECT,
+} = await import('../permissionOptions.js')
 
 type PermissionResponse =
   | { outcome: { outcome: 'cancelled' } }
@@ -61,7 +69,7 @@ type PermissionResponse =
 
 function makeConn(
   permissionResponse: PermissionResponse = {
-    outcome: { outcome: 'selected', optionId: 'allow' },
+    outcome: { outcome: 'selected', optionId: ACP_ALLOW_ONCE },
   },
 ): AgentSideConnection {
   return {
@@ -164,7 +172,7 @@ describe('createAcpCanUseTool', () => {
 
   test('delegates ask decisions to the ACP client', async () => {
     const conn = makeConn({
-      outcome: { outcome: 'selected', optionId: 'allow' },
+      outcome: { outcome: 'selected', optionId: ACP_ALLOW_ONCE },
     })
     const input = { command: 'ls' }
     const canUseTool = createAcpCanUseTool(conn, 'sess-1', () => 'default')
@@ -187,7 +195,7 @@ describe('createAcpCanUseTool', () => {
 
   test('returns deny when the client rejects or cancels', async () => {
     const rejectConn = makeConn({
-      outcome: { outcome: 'selected', optionId: 'reject' },
+      outcome: { outcome: 'selected', optionId: ACP_REJECT },
     })
     const cancelConn = makeConn({ outcome: { outcome: 'cancelled' } })
 
@@ -234,18 +242,23 @@ describe('createAcpCanUseTool', () => {
     }
   })
 
-  test('options include allow always, allow once, reject once, and reject always', async () => {
+  test('options use official allow-once / allow-with-updates / reject ids', async () => {
     const conn = makeConn({ outcome: { outcome: 'cancelled' } })
     const canUseTool = createAcpCanUseTool(conn, 'sess-3', () => 'default')
-    await canUseTool(makeTool('Write'), {}, dummyContext, dummyMsg, 'tu_8')
+    await canUseTool(makeTool('WebSearch'), {}, dummyContext, dummyMsg, 'tu_8')
 
     const { options } = (conn.requestPermission as ReturnType<typeof mock>).mock
       .calls[0][0] as Record<string, unknown>
     const opts = options as Array<Record<string, unknown>>
-    expect(opts.find(option => option.kind === 'allow_always')).toBeTruthy()
-    expect(opts.find(option => option.kind === 'allow_once')).toBeTruthy()
-    expect(opts.find(option => option.kind === 'reject_once')).toBeTruthy()
-    expect(opts.find(option => option.kind === 'reject_always')).toBeTruthy()
+    expect(opts.map(option => option.optionId)).toEqual([
+      ACP_ALLOW_ONCE,
+      ACP_ALLOW_WITH_UPDATES,
+      ACP_REJECT,
+    ])
+    expect(opts.find(option => option.optionId === 'allow')).toBeUndefined()
+    expect(
+      opts.find(option => option.optionId === 'allow_always'),
+    ).toBeUndefined()
   })
 
   test('ExitPlanMode omits bypass option when the session does not expose it', async () => {
@@ -271,8 +284,14 @@ describe('createAcpCanUseTool', () => {
     const { options } = (conn.requestPermission as ReturnType<typeof mock>).mock
       .calls[0][0] as Record<string, unknown>
     const opts = options as Array<Record<string, unknown>>
-    expect(opts.some(option => option.optionId === 'bypassPermissions')).toBe(
+    expect(opts.some(option => option.optionId === ACP_EXIT_PLAN_BYPASS)).toBe(
       false,
+    )
+    expect(opts.some(option => option.optionId === ACP_EXIT_PLAN_AUTO)).toBe(
+      true,
+    )
+    expect(opts.some(option => option.optionId === ACP_EXIT_PLAN_DEFAULT)).toBe(
+      true,
     )
   })
 
@@ -286,6 +305,8 @@ describe('createAcpCanUseTool', () => {
       undefined,
       undefined,
       () => true,
+      undefined,
+      () => ['default', 'bypassPermissions'],
     )
 
     await canUseTool(
@@ -299,14 +320,17 @@ describe('createAcpCanUseTool', () => {
     const { options } = (conn.requestPermission as ReturnType<typeof mock>).mock
       .calls[0][0] as Record<string, unknown>
     const opts = options as Array<Record<string, unknown>>
-    expect(opts.some(option => option.optionId === 'bypassPermissions')).toBe(
+    expect(opts.some(option => option.optionId === ACP_EXIT_PLAN_BYPASS)).toBe(
       true,
+    )
+    expect(opts.some(option => option.optionId === ACP_EXIT_PLAN_AUTO)).toBe(
+      false,
     )
   })
 
   test('ExitPlanMode rejects a bypass selection that was not offered', async () => {
     const conn = makeConn({
-      outcome: { outcome: 'selected', optionId: 'bypassPermissions' },
+      outcome: { outcome: 'selected', optionId: ACP_EXIT_PLAN_BYPASS },
     })
     const onModeChange = mock(() => {})
     const canUseTool = createAcpCanUseTool(
@@ -420,5 +444,87 @@ describe('createAcpCanUseTool', () => {
 
     expect(result.behavior).toBe('deny')
     expect(onPermissionCancelled).toHaveBeenCalledTimes(1)
+  })
+
+  test('ExitPlanMode returns deny when client permission request throws', async () => {
+    const conn = {
+      requestPermission: mock(async () => {
+        throw new Error('connection lost')
+      }),
+      sessionUpdate: mock(async () => {}),
+    } as unknown as AgentSideConnection
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+    const onModeChange = mock(() => {})
+
+    try {
+      const result = await createAcpCanUseTool(
+        conn,
+        'sess-plan-fail',
+        () => 'plan',
+        undefined,
+        undefined,
+        onModeChange,
+      )(makeTool('ExitPlanMode'), {}, dummyContext, dummyMsg, 'tu_plan_fail')
+
+      expect(result.behavior).toBe('deny')
+      if (result.behavior !== 'deny') {
+        throw new Error('expected deny result')
+      }
+      expect(result.message).toContain('Permission request failed')
+      expect(onModeChange).not.toHaveBeenCalled()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  test('legacy allow / allow_always aliases are denied', async () => {
+    const allowConn = makeConn({
+      outcome: { outcome: 'selected', optionId: 'allow' },
+    })
+    const alwaysConn = makeConn({
+      outcome: { outcome: 'selected', optionId: 'allow_always' },
+    })
+    const allow = await createAcpCanUseTool(
+      allowConn,
+      'sess-legacy',
+      () => 'default',
+    )(makeTool('Bash'), { command: 'ls' }, dummyContext, dummyMsg, 'tu_legacy')
+    const always = await createAcpCanUseTool(
+      alwaysConn,
+      'sess-legacy2',
+      () => 'default',
+    )(makeTool('Bash'), { command: 'ls' }, dummyContext, dummyMsg, 'tu_legacy2')
+    expect(allow.behavior).toBe('deny')
+    expect(always.behavior).toBe('deny')
+  })
+
+  test('allow-with-updates applies session suggestions', async () => {
+    hasPermissionsMock.mockResolvedValueOnce({
+      ...askDecision,
+      suggestions: [
+        {
+          type: 'addRules',
+          rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }],
+          behavior: 'allow',
+          destination: 'session',
+        },
+      ],
+    })
+    const persist = mock(() => {})
+    const ctx = {
+      setSessionToolPermissionContext: persist,
+    } as unknown as ToolUseContext
+    const conn = makeConn({
+      outcome: { outcome: 'selected', optionId: ACP_ALLOW_WITH_UPDATES },
+    })
+    const result = await createAcpCanUseTool(conn, 'sess-dur', () => 'default')(
+      makeTool('Bash'),
+      { command: 'npm test' },
+      ctx,
+      dummyMsg,
+      'tu_dur',
+    )
+    expect(result.behavior).toBe('allow')
+    expect(persist).toHaveBeenCalled()
   })
 })

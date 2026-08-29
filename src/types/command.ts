@@ -105,9 +105,7 @@ export type LocalJSXCommandContext = ToolUseContext & {
     theme: ThemeName
   }
   onChangeAPIKey: () => void
-  onChangeDynamicMcpConfig?: (
-    config: Record<string, ScopedMcpServerConfig>,
-  ) => void
+  onChangeDynamicMcpConfig?: ToolUseContext['onChangeDynamicMcpConfig']
   onInstallIDEExtension?: (ide: IdeType) => void
   resume?: (
     sessionId: UUID,

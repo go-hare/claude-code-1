@@ -107,6 +107,10 @@ import { ConfigTool } from '@claude-code/builtin-tools/tools/ConfigTool/ConfigTo
 const GoalTool = feature('GOAL')
   ? require('@claude-code/builtin-tools/tools/GoalTool/GoalTool.js').GoalTool
   : null
+// densable ikw — always in the base pool; isEnabled() gates via GB + session + Ktr
+const ProposeGoalTool =
+  require('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js')
+    .ProposeGoalTool as typeof import('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js').ProposeGoalTool
 import { LocalMemoryRecallTool } from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/LocalMemoryRecallTool.js'
 import { VaultHttpFetchTool } from '@claude-code/builtin-tools/tools/VaultHttpFetchTool/VaultHttpFetchTool.js'
 import { TaskCreateTool } from '@claude-code/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
@@ -259,6 +263,7 @@ export function getAllBaseTools(): Tools {
     VaultHttpFetchTool,
     ConfigTool,
     ...(GoalTool ? [GoalTool] : []),
+    ProposeGoalTool,
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
     ...(SuggestBackgroundPRTool ? [SuggestBackgroundPRTool] : []),
     ...(WebBrowserTool ? [WebBrowserTool] : []),

@@ -1,9 +1,13 @@
-import { mock, describe, expect, test } from 'bun:test'
+import { afterAll, mock, describe, expect, test } from 'bun:test'
 import * as realToolsConstants from 'src/constants/tools.js'
 import * as realTool from 'src/Tool.js'
 import * as realErrors from 'src/utils/errors.js'
 import * as realMessages from 'src/utils/messages.js'
+import * as realLocalAgentTask from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { debugMock } from '../../../../../../tests/mocks/debug'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+
+const localAgentSnap = snapshotModuleExports(realLocalAgentTask)
 
 // ─── Mocks for agentToolUtils.ts dependencies ───
 // Only mock modules that are truly unavailable or cause side effects.
@@ -58,7 +62,11 @@ mock.module('src/utils/messages.ts', () => ({
   isEmptyMessageText: () => true,
 }))
 
+// Keep the real snapshot so sibling SendMessage suites still see
+// isLocalAgentTask / registerAsyncAgent. A one-function stub that always
+// returns false routes live local_agent tasks down the resume-dead path.
 mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
+  ...localAgentSnap,
   completeAgentTask: noop,
   createActivityDescriptionResolver: () => ({}),
   createProgressTracker: () => ({}),
@@ -66,7 +74,6 @@ mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
   failAgentTask: noop,
   getProgressUpdate: () => ({ tokenCount: 0, toolUseCount: 0 }),
   getTokenCountFromTracker: () => 0,
-  isLocalAgentTask: () => false,
   killAsyncAgent: noop,
   markAgentsNotified: noop,
   rebuildProgressFromMessages: noop,
@@ -127,6 +134,12 @@ mock.module('src/tools/AgentTool/AgentTool.tsx', () => ({
   outputSchema: {},
   default: {},
 }))
+
+afterAll(() => {
+  mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
+    ...localAgentSnap,
+  }))
+})
 
 const { countToolUses, getLastToolUseName } = await import('../agentToolUtils')
 

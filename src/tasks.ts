@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import type { Task, TaskType } from './Task.js'
+import { AutoModeScanTask } from './tasks/AutoModeScanTask/AutoModeScanTask.js'
 import { DreamTask } from './tasks/DreamTask/DreamTask.js'
 import { LocalAgentTask } from './tasks/LocalAgentTask/LocalAgentTask.js'
 import { LocalShellTask } from './tasks/LocalShellTask/LocalShellTask.js'
@@ -25,6 +26,7 @@ export function getAllTasks(): Task[] {
     LocalAgentTask,
     RemoteAgentTask,
     DreamTask,
+    AutoModeScanTask,
   ]
   if (LocalWorkflowTask) tasks.push(LocalWorkflowTask)
   if (MonitorMcpTask) tasks.push(MonitorMcpTask)

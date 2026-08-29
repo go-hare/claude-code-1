@@ -144,6 +144,11 @@ async function createSession(
       () =>
         this.sessions.get(sessionId)?.appState.toolPermissionContext
           .isBypassPermissionsModeAvailable ?? false,
+      undefined,
+      () =>
+        this.sessions
+          .get(sessionId)
+          ?.modes.availableModes.map(mode => mode.id) ?? [],
     )
 
     // Parse MCP servers from ACP params

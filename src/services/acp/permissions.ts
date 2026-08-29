@@ -2,11 +2,9 @@
  * Permission bridge: maps Claude Code's canUseTool / PermissionDecision
  * system to ACP's requestPermission() flow.
  *
- * Supports:
- *  - bypassPermissions mode (auto-allow all tools)
- *  - ExitPlanMode special handling (multi-option: Yes+auto/acceptEdits/default/No)
- *  - Always Allow
- *  - Standard allow_once/allow_always/reject_once
+ * Official option ids come from permissionOptions.ts (allow-once /
+ * allow-with-updates / skill / ExitPlan keep-context). Legacy allow /
+ * allow_always aliases are not advertised and not decoded.
  */
 import type {
   AgentSideConnection,
@@ -19,11 +17,29 @@ import type {
   PermissionAllowDecision,
   PermissionAskDecision,
   PermissionDenyDecision,
+  PermissionUpdate,
 } from '../../types/permissions.js'
 import type { Tool as ToolType, ToolUseContext } from '../../Tool.js'
 import type { AssistantMessage } from '../../types/message.js'
+import {
+  applyPermissionUpdates,
+  persistPermissionUpdates,
+} from '../../utils/permissions/PermissionUpdate.js'
 import { hasPermissionsToUseTool } from '../../utils/permissions/permissions.js'
 import { toolInfoFromToolUse } from './bridge.js'
+import {
+  ACP_ALLOW_ONCE,
+  ACP_REJECT,
+  buildExitPlanPermissionOptions,
+  buildStandardPermissionOptions,
+  decodeStandardPermissionOption,
+  durableUpdatesForAllow,
+  isOfferedOption,
+  resolveExitPlanModeId,
+  skillExactUpdates,
+  skillPrefixUpdates,
+} from './permissionOptions.js'
+import { buildPermissionRequestMeta } from './permissionPresentation.js'
 
 /**
  * Creates a CanUseToolFn that delegates permission decisions to the
@@ -46,6 +62,7 @@ export function createAcpCanUseTool(
    * wired up yet.
    */
   onPermissionCancelled?: () => void,
+  getAvailableModeIds?: () => readonly string[],
 ): CanUseToolFn {
   return async (
     tool: ToolType,
@@ -74,6 +91,7 @@ export function createAcpCanUseTool(
         onModeChange,
         isBypassModeAvailable,
         onPermissionCancelled,
+        getAvailableModeIds,
       )
     }
 
@@ -85,6 +103,7 @@ export function createAcpCanUseTool(
     // ── Run through the normal permission pipeline ────────────────
     // This handles: deny rules, allow rules, tool-specific checks,
     // bypassPermissions mode, dontAsk mode, acceptEdits mode, auto mode classifier
+    let ask: PermissionAskDecision | undefined
     try {
       const pipelineResult = await hasPermissionsToUseTool(
         tool,
@@ -101,7 +120,7 @@ export function createAcpCanUseTool(
       if (pipelineResult.behavior === 'deny') {
         return pipelineResult as PermissionDenyDecision
       }
-      // behavior === 'ask' → fall through to client delegation
+      ask = pipelineResult as PermissionAskDecision
     } catch (err) {
       console.error('[ACP Permissions] Pipeline error:', err)
       return {
@@ -130,22 +149,25 @@ export function createAcpCanUseTool(
       rawInput: input,
     }
 
-    const options: Array<PermissionOption> = [
-      { kind: 'allow_always', name: 'Always Allow', optionId: 'allow_always' },
-      { kind: 'allow_once', name: 'Allow', optionId: 'allow' },
-      { kind: 'reject_once', name: 'Reject', optionId: 'reject' },
-      {
-        kind: 'reject_always',
-        name: 'Always Reject',
-        optionId: 'reject_always',
-      },
-    ]
+    const options = buildAcpPermissionOptions({
+      toolName: tool.name,
+      input,
+      allowPersistent: ask?.suppressAlwaysAllowRule !== true,
+      suggestions: ask?.suggestions,
+      displayName: info.title,
+      cwd,
+    })
 
     try {
       const response = await conn.requestPermission({
         sessionId,
         toolCall,
         options,
+        _meta: buildPermissionRequestMeta({
+          toolName: tool.name,
+          title: info.title,
+          decisionReason: ask?.message,
+        }),
       })
 
       if (response.outcome.outcome === 'cancelled') {
@@ -167,12 +189,15 @@ export function createAcpCanUseTool(
         response.outcome.optionId !== undefined
       ) {
         const optionId = response.outcome.optionId
-        if (optionId === 'allow' || optionId === 'allow_always') {
-          return {
-            behavior: 'allow',
-            updatedInput: input,
-          }
-        }
+        const allowed = settleStandardPermissionOption({
+          optionId,
+          options,
+          toolName: tool.name,
+          input,
+          suggestions: ask?.suggestions,
+          context,
+        })
+        if (allowed) return allowed
       }
 
       // Default: deny
@@ -202,32 +227,12 @@ async function handleExitPlanMode(
   onModeChange?: (modeId: string) => void,
   isBypassModeAvailable?: () => boolean,
   onPermissionCancelled?: () => void,
+  getAvailableModeIds?: () => readonly string[],
 ): Promise<PermissionAllowDecision | PermissionDenyDecision> {
-  const options: Array<PermissionOption> = [
-    {
-      kind: 'allow_always',
-      name: 'Yes, and use "auto" mode',
-      optionId: 'auto',
-    },
-    {
-      kind: 'allow_always',
-      name: 'Yes, and auto-accept edits',
-      optionId: 'acceptEdits',
-    },
-    {
-      kind: 'allow_once',
-      name: 'Yes, and manually approve edits',
-      optionId: 'default',
-    },
-    { kind: 'reject_once', name: 'No, keep planning', optionId: 'plan' },
-  ]
-  if (isBypassModeAvailable?.() === true) {
-    options.unshift({
-      kind: 'allow_always',
-      name: 'Yes, and bypass permissions',
-      optionId: 'bypassPermissions',
-    })
-  }
+  const options = buildExitPlanPermissionOptions(
+    getAvailableModeIds?.() ??
+      defaultExitPlanAvailableModeIds(isBypassModeAvailable),
+  )
 
   const info = toolInfoFromToolUse(
     { name: 'ExitPlanMode', id: toolUseID, input },
@@ -243,60 +248,146 @@ async function handleExitPlanMode(
     rawInput: input,
   }
 
-  const response = await conn.requestPermission({
-    sessionId,
-    toolCall,
-    options,
-  })
+  try {
+    const response = await conn.requestPermission({
+      sessionId,
+      toolCall,
+      options,
+      _meta: buildPermissionRequestMeta({
+        toolName: 'ExitPlanMode',
+        title: info.title,
+      }),
+    })
 
-  if (response.outcome.outcome === 'cancelled') {
-    // Propagate cancellation so prompt() resolves with StopReason::Cancelled.
-    onPermissionCancelled?.()
+    if (response.outcome.outcome === 'cancelled') {
+      // Propagate cancellation so prompt() resolves with StopReason::Cancelled.
+      onPermissionCancelled?.()
+      return {
+        behavior: 'deny',
+        message: 'Tool use aborted',
+        decisionReason: { type: 'mode', mode: 'default' },
+      }
+    }
+
+    if (
+      response.outcome.outcome === 'selected' &&
+      'optionId' in response.outcome &&
+      response.outcome.optionId !== undefined
+    ) {
+      const selectedOption = response.outcome.optionId
+      const modeId = resolveExitPlanModeId(selectedOption)
+      if (isOfferedOption(selectedOption, options) && modeId) {
+        onModeChange?.(modeId)
+
+        try {
+          await conn.sessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: 'current_mode_update',
+              currentModeId: modeId,
+            },
+          })
+        } catch (err) {
+          // Mode already applied locally. Keep allow so a notify failure
+          // does not undo the user's choice or surface a raw transport error.
+          console.error('[ACP Permissions] ExitPlanMode sessionUpdate:', err)
+        }
+
+        return {
+          behavior: 'allow',
+          updatedInput: input,
+        }
+      }
+    }
+
     return {
       behavior: 'deny',
-      message: 'Tool use aborted',
+      message: 'User rejected request to exit plan mode.',
+      decisionReason: { type: 'mode', mode: 'plan' },
+    }
+  } catch (err) {
+    console.error('[ACP Permissions] Client request error:', err)
+    return {
+      behavior: 'deny',
+      message: 'Permission request failed',
       decisionReason: { type: 'mode', mode: 'default' },
     }
   }
+}
 
-  if (
-    response.outcome.outcome === 'selected' &&
-    'optionId' in response.outcome &&
-    response.outcome.optionId !== undefined
-  ) {
-    const selectedOption = response.outcome.optionId
-    const isOfferedOption = options.some(
-      option => option.optionId === selectedOption,
-    )
-    if (
-      isOfferedOption &&
-      (selectedOption === 'default' ||
-        selectedOption === 'acceptEdits' ||
-        selectedOption === 'auto' ||
-        selectedOption === 'bypassPermissions')
-    ) {
-      // Sync mode to session state and appState
-      onModeChange?.(selectedOption)
+function defaultExitPlanAvailableModeIds(
+  isBypassModeAvailable?: () => boolean,
+): readonly string[] {
+  return [
+    'default',
+    'acceptEdits',
+    'auto',
+    ...(isBypassModeAvailable?.() === true ? ['bypassPermissions'] : []),
+  ]
+}
 
-      await conn.sessionUpdate({
-        sessionId,
-        update: {
-          sessionUpdate: 'current_mode_update',
-          currentModeId: selectedOption,
-        },
-      })
-
-      return {
-        behavior: 'allow',
-        updatedInput: input,
-      }
-    }
+function buildAcpPermissionOptions(args: {
+  toolName: string
+  input: Record<string, unknown>
+  allowPersistent: boolean
+  suggestions?: PermissionUpdate[]
+  displayName?: string
+  cwd?: string
+}): PermissionOption[] {
+  // Official AskUserQuestion is elicitation, not permission options.
+  // SDK 0.19 has no elicitation host — advertise one-shot Yes/No only.
+  if (args.toolName === 'AskUserQuestion') {
+    return [
+      { optionId: ACP_ALLOW_ONCE, name: 'Yes', kind: 'allow_once' },
+      { optionId: ACP_REJECT, name: 'No', kind: 'reject_once' },
+    ]
   }
+  return buildStandardPermissionOptions(args)
+}
 
-  return {
-    behavior: 'deny',
-    message: 'User rejected request to exit plan mode.',
-    decisionReason: { type: 'mode', mode: 'plan' },
+function persistAcpPermissionUpdates(
+  context: ToolUseContext,
+  updates: PermissionUpdate[],
+): void {
+  if (updates.length === 0) return
+  persistPermissionUpdates(updates)
+  if (typeof context.setSessionToolPermissionContext !== 'function') return
+  context.setSessionToolPermissionContext(prev =>
+    applyPermissionUpdates(prev, updates),
+  )
+}
+
+function settleStandardPermissionOption(args: {
+  optionId: string
+  options: readonly PermissionOption[]
+  toolName: string
+  input: Record<string, unknown>
+  suggestions?: PermissionUpdate[]
+  context: ToolUseContext
+}): PermissionAllowDecision | undefined {
+  if (!isOfferedOption(args.optionId, args.options)) return undefined
+  const decoded = decodeStandardPermissionOption(args.optionId)
+  if (!decoded) return undefined
+  switch (decoded.kind) {
+    case 'allow-once':
+      return { behavior: 'allow', updatedInput: args.input }
+    case 'allow-durable':
+      persistAcpPermissionUpdates(
+        args.context,
+        durableUpdatesForAllow(args.toolName, args.suggestions, args.input),
+      )
+      return { behavior: 'allow', updatedInput: args.input }
+    case 'allow-skill-exact':
+      persistAcpPermissionUpdates(args.context, skillExactUpdates(args.input))
+      return { behavior: 'allow', updatedInput: args.input }
+    case 'allow-skill-prefix': {
+      const updates = skillPrefixUpdates(args.input)
+      if (updates) persistAcpPermissionUpdates(args.context, updates)
+      return { behavior: 'allow', updatedInput: args.input }
+    }
+    case 'reject-once':
+    case 'reject-durable':
+      return undefined
   }
 }
 
