@@ -103,6 +103,7 @@ import {
   messagesEndWithSuccessfulTerminalMcpTool,
   shouldSuppressPushForUserPresence,
   isAlternateScreenDisabled,
+  isAxcStickyMainEnabled,
   isEagerFlushEnabled,
   isForceFullLogoEnabled,
   isForceFullscreenUpsellEnabled,
@@ -278,6 +279,7 @@ import {
   resolveEnvironmentRunnerVersion,
   isSimpleModeEnvEnabled,
   isCoordinatorModeEnvEnabled,
+  syncCoordinatorModeEnvFromSession,
   isBriefEnvEnabled,
   resolveShellPrefix,
   isExplorePlanAgentsDisabled,
@@ -968,6 +970,10 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
     expect(
       isAlternateScreenDisabled({ CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: '1' }),
     ).toBe(true)
+    expect(isAxcStickyMainEnabled({})).toBe(false)
+    expect(isAxcStickyMainEnabled({ CLAUDE_CODE_AXC_STICKY_MAIN: '1' })).toBe(
+      true,
+    )
     expect(
       isWorkingSyncDisabled({ CLAUDE_CODE_DISABLE_WORKING_SYNC: '1' }),
     ).toBe(true)
@@ -3055,6 +3061,21 @@ describe('DISABLE_CRON + BRIEF_UPLOAD densables', () => {
     expect(
       isCoordinatorModeEnvEnabled({ CLAUDE_CODE_COORDINATOR_MODE: '1' }),
     ).toBe(true)
+    {
+      const env: NodeJS.ProcessEnv = {}
+      expect(syncCoordinatorModeEnvFromSession('coordinator', env)).toBe(
+        'Entered coordinator mode to match resumed session.',
+      )
+      expect(env.CLAUDE_CODE_COORDINATOR_MODE).toBe('1')
+      expect(
+        syncCoordinatorModeEnvFromSession('coordinator', env),
+      ).toBeUndefined()
+      expect(syncCoordinatorModeEnvFromSession('normal', env)).toBe(
+        'Exited coordinator mode to match resumed session.',
+      )
+      expect(env.CLAUDE_CODE_COORDINATOR_MODE).toBeUndefined()
+      expect(syncCoordinatorModeEnvFromSession(undefined, env)).toBeUndefined()
+    }
     expect(isBriefEnvEnabled({ CLAUDE_CODE_BRIEF: '1' })).toBe(true)
     expect(resolveShellPrefix({})).toBeNull()
     expect(resolveShellPrefix({ CLAUDE_CODE_SHELL_PREFIX: 'timeout 30' })).toBe(

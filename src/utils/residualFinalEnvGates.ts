@@ -2408,6 +2408,30 @@ export function isCoordinatorModeEnvEnabled(
   return isEnvTruthy(env.CLAUDE_CODE_COORDINATOR_MODE)
 }
 
+/**
+ * densable `matchSessionMode` env arm — flip CLAUDE_CODE_COORDINATOR_MODE to
+ * match a resumed transcript without loading coordinatorMode.js.
+ * Used when lazy require/import yields an incomplete ESM namespace (Bun/Windows).
+ * Returns the same warning string as matchSessionMode, or undefined.
+ */
+export function syncCoordinatorModeEnvFromSession(
+  sessionMode: 'coordinator' | 'normal' | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (!sessionMode) return undefined
+  const currentIsCoordinator = isCoordinatorModeEnvEnabled(env)
+  const sessionIsCoordinator = sessionMode === 'coordinator'
+  if (currentIsCoordinator === sessionIsCoordinator) return undefined
+  if (sessionIsCoordinator) {
+    env.CLAUDE_CODE_COORDINATOR_MODE = '1'
+  } else {
+    delete env.CLAUDE_CODE_COORDINATOR_MODE
+  }
+  return sessionIsCoordinator
+    ? 'Entered coordinator mode to match resumed session.'
+    : 'Exited coordinator mode to match resumed session.'
+}
+
 /** Official CLAUDE_CODE_BRIEF densable. */
 export function isBriefEnvEnabled(
   env: NodeJS.ProcessEnv = process.env,

@@ -35,6 +35,7 @@ import {
   resolveSyncPluginsInstallTimeoutMs,
   shouldRegisterSdkHostAuthRefreshCallback,
   shouldRegisterSdkOauthRefreshCallback,
+  syncCoordinatorModeEnvFromSession,
 } from 'src/utils/residualFinalEnvGates.js'
 import {
   getRemoteSystemPromptGbFeatureKey,
@@ -6911,11 +6912,14 @@ async function loadInitialMessages(
         { forkSession: !!options.forkSession },
       )
       if (result) {
-        // Match coordinator mode to the resumed session's mode
-        if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
-          const warning = getCoordinatorModeModule()?.matchSessionMode(
-            result.mode,
-          )
+        // Match coordinator mode to the resumed session's mode.
+        // When lazy require yields an incomplete namespace, still flip env so
+        // tool filter / footer match the transcript (saveMode already does).
+        if (feature('COORDINATOR_MODE')) {
+          const coordinatorMod = getCoordinatorModeModule()
+          const warning = coordinatorMod
+            ? coordinatorMod.matchSessionMode(result.mode)
+            : syncCoordinatorModeEnvFromSession(result.mode)
           if (warning) {
             process.stderr.write(warning + '\n')
             // Refresh agent definitions to reflect the mode switch
@@ -7253,11 +7257,13 @@ async function loadInitialMessages(
         result.messages = index >= 0 ? result.messages.slice(0, index + 1) : []
       }
 
-      // Match coordinator mode to the resumed session's mode
-      if (feature('COORDINATOR_MODE') && getCoordinatorModeModule()) {
-        const warning = getCoordinatorModeModule()?.matchSessionMode(
-          result.mode,
-        )
+      // Match coordinator mode to the resumed session's mode.
+      // Incomplete lazy module → sync env without matchSessionMode.
+      if (feature('COORDINATOR_MODE')) {
+        const coordinatorMod = getCoordinatorModeModule()
+        const warning = coordinatorMod
+          ? coordinatorMod.matchSessionMode(result.mode)
+          : syncCoordinatorModeEnvFromSession(result.mode)
         if (warning) {
           process.stderr.write(warning + '\n')
           // Refresh agent definitions to reflect the mode switch

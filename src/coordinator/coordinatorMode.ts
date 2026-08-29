@@ -15,7 +15,10 @@ import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTo
 import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
 import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
-import { isCoordinatorModeEnvEnabled } from '../utils/residualFinalEnvGates.js'
+import {
+  isCoordinatorModeEnvEnabled,
+  syncCoordinatorModeEnvFromSession,
+} from '../utils/residualFinalEnvGates.js'
 
 // Checks the same gate as isScratchpadEnabled() in
 // utils/permissions/filesystem.ts. Duplicated here because importing
@@ -69,32 +72,16 @@ export function isCoordinatorMode(): boolean {
 export function matchSessionMode(
   sessionMode: 'coordinator' | 'normal' | undefined,
 ): string | undefined {
-  // No stored mode (old session before mode tracking) — do nothing
-  if (!sessionMode) {
-    return undefined
-  }
-
-  const currentIsCoordinator = isCoordinatorMode()
-  const sessionIsCoordinator = sessionMode === 'coordinator'
-
-  if (currentIsCoordinator === sessionIsCoordinator) {
-    return undefined
-  }
-
-  // Flip the env var — isCoordinatorMode() reads it live, no caching
-  if (sessionIsCoordinator) {
-    process.env.CLAUDE_CODE_COORDINATOR_MODE = '1'
-  } else {
-    delete process.env.CLAUDE_CODE_COORDINATOR_MODE
-  }
+  // Env flip lives in residualFinalEnvGates so print/sessionRestore can sync
+  // even when this module's lazy require returns an incomplete namespace.
+  const warning = syncCoordinatorModeEnvFromSession(sessionMode)
+  if (!warning) return undefined
 
   logEvent('tengu_coordinator_mode_switched', {
     to: sessionMode as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 
-  return sessionIsCoordinator
-    ? 'Entered coordinator mode to match resumed session.'
-    : 'Exited coordinator mode to match resumed session.'
+  return warning
 }
 
 export function getCoordinatorUserContext(

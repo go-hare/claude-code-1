@@ -26,19 +26,12 @@ import type { Message } from '../types/message.js';
 import { agenticSessionSearch } from '../utils/agenticSessionSearch.js';
 import { renameRecordingForSession } from '../utils/asciicast.js';
 import { updateSessionName } from '../utils/concurrentSessions.js';
-import { ResumeReturnDialog } from '../components/ResumeReturnDialog.js';
 import { loadConversationForResume } from '../utils/conversationRecovery.js';
 import { checkCrossProjectResume } from '../utils/crossProjectResume.js';
 import type { FileHistorySnapshot } from '../utils/fileHistory.js';
 import { toError } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
-import { createSystemMessage, getMessagesAfterCompactBoundary } from '../utils/messages.js';
-import {
-  evaluateResumeReturnOffer,
-  getResumePrompt,
-  type ResumeReturnChoice,
-  type ResumeReturnOffer,
-} from '../utils/resumeReturn.js';
+import { createSystemMessage } from '../utils/messages.js';
 import {
   computeStandaloneAgentContext,
   restoreAgentFromSession,
@@ -56,9 +49,7 @@ import {
   type SessionLogResult,
 } from '../utils/sessionStorage.js';
 import type { ThinkingConfig } from '../utils/thinking.js';
-import { tokenCountWithEstimation } from '../utils/tokens.js';
 import type { ContentReplacementRecord } from '../utils/toolResultStorage.js';
-import { saveGlobalConfig } from '../utils/config.js';
 import { REPL } from './REPL.js';
 
 function parsePrIdentifier(value: string): number | null {
@@ -134,19 +125,6 @@ export function ResumeConversation({
     agentName?: string;
     agentColor?: AgentColorName;
     mainThreadAgentDefinition?: AgentDefinition;
-    /** Official resume-return: inject continue prompt after full resume. */
-    autoContinuePrompt?: string;
-  } | null>(null);
-  const [resumeReturnOffer, setResumeReturnOffer] = React.useState<{
-    offer: ResumeReturnOffer;
-    pending: {
-      messages: Message[];
-      fileHistorySnapshots?: FileHistorySnapshot[];
-      contentReplacements?: ContentReplacementRecord[];
-      agentName?: string;
-      agentColor?: AgentColorName;
-      mainThreadAgentDefinition?: AgentDefinition;
-    };
   } | null>(null);
   const [crossProjectCommand, setCrossProjectCommand] = React.useState<string | null>(null);
   const sessionLogResultRef = React.useRef<SessionLogResult | null>(null);
@@ -286,8 +264,13 @@ export function ResumeConversation({
         /* eslint-disable @typescript-eslint/no-require-imports */
         const coordinatorModule =
           require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js');
+        const { syncCoordinatorModeEnvFromSession } =
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
         /* eslint-enable @typescript-eslint/no-require-imports */
-        const warning = coordinatorModule.matchSessionMode(result.mode);
+        const warning =
+          typeof coordinatorModule?.matchSessionMode === 'function'
+            ? coordinatorModule.matchSessionMode(result.mode)
+            : syncCoordinatorModeEnvFromSession(result.mode);
         if (warning) {
           /* eslint-disable @typescript-eslint/no-require-imports */
           const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
@@ -386,25 +369,15 @@ export function ResumeConversation({
       });
 
       setLogs([]);
-      const pending = {
+      // densable iXg(Gxt) is REPL-after-load, not picker intercept.
+      setResumeData({
         messages: result.messages,
         fileHistorySnapshots: result.fileHistorySnapshots,
         contentReplacements: result.contentReplacements,
         agentName: result.agentName,
         agentColor: (result.agentColor === 'default' ? undefined : result.agentColor) as AgentColorName | undefined,
         mainThreadAgentDefinition: resolvedAgentDef,
-      };
-      // Official CBp/Oga — large old sessions offer compact | continue | never.
-      const offer = evaluateResumeReturnOffer(result.messages as Array<{ type: string; timestamp?: string }>, msgs =>
-        tokenCountWithEstimation(msgs as Message[]),
-      );
-      if (offer) {
-        setResumeReturnOffer({ offer, pending });
-        selectingRef.current = false;
-        setResuming(false);
-        return;
-      }
-      setResumeData(pending);
+      });
       selectingRef.current = false;
       setResuming(false);
     } catch (e) {
@@ -426,40 +399,6 @@ export function ResumeConversation({
 
   if (crossProjectCommand) {
     return <CrossProjectMessage command={crossProjectCommand} />;
-  }
-
-  if (resumeReturnOffer) {
-    return (
-      <ResumeReturnDialog
-        sessionAgeMinutes={resumeReturnOffer.offer.sessionAgeMinutes}
-        estimatedTokens={resumeReturnOffer.offer.estimatedTokens}
-        onChoice={(choice: ResumeReturnChoice) => {
-          const { pending } = resumeReturnOffer;
-          setResumeReturnOffer(null);
-          if (choice === 'never') {
-            saveGlobalConfig(prev => {
-              if (prev.resumeReturnDismissed) return prev;
-              return { ...prev, resumeReturnDismissed: true };
-            });
-            setResumeData(pending);
-            return;
-          }
-          if (choice === 'compact') {
-            setResumeData({
-              ...pending,
-              messages: getMessagesAfterCompactBoundary(pending.messages),
-              autoContinuePrompt: getResumePrompt(),
-            });
-            return;
-          }
-          // continue — full session as-is, still inject continue prompt
-          setResumeData({
-            ...pending,
-            autoContinuePrompt: getResumePrompt(),
-          });
-        }}
-      />
-    );
   }
 
   if (resumeData) {
@@ -484,7 +423,6 @@ export function ResumeConversation({
         taskListId={taskListId}
         thinkingConfig={thinkingConfig}
         onTurnComplete={onTurnComplete}
-        initialAutoContinuePrompt={resumeData.autoContinuePrompt}
       />
     );
   }

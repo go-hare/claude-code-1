@@ -55,7 +55,10 @@ import { fileHistoryRestoreStateFromLog } from './fileHistory.js'
 import { createSystemMessage } from './messages.js'
 import { parseUserSpecifiedModel } from './model/model.js'
 import { getPlansDirectory } from './plans.js'
-import { isCoordinatorModeEnvEnabled } from './residualFinalEnvGates.js'
+import {
+  isCoordinatorModeEnvEnabled,
+  syncCoordinatorModeEnvFromSession,
+} from './residualFinalEnvGates.js'
 import { setCwd } from './Shell.js'
 import {
   adoptResumedSessionFile,
@@ -590,7 +593,9 @@ export async function processResumedConversation(
   // Match coordinator/normal mode to the resumed session
   let modeWarning: string | undefined
   if (feature('COORDINATOR_MODE')) {
-    modeWarning = context.modeApi?.matchSessionMode(result.mode)
+    modeWarning = context.modeApi
+      ? context.modeApi.matchSessionMode(result.mode)
+      : syncCoordinatorModeEnvFromSession(result.mode)
     if (modeWarning) {
       result.messages.push(createSystemMessage(modeWarning, 'warning'))
     }
