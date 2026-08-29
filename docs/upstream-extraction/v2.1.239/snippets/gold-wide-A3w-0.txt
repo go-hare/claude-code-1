@@ -1,0 +1,46 @@
+# offset=315081857 (0x12c7c481) kw="async function A3w(" bytes=8050
+
+racked does not prove user-authored"}`].join(`
+`)}async function A3w(e,t=db("userSettings")??sF.join(En(),"settings.json"),r){let n="(no settings file)",o=[],i=[],s=0,a=0,l=0,c;try{c=await l$m(t,1e6,r!==void 0&&sF.resolve(t)===sF.resolve(sF.join(En(),yJe.default))?{backend:r,key:Pn.userSettings()}:void 0)}catch(f){if(dt(f)==="ENOENT")c=null;else throw Error("settings file present but unreadable")}if(c==null);else{let m=er(c);n=p$m(m.autoMode??{});let h=m.permissions?.allow;if(Array.isArray(h)){let g=h.filter((w)=>typeof w==="string"),y=g.filter(YNm),_=g.filter((w)=>!YNm(w)).filter((w)=>{let{toolName:T,ruleContent:k}=Wp(w);return MNm(T,k)});l=tr(y,(w)=>!Frn(w))+tr(_,(w)=>!Frn(w));let b=y.filter(Frn),S=_.filter(Frn);s=Math.max(0,b.length-BEe),a=Math.max(0,S.length-BEe),o=b.slice(0,BEe),i=S.slice(0,BEe)}}let u=await E3w(e),d=B4n()?`
+_Note: classifyAllShell is active, so at runtime auto mode ignores every Bash/PowerShell allow rule \u2014 a superset of the entries flagged here, including any shell entries in the destructive list; outside auto mode all of these rules still apply._`:"",p=(f)=>f>0?`
+- \u2026and ${f} more flagged entries not shown (list capped) \u2014 re-run /auto-mode-setup after this cleanup to see the rest`:"";return AO("Existing auto-mode settings (selective read)",[`#### autoMode.{environment, allow, soft_deny, hard_deny, deny}
+${n}${u}`,o.length?`
+${wPl}
+${o.map((f)=>`- \`${oUe(f)}\``).join(`
+`)}${p(s)}${d}`:`
+No classifier-bypassing entries in user-settings permissions.allow.${d}`,i.length?`
+${EPl}
+${i.map((f)=>`- \`${oUe(f)}\``).join(`
+`)}${p(a)}`:`
+No destructive entries in user-settings permissions.allow.`,l>0?`
+${l} additional flagged ${l===1?"entry":"entries"} can't be shown or auto-removed (unusual characters or length) \u2014 the user should review permissions.allow by hand.`:""].filter(Boolean).join(`
+`))}function f$m(e){return e.replace(/[\u2028\u2029\u0085`]/g,(t)=>`\\u${t.codePointAt(0)?.toString(16).padStart(4,"0")}`)}function R3w(e){return x3w.has(e)||/^(python[0-9.]*|pip[0-9]*)$/.test(e)}async function I3w(e){let t=bS(e),r=[];try{let d=await Bge.readdir(t);r=(await Promise.all(d.filter((f)=>f.endsWith(".jsonl")).map(async(f)=>{let m=await Bge.stat(sF.join(t,f));return{path:sF.join(t,f),mtime:m.mtimeMs,size:m.size}}))).sort((f,m)=>m.mtime-f.mtime).slice(0,n$m).map((f)=>({path:f.path,size:f.size}))}catch{return AO("Recent usage in this project (names only)","_no transcript history for this project_")}let n=[],o=[],i=0;for(let{path:d,size:p}of r){if(p>u3w){i++;continue}let f="";try{f=await Bge.readFile(d,"utf8")}catch{continue}for(let m of f.split(`
+`)){let h=m.includes(o$m),g=m.includes(k3w);if(!h&&!g)continue;try{let _=rT(m).message?.content;if(!Array.isArray(_))continue;for(let b of _){if(b.type==="tool_use"&&b.name===Ni&&typeof b.input?.command==="string")n.push(Cs(b.input.command,`
+`));if(g&&b.type==="tool_result"){let S=typeof b.content==="string"?b.content:b.content===void 0?"":He(b.content);o.push(...$rn(S,C3w))}}}catch{}}}let s=n.join(`
+`),a=rvr($rn(s,/(https?:\/\/[^\s"'`]+)/g).map(u$m).filter((d)=>d!==null&&!T3w.test(d)&&!Mm(d))),l=rvr($rn(s,a$m)),c=rvr($rn(s,/-n\s+([a-z][a-z0-9-]{2,})/g)),u=n.map((d)=>d.replace(/^(sudo |timeout [0-9]+[smh]? )+/,"")).map((d)=>d.match(/^([a-z][a-z0-9_-]{1,20})\b/)?.[1]).filter((d)=>!!d&&!R3w(d));return AO("Recent usage in this project (names only)",[`Transcripts scanned: ${r.length-i}${i?` (${i} skipped as oversized)`:""}; Bash commands seen: ${n.length}`,a.length?`
+#### Hosts contacted
+${a.map(([d,p])=>`- ${d} (${p}\xD7)`).join(`
+`)}`:"",l.length?`
+#### Cloud buckets touched
+${l.map(([d,p])=>`- ${d} (${p}\xD7)`).join(`
+`)}`:"",c.length?`
+#### k8s namespaces (-n flags)
+${c.map(([d,p])=>`- ${d} (${p}\xD7)`).join(`
+`)}`:"",u.length?`
+#### Non-standard CLIs by frequency
+${rvr(u).map(([d,p])=>`- ${d} (${p}\xD7)`).join(`
+`)}`:"",o.length?`
+#### Recent auto-mode denial reasons
+${rvr(o,10).map(([d,p])=>`- ${d} (${p}\xD7)`).join(`
+`)}`:"",`
+Other projects\u2019 transcripts are NOT mined here (a Q2 opt-in). Shell history and other checkouts under ~ have their own sections below.`].join(`
+`))}async function JNm(e,t,r){if(!e||t===void 0)return AO(nvr,'_NOT GATHERED \u2014 the user did not opt in at setup, or was not asked before this ran. Treat shell history as "not queryable here". Do not read history files yourself._');let n=r?.homeDir??ePl();if(n===null)return AO(nvr,'_NOT GATHERED \u2014 no home directory could be determined. Treat shell history as "not queryable here". Do not read history files yourself._');let o=r??{platform:Wt(),homeDir:n,appData:V.APPDATA,xdgDataHome:V.XDG_DATA_HOME,histFile:V.HISTFILE};if(y0t(o.homeDir))return AO(nvr,XNm);let i=new AbortController,s;try{s=await Promise.race([H3w(o,t,i.signal),Pr(bPl(o.platform),i.signal).then(()=>qWt)])}finally{i.abort()}if(s!==qWt&&s.networkHome)return AO(nvr,XNm);let{words:a,filesRead:l,partial:c}=s===qWt?{words:[],filesRead:[],partial:!0}:s,u=rvr(a,BEe*2),d=[`Status: ${c?"partial":"complete"} \u2014 ${l.length} file(s) read: ${l.map(oUe).join(", ")||"none"}`,u.length?`
+#### Tools run outside Claude (shell history)
+${u.map(([p,f])=>`- ${oUe(p)} (${f}\xD7)`).join(`
+`)}`:"",`
+The user opted into this at setup. Raw history lines were never read into the transcript \u2014 only the command words above. Do not read these files yourself; they carry inline secrets.`].filter(Boolean).join(`
+`);return AO(nvr,d)}async function H3w(e,t,r){let n=[],o=[],i=new Set,s=!1,a=performance.now()+bPl(e.platform)-50,l=await Bge.realpath(e.homeDir).catch((u)=>drn(u)?e.homeDir:null);if(l===null)return{words:[],filesRead:[],partial:!0};if(y0t(l))return{words:[],filesRead:[],partial:!0,networkHome:!0};let c=(u)=>jge(u,t);for(let u of VNm(e)){if(r.aborted||performance.now()>a){s=!0;break}if(y0t(u.path)||g0t(u.path,e.homeDir,l,c,e.platform)){s=!0;continue}let d=await Bge.realpath(u.path).catch((y)=>drn(y)?u.path:null);if(d===null){s=!0;continue}if(d!==u.path&&(y0t(d)||g0t(d,l,e.homeDir,c,e.platform))){s=!0;continue}let p=hqi(d,e.platform);if(i.has(p))continue;if(i.add(p),r.aborted||performance.now()>a){s=!0;break}let f=await wHe(u.path,GNm,{fromTail:!0,sniffEncoding:u.format==="psreadline",requireNlink1:!0});if(f==="unreadable"){s=!0;continue}if(f===null)continue;n.push(u.label);let m=qNm(f.content,u.format,f.truncated),h=m.slice(-_Pl);if(f.truncated||h.length<m.length)s=!0;let g=vPl(h,u.format,a);for(let y of g.words)o.push(y);if(g.hitDeadline){s=!0;break}}return{words:o,filesRead:n,partial:s}}async function ZNm(e,t,r,n){if(!e||t===void 0)return AO(Urn,"_NOT GATHERED \u2014 the user did not opt in to looking beyond this repo at setup, or was not asked before this ran. No home-directory contents were read. Do not run your own filesystem search to fill this in._");let{repos:o,limit:i}=await uNm({home:r,thisRepoHost:n,isReadDenied:(a)=>jge(a,t)});if(i==="network-home")return AO(Urn,'_NOT WALKED \u2014 the home directory resolves to a network path (UNC share or automount), and merely touching one authenticates to, or resolves, the named host. Treat other repos as "not queryable here"._');if(i==="home-unreadable")return AO(Urn,'_NOT WALKED \u2014 the home directory could not be read. Treat other repos as "not queryable here"._');let s=o.map((a)=>{let l=a.remotes.map(oUe).join(", "),c=a.note==="gitdir-outside-home"?"(gitdir points outside the home directory \u2014 remotes not read)":a.note==="no-remote"?"(no remote configured)":l||"(remote not on a known VCS host; not shown)";return`- \`${oUe(a.path)}\` \u2014 ${c}`});return AO(Urn,[s.length?`Repos found (path \u2014 \`host/org/repo\` remotes; userinfo and any path beyond owner/repo are stripped at the parse):
+${s.join(`
+`)}`:i==="none"?"_No other git repos found under the home directory._":"_No repos found before the walk was cut short \u2014 treat this as unknown, not as none._",P3w(i),`
+These are CANDIDATES, not vetted context: keep only the ones whose org already appears in Repo facts or the sibling-docs section.`].filter(Boolean).join(`
+`))}async function Q

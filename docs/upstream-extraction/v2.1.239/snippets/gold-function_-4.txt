@@ -1,0 +1,64 @@
+# offset=70000190 (0x42c1e3e) kw="function "
+
+loadedModules[id] = await import(allServerFiles[id]))]);
+    }
+  return @Promise.all(modulesForFiles.map(async (modules, i) => {
+    let typeAndFlag = typeAndFlags[i], type = typeAndFlag & 255, noClient = (typeAndFlag & 256) !== 0, [pageModule, ...layouts] = modules;
+    if (paramInformation[i] != null) {
+      let getParam = getParams[type], paramGetter = await getParam({
+        pageModule,
+        layouts
+      }), result;
+      if (paramGetter[Symbol.asyncIterator] != @undefined) {
+        for await (let params of paramGetter)
+          if (result = callRouteGenerator(type, noClient, i, layouts, pageModule, params), @isPromise(result) && @peekPromiseStatus(result) === 0)
+            await result;
+      } else if (paramGetter[Symbol.iterator] != @undefined) {
+        for (let params of paramGetter)
+          if (result = callRouteGenerator(type, noClient, i, layouts, pageModule, params), @isPromise(result) && @peekPromiseStatus(result) === 0)
+            await result;
+      } else
+        await @Promise.all(paramGetter.pages.map((params) => {
+          callRouteGenerator(type, noClient, i, layouts, pageModule, params);
+        }));
+    } else
+      await doGenerateRoute(type, noClient, i, layouts, pageModule, null);
+  }));
+})
+(function (component, responseObject, responseOptions, kind) {"use strict";
+  let bakeGetAsyncLocalStorage = @lazy(210);
+  return function() {
+    if (kind === 1)
+      throw responseObject;
+    if (kind === 2)
+      throw responseObject;
+    let async_local_storage = bakeGetAsyncLocalStorage();
+    if (async_local_storage) {
+      let store = async_local_storage.getStore();
+      if (store)
+        store.responseOptions = responseOptions;
+    }
+    return component;
+  };
+})
+(function (plugins, bunfig_folder, runSetupFn) {"use strict";
+  let config = {
+    experimentalCss: !0,
+    experimentalHtml: !0,
+    target: "browser",
+    root: bunfig_folder
+  };
+
+  class InvalidBundlerPluginError extends TypeError {
+    pluginName;
+    constructor(pluginName, reason) {
+      super(`"${pluginName}" is not a valid bundler plugin: ${reason}`);
+      this.pluginName = pluginName;
+    }
+  }
+  return (async (plugins2, bunfig_folder2, runSetupFn2, bundlerPlugin2) => {
+    let onstart_promises_array = @undefined;
+    for (let i = 0;i < plugins2.length; i++) {
+      let pluginModuleRaw = await import(await Bun.resolve(plugins2[i], bunfig_folder2));
+      if (!pluginModuleRaw || !pluginModuleRaw.default)
+        @throwTypeError(`Expected "${plugins2[

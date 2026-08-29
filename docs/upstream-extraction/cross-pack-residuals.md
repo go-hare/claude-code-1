@@ -1,11 +1,11 @@
 # Cross-pack residual inventory (go-hare vs densable)
 
-> 更新：**2026-08-27** — tip **densable 2.1.239 leftover** + npm **2.7.46**。  
+> 更新：**2026-08-29** — tip **densable 2.1.239 leftover** + npm **2.7.46**。  
 > 原则：densable-first 1:1；**不 invent** VSCode/cloud-only；**不 auto commit/push/bump**。  
 > 分 pack 金标仍以各 `official-*-checklist.md` / board 为准。本文只记**跨 pack 仍 open** 与有意 delta。  
 > **过期**：2026-08-13 稿把 228 当 tip、写「65+ feature ON」「全量 ~310 fail」。现码 `DEFAULT_BUILD_FEATURES` **42** ON（`scripts/defines.ts` / CLAUDE.md）。全量 suite 数以当下 `bun run precheck` 为准，勿再引用 310。  
 > **本轮 triage（2026-08-27）**：假 HAVE 纠偏 — **236 #11/#27**、**239 #4/#13**、**234 #4** → **PARTIAL**。完整单宿主 NMs 切轨另立项（Project NMs）。  
-> **审计补记（同日）**：① committed 残留 bug 工作树已修（RZi armed Esc、REPL coordinator 懒加载、print/REPL `saveMode` transcript-first）待提交；② `useSwarmBanner` 对齐 zRr `length>1`（撤 teamName / `getResolvedTeammateMode` invent 扩面）；③ 清 `CLAUDE_CODE_SPAWN_TUI_RELAUNCH` 双规残留。
+> **诚实度（2026-08-29）**：236 **#9** Project C → HAVE（checklist HAVE **22** / PARTIAL **10**）。**#11 仍 PARTIAL**（不抬 HAVE）；§1b 过期缺口（Hnu Fallback / `DIALOG_LAYOUTS={}` / ProposeGoal 无 tool）已关。239 board 假 HAVE 54 已对齐 checklist HAVE **52** / PARTIAL **2**。
 
 ---
 
@@ -14,8 +14,8 @@
 | 项 | 状态 |
 | --- | --- |
 | 239 changelog | HAVE **52** / PARTIAL **2**（#4 @synced 灌目录死；#13 交互 plan resume）/ GAP **0** / UNKNOWN **2 parked**（#44/#56）/ N/A **3** |
-| 239 leftover | willow crate REPL diff tab **已落**（GB 关走 DiffDialog；uncommitted only） |
-| 236 | HAVE **21** / PARTIAL **11** / N/A **1**（`#11` NMs 产品面 + `#27` REPL SIGTERM → PARTIAL） |
+| 239 leftover | willow crate REPL diff tab **已落**（GB 关走 DiffDialog；uncommitted only）。LOCAL `tengu_willow_mode:'dialog'` 已删。 |
+| 236 | HAVE **22** / PARTIAL **10** / N/A **1**（`#9` Project C HAVE；`#11` NMs 产品面 + `#27` REPL SIGTERM 仍 PARTIAL） |
 | 234 | HAVE **43** / PARTIAL **1**（`#4` quota 仅 REPL）/ GAP **1** / N/A **6** |
 | 237 | HAVE **3** |
 | 238 | HAVE **34** / PARTIAL **5**（live E2E / chrome UI / 官方自己也不隔离；不抬 HAVE） |
@@ -33,10 +33,9 @@
 | **228 #12** | synced skills ingest | **PARTIAL** | core harden 已齐；无 claude.ai 下载 host | 不 invent ingest |
 | **239 #4** | `@synced` 云插件 | **PARTIAL** | CLI 语法有；`setSyncedPluginDirs` 生产零调用 | 同 228 #12；不 invent 云灌 |
 | **239 #13** | cloud plan mode resume | **PARTIAL** | print + 交互 hydrate/`y_u` 已接；continue 不调；缺端到端 CCR 证齐 | 不抬 HAVE |
-| **236 #11** | managed-settings NMs | **PARTIAL** | 基建 + sXg 早装 + modal Host mount；产品面未切单宿主（见 §1b） | 不抬 HAVE |
+| **236 #11** | managed-settings NMs | **PARTIAL** | 基建 + sXg 早装 + modal Host mount；产品面未切单宿主（见 §1b）。mLo 只有 EQr；elicitation/sandbox 仍 focused | 不抬 HAVE |
 | **236 #27** | SIGTERM remote-cancel | **PARTIAL** | print + REPL `registerInteractiveShutdownAbort` 已打同因；全路径证齐前不抬 | 不抬 HAVE |
 | **236** | `#4/#10/#28/#29` 等 | **PARTIAL** gold-weak | 有邻近机、无完整 SEA 合同 | 再挖可以，禁止第二套 |
-| **236 #9** | fullscreen-resize-message | **PARTIAL** invent-ban | 金标=**239** `Axc`（`nativeHistory`+`tickPump`/`q$0=100`）；tip=`resetFrames`+React；tip-equiv=VML/`columns`/`layoutEpoch` | **禁止伪泵**；真 1:1=**Project C**（另立项） |
 | **236** | `#18/#24/#31/#32` | **PARTIAL** gold-false | SEA `found:false` | invent-ban |
 | **238** | `#4/#16/#18/#24/#25` | **PARTIAL** stay | 代码合同 1:1；骨架 E2E 不抬 HAVE | 保持 PARTIAL |
 | **coordinator resume** | `print.ts` lazy module / `saveMode` | parked soft | tip 已有 env/`result.mode` 落盘；Bun null `modeApi` 补 `matchSessionMode` 翻转等证据不足 | **本轮不必修** |
@@ -45,17 +44,17 @@
 
 ### 1b. NMs 产品面缺口（金标单宿主 vs tip 双轨）
 
-金标：**NMs + Bgp(kdy)** 一条宿主。tip：store/mailbox/jsu 表有，REPL 产品面未切。
+金标：**NMs + Bgp(kdy)** 一条宿主。tip：store/mailbox/jsu 表有，REPL 产品面**未全切**。**236 #11 仍 PARTIAL，禁止抬 HAVE。**
 
-| 缺口 | 事实 |
+| 缺口 | 事实（2026-08-29） |
 | --- | --- |
-| orphan kind | `goal_proposal` / `auto_mode_*` / `auto_default_nudge` / `it2_setup` / `computer_use_approval` 等 jsu 有 renderer，生产从不 `requestDialog`（缺 payload → `answer(null)`） |
-| 双轨 | REPL 仍 `focusedInputDialog`：cost / idle-return / ide-onboarding / sandbox-permission；jsu 同名 renderer orphan |
-| modal 空表 | `DIALOG_LAYOUTS={}`；fullscreen 已挂 `variant="modal"`（mLo），GSn 仍 inline；exit-plan 等无 opener 不造假 LAYOUT |
-| `permission_browser` | select 能标 kind；UI 走 Fallback，无专用 Hnu |
-| permission_* 单 renderer | Host 全进 `PermissionPromptRenderer`，只读 `requestId`；`showingDiffInIDE` 在 descriptor 上 Host 不读 |
+| **已切 NMs（勿再当 orphan）** | `goal_proposal`（ProposeGoalTool `l(Dot)`）；`auto_mode_setup_review` / flagged-allow；`auto_default_nudge`；`ide_onboarding` `sdu(CHr)`；`cost_threshold`；`permission_browser` Hnu（Allow / allow-domain / Deny，不再 Fallback） |
+| **仍 focused（金标也是）** | elicitation `_Zt`；sandbox / worker-sandbox 走 `focusedInputDialog` |
+| **仍 orphan spec** | `it2_setup` / `computer_use_approval` 仅 `jsuKinds`，生产无 opener（不 invent） |
+| **modal** | `DIALOG_LAYOUTS` 只有 `permission_exit_plan_mode_v2`（金标 mLo 也只有 EQr）；fullscreen 挂 `variant="modal"`；GSn 仍 inline |
+| **permission_* 单 renderer** | 除 browser 外 Host 仍进 `PermissionPromptRenderer`，只读 `requestId`；`showingDiffInIDE` 在 descriptor 上 Host 不读 |
 
-**P1 半截（只记账，本轮不改码）：** goal_proposal 整条无 tool；238 identity_changed 文案在、classifier stub；**232 #43** 已纠偏为 PARTIAL（233 回滚 / 产品路径不调用）；raccoon `/compact` GB 默认 false；policyHelpers consent 门 tip no-op。
+**P1 半截（只记账，本轮不改码）：** 238 identity_changed 文案在、classifier stub；**232 #43** 已纠偏为 PARTIAL（233 回滚 / 产品路径不调用）；raccoon `/compact` GB 默认 false；policyHelpers consent 门 tip no-op。GoalProposal extras（`stillWorking`/`currentCondition`）是死字段；1:1 是 renderer 现场读 `vou()`/`wt(nFA)`，禁止造 payload。
 
 **已关闭（勿再当 open GAP）：**
 
@@ -65,6 +64,8 @@
 | **createSdkMcpServer** | **HAVE** | densable `fVp`；registry plain `{}` |
 | **221 #12** large-upload TLS | **DEP-HAVE** | 修在 `@anthropic-ai/sandbox-runtime`；CLI 无独立 locus |
 | **236 #6** | **HAVE**（2026-08-26） | `LFh=14` chrome + `sgM` 动态槽；无 XKl → `ngM=0` |
+| **236 #9** | **HAVE**（2026-08-29） | Project C `Axc`/`xxc`/`frameSink`；sticky 默认 OFF |
+| **Hnu / ymn / ProposeGoal** | **HAVE**（WT，未 commit unless asked） | permission_browser 真 UI；auto-mode review gold copy；ProposeGoal 独立工具 |
 
 ---
 

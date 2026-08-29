@@ -1,0 +1,121 @@
+# densable 2.1.239 — Axc method bodies (Project C)
+# SEA: C:\Users\ADMINI~1\AppData\Local\Temp\official-239-pkg\package\claude.exe
+# extracted: 2026-08-28T08:22:38.159Z
+
+
+#### handleResize @ 321273465
+```js
+handleResize(e,t){if(e===this.cols&&t===this.rows)return"noop";if(this.suspended)return this.cols=e,this.rows=t,"noop";let r=e!==this.cols,n=this.rows;this.cols=e,this.rows=t;let o=Math.max(2,t-dyn);if(this.contentHeight=o,r||t<n)return this.buf+=Exe+D$+gsr+tO,this.buf+=C1e(1,Math.max(2,o)),this.resetTransientState(),this.replayPending=!0,this.pumpCursor=this.nativeHistory.length>0?0:-1,this.lastFrame="",this.commitImmediate(),"replay";return this.buf+=C1e(1,Math.max(2,o)),this.lastFrame="",this.commitImmediate(),"adjust"}
+```
+
+#### tickPump @ 321273993
+```js
+tickPump(){if(this.pumpCursor<0)return!1;let e=this.nativeHistory;this.buf+=C1e(1,2);let t=Math.min(this.pumpCursor+q$0,e.length);for(;this.pumpCursor<t;this.pumpCursor++)this.buf+=mSe(1,1)+e[this.pumpCursor]+Mko+Exc,this.buf+=mSe(2,1)+`
+`;if(this.buf+=C1e(1,Math.max(2,this.contentHeight)),this.lastFrame="",this.commitImmediate(),this.pumpCursor>=e.length)this.pumpCursor=-1;return this.pumpCursor>=0}
+```
+
+#### syncViewport @ 321271035
+```js
+syncViewport(e,t){if(this.suspended)return;if(this.pumpCursor>=0)return;if(!this.syncOpen&&Yhe())this.buf+=pYn,this.syncOpen=!0;if(this.restoreUnderContentOverlay(),this.replayPending)this.replayPending=!1,this.committedTop=Math.min(e.scrollTop,e.transcriptEnd);let r=Math.min(e.scrollTop,e.transcriptEnd),n=Math.max(0,r-this.committedTop);if(n>0){let c=Math.min(n,this.onScreen.length);if(c>0){this.buf+=mSe(this.contentHeight,1),this.buf+=`
+`.repeat(c);for(let d=0;d<c;d++)this.nativeHistory.push(this.onScreen.shift());if(this.nativeHistory.length>uyn)this.nativeHistory.splice(0,this.nativeHistory.length-uyn)}let u=this.committedTop+c;if(this.committedTop=r,u<r)this._gapRange={from:u,to:r};if(this.nativeHistory.length===0&&r>0)this._backfillNeeded=!0}if(t!==this.contentHeight)this.contentHeight=t,this.buf+=C1e(1,Math.max(2,t));let o=Math.max(0,this.committedTop-e.scrollTop),i=this.contentHeight,s=Math.min(e.lines.length,i),a=Math.max(0,s-o),l=Math.max(0,i-this.onScreen.length);if(this.onScreen.length>i)this.onScreen.length=i;while(this.onScreen.length<i)this.onScreen.push("");for(let c=0;c<i;c++){let u=c<a?e.lines[o+c]:"";if(c<i-l&&this.onScreen[c]===u)continue;this.buf+=mSe(c+1,1)+u+Mko+Exc,this.onScreen[c]=u}this.tailSlack=Math.max(0,i-a)}
+```
+
+#### draw @ 321272293 (Axc.draw — NOT Ink.draw; see gold-project-c-axc-draw.txt)
+```js
+draw(e){if(this.suspended)return;let t=this.syncOpen;if(!this.syncOpen&&Yhe())this.buf+=pYn;let r=this.buf.length;if(this.buf+=xce,this.restoreUnderContentOverlay(),e.contentHeight!==this.contentHeight)this.contentHeight=e.contentHeight,this.buf+=C1e(1,Math.max(2,e.contentHeight));for(let i=this.contentHeight;i<this.rows;i++)this.clearLine(i);if(this.tailSlack>0){let i=this.contentHeight-this.tailSlack;for(let s=i;s<this.contentHeight;s++)this.clearLine(s)}this.writeOverlayLines(e.bottomTop,e.bottomLines);let n=e.overlayLines.length;if(n>0){this.overlayRatchet=Math.max(this.overlayRatchet,n);let i=Math.max(0,this.rows-this.overlayRatchet);this.writeOverlayLines(i,e.overlayLines);for(let s=i+n;s<this.rows;s++)this.clearLine(s);this.contentOverlayRows=Math.max(0,this.contentHeight-Math.max(0,i-1))}else this.overlayRatchet=0,this.contentOverlayRows=0;let o=this.buf.slice(r);if(!t&&o===this.lastFrame){this.buf="",this.syncOpen=!1;return}if(this.lastFrame=o,Yhe())this.buf+=s9r;this.syncOpen=!1,this.commitImmediate()}
+```
+
+#### resume @ 321270445
+```js
+resume(e,t){this.suspended=!1;let r=e!==this._suspendedCols||t!==this._suspendedRows;if(this.cols=e,this.rows=t,this.contentHeight=Math.max(2,t-dyn),this.buf+=xce,this.buf+=C1e(1,this.contentHeight),this.buf+=tO,r)this.buf+=D$+gsr+tO,this.resetTransientState(),this.replayPending=!0,this.pumpCursor=this.nativeHistory.length>0?0:-1,this.lastFrame="";this.commitImmediate()}
+```
+
+#### suspend @ 321270320
+```js
+suspend(){this.suspended=!0,this._suspendedCols=this.cols,this._suspendedRows=this.rows,this.buf+=Exe,this.commitImmediate()}
+```
+
+#### restore @ 321270818
+```js
+restore(){if(this.restored)return;this.restored=!0,this.buf+=Mko;for(let e=this.contentHeight;e<this.rows;e++)this.clearLine(e);this.buf+=Exe,this.buf+=mSe(this.contentHeight+1,1),this.buf+=Ioe,this.commitImmediate()}
+```
+
+#### resetTransientState @ 321275388
+```js
+resetTransientState(){this.tailSlack=0,this.contentOverlayRows=0,this.overlayRatchet=0,this.onScreen.length=0,this.committedTop=0}
+```
+
+#### primeBackfill @ 321274556
+```js
+primeBackfill(e){if(e.length===0)return;let t=this.nativeHistory.length;for(let r of e)this.nativeHistory.push(r);if(this.nativeHistory.length>uyn){let r=this.nativeHistory.length-uyn;this.nativeHistory.splice(0,r),this.pumpCursor=Math.max(0,t-r)}else this.pumpCursor=t;if(this.replayPending=!0,t>0)this.onScreen.length=0}
+```
+
+#### switchTranscript @ 321274878
+```js
+switchTranscript(){this.buf+=Exe+D$+gsr,this.buf+=tO,this.buf+=C1e(1,Math.max(2,this.contentHeight)),this.resetTransientState(),this.nativeHistory.length=0,this.pumpCursor=-1,this.replayPending=!0,this.lastFrame="",this.commitImmediate()}
+```
+
+#### consumeBackfillNeeded @ 321274396
+```js
+consumeBackfillNeeded(){if(!this._backfillNeeded)return!1;return this._backfillNeeded=!1,!0}
+```
+
+#### consumeGapRange @ 321274488
+```js
+consumeGapRange(){let e=this._gapRange;return this._gapRange=null,e}
+```
+
+#### computeLayout @ 321273320
+```js
+computeLayout(e,t){let r=Math.max(dyn,e.length);return{contentHeight:Math.max(2,this.rows-r),bottomTop:this.rows-r,bottomLines:e,overlayLines:t}}
+```
+
+#### setup @ 321270250 (Axc.setup — from ctor contiguous peel)
+```js
+setup(){this.resetTransientState(),this.buf+=xce,this.buf+=jh(`\n`,this.rows-this.contentHeight),this.buf+=C1e(1,Math.max(2,this.contentHeight));for(let e=this.contentHeight;e<this.rows;e++)this.clearLine(e);this.commitImmediate()}
+```
+
+#### CONSTANTS_CLUSTER count=1
+--- 321276105 ---
+.tailSlack,overlayRows:this.contentOverlayRows}}}var Mko="\x1B[0m",Exc="\x1B[K",q$0=100,uyn=1e4,dyn=4;var _Tg=A(()=>{Srt();xoe();JRe();Lr()});function tSs(e,t,r){let n=e.width,o=r*n,i=-1;for(let c=n-1;c>=0;c--){let u=x$e(e,o+c);if(u.width===2)continue;if(u.char===" "&&(u.styleId&
+
+#### frameSink / tick arms
+
+#### "?"tick":!0" count=1
+--- 321278158 ---
+et I=S.consumeGapRange(),M=S.consumeBackfillNeeded();if(I||M){let O=I?I.from:0,D=I?I.to:x.scrollTop??0,F=J$0(x,O,D,S.cols,h.getStylePool());if(F.length>0)S.primeBackfill(F),R=!0}}return S.draw(C),w||R?"tick":!0},()=>{h.frameSink=null,g.restore(),l.current=null}},[]);let m=CKe.useRef({cols:s,rows:a});return CKe.useLayoutEffect(()=>{if(s===m.current.cols&&a===m.current.rows)return;m.current={cols:s,rows:a},l.current?.handleResize(s,a)},[s,a]),Bkr.jsxs(rv,{flexDirection:"column",height:a,width:"100%",flexShrink:0,children:[Bkr.jsx(QW,{ref:(h)=>{if(f)f.current=h},flexGrow:1,flexDirection:"column",stickyScroll:!0,children:Bkr.jsx(rSs.Provider,{value:d,children:e})}),Bkr.jsxs(rv,{ref:c,flexDirection:"column",flexShrink:0,minHeight:dyn,maxHeight:a-2,children:[r,t]}),n!=null?Bkr.jsx(rv,{ref:u,flexDirection:"column",flexShrink:0,position:"absolute",bottom:0,left:0,right:0,opaque:!0,children:n}):null]})}function X$0(e,t){if(!e)return;let r=0,n=e;while(n&&n.parentNode!==t)r+=n.yogaNode?.getComputedTop()??0,n=n.parentNode;return n?r:void 0}function J$0(e,t,r,n,o){let i=e.childNodes[0];if(!i)retu
+
+#### "return"tick"" count=0
+
+#### ","tick"" count=3
+--- 326443952 ---
+.since)),a=e.slice(o.fireIdx).map((l)=>l.uuid);return Ee("loop_noop_fold",{streak:i,span_len:a.length,tool_uses:o.toolUseCount,span_duration_s:_JA(e,o.fireIdx)}),[...e,Wpo(`${n} \xB7 ${i} no-op ${At(i,"tick")} since ${s}`,{cronKind:"loop",noOpStreak:i,streakStartedAt:o.since,foldedUuids:a}),yJA(i)]}function _JA(e,t){let r=e[t]?.timestamp,n=e.at(-1)?.timestamp;if(!r||!n)return 0;return Math.round((Date.parse(n)-Date.parse(r))/1000)}var G$y=A(()=>{Zt();Rme();ci();Lr()});async function q$y(e){if(!Jx().claim(`claude_runtime_exclude_ensured:${e}`))return;try{let t=await pU(e);if(!t)return;let r=await Tfe(t)??t,n=shu.join(r,"info","exclude"),o="";try{if(o=await aTn.readFile(n,"utf-8"),o.includes(V$y))return}catch(a){if(dt(a)!=="ENOENT")throw a;await aTn.mkdir(shu.join(r,"info"),{recursive:!0})}let i=o&&!o.endsWith(`
+`)?`
+`:"",s=[V$y,...bJA,""].join(`
+`);await aTn.appendFile(n,i+s)}catch(t){E(`ensureClaudeRuntimeFilesExcluded: ${t}`)}}var aTn,shu,bJA,V$y="# claude-code-runtime";var K$y=A(()=>{qe();st();fU();J4();aTn=require("fs/promises"),shu=require("path"),bJA=["**/.claude/scheduled_tasks
+--- 332177707 ---
+th-1]+u,w=(t.bandwidth?tPe:ePe)(t.copy(),u),C=m.selection?m.selection():m,k=C.selectAll(".domain").data([null]),E=C.selectAll(".tick").data(g,t).order(),A=E.exit(),N=E.enter().append("g").attr("class","tick"),P=E.select("line"),I=E.select("text");k=k.merge(k.enter().insert("path",".tick").attr("class","domain").attr("stroke","currentColor")),E=E.merge(N),P=P.merge(N.append("line").attr("stroke","currentColor").attr(d+"2",h*a)),I=I.merge(N.append("text").attr("fill","currentColor").attr(d,h*v).attr("dy",e===Ak?"0em":e===ZD?"0.71em":"0.32em")),m!==C&&(k=k.transition(m),E=E.transition(m),P=P.transition(m),I=I.transition(m),A=A.transition(m).attr("opacity",xX).attr("transform",function(D){return isFinite(D=w(D))?f(D+u):this.getAttribute("transform")}),N.attr("opacity",xX).attr("transform",function(D){var _=this.parentNode.__axis;return f((_&&isFinite(_=_(D))?_:w(D))+u)})),A.remove(),k.attr("d",e===Ek||e===KD?s?"M"+h*s+","+b+"H"+u+"V"+T+"H"+h*s:"M"+u+","+b+"V"+T:s?"M"+b+","+h*s+"V"+u+"H"+T+"V"+h*s:"M"+b+","+u+"H"+T),E.attr("opacity",1).attr("transform",function(D){return f(w(D)+u)}),P.att
+
+#### "frameSink=" count=3
+--- 308642782 ---
+portedLayoutFaultRecovered=!1;reportedLayoutFaultDropped=!1;reportedLayoutFaultPersisting=!1;altScreenParkPatch;selection=lbf();searchHighlightQuery="";searchPositions=null;selectionListeners=new Set;frameSink=null;hoveredNodes=new Set;hasRendered=!1;renderCalled=!1;isExiting=!1;altScreenActive=!1;_handoffRawMode=!1;altScreenMouseTracking="off";altScreenBackground;prevFrameContaminated=!1;prevOverlaySig="";needsEraseBeforePaint=!1;altScreenFullRepaint;bgWorkerForceShowCursor;fullRepaintSentinelScreen;cursorDeclaration=null;displayCursor=null;accessibilityMode;nativeCursorVisible;isScreenReaderEnabled;prevScreenReaderLines=[];prevScreenReaderPark={row:0,col:0};prevScreenReaderParkDeclared=!1;prevScreenReaderAnchor="clean";srStartupQuietTimer=null;srPreParkTimer=null;srPreParked=!1;resetScreenReaderDiffState(){this.prevScreenReaderLines=[],this.prevScreenReaderPark={row:0,col:0},this.prevScreenReaderParkDeclared=!1,this.prevScreenReaderAnchor="clean",this.srPreParked=!1}constructor(e){this.options=e;if(ZKa(this),this.accessibilityMode=V.CLAUDE_CODE_ACCESSIBILITY,this.altScreenFullRepai
+--- 321277397 ---
+ef(null),p=CKe.useRef(null),f=o??p;CKe.useInsertionEffect(()=>{let h=Yp.get(process.stdout);if(!h)return;let g=new Axc(process.stdout,s,a,h.recordContentWrite);g.setup(),l.current=g;let y=!1;return h.frameSink=(_,b)=>{let S=l.current;if(!S)return!1;if(h.isAltScreenActive){if(!y)S.suspend(),y=!0;return!1}if(y)y=!1,S.resume(S.cols,S.rows);let w=S.tickPump(),T=wTg(_,b,c.current),k=wTg(_,b,u.current),C=S.computeLayout(T,k),x=f.current?.getDomElement()??null;if(x){let I=x.cachedLayout,M=[];if(I&&I.height>0){let F=Math.min(I.y+I.height,_.screen.height);for(let B=I.y;B<F;B++)M.push(tSs(_.screen,b,B))}let O=x.scrollHeight??0,D=X$0(d.current,x)??O;S.syncViewport({lines:M,scrollTop:x.scrollTop??0,scrollHeight:O,transcriptEnd:D},C.contentHeight)}let R=!1;if(x){let I=S.consumeGapRange(),M=S.consumeBackfillNeeded();if(I||M){let O=I?I.from:0,D=I?I.to:x.scrollTop??0,F=J$0(x,O,D,S.cols,h.getStylePool());if(F.length>0)S.primeBackfill(F),R=!0}}return S.draw(C),w||R?"tick":!0},()=>{h.frameSink=null,g.restore(),l.current=null}},[]);let m=CKe.useRef({cols:s,rows:a});return CKe.useLayoutEffect(()=>{if(s==
+
+#### "tickPump()" count=2
+--- 321273993 ---
+ayPending=!0,this.pumpCursor=this.nativeHistory.length>0?0:-1,this.lastFrame="",this.commitImmediate(),"replay";return this.buf+=C1e(1,Math.max(2,o)),this.lastFrame="",this.commitImmediate(),"adjust"}tickPump(){if(this.pumpCursor<0)return!1;let e=this.nativeHistory;this.buf+=C1e(1,2);let t=Math.min(this.pumpCursor+q$0,e.length);for(;this.pumpCursor<t;this.pumpCursor++)this.buf+=mSe(1,1)+e[this.pumpCursor]+Mko+Exc,this.buf+=mSe(2,1)+`
+`;if(this.buf+=C1e(1,Math.max(2,this.contentHeight)),this.lastFrame="",this.commitImmediate(),this.pumpCursor>=e.length)this.pumpCursor=-1;return this.pumpCursor>=0}consumeBackfillNeeded(){if(!this._backfillNeeded)return!1;return this._backfillNeeded=!1,!0}consumeGapRange(){let e=this._gapRange;return this._gapRange=null,e}primeBackfill(e){if(e.length===0)return;let t=this.nativeHistory.length;for(let r of e)this.nativeHistory.push(r);if(this.nativeHistory.length>uyn){let r=this.nativeHistory.length-uyn;this.nativeHistory.splice(0,r),this.pumpCursor=Math.max(0,t-r)}else this.pumpCursor=t;if(this.replayPending=!0,t>0)this.onScreen.length=0}switchTranscrip
+--- 321277544 ---
+ontentWrite);g.setup(),l.current=g;let y=!1;return h.frameSink=(_,b)=>{let S=l.current;if(!S)return!1;if(h.isAltScreenActive){if(!y)S.suspend(),y=!0;return!1}if(y)y=!1,S.resume(S.cols,S.rows);let w=S.tickPump(),T=wTg(_,b,c.current),k=wTg(_,b,u.current),C=S.computeLayout(T,k),x=f.current?.getDomElement()??null;if(x){let I=x.cachedLayout,M=[];if(I&&I.height>0){let F=Math.min(I.y+I.height,_.screen.height);for(let B=I.y;B<F;B++)M.push(tSs(_.screen,b,B))}let O=x.scrollHeight??0,D=X$0(d.current,x)??O;S.syncViewport({lines:M,scrollTop:x.scrollTop??0,scrollHeight:O,transcriptEnd:D},C.contentHeight)}let R=!1;if(x){let I=S.consumeGapRange(),M=S.consumeBackfillNeeded();if(I||M){let O=I?I.from:0,D=I?I.to:x.scrollTop??0,F=J$0(x,O,D,S.cols,h.getStylePool());if(F.length>0)S.primeBackfill(F),R=!0}}return S.draw(C),w||R?"tick":!0},()=>{h.frameSink=null,g.restore(),l.current=null}},[]);let m=CKe.useRef({cols:s,rows:a});return CKe.useLayoutEffect(()=>{if(s===m.current.cols&&a===m.current.rows)return;m.current={cols:s,rows:a},l.current?.handleResize(s,a)},[s,a]),Bkr.jsxs(rv,{flexDirection:"column",heigh
+
+#### ctor nativeHistory init
+--- 321269869 ---
+=>Pko(null)},V$0=[Pko,Sxc],wnL[0]=Sxc,wnL[1]=Pko,wnL[2]=G$0,wnL[3]=V$0;else G$0=wnL[2],V$0=wnL[3];s1.useEffect(G$0,V$0)}var s1,pCt,eSs,ayn,Kvs,lyn,Yvs;var Dko=A(()=>{s1=P(Lt(),1),pCt=P(Ae(),1),eSs=P(Me(),1),ayn=s1.createContext(null),Kvs=s1.createContext(null),lyn=s1.createContext(null),Yvs=s1.createContext(null)});class Axc{out;cols;rows;onWrite;buf="";lastFrame="";syncOpen=!1;suspended=!1;restored=!1;tailSlack=0;contentOverlayRows=0;overlayRatchet=0;onScreen=[];replayPending=!1;committedTop=0;nativeHistory=[];pumpCursor=-1;_backfillNeeded=!1;_gapRange=null;_suspendedCols=0;_suspendedRows=0;contentHeight;constructor(e,t,r,n){this.out=e;this.cols=t;this.rows=r;this.onWrite=n;this.contentHeight=Math.max(2,r-dyn)}setup(){this.resetTransientState(),this.buf+=xce,this.buf+=jh(`
+`,this.rows-this.contentHeight),this.buf+=C1e(1,Math.max(2,this.contentHeight));for(let e=this.contentHeight;e<this.rows;e++)this.clearLine(e);this.commitImmediate()}suspend(){this.suspended=!0,this._suspendedCols=this.cols,this._suspendedRows=this.rows,this.buf+=Exe,this.commitImmediate()}resume(e,t){this.suspended=!1;let r=e!==this._suspendedCols||t!==this._suspendedRows;if(this.cols=e,this.rows=t,this.contentHeight=Math.max(2,t-dyn),this.buf+=xce,this.buf+=C1e(1,this.contentHeight),this.buf+=tO,r)this.buf+=D$+gsr+tO,this.resetTransientState(),this.replayPending=!0,this.pumpCursor=this.nativeHistory.length>0?0:-1,this.lastFrame="";this.commitImmediate()}restore(){if(this.restored)return;this.restored=!0,this.buf+=Mko;for(let e=this.contentHeight;e<this.rows;e++)this.clearLine(e);this.buf+=Exe,this.buf+=mSe(this.contentHeight+1,1),this.buf+=Ioe,this.commitImmediate()}syncViewport(e,t){if(this.suspended)return;if(this.pumpCursor>=0)return;if(!this.syncOpen&&Yhe())this.buf+=pYn,this.syncOpen=!0;if(this.restoreUnderContentOverlay(),this.replayPending)this.replayPending=!1,this.committedTop=Math.min(e.scrollTop,e.transcriptEnd);let r=Math.min(e.scrollTop,e.transcriptEnd),n=Math.max(0,r-this.committe
+
+#### rename notes
+l5w hits: 0 (236 batch name; 239 uses q$0)
+Ran= hits (noise-prone): 3
+dyn=4 in cluster: true
+contentHeight uses dyn: 3 / Math.max(2,t-dyn)

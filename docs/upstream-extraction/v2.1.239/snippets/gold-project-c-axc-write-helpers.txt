@@ -1,0 +1,47 @@
+# densable Axc write helpers peel
+
+#### @ 321275642
+```
+commitImmediate(){if(this.buf.length===0)return;let e=performance.now();this.out.write(this.buf),this.onWrite?.(e,Buffer.byteLength(this.buf)),this.buf=""}_onScreen(){return this.onScreen}_committedTop(){return this.committedTop}_pumpCursor(){return this.pumpCursor}_nativeHistory(){return this.nativeHistory}_commitForTest(){this.commitImmediate()}_transient(){return{tailSlack:this.tailSlack,overlayRows:this.contentOverlayRows}}}var Mko="\x1B[0m",Exc="\x1B[K",q$0=100,uyn=1e4,dyn=4;var _Tg=A(()=>{Srt();xoe();JRe();Lr()});function tSs(e,t,r){let n=e.width,o=r*n,i=-1;for(let c=n-1;c>=0;c--){let u=
+```
+
+#### @ 321275518
+```
+clearLine(e){this.buf+=mSe(e+1,1)+Z3e}writeOverlayLines(e,t){for(let r=0;r<t.length;r++)this.buf+=mSe(e+r+1,1)+t[r]+Mko+Exc}commitImmediate(){if(this.buf.length===0)return;let e=performance.now();this.out.write(this.buf),this.onWrite?.(e,Buffer.byteLength(this.buf)),this.buf=""}_onScreen(){return this.onScreen}_committedTop(){return this.committedTop}_pumpCursor(){return this.pumpCursor}_nativeHis
+```
+
+#### @ 321275556
+```
+writeOverlayLines(e,t){for(let r=0;r<t.length;r++)this.buf+=mSe(e+r+1,1)+t[r]+Mko+Exc}commitImmediate(){if(this.buf.length===0)return;let e=performance.now();this.out.write(this.buf),this.onWrite?.(e,Buffer.byteLength(this.buf)),this.buf=""}_onScreen(){return this.onScreen}_committedTop(){return this.committedTop}_pumpCursor(){return this.pumpCursor}_nativeHistory(){return this.nativeHistory}_comm
+```
+
+#### @ 321275116
+```
+restoreUnderContentOverlay(){let e=this.contentOverlayRows;if(e===0)return;this.contentOverlayRows=0;let t=this.contentHeight,r=this.onScreen.length;for(let n=0;n<e;n++){let o=t-1-n;if(o<0)break;this.buf+=mSe(o+1,1)+Z3e;let i=r-1-n;if(i>=0)this.buf+=this.onScreen[i]+Mko}}resetTransientState(){this.tailSlack=0,this.contentOverlayRows=0,this.overlayRatchet=0,this.onScreen.length=0,this.committedTop=0}clearLine(e){this.buf+=mSe(e+1,1)+Z3e}writeOverlayLines(e,t){for(let r=0;r<t.length;r++)this.buf+=mSe(e+r+1,1)+t[r]+Mko+Exc}commitImmediate(){if(this.buf.length===0)return;let e=performance.now();this.out.write(this.buf),this.onWrite?.(e,Buffer.byteLength(this.buf)),this.buf=""}_onScreen(){return this.onScreen}_committedTop(){return this.committedTop}_pumpCursor(){return this.pumpCursor}_nativeH
+```
+
+#### @ 308666610
+```
+recordContentWrite=(e,t)=>{Nki(this.terminal,e,t)};reassertTerminalModes=(e=!1)=>{if(!this.options.stdout.isTTY)return;if(this.isPaused||this.isUnmounted)return;if(this.options.stdout.write(Dci),this.options.stdout.write(I$e()),!this.altScreenActive)return;if(this.altScreenMouseTracking!=="off")this
+```
+
+#### @ 308550548
+```
+function Nki(e,t,r){let n=performance.now(),o=e.slowestWrite;if(o===void 0||n-t>=o.endedMs-o.startedMs)e.slowestWrite={startedMs:t,endedMs:n,bytes:r}}function g7a(e,t){if(e.stdoutDead)return;let r=performance.now(),n=Buffer.byteLength(t);try{e.stdout.write(t)}catch(o){if(e.tolerateDeadStdout&&(Cbf(o)==="EIO"||Cbf(o)==="EPIPE")){e.stdoutDead=!0,Nki(e,r,n);return}throw o}Nki(e,r,n)}function y7a(e,t,r=!1,n){let o=n!==void 0&&n>1?n-1:void 0;if(t.length===0)return;let i=!r,s=i?pYn:"";for(let a of t)switch(a.type){case"stdout":s+=a.content;break;case"clear":if(a.count>0)s+=Oci(a.count);break;case"clearTerminal":s+=a.altScreen?f7a():uYn(a.viewportRows);break;case"cursorHide":s+=xce;break;case"curso
+```
+
+#### @ 308550698
+```
+function g7a(e,t){if(e.stdoutDead)return;let r=performance.now(),n=Buffer.byteLength(t);try{e.stdout.write(t)}catch(o){if(e.tolerateDeadStdout&&(Cbf(o)==="EIO"||Cbf(o)==="EPIPE")){e.stdoutDead=!0,Nki(e,r,n);return}throw o}Nki(e,r,n)}function y7a(e,t,r=!1,n){let o=n!==void 0&&n>1?n-1:void 0;if(t.length===0)return;let i=!r,s=i?pYn:"";for(let a of t)switch(a.type){case"stdout":s+=a.content;break;case
+```
+
+#### @ 321270038
+```
+this.onWrite=n;this.contentHeight=Math.max(2,r-dyn)}setup(){this.resetTransientState(),this.buf+=xce,this.buf+=jh(`
+`,this.rows-this.contentHeight),this.buf+=C1e(1,Math.max(2,this.contentHeight));for(
+```
+
+#### @ 305065158
+```
+function C1e(e,t){return Xx(e,t,"r")}var iIa,K4r,aP,t_p,r_p,sIa,lIa,tO,Z3e,D$,gsr,Exe,s_p,a_p,ysr,yNt,l_p,MQe,c_p,Ygt;var Lci=A(()=>{hsr();iIa=Ple+String.fromCharCode(fSe.CSI),K4r={PARAM_START:48,PARAM_END:63,INTERMEDIATE_START:32,INTERMEDIATE_END:47,FINAL_START:64,FINAL_END:126};aP={CUU:65,CUD:66,CUF:67,CUB:68,CNL:69,CPL:70,CHA:71,CUP:72,CHT:73,HPA:96,HPR:97,VPA:100,VPR:101,HVP:102,ED:74,EL:75,ECH:88,IL:76,DL:77,ICH:64,DCH:80,SU:83,SD:84,SM:104,RM:108,SGR:109,DSR:110,DECSCUSR:113,DECSTBM:114,SC
+```

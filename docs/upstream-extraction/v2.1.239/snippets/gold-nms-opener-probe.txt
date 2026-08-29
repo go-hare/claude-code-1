@@ -1,0 +1,82 @@
+## Qg registry presence
+refusal_fallback_prompt	sym=$ne	Qg@305028604
+fable_overage_consent_prompt	sym=tbt	Qg@306981350
+mcp_url_elicitation	sym=Gbt	Qg@307562652
+computer_use_approval	sym=DIi	Qg@309386815
+it2_setup	sym=_Bi	Qg@312505059
+goal_proposal	sym=Dot	Qg@313297390
+auto_mode_setup_review	sym=AEo	Qg@320599864
+auto_mode_flagged_allow	sym=TEo	Qg@320600150
+cost_threshold	sym=Wxt	Qg@322325642
+resume_return	sym=Gxt	Qg@322326201
+managed_settings_security	sym=GSn	Qg@322326594
+sandbox_network_access	sym=FRr	Qg@322332255
+auto_default_nudge	sym=qSn	Qg@322332512
+peer_inbound_approval	sym=UOo	Qg@323128588
+chrome_install_setup	sym=jOo	Qg@323132490
+chrome_install_upsell	sym=zOo	Qg@323132768
+ide_onboarding	sym=CHr	Qg@323154372
+
+## Gm(<sym> opener patterns
+HIT auto_default_nudge Gm(qSn, count=1
+  @326463623: ),sFy)).then((nr)=>{let Xr=nr.shouldShowAutoDefaultNudge(ot.getState().toolPermissionContext);if(Xr)Gm(qSn,{currentMode:Xr},{queueBehind:!0})})},[Gm,ot]);let[pc]=ho.useState(()=>new AUl),[qd]=ho.useState(()=>new K8c({requestDialog:Gm,getBridge:()=>pc.bridge?.permission,applyPermissionUpdate:(nr)=>De((Xr)=>({...Xr,toolPermissionContext:gk(Xr.toolPermissionContext,nr)}))})),kc=ho.useRef(new ePr);ho.useEffect(()=>{kc.current.clear()},[re]);let Nl=wt((nr)=>nr.settings.terminalTitleFromRename)!==!1,Zd=ho.useSyncExternalStore(BQi,()=>Nl?EA(te.id):void 0),Rf=ho.useSyncExternalStore(BQi,()=>l8e(te.id)
+
+## known opener wrappers
+count function oXg(: 1
+  @322325443: n();mr();Rs();_I();ec();Qct=P(Ae(),1),nXg=P(Me(),1)});async function oXg(e,t){if(await e(Wxt,{})==="cancelled")return;ln((n)=>({...n,hasAcknowledgedCostThreshold:!0}),t),N("tengu_cost_threshold_acknowledged",{})}var Wxt;var Vxs=A(()=>{qn();jt();Wn();Sn();Wxt=Qg({kind:"cost_threshold",payload:ve(()=>_e({})),result:ve(()=>Or(["acknowledged","cancelled"])),default:"cancelled"})});async function iXg(e,t,{getMes
+count function LZh(: 0
+count function sXg(: 1
+  @322326388: e","dismiss","never","cancelled"])),default:"cancelled"})});function sXg(e){return cMl((t,r)=>e(GSn,s_A(t,r),{queueBehind:!0})),()=>cMl(null)}async function*s_A(e,t){yield{settings:e};for await(let r of t)yield{settings:r}}var GSn;var Kxs=A(()=>{qn();uMl();Sn();GSn=Qg({kind:"managed_settings_security",payload:ve(()=>_e({settings:iU((e)=>typeof e==="object"&&e!==null)})),result:ve(()=>Or(["approved","rejecte
+count function doo(: 1
+  @312897280: assifierState:"none",toolPermissionContext:_})});return}f()}function doo(e,t,r){let{ctx:n,description:o,result:i,awaitAutomatedChecksBeforeDialog:s,bridgeCallbacks:a,channelCallbacks:l}=e,{resolve:c,isResolved:u,claim:d}=t,p=n.toolUseContext.requestDialog;if(p===void 0)return;let f=p,m=n.toolUseContext.agentContext,h=m.agentType==="teammate"||dQ(m)&&m.isAsync===!0||n.toolUseContext.forRemoteExecution===!0,g
+count oXg(Gm,: 1
+  @326487829: dgedCostThreshold||nr.some((Xr)=>Xr.kind===Wxt.kind))return;oXg(Gm,Q)},[Yt,Un,he,ui,uy,Gm,Q,Kt]);let ECn=ho.useCallback(async(nr)=>{let Xr=ot.getState(),{mode:Qn,isBypassPermissionsModeAvailable:Yi}=Xr.toolPermissionContext;switch(JNr(Qn,Yi)){case"allow":return!0;case"deny":return!1;case"classify":return kc.current.getOrClassify(nr.host,nr.port,SAn(lo.getSnapshot()),()=>Prn(nr.host,nr.port,lo.getSnapshot(),
+count LZh(: 0
+count sXg(Gm): 1
+  @326463442: ;let Gm=ho.useMemo(()=>Bgp(jd.current),[]);ho.useEffect(()=>sXg(Gm),[Gm]),ho.useEffect(()=>{if(As())return;Promise.resolve().then(() => (mhu(),sFy)).then((nr)=>{let Xr=nr.shouldShowAutoDefaultNudge(ot.getState().toolPermissionContext);if(Xr)Gm(qSn,{currentMode:Xr},{queueBehind:!0})})},[Gm,ot]);let[pc]=ho.useState(()=>new AUl),[qd]=ho.useState(()=>new K8c({requestDialog:Gm,getBridge:()=>pc.bridge?.permission
+count Gm(qSn,: 1
+  @326463623: AutoDefaultNudge(ot.getState().toolPermissionContext);if(Xr)Gm(qSn,{currentMode:Xr},{queueBehind:!0})})},[Gm,ot]);let[pc]=ho.useState(()=>new AUl),[qd]=ho.useState(()=>new K8c({requestDialog:Gm,getBridge:()=>pc.bridge?.permission,applyPermissionUpdate:(nr)=>De((Xr)=>({...Xr,toolPermissionContext:gk(Xr.toolPermissionContext,nr)}))})),kc=ho.useRef(new ePr);ho.useEffect(()=>{kc.current.clear()},[re]);let Nl=wt
+count Gm(Wxt,: 0
+count Gm(GSn,: 0
+count Gm(CHr,: 0
+count Gm(Gxt,: 0
+count Gm(FRr,: 0
+count Gm(_Bi,: 0
+count Gm(DIi,: 0
+count Gm(Gbt,: 0
+count Gm(Dot,: 0
+count Gm(jOo,: 0
+count Gm(zOo,: 0
+count Gm(UOo,: 0
+count Gm(AEo,: 0
+count Gm(TEo,: 0
+
+## focused dialog string counts
+count "ide-onboarding": 0
+count "idle-return": 4
+count "sandbox-permission": 4
+count "elicitation": 520
+count "cost": 639
+count "auto-default-nudge": 2
+count "managed-settings": 103
+count "resume_return": 6
+count "sandbox_network_access": 2
+
+## kind-string near requestDialog / mailbox open
+kind:"refusal_fallback_prompt" total=1
+kind:"fable_overage_consent_prompt" total=1
+kind:"mcp_url_elicitation" total=1
+kind:"computer_use_approval" total=1
+kind:"it2_setup" total=1
+kind:"goal_proposal" total=1
+kind:"auto_mode_setup_review" total=1
+kind:"auto_mode_flagged_allow" total=1
+kind:"cost_threshold" total=1
+kind:"resume_return" total=1
+kind:"managed_settings_security" total=1
+kind:"sandbox_network_access" total=1
+kind:"auto_default_nudge" total=1
+kind:"peer_inbound_approval" total=1
+kind:"chrome_install_setup" total=1
+kind:"chrome_install_upsell" total=1
+kind:"ide_onboarding" total=1

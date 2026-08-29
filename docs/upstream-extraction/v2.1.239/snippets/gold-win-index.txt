@@ -1,0 +1,14 @@
+goal-call: @313299458 docs\upstream-extraction\v2.1.239\snippets\gold-win-goal-call.txt chars=5400
+l-Dot: @313301514 docs\upstream-extraction\v2.1.239\snippets\gold-win-l-Dot.txt chars=2899
+n-UOo: @326391438 docs\upstream-extraction\v2.1.239\snippets\gold-win-n-UOo.txt chars=2900
+t-jOo: @323451207 docs\upstream-extraction\v2.1.239\snippets\gold-win-t-jOo.txt chars=3899
+t-zOo: @323458317 docs\upstream-extraction\v2.1.239\snippets\gold-win-t-zOo.txt chars=2899
+o-AEo: @320601844 docs\upstream-extraction\v2.1.239\snippets\gold-win-o-AEo.txt chars=2900
+o-TEo: @320602416 docs\upstream-extraction\v2.1.239\snippets\gold-win-o-TEo.txt chars=2900
+Dot-Qg: @313297394 docs\upstream-extraction\v2.1.239\snippets\gold-win-Dot-Qg.txt chars=1200
+UOo-Qg: @323128592 docs\upstream-extraction\v2.1.239\snippets\gold-win-UOo-Qg.txt chars=1200
+jOo-Qg: @323132494 docs\upstream-extraction\v2.1.239\snippets\gold-win-jOo-Qg.txt chars=1200
+zOo-Qg: @323132772 docs\upstream-extraction\v2.1.239\snippets\gold-win-zOo-Qg.txt chars=1200
+idle-hint: @199752368 docs\upstream-extraction\v2.1.239\snippets\gold-win-idle-hint.txt chars=298
+willow: NOT FOUND
+idle-action: @199461992 docs\upstream-extraction\v2.1.239\snippets\gold-win-idle-action.txt chars=653

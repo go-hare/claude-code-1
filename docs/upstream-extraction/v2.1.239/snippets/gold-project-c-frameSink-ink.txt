@@ -1,0 +1,94 @@
+# densable 2.1.239 — Project C Phase-2: Ink.frameSink wiring (Ink class `Z2t`)
+# SEA: %TEMP%\official-239-pkg\package\claude.exe
+# extracted: 2026-08-28
+# Companion: gold-project-c-xxc-host.txt (sink body), probe-project-c-xxc.mjs
+
+## Contract
+
+Ink field: `frameSink = null` (writable from React host `xxc`).
+
+Signature installed by xxc:
+
+```ts
+frameSink: (frame, stylePool) => "tick" | true | false
+```
+
+| return from sink | Ink `onRender` behavior |
+|------------------|-------------------------|
+| falsy (`false`, or no sink) | fall through to normal cell-diff paint (`writeDiff` / dj8 path) |
+| truthy (`true` **or** `"tick"`) | swap `frontFrame`/`backFrame` to the just-rendered frame; `prevFrameContaminated=false`; `maybeResetPools`; call `onFrame`; **return early** (skip cell-diff write) |
+| `"tick"` (subset of truthy) | additionally `drainTimer = setTimeout(() => this.onRender(), hX>>2)` so pump keeps draining |
+
+Alt-screen suspend is **inside the sink (xxc)**, not Ink:
+- when `h.isAltScreenActive`: `Axc.suspend()` once, return `false` → Ink paints normally (alt-screen cell blit).
+- Axc is the **main-screen** sticky compositor only.
+
+## Field init (`Z2t` class) @ 308642782
+
+```js
+selectionListeners=new Set;frameSink=null;hoveredNodes=new Set;hasRendered=!1;...
+```
+
+Also nearby: `drainTimer=null` @ ~308642396.
+
+## `onRender` invoke site @ 308652923 (method head @ ~308652088)
+
+After `this.renderer({frontFrame, backFrame, ... overlayActive})` returns frame `c`:
+
+```js
+if(this.frameSink){
+  let W=this.frameSink(c,this.stylePool);
+  if(W){
+    if(this.backFrame=this.frontFrame,this.frontFrame=c,this.prevFrameContaminated=!1,this.maybeResetPools(e),W==="tick")
+      this.drainTimer=setTimeout(()=>this.onRender(),hX>>2);
+    this.options.onFrame?.({durationMs:performance.now()-e,flickers:[]});
+    return
+  }
+}
+// else: followScroll / selection / cell-diff write path continues...
+```
+
+Return-type handling summary (truthiness first, then string check):
+
+1. `if (this.frameSink)` — absent → normal paint
+2. `W = this.frameSink(c, this.stylePool)`
+3. `if (W)` — `false` from alt-screen suspend → normal paint
+4. swap frames + early return
+5. `if (W === "tick")` — re-arm `drainTimer` at `hX>>2` (quarter frame interval; tip: `FRAME_INTERVAL_MS >> 2`)
+
+## Related Ink surfaces used by xxc
+
+```js
+// @ 308666610
+recordContentWrite=(e,t)=>{Nki(this.terminal,e,t)};
+writeContent(e){g7a(this.terminal,e)}
+
+get isAltScreenActive(){return this.altScreenActive}  // @ 308665713
+
+getStylePool(){...}   // used by J$0 gap renderer + frameSink(stylePool arg is this.stylePool)
+getCharPool() / getHyperlinkPool()
+```
+
+## Instance map
+
+`Yp` = densable Ink registry (`Map` keyed by stdout). xxc does:
+
+```js
+let h = Yp.get(process.stdout);
+...
+h.frameSink = (...) => { ... }
+// cleanup: h.frameSink = null
+```
+
+`Yp.set(stdout, ink)` on createRoot / wrappedRender (~308679856 / mAS helper ~308680610).
+
+## Tip gap (honest)
+
+| densable | tip `packages/@ant/ink` | status |
+|----------|-------------------------|--------|
+| `frameSink` field + onRender hook | **ABSENT** in `ink.tsx` | Phase-2 wire target |
+| `"tick"` → `drainTimer` re-arm | tip has `drainTimer` only for `scrollDrainPending` (~1289) | different arm; need parallel `"tick"` arm |
+| `recordContentWrite` | **ABSENT** | needed as Axc `onWrite` |
+| `getStylePool()` public | stylePool is **private**; no getter | needed by host/J$0 |
+| `isAltScreenActive` getter | **PRESENT** `ink.tsx:1783` | ok |
+| `Yp.get(process.stdout)` | `instances.get(stdout)` (`instances.ts`, `$yf`/`Yp` comment) | ok |

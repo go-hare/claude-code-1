@@ -1,0 +1,155 @@
+## Call-like (<Sym>,  — filter out Qg({kind
+
+### Wxt raw=2 filtered=1
+@323217976: ([Wxt.kind,Gxt.kind,qSn.kind,CHr.kind]);jsu={...vM(_Bi,l2A),...vM(DIi,c2A),...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,
+
+### Gxt raw=2 filtered=2
+@322325843: async function iXg(e,t,{getMessageCount:r,storage:n,runCompact:o}){let i=await e(Gxt,t);if(i==="cancelled")return;if(N("tengu_resume_return_action",{action:me(i),sessionAgeMinutes:Math.round(t.sessionAgeMinutes),messageCount:r(),estimatedTokens:t.estimatedTokens}),i==="never")awa
+@323217991: kind,qSn.kind,CHr.kind]);jsu={...vM(_Bi,l2A),...vM(DIi,c2A),...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,Ynu),...vM(Dot,
+
+### CHr raw=2 filtered=2
+@323218021: ...vM(_Bi,l2A),...vM(DIi,c2A),...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,Ynu),...vM(Dot,xou),...vM(EQr,teu),...vM(Nno,
+@326208622: )||NHy.current){return}NHy.current=!0;let cdu=function cdu(){NHy.current=!1};sdu(CHr,{installationStatus:z4N},{queueBehind:!0}).then(cdu,cdu)},(W4N)=>adu(W4N),p6A.signal,ldu),()=>{p6A.abort(),n7n()}},d6A=[odu,T1o,idu,sdu,adu,ldu],j4N[0]=odu,j4N[1]=T1o,j4N[2]=sdu,j4N[3]=idu,j4N[4]
+
+### FRr raw=2 filtered=2
+@322331774: rt()});i=(f)=>{if(p(),!f)s.cancelRequest(d)}}let a=await this.deps.requestDialog(FRr,{host:e,port:t},{signal:n.signal,queueBehind:!0});if(i(o!==void 0),a==="cancelled"){if(o)gi.addSessionAllowedHost(e);return o??!1}let{allow:l,persistToSettings:c,persistRow:u}=a;if(c&&l&&u!==void
+@323218036: ...vM(DIi,c2A),...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,Ynu),...vM(Dot,xou),...vM(EQr,teu),...vM(Nno,Wou),...vM(Byr,
+
+### qSn raw=2 filtered=2
+@323218051: ...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,Ynu),...vM(Dot,xou),...vM(EQr,teu),...vM(Nno,Wou),...vM(Byr,Cmy),...vM($ne,
+@326463625: t Xr=nr.shouldShowAutoDefaultNudge(ot.getState().toolPermissionContext);if(Xr)Gm(qSn,{currentMode:Xr},{queueBehind:!0})})},[Gm,ot]);let[pc]=ho.useState(()=>new AUl),[qd]=ho.useState(()=>new K8c({requestDialog:Gm,getBridge:()=>pc.bridge?.permission,applyPermissionUpdate:(nr)=>De((
+
+### GSn raw=2 filtered=1
+@323218006: Hr.kind]);jsu={...vM(_Bi,l2A),...vM(DIi,c2A),...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,Ynu),...vM(Dot,xou),...vM(EQr,
+
+### _Bi raw=2 filtered=2
+@312934839: );if(_.needsIt2Setup&&t.requestDialog){let F=await Hjt(),B=await t.requestDialog(_Bi,{tmuxAvailable:F});if(B==="cancelled")throw pe("subagent_launch","subagent_teammate_iterm_cancelled"),new Hee("Teammate spawn cancelled - iTerm2 setup required");if(B==="installed"||B==="use-tmux
+@323217946: nd]:"dialog open"},i_y=new Set([Wxt.kind,Gxt.kind,qSn.kind,CHr.kind]);jsu={...vM(_Bi,l2A),...vM(DIi,c2A),...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,
+
+### DIi raw=2 filtered=2
+@309402584:  t=$we(),r=t.requestDialog;if(!r)return{granted:[],denied:[],flags:uIe};return r(DIi,e,{signal:t.abortController.signal})}var Url=A(()=>{RXn();tt();Erl();qe();xrl();HSt();LIi();MKr();$rl();eMf()});var PXn={};Et(PXn,{createLinkedTransportPair:()=>hNS});class Brl{peer;closed=!1;onc
+@323217961: n"},i_y=new Set([Wxt.kind,Gxt.kind,qSn.kind,CHr.kind]);jsu={...vM(_Bi,l2A),...vM(DIi,c2A),...vM(Wxt,u2A),...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,
+
+### Gbt raw=3 filtered=3
+@309475843: icitationDeclined:{url:x.url},isError:!0};continue}let M;h?.(!0);try{M=c?await c(Gbt,{serverName:C,params:x},{signal:i}):{action:"cancel"}}finally{h?.(!1)}let O=await mxi(C,M,i,"url",R);if(O.action!=="accept")return Ht(C,`User ${O.action==="decline"?"declined":O.action+"ed"} URL 
+@309654881: icitationDeclined:{url:C.url},isError:!0};continue}let I;h?.(!0);try{I=c?await c(Gbt,{serverName:k,params:C},{signal:i}):{action:"cancel"}}finally{h?.(!1)}let M=await pHi(k,I,i,"url",x);if(M.action!=="accept")return Ht(k,`User ${M.action==="decline"?"declined":M.action+"ed"} URL 
+@323218066: ...vM(Gxt,d2A),...vM(GSn,h2A),...vM(CHr,f2A),...vM(FRr,m2A),...vM(qSn,p2A),...vM(Gbt,g2A),...vM(bEt,Iiu),...vM(Uno,csu),...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,Ynu),...vM(Dot,xou),...vM(EQr,teu),...vM(Nno,Wou),...vM(Byr,Cmy),...vM($ne,Giu),...vM(tbt,
+
+### Dot raw=3 filtered=3
+@313301515: AppState:c}=r,u=Ibm.randomUUID();return c((d)=>({...d,pendingGoalProposal:u})),l(Dot,{condition:n},{queueBehind:!0}).then((d)=>{let p=r.getAppState().pendingGoalProposal!==u,f=Ktr()==="disabled",m=gn(r).mode==="plan";if(N("tengu_goal_proposal_decided",{decision:d.approved?p?xe("a
+@323218186: ...vM(Fno,Jiu),...vM($no,tyy),...vM(S4t,Mhy),...vM(v4t,Vru),...vM(xno,Ynu),...vM(Dot,xou),...vM(EQr,teu),...vM(Nno,Wou),...vM(Byr,Cmy),...vM($ne,Giu),...vM(tbt,o_y),...vM(Cno,Hnu),...vM(UOo,$nu),...vM(zOo,znu),...vM(jOo,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},.
+@333189551: tePanZoomMatrix");o(Sge,"setContextTransform");o(_ot,"drawSelectionRectangle");o(Dot,"drawAxes");o(Rot,"drawAtlases");o(Lot,"getPickingIndexes");o(Mot,"findNearestElementsWebgl");o(WO,"drawEle");o(Ege,"renderWebgl");ef={};ef.drawPolygonPath=function(e,t,r,i,n,a){var s=i/2,l=n/2;e
+
+### jOo raw=2 filtered=2
+@323218321: ...vM($ne,Giu),...vM(tbt,o_y),...vM(Cno,Hnu),...vM(UOo,$nu),...vM(zOo,znu),...vM(jOo,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},...vM(AEo,snu),...vM(TEo,anu)}});function NMs(PyN){let Vsu=gLo.c(15),{channel:DyN,variant:_2A,components:b2A,layouts:v2A,notifications:S
+@323451208: ()};o.signal.addEventListener("abort",w,{once:!0})})}try{while(!0){let b=await t(jOo,y(),{signal:r});if(b==="keep_waiting")continue;let{phase:S}=g();if(b==="continue"&&S==="connected"&&p){if(L0n())return be("chrome_install_upsell","policy_denied_late",{install_page_opened:n}),Dby
+
+### zOo raw=2 filtered=2
+@323218306: ...vM(Byr,Cmy),...vM($ne,Giu),...vM(tbt,o_y),...vM(Cno,Hnu),...vM(UOo,$nu),...vM(zOo,znu),...vM(jOo,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},...vM(AEo,snu),...vM(TEo,anu)}});function NMs(PyN){let Vsu=gLo.c(15),{channel:DyN,variant:_2A,components:b2A,layouts:v2A,
+@323458318:  detected"),be("chrome_install_upsell","no_browser_detected"),DXt;switch(await t(zOo,{},{signal:e.abortController.signal})){case"install":{let i=await Mby(e,t);if(i===zMs)gP().installUpsellResolution=void 0;return i}case"dont_ask_again":return be("chrome_install_upsell","dont_ask
+
+### UOo raw=2 filtered=2
+@323218291: ...vM(Nno,Wou),...vM(Byr,Cmy),...vM($ne,Giu),...vM(tbt,o_y),...vM(Cno,Hnu),...vM(UOo,$nu),...vM(zOo,znu),...vM(jOo,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},...vM(AEo,snu),...vM(TEo,anu)}});function NMs(PyN){let Vsu=gLo.c(15),{channel:DyN,variant:_2A,components:b
+@326391439: ll},rearmDeadline:()=>{S?.(),S=null,w()},superseded:!1};a.current.set(d,T),w(),n(UOo,{fromAddress:m.address==="an unidentified session"?void 0:m.address,claimedName:m.claimedName||void 0,verifiedPeerPid:m.verifiedPeerPid,holdCause:f,preview:m.dialogBody},{signal:y.signal,queueBeh
+
+### AEo raw=2 filtered=2
+@320601845: orted){N6t("cancel","background_scan");return}lhs(t,n,"completed");let c=await o(AEo,{...l.proposal,mode:e.mode},{queueBehind:!0});if(c!=="accept"){i?.(Ss("Auto-mode proposal discarded \u2014 nothing was saved. Re-run /auto-mode-setup anytime.","notice")),N6t(c==="decline"?"decli
+@323218390: ,znu),...vM(jOo,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},...vM(AEo,snu),...vM(TEo,anu)}});function NMs(PyN){let Vsu=gLo.c(15),{channel:DyN,variant:_2A,components:b2A,layouts:v2A,notifications:S2A}=PyN,MyN=_2A===void 0?"inline":_2A,OyN=b2A===void 0?jsu:b2A,LyN=v2
+
+### TEo raw=2 filtered=2
+@320602417: ,notFound:0};if(l.proposal.remove_from_permissions_allow.length>0){let p=await o(TEo,{flagged:l.proposal.remove_from_permissions_allow,runId:t},{queueBehind:!0}),f=p==="cancelled"?[]:p.toRemove.filter((m)=>l.proposal.remove_from_permissions_allow.includes(m));if(f.length>0)try{le
+@323218405: ,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},...vM(AEo,snu),...vM(TEo,anu)}});function NMs(PyN){let Vsu=gLo.c(15),{channel:DyN,variant:_2A,components:b2A,layouts:v2A,notifications:S2A}=PyN,MyN=_2A===void 0?"inline":_2A,OyN=b2A===void 0?jsu:b2A,LyN=v2A===void 0?mLo:
+
+### $ne raw=4 filtered=4
+@316758624: sal_fallback_bridge_forwarded",{...i,bridge_request_id:dn(a)})}):{result:await t($ne,o,{signal:r}),source:"local"};if(s.source==="timeout")N("tengu_refusal_fallback_bridge_timeout",i),pe("refusal_fallback","dialog_bridge_timeout");if(s.result!=="cancelled")N("tengu_refusal_fallba
+@322868954: .payload().safeParse(t);if(!n.success)return{behavior:"cancelled"};let o=await e($ne,n.data,r);return o==="cancelled"?{behavior:"cancelled"}:{behavior:"completed",result:o}}}}});class UIr{slots=new Map;reset(){this.slots.clear()}onInputJsonDelta(e,t,r){if(!r||!Qot())return;let n=
+@323218246: ...vM(xno,Ynu),...vM(Dot,xou),...vM(EQr,teu),...vM(Nno,Wou),...vM(Byr,Cmy),...vM($ne,Giu),...vM(tbt,o_y),...vM(Cno,Hnu),...vM(UOo,$nu),...vM(zOo,znu),...vM(jOo,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},...vM(AEo,snu),...vM(TEo,anu)}});function NMs(PyN){let Vsu=gL
+@332530806: .circle(t,(t.width??7)/2,l)},a}var zne=z(()=>{"use strict";jt();Kt();Ht();Wt();o($ne,"stateStart")});async function Gne(e,t){let{labelStyles:r,nodeStyles:i}=ct(t);t.labelStyle=r;let n=t?.padding??8,a=t.look==="neo"?28:n,s=t.look==="neo"?12:n,{shapeSvg:l,bbox:u}=await At(e,t,Ct(t)
+
+### tbt raw=2 filtered=2
+@312274539: meout((In)=>{if(PHt(),!Js)In.abort()},po,Ci):void 0;try{Ir=await X.requestDialog(tbt,{overagesEnabled:usr()},{signal:Ci.signal})}finally{clearTimeout(on),go(),Bn(),On.removeEventListener("abort",ui)}no=Ir==="cancelled"&&Ci.signal.aborted&&!On.aborted}let Er=Ir==="consent"&&await 
+@323218261: ...vM(Dot,xou),...vM(EQr,teu),...vM(Nno,Wou),...vM(Byr,Cmy),...vM($ne,Giu),...vM(tbt,o_y),...vM(Cno,Hnu),...vM(UOo,$nu),...vM(zOo,znu),...vM(jOo,Kmy),...r_y&&HMs?vM(HMs,r_y):{},...n_y&&PMs?vM(PMs,n_y):{},...vM(AEo,snu),...vM(TEo,anu)}});function NMs(PyN){let Vsu=gLo.c(15),{channe
+
+## Wrappers after cost oXg / resume iXg
+
+=== async function oXg( count~1 ===
+@322325437: _I();ec();Qct=P(Ae(),1),nXg=P(Me(),1)});async function oXg(e,t){if(await e(Wxt,{})==="cancelled")return;ln((n)=>({...n,hasAcknowledgedCostThreshold:!0}),t),N("tengu_cost_threshold_acknowledged",{})}var Wxt;var Vxs=A(()=>{qn();jt();Wn();Sn();Wxt=Qg({kind:"cost_threshold",payload:ve(()=>_e({})),result:ve(()=>Or(["acknowledged","cancelled"])),default:"cancelled"})});async function iXg(e,t,{getMessageCount:r,storage:n,runCompact:o}){let i=await e(Gxt,t);if(i==="cancelled")return;if(N("tengu_resume_return_action",{action:me(i),sessionAgeMi
+
+=== async function iXg( count~1 ===
+@322325763: ,"cancelled"])),default:"cancelled"})});async function iXg(e,t,{getMessageCount:r,storage:n,runCompact:o}){let i=await e(Gxt,t);if(i==="cancelled")return;if(N("tengu_resume_return_action",{action:me(i),sessionAgeMinutes:Math.round(t.sessionAgeMinutes),messageCount:r(),estimatedTokens:t.estimatedTokens}),i==="never")await ln((s)=>{if(s.resumeReturnDismissed)return s;return{...s,resumeReturnDismissed:!0}},n);if(i==="compact")o()}var Gxt;var qxs=A(()=>{qn();jt();Wn();Sn();Gxt=Qg({kind:"resume_return",payload:ve(()=>_e({sessionAgeMinutes:
+
+=== async function aXg( count~0 ===
+
+=== async function sXg( count~0 ===
+
+=== function sXg( count~1 ===
+@322326388: ,"cancelled"])),default:"cancelled"})});function sXg(e){return cMl((t,r)=>e(GSn,s_A(t,r),{queueBehind:!0})),()=>cMl(null)}async function*s_A(e,t){yield{settings:e};for await(let r of t)yield{settings:r}}var GSn;var Kxs=A(()=>{qn();uMl();Sn();GSn=Qg({kind:"managed_settings_security",payload:ve(()=>_e({settings:iU((e)=>typeof e==="object"&&e!==null)})),result:ve(()=>Or(["approved","rejected","deferred_no_consent_surface"])),default:"deferred_no_consent_surface"})});class eut{#e=!0;node;applies;constructor(e,t,r){if(e!==Vxt)throw Error("
+
+=== async function nXg( count~0 ===
+
+=== async function rXg( count~0 ===
+
+=== CHr) count~0 ===
+
+=== Gxt) count~0 ===
+
+=== FRr) count~0 ===
+
+=== _Bi) count~0 ===
+
+=== DIi) count~0 ===
+
+=== jOo) count~0 ===
+
+=== zOo) count~0 ===
+
+=== Dot) count~3 ===
+@70360673: ;.        }.        toRegExpSource(allowDot) {.          let dot = allowDot ?? !!this.#options.dot;.          if (this.#root === this).            this.#flatten(), this.#fillNegs();.          if (!isExtglobAST(this)) {.            let noEmpty = this.isStart() && this.isEnd() && !this.#parts.some((s) => typeof s !== "string"), src = this.#parts.map((p) => {.              let [re, _, hasMagic, uflag] = typeof p === "string" ? _a.#parseGlob(p, this.#hasMagic, noEmpty) : p.toRegExpSource(allowDot);.              return this.#hasMagic = th
+@70361127: Magic, noEmpty) : p.toRegExpSource(allowDot);.              return this.#hasMagic = this.#hasMagic || hasMagic, this.#uflag = this.#uflag || uflag, re;.            }).join(""), start2 = "";.            if (this.isStart()) {.              if (typeof this.#parts[0] === "string") {.                if (!(this.#parts.length === 1 && justDots.has(this.#parts[0]))) {.                  let aps = addPatternStart, needNoTrav = dot && aps.has(src.charAt(0)) || src.startsWith("\\.") && aps.has(src.charAt(2)) || src.startsWith("\\.\\.") && aps.has
+@71897637: ecmaVersion>=11,h=o&&this.eat(a.questionDot);s&&h&&this.raise(this.lastTokStart,"Optional chaining cannot appear in the callee of new expressions");var p=this.eat(a.bracketL);if(p||h&&this.type!==a.parenL&&this.type!==a.backQuote||this.eat(a.dot)){var d=this.startNodeAt(t,i);d.object=e,p?(d.property=this.parseExpression(),this.expect(a.bracketR)):this.type===a.privateId&&e.type!=="Super"?d.property=this.parsePrivateIdent():d.property=this.parseIdent(this.options.allowReserved!=="never"),d.computed=!!p,o&&(d.optional=h),e=this.finishNo
+
+=== UOo) count~0 ===
+
+## ide / chrome / it2 / computer-use host strings
+count "IdeOnboarding": 10
+  @106622424: hemeSetting.................useTimeout......................IdeOnboardingDialog..............F6.....hasIdeOnboardingDialogBeenShown.................parseRelatedTaskMetadata................registerElicitationHandler......................runElicitationHooks.....
+  @106622467: .................IdeOnboardingDialog..............F6.....hasIdeOnboardingDialogBeenShown.................parseRelatedTaskMetadata................registerElicitationHandler......................runElicitationHooks..............H6.....runElicitationResultHooksH6
+count "ide onboarding": 0
+count "Install the Claude Code": 0
+count "Claude in Chrome": 213
+count "Setting up iTerm": 0
+count "tmuxAvailable": 12
+  @150058640: ...................................../......................tmuxAvailable...................createTeammatePaneInSwarmView...................isFirstTeammate.................enablePaneBorderStatus..................sendCommandToPane.......................insideTm
+  @312505099: (()=>{qn();Sn();_Bi=Qg({kind:"it2_setup",payload:ve(()=>_e({tmuxAvailable:Ut()})),result:ve(()=>Or(["installed","use-tmux","cancelled"])),default:"cancelled"})});async function kno(e){let{ctx:t,updatedInput:r,suggestions:n,permissionMode:o}=e,i=!1;try{let s=aw
+count "computer_use_approval": 6
+  @194019840: ....(...............................M.......................computer_use_approval...................agent_progress..................bash_mode_progress......................background_hint.................it2_setup_prompt......................._................
+  @256954800: ......i..... ...............8...............................computer_use_approval.....................................................P,......P,......`d..0...........`o....T$.................;............................@F......................................
+count "Computer Use": 29
+count "resume_return": 6
+  @189414366: ......................cancelled.......................tengu_resume_return_action......................r.......................never...................n...............................compact.................o................................................@....
+  @289366704: ............@...............P...............................resume_return...................cancelled.................................................p.......P,......P,......P,......`d..0.........A......l...............;........................................
+count "Welcome back": 4
+  @182780112: ............@...............P...............................Welcome back!...................Welcome back ...................!................................@...@0..G.....,.....@.O.................................:...........[........9.e...a.....9.b.....9.,.9.
+  @182780144: ............................Welcome back!...................Welcome back ...................!................................@...@0..G.....,.....@.O.................................:...........[........9.e...a.....9.b.....9.,.9......H..H.......................
+count "sessionAgeMinutes": 9
+  @189398168: ....................resumeReturnDismissed...................sessionAgeMinutes.............................K.....G.......G.....K...K......D..H.......................................................x.......................................@.......................
+  @189401461: ...........................L...Cannot destructure property 'sessionAgeMinutes' from null or undefined value....................................Z7g.....................................Q7g.............................This session is ................ old and ....
+count "sandbox_network_access": 2
+  @289396448: ....p...............................crypto..................sandbox_network_access..................cancelled.................................................p.......P,......P,......P,......`,......P,......`,......`d...........;..`}..0...........0o_........l..
+  @322332265: );LU();Kce();XS();Mse();q8c=require("crypto"),FRr=Qg({kind:"sandbox_network_access",payload:ve(()=>_e({host:L(),port:Xe().optional()})),result:ve(()=>Es([_e({allow:Ut(),persistToSettings:Ut(),persistRow:aXg().optional()}),kt("cancelled")])),default:"cancelled"
+count "Network access": 2
+  @311274163: t.com"} is added at environment settings \u2192 Code \u2192 Network access \u2192 Custom \u2192 Allowed domains. An admin can add the same entry to a shared environment from admin settings \u2192 Cloud environments; sessions that run in that environment get th
+  @311916442: 's allowed domains: environment settings \u2192 Code \u2192 Network access \u2192 Custom \u2192 Allowed domains. An admin can add the same entry to a shared environment from admin settings \u2192 Cloud environments; sessions that run in that environment get th
+
+## focused helper return strings
+return"message-selector": 1
+return"sandbox-permission": 0
+return"elicitation": 1
+return"idle-return": 0
+return"ide-onboarding": 0
+return"cost": 0
+return"tool-permission": 0
+return"managed-settings": 0
+return"worker-sandbox-permission": 1
+return"prompt": 2
+return"auto-default-nudge": 0

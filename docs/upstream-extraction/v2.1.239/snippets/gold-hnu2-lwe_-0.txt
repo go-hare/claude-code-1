@@ -1,0 +1,3 @@
+# offset=307765720
+
+),OUt=require("os"),MUt=require("path"),lwe=`mcp__${Ux}__`;I8n={chrome:{name:"Google Chrome",macos:{appName:"Google Chrome",nativeMessagingPath:["Library","Application Support","Google","Chrome","NativeMessagingHosts"]},linux:{binaries:["google-chrome","google-chrome-stable"],nativeMessagingPath:[".config","google-chrome","NativeMessagingHosts"]},windows:{dataPath:["Google","Chrome","User Data"],registryKey:"HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts",appPathsExe:"chrome.exe"}},brave:{name:"Brave",macos:{appName:"Brave Browser",nativeMessagingPath:["Library","Application Support","BraveSoftware","Brave-Browser","NativeMess

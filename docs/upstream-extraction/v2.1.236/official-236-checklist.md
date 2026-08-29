@@ -4,14 +4,14 @@
 > SEA：`/tmp/official-236/plat/package/claude` · `2.1.236 (Claude Code)` · size **317044624** · sha256 `6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848`。  
 > 基线：本地 tip densable **2.1.235** + npm **2.7.45**。**本 pack 只对齐 2.1.236**（勿折入 237）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A**  
-> 更新：2026-08-27 — 假 HAVE 纠偏：`#11` / `#27` → **PARTIAL**（HAVE **21** / PARTIAL **11**）。基建有 dialog store；产品面未切单宿主 NMs。**无 auto commit/bump**。
+> 更新：2026-08-29 — `#9` Project C → **HAVE**（HAVE **22** / PARTIAL **10**）。**无 auto commit/bump**。
 
 ## Summary
 
 | 状态 | 计数 | 备注 |
 | ---- | ---- | ---- |
-| **HAVE** | **21** | Batch A/B/C + `#25` Bqn + `#6` sgM + `#7` vMi（不含 `#11`/`#27`） |
-| **PARTIAL** | **11** | gold-weak `#18/#24/#31/#32`；`#4` clipboard/bg spawn；`#9/#10/#28/#29`；**`#11` NMs 产品面**；**`#27` REPL SIGTERM** |
+| **HAVE** | **22** | Batch A/B/C + `#25` Bqn + `#6` sgM + `#7` vMi + **`#9` Project C Axc** |
+| **PARTIAL** | **10** | gold-weak `#18/#24/#31/#32`；`#4` clipboard/bg spawn；`#10/#28/#29`；**`#11` NMs 产品面**；**`#27` REPL SIGTERM** |
 | **GAP** | **0** | — |
 | **N/A** | **1** | #33 VSCode host a11y（invent-ban） |
 | **UNKNOWN** | **0** | — |
@@ -28,9 +28,9 @@
 | 6 | model-picker-height | `/model` picker taller-than-terminal: show only fitting rows + scroll | **HAVE** | SEA `LFh=14` 是 chrome 预留，不是 max visible。`sgM=Math.max(2,Math.min(10,Math.floor((tgM-LFh-ngM-ogM-igM)/2)))`；`ngM` search 4 / `ogM` `r7l` 3 / `igM` session 2。tip `computeModelPickerVisibleSlots` + `isModelPickerFastModeNoticeChrome`（`Iu()&&(_do\|\|xz()&&!cje())`）。**无** XKl search host → `ngM=0`。测：`modelPickerVisible.236.test.ts`。 |
 | 7 | sendmessage-malformed-tag | SendMessage rejected when malformed closing tag left text in summary | **HAVE** | 239 SEA：`vMi`/`U4f`/`bMi`/`QTl` + `x0m`/`C0m`/`GTl`。coerce 拆 slipped-summary；`x0m` 读 vMi 后 `{message,notify_when_idle}`；`C0m` 空执行+原正文或 GRi；`GTl` 空 UDS：handler_rewrite→QRw/eIw/R0m，否则 empty_message/u3i。fWt=`LPi`。dump：`gold-vmi-239.txt` / `gold-gtl-239.txt`。测：`sendMessageSlippedSummary.236.test.ts` / `sendMessageBlankCall.236.test.ts`。 |
 | 8 | subprocess-unhandled | Unhandled rejection when subprocess fails to start (e.g. powershell on WSL) | **HAVE** | tip Ink/exec 已吞 spawn fail；SEA powershell/WSL + unhandledRejection 面匹配 |
-| 9 | fullscreen-resize-message | Fullscreen: newly sent message missing until next update after resize | **PARTIAL** | **金标基准 = densable 2.1.239 SEA**（changelog 出 236；类以 239 peel）。官方 `Qvt`→`xxc`→**`Axc`**：`nativeHistory`（滚出行，帽 `uyn=1e4`）+ `handleResize`/`resume`→`replayPending`+`pumpCursor` + **`tickPump`**（批 `q$0=100`）+ 泵中 `syncViewport` 早退；`frameSink` 回 `"tick"`。236→239 = mangle + `onWrite`，合同同构。tip = `Ink.handleResize`→`resetFramesForAltScreen`+React；**无** `Axc`/`tickPump`/`nativeHistory`/`frameSink`。tip-equiv = VML **`columns`** 重测高 + **`layoutEpoch`**（仅 expand/collapse bump，**不**在 resize 上宣称 #9）。**invent-ban**：未 peel 完整 `Axc`+`xxc`+`frameSink`+`Qvt` 臂前禁止伪泵；真 1:1 = **Project C**。 |
+| 9 | fullscreen-resize-message | Fullscreen: newly sent message missing until next update after resize | **HAVE** | **Project C 合同齐**：densable `Axc`/`xxc`/`frameSink`/`J$0`/`tSs` 1:1（`axc.ts`+`useAxcFrameSink`+`serializeGapBackfill`）。金标：`gold-project-c-axc-callgraph.md`。**双面**：alt fullscreen → tip `resetFramesForAltScreen`（densable 亦在 alt **suspend Axc**）；主屏 sticky → `CLAUDE_CODE_AXC_STICKY_MAIN=1` 跳过 alt + `AxcFrameSinkBridge`。测：`axc.239`/`frameSink.239`/`axcGapBackfill.239`/`axcStickyTipWire.239`。未把 Axc 硬塞 alt `handleResize`（invent-ban 遵守）。product-default tip fullscreen = alt。 |
 | 10 | fullscreen-blank-band | Fullscreen: blank band after clearing multi-line prompt; panes not repainting | **PARTIAL** | tip fullscreen/ink repaint 面在；SEA latin1 金标弱 |
-| 11 | managed-settings-prompt | Managed-settings approval prompt missing at startup while still eating first keypress | **PARTIAL** | **基建 + sXg 早注册 / modal NMs mount；产品面仍未全通**：`useLayoutEffect` 装 sXg；fullscreen 挂 `DialogHost variant=modal`（`mLo` 空表，GSn 仍 inline）。`void loadRemoteManagedSettings()` 仍 fire-and-forget；其它 dialog 仍双轨；permission 分 renderer 未齐。见 `gold-sXg-queueBehind-dig.md`。 |
+| 11 | managed-settings-prompt | Managed-settings approval prompt missing at startup while still eating first keypress | **PARTIAL** | **基建 + sXg 早注册 / modal NMs mount；产品面仍未单宿主**（禁止抬 HAVE）：`useLayoutEffect` 装 sXg；fullscreen 挂 `DialogHost variant=modal`。`mLo` 只有 `permission_exit_plan_mode_v2`（GSn 仍 inline，金标也是）。`void loadRemoteManagedSettings()` 仍 fire-and-forget。**已切 NMs：** ProposeGoal `l(Dot)` / `/auto-mode-setup`+ymn / ide `sdu(CHr)` / cost / Hnu `permission_browser`。**仍 focused（金标也是）：** elicitation `_Zt`、sandbox。`it2_setup` / `computer_use_approval` 仅 spec。permission_* 除 browser 仍共用 `PermissionPromptRenderer`。见 `gold-sXg-queueBehind-dig.md`。 |
 | 12 | tmux-title | tmux/iTerm title jump: write title only when text changes (was every 960ms) | **HAVE** | tip `use-terminal-title.ts` `useEffect([title, writeRaw])` 已 change-gated |
 | 13 | cloud-env-empty | Unclear error when cloud environments list empty/malformed | **HAVE** | tip `mapMalformedEnvironmentsResponse` + loose DIS + empty `[]` OK（Batch B `wyvhenvgr`） |
 | 14 | fable5-credits-rc | Fable 5 first-time usage-credits prompt auto-selecting fallback after 60s under Remote Control | **HAVE** | tip parkTimeout → `unanswered`/`dialog_unanswered`+`shouldAbort`，无 fallbackModel；soft cancel 仍可 `dialog_declined`（Batch B）；`dialog_queued_at_park`（J1t/xo park watch）已补；Fo/Wlt residual |

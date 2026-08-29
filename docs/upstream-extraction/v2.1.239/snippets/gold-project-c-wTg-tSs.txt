@@ -1,0 +1,16 @@
+# wTg / tO / hyperlink helpers
+
+#### around Z3e
+```
+!1},{style:"bar",blinking:!0},{style:"bar",blinking:!1}];lIa=Xx("G");tO=Xx("H");Z3e=Xx(2,"K"),D$=Xx(2,"J"),gsr=Xx(3,"J");Exe=Xx("r"),s_p=Xx("200~"),a_p=Xx("201~"),ysr=Xx("I"),yNt=Xx("O"),l_p=Xx(">1u")
+```
+
+#### wTg
+```
+function wTg(e,t,r){if(!r)return[];let n=r.cachedLayout;if(!n||n.height<=0)return[];let o=[],i=Math.min(n.y+n.height,e.screen.height);for(let s=Math.max(0,n.y);s<i;s++)o.push(tSs(e.screen,t,s));return o}var CKe,Bkr;var ETg=A(()=>{Ml();Art();akt();m2();tCi();oCi();Awe();_Tg();bTg();Cxc();CKe=P(Lt(),1),Bkr=P(Ae(),1)});function ATg(e){return`rgb(${e&255},${e>>8&255},${e>>16&255})`}var Rxc,Z$0=64,Q$0=64,QnL,eoL,eF0,toL;var TTg=A(()=>{Ml();Awe();Ece();Nt();mr();Lr();Rxc=P(Lt(),1);QnL=Array.from({length:Z$0},(e,t)=>ATg(t*2043453)),eoL=Array.from({length:Q$0},(e,t)=>ATg(t*461587+8405034)),eF0=[[33,94],[161,431],[592,96],[880,144],[1024,256],[8592,112],[8704,256],[9472,128],[9600,32],[9632,96]],toL=eF0.reduce((e,[,t])=>e+t,0)});function doL(t){return t+1}function poL(e_0){return e_0.kind==="in"}function foL(e_1,i){return jsx_runtime.jsx(v,{dimColor:!0,wrap:"truncate-end",children:fmt(e_1)},`${e_1.ts}-${i}`)}function moL(r,i_0){return jsx_runtime.jsx(v,{dimColor:!0,children:r},i_0)}var kTg,nF0,tF0=25,rF0=80,coL;var CTg=A(()=>{gKn();ffr();T2t();Nt();kTg=P(Lt(),1),nF0=P(Me(),1);coL=tF0*rF0});function uF0(Ixc,SoL){return jye.jsxs(v,{dimColor:!0,children:["  ",Ixc.num,Ixc.text&&jye.jsxs(jye.Fragment,{children:["  ",Ixc.indent,Ixc.text]})]},SoL)}function pyn(){let boL=Pxc.c(2),xTg=Oko.useSyncExternalStore(pfr,yXa),oF0;if(boL[0]!==xTg)oF0=xTg?jye.jsx(Hxc,{}):null,boL[0]=xTg,boL[1]=oF0;else oF0=boL[1];return oF0}function Hxc(){let iF0=Pxc.c(2),sF0;if(iF0[0]===ue)sF0=HTg(RTg),iF0[0]=sF0;else 
+```
+
+#### tSs head
+```
+function tSs(e,t,r){let n=e.width,o=r*n,i=-1;for(let c=n-1;c>=0;c--){let u=x$e(e,o+c);if(u.width===2)continue;if(u.char===" "&&(u.styleId&1)===0&&u.hyperlink===void 0)continue;i=c;break}if(i<0)return"";let s="",a=t.none,l;for(let c=0;c<=i;c++){let u=x$e(e,o+c);if(u.width===2||u.width===3)continue;if(u.hyperlink!==l){if(l!==void 0)s+=Wpr;if(u.hyperlink!==void 0)s+=O8r(u.hyperlink);l=u.hyperlink}s+=t.transition(a,u.styleId),a=u.styleId,s+=u.char}if(l!==void 0)s+=Wpr;if(a!==t.none)s+=K$0;return s}
+```

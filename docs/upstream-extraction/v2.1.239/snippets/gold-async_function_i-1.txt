@@ -1,0 +1,49 @@
+# offset=72020678 (0x44af2c6) kw="async function i"
+
+       paused = !1;
+        let entry, tmpCompletionEnabled = self.isCompletionEnabled;
+        while ((entry = ArrayPrototypeShift(pausedBuffer)) !== @undefined) {
+          let { 0: type, 1: payload, 2: isCompletionEnabled } = entry;
+          switch (type) {
+            case "key": {
+              let { 0: d, 1: key } = payload;
+              self.isCompletionEnabled = isCompletionEnabled, self._ttyWrite(d, key);
+              break;
+            }
+            case "close":
+              self.emit("exit");
+              break;
+          }
+          if (paused)
+            break;
+        }
+        self.isCompletionEnabled = tmpCompletionEnabled;
+      }
+      function defaultEval(code, context, file, cb) {
+        let result, script, wrappedErr, err = null, wrappedCmd = !1, awaitPromise = !1, input = code;
+        if (isObjectLiteral(code) && isValidSyntax2(code))
+          code = `(${StringPrototypeTrim(code)})
+`, wrappedCmd = !0;
+        let hostDefinedOptionId = Symbol(`eval:${file}`), parentURL;
+        try {
+          let { pathToFileURL } = @getInternalField(@internalModuleRegistry, 183) || @createInternalModuleById(183);
+          parentURL = pathToFileURL(path.join(process.cwd(), "repl")).href;
+        } catch {}
+        async function importModuleDynamically(specifier, _, importAttributes, phase) {
+          let cascadedLoader = (@getInternalField(@internalModuleRegistry, 65) || @createInternalModuleById(65)).getOrInitializeCascadedLoader();
+          return cascadedLoader.import(specifier, parentURL, importAttributes, phase === "evaluation" ? cascadedLoader.kEvaluationPhase : cascadedLoader.kSourcePhase);
+        }
+        if (experimentalREPLAwait && StringPrototypeIncludes(code, "await")) {
+          if (processTopLevelAwait === @undefined)
+            ({ processTopLevelAwait } = @getInternalField(@internalModuleRegistry, 58) || @createInternalModuleById(58));
+          try {
+            let potentialWrappedCode = processTopLevelAwait(code);
+            if (potentialWrappedCode !== null)
+              code = potentialWrappedCode, wrappedCmd = !0, awaitPromise = !0;
+          } catch (e) {
+            let recoverableError = !1;
+            if (e.name === "SyntaxError") {
+              let fallbackCode = SideEffectFreeRegExpPrototypeSymbolReplace(/\bawait\b/g, code, "");
+              try {
+                makeContextifyScript(fallbackCode, file, 0, 0, @undefined, !1, @undefined, hostDefinedOptionId, importModuleDynamically);
+              } cat

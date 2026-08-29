@@ -1,0 +1,82 @@
+
+==== iXg( (2) ====
+@322325778: (()=>_e({})),result:ve(()=>Or(["acknowledged","cancelled"])),default:"cancelled"})});async function iXg(e,t,{getMessageCount:r,storage:n,runCompact:o}){let i=await e(Gxt,t);if(i==="cancelled")return;if(N("tengu_resume_return_action",{action:me(i),sessionAgeMinutes:Math.round(t.sessionAgeMinutes),messageCount:r(),estimatedTokens:t.estimatedTokens}),i==="never")await ln((s)=>{if(s.resumeReturnDismissed)return s;return{...s,resumeReturnDismissed:!0}},n);if(i==="compact")o()}var Gxt;var qxs=A(()=>{qn();jt();Wn();Sn();Gxt=Qg({kind:"resume_return",pa
+@326471988: ,[el,Kc]=ho.useState(()=>lTn.randomUUID()),cu=ho.useCallback((nr)=>{let Xr=rXg(nr,ZD);if(!Xr)return;iXg(Gm,Xr,{getMessageCount:()=>lo.getSnapshot().length,storage:Q,runCompact:()=>void vZt.current("/compact",{setCursorOffset:()=>{},clearBuffer:()=>{},resetHistory:()=>{}})})},[Gm,Q,lo]),$c=aAr();ho.useEffect(()=>{if(ui>0)$c()},[ui,$c]);let[Hf]=ho.useState(()=>({current:yAf(n,s)})),[uy,KO]=ho.useState(cr().hasAcknowledgedCostThreshold?!1:null),[QF,bw]=ho.useState(!1),[vw,ZN]=ho.useState(!1),[$E,cA]=ho.useState(!1),[qT,b1]=ho.useState(!1);ho.useEf
+
+==== iXg(Gm (1) ====
+@326471988: ,[el,Kc]=ho.useState(()=>lTn.randomUUID()),cu=ho.useCallback((nr)=>{let Xr=rXg(nr,ZD);if(!Xr)return;iXg(Gm,Xr,{getMessageCount:()=>lo.getSnapshot().length,storage:Q,runCompact:()=>void vZt.current("/compact",{setCursorOffset:()=>{},clearBuffer:()=>{},resetHistory:()=>{}})})},[Gm,Q,lo]),$c=aAr();ho.useEffect(()=>{if(ui>0)$c()},[ui,$c]);let[Hf]=ho.useState(()=>({current:yAf(n,s)})),[uy,KO]=ho.useState(cr().hasAcknowledgedCostThreshold?!1:null),[QF,bw]=ho.useState(!1),[vw,ZN]=ho.useState(!1),[$E,cA]=ho.useState(!1),[qT,b1]=ho.useState(!1);ho.useEf
+
+==== iXg(Dd (0) ====
+
+==== await iXg( (0) ====
+
+==== e(Gxt, (1) ====
+@322325842: ault:"cancelled"})});async function iXg(e,t,{getMessageCount:r,storage:n,runCompact:o}){let i=await e(Gxt,t);if(i==="cancelled")return;if(N("tengu_resume_return_action",{action:me(i),sessionAgeMinutes:Math.round(t.sessionAgeMinutes),messageCount:r(),estimatedTokens:t.estimatedTokens}),i==="never")await ln((s)=>{if(s.resumeReturnDismissed)return s;return{...s,resumeReturnDismissed:!0}},n);if(i==="compact")o()}var Gxt;var qxs=A(()=>{qn();jt();Wn();Sn();Gxt=Qg({kind:"resume_return",payload:ve(()=>_e({sessionAgeMinutes:Xe(),estimatedTokens:Xe()})),
+
+==== e(CHr, (0) ====
+
+==== e(FRr, (0) ====
+
+==== e(_Bi, (0) ====
+
+==== e(DIi, (0) ====
+
+==== await e(Gxt (1) ====
+@322325836: )),default:"cancelled"})});async function iXg(e,t,{getMessageCount:r,storage:n,runCompact:o}){let i=await e(Gxt,t);if(i==="cancelled")return;if(N("tengu_resume_return_action",{action:me(i),sessionAgeMinutes:Math.round(t.sessionAgeMinutes),messageCount:r(),estimatedTokens:t.estimatedTokens}),i==="never")await ln((s)=>{if(s.resumeReturnDismissed)return s;return{...s,resumeReturnDismissed:!0}},n);if(i==="compact")o()}var Gxt;var qxs=A(()=>{qn();jt();Wn();Sn();Gxt=Qg({kind:"resume_return",payload:ve(()=>_e({sessionAgeMinutes:Xe(),estimatedTokens:Xe
+
+==== await e(CHr (0) ====
+
+==== await e(FRr (0) ====
+
+==== await e(_Bi (0) ====
+
+==== await e(DIi (0) ====
+
+==== l(Dot, (1) ====
+@313301514: ,askUser:!1}};let{setAppState:c}=r,u=Ibm.randomUUID();return c((d)=>({...d,pendingGoalProposal:u})),l(Dot,{condition:n},{queueBehind:!0}).then((d)=>{let p=r.getAppState().pendingGoalProposal!==u,f=Ktr()==="disabled",m=gn(r).mode==="plan";if(N("tengu_goal_proposal_decided",{decision:d.approved?p?xe("approved_stale"):f?xe("approved_disabled"):m?xe("approved_plan_mode"):xe("approved"):d.explicit===!0?xe("declined"):xe("unanswered")}),!d.approved||p||f||m){if(d.approved&&!p){if(f)be("goal_propose","approved_dropped_disabled");else if(m)be("goal_pro
+
+==== pendingGoalProposal (5) ====
+@266478536: ....HI......................(.......................................................................pendingGoalProposal.....................forcedAsk....... .......X...................................Hp......".......#...Hp..jp.......d..H.......................................................x.......................................@...............................................................x$..........................................................................h...h...h...h...h...h...h...h...h...h...h.....................................
+@313300993:  an interactive session to render the approval prompt; none is available here.");if(r.getAppState().pendingGoalProposal)throw Error("A goal proposal is already awaiting the user's decision. Keep working; if it is approved you will receive a kickoff message.");if(N("tengu_goal_proposed",{promptLength:n.length,askUser:s,forcedAsk:s&&t===!1}),Ee("goal_propose"),!s)return ebl(r.setAppState,n,"proposal_direct"),a.enqueue({agentId:Di(),mode:"prompt",value:`/goal ${n}`,origin:{kind:"task-notification"}}),{data:{condition:n,askUser:!1}};let{setAppState
+@313301489: on"}}),{data:{condition:n,askUser:!1}};let{setAppState:c}=r,u=Ibm.randomUUID();return c((d)=>({...d,pendingGoalProposal:u})),l(Dot,{condition:n},{queueBehind:!0}).then((d)=>{let p=r.getAppState().pendingGoalProposal!==u,f=Ktr()==="disabled",m=gn(r).mode==="plan";if(N("tengu_goal_proposal_decided",{decision:d.approved?p?xe("approved_stale"):f?xe("approved_disabled"):m?xe("approved_plan_mode"):xe("approved"):d.explicit===!0?xe("declined"):xe("unanswered")}),!d.approved||p||f||m){if(d.approved&&!p){if(f)be("goal_propose","approved_dropped_disabled
+@313301585: ..d,pendingGoalProposal:u})),l(Dot,{condition:n},{queueBehind:!0}).then((d)=>{let p=r.getAppState().pendingGoalProposal!==u,f=Ktr()==="disabled",m=gn(r).mode==="plan";if(N("tengu_goal_proposal_decided",{decision:d.approved?p?xe("approved_stale"):f?xe("approved_disabled"):m?xe("approved_plan_mode"):xe("approved"):d.explicit===!0?xe("declined"):xe("unanswered")}),!d.approved||p||f||m){if(d.approved&&!p){if(f)be("goal_propose","approved_dropped_disabled");else if(m)be("goal_propose","approved_dropped_plan_mode")}return}ebl(c,n,"proposal_approved")
+@313302173: ,value:`/goal ${n}`,origin:{kind:"auto-continuation"}})}).catch((d)=>{Te(d)}).finally(()=>{c((d)=>d.pendingGoalProposal===u?{...d,pendingGoalProposal:void 0}:d)}),{data:{condition:n,askUser:!0}}},mapToolResultToToolResultBlockParam(e,t){return{tool_use_id:t,type:"tool_result",content:e.askUser===!1?"Setting the goal now, without an approval dialog \u2014 the user sees it being set and can clear it with /goal clear. It becomes active at the end of this turn, when you will receive a kickoff message confirming it; until that message arrives, any p
+
+==== t(jOo, (1) ====
+@323451207: w),b()}),w=()=>{S(),b()};o.signal.addEventListener("abort",w,{once:!0})})}try{while(!0){let b=await t(jOo,y(),{signal:r});if(b==="keep_waiting")continue;let{phase:S}=g();if(b==="continue"&&S==="connected"&&p){if(L0n())return be("chrome_install_upsell","policy_denied_late",{install_page_opened:n}),Dby;if(jMs(e))return be("chrome_install_upsell","bypass_mode_late",{install_page_opened:n}),qBA;let w=zBA(e,p,n);return u=!0,f=void 0,w}if(S==="failed"){if(d==="policy_denied_mid_wait")return be("chrome_install_upsell",d,{install_page_opened:n}),Dby;re
+
+==== t(zOo, (1) ====
+@323458317: romium-family browser detected"),be("chrome_install_upsell","no_browser_detected"),DXt;switch(await t(zOo,{},{signal:e.abortController.signal})){case"install":{let i=await Mby(e,t);if(i===zMs)gP().installUpsellResolution=void 0;return i}case"dont_ask_again":return be("chrome_install_upsell","dont_ask_again"),ln((i)=>i.chromeInstallUpsellDismissed===!0?i:{...i,chromeInstallUpsellDismissed:!0},e.storageV5),gau;case"not_now":return be("chrome_install_upsell","declined"),gau;case"cancelled":if(e.abortController.signal.aborted)return gP().installUps
+
+==== n(UOo, (1) ====
+@326391438: dline:()=>{S?.(),S=null},rearmDeadline:()=>{S?.(),S=null,w()},superseded:!1};a.current.set(d,T),w(),n(UOo,{fromAddress:m.address==="an unidentified session"?void 0:m.address,claimedName:m.claimedName||void 0,verifiedPeerPid:m.verifiedPeerPid,holdCause:f,preview:m.dialogBody},{signal:y.signal,queueBehind:!0}).then((k)=>{if(T.clearDeadline(),T.superseded)return;a.current.delete(d);let C=k.behavior==="cancelled"?ctn(d,_?"cancelled":"deny"):ctn(d,k.behavior);if(C==="dropped"&&k.behavior==="approve")r((x)=>[...x,Ss("That held message was NOT deliver
+
+==== o(AEo, (1) ====
+@320601844: return}if(r.signal.aborted){N6t("cancel","background_scan");return}lhs(t,n,"completed");let c=await o(AEo,{...l.proposal,mode:e.mode},{queueBehind:!0});if(c!=="accept"){i?.(Ss("Auto-mode proposal discarded \u2014 nothing was saved. Re-run /auto-mode-setup anytime.","notice")),N6t(c==="decline"?"decline":"cancel","background_review");return}let u;try{u=await a({mode:e.mode,autoMode:uhs(l.proposal)},e.storageV5)}catch(p){i?.(Ss(`Auto-mode setup couldn\u2019t save: ${le(p)}. Re-run /auto-mode-setup to try again.`,"warning")),N6t("error","backgroun
+
+==== o(TEo, (1) ====
+@320602416: ={removed:0,skipped:0,notFound:0};if(l.proposal.remove_from_permissions_allow.length>0){let p=await o(TEo,{flagged:l.proposal.remove_from_permissions_allow,runId:t},{queueBehind:!0}),f=p==="cancelled"?[]:p.toRemove.filter((m)=>l.proposal.remove_from_permissions_allow.includes(m));if(f.length>0)try{let m=await a({removeFromPermissionsAllow:f},e.storageV5);d={removed:m.permissionsAllowRemoved.length,skipped:m.permissionsAllowSkipped?f.length:0,notFound:m.permissionsAllowNotFound.length}}catch(m){i?.(Ss(`${wEo(u,{removed:0,skipped:0})}.Note: remov
+
+==== hasIdeOnboardingDialogBeenShown (4) ====
+@106622464: hemeSetting.................useTimeout......................IdeOnboardingDialog..............F6.....hasIdeOnboardingDialogBeenShown.................parseRelatedTaskMetadata................registerElicitationHandler......................runElicitationHooks..............H6.....runElicitationResultHooksH6.....................DIAL_LATCH_BASE_HOLD_MS.................DIAL_LATCH_MAX_HOLD_MS...........J6.....boundDial...............IJ6.....createDialFailureLatch..................acquireIdpIdToken................K6.....clearIdpClientSecret..............
+@308741897: 0f;var mBt=A(()=>{Nt();Hfr=P(Ae(),1),P0f=P(Me(),1)});var N0f={};Et(N0f,{IdeOnboardingDialog:()=>VCi,hasIdeOnboardingDialogBeenShown:()=>L0f});function VCi(mNR){let oIe=$0f.c(22),{onDone:B9r,installationStatus:rZa}=mNR,{storageV5:hNR}=tn();O0f(hNR);let WkS;if(oIe[0]!==B9r)WkS={"confirm:yes":B9r,"confirm:no":B9r},oIe[0]=B9r,oIe[1]=WkS;else WkS=oIe[1];let GkS;if(oIe[2]===ue)GkS={context:"Confirmation"},oIe[2]=GkS;else GkS=oIe[2];Mi(WkS,GkS);let VkS;if(oIe[3]!==rZa?.ideType)VkS=rZa?.ideType??GCi(),oIe[3]=rZa?.ideType,oIe[4]=VkS;else VkS=oIe[4];let 
+@308756602: pe:a})).then((c)=>{if(n(c),c?.installed&&!o?.aborted)qCi().then(e);if(!l&&c?.installed===!0&&!F0f().hasIdeOnboardingDialogBeenShown())r(c)})});else if(Mrt(a))U0f(a).then(async(l)=>{if(l&&!F0f().hasIdeOnboardingDialogBeenShown())r(null)})}}}function eAf(e,t){let r=GRe().hostIPByTarget,n=`${e}:${t}`,o=r.get(n);if(!o)o=mCS(e,t),r.set(n,o);return o}async function mCS(e,t){if(V.CLAUDE_CODE_IDE_HOST_OVERRIDE)return V.CLAUDE_CODE_IDE_HOST_OVERRIDE;if(Wt()!=="wsl"||!e)return"127.0.0.1";try{let r=await Y3("ip route show | grep -i default",{reject:!1});i
+@308756696: F0f().hasIdeOnboardingDialogBeenShown())r(c)})});else if(Mrt(a))U0f(a).then(async(l)=>{if(l&&!F0f().hasIdeOnboardingDialogBeenShown())r(null)})}}}function eAf(e,t){let r=GRe().hostIPByTarget,n=`${e}:${t}`,o=r.get(n);if(!o)o=mCS(e,t),r.set(n,o);return o}async function mCS(e,t){if(V.CLAUDE_CODE_IDE_HOST_OVERRIDE)return V.CLAUDE_CODE_IDE_HOST_OVERRIDE;if(Wt()!=="wsl"||!e)return"127.0.0.1";try{let r=await Y3("ip route show | grep -i default",{reject:!1});if(r.exitCode===0&&r.stdout){let n=r.stdout.match(/default via (\d+\.\d+\.\d+\.\d+)/);if(n){let
+
+==== IdeOnboardingDialog (5) ====
+@106622424: .....E6.....useTheme................useThemeSetting.................useTimeout......................IdeOnboardingDialog..............F6.....hasIdeOnboardingDialogBeenShown.................parseRelatedTaskMetadata................registerElicitationHandler......................runElicitationHooks..............H6.....runElicitationResultHooksH6.....................DIAL_LATCH_BASE_HOLD_MS.................DIAL_LATCH_MAX_HOLD_MS...........J6.....boundDial...............IJ6.....createDialFailureLatch..................acquireIdpIdToken................K
+@106622467: eSetting.................useTimeout......................IdeOnboardingDialog..............F6.....hasIdeOnboardingDialogBeenShown.................parseRelatedTaskMetadata................registerElicitationHandler......................runElicitationHooks..............H6.....runElicitationResultHooksH6.....................DIAL_LATCH_BASE_HOLD_MS.................DIAL_LATCH_MAX_HOLD_MS...........J6.....boundDial...............IJ6.....createDialFailureLatch..................acquireIdpIdToken................K6.....clearIdpClientSecret.................
+@308741869: =I0f[9];return zkS}var Hfr,P0f;var mBt=A(()=>{Nt();Hfr=P(Ae(),1),P0f=P(Me(),1)});var N0f={};Et(N0f,{IdeOnboardingDialog:()=>VCi,hasIdeOnboardingDialogBeenShown:()=>L0f});function VCi(mNR){let oIe=$0f.c(22),{onDone:B9r,installationStatus:rZa}=mNR,{storageV5:hNR}=tn();O0f(hNR);let WkS;if(oIe[0]!==B9r)WkS={"confirm:yes":B9r,"confirm:no":B9r},oIe[0]=B9r,oIe[1]=WkS;else WkS=oIe[1];let GkS;if(oIe[2]===ue)GkS={context:"Confirmation"},oIe[2]=GkS;else GkS=oIe[2];Mi(WkS,GkS);let VkS;if(oIe[3]!==rZa?.ideType)VkS=rZa?.ideType??GCi(),oIe[3]=rZa?.ideType,oIe
+@308741900: var mBt=A(()=>{Nt();Hfr=P(Ae(),1),P0f=P(Me(),1)});var N0f={};Et(N0f,{IdeOnboardingDialog:()=>VCi,hasIdeOnboardingDialogBeenShown:()=>L0f});function VCi(mNR){let oIe=$0f.c(22),{onDone:B9r,installationStatus:rZa}=mNR,{storageV5:hNR}=tn();O0f(hNR);let WkS;if(oIe[0]!==B9r)WkS={"confirm:yes":B9r,"confirm:no":B9r},oIe[0]=B9r,oIe[1]=WkS;else WkS=oIe[1];let GkS;if(oIe[2]===ue)GkS={context:"Confirmation"},oIe[2]=GkS;else GkS=oIe[2];Mi(WkS,GkS);let VkS;if(oIe[3]!==rZa?.ideType)VkS=rZa?.ideType??GCi(),oIe[3]=rZa?.ideType,oIe[4]=VkS;else VkS=oIe[4];let nZa
+@308756605: a})).then((c)=>{if(n(c),c?.installed&&!o?.aborted)qCi().then(e);if(!l&&c?.installed===!0&&!F0f().hasIdeOnboardingDialogBeenShown())r(c)})});else if(Mrt(a))U0f(a).then(async(l)=>{if(l&&!F0f().hasIdeOnboardingDialogBeenShown())r(null)})}}}function eAf(e,t){let r=GRe().hostIPByTarget,n=`${e}:${t}`,o=r.get(n);if(!o)o=mCS(e,t),r.set(n,o);return o}async function mCS(e,t){if(V.CLAUDE_CODE_IDE_HOST_OVERRIDE)return V.CLAUDE_CODE_IDE_HOST_OVERRIDE;if(Wt()!=="wsl"||!e)return"127.0.0.1";try{let r=await Y3("ip route show | grep -i default",{reject:!1});if(r
+
+==== function _Zt( (2) ====
+@308475768: onPostCommitFiberRoot(MCn,It)}catch(ta){}return _Zt(It.current),!0}finally{AV(ht),f_.T=ye,rHt(z,J)}}function _Zt(z){var J=z;for(;;){var ye=J.alternate,Oe=!1;if(ye!==null){if(ye.memoizedProps!==null||ye.memoizedState!==null||ye.pendingProps!==null||ye.dependencies!==null)ye.memoizedState=null,ye.memoizedProps=null,ye.dependencies=null,ye.pendingProps=null,Oe=!0}if((Oe||J===z)&&J.child!==null){J.child.return=J,J=J.child;continue}if(J===z)return;for(;J.sibling===null;){if(J.return===null||J.return===z)return;J=J.return}J.sibling.return=J.return,J=
+@326485709: ,Mr),(nr)=>sit(nr,Q))}},[]);let{status:yZt,reverify:rHt}=Xay(),[pke,Npt]=ho.useState({kind:"none"});function _Zt(){if(pke.kind!=="none")return;if(hi)return"message-selector";if(Tt)return"left-arrow-confirm";if(To)return;let nr=!us||us.shouldContinueAnimation;if(nr&&Fe.queue[0])return"worker-sandbox-permission";if(nr&&Be.queue[0])return"elicitation";if(nr&&!Un&&je)return"ultraplan-choice";if(nr&&!Un&&ze)return"ultraplan-launch";if(As()){if(nr&&vr)return"remote-callout";return}if(nr&&Ur)return"fullscreen-upsell";if(nr&&vr)return"remote-callout";i
+
+==== function mfn( (0) ====
+count Ym((: 0
+count sandbox-permission: 4
+count pendingSandboxR: 9
+count GP==="sandbox: 0
+count ==="sandbox-permission": 0

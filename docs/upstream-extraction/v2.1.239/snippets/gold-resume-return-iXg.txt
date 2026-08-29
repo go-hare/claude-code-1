@@ -1,0 +1,73 @@
+
+==== function rXg( (1) ====
+
+s,Wxs="\u2733",Y7g=960;var J7g=A(()=>{$Yn();Ert();FYn();bn();IA();B8c=P(Lt(),1),X7g=P(Me(),1);zxs=["\u25D0","\u25D1"]});function rXg(e,t){if(!it("tengu_gleaming_fair",!1))return null;if(cr().resumeReturnDismissed)return null;let r=V.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES??70,n=V.CLAUDE_CODE_RESUME_TOKEN_THRESHOLD??1e5,o=Date.now()-60000,i=e.findLast((l)=>(l.type==="user"||l.type==="assistant")&&Date.parse(l.timestamp)<o)?.timestamp;if(!i)return null;let s=(Date.now()-Date.parse(i))/60000;if(s<r)return null;let a=t(e);if(a<n)return null;return{sessionAgeMinutes:s,estimatedTokens:a}}function W8c(Bh1){let WSn=nXg.c(14),{sessionAgeMinutes:Z7g,estimatedTokens:Q7g,onDone:PPo}=Bh1,t_A;if(WSn[0]!==Z7g)t_A=tXg(Z7g),WSn[0]
+
+
+==== async function rXg( (0) ====
+
+
+==== rXg(nr (1) ====
+
+]=ho.useState(!1),[Ns,Na]=ho.useState(void 0),[el,Kc]=ho.useState(()=>lTn.randomUUID()),cu=ho.useCallback((nr)=>{let Xr=rXg(nr,ZD);if(!Xr)return;iXg(Gm,Xr,{getMessageCount:()=>lo.getSnapshot().length,storage:Q,runCompact:()=>void vZt.current("/compact",{setCursorOffset:()=>{},clearBuffer:()=>{},resetHistory:()=>{}})})},[Gm,Q,lo]),$c=aAr();ho.useEffect(()=>{if(ui>0)$c()},[ui,$c]);let[Hf]=ho.useState(()=>({current:yAf(n,s)})),[uy,KO]=ho.useState(cr().hasAcknowledgedCostThreshold?!1:null),[QF,bw]=ho.useState(!1),[vw,ZN]=ho.useState(!1),[$E,cA]=ho.useState(!1),[qT,b1]=ho.useState(!1);ho.useEffect(()=>{if(je&&QF)bw(!1)},[je,QF]);let[uA]=La(),cZ=ho.useRef(!1),M3=ho.useCallback(()=>{if(cZ.current)return;cZ.current=!0;
+
+
+==== iXg(Gm, (1) ====
+
+=ho.useState(void 0),[el,Kc]=ho.useState(()=>lTn.randomUUID()),cu=ho.useCallback((nr)=>{let Xr=rXg(nr,ZD);if(!Xr)return;iXg(Gm,Xr,{getMessageCount:()=>lo.getSnapshot().length,storage:Q,runCompact:()=>void vZt.current("/compact",{setCursorOffset:()=>{},clearBuffer:()=>{},resetHistory:()=>{}})})},[Gm,Q,lo]),$c=aAr();ho.useEffect(()=>{if(ui>0)$c()},[ui,$c]);let[Hf]=ho.useState(()=>({current:yAf(n,s)})),[uy,KO]=ho.useState(cr().hasAcknowledgedCostThreshold?!1:null),[QF,bw]=ho.useState(!1),[vw,ZN]=ho.useState(!1),[$E,cA]=ho.useState(!1),[qT,b1]=ho.useState(!1);ho.useEffect(()=>{if(je&&QF)bw(!1)},[je,QF]);let[uA]=La(),cZ=ho.useRef(!1),M3=ho.useCallback(()=>{if(cZ.current)return;cZ.current=!0;let nr=lo.getSnapshot().s
+
+
+==== IdleReturn (0) ====
+
+
+==== idle-return (3) ====
+
+........................lo......................................ui......`.......................Ct......................idle-return-hint................contextual......................new task? ............................../clear..................suggestion...................... to save ....................... tokens.................medium..........................Nc......................tengu_idle_return_action................hint_shown..................................+......................T.......4..$<...]..0...0........4...;...;...=..0........<......B4..P<..0....3...5........1..................,.....@.4..`........m.......4......@m.......4..$<...].l...@.4........6...8.......................................
+
+........................................................................Ws......................_t......................idle-return-hint................Nc........................................................p.......P,......p-....................................................H.V.......................'.............................@............W..X6.......+.......W..xX.......D..H.......................................................h...................................................................................................................................................................h...h...h...h...h...h...h...h...h...h...h...........................................................................
+
+(()=>{if(lo.getSnapshot().length===0)return;let Sl=ZD(mC(lo.getSnapshot())),nh=nc(Sl),Mu=(Date.now()-ui)/60000;Ct({key:"idle-return-hint",kind:"contextual",segments:[{text:"new task? ",dim:!0},{text:"/clear",color:"suggestion"},{text:" to save ",dim:!0},{text:`${nh} tokens`,color:"suggestion"}],priority:"medium",timeoutMs:2147483647}),Nc.current=!0,N("tengu_idle_return_action",{action:xe("hint_shown"),idleMinutes:Math.round(Mu),messageCount:lo.getSnapshot().length,contextTokens:Sl})},Math.max(0,yi));return()=>{Ws(),_t("idle-return-hint"),Nc.current=!1}},[ui,Un,Ct,_t,Z]);let Lze=ILy({mainLoopModel:yt,mcpClients:Ft,ideInstallationStatus:jr,dynamicMcpConfig:dr,transcript:lo,isLoading:Un,lastQueryCompletionTime:ui,
+
+
+==== idleReturn (0) ====
+
+
+==== tengu_idle_return (3) ====
+
+d value.................lE......................ri......................clear...................Nc......................tengu_idle_return_action................hint_converted..................Er......`.......................lo......................$S......................Si......................local-jsx...............(.......................................X:..............................ot......................Ct......................immediate-ended-by-model................feedback............L...Claude ended this conversation. Start a new session (or /clear) to continue.....................immediate..................."...cmd_local_jsx_no_dialog_resolution......................immediate-......................
+
+........ to save ....................... tokens.................medium..........................Nc......................tengu_idle_return_action................hint_shown..................................+......................T.......4..$<...]..0...0........4...;...;...=..0........<......B4..P<..0....3...5........1..................,.....@.4..`........m.......4......@m.......4..$<...].l...@.4........6...8...............................................@.......................@,......................x....................... .........................}.......................}.....................04......................x.V......................X......................8.|.......................t.....................
+
+f=Eet(nr,Yi).trim(),{name:lE,args:$S}=T$t(Xf),FE=bb(lE,ri),Yb=FE&&UD(FE)?FE:void 0;if(Yb?.name==="clear"&&Nc.current)N("tengu_idle_return_action",{action:xe("hint_converted"),idleMinutes:Math.round((Date.now()-Er.getSnapshot().lastQueryCompletionTime)/60000),messageCount:lo.getSnapshot().length,contextTokens:ZD(mC(lo.getSnapshot()))}),Nc.current=!1;let Ig=E$t(Yb,$S),YA=Si.isActive&&(Ig||Qn?.fromKeybinding);if(Yb&&YA&&Yb.type==="local-jsx"){if(aQr(Yb,ot.getState().endedByModel)){Ct({key:"immediate-ended-by-model",kind:"feedback",text:Cme("Claude ended this conversation. Start a new session (or /clear) to continue."),priority:"immediate"});return}let g8=wPo(Yb);if(!g8){pe(qXe(Yb.name),"cmd_local_jsx_no_dialog_res
+
+
+==== tengu_resume_return (2) ====
+
+)......... ...............&.....I.......................................................cancelled.......................tengu_resume_return_action......................r.......................never...................n...............................compact.................o................................................@....@..@ ..G.......@.5.....@ ........m.....@.4.R.....3.@@n.B...@@m.P.......@.d.....@.,..0%S....@..T............@...@.$.B.......@..Y...!...........U...d...m...i...............................`].......................T..............................................0B......................XR........................9.......................!.....................@.3.....................h...............
+
+async function iXg(e,t,{getMessageCount:r,storage:n,runCompact:o}){let i=await e(Gxt,t);if(i==="cancelled")return;if(N("tengu_resume_return_action",{action:me(i),sessionAgeMinutes:Math.round(t.sessionAgeMinutes),messageCount:r(),estimatedTokens:t.estimatedTokens}),i==="never")await ln((s)=>{if(s.resumeReturnDismissed)return s;return{...s,resumeReturnDismissed:!0}},n);if(i==="compact")o()}var Gxt;var qxs=A(()=>{qn();jt();Wn();Sn();Gxt=Qg({kind:"resume_return",payload:ve(()=>_e({sessionAgeMinutes:Xe(),estimatedTokens:Xe()})),result:ve(()=>Or(["compact","continue","dismiss","never","cancelled"])),default:"cancelled"})});function sXg(e){return cMl((t,r)=>e(GSn,s_A(t,r),{queueBehind:!0})),()=>cMl(null)}async functio
+
+
+==== Resume from summary (2) ====
+
+tial portion of your usage limits. We recommend resuming from a summary.........................compact.............!...Resume from summary (recommended).......................continue................Resume full session as-is.......................never...................Don't ask me again......................................................................................................................-............D!L...?.......].......4..@...@%..@....3...<..p........4..p.......@E.......4...4.......4..@...0%..@....3...<..p........4..p.......@E......@N...L...........4..@c..pF..p4...c...4..p.......@E...... M.......4.........@`4..P......@`4..............Qi.......<..p.......@E...... M.......4.D........p.......@E
+
+ recommend resuming from a summary."})}),WSn[6]=n_A;else n_A=WSn[6];let o_A;if(WSn[7]===ue)o_A=[{value:"compact",label:"Resume from summary (recommended)"},{value:"continue",label:"Resume full session as-is"},{value:"never",label:"Don't ask me again"}],WSn[7]=o_A;else o_A=WSn[7];let z8c;if(WSn[8]!==PPo)z8c=Qct.jsx(Ln,{options:o_A,onChange:(zh1)=>PPo(zh1)}),WSn[8]=PPo,WSn[9]=z8c;else z8c=WSn[9];let i_A;if(WSn[10]!==eXg||WSn[11]!==j8c||WSn[12]!==z8c)i_A=Qct.jsxs(Vr,{title:eXg,onCancel:j8c,children:[n_A,z8c]}),WSn[10]=eXg,WSn[11]=j8c,WSn[12]=z8c,WSn[13]=i_A;else i_A=WSn[13];return i_A}function tXg(e){if(e<60)return`${Math.floor(e)}m`;let t=Math.floor(e/60);if(t<24){let o=Math.floor(e%60);return o===0?`${t}h`:`${t}
+
+
+==== sessionAgeMinutes (3) ====
+
+.........G......................H.......................X"......................resumeReturnDismissed...................sessionAgeMinutes.............................K.....G.......G.....K...K......D..H.......................................................x.......................................@...............................................................x...........................................................................h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...................................8...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h................................................................... ...............
+
+...................................................PPo.................................L...Cannot destructure property 'sessionAgeMinutes' from null or undefined value....................................Z7g.....................................Q7g.............................This session is ................ old and ....................... tokens.........................PPo.....................................column..............x...Resuming the full session will consume a substantial portion of your usage limits. We recommend resuming from a summary.........................compact.............!...Resume from summary (recommended).......................continue................Resume full session as-is............
+
+estamp;if(!i)return null;let s=(Date.now()-Date.parse(i))/60000;if(s<r)return null;let a=t(e);if(a<n)return null;return{sessionAgeMinutes:s,estimatedTokens:a}}function W8c(Bh1){let WSn=nXg.c(14),{sessionAgeMinutes:Z7g,estimatedTokens:Q7g,onDone:PPo}=Bh1,t_A;if(WSn[0]!==Z7g)t_A=tXg(Z7g),WSn[0]=Z7g,WSn[1]=t_A;else t_A=WSn[1];let jh1=t_A,r_A;if(WSn[2]!==Q7g)r_A=nc(Q7g),WSn[2]=Q7g,WSn[3]=r_A;else r_A=WSn[3];const eXg=`This session is ${jh1} old and ${r_A} tokens.`;let j8c;if(WSn[4]!==PPo)j8c=()=>PPo("dismiss"),WSn[4]=PPo,WSn[5]=j8c;else j8c=WSn[5];let n_A;if(WSn[6]===ue)n_A=Qct.jsx(H,{flexDirection:"column",children:Qct.jsx(v,{children:"Resuming the full session will consume a substantial portion of your usage limi
+
+
+==== Welcome back (3) ====
+
+.H.......................X...i.............j...i........0...............@...............P...............................Welcome back!...................Welcome back ...................!................................@...@0..G.....,.....@.O.................................:...........[........9.e...a.....9.b.....9.,.9......H..H.......................8}...................... }......h.......................................@.{......................................................................................... .......-...................*...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......X...X...X...X...X...............................................................
+
+...........j...i........0...............@...............P...............................Welcome back!...................Welcome back ...................!................................@...@0..G.....,.....@.O.................................:...........[........9.e...a.....9.b.....9.,.9......H..H.......................8}...................... }......h.......................................@.{......................................................................................... .......-...................*...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h...h.......X...X...X...X...X...............................................................................................
+
+ion OTc(e,t,r){let n=Math.max(or(e),or(t),or(r),20);return Math.min(n+4,Fwg)}function Okr(e){if(!e||e.length>WO0)return"Welcome back!";return`Welcome back ${e}!`}function HAe(e,t){if(or(e)<=t)return e;let r="/",n="\u2026",o=1,i=1,s=e.split(r),a=s[0]||"",l=s.at(-1)||"",c=or(a),u=or(l);if(s.length===1)return Hi(e,t);if(a===""&&o+i+u>=t)return`${r}${Hi(l,Math.max(1,t-i))}`;if(a!==""&&o*2+i+u>=t)return`${n}${r}${Hi(l,Math.max(1,t-o-i))}`;if(s.length===2){let f=t-o-i-u;return`${xZe(a,f)}${n}${r}${l}`}let d=t-c-u-o-2*i;if(d<=0){let f=Math.max(0,t-u-o-2*i);return`${xZe(a,f)}${r}${n}${r}${l}`}let p=[];for(let f=s.length-2;f>0;f--){let m=s[f];if(m&&or(m)+i<=d)p.unshift(m),d-=or(m)+i;else break}if(p.length===0)return`${a

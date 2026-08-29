@@ -1,0 +1,51 @@
+# offset=69998185 (0x42c1669) kw="function "
+
+llServerFiles.length);
+  async function doGenerateRoute(type, noClient, i, layouts, pageModule, params) {
+    let callback = renderStatic[type], client = clientEntryUrl[type], results = await callback({
+      modules: client && !noClient ? [client] : [],
+      modulepreload: [],
+      styles: styles[i],
+      layouts,
+      pageModule,
+      params
+    });
+    if (results == null)
+      throw Error(`Route ${JSON.stringify(sourceRouteFiles[i])} cannot be pre-rendered to a static page.`);
+    if (typeof results !== "object")
+      throw Error(`Rendering route ${JSON.stringify(sourceRouteFiles[i])} did not return an object, got ${Bun.inspect(results)}. This is a bug in the framework.`);
+    let { files: files2 } = results;
+    if (files2 == null)
+      throw Error(`Route ${JSON.stringify(sourceRouteFiles[i])} cannot be pre-rendered to a static page.`);
+    await @Promise.all(Object.entries(files2).map(([key, value]) => {
+      if (params != null) {
+        let newKey = patterns[i].replace(/:(\w+)/g, (_, p1) => typeof params[p1] === "string" ? params[p1] : params[p1].join("/"));
+        return Bun.write(pathJoin(outBase, newKey + key), value);
+      }
+      return Bun.write(pathJoin(outBase, patterns[i] + key), value);
+    }));
+  }
+  function callRouteGenerator(type, noClient, i, layouts, pageModule, params) {
+    for (let param of paramInformation[i])
+      if (params[param] === @undefined)
+        throw Error(`Missing param ${param} for route ${JSON.stringify(sourceRouteFiles[i])}`);
+    return doGenerateRoute(type, noClient, i, layouts, pageModule, params);
+  }
+  let modulesForFiles = [];
+  for (let fileList of files)
+    if (fileList.length > 1) {
+      let anyPromise = !1, loaded = fileList.map((x) => loadedModules[x] ?? (anyPromise = !0, import(allServerFiles[x]).then((x2) => loadedModules[x2] = x2)));
+      modulesForFiles.push(anyPromise ? await @Promise.all(loaded) : loaded);
+    } else {
+      let id = fileList[0];
+      modulesForFiles.push([loadedModules[id] ?? (loadedModules[id] = await import(allServerFiles[id]))]);
+    }
+  return @Promise.all(modulesForFiles.map(async (modules, i) => {
+    let typeAndFlag = typeAndFlags[i], type = typeAndFlag & 255, noClient = (typeAndFlag & 256) !== 0, [pageModule, ...layouts] = modules;
+    if (paramInformation[i] != null) {
+      let getParam = getParams[type], paramGetter = await getParam({
+        pageModule,
+        layouts
+      }), result;
+      if (paramGetter[Symbol.asyncIterator] != @undefined) {
+    

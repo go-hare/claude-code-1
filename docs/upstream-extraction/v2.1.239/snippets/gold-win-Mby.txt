@@ -1,0 +1,1289 @@
+
+==== async function Mby ====
+hits=1
+@323448867:
+r();$j()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{level:"error"}),d="setup_reconnect_error",l("failed");return}if(k.client.type==="connected")f={config:w};if(k.client.type!=="connected"||o.signal.aborted){if(!o.signal.aborted)d="setup_client_not_connected",l("failed");return}let C=Date.now(),x=!1,R=0;while(!o.signal.aborted){let I=await jBA(k.client,o.signal);if(I==="connected"){p=k,l("connected");return}if(I==="error"){if(R++,R>=BBA){d="setup_probe_errors",l("failed");return}}else R=0;let M=Date.now()-C;if(!x&&M>=$BA)x=!0,nvt(CTr).catch((O)=>E(`[Claude in Chrome] Install setup reconnect nudge failed: ${O}`));if(s==="connecting"&&M>=FBA)l("stalled");await Pr(Pby,o.signal)}}function g(){return{phase:s,installPageOpened:n}}async function*y(){let b=g();yield b;while(!o.signal.aborted){if(g().phase!==b.phase){b=g(),yield b;continue}if(await _(),o.signal.aborted)return}}function _(){return new Promise((b)=>{let S=a.subscribe(()=>{S(),o.signal.removeEventListener("abort",w),b()}),w=()=>{S(),b()};o.signal.addEventListener("abort",w,{once:!0})})}try{while(!0){let b=await t(jOo,y(),{signal:r});if(b==="keep_waiting")continue;let{phase:S}=g();if(b==="continue"&&S==="connected"&&p){if(L0n())return be("chrome_install_upsell","policy_denied_late",{install_page_opened:n}),Dby;if(jMs(e))return be("chrome_install_upsell","bypass_mode_late",{install_page_opened:n}),qBA;let w=zBA(e,p,n);return u=!0,f=void 0,w}if(S==="failed"){if(d==="policy_denied_mid_wait")return be("chrome_install_upsell",d,{install_page_opened:n}),Dby;return pe("chrome_install_upsell",d,{install_page_opened:n}),GBA}if(b==="cancelled"&&r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return be("chrome_install_upsell",S==="waiting_install"?"setup_skipped_waiting_install":S==="connected"?"setup_skipped_after_connect":"setup_skipped_connecting",{install_page_opened:n}),WBA}}catch(b){if(r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return E(`[Claude in Chrome] Install setup dialog failed: ${b}`,{level:"error"}),pe("chrome_install_upsell","setup_dialog_error",{install_page_opened:n}),VBA}finally{if(r.removeEventListener("abort",i),o.abort(),!u){if(c)jmn();m.then(()=>{if(!f)return;let{config:b}=f;f=void 0,Promise.resolve().then(() => (Cv(),kv)).then((S)=>S.mcpClientModule().clearServerCache(Ux,b)).catch((S)=>E(`[Claude in Chrome] Install setup orphan cleanup failed: ${S}`,{level:"error"}))})}}}async function jBA(e,t){try{let r=await Promise.race([Jrt(e,{name:"list_connected_browsers",arguments:{}}),Pr(UBA,t).then(()=>{return})]);if(!r)return"not_connected";let n=Array.isArray(r.content)?r.content[0]:void 0,o=n&&typeof n==="object"&&"text"in n&&typeof n.text==="string"?n.text:void 0;if(!o)return"not_connected";let i;try{i=er(o)}catch{return"not_connected"}return Array.isArray(i)&&i.length>0?"connected":"not_connected"}catch{return"error"}}function zBA(e,t,r){return Iby(e,t),ln((n)=>n.claudeInChromeDefaultEnabled===!0&&n.hasCompletedClaudeInChromeOnboarding===!0&&n.cachedChromeExtensionInstalled===!0?n:{...n,claudeInChromeDefaultEnabled:!0,hasCompletedClaudeInChromeOnboarding:!0,cachedChromeExtensionInstalled:!0},e.storageV5),Ee("chrome_install_upsell",{install_page_opened:r}),`Claude in Chrome setup completed: the extension is installed and connected, and the mcp__claude-in-chrome__* browser tools are now available in this session. Continue the user's task using them.
+${Bin}`}var Pby=2000,LBA=30000,NBA=5000,$BA=15000,FBA=45000,UBA=5000,BBA=5,WBA="The user started installing the Claude in Chrome extension but chose to continue without browser tools. Do not suggest the extension again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. If they finish installing later, /chrome completes the connection, and the next Claude Code session detects the extension automatically.",GBA="The Claude in Chrome extension was installed, but the browser connection could not be established in this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish the connection with /chrome (Reconnect extension), and the next Claude Code session will detect the extension automatically.",zMs="Claude in Chrome setup did not complete because the turn was interrupted \u2014 the user did not choose to continue without browser tools. Continue without browser tools for now (WebFetch and WebSearch cover read-only web content). If the user finishes installing, /chrome completes the connection, and the next Claude Code session detects the extension automatically.",VBA="Claude in Chrome setup ended early due to an internal error; the extension may or may not be installed. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish setup with /chrome, and the next Claude Code session detects the extension automatically.",Dby="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server (the policy loaded while setup was in progress). Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest the extension again.",qBA="Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was in progress, and Claude in Chrome is not wired into that configuration. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the session leaves that mode, /chrome completes the connection.";var Oby=A(()=>{Wnu();Zt();Hq();Wn();qe();dp();wr();Hby();$j();hau();Spo();LPe();EGt()});function Lby(){if(Bmn())return!1;if(gP().installUpsellResolution!==void 0)return!1;return Vhs()&&!jn()&&!Xk()&&Kxn()===void 0&&!kd()&&!Yze()&&Wt()!=="wsl"&&!wa()&&tOr()?.isTeleported!==!0&&!p4()&&!qhs()&&cr().chromeInstallUpsellDismissed!==!0&&it("tengu_chrome_install_upsell",!1)&&!L0n()}function Nby(){return gP().installUpsellResolution!==void 0}async function yau(e){if(e.options?.isSkillPreload||e.agentId!==void 0||e.abortController.signal.aborted)return DXt;let t=gP();if(t.installUpsellResolution)return t.installUpsellResolution;let r=e.requestDialog;if(!r)return t.installUpsellResolution=Promise.resolve(DXt),t.installUpsellResolution;return t.installUpsellResolution=KBA(e,r).catch((n)=>{if(e.abortController.signal.aborted)return t.installUpsellResolution=void 0,DXt;return E(`[Claude in Chrome] Install upsell failed: ${n}`,{level:"error"}),pe("chrome_install_upsell","upsell_error"),DXt}),t.installUpsellResolution}async function KBA(e,t){if(L0n())return E("[Claude in Chrome] Skipping install upsell: blocked by managed deniedMcpServers policy"),be("chrome_install_upsell","policy_denied"),YBA;if(await bde().catch(()=>!1))return ln((i)=>i.cachedChromeExtensionInstalled===!0?i:{...i,cachedChromeExtensionInstalled:!0},e.storageV5),"The Claude in Chrome extension is installed, but browser tools are not enabled for this session. Tell the user Claude Code can work in their Chrome browser once browser tools are on: they can run /chrome to manage them, or restart Claude Code to get a one-time prompt to enable them. Do not attempt mcp__claude-in-chrome__* tool calls this session.";if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;if(jMs(e)){if(E("[Claude in Chrome] Skipping install upsell: session auto-allows tool calls with no prompt (bypass or plan+bypass)"),!gP().installUpsellBypassSuppressionCounted)gP().installUpsellBypassSuppressionCounted=!0,be("chrome_install_upsell","suppressed_bypass_mode");return gP().installUpsellResolution=void 0,DXt}if(await VEi()===null)return E("[Claude in Chrome] Skipping install upsell: no Chromium-family browser detected"),be("chrome_install_upsell","no_browser_detected"),DXt;switch(await t(zOo,{},{signal:e.abortController.signal})){case"install":{let i=await Mby(e,t);if(i===zMs)gP().installUpsellResolution=void 0;return i}case"dont_ask_again":return be("chrome_install_upsell","dont_ask_again"),ln((i)=>i.chromeInstallUpsellDismissed===!0?i:{...i,chromeInstallUpsellDismissed:!0},e.storageV5),gau;case"not_now":return be("chrome_install_upsell","declined"),gau;case"cancelled":if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;return be("chrome_install_upsell","cancelled"),gau}}var DXt,gau="The user declined to install the Claude in Chrome extension for now. Do not suggest it again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. They can revisit with /chrome.",YBA="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest installing the extension.";var $by=A(()=>{tt();Gnu();zp();Zt();bn();su();Wn();qe();bo();ki();s6r();$j();Oby();hau();LPe();EGt();DXt=`Browser tools are not available in this session: the Claude in Chrome extension is not set up. The user can install or connect it from ${c0e} and manage browser tools with /chrome. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not attempt mcp__claude-in-chrome__* tool calls.`});function QBA(e){let t=e?.filter((r)=>r.name===Ux)??[];return t.length>0&&t.every((r)=>ZBA.has(r.type))}async function ejA(e){let t=Bmn(),r=e.options?.tools?.some((n)=>n.name?.startsWith(lwe))??!1;if(!t)return yau(e);if(r)return Bin;if(e.agentId!==void 0||e.options?.isSkillPreload)return XBA;if(QBA(e.options?.mcpClients))return E("[Claude in Chrome] Skill invoked while the chrome MCP client is in a dead state; steering away from browser tools"),JBA;if(Nby())return yau(e);return Bin}function Fby({disabled:e=!1}={}){Cd({name:"claude-in-chrome",menuDescription:"Let Claude browse and interact with pages in your Chrome",description:"Automates your Chrome browser to interact with web pages - clicking elements, filling forms, capturing screenshots, reading console logs, and navigating sites. Opens pages in new tabs within your existing Chrome session. Requires site-level permissions before executing (configured in the ex
+---
+
+==== function Mby ====
+hits=1
+@323448873:
+()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{level:"error"}),d="setup_reconnect_error",l("failed");return}if(k.client.type==="connected")f={config:w};if(k.client.type!=="connected"||o.signal.aborted){if(!o.signal.aborted)d="setup_client_not_connected",l("failed");return}let C=Date.now(),x=!1,R=0;while(!o.signal.aborted){let I=await jBA(k.client,o.signal);if(I==="connected"){p=k,l("connected");return}if(I==="error"){if(R++,R>=BBA){d="setup_probe_errors",l("failed");return}}else R=0;let M=Date.now()-C;if(!x&&M>=$BA)x=!0,nvt(CTr).catch((O)=>E(`[Claude in Chrome] Install setup reconnect nudge failed: ${O}`));if(s==="connecting"&&M>=FBA)l("stalled");await Pr(Pby,o.signal)}}function g(){return{phase:s,installPageOpened:n}}async function*y(){let b=g();yield b;while(!o.signal.aborted){if(g().phase!==b.phase){b=g(),yield b;continue}if(await _(),o.signal.aborted)return}}function _(){return new Promise((b)=>{let S=a.subscribe(()=>{S(),o.signal.removeEventListener("abort",w),b()}),w=()=>{S(),b()};o.signal.addEventListener("abort",w,{once:!0})})}try{while(!0){let b=await t(jOo,y(),{signal:r});if(b==="keep_waiting")continue;let{phase:S}=g();if(b==="continue"&&S==="connected"&&p){if(L0n())return be("chrome_install_upsell","policy_denied_late",{install_page_opened:n}),Dby;if(jMs(e))return be("chrome_install_upsell","bypass_mode_late",{install_page_opened:n}),qBA;let w=zBA(e,p,n);return u=!0,f=void 0,w}if(S==="failed"){if(d==="policy_denied_mid_wait")return be("chrome_install_upsell",d,{install_page_opened:n}),Dby;return pe("chrome_install_upsell",d,{install_page_opened:n}),GBA}if(b==="cancelled"&&r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return be("chrome_install_upsell",S==="waiting_install"?"setup_skipped_waiting_install":S==="connected"?"setup_skipped_after_connect":"setup_skipped_connecting",{install_page_opened:n}),WBA}}catch(b){if(r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return E(`[Claude in Chrome] Install setup dialog failed: ${b}`,{level:"error"}),pe("chrome_install_upsell","setup_dialog_error",{install_page_opened:n}),VBA}finally{if(r.removeEventListener("abort",i),o.abort(),!u){if(c)jmn();m.then(()=>{if(!f)return;let{config:b}=f;f=void 0,Promise.resolve().then(() => (Cv(),kv)).then((S)=>S.mcpClientModule().clearServerCache(Ux,b)).catch((S)=>E(`[Claude in Chrome] Install setup orphan cleanup failed: ${S}`,{level:"error"}))})}}}async function jBA(e,t){try{let r=await Promise.race([Jrt(e,{name:"list_connected_browsers",arguments:{}}),Pr(UBA,t).then(()=>{return})]);if(!r)return"not_connected";let n=Array.isArray(r.content)?r.content[0]:void 0,o=n&&typeof n==="object"&&"text"in n&&typeof n.text==="string"?n.text:void 0;if(!o)return"not_connected";let i;try{i=er(o)}catch{return"not_connected"}return Array.isArray(i)&&i.length>0?"connected":"not_connected"}catch{return"error"}}function zBA(e,t,r){return Iby(e,t),ln((n)=>n.claudeInChromeDefaultEnabled===!0&&n.hasCompletedClaudeInChromeOnboarding===!0&&n.cachedChromeExtensionInstalled===!0?n:{...n,claudeInChromeDefaultEnabled:!0,hasCompletedClaudeInChromeOnboarding:!0,cachedChromeExtensionInstalled:!0},e.storageV5),Ee("chrome_install_upsell",{install_page_opened:r}),`Claude in Chrome setup completed: the extension is installed and connected, and the mcp__claude-in-chrome__* browser tools are now available in this session. Continue the user's task using them.
+${Bin}`}var Pby=2000,LBA=30000,NBA=5000,$BA=15000,FBA=45000,UBA=5000,BBA=5,WBA="The user started installing the Claude in Chrome extension but chose to continue without browser tools. Do not suggest the extension again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. If they finish installing later, /chrome completes the connection, and the next Claude Code session detects the extension automatically.",GBA="The Claude in Chrome extension was installed, but the browser connection could not be established in this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish the connection with /chrome (Reconnect extension), and the next Claude Code session will detect the extension automatically.",zMs="Claude in Chrome setup did not complete because the turn was interrupted \u2014 the user did not choose to continue without browser tools. Continue without browser tools for now (WebFetch and WebSearch cover read-only web content). If the user finishes installing, /chrome completes the connection, and the next Claude Code session detects the extension automatically.",VBA="Claude in Chrome setup ended early due to an internal error; the extension may or may not be installed. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish setup with /chrome, and the next Claude Code session detects the extension automatically.",Dby="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server (the policy loaded while setup was in progress). Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest the extension again.",qBA="Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was in progress, and Claude in Chrome is not wired into that configuration. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the session leaves that mode, /chrome completes the connection.";var Oby=A(()=>{Wnu();Zt();Hq();Wn();qe();dp();wr();Hby();$j();hau();Spo();LPe();EGt()});function Lby(){if(Bmn())return!1;if(gP().installUpsellResolution!==void 0)return!1;return Vhs()&&!jn()&&!Xk()&&Kxn()===void 0&&!kd()&&!Yze()&&Wt()!=="wsl"&&!wa()&&tOr()?.isTeleported!==!0&&!p4()&&!qhs()&&cr().chromeInstallUpsellDismissed!==!0&&it("tengu_chrome_install_upsell",!1)&&!L0n()}function Nby(){return gP().installUpsellResolution!==void 0}async function yau(e){if(e.options?.isSkillPreload||e.agentId!==void 0||e.abortController.signal.aborted)return DXt;let t=gP();if(t.installUpsellResolution)return t.installUpsellResolution;let r=e.requestDialog;if(!r)return t.installUpsellResolution=Promise.resolve(DXt),t.installUpsellResolution;return t.installUpsellResolution=KBA(e,r).catch((n)=>{if(e.abortController.signal.aborted)return
+---
+
+==== async function*y() ====
+hits=1
+@323450858:
+getPromptForCommand(e){let t=e.trim();if(!t)return[{type:"text",text:OBA}];if(!await P1())return[{type:"text",text:MBA}];return[{type:"text",text:DBA(t)}]}})}var kby=5,Cby=30,PBA,MBA="This is not a git repository. The `/batch` command requires a git repo because it spawns agents in isolated git worktrees and creates PRs from each. Initialize a repo first, or run this from inside an existing one.",OBA=`Provide an instruction describing the batch change you want to make.
+Examples:
+  /batch migrate from react to vue
+  /batch replace all uses of lodash with native equivalents
+  /batch add type annotations to all untyped function parameters`;var Rby=A(()=>{yy();W4();al();Zv();PBA=`After you finish implementing the change:
+1. **Code review** \u2014 Invoke the \`${Nf}\` tool with \`skill: "code-review"\` to find correctness bugs (it reports findings; it does not edit code). Fix any findings it surfaces before continuing.
+2. **Run unit tests** \u2014 Run the project's test suite (check for package.json scripts, Makefile targets, or common commands like \`npm test\`, \`bun test\`, \`pytest\`, \`go test\`). If tests fail, fix them.
+3. **Test end-to-end** \u2014 Follow the e2e test recipe from the coordinator's prompt (below). If the recipe says to skip e2e for this unit, skip it.
+4. **Commit and push** \u2014 Commit all changes with a clear message, push the branch, and create a PR with \`gh pr create\`. Use a descriptive title. If \`gh\` is not available or the push fails, note it in your final message.
+5. **Report** \u2014 End with a single line: \`PR: <url>\` so the coordinator can track it. If no PR was created, end with \`PR: none \u2014 <reason>\`.`});function Iby(e,t){e.onChangeDynamicMcpConfig?.((r)=>({...r,[Ux]:t.client.config})),e.setAppState((r)=>p8r(r,Ux,t))}var Hby=A(()=>{m8r();$j()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{level:"error"}),d="setup_reconnect_error",l("failed");return}if(k.client.type==="connected")f={config:w};if(k.client.type!=="connected"||o.signal.aborted){if(!o.signal.aborted)d="setup_client_not_connected",l("failed");return}let C=Date.now(),x=!1,R=0;while(!o.signal.aborted){let I=await jBA(k.client,o.signal);if(I==="connected"){p=k,l("connected");return}if(I==="error"){if(R++,R>=BBA){d="setup_probe_errors",l("failed");return}}else R=0;let M=Date.now()-C;if(!x&&M>=$BA)x=!0,nvt(CTr).catch((O)=>E(`[Claude in Chrome] Install setup reconnect nudge failed: ${O}`));if(s==="connecting"&&M>=FBA)l("stalled");await Pr(Pby,o.signal)}}function g(){return{phase:s,installPageOpened:n}}async function*y(){let b=g();yield b;while(!o.signal.aborted){if(g().phase!==b.phase){b=g(),yield b;continue}if(await _(),o.signal.aborted)return}}function _(){return new Promise((b)=>{let S=a.subscribe(()=>{S(),o.signal.removeEventListener("abort",w),b()}),w=()=>{S(),b()};o.signal.addEventListener("abort",w,{once:!0})})}try{while(!0){let b=await t(jOo,y(),{signal:r});if(b==="keep_waiting")continue;let{phase:S}=g();if(b==="continue"&&S==="connected"&&p){if(L0n())return be("chrome_install_upsell","policy_denied_late",{install_page_opened:n}),Dby;if(jMs(e))return be("chrome_install_upsell","bypass_mode_late",{install_page_opened:n}),qBA;let w=zBA(e,p,n);return u=!0,f=void 0,w}if(S==="failed"){if(d==="policy_denied_mid_wait")return be("chrome_install_upsell",d,{install_page_opened:n}),Dby;return pe("chrome_install_upsell",d,{install_page_opened:n}),GBA}if(b==="cancelled"&&r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return be("chrome_install_upsell",S==="waiting_install"?"setup_skipped_waiting_install":S==="connected"?"setup_skipped_after_connect":"setup_skipped_connecting",{install_page_opened:n}),WBA}}catch(b){if(r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return E(`[Claude in Chrome] Install setup dialog failed: ${b}`,{level:"error"}),pe("chrome_install_upsell","setup_dialog_error",{install_page_opened:n}),VBA}finally{if(r.removeEventListener("abort",i),o.abort(),!u){if(c)jmn();m.then(()=>{if(!f)return;let{config:b}=f;f=void 0,Promise.resolve().then(() => (Cv(),kv)).then((S)=>S.mcpClientModule().clearServerCache(Ux,b)).catch((S)=>E(`[Claude in Chrome] Install setup orphan cleanup failed: ${S}`,{level:"error"}))})}}}async function jBA(e,t){try{let r=await Promise.race([Jrt(e,{name:"list_connected_browsers",arguments:{}}),Pr(UBA,t).then(()=>{return})]);if(!r)return"not_connected";let n=Array.isArray(r.content)?r.content[0]:void 0,o=n&&typeof n==="object"&&"text"in n&&typeof n.text
+---
+
+==== t(zOo,{},{signal: ====
+hits=1
+@323458317:
+t",i),o.abort(),!u){if(c)jmn();m.then(()=>{if(!f)return;let{config:b}=f;f=void 0,Promise.resolve().then(() => (Cv(),kv)).then((S)=>S.mcpClientModule().clearServerCache(Ux,b)).catch((S)=>E(`[Claude in Chrome] Install setup orphan cleanup failed: ${S}`,{level:"error"}))})}}}async function jBA(e,t){try{let r=await Promise.race([Jrt(e,{name:"list_connected_browsers",arguments:{}}),Pr(UBA,t).then(()=>{return})]);if(!r)return"not_connected";let n=Array.isArray(r.content)?r.content[0]:void 0,o=n&&typeof n==="object"&&"text"in n&&typeof n.text==="string"?n.text:void 0;if(!o)return"not_connected";let i;try{i=er(o)}catch{return"not_connected"}return Array.isArray(i)&&i.length>0?"connected":"not_connected"}catch{return"error"}}function zBA(e,t,r){return Iby(e,t),ln((n)=>n.claudeInChromeDefaultEnabled===!0&&n.hasCompletedClaudeInChromeOnboarding===!0&&n.cachedChromeExtensionInstalled===!0?n:{...n,claudeInChromeDefaultEnabled:!0,hasCompletedClaudeInChromeOnboarding:!0,cachedChromeExtensionInstalled:!0},e.storageV5),Ee("chrome_install_upsell",{install_page_opened:r}),`Claude in Chrome setup completed: the extension is installed and connected, and the mcp__claude-in-chrome__* browser tools are now available in this session. Continue the user's task using them.
+${Bin}`}var Pby=2000,LBA=30000,NBA=5000,$BA=15000,FBA=45000,UBA=5000,BBA=5,WBA="The user started installing the Claude in Chrome extension but chose to continue without browser tools. Do not suggest the extension again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. If they finish installing later, /chrome completes the connection, and the next Claude Code session detects the extension automatically.",GBA="The Claude in Chrome extension was installed, but the browser connection could not be established in this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish the connection with /chrome (Reconnect extension), and the next Claude Code session will detect the extension automatically.",zMs="Claude in Chrome setup did not complete because the turn was interrupted \u2014 the user did not choose to continue without browser tools. Continue without browser tools for now (WebFetch and WebSearch cover read-only web content). If the user finishes installing, /chrome completes the connection, and the next Claude Code session detects the extension automatically.",VBA="Claude in Chrome setup ended early due to an internal error; the extension may or may not be installed. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish setup with /chrome, and the next Claude Code session detects the extension automatically.",Dby="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server (the policy loaded while setup was in progress). Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest the extension again.",qBA="Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was in progress, and Claude in Chrome is not wired into that configuration. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the session leaves that mode, /chrome completes the connection.";var Oby=A(()=>{Wnu();Zt();Hq();Wn();qe();dp();wr();Hby();$j();hau();Spo();LPe();EGt()});function Lby(){if(Bmn())return!1;if(gP().installUpsellResolution!==void 0)return!1;return Vhs()&&!jn()&&!Xk()&&Kxn()===void 0&&!kd()&&!Yze()&&Wt()!=="wsl"&&!wa()&&tOr()?.isTeleported!==!0&&!p4()&&!qhs()&&cr().chromeInstallUpsellDismissed!==!0&&it("tengu_chrome_install_upsell",!1)&&!L0n()}function Nby(){return gP().installUpsellResolution!==void 0}async function yau(e){if(e.options?.isSkillPreload||e.agentId!==void 0||e.abortController.signal.aborted)return DXt;let t=gP();if(t.installUpsellResolution)return t.installUpsellResolution;let r=e.requestDialog;if(!r)return t.installUpsellResolution=Promise.resolve(DXt),t.installUpsellResolution;return t.installUpsellResolution=KBA(e,r).catch((n)=>{if(e.abortController.signal.aborted)return t.installUpsellResolution=void 0,DXt;return E(`[Claude in Chrome] Install upsell failed: ${n}`,{level:"error"}),pe("chrome_install_upsell","upsell_error"),DXt}),t.installUpsellResolution}async function KBA(e,t){if(L0n())return E("[Claude in Chrome] Skipping install upsell: blocked by managed deniedMcpServers policy"),be("chrome_install_upsell","policy_denied"),YBA;if(await bde().catch(()=>!1))return ln((i)=>i.cachedChromeExtensionInstalled===!0?i:{...i,cachedChromeExtensionInstalled:!0},e.storageV5),"The Claude in Chrome extension is installed, but browser tools are not enabled for this session. Tell the user Claude Code can work in their Chrome browser once browser tools are on: they can run /chrome to manage them, or restart Claude Code to get a one-time prompt to enable them. Do not attempt mcp__claude-in-chrome__* tool calls this session.";if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;if(jMs(e)){if(E("[Claude in Chrome] Skipping install upsell: session auto-allows tool calls with no prompt (bypass or plan+bypass)"),!gP().installUpsellBypassSuppressionCounted)gP().installUpsellBypassSuppressionCounted=!0,be("chrome_install_upsell","suppressed_bypass_mode");return gP().installUpsellResolution=void 0,DXt}if(await VEi()===null)return E("[Claude in Chrome] Skipping install upsell: no Chromium-family browser detected"),be("chrome_install_upsell","no_browser_detected"),DXt;switch(await t(zOo,{},{signal:e.abortController.signal})){case"install":{let i=await Mby(e,t);if(i===zMs)gP().installUpsellResolution=void 0;return i}case"dont_ask_again":return be("chrome_install_upsell","dont_ask_again"),ln((i)=>i.chromeInstallUpsellDismissed===!0?i:{...i,chromeInstallUpsellDismissed:!0},e.storageV5),gau;case"not_now":return be("chrome_install_upsell","declined"),gau;case"cancelled":if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;return be("chrome_install_upsell","cancelled"),gau}}var DXt,gau="The user declined to install the Claude in Chrome extension for now. Do not suggest it again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. They can revisit with /chrome.",YBA="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest installing the extension.";var $by=A(()=>{tt();Gnu();zp();Zt();bn();su();Wn();qe();bo();ki();s6r();$j();Oby();hau();LPe();EGt();DXt=`Browser tools are not available in this session: the Claude in Chrome extension is not set up. The user can install or connect it from ${c0e} and manage browser tools with /chrome. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not attempt mcp__claude-in-chrome__* tool calls.`});function QBA(e){let t=e?.filter((r)=>r.name===Ux)??[];return t.length>0&&t.every((r)=>ZBA.has(r.type))}async function ejA(e){let t=Bmn(),r=e.options?.tools?.some((n)=>n.name?.startsWith(lwe))??!1;if(!t)return yau(e);if(r)return Bin;if(e.agentId!==void 0||e.options?.isSkillPreload)return XBA;if(QBA(e.options?.mcpClients))return E("[Claude in Chrome] Skill invoked while the chrome MCP client is in a dead state; steering away from browser tools"),JBA;if(Nby())return yau(e);return Bin}function Fby({disabled:e=!1}={}){Cd({name:"claude-in-chrome",menuDescription:"Let Claude browse and interact with pages in your Chrome",description:"Automates your Chrome browser to interact with web pages - clicking elements, filling forms, capturing screenshots, reading console logs, and navigating sites. Opens pages in new tabs within your existing Chrome session. Requires site-level permissions before executing (configured in the extension).",whenToUse:"When the user wants to interact with web pages, automate browser tasks, capture screenshots, read console logs, or perform any browser-based actions. Always invoke BEFORE attempting to use any mcp__claude-in-chrome__* tools.",allowedTools:[],userInvocable:!0,isEnabled:()=>!e&&(Bmn()||Lby()),async getPromptForCommand(t,r){let n=await ejA(r);if(t)n+=`
+## Task
+${t}`;return[{type:"text",text:n}]}})}var XBA="Claude in Chrome browser tools are enabled for this session, but they are not part of this agent context (its tool set was fixed before the browser connection completed, or its agent type does not include them). Do not attempt mcp__claude-in-chrome__* tool calls here \u2014 complete the task with the tools this context does have, or report back so the main conversation can drive the browser.",JBA="Claude in Chrome is enabled for this session, but the browser connection is not working (it failed or was disabled), so mcp__claude-in-chrome__* tools are not available. Do not attempt them. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can retry the connection with /chrome (Reconnect extension).",ZBA;var Uby=A(()=>{$j();$by();Spo();LPe();qe();Zv();ZBA=new Set(["failed","disabled","needs-auth"])});function Bby(e,t){let r=e.trim(),n=r.split(/\s+/,1)[0]??"",o=new Set,i=r;for(let s of t){let a=i.replace(new 
+---
+
+==== t(jOo,y(),{signal: ====
+hits=1
+@323451207:
+es \u2192 closer to ${kby}; hundreds of files \u2192 closer to ${Cby}. Prefer per-directory or per-module slicing over arbitrary file lists.
+3. **Determine the e2e test recipe.** Figure out how a worker can verify its change actually works end-to-end \u2014 not just that unit tests pass. Look for:
+   - A \`claude-in-chrome\` skill or browser-automation tool (for UI changes: click through the affected flow, screenshot the result)
+   - A \`tmux\` or CLI-verifier skill (for CLI changes: launch the app interactively, exercise the changed behavior)
+   - A dev-server + curl pattern (for API changes: start the server, hit the affected endpoints)
+   - An existing e2e/integration test suite the worker can run
+   If you cannot find a concrete e2e path, use the \`${gy}\` tool to ask the user how to verify this change end-to-end. Offer 2\u20133 specific options based on what you found (e.g., "Screenshot via chrome extension", "Run \`bun run dev\` and curl the endpoint", "No e2e \u2014 unit tests are sufficient"). Do not skip this \u2014 the workers cannot ask the user themselves.
+   Write the recipe as a short, concrete set of steps that a worker can execute autonomously. Include any setup (start a dev server, build first) and the exact command/interaction to verify.
+4. **Write the plan.** In your plan file, include:
+   - A summary of what you found during research
+   - A numbered list of work units \u2014 for each: a short title, the list of files/directories it covers, and a one-line description of the change
+   - The e2e test recipe (or "skip e2e because \u2026" if the user chose that)
+   - The exact worker instructions you will give each agent (the shared template)
+5. Call \`${fj}\` to present the plan for approval.
+## Phase 2: Spawn Workers (After Plan Approval)
+Once the plan is approved, spawn one background agent per work unit using the \`${Pi}\` tool. **All agents must use \`isolation: "worktree"\` and \`run_in_background: true\`.** Launch them all in a single message block so they run in parallel.
+For each agent, the prompt must be fully self-contained. Include:
+- The overall goal (the user's instruction)
+- This unit's specific task (title, file list, change description \u2014 copied verbatim from your plan)
+- Any codebase conventions you discovered that the worker needs to follow
+- The e2e test recipe from your plan (or "skip e2e because \u2026")
+- The worker instructions below, copied verbatim:
+\`\`\`
+${PBA}
+\`\`\`
+Use \`subagent_type: "general-purpose"\` unless a more specific agent type fits.
+## Phase 3: Track Progress
+After launching all workers, render an initial status table:
+| # | Unit | Status | PR |
+|---|------|--------|----|
+| 1 | <title> | running | \u2014 |
+| 2 | <title> | running | \u2014 |
+As background-agent completion notifications arrive, parse the \`PR: <url>\` line from each agent's result and re-render the table with updated status (\`done\` / \`failed\`) and PR links. Keep a brief failure note for any agent that did not produce a PR.
+When all agents have reported, render the final table and a one-line summary (e.g., "22/24 units landed as PRs").
+`}function xby(){Cd({name:"batch",menuDescription:"Plan a large change; background agents each open a PR",description:"Research and plan a large-scale change, then execute it in parallel across 5\u201330 isolated worktree agents that each open a PR.",whenToUse:"Use when the user wants to make a sweeping, mechanical change across many files (migrations, refactors, bulk renames) that can be decomposed into independent parallel units.",argumentHint:"<instruction>",userInvocable:!0,disableModelInvocation:!0,async getPromptForCommand(e){let t=e.trim();if(!t)return[{type:"text",text:OBA}];if(!await P1())return[{type:"text",text:MBA}];return[{type:"text",text:DBA(t)}]}})}var kby=5,Cby=30,PBA,MBA="This is not a git repository. The `/batch` command requires a git repo because it spawns agents in isolated git worktrees and creates PRs from each. Initialize a repo first, or run this from inside an existing one.",OBA=`Provide an instruction describing the batch change you want to make.
+Examples:
+  /batch migrate from react to vue
+  /batch replace all uses of lodash with native equivalents
+  /batch add type annotations to all untyped function parameters`;var Rby=A(()=>{yy();W4();al();Zv();PBA=`After you finish implementing the change:
+1. **Code review** \u2014 Invoke the \`${Nf}\` tool with \`skill: "code-review"\` to find correctness bugs (it reports findings; it does not edit code). Fix any findings it surfaces before continuing.
+2. **Run unit tests** \u2014 Run the project's test suite (check for package.json scripts, Makefile targets, or common commands like \`npm test\`, \`bun test\`, \`pytest\`, \`go test\`). If tests fail, fix them.
+3. **Test end-to-end** \u2014 Follow the e2e test recipe from the coordinator's prompt (below). If the recipe says to skip e2e for this unit, skip it.
+4. **Commit and push** \u2014 Commit all changes with a clear message, push the branch, and create a PR with \`gh pr create\`. Use a descriptive title. If \`gh\` is not available or the push fails, note it in your final message.
+5. **Report** \u2014 End with a single line: \`PR: <url>\` so the coordinator can track it. If no PR was created, end with \`PR: none \u2014 <reason>\`.`});function Iby(e,t){e.onChangeDynamicMcpConfig?.((r)=>({...r,[Ux]:t.client.config})),e.setAppState((r)=>p8r(r,Ux,t))}var Hby=A(()=>{m8r();$j()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{level:"error"}),d="setup_reconnect_error",l("failed");return}if(k.client.type==="connected")f={config:w};if(k.client.type!=="connected"||o.signal.aborted){if(!o.signal.aborted)d="setup_client_not_connected",l("failed");return}let C=Date.now(),x=!1,R=0;while(!o.signal.aborted){let I=await jBA(k.client,o.signal);if(I==="connected"){p=k,l("connected");return}if(I==="error"){if(R++,R>=BBA){d="setup_probe_errors",l("failed");return}}else R=0;let M=Date.now()-C;if(!x&&M>=$BA)x=!0,nvt(CTr).catch((O)=>E(`[Claude in Chrome] Install setup reconnect nudge failed: ${O}`));if(s==="connecting"&&M>=FBA)l("stalled");await Pr(Pby,o.signal)}}function g(){return{phase:s,installPageOpened:n}}async function*y(){let b=g();yield b;while(!o.signal.aborted){if(g().phase!==b.phase){b=g(),yield b;continue}if(await _(),o.signal.aborted)return}}function _(){return new Promise((b)=>{let S=a.subscribe(()=>{S(),o.signal.removeEventListener("abort",w),b()}),w=()=>{S(),b()};o.signal.addEventListener("abort",w,{once:!0})})}try{while(!0){let b=await t(jOo,y(),{signal:r});if(b==="keep_waiting")continue;let{phase:S}=g();if(b==="continue"&&S==="connected"&&p){if(L0n())return be("chrome_install_upsell","policy_denied_late",{install_page_opened:n}),Dby;if(jMs(e))return be("chrome_install_upsell","bypass_mode_late",{install_page_opened:n}),qBA;let w=zBA(e,p,n);return u=!0,f=void 0,w}if(S==="failed"){if(d==="policy_denied_mid_wait")return be("chrome_install_upsell",d,{install_page_opened:n}),Dby;return pe("chrome_install_upsell",d,{install_page_opened:n}),GBA}if(b==="cancelled"&&r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return be("chrome_install_upsell",S==="waiting_install"?"setup_skipped_waiting_install":S==="connected"?"setup_skipped_after_connect":"setup_skipped_connecting",{install_page_opened:n}),WBA}}catch(b){if(r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return E(`[Claude in Chrome] Install setup dialog failed: ${b}`,{level:"error"}),pe("chrome_install_upsell","setup_dialog_error",{install_page_opened:n}),VBA}finally{if(r.removeEventListener("abort",i),o.abort(),!u){if(c)jmn();m.then(()=>{if(!f)return;let{config:b}=f;f=void 0,Promise.resolve().then(() => (Cv(),kv)).then((S)=>S.mcpClientModule().clearServerCache(Ux,b)).catch((S)=>E(`[Claude in Chrome] Install setup orphan cleanup failed: ${S}`,{level:"error"}))})}}}async function jBA(e,t){try{let r=await Promise.race([Jrt(e,{name:"list_connected_browsers",arguments:{}}),Pr(UBA,t).then(()=>{return})]);if(!r)return"not_connected";let n=Array.isArray(r.content)?r.content[0]:void 0,o=n&&typeof n==="object"&&"text"in n&&typeof n.text==="string"?n.text:void 0;if(!o)return"not_connected";let i;try{i=er(o)}catch{return"not_connected"}return Array.isArray(i)&&i.length>0?"connected":"not_connected"}catch{return"error"}}function zBA(e,t,r){return Iby(e,t),ln((n)=>n.claudeInChromeDefaultEnabled===!0&&n.hasCompletedClaudeInChromeOnboarding===!0&&n.cachedChromeExtensionInstalled===!0?
+---
+
+==== function Nby( ====
+hits=1
+@323456420:
+ Vhs()&&!jn()&&!Xk()&&Kxn()===void 0&&!kd()&&!Yze()&&Wt()!=="wsl"&&!wa()&&tOr()?.isTeleported!==!0&&!p4()&&!qhs()&&cr().chromeInstallUpsellDismissed!==!0&&it("tengu_chrome_install_upsell",!1)&&!L0n()}function Nby(){return gP().installUpsellResolution!==void 0}async function yau(e){if(e.options?.isSkillPreload||e.agentId!==void 0||e.abortController.signal.aborted)return DXt;let t=gP();if(t.installUpsellResolution)return t.installUpsellResolution;let r=e.requestDialog;if(!r)return t.installUpsellResolution=Promise.resolve(DXt),t.installUpsellResolution;return t.installUpsellResolution=KBA(e,r).catch((n)=>{if(e.abortController.signal.aborted)return t.installUpsellResolution=void 0,DXt;return E(`[Claude in Chrome] Install upsell failed: ${n}`,{level:"error"}),pe("chrome_install_upsell","upsell_error"),DXt}),t.installUpsellResolution}async function KBA(e,t){if(L0n())return E("[Claude in Chrome] Skipping install upsell: blocked by managed deniedMcpServers policy"),be("chrome_install_upsell","policy_denied"),YBA;if(await bde().catch(()=>!1))return ln((i)=>i.cachedChromeExtensionInstalled===!0?i:{...i,cachedChromeExtensionInstalled:!0},e.storageV5),"The Claude in Chrome extension is installed, but browser tools are not enabled for this session. Tell the user Claude Code can work in their Chrome browser once browser tools are on: they can run /chrome to manage them, or restart Claude Code to get a one-time prompt to enable them. Do not attempt mcp__claude-in-chrome__* tool calls this session.";if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;if(jMs(e)){if(E("[Claude in Chrome] Skipping install upsell: session auto-allows tool calls with no prompt (bypass or plan+bypass)"),!gP().installUpsellBypassSuppressionCounted)gP().installUpsellBypassSuppressionCounted=!0,be("chrome_install_upsell","suppressed_bypass_mode");return gP().installUpsellResolution=void 0,DXt}if(await VEi()===null)return E("[Claude in Chrome] Skipping install upsell: no Chromium-family browser detected"),be("chrome_install_upsell","no_browser_detected"),DXt;switch(await t(zOo,{},{signal:e.abortController.signal})){case"install":{let i=await Mby(e,t);if(i===zMs)gP().installUpsellResolution=void 0;return i}case"dont_ask_again":return be("chrome_install_upsell","dont_ask_again"),ln((i)=>i.chromeInstallUpsellDismissed===!0?i:{...i,chromeInstallUpsellDismissed:!0},e.storageV5),gau;case"not_now":return be("chrome_install_upsell","declined"),gau;case"cancelled":if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;return be("chrome_install_upsell","cancelled"),gau}}var DXt,gau="The user declined to install the Claude in Chrome extension for now. Do not suggest it again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. They can revisit with /chrome.",YBA="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest installing the extension.";var $by=A(()=>{tt();Gnu();zp();Zt();bn();su();Wn();qe();bo();ki();s6r();$j();Oby();hau();LPe();EGt();DXt=`Browser tools are not available in this session: the Claude in Chrome extension is not set up. The user can install or connect it from ${c0e} and manage browser tools with /chrome. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not attempt mcp__claude-in-chrome__* tool calls.`});function QBA(e){let t=e?.filter((r)=>r.name===Ux)??[];return t.length>0&&t.every((r)=>ZBA.has(r.type))}async function ejA(e){let t=Bmn(),r=e.options?.tools?.some((n)=>n.name?.startsWith(lwe))??!1;if(!t)return yau(e);if(r)return Bin;if(e.agentId!==void 0||e.options?.isSkillPreload)return XBA;if(QBA(e.options?.mcpClients))return E("[Claude in Chrome] Skill invoked while the chrome MCP client is in a dead state; steering away from browser tools"),JBA;if(Nby())return yau(e);retu
+---
+
+==== async function ejA ====
+hits=1
+@323460044:
+e user to perform browser steps manually. Do not attempt mcp__claude-in-chrome__* tool calls.`});function QBA(e){let t=e?.filter((r)=>r.name===Ux)??[];return t.length>0&&t.every((r)=>ZBA.has(r.type))}async function ejA(e){let t=Bmn(),r=e.options?.tools?.some((n)=>n.name?.startsWith(lwe))??!1;if(!t)return yau(e);if(r)return Bin;if(e.agentId!==void 0||e.options?.isSkillPreload)return XBA;if(QBA(e.options?.mcpClients))return E("[Claude in Chrome] Skill invoked while the chrome MCP client is in a dead state; steering away from browser tools"),JBA;if(Nby())return yau(e);return Bin}function Fby({disabled:e=!1}={}){Cd({name:"claude-in-chrome",menuDescription:"Let Claude browse and interact with pages in your Chrome",description:"Automates your Chrome browser to interact with web pages - clicking elements, filling forms, capturing screenshots, reading console logs, and navigating sites. Opens pages in new tabs within your existing Chrome session. Requires site-level permissions before executing (configured in the extension).",whenToUse:"When the user wants to interact with web pages, automate browser tasks, capture screenshots, read console logs, or perform any browser-based actions. Always invoke BEFORE attempting to use any mcp__claude-in-chrome__* tools.",allowedTools:[],userInvocable:!0,isEnabled:()=>!e&&(Bmn()||Lby()),async getPromptForCommand(t,r){let n=await ejA(r);if(t)n+=`
+## Task
+${t}`;return[{type:"text",text:n}]}})}var XBA="Claude in Chrome browser tools are enabled for this session, but they are not part of this agent context (its tool set was fixed before the browser connection completed, or its agent type does not include them). Do not attempt mcp__claude-in-chrome__* tool calls here \u2014 complete the task with the tools this context does have, or report back so the main conversation can drive the browser.",JBA="Claude in Chrome is enabled for this session, but the browser connection is not working (it failed or was disabled), so mcp__claude-in-chrome__* tools are not available. Do not attempt them. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can retry the connection with /chrome (Reconnect extension).",ZBA;var Uby=A(()=>{$j();$by();Spo();LPe();qe();Zv();ZBA=new Set(["failed","disabled","needs-auth"])});function Bby(e,t){let r=e.trim(),n=r.split(/\s+/,1)[0]??"",o=new Set,i=r;for(let s of t){let a=i.replace(new RegExp(`(?:^|\\s)--${s$(s)}(?=\\s|$)`,"g"),"");if(a!==i)o.add(s),i=a.trim()}return{rawFirstToken:n,flags:o,rest:i}}var jby=A(()=>{Lr()});function WMs(e){if(e.agentContext&&WC(e.agentContext)>=vq())return!1;let t=e.options?.tool
+---
+
+==== function gP() ====
+hits=1
+@307761506:
+,this.tabGroupCleanupRegistered=!1,this.unsubscribeSessionSwitch?.(),this.unsubscribeSessionSwitch=void 0,this.unregisterExitCleanup?.(),this.unregisterExitCleanup=void 0,this.closesInFlight=new Map}}function gP(){return OpS.of(ar().host)}var OpS;var s6r=A(()=>{tt();OpS=new Ar(()=>new slf)});var clf={};Et(clf,{BROWSER_DETECTION_ORDER:()=>GEi,CFC_TOOL_PREFIX:()=>lwe,CHROMIUM_BROWSERS:()=>I8n,CLAUDE_IN_CHROME_DOMAIN_RULE_TOOL:()=>rvt,CLAUDE_IN_CHROME_MCP_SERVER_NAME:()=>Ux,detectAvailableBrowser:()=>VEi,getAllNativeMessagingHostsDirs:()=>c6a,getAllSocketPaths:()=>f6a,getAllWindowsRegistryKeys:()=>u6a,getSecureSocketPath:()=>H8n,getSocketDir:()=>a6r,isClaudeInChromeMCPServer:()=>oQ,isInProductPermissionsEnabled:()=>LUt,isTrackedClaudeInChromeTabId:()=>p6a,openInChrome:()=>nvt,trackClaudeInChromeTabId:()=>d6a});function LUt(){return it("tengu_cfc_in_product_permissions",!1)}function c6a(){let e=Wt(),t=OUt.homedir(),r=[];for(let n of GEi){let o=I8n[n];switch(e){case"macos":if(o.macos.nativeMessagingPath.length>0)r.push({browser:n,path:MUt.join(t,...o.macos.nativeMessagingPath)});break;case"linux":case"wsl":if(o.linux.nativeMessagingPath.length>0)r.push({browser:n,path:MUt.join(t,...o.linux.nativeMessagingPath)});break;case"windows":break}}return r}function u6a(){let e=[];for(let t of GEi){let r=I8n[t];if(r.windows.registryKey)e.push({browser:t,key:r.windows.registryKey})}return e}async function VEi(){let e=Wt();for(let t of GEi){let r=I8n[t];switch(e){case"macos":{let n=`/Applications/${r.macos.appName}.app`;try{if((await R8n.stat(n)).isDirectory())return E(`[Claude in Chrome] Detected browser: ${r.name}`),t}catch(o){if(!as(o))throw o}break}case"wsl":case"linux":{for(let n of r.linux.binaries)if(await uS(n).catch(()=>null))return E(`[Claude in Chrome] Detected browser: ${r.name}`),t;break}case"windows":{let n=OUt.homedir();if(r.windows.dataPath.length>0){let o=r.windows.useRoaming?MUt.join(n,"AppData","Roaming"):MUt.join(n,"AppData","Local"),i=MUt.join(o,...r.windows.dataPath);try{if((await R8n.stat(i)).isDirectory())return E(`[Claude in Chrome] Detected browser: ${r.name}`),t}catch(s){if(!as(s))throw s}}break}}}return null}function d6a(e){let t=gP().trackedTabIds;if(t.size>=LpS&&!t.has(e))t.clear();t.add(e)}function p6a(e){return gP().trackedTabIds.has(e)}function l6a(e){return{exec_exit_code:e.code,exec_failure_kind:e.exitCode!==void 0?xe("nonzero_exit"):e.code===127?xe("not_found"):xe("spawn_failed_or_killed")}}async function nvt(e){if(!/^https?:\/\//i.test(e))return pe("chrome_open_url","invalid_url"),!1;let t=Wt(),r=await VEi();if(!r)return E("[Claude in Chrome] No compatible browser found"),pe("chrome_open_url","no_browser"),!1;let n=I8n[r];switch(t){
+---
+
+==== function VEi( ====
+hits=1
+@307762710:
+nativeMessagingPath)});break;case"windows":break}}return r}function u6a(){let e=[];for(let t of GEi){let r=I8n[t];if(r.windows.registryKey)e.push({browser:t,key:r.windows.registryKey})}return e}async function VEi(){let e=Wt();for(let t of GEi){let r=I8n[t];switch(e){case"macos":{let n=`/Applications/${r.macos.appName}.app`;try{if((await R8n.stat(n)).isDirectory())return E(`[Claude in Chrome] Detected browser: ${r.name}`),t}catch(o){if(!as(o))throw o}break}case"wsl":case"linux":{for(let n of r.linux.binaries)if(await uS(n).catch(()=>null))return E(`[Claude in Chrome] Detected browser: ${r.name}`),t;break}case"windows":{let n=OUt.homedir();if(r.windows.dataPath.length>0){let o=r.windows.useRoaming?MUt.join(n,"AppData","Roaming"):MUt.join(n,"AppData","Local"),i=MUt.join(o,...r.windows.dataPath);try{if((await R8n.stat(i)).isDirectory())return E(`[Claude in Chrome] Detected browser: ${r.name}`),t}catch(s){if(!as(s))throw s}}break}}}return null}function d6a(e){let t=gP().trackedTabIds;if(t.size>=LpS&&!t.has(e))t.clear();t.add(e)}function p6a(e){return gP().trackedTabIds.has(e)}function l6a(e){return{exec_exit_code:e.code,exec_failure_kind:e.exitCode!==void 0?xe("nonzero_exit"):e.code===127?xe("not_found"):xe("spawn_failed_or_killed")}}async function nvt(e){if(!/^https?:\/\//i.test(e))return pe("chrome_open_url","invalid_url"),!1;let t=Wt(),r=await VEi();if(!r)return E("[Claude in Chrome] No compatible browser found"),pe("chrome_open_url","no_browser"),!1;let n=I8n[r];switch(t){case"macos":{let o=await yo("open",["-a",n.macos.appName,e]);if(o.code===0)return Ee("chrome_open_url"),!0;return pe("chrome_open_url","exec_failed",l6a(o)),!1}case"windows":{let o=n.windows.appPathsExe,i=!1;if(o){let a=await nlf(o);if(a){if(await olf(a,[e]))return Ee("chrome_open_url",{open_method:xe("app_paths"),browser:me(r)}),!0;i=!0}}let s=await wo("rundll32",["url,OpenURL",e],{cwd:a6a()});if(s.code===0)return Ee("chrome_open_url",{open_method:i?xe("rundll32_after_spawn_fail"):o?xe("rundll32"):xe("rundll32_no_app_paths_support"),browser:me(r)}),!0;return pe("chrome_open_url","exec_failed",{...l6a(s),...i&&{app_paths_spawn_failed:!0},browser:me(r)}),!1}case"wsl":case"linux":{let o;for(let i 
+---
+
+==== function Iby( ====
+hits=1
+@323448535:
+ push fails, note it in your final message.
+5. **Report** \u2014 End with a single line: \`PR: <url>\` so the coordinator can track it. If no PR was created, end with \`PR: none \u2014 <reason>\`.`});function Iby(e,t){e.onChangeDynamicMcpConfig?.((r)=>({...r,[Ux]:t.client.config})),e.setAppState((r)=>p8r(r,Ux,t))}var Hby=A(()=>{m8r();$j()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{level:"error"}),d="setup_reconnect_error",l("failed");return}if(k.client.type==="connected")f={config:w};if(k.client.type!=="connected"||o.signal.aborted){if(!o.signal.aborted)d="setup_client_not_connected",l("failed");return}let C=Date.now(),x=!1,R=0;while(!o.signal.aborted){let I=await jBA(k.client,o.signal);if(I==="connected"){p=k,l("connected");return}if(I==="error"){if(R++,R>=BBA){d="setup_probe_errors",l("failed");return}}else R=0;let M=Date.now()-C;if(!x&&M>=$BA)x=!0,nvt(CTr).catch((O)=>E(`[Claude in Chrome] Install setup reconnect nudge failed: ${O}`));if(s==="connecting"&&M>=FBA)l("stalled");await Pr(Pby,o.signal)}}function g(){return{phase:s,installPageOpened:n}}async function*y(){let b=g();yield b;while(!o.signal.aborted){if(g().phase!==b.phase){b=g(),yield b;continue}if(await _(),o.signal.aborted)return}}function _(){return new Promis
+---
+
+==== function L0n( ====
+hits=1
+@323448678:
+R was created, end with \`PR: none \u2014 <reason>\`.`});function Iby(e,t){e.onChangeDynamicMcpConfig?.((r)=>({...r,[Ux]:t.client.config})),e.setAppState((r)=>p8r(r,Ux,t))}var Hby=A(()=>{m8r();$j()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{l
+---
+
+==== function jMs( ====
+hits=1
+@323448714:
+u2014 <reason>\`.`});function Iby(e,t){e.onChangeDynamicMcpConfig?.((r)=>({...r,[Ux]:t.client.config})),e.setAppState((r)=>p8r(r,Ux,t))}var Hby=A(()=>{m8r();$j()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{level:"error"}),d="setup_reconnect_er
+---
+
+==== function jmn( ====
+hits=1
+@320683046:
+.shouldAutoEnable!==void 0)return t.shouldAutoEnable;return t.shouldAutoEnable=Vhs()&&(ev0(e)||qhs())&&it("tengu_chrome_auto_enable",!1),t.shouldAutoEnable}function Bmn(){return gP().wiredThisSession}function jmn(){gP().wiredThisSession=!1}function Slt(e){if(e===Ux)jmn()}function wgc({isSSHPending:e,isRemoteMode:t,hasTeleport:r,isSafeMode:n,permissionMode:o,isBypassPermissionsModeAvailable:i,teammateAgentId:s}){return e||t||r||n||o==="bypassPermissions"||o==="plan"&&i||s!==void 0}function kTr(){if(k0())return{type:"stdio",command:process.execPath,args:["--claude-in-chrome-mcp"],scope:"dynamic"};let e=bgc.fileURLToPath("file:///D:/a/claude-cli-internal/claude-cli-internal/src/utils/claudeInChrome/setup.ts"),t=q2e.join(e,".."),r=q2e.join(t,"cli.js");return{type:"stdio",command:process.execPath,args:[`${r}`,"--claude-in-chrome-mcp"],scope:"dynamic"}}function xTr(e){let t=k0(),r=[],n={};if(Yze())n.CLAUDE_CHROME_PERMISSION_MODE="skip_all_permission_checks";let o=Object.keys(n).length>0;if(t){let i=`"${process.execPath}" --chrome-native-host`;return Hug(i).then((s)=>_gc(s,e)).catch((s)=>E(`[Claude in Chrome] Failed to install native host: ${s}`,{level:"error"})),gP().wiredThisSession=!0,{mcpConfig:{[Ux]:{...kTr(),...o&&{env:n}}},allowedTools:r,systemPrompt:KUl()}}else{let i=bgc.fileURLToPath("file:///D:/a/claude-cli-internal/claude-cli-internal/src/utils/claudeInChrome/setup.ts"),s=q2e.join(i,".."),a=q2e.join(s,"cli.js");Hug(`"${process.execPath}" "${a}" --chrome-native-host`).then((c)=>_gc(c,e)).catch((c)=>E(`[Claude in Chrome] Failed to install native host: ${c}`,{level:"error"}));let l={[Ux]:{...kTr(),...o&&{env:n}}};return gP().wiredThisSession=!0,{mcpConfig:l,allowedTools:
+---
+
+==== installUpsellResolution ====
+hits=4
+@195225400:
+ell
+4
+e
+!<
+3
+7
+pT
+;
+4
+;
+4
+u
+;
+4
+;
+4
+8E
+<
+;
+4
+N!T
+\f
+<
+;
+4
+;
+4
+!<
+4
+<
+V
+;
+>
+@
+t
+$
+I
+L
+P
+m
+c5
+0
+E
+:
+X
+I
+;
+`
+:
+@
+D
+D
+.8
+h
+3
+h
+H
+ 
+>
+3
+=
+`
+;
+y;
+installUpsellResolution
+chromeInstallUpsellDismissed
+m
+d\
+ 
+/
+c\
+0
+d\
+Bd\
+H
+H
+XA7
+@A7
+h
+0
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+x
+x
+x
+x
+x
+$
+i
+!<
+3
+(
+E
+@ 
+m
+Cd\
+b
+2
+1d\
+3
+Ud\
+f\
+H
+H
+X
+7
+@
+7
+h
+$
+%
+#
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+
+---
+@307760866:
+ths candidate for ${e}: ${u??String(c)}`)}finally{clearTimeout(l)}}return null}function olf(e,t){return new Promise((r)=>{let n;try{n=tlf.spawn(e,t,{cwd:x8n.dirname(e),detached:!0,stdio:"ignore",windowsHide:!1})}catch(o){E(`[Claude in Chrome] Detached launch of ${e} failed: ${dt(o)??String(o)}`,{level:"error"}),r(!1);return}n.once("spawn",()=>r(!0)),n.once("error",(o)=>{E(`[Claude in Chrome] Detached launch of ${e} failed: ${dt(o)??o.message}`,{level:"error"}),r(!1)}),n.unref()})}var tlf,rlf,x8n,IpS="SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths",elf=1e4,HpS=5000;var ilf=A(()=>{qe();mr();st();rc();tlf=require("child_process"),rlf=require("fs/promises"),x8n=require("path")});class slf{bridgeBinding=void 0;resolvedHostByToolUseId=new Map;shouldAutoEnable=void 0;wiredThisSession=!1;installUpsellResolution=void 0;installUpsellBypassSuppressionCounted=!1;trackedTabIds=new Set;tabGroupCleanupRegistered=!1;unsubscribeSessionSwitch=void 0;unregisterExitCleanup=void 0;closesInFlight=new Map;reset(){this.bridgeBinding=void 0,this.resolvedHostByToolUseId=new Map,this.shouldAutoEnable=void 0,this.wiredThisSession=!1,this.installUpsellResolution=void 0,this.installUpsellBypassSuppressionCounted=!1,this.trackedTabIds=new Set,this.tabGroupCleanupRegistered=!1,this.unsubscribeSessionSwitch?.(),this.unsubscribeSessionSwitch=void 0,this.unregisterExitCleanup?.(),this.unregisterExitCleanup=void 0,this.closesInFlight=new Map}}function gP(){return OpS.of(ar().host)}var OpS;var s6r=A(()=>{tt();OpS=new Ar(()=>new slf)});var clf={};Et(clf,{BROWSER_DETECTION_ORDER:()=>GEi,CFC_TOOL_PREFIX:()=>lwe,CHROMIUM_BROWSERS:()=>I8n,CLAUDE_IN_CHROME_DOMAIN_RULE_TOOL:()=>rvt,CLAUDE_IN_CHROME_MCP_SERVER_NAME:()=>Ux,detectAvailableBrowser:()=>VEi,getAllNativeMessagingHostsDirs:()=>c6a,getAllSocketPaths:()=>f6a,getAllWindowsRegistryKeys:()=>u6a,getSecureSocketPath:()=>H8n,getSocketDir:()=>a6r,isClaudeInChromeMCPServer:()=>oQ,isInProductPermissionsEnabled:()=>LUt,isTrackedClaudeInChromeTabId:()=>p
+---
+@307761203:
+wn",()=>r(!0)),n.once("error",(o)=>{E(`[Claude in Chrome] Detached launch of ${e} failed: ${dt(o)??o.message}`,{level:"error"}),r(!1)}),n.unref()})}var tlf,rlf,x8n,IpS="SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths",elf=1e4,HpS=5000;var ilf=A(()=>{qe();mr();st();rc();tlf=require("child_process"),rlf=require("fs/promises"),x8n=require("path")});class slf{bridgeBinding=void 0;resolvedHostByToolUseId=new Map;shouldAutoEnable=void 0;wiredThisSession=!1;installUpsellResolution=void 0;installUpsellBypassSuppressionCounted=!1;trackedTabIds=new Set;tabGroupCleanupRegistered=!1;unsubscribeSessionSwitch=void 0;unregisterExitCleanup=void 0;closesInFlight=new Map;reset(){this.bridgeBinding=void 0,this.resolvedHostByToolUseId=new Map,this.shouldAutoEnable=void 0,this.wiredThisSession=!1,this.installUpsellResolution=void 0,this.installUpsellBypassSuppressionCounted=!1,this.trackedTabIds=new Set,this.tabGroupCleanupRegistered=!1,this.unsubscribeSessionSwitch?.(),this.unsubscribeSessionSwitch=void 0,this.unregisterExitCleanup?.(),this.unregisterExitCleanup=void 0,this.closesInFlight=new Map}}function gP(){return OpS.of(ar().host)}var OpS;var s6r=A(()=>{tt();OpS=new Ar(()=>new slf)});var clf={};Et(clf,{BROWSER_DETECTION_ORDER:()=>GEi,CFC_TOOL_PREFIX:()=>lwe,CHROMIUM_BROWSERS:()=>I8n,CLAUDE_IN_CHROME_DOMAIN_RULE_TOOL:()=>rvt,CLAUDE_IN_CHROME_MCP_SERVER_NAME:()=>Ux,detectAvailableBrowser:()=>VEi,getAllNativeMessagingHostsDirs:()=>c6a,getAllSocketPaths:()=>f6a,getAllWindowsRegistryKeys:()=>u6a,getSecureSocketPath:()=>H8n,getSocketDir:()=>a6r,isClaudeInChromeMCPServer:()=>oQ,isInProductPermissionsEnabled:()=>LUt,isTrackedClaudeInChromeTabId:()=>p6a,openInChrome:()=>nvt,trackClaudeInChromeTabId:()=>d6a});function LUt(){return it("tengu_cfc_in_product_permissions",!1)}function c6a(){let e=Wt(),t=OUt.homedir(),r=[];for(let n of GEi){let o=I8n[n];switch(e){case"macos":if(o.macos.nativeMessagingPath.length>0)r.push({browser:n,path:MUt.join(t,...o.macos.nativeMessagingPath)});break;
+---
+@323456172:
+ver (the policy loaded while setup was in progress). Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest the extension again.",qBA="Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was in progress, and Claude in Chrome is not wired into that configuration. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the session leaves that mode, /chrome completes the connection.";var Oby=A(()=>{Wnu();Zt();Hq();Wn();qe();dp();wr();Hby();$j();hau();Spo();LPe();EGt()});function Lby(){if(Bmn())return!1;if(gP().installUpsellResolution!==void 0)return!1;return Vhs()&&!jn()&&!Xk()&&Kxn()===void 0&&!kd()&&!Yze()&&Wt()!=="wsl"&&!wa()&&tOr()?.isTeleported!==!0&&!p4()&&!qhs()&&cr().chromeInstallUpsellDismissed!==!0&&it("tengu_chrome_install_upsell",!1)&&!L0n()}function Nby(){return gP().installUpsellResolution!==void 0}async function yau(e){if(e.options?.isSkillPreload||e.agentId!==void 0||e.abortController.signal.aborted)return DXt;let t=gP();if(t.installUpsellResolution)return t.installUpsellResolution;let r=e.requestDialog;if(!r)return t.installUpsellResolution=Promise.resolve(DXt),t.installUpsellResolution;return t.installUpsellResolution=KBA(e,r).catch((n)=>{if(e.abortController.signal.aborted)return t.installUpsellResolution=void 0,DXt;return E(`[Claude in Chrome] Install upsell failed: ${n}`,{level:"error"}),pe("chrome_install_upsell","upsell_error"),DXt}),t.installUpsellResolution}async function KBA(e,t){if(L0n())return E("[Claude in Chrome] Skipping install upsell: blocked by managed deniedMcpServers policy"),be("chrome_install_upsell","policy_denied"),YBA;if(await bde().catch(()=>!1))return ln((i)=>i.cachedChromeExtensionInstalled===!0?i:{...i,cachedChromeExtensionInstalled:!0},e.stor
+---
+
+==== chromeInstallUpsellDismissed ====
+hits=4
+@195225440:
+
+e
+!<
+3
+7
+pT
+;
+4
+;
+4
+u
+;
+4
+;
+4
+8E
+<
+;
+4
+N!T
+\f
+<
+;
+4
+;
+4
+!<
+4
+<
+V
+;
+>
+@
+t
+$
+I
+L
+P
+m
+c5
+0
+E
+:
+X
+I
+;
+`
+:
+@
+D
+D
+.8
+h
+3
+h
+H
+ 
+>
+3
+=
+`
+;
+y;
+installUpsellResolution
+chromeInstallUpsellDismissed
+m
+d\
+ 
+/
+c\
+0
+d\
+Bd\
+H
+H
+XA7
+@A7
+h
+0
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+x
+x
+x
+x
+x
+$
+i
+!<
+3
+(
+E
+@ 
+m
+Cd\
+b
+2
+1d\
+3
+Ud\
+f\
+H
+H
+X
+7
+@
+7
+h
+$
+%
+#
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+p
+p
+p
+p
+p
+`
+`
+
+---
+@323456340:
+rform browser steps manually. Do not suggest the extension again.",qBA="Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was in progress, and Claude in Chrome is not wired into that configuration. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the session leaves that mode, /chrome completes the connection.";var Oby=A(()=>{Wnu();Zt();Hq();Wn();qe();dp();wr();Hby();$j();hau();Spo();LPe();EGt()});function Lby(){if(Bmn())return!1;if(gP().installUpsellResolution!==void 0)return!1;return Vhs()&&!jn()&&!Xk()&&Kxn()===void 0&&!kd()&&!Yze()&&Wt()!=="wsl"&&!wa()&&tOr()?.isTeleported!==!0&&!p4()&&!qhs()&&cr().chromeInstallUpsellDismissed!==!0&&it("tengu_chrome_install_upsell",!1)&&!L0n()}function Nby(){return gP().installUpsellResolution!==void 0}async function yau(e){if(e.options?.isSkillPreload||e.agentId!==void 0||e.abortController.signal.aborted)return DXt;let t=gP();if(t.installUpsellResolution)return t.installUpsellResolution;let r=e.requestDialog;if(!r)return t.installUpsellResolution=Promise.resolve(DXt),t.installUpsellResolution;return t.installUpsellResolution=KBA(e,r).catch((n)=>{if(e.abortController.signal.aborted)return t.installUpsellResolution=void 0,DXt;return E(`[Claude in Chrome] Install upsell failed: ${n}`,{level:"error"}),pe("chrome_install_upsell","upsell_error"),DXt}),t.installUpsellResolution}async function KBA(e,t){if(L0n())return E("[Claude in Chrome] Skipping install upsell: blocked by managed deniedMcpServers policy"),be("chrome_install_upsell","policy_denied"),YBA;if(await bde().catch(()=>!1))return ln((i)=>i.cachedChromeExtensionInstalled===!0?i:{...i,cachedChromeExtensionInstalled:!0},e.storageV5),"The Claude in Chrome extension is installed, but browser tools are not enabled for this session. Tell the user Claude Code can work in their Chrome browser once browser tools are on: they can run /chrome to manage them, or restart Claude Code to get a one-time prompt to enable them. Do not attempt mcp__claude-in-chrome__* tool calls this session.";if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;if(jMs(e)){if(E("[Claude in
+---
+@323458537:
+ortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;if(jMs(e)){if(E("[Claude in Chrome] Skipping install upsell: session auto-allows tool calls with no prompt (bypass or plan+bypass)"),!gP().installUpsellBypassSuppressionCounted)gP().installUpsellBypassSuppressionCounted=!0,be("chrome_install_upsell","suppressed_bypass_mode");return gP().installUpsellResolution=void 0,DXt}if(await VEi()===null)return E("[Claude in Chrome] Skipping install upsell: no Chromium-family browser detected"),be("chrome_install_upsell","no_browser_detected"),DXt;switch(await t(zOo,{},{signal:e.abortController.signal})){case"install":{let i=await Mby(e,t);if(i===zMs)gP().installUpsellResolution=void 0;return i}case"dont_ask_again":return be("chrome_install_upsell","dont_ask_again"),ln((i)=>i.chromeInstallUpsellDismissed===!0?i:{...i,chromeInstallUpsellDismissed:!0},e.storageV5),gau;case"not_now":return be("chrome_install_upsell","declined"),gau;case"cancelled":if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;return be("chrome_install_upsell","cancelled"),gau}}var DXt,gau="The user declined to install the Claude in Chrome extension for now. Do not suggest it again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. They can revisit with /chrome.",YBA="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest installing the extension.";var $by=A(()=>{tt();Gnu();zp();Zt();bn();su();Wn();qe();bo();ki();s6r();$j();Oby();hau();LPe();EGt();DXt=`Browser tools are not available in this session: the Claude in Chrome extension is not set up. The user can install or connect it from ${c0e} and manage browser tools with /chrome. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not attempt mcp__claude-in-chrome__* tool calls.`});function QBA(e){let t=e?.filter((r)=>r.name===Ux)??[];return t.length>0&&t.every((r)=>ZBA.has(r.
+---
+@323458579:
+nstallUpsellResolution=void 0,DXt;if(jMs(e)){if(E("[Claude in Chrome] Skipping install upsell: session auto-allows tool calls with no prompt (bypass or plan+bypass)"),!gP().installUpsellBypassSuppressionCounted)gP().installUpsellBypassSuppressionCounted=!0,be("chrome_install_upsell","suppressed_bypass_mode");return gP().installUpsellResolution=void 0,DXt}if(await VEi()===null)return E("[Claude in Chrome] Skipping install upsell: no Chromium-family browser detected"),be("chrome_install_upsell","no_browser_detected"),DXt;switch(await t(zOo,{},{signal:e.abortController.signal})){case"install":{let i=await Mby(e,t);if(i===zMs)gP().installUpsellResolution=void 0;return i}case"dont_ask_again":return be("chrome_install_upsell","dont_ask_again"),ln((i)=>i.chromeInstallUpsellDismissed===!0?i:{...i,chromeInstallUpsellDismissed:!0},e.storageV5),gau;case"not_now":return be("chrome_install_upsell","declined"),gau;case"cancelled":if(e.abortController.signal.aborted)return gP().installUpsellResolution=void 0,DXt;return be("chrome_install_upsell","cancelled"),gau}}var DXt,gau="The user declined to install the Claude in Chrome extension for now. Do not suggest it again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. They can revisit with /chrome.",YBA="Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest installing the extension.";var $by=A(()=>{tt();Gnu();zp();Zt();bn();su();Wn();qe();bo();ki();s6r();$j();Oby();hau();LPe();EGt();DXt=`Browser tools are not available in this session: the Claude in Chrome extension is not set up. The user can install or connect it from ${c0e} and manage browser tools with /chrome. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not attempt mcp__claude-in-chrome__* tool calls.`});function QBA(e){let t=e?.filter((r)=>r.name===Ux)??[];return t.length>0&&t.every((r)=>ZBA.has(r.type))}async function ejA(e){let t=Bmn(),r
+---
+
+==== phase:"waiting_install" ====
+hits=0
+
+==== s="waiting_install" ====
+hits=1
+@323449154:
+_background: true\`.** Launch them all in a single message block so they run in parallel.
+For each agent, the prompt must be fully self-contained. Include:
+- The overall goal (the user's instruction)
+- This unit's specific task (title, file list, change description \u2014 copied verbatim from your plan)
+- Any codebase conventions you discovered that the worker needs to follow
+- The e2e test recipe from your plan (or "skip e2e because \u2026")
+- The worker instructions below, copied verbatim:
+\`\`\`
+${PBA}
+\`\`\`
+Use \`subagent_type: "general-purpose"\` unless a more specific agent type fits.
+## Phase 3: Track Progress
+After launching all workers, render an initial status table:
+| # | Unit | Status | PR |
+|---|------|--------|----|
+| 1 | <title> | running | \u2014 |
+| 2 | <title> | running | \u2014 |
+As background-agent completion notifications arrive, parse the \`PR: <url>\` line from each agent's result and re-render the table with updated status (\`done\` / \`failed\`) and PR links. Keep a brief failure note for any agent that did not produce a PR.
+When all agents have reported, render the final table and a one-line summary (e.g., "22/24 units landed as PRs").
+`}function xby(){Cd({name:"batch",menuDescription:"Plan a large change; background agents each open a PR",description:"Research and plan a large-scale change, then execute it in parallel across 5\u201330 isolated worktree agents that each open a PR.",whenToUse:"Use when the user wants to make a sweeping, mechanical change across many files (migrations, refactors, bulk renames) that can be decomposed into independent parallel units.",argumentHint:"<instruction>",userInvocable:!0,disableModelInvocation:!0,async getPromptForCommand(e){let t=e.trim();if(!t)return[{type:"text",text:OBA}];if(!await P1())return[{type:"text",text:MBA}];return[{type:"text",text:DBA(t)}]}})}var kby=5,Cby=30,PBA,MBA="This is not a git repository. The `/batch` command requires a git repo because it spawns agents in isolated git worktrees and creates PRs from each. Initialize a repo first, or run this from inside an existing one.",OBA=`Provide an instruction describing the batch change you want to make.
+Examples:
+  /batch migrate from react to vue
+  /batch replace all uses of lodash with native equivalents
+  /batch add type annotations to all untyped function parameters`;var Rby=A(()=>{yy();W4();al();Zv();PBA=`After you finish implementing the change:
+1. **Code review** \u2014 Invoke the \`${Nf}\` tool with \`skill: "code-review"\` to find correctness bugs (it reports findings; it does not edit code). Fix any findings it surfaces before continuing.
+2. **Run unit tests** \u2014 Run the project's test suite (check for package.json scripts, Makefile targets, or common commands like \`npm test\`, \`bun test\`, \`pytest\`, \`go test\`). If tests fail, fix them.
+3. **Test end-to-end** \u2014 Follow the e2e test recipe from the coordinator's prompt (below). If the recipe says to skip e2e for this unit, skip it.
+4. **Commit and push** \u2014 Commit all changes with a clear message, push the branch, and create a PR with \`gh pr create\`. Use a descriptive title. If \`gh\` is not available or the push fails, note it in your final message.
+5. **Report** \u2014 End with a single line: \`PR: <url>\` so the coordinator can track it. If no PR was created, end with \`PR: none \u2014 <reason>\`.`});function Iby(e,t){e.onChangeDynamicMcpConfig?.((r)=>({...r,[Ux]:t.client.config})),e.setAppState((r)=>p8r(r,Ux,t))}var Hby=A(()=>{m8r();$j()});function L0n(){return S2t(Ux,kTr())}function jMs(e){let{mode:t,isBypassPermissionsModeAvailable:r}=gn(e);return t==="bypassPermissions"||t==="plan"&&r}var hau=A(()=>{wT();yu();$j();LPe()});async function Mby(e,t){let r=e.abortController.signal,n=await nvt(c0e).catch((b)=>(E(`[Claude in Chrome] Install setup failed to open install page: ${b}`,{level:"error"}),!1)),o=new AbortController,i=()=>o.abort();if(r.aborted)o.abort();else r.addEventListener("abort",i,{once:!0});let s="waiting_install",a=xi();function l(b){if(s===b)return;s=b,a.emit()}let c=!1,u=!1,d="setup_connect_failed",p,f,m=h().catch((b)=>{E(`[Claude in Chrome] Install setup driver failed: ${b}`,{level:"error"}),d="setup_driver_error",l("failed")});async function h(){let b=Date.now();while(!o.signal.aborted){if(await bde().catch(()=>!1))break;await Pr(Date.now()-b>=LBA?NBA:Pby,o.signal)}if(o.signal.aborted)return;if(l("connecting"),ln((I)=>I.cachedChromeExtensionInstalled===!0?I:{...I,cachedChromeExtensionInstalled:!0},e.storageV5),L0n()){E("[Claude in Chrome] Install setup stopped: managed policy denied the chrome MCP server during the install wait"),d="policy_denied_mid_wait",l("failed");return}c=!0;let{mcpConfig:S}=xTr({skipReconnectAutoOpen:!0}),w=S[Ux];if(!w){d="setup_no_config",l("failed");return}let{reconnectMcpServerImpl:T}=(await Promise.resolve().then(() => (Cv(),kv))).mcpClientModule(),k;try{k=await T(Ux,w,e.storageV5,e.credentials)}catch(I){E(`[Claude in Chrome] Install setup MCP connect failed: ${I}`,{level:"error"}),d="setup_reconnect_error",l("failed");return}if(k.client.type==="connected")f={config:w};if(k.client.type!=="connected"||o.signal.aborted){if(!o.signal.aborted)d="setup_client_not_connected",l("failed");return}let C=Date.now(),x=!1,R=0;while(!o.signal.aborted){let I=await jBA(k.client,o.signal);if(I==="connected"){p=k,l("connected");return}if(I==="error"){if(R++,R>=BBA){d="setup_probe_errors",l("failed");return}}else R=0;let M=Date.now()-C;if(!x&&M>=$BA)x=!0,nvt(CTr).catch((O)=>E(`[Claude in Chrome] Install setup reconnect nudge failed: ${O}`));if(s==="connecting"&&M>=FBA)l("stalled");await Pr(Pby,o.signal)}}function g(){return{phase:s,installPageOpened:n}}async function*y(){let b=g();yield b;while(!o.signal.aborted){if(g().phase!==b.phase){b=g(),yield b;continue}if(await _(),o.signal.aborted)return}}function _(){return new Promise((b)=>{let S=a.subscribe(()=>{S(),o.signal.removeEventListener("abort",w),b()}),w=()=>{S(),b()};o.signal.addEventListener("abort",w,{once:!0})})}try{while(!0){let b=await t(jOo,y(),{signal:r});if(b==="keep_waiting")continue;let{phase:S}=g();if(b==="continue"&&S==="connected"&&p){if(L0n())return be("chrome_install_upsell","policy_denied_late",{install_page_opened:n}),Dby;if(jMs(e))return be("chrome_install_upsell","bypass_mode_late",{install_page_opened:n}),qBA;let w=zBA(e,p,n);return u=!0,f=void 0,w}if(S==="failed"){if(d==="policy_denied_mid_wait")return be("chrome_install_upsell",d,{install_page_opened:n}),Dby;return pe("chrome_install_upsell",d,{install_page_opened:n}),GBA}if(b==="cancelled"&&r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return be("chrome_install_upsell",S==="waiting_install"?"setup_skipped_waiting_install":S==="connected"?"setup_skipped_after_connect":"setup_skipped_connecting",{install_page_opened:n}),WBA}}catch(b){if(r.aborted)return be("chrome_install_upsell","setup_aborted",{install_page_opened:n}),zMs;return E(`[Claude in Chrome] Install setup dialog failed: ${b}`,{level:"error"}),pe("chrome_install_upsell","setup_dialog_error",{install_page_opened:n}),VBA}finally{if(r.removeEventListener("abort",i),o.abort(),!u){if(c)jmn();m.then(()=>{if(!f)return;let{config:b}=f;f=void 0,Promise.resolve().then(() => (Cv(),kv)).then((S)=>S.mcpClientModule().clearServerCache(Ux,b)).catch((S)=>E(`[Claude in Chrome] Install setup orphan cleanup failed: ${S}`,{level:"error"}))})}}}async function jBA(e,t){try{let r=await Promise.race([Jrt(e,{name:"list_connected_browsers",arguments:{}}),Pr(UBA,t).then(()=>{return})]);if(!r)return"not_connected";let n=Array.isArray(r.content)?r.content[0]:void 0,o=n&&typeof n==="object"&&"text"in n&&typeof n.text==="string"?n.text:void 0;if(!o)return"not_connected";let i;try{i=er(o)}catch{return"not_connected"}return Array.isArray(i)&&i.length>0?"connected":"not_connected"}catch{return"error"}}function zBA(e,t,r){return Iby(e,t),ln((n)=>n.claudeInChromeDefaultEnabled===!0&&n.hasCompletedClaudeInChromeOn
+---
+
+==== openInChrome(c0e ====
+hits=0
+
+==== c0e= ====
+hits=2
+@317375111:
+led:!0,browser:n}}catch{}}}return t?.("[Claude in Chrome] Extension not found in any browser"),{isInstalled:!1,browser:null}}async function afh(e,t){return(await fAE(e,t)).isInstalled}var Pzl,ifh,Nsn,c0e="https://claude.ai/chrome",cAE="fcoeoabgfenejglbffodgkkbkcdhcgfn",dAE,pAE;var EGt=A(()=>{st();Pzl=require("fs/promises"),ifh=require("os"),Nsn=require("path");dAE=["chrome","brave","arc","edge","chromium","vivaldi","opera"],pAE={chrome:{macos:["Library","Application Support","Google","Chrome"],linux:[".config","google-chrome"],windows:{path:["Google","Chrome","User Data"]}},brave:{macos:["Libr
+---
+@332911681:
+ges(),u=0;u<l.length;u++){var h=l[u],d=h.source(),f=h.target();t.outgoing&&d===s?(n.push(h),n.push(f)):t.incoming&&f===s&&(n.push(h),n.push(d))}}return this.spawn(n,!0).filter(r)}},"defineDagOneHop"),c0e=o(function(t){return function(r){for(var i=this,n=[],a={};;){var s=t.outgoing?i.outgoers():i.incomers();if(s.length===0)break;for(var l=!1,u=0;u<s.length;u++){var h=s[u],d=h.id();a[d]||(a[d]=!0,n.push(h),l=!0)}if(!l)break;i=s}return this.spawn(n,!0).filter(r)}},"defineDagAllHops");Oa.clearTraversalCache=function(){for(var e=0;e<this.length;e++)this[e]._private.traversalCache=null};hr(Oa,{roots
+---
+
+==== installPageOpened=!0 ====
+hits=0
+
+==== list_connected_browsers ====
+hits=4
+@109319728:
+
+]
+p
+~
+p
+H
+F
+!
+H
+A
+H
+(
+H
+$
+G
++!
+!
+"
+i
+~
+%
+%
+i
+%
+"
+%
+#
+O
+s
+G
+,
+i
+~
+%
+%
+i
+%
+$
+%
+%
+O
+s
+a
+G
+A!
+!
+$
+j
+"
+i
+$
+ 
+!
+!
+!
+j
+"
+i
+i
+X
+p
+(
+P
+`
+i
+x
+x
+)
+h
+I
+(
+string
+text
+D
+select_browser requires a bridge connection and a deviceId argument.
+#
+No connected browser has deviceId "
+D
+". Call list_connected_browsers to see currently connected browsers.
+Connected to browser "
+".
+.
+.
+I
+@`m
+I
+@
+Z
+@
+G
+M
+@
+M
+T
+@
+M
+X
+@
+M
+@
+P
+B
+5 
+@ 
+@
+M
+X
+B
+5
+E
+QT
+@
+=J
+@
+^
+@ 
+@ 
+H
+@
+4
+C
+@;
+@
+=
+T
+@`5
+@ L
+E
+,
+@`4
+@
+@
+!
+!
+@`
+S
+V
+(
+W
+H
+P
+l
+(+
+X
+o
+?
+Ed
+[
+bU
+bb
+x
+h
+selectExtensionById
+2
+Q
+Q
+2
+D
+D
+H
+x
+@
+R
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+x
+x
+x
+x
+x
+x
+x
+x
+
+---
+@109331024:
+
+@
+0
+X
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+)
+i
+@`4
+E
+3
+;
+H`c
+0x
+S
+T
+D
+H
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+ 
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+8
+,
+ 
+P
+E
+Q
+9
+j
+F
+i
+0
+H
+@
+list_connected_browsers
+2
+ 
+@`
+E
+@pV
+@`=
+L
+@
+e
+@P
+@
+C
+t
+B
+O
+N
+S
+*
+D
+H
+h
+x
+,
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+p
+p
+p
+p
+p
+p
+p
+p
+0
+0
+0
+0
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+H
+h
+`
+)
+k
+{
+^
+p
+$
+~
+a
+~
+~
+~
+5
+Q
+F 
+F
+i
+F
+p
+x
+(
+K
+8
+@
+9
+e
+)
+[
+k
+y
+{
+J
+X
+
+---
+@179365256:
+
+8
+@
+9
+.
+`
+p
+~
+?
+/32
+|
+|
+/32
+32
+D
+H
+6
+`!
+8
+?
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+0
+0
+(
+p
+N
+]
+p
+~
+!
+~
+%
+i
+%
+O
+s
+G
+"
+i
+H
+F
+"
+i
+i
+`
+(
+i
+E
+)
+list_connected_browsers
+@ 
+ ]
+@
+;
+Jr<
+4
+@ 
+;
+@
+=
+H
+@
+L
+E
+@`
+O
+^
+l
+K8
+`
+?
+a2
+;
+v
+2
+x
+PE
+ D
+uZ
+32
+.
+32
+32
+m42
+H
+H
+J8
+J8
+h
+$
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+p
+p
+p
+p
+p
+p
+p
+p
+0
+0
+0
+0
+x
+x
+x
+x
+x
+x
+x
+x
+x
+x
+x
+x
+x
+x
+x
+>
+^
+p
+$
+$
+$
+.
+~
+a
+~
+~
+~
+5
+Q
+F 
+F
+i
+F
+p
+(
+(X
+
+---
+@195219336:
+
+y
+!
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+h
+(
+H
+H
+H
+H
+X
+X
+X
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+(
+`
+P
+P
+P
+P
+\
+K
+g
+\
+\
+]
+p
+~
+!
+!
+a
+"
+~
+%
+i
+%
+O
+s
+G
+i
+H
+&
+F
+H
+%
+H
+8
+H
+H
+F
+G
+i
+F
+i
+H
+X
+F
+i
+F
+i
+i
+F
+F
+P
+H
+@
+X
+P
+H
+X
+P
+X
+`
+h
+x
+(
+i
+[
+)
+list_connected_browsers
+not_connected
+object
+text
+string
+connected
+error
++
+4
+@ 
+$
+@?
+@
+@ 
+Er<
+STUl
+l
+@
+@!.
+H
+@
+4
+H
+K
+3
+@
+T
+H
+C
+4
+@
+\
+@
+5
+A
+@
+<
+E
+@ m
+E
+@ ]
+PF
+@ 
+@
+^
+H
+@
+4
+C
+@`T
+G
+*[
+@
+C
+H
+K
+g
+i
+`4
+J>
+M
+p
+9
+@
+C
+0q
+3
+F
+G
++@
+(X
+U\
+c
+c
+U\
+U\
+D
+H
+x
+@
+X.
+
+---

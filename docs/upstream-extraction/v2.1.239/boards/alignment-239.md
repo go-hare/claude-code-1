@@ -1,15 +1,16 @@
 # Alignment board — densable 2.1.239
 
-> Living board · 2026-08-26 · SEA `%TEMP%\official-239\package\claude.exe`  
-> 计数 HAVE **54** / PARTIAL **0** / GAP **0** / UNKNOWN **2** / N/A **3**  
-> tip：npm **2.7.46** + 239 leftover（willow crate）· **不**折入 240/241
+> Living board · 2026-08-29 · SEA `%TEMP%\official-239\package\claude.exe`  
+> 计数 HAVE **52** / PARTIAL **2** / GAP **0** / UNKNOWN **2** / N/A **3**  
+> tip：npm **2.7.46** + 239 leftover（willow crate）· **不**折入 240/241  
+> 计数以 `official-239-checklist.md` 为准（2026-08-27 假 HAVE 纠偏 `#4`/`#13` → PARTIAL）。
 
 ## 桶
 
 | 桶 | # |
 | -- | - |
-| HAVE | #1 #2 #3 #4 #6 #7 #8 #9 #10 #11 #12 #13 #14 #15 #16 #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 #32 #33 #34 #35 #36 #37 #38 #39 #40 #41 #42 #43 #45 #46 #47 #48 #49 #50 #51 #52 #53 #55 #57 #58 |
-| PARTIAL | — |
+| HAVE | #1 #2 #3 #6 #7 #8 #9 #10 #11 #12 #14 #15 #16 #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 #32 #33 #34 #35 #36 #37 #38 #39 #40 #41 #42 #43 #45 #46 #47 #48 #49 #50 #51 #52 #53 #55 #57 #58 |
+| PARTIAL | #4 @synced 灌目录死 · #13 交互 plan resume 缺 CCR E2E |
 | GAP | — |
 | N/A | #5 #54 #59 |
 | UNKNOWN | #44 #56（已搁置） |
@@ -87,7 +88,7 @@
 1. **#44 / #56 已搁置**，不进下一刀。
 2. Artifact 读面仍无 cobalt host，不 invent `readArtifactForModel` / `ASe`/`UQ`/`fxv`/`J4n`。
 3. leftover 停着：`PPi` session/branch · `V1w` · `/config` bvr · `U_c` catalog · `H_a` preamble · storageV5。不 invent。
-4. **跨 pack 236 #9**（fullscreen-resize）：金标以 **本 pack 239 SEA** `Axc`/`xxc`/`Qvt` 为准；tip 无泵类。**invent-ban** 伪泵；tip-equiv 走 VML；真 1:1=**Project C**。不折入本 pack HAVE。
+4. **跨 pack 236 #9**（fullscreen-resize）：Project C 已落 HAVE（`Axc`/`xxc`/`frameSink`）。sticky 默认 OFF。**不要**把 pending 折进 xxc `'tick'`。不折入本 pack changelog HAVE。
 
 ## 日志
 
@@ -141,3 +142,4 @@
 - 2026-08-26：leftover `tengu_willow_crate` REPL diff tab（`P6e`/`h0c`/`nhu`/`Ocs`）。GB 关 / 非 fullscreen / 非 git / <110 列 → 仍走 `DiffDialog`。面板只接 `useDiffData` uncommitted。**不** invent `PPi` session/branch、`V1w`、`bvr`、`U_c`、`H_a`、storageV5。测：`replDiffTab.239.test.ts` / `diff.239.test.ts`。
 - 2026-08-26：跨 pack **236 #9** 以 **239 SEA** 复核锁定 invent-ban（`Axc`/`q$0=100`/`uyn=1e4`）；tip-equiv≠HAVE；真 1:1=Project C。见 `cross-pack-residuals.md` / `official-236-checklist` #9。
 - 2026-08-26：邻 pack 236 `#6` 收口：`LFh=14` chrome + `sgM` 动态槽；固定 `maxVisible=10` 已删。无 XKl → `ngM=0`。测：`modelPickerVisible.236.test.ts`。
+- 2026-08-29：诚实度对齐 checklist — 桶从 HAVE 54 / PARTIAL 0 改为 HAVE **52** / PARTIAL **2**（`#4`/`#13`）。不抬 HAVE。08-26 日志里 236 #9 invent-ban 已被 Project C HAVE 取代（见 `official-236-checklist.md`）。

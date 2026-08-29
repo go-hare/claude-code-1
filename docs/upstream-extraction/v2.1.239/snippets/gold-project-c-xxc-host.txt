@@ -1,0 +1,25 @@
+# densable 2.1.239 — Project C Phase-2: xxc React host
+# SEA: C:\Users\ADMINI~1\AppData\Local\Temp\official-239-pkg\package\claude.exe
+# extracted: 2026-08-28T08:29:08.738Z
+# xxc @ 321277029
+# Surrounding: kxc (scroll-anchor) + Cxc module factory above; X$0/J$0 helpers below
+
+#### preamble (~900 before function xxc)
+```js
+r _Tg=A(()=>{Srt();xoe();JRe();Lr()});function tSs(e,t,r){let n=e.width,o=r*n,i=-1;for(let c=n-1;c>=0;c--){let u=x$e(e,o+c);if(u.width===2)continue;if(u.char===" "&&(u.styleId&1)===0&&u.hyperlink===void 0)continue;i=c;break}if(i<0)return"";let s="",a=t.none,l;for(let c=0;c<=i;c++){let u=x$e(e,o+c);if(u.width===2||u.width===3)continue;if(u.hyperlink!==l){if(l!==void 0)s+=Wpr;if(u.hyperlink!==void 0)s+=O8r(u.hyperlink);l=u.hyperlink}s+=t.transition(a,u.styleId),a=u.styleId,s+=u.char}if(l!==void 0)s+=Wpr;if(a!==t.none)s+=K$0;return s}var K$0="\x1B[0m";var bTg=A(()=>{Awe();IA()});function kxc(){let OnL=STg.c(2),DnL=_9t.useContext(rSs),MnL=_9t.useRef(null);const vTg=DnL??MnL;let Y$0;if(OnL[0]!==vTg)Y$0=Txc.jsx(rv,{ref:vTg,height:0}),OnL[0]=vTg,OnL[1]=Y$0;else Y$0=OnL[1];return Y$0}var _9t,Txc,STg,rSs;var Cxc=A(()=>{Art();_9t=P(Lt(),1),Txc=P(Ae(),1),STg=P(Me(),1),rSs=_9t.createContext(null)});
+```
+
+#### function xxc (full, through X$0) @ 321277029
+```js
+function xxc({scrollable:e,bottom:t,pushUp:r,overlay:n,scrollRef:o}){let i=vn(),s=i.columns,a=i.rows,l=CKe.useRef(null),c=CKe.useRef(null),u=CKe.useRef(null),d=CKe.useRef(null),p=CKe.useRef(null),f=o??p;CKe.useInsertionEffect(()=>{let h=Yp.get(process.stdout);if(!h)return;let g=new Axc(process.stdout,s,a,h.recordContentWrite);g.setup(),l.current=g;let y=!1;return h.frameSink=(_,b)=>{let S=l.current;if(!S)return!1;if(h.isAltScreenActive){if(!y)S.suspend(),y=!0;return!1}if(y)y=!1,S.resume(S.cols,S.rows);let w=S.tickPump(),T=wTg(_,b,c.current),k=wTg(_,b,u.current),C=S.computeLayout(T,k),x=f.current?.getDomElement()??null;if(x){let I=x.cachedLayout,M=[];if(I&&I.height>0){let F=Math.min(I.y+I.height,_.screen.height);for(let B=I.y;B<F;B++)M.push(tSs(_.screen,b,B))}let O=x.scrollHeight??0,D=X$0(d.current,x)??O;S.syncViewport({lines:M,scrollTop:x.scrollTop??0,scrollHeight:O,transcriptEnd:D},C.contentHeight)}let R=!1;if(x){let I=S.consumeGapRange(),M=S.consumeBackfillNeeded();if(I||M){let O=I?I.from:0,D=I?I.to:x.scrollTop??0,F=J$0(x,O,D,S.cols,h.getStylePool());if(F.length>0)S.primeBackfill(F),R=!0}}return S.draw(C),w||R?"tick":!0},()=>{h.frameSink=null,g.restore(),l.current=null}},[]);let m=CKe.useRef({cols:s,rows:a});return CKe.useLayoutEffect(()=>{if(s===m.current.cols&&a===m.current.rows)return;m.current={cols:s,rows:a},l.current?.handleResize(s,a)},[s,a]),Bkr.jsxs(rv,{flexDirection:"column",height:a,width:"100%",flexShrink:0,children:[Bkr.jsx(QW,{ref:(h)=>{if(f)f.current=h},flexGrow:1,flexDirection:"column",stickyScroll:!0,children:Bkr.jsx(rSs.Provider,{value:d,children:e})}),Bkr.jsxs(rv,{ref:c,flexDirection:"column",flexShrink:0,minHeight:dyn,maxHeight:a-2,children:[r,t]}),n!=null?Bkr.jsx(rv,{ref:u,flexDirection:"column",flexShrink:0,position:"absolute",bottom:0,left:0,right:0,opaque:!0,children:n}):null]})}
+```
+
+#### function X$0 @ 321278865
+```js
+function X$0(e,t){if(!e)return;let r=0,n=e;while(n&&n.parentNode!==t)r+=n.yogaNode?.getComputedTop()??0,n=n.parentNode;return n?r:void 0}
+```
+
+#### function J$0 (gap/backfill serializer head) @ 321279002
+```js
+function J$0(e,t,r,n,o){let i=e.childNodes[0];if(!i)return[];if((e.scrollHeight??0)<=0||r<=t)return[];let a=Yp.get(process.stdout);if(!a)return[];let l=Math.ceil(r),c=Math.max(0,Math.floor(t),l-uyn),u=l-c;if(u<=0)return[];let d=mVe(n,u,o,a.getCharPool(),a.getHyperlinkPool()),p=new X2t({width:n,height:u,stylePool:o,screen:d});p.clip({x1:void 0,x2:void 0,y1:0,y2:u});let f=i.cachedLayout;if(v9r(i,p,b9r(),{offsetX:0,offsetY:-c,prevScreen:void 0}),p.unclip(),nCi(i),f)i.cachedLayout=f;let m=p.get();i.dirty=!0;let h=[];for(let g=0;g<u;g++)h.push(tSs(m,o,g));return h}
+```

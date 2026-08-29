@@ -1,0 +1,27 @@
+# offset=69996631 (0x42c1057) kw="function "
+
+.
+	.........................................................................f...g...g...g...g...g...g...g..................................@?>=<;:9876543210/.-,+*)('&%$#"! ....................
+	.........+DT............0.-2.....wB................u....$a.c....@.q.........................	...
+......................d...e...f...g...h...i...j...k....................................................................+zE....L..D.....r.@.....r.@.......D.......D.......D.......D.......D.......D....L..D....<..D.......D.......D.......D....\..D.....,zE....P..D.....r.@.....r.@.......D.......D.......D.......D.......D.......D.......D....|..D.....-zE.......D.....r.@.....r.@.......D.......D.......D.... ..D....h..D............................0123456789abcdefghijklmnopqrstuvwxyz......!......
+
+					.......................0123456789abcdefghijklmnopqrstuvwxyz......A)!.............................@..........................................................................................E.......................E.......E...............................................................................................................................................................E.......E.......E.......E.......E....................................(async function (outBase, allServerFiles, renderStatic, getParams, clientEntryUrl, patterns, files, typeAndFlags, sourceRouteFiles, paramInformation, styles) {"use strict";
+  let { join: pathJoin } = @getInternalField(@internalModuleRegistry, 163) || @createInternalModuleById(163), loadedModules = new @Array(allServerFiles.length);
+  async function doGenerateRoute(type, noClient, i, layouts, pageModule, params) {
+    let callback = renderStatic[type], client = clientEntryUrl[type], results = await callback({
+      modules: client && !noClient ? [client] : [],
+      modulepreload: [],
+      styles: styles[i],
+      layouts,
+      pageModule,
+      params
+    });
+    if (results == null)
+      throw Error(`Route ${JSON.stringify(sourceRouteFiles[i])} cannot be pre-rendered to a static page.`);
+    if (typeof results !== "object")
+      throw Error(`Rendering route ${JSON.stringify(sourceRouteFiles[i])} did not return an object, got ${Bun.inspect(results)}. This is a bug in the framework.`);
+    let { files: files2 } = results;
+    if (files2 == null)
+      throw Error(`Route ${JSON.stringify(sourceRouteFiles[i])} cannot be pre-rendered to a static page.`);
+    await @Promise.all(Object.entries(files2).map(([key, value]) => {
+      if (para

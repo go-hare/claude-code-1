@@ -1,0 +1,78 @@
+# offset=70078421 (0x42d4fd5) kw="async function i"
+
+ned;
+    source?.updateRef?.(!1);
+  }
+  let stream = new (isTTY ? (@getInternalField(@internalModuleRegistry, 182) || @createInternalModuleById(182)).ReadStream : (@getInternalField(@internalModuleRegistry, 154) || @createInternalModuleById(154)).ReadStream)(null, { fd, autoClose: !1 }), originalOn = stream.on, stream_destroyed = !1, stream_reachedEof = !1;
+  if (stream.addListener = stream.on = function(event, listener) {
+    if (event === "readable")
+      own();
+    return originalOn.@call(this, event, listener);
+  }, stream.fd = fd, isTTY || fdType !== 0 /* file */)
+    stream.ref = function() {
+      return forceUnref = !1, own(), this;
+    }, stream.unref = function() {
+      return forceUnref = !0, source?.updateRef?.(!1), this;
+    };
+  let originalPause = stream.pause;
+  stream.pause = function() {
+    return originalPause.@call(this);
+  };
+  let originalResume = stream.resume;
+  stream.resume = function() {
+    return own(), originalResume.@call(this);
+  };
+  let originalRead = stream.read;
+  stream.read = function(size) {
+    let ret = originalRead.@call(this, size);
+    if (size !== 0 && reader === @undefined && !stream_destroyed)
+      own();
+    return ret;
+  };
+  function rethrowUncaught(err) {
+    throw err;
+  }
+  async function internalRead(stream2) {
+    let readerForThisRead = reader, value;
+    try {
+      ({ value } = await readerForThisRead.read());
+    } catch (err) {
+      if (readerForThisRead !== reader) {
+        triggerRead.@call(stream2, @undefined);
+        return;
+      }
+      stream2.destroy(err);
+      return;
+    }
+    try {
+      if (value)
+        stream2.push(value);
+      else
+        stream_reachedEof = !0, disown(), stream2.push(null);
+    } catch (err) {
+      if (value)
+        triggerRead.@call(stream2, @undefined);
+      process.nextTick(rethrowUncaught, err);
+    }
+  }
+  function triggerRead(_size) {
+    if (reader)
+      internalRead(this);
+    else
+      needsInternalReadRefresh = !0;
+  }
+  return stream._read = triggerRead, stream.on("resume", () => {
+    if (stream.isPaused())
+      return;
+    own(), stream._undestroy(), stream_destroyed = !1;
+  }), stream._readableState.reading = !1, stream.on("pause", () => {
+    process.nextTick(() => {
+      if (!stream.readableFlowing)
+        stream._readableState.reading = !1, disown();
+    });
+  }), stream.on("end", () => {
+    if (!stream_destroyed)
+      stream_destroyed = !0, process.nextTick(() => {
+        stream.destroy();
+      });
+  }), stream.on("close", (
