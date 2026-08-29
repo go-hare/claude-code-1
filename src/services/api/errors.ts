@@ -113,6 +113,8 @@ export function isPromptTooLongMessage(msg: AssistantMessage): boolean {
 export function isPromptTooLongErrorMessage(raw: string): boolean {
   const lower = raw.toLowerCase()
   if (lower.includes('prompt is too long')) return true
+  // densable gzr: "input is too long for requested model"
+  if (lower.includes('input is too long for requested model')) return true
   // OpenAI / xAI Chat Completions style
   if (
     lower.includes('maximum prompt length') ||

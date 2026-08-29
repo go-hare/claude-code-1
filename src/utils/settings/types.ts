@@ -638,6 +638,13 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           "Inbound cross-session peer messages (SendMessage from your other sessions): 'accept' delivers them, 'hold' parks them for your review without letting Claude act, 'refuse' opts this session out. An explicit value always wins. Unset (mode parity): a message auto-delivers only when the sending session's permission-mode class matches yours (bypass↔bypass or prompting↔prompting); a mismatched sender's message is held for your approval; a sender that asserts no class is held only while this session bypasses permission prompts.",
         ),
+      // densable Ktr / vCe — ProposeGoal ask policy
+      modelProposedGoals: z
+        .enum(['auto', 'alwaysAsk', 'disabled'])
+        .optional()
+        .describe(
+          'When the model may propose a session goal: auto (ask unless the tool sets ask_user=false), alwaysAsk, or disabled.',
+        ),
       // Only run hooks defined in managed settings (managed-settings.json)
       allowManagedHooksOnly: z
         .boolean()

@@ -10,6 +10,7 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getGlobalConfig } from './config.js'
 import { parseEnvInt as parseEnvIntShared } from './envUtils.js'
+import { formatTokens } from './format.js'
 
 /** Official default: 70 minutes of idle age before offering. */
 export const RESUME_THRESHOLD_MINUTES_DEFAULT = 70
@@ -78,14 +79,25 @@ export const RESUME_RETURN_OPTIONS: ReadonlyArray<{
   { value: 'never', label: "Don't ask me again" },
 ]
 
+/**
+ * densable tXg — age for W8c banner.
+ * Dump has e<60 and t<24 arms; t>=24 continues the same `Xh` / `Xh Ym`
+ * formula (no invented day unit).
+ */
+export function formatResumeReturnAge(minutes: number): string {
+  if (minutes < 60) return `${Math.floor(minutes)}m`
+  const hours = Math.floor(minutes / 60)
+  const remaining = Math.floor(minutes % 60)
+  return remaining === 0 ? `${hours}h` : `${hours}h ${remaining}m`
+}
+
 export function formatResumeReturnBanner(
   sessionAgeMinutes: number,
   estimatedTokens: number,
-  formatAge: (minutes: number) => string = m =>
-    `${Math.round(m)} minute${Math.round(m) === 1 ? '' : 's'}`,
-  formatTokens: (n: number) => string = n => n.toLocaleString('en-US'),
+  formatAge: (minutes: number) => string = formatResumeReturnAge,
+  formatTokenCount: (n: number) => string = formatTokens,
 ): string {
-  return `This session is ${formatAge(sessionAgeMinutes)} old and ${formatTokens(estimatedTokens)} tokens.`
+  return `This session is ${formatAge(sessionAgeMinutes)} old and ${formatTokenCount(estimatedTokens)} tokens.`
 }
 
 export function getResumeReturnWarning(): string {

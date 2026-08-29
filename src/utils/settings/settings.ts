@@ -556,7 +556,7 @@ export function getSettingsForSource(
   return result
 }
 
-function getSettingsForSourceUncached(
+export function getSettingsForSourceUncached(
   source: SettingSource,
 ): SettingsJson | null {
   // For policySettings: first source wins (remote > HKLM/plist > file > HKCU)

@@ -2,6 +2,8 @@
  * densable 2.1.214 #7 — EEf / R5b remote user-dialog handlers.
  */
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { REFUSAL_FALLBACK_DIALOG_KIND } from '../../utils/printRequestDialog.js'
 import { REMOTE_USER_DIALOG_HANDLERS } from '../useRemoteUserDialog.js'
 
@@ -50,5 +52,15 @@ describe('densable EEf R5b remote user dialog handlers', () => {
       { signal: new AbortController().signal },
     )
     expect(r).toEqual({ behavior: 'cancelled' })
+  })
+})
+
+describe('REPL remote requestDialog host', () => {
+  test('useRemoteSession receives the DialogStore requestDialog', () => {
+    const repl = readFileSync(
+      join(import.meta.dir, '../../screens/REPL.tsx'),
+      'utf8',
+    )
+    expect(repl).toMatch(/useRemoteSession\(\{[\s\S]*requestDialog,/)
   })
 })

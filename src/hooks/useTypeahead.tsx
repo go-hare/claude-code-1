@@ -503,6 +503,8 @@ export function useTypeahead({
   const latestBashInputRef = useRef('');
   // Track the latest slack channel token to discard stale results from MCP
   const latestSlackTokenRef = useRef('');
+  // densable d4p — discard stale peer rows after await processPeerMentionsTypeahead
+  const latestAtMentionRef = useRef('');
   // Track suggestions via ref to avoid updateSuggestions being recreated on selection changes
   const suggestionsRef = useRef(suggestions);
   suggestionsRef.current = suggestions;
@@ -624,6 +626,7 @@ export function useTypeahead({
         clearSuggestions();
         return;
       }
+      latestAtMentionRef.current = value;
 
       // Check for mid-input slash command (e.g., "help me /com")
       // Only in prompt mode, not when input starts with "/" (handled separately)
@@ -722,6 +725,7 @@ export function useTypeahead({
               );
               if (isPeerAtMentionEnabled()) {
                 const peerRows = await processPeerMentionsTypeahead(partialName, [...seen]);
+                if (latestAtMentionRef.current !== value) return;
                 for (const row of peerRows) {
                   const bare = row.displayText.replace(/^@"?|"$/g, '');
                   if (seen.has(bare)) continue;

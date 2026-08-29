@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   evaluateResumeReturnOffer,
+  formatResumeReturnAge,
   formatResumeReturnBanner,
   getResumePrompt,
   getResumeReturnWarning,
@@ -56,8 +57,13 @@ describe('getResumePrompt (kdo)', () => {
 
 describe('copy', () => {
   test('banner + warning + options', () => {
-    expect(formatResumeReturnBanner(70, 100_000)).toContain('70')
-    expect(formatResumeReturnBanner(70, 100_000)).toContain('100,000')
+    expect(formatResumeReturnAge(59)).toBe('59m')
+    expect(formatResumeReturnAge(60)).toBe('1h')
+    expect(formatResumeReturnAge(70)).toBe('1h 10m')
+    expect(formatResumeReturnAge(120)).toBe('2h')
+    expect(formatResumeReturnBanner(70, 100_000)).toBe(
+      'This session is 1h 10m old and 100k tokens.',
+    )
     expect(getResumeReturnWarning()).toContain('usage limits')
     expect(RESUME_RETURN_OPTIONS.map(o => o.value)).toEqual([
       'compact',

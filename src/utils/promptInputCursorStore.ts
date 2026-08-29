@@ -30,6 +30,18 @@ export function getPromptInputCursorState(): PromptInputCursorState {
   return store.getState()
 }
 
+/** densable IW.subscribe — PromptInput typing latch. */
+export function subscribePromptInputCursorStore(
+  listener: () => void,
+): () => void {
+  return store.subscribe(listener)
+}
+
+/** densable hyr / Zwn — set IW.active after commit (not inside setInputValue). */
+export function setPromptInputStoreActive(active: boolean): void {
+  store.setState(prev => (prev.active === active ? prev : { ...prev, active }))
+}
+
 /** densable B4 */
 export function getPromptInputStoreValue(): string {
   return store.getState().value

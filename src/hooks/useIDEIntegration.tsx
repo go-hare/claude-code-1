@@ -1,4 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { getIsRemoteMode } from '../bootstrap/state.js';
+import type { RequestDialog } from '../dialog/requestDialog.js';
+import { ideOnboardingSpec } from '../dialog/specs/jsuKinds.js';
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js';
 import { getGlobalConfig } from '../utils/config.js';
 import { isEnvDefinedFalsy, isEnvTruthy } from '../utils/envUtils.js';
@@ -6,6 +9,7 @@ import type { DetectedIDEInfo } from '../utils/ide.js';
 import {
   type IDEExtensionInstallationStatus,
   type IdeType,
+  cancelCurrentIDESearch,
   initializeIdeIntegration,
   isSupportedTerminal,
 } from '../utils/ide.js';
@@ -13,27 +17,33 @@ import {
 type UseIDEIntegrationProps = {
   autoConnectIdeFlag?: boolean;
   ideToInstallExtension: IdeType | null;
-  setDynamicMcpConfig: React.Dispatch<React.SetStateAction<Record<string, ScopedMcpServerConfig> | undefined>>;
-  setShowIdeOnboarding: React.Dispatch<React.SetStateAction<boolean>>;
-  setIDEInstallationState: React.Dispatch<React.SetStateAction<IDEExtensionInstallationStatus | null>>;
+  setDynamicMcpConfig: Dispatch<SetStateAction<Record<string, ScopedMcpServerConfig> | undefined>>;
+  requestDialog: RequestDialog;
+  setIDEInstallationState: Dispatch<SetStateAction<IDEExtensionInstallationStatus | null>>;
 };
 
+/**
+ * densable sdu(CHr, {installationStatus}, {queueBehind:!0}).
+ * Gates: wa() remote; As() bg session; NHy shown latch; n7n abort cleanup.
+ */
 export function useIDEIntegration({
   autoConnectIdeFlag,
   ideToInstallExtension,
   setDynamicMcpConfig,
-  setShowIdeOnboarding,
+  requestDialog,
   setIDEInstallationState,
 }: UseIDEIntegrationProps): void {
+  const requestDialogRef = useRef(requestDialog);
+  requestDialogRef.current = requestDialog;
+  const shownLatchRef = useRef(false);
+
   useEffect(() => {
     function addIde(ide: DetectedIDEInfo | null) {
       if (!ide) {
         return;
       }
 
-      // Check if auto-connect is enabled
       const globalConfig = getGlobalConfig();
-      // Official AUTO_CONNECT_IDE densable.
       let autoConnectIdeEnv = isEnvTruthy(process.env.CLAUDE_CODE_AUTO_CONNECT_IDE);
       try {
         const { isAutoConnectIdeEnvEnabled } =
@@ -47,8 +57,6 @@ export function useIDEIntegration({
         (globalConfig.autoConnectIde ||
           autoConnectIdeFlag ||
           isSupportedTerminal() ||
-          // tmux/screen overwrite TERM_PROGRAM, breaking terminal detection, but the
-          // IDE extension's port env var is inherited. If set, auto-connect anyway.
           process.env.CLAUDE_CODE_SSE_PORT ||
           ideToInstallExtension ||
           autoConnectIdeEnv) &&
@@ -59,7 +67,6 @@ export function useIDEIntegration({
       }
 
       setDynamicMcpConfig(prev => {
-        // Only add the IDE if we don't already have one
         if (prev?.ide) {
           return prev;
         }
@@ -77,12 +84,26 @@ export function useIDEIntegration({
       });
     }
 
-    // Use the new utility function
     void initializeIdeIntegration(
       addIde,
       ideToInstallExtension,
-      () => setShowIdeOnboarding(true),
+      status => {
+        if (getIsRemoteMode()) return;
+        if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return;
+        if (shownLatchRef.current) return;
+        shownLatchRef.current = true;
+        const clear = () => {
+          shownLatchRef.current = false;
+        };
+        void requestDialogRef
+          .current(ideOnboardingSpec, { installationStatus: status }, { queueBehind: true })
+          .then(clear, clear);
+      },
       status => setIDEInstallationState(status),
     );
-  }, [autoConnectIdeFlag, ideToInstallExtension, setDynamicMcpConfig, setShowIdeOnboarding, setIDEInstallationState]);
+
+    return () => {
+      cancelCurrentIDESearch();
+    };
+  }, [autoConnectIdeFlag, ideToInstallExtension, setDynamicMcpConfig, setIDEInstallationState]);
 }

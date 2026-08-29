@@ -39,6 +39,18 @@ export function isAlternateScreenDisabled(
   return isEnvTruthy(env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN)
 }
 
+/**
+ * densable main-screen sticky compositor (Axc / xxc) opt-in.
+ * When set with fullscreen ON, tip skips `<AlternateScreen>` and mounts
+ * `AxcFrameSinkBridge` so Ink.frameSink drives Axc (Project C / 236 #9).
+ * Default OFF — tip fullscreen remains alt-screen until product-defaulted.
+ */
+export function isAxcStickyMainEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_AXC_STICKY_MAIN)
+}
+
 export function isWorkingSyncDisabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {

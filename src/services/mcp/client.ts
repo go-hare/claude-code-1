@@ -130,7 +130,6 @@ import {
   logEvent,
 } from '../analytics/index.js'
 import {
-  type ElicitationWaitingState,
   runElicitationHooks,
   runElicitationResultHooks,
 } from './elicitationHandler.js'
@@ -2495,6 +2494,7 @@ export const fetchToolsForClient = memoizeWithLRU(
                             }
                           : undefined,
                       handleElicitation: context.handleElicitation,
+                      requestDialog: context.requestDialog,
                     })
 
                   const mcpResult =
@@ -3752,12 +3752,13 @@ export async function callMCPToolWithUrlElicitationRetry({
   args,
   meta,
   signal,
-  setAppState,
+  setAppState: _setAppState,
   onProgress,
   imageLimits,
   hasResultSizeAnnotation = false,
   callToolFn = callMCPTool,
   handleElicitation,
+  requestDialog,
 }: {
   client: ConnectedMCPServer
   clientConnection: MCPServerConnection
@@ -3787,6 +3788,21 @@ export async function callMCPToolWithUrlElicitationRetry({
     params: ElicitRequestURLParams,
     signal: AbortSignal,
   ) => Promise<ElicitResult>
+  /** densable `c` — requestDialog(Gbt, {serverName, params}, {signal}). */
+  requestDialog?: (
+    spec: {
+      kind: string
+      default: unknown
+      payload?: () => {
+        safeParse: (v: unknown) => { success: boolean; data?: unknown }
+      }
+      result?: () => {
+        safeParse: (v: unknown) => { success: boolean; data?: unknown }
+      }
+    },
+    payload: unknown,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown>
 }): Promise<MCPToolCallResult> {
   const MAX_URL_ELICITATION_RETRIES = 3
   for (let attempt = 0; ; attempt++) {
@@ -3872,8 +3888,8 @@ export async function callMCPToolWithUrlElicitationRetry({
       )
 
       // Process each URL elicitation from the error.
-      // The completion notification handler (in registerElicitationHandler) sets
-      // `completed: true` on the matching queue event; the dialog reacts to this flag.
+      // Official: c?await c(Gbt,{serverName,params},{signal}):{action:"cancel"}.
+      // NMs complete settles the mailbox via answerMcpUrlElicitationComplete.
       // densable $cy: mark pending so MCP auto-background defers while open.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { beginMcpElicitation, endMcpElicitation } =
@@ -3903,64 +3919,25 @@ export async function callMCPToolWithUrlElicitationRetry({
             continue
           }
 
-          // Resolve the URL elicitation via callback (print/SDK mode) or queue (REPL mode).
+          // Official: M=c?await c(Gbt,{serverName,params},{signal}):{action:"cancel"}
           let userResult: ElicitResult
-          if (handleElicitation) {
-            // Print/SDK mode: delegate to structuredIO which sends a control request
+          if (requestDialog) {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { mcpUrlElicitationSpec } =
+              require('../../dialog/specs/jsuKinds.js') as typeof import('../../dialog/specs/jsuKinds.js')
+            userResult = (await requestDialog(
+              mcpUrlElicitationSpec,
+              { serverName, params: elicitation },
+              { signal },
+            )) as ElicitResult
+          } else if (handleElicitation) {
             userResult = await handleElicitation(
               serverName,
               elicitation,
               signal,
             )
           } else {
-            // REPL mode: queue for ElicitationDialog with two-phase consent/waiting flow
-            const waitingState: ElicitationWaitingState = {
-              actionLabel: 'Retry now',
-              showCancel: true,
-            }
-            userResult = await new Promise<ElicitResult>(resolve => {
-              const onAbort = () => {
-                void resolve({ action: 'cancel' })
-              }
-              if (signal.aborted) {
-                onAbort()
-                return
-              }
-              signal.addEventListener('abort', onAbort, { once: true })
-
-              setAppState(prev => ({
-                ...prev,
-                elicitation: {
-                  queue: [
-                    ...prev.elicitation.queue,
-                    {
-                      serverName,
-                      requestId: `error-elicit-${elicitationId}`,
-                      params: elicitation,
-                      signal,
-                      waitingState,
-                      respond: result => {
-                        // Phase 1 consent: accept is a no-op (doesn't resolve retry Promise)
-                        if (result.action === 'accept') {
-                          return
-                        }
-                        // Decline or cancel: resolve the retry Promise
-                        signal.removeEventListener('abort', onAbort)
-                        void resolve(result)
-                      },
-                      onWaitingDismiss: action => {
-                        signal.removeEventListener('abort', onAbort)
-                        if (action === 'retry') {
-                          void resolve({ action: 'accept' })
-                        } else {
-                          void resolve({ action: 'cancel' })
-                        }
-                      },
-                    },
-                  ],
-                },
-              }))
-            })
+            userResult = { action: 'cancel' }
           }
 
           // Run ElicitationResult hooks — they can modify or block the response

@@ -56,6 +56,11 @@ type CancelRequestHandlerProps = {
   inputMode?: PromptInputMode
   inputValue?: string
   streamMode?: SpinnerMode
+  /**
+   * densable mQc `Z=RPs()==="visible"` — when modal chrome is painted,
+   * Select owns Esc (`isActive: re = te && !Z && …`).
+   */
+  isDialogChromeVisible?: boolean
 }
 
 /**
@@ -78,6 +83,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     inputMode,
     inputValue,
     streamMode,
+    isDialogChromeVisible = false,
   } = props
   const store = useAppStateStore()
   const dialogStore = useDialogStore()
@@ -234,9 +240,11 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     !(isVimModeEnabled() && vimMode === 'INSERT')
 
   // Escape (chat:cancel) defers to mode-exit when in special mode with empty
-  // input, and to useBackgroundTaskNavigation when viewing a teammate
+  // input, and to useBackgroundTaskNavigation when viewing a teammate.
+  // densable `Z=RPs()==="visible"` → `!Z` so Select owns Esc while chrome shows.
   const isEscapeActive =
     isContextActive &&
+    !isDialogChromeVisible &&
     (canCancelRunningTask ||
       hasEditableQueuedCommands ||
       isQuotaAutoResumeEscTarget) &&

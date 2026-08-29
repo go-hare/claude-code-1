@@ -37,7 +37,7 @@ import {
   isChromeExtensionInstalledPortable,
 } from './setupPortable.js'
 
-const CHROME_EXTENSION_RECONNECT_URL = 'https://clau.de/chrome/reconnect'
+export const CHROME_EXTENSION_RECONNECT_URL = 'https://clau.de/chrome/reconnect'
 
 const NATIVE_HOST_IDENTIFIER = 'com.anthropic.claude_code_browser_extension'
 const NATIVE_HOST_MANIFEST_NAME = `${NATIVE_HOST_IDENTIFIER}.json`
@@ -149,7 +149,7 @@ export function shouldAutoEnableClaudeInChrome(): boolean {
  * densable `Z4o` / `IRo` base gates — fork: no subscriber requirement.
  * densable Z4o ends with `JKn()` so auto-enable also refuses inference-only tokens.
  */
-function hasBaseChromeAutoEnableEligibility(): boolean {
+export function hasBaseChromeAutoEnableEligibility(): boolean {
   if (getChromeFlagOverride() === false) {
     return false
   }
@@ -171,7 +171,7 @@ function hasBaseChromeAutoEnableEligibility(): boolean {
 }
 
 /** densable `HRo` ∪ positive `de_()` — install cache or bridge pairing evidence. */
-function hasChromeExtensionEvidence(): boolean {
+export function hasChromeExtensionEvidence(): boolean {
   // Side-effect: refresh positive install cache (same as densable de_).
   // Return value already reads cachedChromeExtensionInstalled from disk.
   if (isChromeExtensionInstalled_CACHED_MAY_BE_STALE()) {
@@ -188,6 +188,27 @@ export type SetupClaudeInChromeOptions = {
    * this is unset and the user has OAuth + copper flag.
    */
   forceNative?: boolean
+  /** densable Mby — do not auto-open reconnect while install Host is up. */
+  skipReconnectAutoOpen?: boolean
+}
+
+/** densable kTr — stdio config for L0n policy check. No native-host install. */
+export function getClaudeInChromeStdioConfig(): ScopedMcpServerConfig {
+  if (isInBundledMode()) {
+    return {
+      type: 'stdio',
+      command: process.execPath,
+      args: ['--claude-in-chrome-mcp'],
+      scope: 'dynamic',
+    }
+  }
+  const cliPath = resolveChromeCliJsPath()
+  return {
+    type: 'stdio',
+    command: process.execPath,
+    args: [`${cliPath}`, '--claude-in-chrome-mcp'],
+    scope: 'dynamic',
+  }
 }
 
 /**
@@ -225,7 +246,9 @@ export function setupClaudeInChrome(options?: SetupClaudeInChromeOptions): {
     // Run asynchronously without blocking; best-effort so swallow errors
     void createWrapperScript(execCommand)
       .then(manifestBinaryPath =>
-        installChromeNativeHostManifest(manifestBinaryPath),
+        installChromeNativeHostManifest(manifestBinaryPath, {
+          openReconnectPage: options?.skipReconnectAutoOpen !== true,
+        }),
       )
       .catch(e =>
         logForDebugging(
@@ -254,7 +277,9 @@ export function setupClaudeInChrome(options?: SetupClaudeInChromeOptions): {
       `"${process.execPath}" "${cliPath}" --chrome-native-host`,
     )
       .then(manifestBinaryPath =>
-        installChromeNativeHostManifest(manifestBinaryPath),
+        installChromeNativeHostManifest(manifestBinaryPath, {
+          openReconnectPage: options?.skipReconnectAutoOpen !== true,
+        }),
       )
       .catch(e =>
         logForDebugging(

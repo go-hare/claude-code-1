@@ -100,6 +100,17 @@ export function BackgroundTask({ task, maxActivityWidth }: Props): React.ReactNo
           />
         </Text>
       );
+    case 'auto_mode_scan':
+      return (
+        <Text>
+          {truncate(task.description, activityLimit, true)}{' '}
+          <TaskStatusText
+            status={task.status}
+            label={task.status === 'completed' ? 'done' : undefined}
+            suffix={task.status === 'completed' && !task.notified ? ', unread' : undefined}
+          />
+        </Text>
+      );
     case 'dream': {
       const n = task.filesTouched.length;
       const detail =

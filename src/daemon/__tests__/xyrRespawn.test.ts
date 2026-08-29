@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import * as realUdsClient from '../../utils/udsClient.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+const udsClientSnap = snapshotModuleExports(realUdsClient)
 
 type CtrlResp = {
   ok: boolean
@@ -22,7 +26,11 @@ mock.module('../controlSocket.js', () => ({
 const listAllLiveSessions = mock(
   async () => [] as Array<Record<string, unknown>>,
 )
+// mock.module is process-global. A one-export stub drops isPeerAlive /
+// sendUdsControl / sendToUdsSocket and kills sibling 239 lock files at
+// ESM link time. Spread the real snapshot; only override listAllLiveSessions.
 mock.module('../../utils/udsClient.js', () => ({
+  ...udsClientSnap,
   listAllLiveSessions,
 }))
 
@@ -32,6 +40,10 @@ const {
   xyrPreflightBeforeRespawn,
   killJobYiaFallback,
 } = await import('../xyrRespawn.js')
+
+afterAll(() => {
+  mock.module('../../utils/udsClient.js', () => ({ ...udsClientSnap }))
+})
 
 describe('xyrRespawn densable hLp/D9e/Zxe', () => {
   afterEach(() => {

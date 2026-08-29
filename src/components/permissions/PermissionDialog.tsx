@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Box } from '@anthropic/ink';
+import type { PermissionRequestSource } from '../../dialog/permissionRequestSource.js';
 import type { Theme } from '../../utils/theme.js';
 import { PermissionRequestTitle } from './PermissionRequestTitle.js';
 import type { WorkerBadgeProps } from './WorkerBadge.js';
@@ -12,6 +13,7 @@ type Props = {
   innerPaddingX?: number;
   workerBadge?: WorkerBadgeProps;
   titleRight?: React.ReactNode;
+  requestSource?: PermissionRequestSource;
   children: React.ReactNode;
 };
 
@@ -23,6 +25,7 @@ export function PermissionDialog({
   innerPaddingX = 1,
   workerBadge,
   titleRight,
+  requestSource,
   children,
 }: Props): React.ReactNode {
   return (
@@ -37,7 +40,14 @@ export function PermissionDialog({
     >
       <Box paddingX={1} flexDirection="column">
         <Box justifyContent="space-between">
-          <PermissionRequestTitle title={title} subtitle={subtitle} color={titleColor} workerBadge={workerBadge} />
+          <PermissionRequestTitle
+            title={title}
+            subtitle={subtitle}
+            color={titleColor}
+            workerBadge={workerBadge}
+            requestSource={requestSource}
+            srPrefix="Permission Required:"
+          />
           {titleRight}
         </Box>
       </Box>

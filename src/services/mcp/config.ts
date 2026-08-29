@@ -554,7 +554,7 @@ function expandMcpServerSideString(value: string): string {
  * @param config Optional server config for command/URL-based matching
  * @returns true if denied, false if not on denylist
  */
-function isMcpServerDenied(
+export function isMcpServerDenied(
   serverName: string,
   config?: McpServerConfig,
 ): boolean {

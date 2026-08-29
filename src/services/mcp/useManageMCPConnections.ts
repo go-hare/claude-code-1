@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import { basename } from 'path'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useContext, useEffect, useRef } from 'react'
 import { getSessionId } from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import type { Tool } from '../../Tool.js'
@@ -94,6 +94,7 @@ import {
   clearClaudeAIMcpConfigsCache,
   fetchClaudeAIMcpConfigsIfEligible,
 } from './claudeai.js'
+import { DialogStoreContext } from '../../dialog/DialogStoreContext.js'
 import { registerElicitationHandler } from './elicitationHandler.js'
 import { getMcpPrefix } from './mcpStringUtils.js'
 import { commandBelongsToServer, excludeStalePluginClients } from './utils.js'
@@ -166,6 +167,7 @@ export function useManageMCPConnections(
   // fresh plugin data on re-run.
   const _pluginReconnectKey = useAppState(s => s.mcp.pluginReconnectKey)
   const setAppState = useSetAppState()
+  const dialogStore = useContext(DialogStoreContext)
 
   // Track active reconnection attempts to allow cancellation
   const reconnectTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
@@ -402,7 +404,12 @@ export function useManageMCPConnections(
           // with the real one (queues elicitation in AppState for UI). Registering
           // here (once per connect) instead of in a [mcpClients] effect avoids
           // re-running for every already-connected server on each state change.
-          registerElicitationHandler(client.client, client.name, setAppState)
+          registerElicitationHandler(
+            client.client,
+            client.name,
+            setAppState,
+            dialogStore,
+          )
 
           client.client.onclose = () => {
             const configType = client.config.type ?? 'stdio'

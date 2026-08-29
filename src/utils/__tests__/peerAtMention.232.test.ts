@@ -2,6 +2,8 @@
  * densable 2.1.232 #2 — peer @mention pure core (spv / p4p / f4p / d4p / l4p).
  */
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import {
   PEER_AT_MENTION_RE,
   PEER_MENTION_ASK_CANDIDATES,
@@ -188,5 +190,16 @@ describe('peerAtMention densable 2.1.232 #2', () => {
     expect(src).toContain('tengu_at_mention_peer_')
     expect(PEER_AT_MENTION_RE.flags).toContain('g')
     expect(PEER_AT_MENTION_RE.flags).toContain('u')
+  })
+
+  test('d4p typeahead discards stale await (latestAtMentionRef)', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../../hooks/useTypeahead.tsx'),
+      'utf8',
+    )
+    expect(src).toContain('latestAtMentionRef')
+    expect(src).toContain('latestAtMentionRef.current = value')
+    expect(src).toContain('if (latestAtMentionRef.current !== value) return')
+    expect(src).toContain('processPeerMentionsTypeahead')
   })
 })

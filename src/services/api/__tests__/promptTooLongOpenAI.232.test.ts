@@ -32,6 +32,17 @@ describe('isPromptTooLongErrorMessage', () => {
     ).toBe(true)
   })
 
+  test('densable gzr: input is too long for requested model', () => {
+    expect(
+      isPromptTooLongErrorMessage('input is too long for requested model'),
+    ).toBe(true)
+    expect(
+      isPromptTooLongErrorMessage(
+        'Error: Input is too long for requested model',
+      ),
+    ).toBe(true)
+  })
+
   test('unrelated 400 is not PTL', () => {
     expect(
       isPromptTooLongErrorMessage('invalid_request: bad tool schema'),

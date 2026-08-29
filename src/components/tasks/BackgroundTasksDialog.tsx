@@ -6,6 +6,7 @@ import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
 import type { ToolUseContext } from 'src/Tool.js';
+import { AutoModeScanTask, type AutoModeScanTaskState } from 'src/tasks/AutoModeScanTask/AutoModeScanTask.js';
 import { DreamTask, type DreamTaskState } from 'src/tasks/DreamTask/DreamTask.js';
 import { InProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/InProcessTeammateTask.js';
 import type { InProcessTeammateTaskState } from 'src/tasks/InProcessTeammateTask/types.js';
@@ -36,6 +37,7 @@ import { count } from '../../utils/array.js';
 import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { AsyncAgentDetailDialog } from './AsyncAgentDetailDialog.js';
 import { BackgroundTask as BackgroundTaskComponent } from './BackgroundTask.js';
+import { AutoModeScanDetailDialog } from './AutoModeScanDetailDialog.js';
 import { DreamDetailDialog } from './DreamDetailDialog.js';
 import { InProcessTeammateDetailDialog } from './InProcessTeammateDetailDialog.js';
 import { RemoteSessionDetailDialog } from './RemoteSessionDetailDialog.js';
@@ -100,6 +102,13 @@ type ListItem =
       label: string;
       status: string;
       task: DeepImmutable<DreamTaskState>;
+    }
+  | {
+      id: string;
+      type: 'auto_mode_scan';
+      label: string;
+      status: string;
+      task: DeepImmutable<AutoModeScanTaskState>;
     }
   | {
       id: string;
@@ -189,6 +198,7 @@ export function BackgroundTasksDialog({
     workflowTasks,
     mcpMonitors,
     dreamTasks,
+    autoModeScanTasks,
     allSelectableItems,
   } = useMemo(() => {
     // Filter to only show running/pending background tasks, matching the status bar count
@@ -210,6 +220,7 @@ export function BackgroundTasksDialog({
     const workflows = sorted.filter(item => item.type === 'local_workflow');
     const monitorMcp = sorted.filter(item => item.type === 'monitor_mcp');
     const dreamTasks = sorted.filter(item => item.type === 'dream');
+    const autoModeScanTasks = sorted.filter(item => item.type === 'auto_mode_scan');
     // In spinner-tree mode, exclude teammates from the dialog (they appear in the tree)
     const teammates = showSpinnerTree ? [] : sorted.filter(item => item.type === 'in_process_teammate');
     // Add leader entry when there are teammates, so users can foreground back to leader
@@ -231,6 +242,7 @@ export function BackgroundTasksDialog({
       workflowTasks: workflows,
       mcpMonitors: monitorMcp,
       dreamTasks,
+      autoModeScanTasks,
       teammateTasks: [...leaderItem, ...teammates],
       // Order MUST match JSX render order (teammates \u2192 bash \u2192 monitorMcp \u2192
       // remote \u2192 agent \u2192 workflows \u2192 dream) so \u2193/\u2191 navigation moves the cursor
@@ -244,6 +256,7 @@ export function BackgroundTasksDialog({
         ...agent,
         ...workflows,
         ...dreamTasks,
+        ...autoModeScanTasks,
       ],
     };
   }, [typedTasks, foregroundedTaskId, showSpinnerTree]);
@@ -313,6 +326,8 @@ export function BackgroundTasksDialog({
         killMonitorMcp(currentSelection.id, setAppState);
       } else if (currentSelection.type === 'dream' && currentSelection.status === 'running') {
         void killDreamTask(currentSelection.id);
+      } else if (currentSelection.type === 'auto_mode_scan' && currentSelection.status === 'running') {
+        void killAutoModeScanTask(currentSelection.id);
       } else if (currentSelection.type === 'remote_agent' && currentSelection.status === 'running') {
         if (currentSelection.task.isUltraplan) {
           void stopUltraplan(currentSelection.id, currentSelection.task.sessionId, setAppState);
@@ -377,6 +392,10 @@ export function BackgroundTasksDialog({
 
   async function killDreamTask(taskId: string): Promise<void> {
     await DreamTask.kill(taskId, setAppState);
+  }
+
+  async function killAutoModeScanTask(taskId: string): Promise<void> {
+    await AutoModeScanTask.kill(taskId, setAppState);
   }
 
   async function killRemoteAgentTask(taskId: string): Promise<void> {
@@ -577,6 +596,20 @@ export function BackgroundTasksDialog({
             }
             onBack={goBackToList}
             key={`monitor-mcp-${task.id}`}
+          />
+        );
+      case 'auto_mode_scan':
+        return (
+          <AutoModeScanDetailDialog
+            task={task}
+            onDone={() =>
+              onDone('Background tasks dialog dismissed', {
+                display: 'system',
+              })
+            }
+            onBack={goBackToList}
+            onKill={task.status === 'running' ? () => void killAutoModeScanTask(task.id) : undefined}
+            key={`auto-mode-scan-${task.id}`}
           />
         );
       case 'dream':
@@ -797,6 +830,29 @@ export function BackgroundTasksDialog({
                 </Box>
               </Box>
             )}
+
+            {autoModeScanTasks.length > 0 && (
+              <Box
+                flexDirection="column"
+                marginTop={
+                  teammateTasks.length > 0 ||
+                  bashTasks.length > 0 ||
+                  mcpMonitors.length > 0 ||
+                  remoteSessions.length > 0 ||
+                  agentTasks.length > 0 ||
+                  workflowTasks.length > 0 ||
+                  dreamTasks.length > 0
+                    ? 1
+                    : 0
+                }
+              >
+                <Box flexDirection="column">
+                  {autoModeScanTasks.map(item => (
+                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
+                  ))}
+                </Box>
+              </Box>
+            )}
           </Box>
         )}
       </Dialog>
@@ -858,6 +914,14 @@ function toListItem(task: BackgroundTaskState): ListItem {
       return {
         id: task.id,
         type: 'dream',
+        label: task.description,
+        status: task.status,
+        task,
+      };
+    case 'auto_mode_scan':
+      return {
+        id: task.id,
+        type: 'auto_mode_scan',
         label: task.description,
         status: task.status,
         task,

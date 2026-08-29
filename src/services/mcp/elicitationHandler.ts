@@ -1,4 +1,6 @@
 import type { Client } from '@modelcontextprotocol/client'
+import type { DialogStore } from '../../dialog/dialogStore.js'
+import { answerMcpUrlElicitationComplete } from '../../dialog/mcpUrlElicitationComplete.js'
 import type { ElicitRequestParams, ElicitResult } from './types.js'
 import type { AppState } from '../../state/AppState.js'
 import {
@@ -64,6 +66,7 @@ export function registerElicitationHandler(
   client: Client,
   serverName: string,
   setAppState: (f: (prevState: AppState) => AppState) => void,
+  dialogStore?: DialogStore | null,
 ): void {
   // Register the elicitation request handler.
   // Wrapped in try/catch because setRequestHandler throws if the client wasn't
@@ -193,6 +196,16 @@ export function registerElicitationHandler(
           message: `MCP server "${serverName}" confirmed elicitation ${elicitationId} complete`,
           notificationType: 'elicitation_complete',
         })
+        if (
+          dialogStore &&
+          answerMcpUrlElicitationComplete(
+            dialogStore,
+            serverName,
+            elicitationId,
+          )
+        ) {
+          return
+        }
         let found = false
         setAppState(prev => {
           const idx = findElicitationInQueue(

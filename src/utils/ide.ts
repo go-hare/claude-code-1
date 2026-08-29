@@ -623,6 +623,12 @@ export async function maybeInstallIDEExtension(
 
 let currentIDESearch: AbortController | null = null
 
+/** densable n7n — abort in-flight IDE lockfile search. */
+export function cancelCurrentIDESearch(): void {
+  currentIDESearch?.abort()
+  currentIDESearch = null
+}
+
 export async function findAvailableIDE(): Promise<DetectedIDEInfo | null> {
   if (currentIDESearch) {
     currentIDESearch.abort()
@@ -1300,7 +1306,7 @@ export async function closeOpenDiffs(
 export async function initializeIdeIntegration(
   onIdeDetected: (ide: DetectedIDEInfo | null) => void,
   ideToInstallExtension: IdeType | null,
-  onShowIdeOnboarding: () => void,
+  onShowIdeOnboarding: (status: IDEExtensionInstallationStatus | null) => void,
   onInstallationComplete: (
     status: IDEExtensionInstallationStatus | null,
   ) => void,
@@ -1349,7 +1355,7 @@ export async function initializeIdeIntegration(
                 status?.installed === true &&
                 !ideOnboardingDialog().hasIdeOnboardingDialogBeenShown()
               ) {
-                onShowIdeOnboarding()
+                onShowIdeOnboarding(status)
               }
             })
         })
@@ -1360,7 +1366,7 @@ export async function initializeIdeIntegration(
             installed &&
             !ideOnboardingDialog().hasIdeOnboardingDialogBeenShown()
           ) {
-            onShowIdeOnboarding()
+            onShowIdeOnboarding(null)
           }
         })
       }

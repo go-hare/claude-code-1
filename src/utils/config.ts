@@ -519,9 +519,6 @@ export type GlobalConfig = {
     strikes: number
   }
 
-  // Idle-return dialog tracking
-  idleReturnDismissed?: boolean // "Don't ask again" picked
-
   // Resume-return dialog tracking (tengu_gleaming_fair / CBp)
   resumeReturnDismissed?: boolean // "Don't ask me again" picked
 
@@ -605,6 +602,10 @@ export type GlobalConfig = {
   hasCompletedClaudeInChromeOnboarding?: boolean // Whether Claude in Chrome onboarding has been shown
   claudeInChromeDefaultEnabled?: boolean // Whether Claude in Chrome is enabled by default (undefined means platform default)
   cachedChromeExtensionInstalled?: boolean // Cached result of whether Chrome extension is installed
+  /**
+   * densable `chromeInstallUpsellDismissed` — dont_ask_again on install upsell.
+   */
+  chromeInstallUpsellDismissed?: boolean
 
   // Chrome extension pairing state (persisted across sessions)
   chromeExtension?: {

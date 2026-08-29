@@ -1,5 +1,17 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import type { Command } from '../../commands.js'
+import * as realGit from '../../utils/git.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+const gitSnap = snapshotModuleExports(realGit)
 
 mock.module('bun:bundle', () => ({
   feature: (_name: string) => false,
@@ -62,10 +74,23 @@ const realNormalizeGitRemoteUrl = (url: string): string | null => {
   return null
 }
 
+function withGitRootCache(
+  stub: (startPath?: string) => string,
+  real: typeof gitSnap.findGitRoot,
+): typeof gitSnap.findGitRoot {
+  const fn = ((startPath?: string) => stub(startPath)) as typeof real
+  fn.cache = real.cache
+  return fn
+}
+
 mock.module('src/utils/git.ts', () => ({
+  ...gitSnap,
   getDefaultBranch: async () => 'main',
-  findGitRoot: (_startPath?: string) => '/fake/root',
-  findCanonicalGitRoot: (_startPath?: string) => '/fake/root',
+  findGitRoot: withGitRootCache(() => '/fake/root', gitSnap.findGitRoot),
+  findCanonicalGitRoot: withGitRootCache(
+    () => '/fake/root',
+    gitSnap.findCanonicalGitRoot,
+  ),
   gitExe: () => 'git',
   getIsGit: async () => true,
   getGitDir: async () => null,
@@ -73,9 +98,6 @@ mock.module('src/utils/git.ts', () => ({
   dirIsInGitRepo: async () => true,
   getHead: async () => 'abc123',
   getBranch: async () => 'main',
-  // The following exports are referenced by markdownConfigLoader (and other
-  // transitive consumers) — provide minimal stubs so the mock surface covers
-  // every real export and downstream callers don't see undefined.
   getRemoteUrl: async () => null,
   normalizeGitRemoteUrl: realNormalizeGitRemoteUrl,
   getRepoRemoteHash: async () => null,
@@ -98,6 +120,10 @@ mock.module('src/utils/git.ts', () => ({
   preserveGitStateForIssue: async () => null,
   isCurrentDirectoryBareGitRepo: () => false,
 }))
+
+afterAll(() => {
+  mock.module('src/utils/git.ts', () => ({ ...gitSnap }))
+})
 
 let commitPushPr: Command
 let originalUserType: string | undefined

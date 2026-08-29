@@ -22,6 +22,9 @@ import {
   CLEAR_TAB_STATUS,
   CLEAR_TERMINAL_TITLE,
   instances,
+  NATIVE_HISTORY_BOTTOM_CHROME,
+  RESET_SCROLL_REGION,
+  cursorPosition,
   supportsTabStatus,
   wrapForMultiplexer,
 } from '@anthropic/ink'
@@ -87,13 +90,24 @@ function cleanupTerminalModes(): void {
     // Calling unmount() now does the final render on the alt buffer,
     // unsubscribes from signal-exit, and writes 1049l exactly once.
     const inst = instances.get(process.stdout)
-    if (inst?.isAltScreenActive) {
+    // Sticky-main (Axc frameSink) is not alt-screen; still unmount so
+    // useAxcFrameSink cleanup / Axc.restore() can send RESET_SCROLL_REGION.
+    if (inst?.isAltScreenActive || inst?.frameSink) {
+      const wasAlt = Boolean(inst.isAltScreenActive)
       try {
         inst.unmount()
       } catch {
-        // Reconciler/render threw — fall back to manual alt-screen exit
-        // so printResumeHint still hits the main buffer.
-        writeSync(1, exitAltScreenSequence())
+        // Reconciler/render threw — fall back so printResumeHint still
+        // hits the main buffer / DECSTBM is cleared.
+        if (wasAlt) {
+          writeSync(1, exitAltScreenSequence())
+        } else {
+          // densable Axc.restore sequence (sync). Bare CSI r homes the cursor.
+          const rows = process.stdout.rows || 24
+          const contentHeight = Math.max(2, rows - NATIVE_HISTORY_BOTTOM_CHROME)
+          writeSync(1, RESET_SCROLL_REGION)
+          writeSync(1, cursorPosition(contentHeight + 1, 1))
+        }
       }
     }
     // Catches events that arrived during the unmount tree-walk.
@@ -186,7 +200,9 @@ function printResumeHint(): void {
 
       writeSync(
         1,
-        chalk.dim(`\nResume this session with:\nccb --resume ${resumeArg}\n`),
+        chalk.dim(
+          `\nResume this session with:\nclaude --resume ${resumeArg}\n`,
+        ),
       )
       resumeHintPrinted = true
     } catch {

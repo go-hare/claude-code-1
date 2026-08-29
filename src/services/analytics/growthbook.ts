@@ -462,10 +462,6 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   // auto-memory + OAuth + GitHub remote). Without this local default, densable
   // GB key defaults false and TEAMMEM build ON is a no-op on self-hosted forks.
   tengu_herring_clock: true,
-  // Idle-return: default dialog (blocking Continue / new conversation).
-  // densable 2.1.211 is hint-only; fork keeps dialog as product choice.
-  // Paste-safe: dialog path snapshots pastedContents (see REPL onSubmit).
-  tengu_willow_mode: 'dialog',
 
   // ── Kill switches (keep true to prevent remote disable) ──────────
   tengu_turtle_carbon: true, // Ultrathink extended thinking

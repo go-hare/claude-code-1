@@ -551,6 +551,18 @@ export type AppState = DeepImmutable<{
    * (interactive path). Blocks further queries until /clear or new session.
    */
   endedByModel: boolean
+  /**
+   * densable ProposeGoal latch — UUID while an approval dialog is open.
+   * Gold `pendingGoalProposal`; cleared in finally / stale-check.
+   */
+  pendingGoalProposal?: string
+  /**
+   * densable ebl/smw — /goal consumes this after ProposeGoal enqueue.
+   */
+  queuedGoalOrigin?: {
+    condition: string
+    origin: 'proposal_direct' | 'proposal_approved'
+  }
 }
 
 export type AppStateStore = Store<AppState>
