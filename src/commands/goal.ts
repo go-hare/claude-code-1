@@ -27,6 +27,7 @@ import { createAttachmentMessage } from '../utils/attachments.js'
 import { createUserMessage } from '../utils/messages.js'
 import type { HookCommand } from '../schemas/hooks.js'
 import type { AppState } from '../state/AppState.js'
+import { consumeQueuedGoalOrigin } from '../services/goal/queuedGoalOrigin.js'
 
 const MAX_GOAL_CONDITION_LENGTH = 4000
 
@@ -171,6 +172,9 @@ const goal = {
           return { type: 'text', value: `Goal cleared: ${condition}` }
         }
 
+        // densable SZr: n = r ?? smw(e,t) before wro()
+        const origin = consumeQueuedGoalOrigin(input, context)
+
         // Gate checks
         const gate = checkGates()
         if (gate) {
@@ -205,6 +209,7 @@ const goal = {
             setAt: Date.now(),
             iterations: 0,
             tokensAtStart,
+            origin,
           },
         }))
 
