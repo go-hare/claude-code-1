@@ -7,6 +7,7 @@ import {
   getTurnOutputTokens,
   getBudgetContinuationCount,
   getTotalInputTokens,
+  getIsRemoteMode,
 } from '../bootstrap/state.js';
 import { parseTokenBudget } from '../utils/tokenBudget.js';
 import { count } from '../utils/array.js';
@@ -36,8 +37,6 @@ import {
   useTerminalTitle,
   useTabStatus,
 } from '@anthropic/ink';
-import { CostThresholdDialog } from '../components/CostThresholdDialog.js';
-import { IdleReturnDialog } from '../components/IdleReturnDialog.js';
 import * as React from 'react';
 import {
   useEffect,
@@ -89,6 +88,7 @@ import {
   resolveIdleTokenThreshold,
 } from '../utils/residualMsEnvGates.js';
 import { formatTokens, truncateToWidth } from '../utils/format.js';
+import { tokenCountWithEstimation } from '../utils/tokens.js';
 import { consumeEarlyInput } from '../utils/earlyInput.js';
 import {
   claimConsumableQueuedAutonomyCommands,
@@ -142,23 +142,39 @@ import { type ToolUseConfirm } from '../components/permissions/PermissionRequest
 import { ElicitationDialog } from '../components/mcp/ElicitationDialog.js';
 import { PromptDialog } from '../components/hooks/PromptDialog.js';
 import {
+  COST_THRESHOLD_KIND,
   createDialogMailbox,
   createRequestDialog,
   DialogHost,
+  getModalChromeVisibility,
   installManagedSettingsSxg,
+  isFullscreenModalChromeActive,
   isManagedSettingsSecurityDialog,
   isPermissionPromptDialog,
+  isSoftNmsDialogKind,
+  isTopDialogModalLayout,
+  maybeRequestAutoDefaultNudge,
+  openCostThresholdIfNeeded,
+  openResumeReturnIfNeeded,
   PermissionDialogHostProvider,
   permissionPromptDialogId,
+  SANDBOX_NETWORK_ACCESS_KIND,
   useDialogMailboxBridge,
   useDialogStore,
+  useHasBlockingOpenDialogs,
   useHasOpenDialogs,
+  useNhtHidesPromptInput,
+  useTopDialog,
   useTopDialogKind,
 } from '../dialog/index.js';
+import { legacyFocusForUqc, setLegacyDialogFocus } from '../dialog/legacyDialogFocus.js';
+import { setPromptInputStoreActive } from '../utils/promptInputCursorStore.js';
+import { SandboxNetworkAccessAsker } from '../dialog/sandboxNetworkAccess.js';
 import type { PromptRequest, PromptResponse } from '../types/hooks.js';
 import PromptInput from '../components/PromptInput/PromptInput.js';
 import { PromptInputQueuedCommands } from '../components/PromptInput/PromptInputQueuedCommands.js';
 import { useRemoteSession } from '../hooks/useRemoteSession.js';
+import type { RemoteRequestDialog } from '../hooks/useRemoteUserDialog.js';
 import { useDirectConnect } from '../hooks/useDirectConnect.js';
 import type { DirectConnectConfig } from '../server/directConnectManager.js';
 import { useSSHSession } from '../hooks/useSSHSession.js';
@@ -438,7 +454,7 @@ const usePipeRouter = feature('UDS_INBOX')
   : () => ({ routeToSelectedPipes: () => false });
 const usePeerInboundUdsDrain = feature('UDS_INBOX')
   ? require('../hooks/usePeerInboundUdsDrain.js').usePeerInboundUdsDrain
-  : (): null => null;
+  : (): void => {};
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { isAgentSwarmsEnabled } from '../utils/agentSwarmsEnabled.js';
 import { useTaskListWatcher } from '../hooks/useTaskListWatcher.js';
@@ -470,7 +486,6 @@ import { startBackgroundSession } from '../tasks/LocalMainSessionTask.js';
 import { useSessionBackgrounding } from '../hooks/useSessionBackgrounding.js';
 import { diagnosticTracker } from '../services/diagnosticTracking.js';
 import { handleSpeculationAccept, type ActiveSpeculationState } from '../services/PromptSuggestion/speculation.js';
-import { IdeOnboardingDialog } from '../components/IdeOnboardingDialog.js';
 import { EffortCallout, shouldShowEffortCallout } from '../components/EffortCallout.js';
 import type { EffortValue } from '../utils/effort.js';
 import { RemoteCallout } from '../components/RemoteCallout.js';
@@ -575,7 +590,8 @@ import { computeDiffSidebarWidth, diffSidebarHasGitRepo, useReplDiffAutoOpenBase
 import { isWillowCrateEnabled } from '../utils/willowCrate.js';
 import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, mouseTrackingProp } from '../utils/fullscreen.js';
 import { isCommandImmediate } from '../utils/immediateCommand.js';
-import { AlternateScreen } from '@anthropic/ink';
+import { AlternateScreen, MainScreenShell } from '@anthropic/ink';
+import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { ScrollKeybindingHandler } from '../components/ScrollKeybindingHandler.js';
 import {
   useMessageActions,
@@ -1178,10 +1194,7 @@ export function REPL({
   // Agent definition is state so /resume can update it mid-session
   const [mainThreadAgentDefinition, setMainThreadAgentDefinition] = useState(initialMainThreadAgentDefinition);
 
-  // densable 2.1.224 #5 — interactive UDS peer drain + rSh hold UI (print.ts parity).
-  // Dialog node returned for FullscreenLayout modal slot (not promptOverlay —
-  // Provider lives inside FullscreenLayout; PromptInput writes null to that channel).
-  // Declared before toolJSX state so isDialogSlotFree can read toolJSX after both exist.
+  // densable 2.1.239 rSh n(UOo) — peer drain + hold approval via requestDialog.
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const verbose = useAppState(s => s.verbose);
   const mcp = useAppState(s => s.mcp);
@@ -1319,8 +1332,12 @@ export function REPL({
   );
 
   const onChangeDynamicMcpConfig = useCallback(
-    (config: Record<string, ScopedMcpServerConfig>) => {
-      setDynamicMcpConfig(config);
+    (
+      next:
+        | Record<string, ScopedMcpServerConfig>
+        | ((prev: Record<string, ScopedMcpServerConfig> | undefined) => Record<string, ScopedMcpServerConfig>),
+    ) => {
+      setDynamicMcpConfig(prev => (typeof next === 'function' ? next(prev) : next));
     },
     [setDynamicMcpConfig],
   );
@@ -1353,7 +1370,6 @@ export function REPL({
   const [ideSelection, setIDESelection] = useState<IDESelection | undefined>(undefined);
   const [ideToInstallExtension, setIDEToInstallExtension] = useState<IdeType | null>(null);
   const [ideInstallationStatus, setIDEInstallationStatus] = useState<IDEExtensionInstallationStatus | null>(null);
-  const [showIdeOnboarding, setShowIdeOnboarding] = useState(false);
   // Dead code elimination: model switch callout state (ant-only)
   const [showModelSwitchCallout, setShowModelSwitchCallout] = useState(() => {
     if (process.env.USER_TYPE === 'ant') {
@@ -1583,16 +1599,18 @@ export function REPL({
   // Elapsed time is computed by SpinnerWithVerb from these refs on each
   // animation frame, avoiding a useInterval that re-renders the entire REPL.
   const [userInputOnProcessing, setUserInputOnProcessingRaw] = React.useState<string | undefined>(undefined);
-  // True while the submitted prompt is being processed but its user message
-  // hasn't reached setMessages yet. The render path reads this directly:
-  // when false, the placeholder is hidden regardless of how messages compare.
-  // Length-based gating is unsafe — `cappedMessages` slices to DEFERRED_CAP
-  // (500) and `displayedMessages` falls back to `deferredMessages` while
-  // loading without streaming text, so on long sessions
-  // `displayedMessages.length <= baseline` is permanently true and the
-  // placeholder duplicates the real user message that already rendered.
-  const [userMessagePending, setUserMessagePending] = React.useState(false);
-  const userMessagePendingRef = React.useRef(false);
+  // densable PKe: show h9e while `displayed.length <= placeholderBaseline`.
+  // Snapshot messages.length at submit (before the user turn lands). Clearing
+  // the echo on setMessages alone is wrong on Windows (yank-bug → deferred
+  // Messages lag → one blank frame between echo hide and deferred catch-up).
+  // Once displayed has passed baseline, latch dismissed — mid-turn compact
+  // can shrink `messages.length` back under baseline and must not resurrect
+  // the echo. Bridge pending clears only after deferred has caught past the
+  // submit point (length compare under DEFERRED_CAP; ref equality over cap,
+  // where capped length stays ≤500 and cannot grow past baseline).
+  const [placeholderBaseline, setPlaceholderBaseline] = React.useState<number | undefined>(undefined);
+  const placeholderEchoDismissedRef = React.useRef(false);
+  const placeholderBridgePendingRef = React.useRef(false);
 
   // densable 2.1.218 #18: monotonic clock for turn duration (performance.now),
   // not Date.now wall clock — NTP / clock adjustments must not yield negative
@@ -1772,9 +1790,42 @@ export function REPL({
   const dialogMailboxRef = React.useRef(createDialogMailbox());
   useDialogMailboxBridge(dialogMailboxRef.current);
   const requestDialog = React.useMemo(() => createRequestDialog(dialogMailboxRef.current), []);
+  const [sandboxAsker] = useState(
+    () =>
+      new SandboxNetworkAccessAsker({
+        requestDialog,
+        getBridge: () => store.getState().replBridgePermissionCallbacks,
+        applyPermissionUpdate: update => {
+          setAppState(prev => ({
+            ...prev,
+            toolPermissionContext: applyPermissionUpdate(prev.toolPermissionContext, update),
+          }));
+          // densable K8c durable arm — tip queue wrote localSettings + refreshConfig
+          persistPermissionUpdate(update);
+          SandboxManager.refreshConfig();
+        },
+      }),
+  );
   const topDialogKind = useTopDialogKind();
+  const topDialog = useTopDialog();
   const hasOpenDialogs = useHasOpenDialogs();
+  const hasBlockingOpenDialogs = useHasBlockingOpenDialogs();
+  const hidePromptForHardNms = useNhtHidesPromptInput();
   const dialogStore = useDialogStore();
+  // densable cu → iXg(Gxt): compact submit is assigned after onSubmit exists.
+  const resumeReturnCompactRef = React.useRef<() => void>(() => {});
+  const offerResumeReturnIfNeeded = React.useCallback(
+    (msgs: readonly MessageType[]) => {
+      void openResumeReturnIfNeeded({
+        requestDialog,
+        dialogStore,
+        messages: msgs,
+        estimateTokens: estimateMsgs => tokenCountWithEstimation(estimateMsgs as MessageType[]),
+        runCompact: () => resumeReturnCompactRef.current(),
+      });
+    },
+    [requestDialog, dialogStore],
+  );
   // densable #13: CCR bridge initialize stashes restored.internal — apply y_u
   // when stash arrives (and any pending stash at mount).
   useEffect(() => {
@@ -1803,12 +1854,6 @@ export function REPL({
   // only ExitPlanModePermissionRequest). Renders in FullscreenLayout's `bottom`
   // slot so response options stay visible while the user scrolls a long plan.
   const [permissionStickyFooter, setPermissionStickyFooter] = useState<React.ReactNode | null>(null);
-  const [sandboxPermissionRequestQueue, setSandboxPermissionRequestQueue] = useState<
-    Array<{
-      hostPattern: NetworkHostPattern;
-      resolvePromise: (allowConnection: boolean) => void;
-    }>
-  >([]);
   const [promptQueue, setPromptQueue] = useState<
     Array<{
       request: PromptRequest;
@@ -1818,11 +1863,6 @@ export function REPL({
       reject: (error: Error) => void;
     }>
   >([]);
-
-  // Track bridge cleanup functions for sandbox permission requests so the
-  // local dialog handler can cancel the remote prompt when the local user
-  // responds first. Keyed by host to support concurrent same-host requests.
-  const sandboxBridgeCleanupRef = useRef<Map<string, Array<() => void>>>(new Map());
 
   // -- Terminal title management
   // densable gu=yy??Ol??ui??sc??"Claude Code":
@@ -1852,12 +1892,8 @@ export function REPL({
   // is null, treat as not-showing so TextInput focus and queue processor
   // aren't deadlocked by a phantom overlay.
   const isShowingLocalJSXCommand = toolJSX?.isLocalJSXCommand === true && toolJSX?.jsx != null;
-  // densable 2.1.224 #5 rSh — UDS peer drain + hold approval (gGn queueBehind).
-  // Rendered into FullscreenLayout modal (not promptOverlay). Slot free when no
-  // local-jsx command dialog is occupying the modal.
-  const peerInboundApprovalDialog = usePeerInboundUdsDrain({
-    isDialogSlotFree: () => !isShowingLocalJSXCommand,
-  });
+  // densable 2.1.239 rSh n(UOo) — hold approval via requestDialog queueBehind.
+  usePeerInboundUdsDrain({ requestDialog });
   const titleIsAnimating = isLoading && !isWaitingForApproval && !isShowingLocalJSXCommand;
   // Title animation state lives in <AnimatedTerminalTitle> so the 960ms tick
   // doesn't re-render REPL. titleDisabled/terminalTitle are still computed
@@ -1882,9 +1918,11 @@ export function REPL({
         ? `approve ${toolUseConfirmQueue[0]!.tool.name}`
         : pendingWorkerRequest
           ? 'worker request'
-          : pendingSandboxRequest
+          : pendingSandboxRequest || topDialogKind === SANDBOX_NETWORK_ACCESS_KIND
             ? 'sandbox request'
-            : isManagedSettingsSecurityDialog(topDialogKind) || isShowingLocalJSXCommand
+            : isManagedSettingsSecurityDialog(topDialogKind) ||
+                isSoftNmsDialogKind(topDialogKind) ||
+                isShowingLocalJSXCommand
               ? 'dialog open'
               : 'input needed';
 
@@ -1903,6 +1941,12 @@ export function REPL({
     return installManagedSettingsSxg(requestDialog);
   }, [requestDialog]);
 
+  // densable Gm(qSn,{currentMode},{queueBehind:!0})
+  useEffect(() => {
+    if (getIsRemoteMode()) return;
+    void maybeRequestAutoDefaultNudge(requestDialog, store.getState().toolPermissionContext);
+  }, [requestDialog, store]);
+
   // densable msf / Vce — bg job needs-input producers (agents --json "Needs input")
   // Priority: sandbox > worker-sandbox > elicitation > managed-settings > permission > dialog
   useEffect(() => {
@@ -1913,16 +1957,25 @@ export function REPL({
     });
   }, []);
 
+  // densable msf sandbox slot: DialogStore top FRr (cEr / wrs), not K8c invent.
+  // Depend on top id+host — same-kind A→B swap must refresh (kind alone is stale).
+  const topSandboxHost =
+    topDialog?.kind === SANDBOX_NETWORK_ACCESS_KIND
+      ? (topDialog.payload as { host?: string } | undefined)?.host
+      : undefined;
   useEffect(() => {
     if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
       return;
     }
     void import('../utils/bgNeedsInputBridge.js').then(m => {
       if (!m.isBgJobSession()) return;
-      const host = sandboxPermissionRequestQueue[0]?.hostPattern?.host;
-      m.emitBgNeedsInput(host ? m.formatSandboxNeeds(host) : null, 'sandbox');
+      if (topDialog?.kind !== SANDBOX_NETWORK_ACCESS_KIND) {
+        m.emitBgNeedsInput(null, 'sandbox');
+        return;
+      }
+      m.emitBgNeedsInput(topSandboxHost ? m.formatSandboxNeeds(topSandboxHost) : null, 'sandbox');
     });
-  }, [sandboxPermissionRequestQueue]);
+  }, [topDialog?.kind, topDialog?.id, topSandboxHost]);
 
   useEffect(() => {
     if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
@@ -2020,23 +2073,8 @@ export function REPL({
   // that queue functional updaters then synchronously read the ref
   // (e.g. handleSpeculationAccept → onQuery) see stale data.
   const setMessages = useCallback((action: React.SetStateAction<MessageType[]>) => {
-    const prev = messagesRef.current;
     const next = typeof action === 'function' ? action(messagesRef.current) : action;
     messagesRef.current = next;
-    // Once the user's submitted message lands in the array, the placeholder's
-    // job is done. Diff prev→next by reference identity so we catch it
-    // regardless of where it landed (head replace via compact_boundary, tail
-    // append via onQuery, etc.) — length-based slicing was unreliable.
-    if (userMessagePendingRef.current && next.length > 0) {
-      const prevSet = new Set(prev);
-      for (const m of next) {
-        if (!prevSet.has(m) && isHumanTurn(m)) {
-          userMessagePendingRef.current = false;
-          setUserMessagePending(false);
-          break;
-        }
-      }
-    }
     rawSetMessages(next);
   }, []);
 
@@ -2300,12 +2338,16 @@ export function REPL({
     }
   }, [setAppState, store]);
 
-  // setUserInputOnProcessing flips the pending flag; the render reads it
-  // directly. No length tracking — see userMessagePending declaration.
+  // densable go + Rr.baseline — snapshot length before the turn lands.
   const setUserInputOnProcessing = useCallback((input: string | undefined) => {
-    const pending = input !== undefined;
-    userMessagePendingRef.current = pending;
-    setUserMessagePending(pending);
+    if (input !== undefined) {
+      setPlaceholderBaseline(messagesRef.current.length);
+      placeholderEchoDismissedRef.current = false;
+      placeholderBridgePendingRef.current = true;
+    } else {
+      setPlaceholderBaseline(undefined);
+      placeholderBridgePendingRef.current = false;
+    }
     setUserInputOnProcessingRaw(input);
   }, []);
   // Fullscreen: track the unseen-divider position. dividerIndex changes
@@ -2501,6 +2543,8 @@ export function REPL({
     setStreamingToolUses,
     setStreamMode,
     setInProgressToolUseIDs,
+    // densable wEf — without this, refusal_fallback_prompt always cancels.
+    requestDialog: requestDialog as unknown as RemoteRequestDialog,
   });
 
   // Direct connect hook - manages WebSocket to a claude server for `claude connect` mode
@@ -2691,21 +2735,10 @@ export function REPL({
   const [retryStatus, setRetryStatus] = useState<import('../utils/advisorNetworkStall.js').RetryStatus | null>(null);
   const [isMessageSelectorVisible, setIsMessageSelectorVisible] = useState(false);
   const [messageSelectorPreselect, setMessageSelectorPreselect] = useState<UserMessage | undefined>(undefined);
-  const [showCostDialog, setShowCostDialog] = useState(false);
   const [conversationId, setConversationId] = useState(randomUUID());
-
-  // Idle-return dialog: shown when user submits after a long idle gap.
-  // Must snapshot pastedContents: clearing the input for the dialog would
-  // otherwise fire PromptInput's orphan-image prune and wipe the paste map
-  // before the user continues (first image+text after /resume / long idle).
-  const [idleReturnPending, setIdleReturnPending] = useState<{
-    input: string;
-    idleMinutes: number;
-    pastedContents: Record<number, PastedContent>;
-  } | null>(null);
-  const skipIdleCheckRef = useRef(false);
   const lastQueryCompletionTimeRef = useRef(lastQueryCompletionTime);
   lastQueryCompletionTimeRef.current = lastQueryCompletionTime;
+  const costThresholdReachedLoggedRef = useRef(false);
 
   // Aggregate tool result budget: per-conversation decision tracking.
   // When the GrowthBook flag is on, query.ts enforces the budget; when
@@ -2725,7 +2758,6 @@ export function REPL({
     contentReplacementStateRef.current = createContentReplacementState();
   });
 
-  const [haveShownCostDialog, setHaveShownCostDialog] = useState(getGlobalConfig().hasAcknowledgedCostThreshold);
   const [vimMode, setVimMode] = useState<VimMode>('INSERT');
   const [showBashesDialog, setShowBashesDialog] = useState<string | boolean>(false);
   const [isSearchingHistory, setIsSearchingHistory] = useState(false);
@@ -2954,7 +2986,7 @@ export function REPL({
   const hasActivePrompt =
     toolUseConfirmQueue.length > 0 ||
     promptQueue.length > 0 ||
-    sandboxPermissionRequestQueue.length > 0 ||
+    topDialogKind === SANDBOX_NETWORK_ACCESS_KIND ||
     elicitation.queue.length > 0 ||
     workerSandboxPermissions.queue.length > 0;
 
@@ -3004,7 +3036,7 @@ export function REPL({
     autoConnectIdeFlag,
     ideToInstallExtension,
     setDynamicMcpConfig,
-    setShowIdeOnboarding,
+    requestDialog,
     setIDEInstallationState: setIDEInstallationStatus,
   });
 
@@ -3028,31 +3060,34 @@ export function REPL({
           /* eslint-disable @typescript-eslint/no-require-imports */
           const coordinatorModule =
             require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js');
+          const { syncCoordinatorModeEnvFromSession } =
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
           /* eslint-enable @typescript-eslint/no-require-imports */
-          // Incomplete circular-init namespace — skip match; saveMode still
-          // persists log.mode below (sessionRestore alignment).
-          if (typeof coordinatorModule?.matchSessionMode === 'function') {
-            const warning = coordinatorModule.matchSessionMode(log.mode);
-            if (warning) {
-              // Re-derive agent definitions after mode switch so built-in agents
-              // reflect the new coordinator/normal mode
-              /* eslint-disable @typescript-eslint/no-require-imports */
-              const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
-                require('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js');
-              /* eslint-enable @typescript-eslint/no-require-imports */
-              getAgentDefinitionsWithOverrides.cache.clear?.();
-              const freshAgentDefs = await getAgentDefinitionsWithOverrides(getOriginalCwd());
+          // Incomplete circular-init namespace — still flip env so tool filter
+          // matches transcript; saveMode persists log.mode below.
+          const warning =
+            typeof coordinatorModule?.matchSessionMode === 'function'
+              ? coordinatorModule.matchSessionMode(log.mode)
+              : syncCoordinatorModeEnvFromSession(log.mode);
+          if (warning) {
+            // Re-derive agent definitions after mode switch so built-in agents
+            // reflect the new coordinator/normal mode
+            /* eslint-disable @typescript-eslint/no-require-imports */
+            const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
+              require('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js');
+            /* eslint-enable @typescript-eslint/no-require-imports */
+            getAgentDefinitionsWithOverrides.cache.clear?.();
+            const freshAgentDefs = await getAgentDefinitionsWithOverrides(getOriginalCwd());
 
-              setAppState(prev => ({
-                ...prev,
-                agentDefinitions: {
-                  ...freshAgentDefs,
-                  allAgents: freshAgentDefs.allAgents,
-                  activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-                },
-              }));
-              messages.push(createSystemMessage(warning, 'warning'));
-            }
+            setAppState(prev => ({
+              ...prev,
+              agentDefinitions: {
+                ...freshAgentDefs,
+                allAgents: freshAgentDefs.allAgents,
+                activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
+              },
+            }));
+            messages.push(createSystemMessage(warning, 'warning'));
           }
         }
 
@@ -3269,8 +3304,6 @@ export function REPL({
         // submit (user reports full message swallow after /resume). densable has
         // no dialog so does not need this; fork dialog product does.
         setLastQueryCompletionTime(Date.now());
-        skipIdleCheckRef.current = false;
-        setIdleReturnPending(null);
 
         // Official wvr(messages, Je) on in-session /resume — orphan scan after
         // messages restored (skip fork: new session id, no prior orphans).
@@ -3336,6 +3369,11 @@ export function REPL({
           }
         }
 
+        // densable: if(Qn!=="fork")cu(Ws); then tengu_session_resumed.
+        if (entrypoint !== 'fork') {
+          offerResumeReturnIfNeeded(messages);
+        }
+
         logEvent('tengu_session_resumed', {
           entrypoint: entrypoint as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           success: true,
@@ -3349,7 +3387,7 @@ export function REPL({
         throw error;
       }
     },
-    [resetLoadingState, setAppState],
+    [resetLoadingState, setAppState, offerResumeReturnIfNeeded],
   );
 
   // Lazy init: useRef(createX()) would call createX on every render and
@@ -3489,24 +3527,18 @@ export function REPL({
   const [isExiting, setIsExiting] = useState(false);
 
   // Calculate if cost dialog should be shown
-  const showingCostDialog = !isLoading && showCostDialog;
-
   // Determine which dialog should have focus (if any)
   // Permission and interactive dialogs can show even when toolJSX is set,
   // as long as shouldContinueAnimation is true. This prevents deadlocks when
   // agents set background hints while waiting for user interaction.
   function getFocusedInputDialog():
     | 'message-selector'
-    | 'sandbox-permission'
     | 'managed-settings'
     | 'tool-permission'
     | 'prompt'
     | 'worker-sandbox-permission'
     | 'elicitation'
-    | 'cost'
-    | 'idle-return'
     | 'init-onboarding'
-    | 'ide-onboarding'
     | 'model-switch'
     | 'undercover-callout'
     | 'effort-callout'
@@ -3525,19 +3557,11 @@ export function REPL({
     // High priority dialogs (always show regardless of typing)
     if (isMessageSelectorVisible) return 'message-selector';
 
-    // Idle-return must win over typing-suppression AND toolJSX gating.
-    // onSubmit already stashed the message in idleReturnPending without clearing
-    // the draft; if this check sits behind isPromptInputActive (true while the
-    // prompt still has text) or allowDialogsWithAnimation, the dialog never
-    // mounts and Enter looks like a full swallow.
-    if (idleReturnPending) return 'idle-return';
-
     // Suppress interrupt dialogs while user is actively typing
     if (isPromptInputActive) return undefined;
 
-    if (sandboxPermissionRequestQueue[0]) return 'sandbox-permission';
-
     // densable DialogStore top — GSn / bEt via NMs (not tip-local queue peek)
+    // Tip sandbox network uses FRr via K8c.ask (requestDialog), not _Zt.
     if (isManagedSettingsSecurityDialog(topDialogKind)) return 'managed-settings';
     if (isPermissionPromptDialog(topDialogKind)) return 'tool-permission';
 
@@ -3547,19 +3571,15 @@ export function REPL({
     // Queue may still hold items under DialogStore top; only use when store empty
     if (allowDialogsWithAnimation && !hasOpenDialogs && toolUseConfirmQueue[0]) return 'tool-permission';
     if (allowDialogsWithAnimation && promptQueue[0]) return 'prompt';
-    // Worker sandbox permission prompts (network access) from swarm workers
+    // densable _Zt still returns worker-sandbox-permission (gold Fe.queue[0]).
     if (allowDialogsWithAnimation && workerSandboxPermissions.queue[0]) return 'worker-sandbox-permission';
     if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation';
-    if (allowDialogsWithAnimation && showingCostDialog) return 'cost';
 
     if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice)
       return 'ultraplan-choice';
 
     if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanLaunchPending)
       return 'ultraplan-launch';
-
-    // Onboarding dialogs (special conditions)
-    if (allowDialogsWithAnimation && showIdeOnboarding) return 'ide-onboarding';
 
     // Model switch callout (ant-only, eliminated from external builds)
     if (process.env.USER_TYPE === 'ant' && allowDialogsWithAnimation && showModelSwitchCallout) return 'model-switch';
@@ -3594,16 +3614,41 @@ export function REPL({
 
   const focusedInputDialog = getFocusedInputDialog();
 
-  // True when permission prompts exist but are hidden because the user is typing
+  // densable yMe = To && (nHt || Fe.queue[0] || Be.queue[0]).
+  // Leftover tip queues (toolUseConfirm / prompt) + worker sandbox / elicitation.
   const hasSuppressedDialogs =
     isPromptInputActive &&
-    (sandboxPermissionRequestQueue[0] ||
-      hasOpenDialogs ||
-      toolUseConfirmQueue[0] ||
-      promptQueue[0] ||
+    (hasBlockingOpenDialogs ||
       workerSandboxPermissions.queue[0] ||
       elicitation.queue[0] ||
-      showingCostDialog);
+      toolUseConfirmQueue[0] ||
+      promptQueue[0]);
+
+  // densable zIr same-render (no suppress-reason hook — keystroke tear).
+  const dialogSuppressReason =
+    legacyFocusForUqc(focusedInputDialog) != null
+      ? ('legacy-dialog' as const)
+      : isPromptInputActive
+        ? ('typing' as const)
+        : null;
+
+  // densable RPs — also gates chat:cancel isActive (`!Z` when Z==="visible")
+  const modalChrome = getModalChromeVisibility({
+    hasOpenDialogs,
+    suppressReason: dialogSuppressReason,
+  });
+  const isDialogChromeVisible = modalChrome === 'visible';
+
+  // densable uQc — allowlisted _Zt focus only (Host-owned stays out).
+  useLayoutEffect(() => {
+    setLegacyDialogFocus(legacyFocusForUqc(focusedInputDialog));
+    return () => setLegacyDialogFocus(null);
+  }, [focusedInputDialog]);
+
+  // densable hyr — after commit, not inside setInputValue.
+  useEffect(() => {
+    setPromptInputStoreActive(isPromptInputActive);
+  }, [isPromptInputActive]);
 
   // Keep ref in sync so timer callbacks can read the current value
   focusedInputDialogRef.current = focusedInputDialog;
@@ -3709,7 +3754,6 @@ export function REPL({
 
     queryGuard.forceEnd();
     setMainLoopBusy(false);
-    skipIdleCheckRef.current = false;
 
     // densable FBe: Esc salvages in-progress **thinking only** (isVirtual),
     // not streaming body text — body promote races content_block_stop → double ●.
@@ -3824,21 +3868,25 @@ export function REPL({
     inputMode,
     inputValue,
     streamMode,
+    isDialogChromeVisible,
   };
 
   useEffect(() => {
-    const totalCost = getTotalCost();
-    if (totalCost >= 5 /* $5 */ && !showCostDialog && !haveShownCostDialog) {
+    if (isLoading) return;
+    if (getTotalCost() < 5 /* $5 */) return;
+    // densable uy===null: tengu_cost_threshold_reached once, then oXg
+    // while unacked and store has no Wxt. Esc does not latch.
+    if (!costThresholdReachedLoggedRef.current) {
       logEvent('tengu_cost_threshold_reached', {});
-      // Mark as shown even if the dialog won't render (no console billing
-      // access). Otherwise this effect re-fires on every message change for
-      // the rest of the session — 200k+ spurious events observed.
-      setHaveShownCostDialog(true);
-      if (hasConsoleBillingAccess()) {
-        setShowCostDialog(true);
-      }
+      costThresholdReachedLoggedRef.current = true;
     }
-  }, [messages, showCostDialog, haveShownCostDialog]);
+    if (!hasConsoleBillingAccess()) return;
+    if (getGlobalConfig().hasAcknowledgedCostThreshold) return;
+    if (dialogStore.getState().open.some(d => d.kind === COST_THRESHOLD_KIND)) {
+      return;
+    }
+    void openCostThresholdIfNeeded({ requestDialog, dialogStore });
+  }, [messages, isLoading, requestDialog, dialogStore]);
 
   const sandboxAskCallback: SandboxAskCallback = useCallback(
     async (hostPattern: NetworkHostPattern) => {
@@ -3879,19 +3927,12 @@ export function REPL({
         // Send the request to the leader via mailbox
         const sent = await sendSandboxPermissionRequestViaMailbox(hostPattern.host, requestId);
 
-        return new Promise(resolveShouldAllowHost => {
-          if (!sent) {
-            // If we couldn't send via mailbox, fall back to local handling
-            setSandboxPermissionRequestQueue(prev => [
-              ...prev,
-              {
-                hostPattern,
-                resolvePromise: resolveShouldAllowHost,
-              },
-            ]);
-            return;
-          }
+        // Mailbox soft-fail → local FRr (requestDialog / K8c), not tip queue.
+        if (!sent) {
+          return sandboxAsker.ask(hostPattern);
+        }
 
+        return new Promise(resolveShouldAllowHost => {
           // Register the callback for when the leader responds
           registerSandboxPermissionCallback({
             requestId,
@@ -3910,79 +3951,10 @@ export function REPL({
         });
       }
 
-      // Normal flow for non-workers: show local UI and optionally race
-      // against the REPL bridge (Remote Control) if connected.
-      return new Promise(resolveShouldAllowHost => {
-        let resolved = false;
-        function resolveOnce(allow: boolean): void {
-          if (resolved) return;
-          resolved = true;
-          resolveShouldAllowHost(allow);
-        }
-
-        // Queue the local sandbox permission dialog
-        setSandboxPermissionRequestQueue(prev => [
-          ...prev,
-          {
-            hostPattern,
-            resolvePromise: resolveOnce,
-          },
-        ]);
-
-        // When the REPL bridge is connected, also forward the sandbox
-        // permission request as a can_use_tool control_request so the
-        // remote user (e.g. on claude.ai) can approve it too.
-        if (feature('BRIDGE_MODE')) {
-          const bridgeCallbacks = store.getState().replBridgePermissionCallbacks;
-          if (bridgeCallbacks) {
-            const bridgeRequestId = randomUUID();
-            bridgeCallbacks.sendRequest(
-              bridgeRequestId,
-              SANDBOX_NETWORK_ACCESS_TOOL_NAME,
-              { host: hostPattern.host },
-              randomUUID(),
-              `Allow network connection to ${hostPattern.host}?`,
-            );
-
-            const unsubscribe = bridgeCallbacks.onResponse(bridgeRequestId, response => {
-              unsubscribe();
-              const allow = response.behavior === 'allow';
-              // densable: remote allow also seeds sessionAllowedHosts
-              if (allow) SandboxManager.addSessionAllowedHost(hostPattern.host);
-              // Resolve ALL pending requests for the same host, not just
-              // this one — mirrors the local dialog handler pattern.
-              setSandboxPermissionRequestQueue(queue => {
-                queue
-                  .filter(item => item.hostPattern.host === hostPattern.host)
-                  .forEach(item => item.resolvePromise(allow));
-                return queue.filter(item => item.hostPattern.host !== hostPattern.host);
-              });
-              // Clean up all sibling bridge subscriptions for this host
-              // (other concurrent same-host requests) before deleting.
-              const siblingCleanups = sandboxBridgeCleanupRef.current.get(hostPattern.host);
-              if (siblingCleanups) {
-                for (const fn of siblingCleanups) {
-                  fn();
-                }
-                sandboxBridgeCleanupRef.current.delete(hostPattern.host);
-              }
-            });
-
-            // Register cleanup so the local dialog handler can cancel
-            // the remote prompt and unsubscribe when the local user
-            // responds first.
-            const cleanup = () => {
-              unsubscribe();
-              bridgeCallbacks.cancelRequest(bridgeRequestId);
-            };
-            const existing = sandboxBridgeCleanupRef.current.get(hostPattern.host) ?? [];
-            existing.push(cleanup);
-            sandboxBridgeCleanupRef.current.set(hostPattern.host, existing);
-          }
-        }
-      });
+      // densable K8c.ask — FRr via requestDialog + optional bridge race
+      return sandboxAsker.ask(hostPattern);
     },
-    [setAppState, store],
+    [setAppState, store, sandboxAsker],
   );
 
   // #34044: if user explicitly set sandbox.enabled=true but deps are missing,
@@ -5270,7 +5242,6 @@ export function REPL({
           setMainLoopBusy(false);
           setWasAborted(abortController.signal.aborted);
           setLastQueryCompletionTime(Date.now());
-          skipIdleCheckRef.current = false;
           // Always reset loading state in finally - this ensures cleanup even
           // if onQueryImpl throws. onTurnComplete is called separately in
           // onQueryImpl only on successful completion.
@@ -5830,40 +5801,6 @@ export function REPL({
         return;
       }
 
-      // Idle-return: prompt returning users to start fresh when the
-      // conversation is large and the cache is cold. tengu_willow_mode
-      // controls treatment: "dialog" (blocking), "hint" (notification), "off".
-      {
-        const willowMode = getFeatureValue_CACHED_MAY_BE_STALE('tengu_willow_mode', 'off');
-        const idleThresholdMin = resolveIdleThresholdMinutes();
-        const tokenThreshold = resolveIdleTokenThreshold();
-        if (
-          willowMode !== 'off' &&
-          !getGlobalConfig().idleReturnDismissed &&
-          !skipIdleCheckRef.current &&
-          !speculationAccept &&
-          !input.trim().startsWith('/') &&
-          lastQueryCompletionTimeRef.current > 0 &&
-          getTotalInputTokens() >= tokenThreshold
-        ) {
-          const idleMs = Date.now() - lastQueryCompletionTimeRef.current;
-          const idleMinutes = idleMs / 60_000;
-          if (idleMinutes >= idleThresholdMin && willowMode === 'dialog') {
-            // Stash only — do NOT clear input/paste. Clearing here caused
-            // "entire message gone": PromptInput emptied, and if the dialog
-            // failed to mount (toolJSX gate / layout) there was no recovery.
-            // Dialog still gets focus via idleReturnPending; Continue re-submits
-            // the snapshot; Dismiss leaves the draft in the prompt.
-            setIdleReturnPending({
-              input,
-              idleMinutes,
-              pastedContents: effectivePastedContents,
-            });
-            return;
-          }
-        }
-      }
-
       // densable 2.1.234 #20: build historyEntry at submit; flush on drain (JDr).
       // Mid-turn queue must NOT addToHistory here — otherwise ↑ shows still-queued text.
       const isSlashCommand = !speculationAccept && input.trim().startsWith('/');
@@ -6217,6 +6154,32 @@ export function REPL({
   // old REPL scopes can be GC'd — saves ~35MB over a 1000-turn session.
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
+  resumeReturnCompactRef.current = () => {
+    void onSubmitRef
+      .current('/compact', {
+        setCursorOffset: () => {},
+        clearBuffer: () => {},
+        resetHistory: () => {},
+      })
+      .catch(err => {
+        logForDebugging(`Resume-return compact failed: ${errorMessage(err)}`);
+      });
+  };
+
+  // densable iXg(Gm, Gxt) — after session load, not picker intercept.
+  // Mount: if(ot.getState().initialMessage===null)cu(n) — skip --resume + -p.
+  const resumeReturnOfferedRef = useRef(false);
+  useEffect(() => {
+    if (resumeReturnOfferedRef.current) return;
+    if ((initialMessages?.length ?? 0) === 0) return;
+    if (initialMessage !== null) {
+      resumeReturnOfferedRef.current = true;
+      return;
+    }
+    resumeReturnOfferedRef.current = true;
+    offerResumeReturnIfNeeded(initialMessages ?? []);
+  }, [initialMessages, initialMessage, offerResumeReturnIfNeeded]);
+
   const handleOpenRateLimitOptions = useCallback(() => {
     void onSubmitRef.current('/rate-limit-options', {
       setCursorOffset: () => {},
@@ -6634,16 +6597,10 @@ export function REPL({
     return () => clearTimeout(timer);
   }, [isLoading, toolJSX, submitCount, lastQueryCompletionTime, terminal]);
 
-  // Idle-return hint: show notification when idle threshold is exceeded.
-  // Timer fires after the configured idle period; notification persists until
-  // dismissed or the user submits.
+  // densable 2.1.239 idle-return is ungated hint-only (no focused dialog).
   useEffect(() => {
     if (lastQueryCompletionTime === 0) return;
     if (isLoading) return;
-    // hint / hint_v2 only — dialog mode uses blocking IdleReturnDialog on submit.
-    const willowMode: string = getFeatureValue_CACHED_MAY_BE_STALE('tengu_willow_mode', 'off');
-    if (willowMode !== 'hint' && willowMode !== 'hint_v2') return;
-    if (getGlobalConfig().idleReturnDismissed) return;
 
     const tokenThreshold = resolveIdleTokenThreshold();
     if (getTotalInputTokens() < tokenThreshold) return;
@@ -6653,44 +6610,36 @@ export function REPL({
     const remaining = idleThresholdMs - elapsed;
 
     const timer = setTimeout(
-      (lqct, addNotif, msgsRef, mode, hintRef) => {
+      (lqct, addNotif, msgsRef, hintRef) => {
         if (msgsRef.current.length === 0) return;
         const totalTokens = getTotalInputTokens();
         const formattedTokens = formatTokens(totalTokens);
         const idleMinutes = (Date.now() - lqct) / 60_000;
         addNotif({
           key: 'idle-return-hint',
-          jsx:
-            mode === 'hint_v2' ? (
-              <>
-                <Text dimColor>new task? </Text>
-                <Text color="suggestion">/clear</Text>
-                <Text dimColor> to save </Text>
-                <Text color="suggestion">{formattedTokens} tokens</Text>
-              </>
-            ) : (
-              <Text color="warning">new task? /clear to save {formattedTokens} tokens</Text>
-            ),
+          jsx: (
+            <>
+              <Text dimColor>new task? </Text>
+              <Text color="suggestion">/clear</Text>
+              <Text dimColor> to save </Text>
+              <Text color="suggestion">{formattedTokens} tokens</Text>
+            </>
+          ),
           priority: 'medium',
-          // Persist until submit — the hint fires at T+75min idle, user may
-          // not return for hours. removeNotification in useEffect cleanup
-          // handles dismissal. 0x7FFFFFFF = setTimeout max (~24.8 days).
           timeoutMs: 0x7fffffff,
         });
-        hintRef.current = mode;
+        hintRef.current = 'hint_v2';
         logEvent('tengu_idle_return_action', {
           action: 'hint_shown' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          variant: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           idleMinutes: Math.round(idleMinutes),
           messageCount: msgsRef.current.length,
-          totalInputTokens: totalTokens,
+          contextTokens: totalTokens,
         });
       },
       Math.max(0, remaining),
       lastQueryCompletionTime,
       addNotification,
       messagesRef,
-      willowMode,
       idleHintShownRef,
     );
 
@@ -6976,6 +6925,9 @@ export function REPL({
     };
 
     const handleResume = () => {
+      // densable ePr / [re]: kc.current.clear()
+      sandboxNetworkVerdictCacheRef.current.clear();
+      sandboxAsker.clear();
       // Force complete component tree replacement instead of terminal clear
       // Ink now handles line count reset internally on SIGCONT
       setRemountKey(prev => prev + 1);
@@ -6987,7 +6939,7 @@ export function REPL({
       internal_eventEmitter?.off('suspend', handleSuspend);
       internal_eventEmitter?.off('resume', handleResume);
     };
-  }, [internal_eventEmitter]);
+  }, [internal_eventEmitter, sandboxAsker]);
 
   // Derive stop hook spinner suffix from messages state
   const stopHookSpinnerSuffix = useMemo(() => {
@@ -7282,8 +7234,25 @@ export function REPL({
   // not loading — deferredMessages only matters during streaming (keeps input
   // responsive); after the turn ends, showing messages immediately prevents a
   // jitter gap where the spinner is gone but the answer hasn't appeared yet.
-  // Only reducedMotion users keep the deferred path during loading.
-  const usesSyncMessages = showStreamingText || !isLoading;
+  // Only reducedMotion / Windows yank-bug users keep the deferred path during
+  // loading — except while the submit placeholder bridge is active (densable
+  // PKe: keep sync until deferred catches the post-submit messages so the echo
+  // line does not blank for a frame when deferred lags).
+  if (
+    placeholderBridgePendingRef.current &&
+    placeholderBaseline !== undefined &&
+    messages.length > placeholderBaseline
+  ) {
+    const deferredCaught =
+      messages.length > DEFERRED_CAP
+        ? deferredMessages === cappedMessages
+        : deferredMessages.length > placeholderBaseline;
+    if (deferredCaught) {
+      placeholderBridgePendingRef.current = false;
+    }
+  }
+  const placeholderBridgeActive = placeholderBridgePendingRef.current && deferredMessages !== cappedMessages;
+  const usesSyncMessages = showStreamingText || !isLoading || placeholderBridgeActive;
   // When viewing an agent, never fall through to leader — empty until
   // bootstrap/stream fills. Closes the see-leader-type-agent footgun.
   const rawAgentMessages = viewedAgentTask?.messages;
@@ -7526,19 +7495,30 @@ export function REPL({
     // stays entered across toggle. The 30-cap dump branch stays
     // unwrapped — it wants native terminal scrollback.
     if (transcriptScrollRef) {
+      if (isAxcStickyMainEnabled()) {
+        return <MainScreenShell mouseTracking={mouseTrackingProp()}>{transcriptReturn}</MainScreenShell>;
+      }
       return <AlternateScreen mouseTracking={mouseTrackingProp()}>{transcriptReturn}</AlternateScreen>;
     }
     return transcriptReturn;
   }
 
-  // Show the placeholder until the real user message appears in the
-  // transcript. userInputOnProcessing stays set for the whole turn (cleared
-  // in resetLoadingState); userMessagePending flips false the instant the
-  // submitted message lands in setMessages. Suppressed when viewing an
-  // agent — displayedMessages is a different array there, and onAgentSubmit
-  // doesn't use the placeholder anyway.
+  // densable PKe: placeholderElement while displayed.length <= baseline.
+  // userInputOnProcessing (`go`) stays for the whole turn; baseline gate
+  // hides the echo once deferred/sync Messages includes the new turn.
+  // Latch dismissed after first past-baseline render so mid-turn compact
+  // cannot resurrect the echo when length drops again.
+  if (placeholderBaseline !== undefined && displayedMessages.length > placeholderBaseline) {
+    placeholderEchoDismissedRef.current = true;
+  }
   const placeholderText =
-    userInputOnProcessing && !viewedAgentTask && userMessagePending ? userInputOnProcessing : undefined;
+    userInputOnProcessing &&
+    !viewedAgentTask &&
+    placeholderBaseline !== undefined &&
+    !placeholderEchoDismissedRef.current &&
+    displayedMessages.length <= placeholderBaseline
+      ? userInputOnProcessing
+      : undefined;
 
   // densable NMs owns permission UI (jsu → Iiu). Tip overlay retired —
   // queue-only pushers must mirror into DialogStore (createPermissionQueueOps).
@@ -7554,7 +7534,8 @@ export function REPL({
   // spriteWidth — divider stops short and dialog text wraps early. Don't
   // check footerSelection: pill FOCUS (arrow-down to tasks pill) must keep
   // the sprite visible so arrow-right can navigate to it.
-  const companionVisible = !toolJSX?.shouldHidePromptInput && !focusedInputDialog && !showBashesDialog;
+  const companionVisible =
+    !toolJSX?.shouldHidePromptInput && !focusedInputDialog && !showBashesDialog && !hidePromptForHardNms;
 
   // In fullscreen, ALL local-jsx slash commands float in the modal slot —
   // FullscreenLayout wraps them in an absolute-positioned bottom-anchored
@@ -7564,14 +7545,42 @@ export function REPL({
   // (immediate: /model, /mcp, /btw, ...) and scrollable (non-immediate:
   // /config, /theme, /diff, ...) both go here now.
   const toolJsxCentered = isFullscreenEnvEnabled() && toolJSX?.isLocalJSXCommand === true;
-  // densable rSh gGn + ozs modal NMs: peer/local-jsx share modal slot; also
-  // mount DialogHost variant=modal (mLo filter; GSn stays inline).
-  const centeredModal: React.ReactNode = isFullscreenEnvEnabled() ? (
-    <>
-      {toolJsxCentered ? toolJSX!.jsx : peerInboundApprovalDialog}
-      <DialogHost variant="modal" suppressReason={isPromptInputActive ? 'typing' : null} />
-    </>
-  ) : null;
+  // densable ozs: KA ? {content:NMs(modal), visible:wi==="visible"}
+  //            : PCn ? {content:PCn, visible:true} : undefined
+  // densable kZt = KA&&wi==="visible"||PCn — not bare occupy (KA||PCn)
+  const kZt = isFullscreenModalChromeActive({
+    toolJsxCentered,
+    topDialogKind,
+    modalChrome,
+  });
+  const ozs = isTopDialogModalLayout(topDialogKind)
+    ? {
+        content: <DialogHost variant="modal" suppressReason={dialogSuppressReason} />,
+        visible: modalChrome === 'visible',
+      }
+    : toolJsxCentered
+      ? { content: toolJSX!.jsx, visible: true }
+      : undefined;
+  const permissionDialogHostValue = useMemo(
+    () => ({
+      verbose,
+      getToolUseContext: () =>
+        getToolUseContext(messages, messages, abortController ?? createAbortController(), mainLoopModel),
+      onReject: handleQueuedCommandOnCancel,
+      dequeue: (toolUseID: string) => {
+        setToolUseConfirmQueue(queue => queue.filter(item => item.toolUseID !== toolUseID));
+        void import('../dialog/permissionConfirmRegistry.js').then(m => {
+          m.unregisterPermissionConfirm(toolUseID);
+        });
+        const id = permissionPromptDialogId(toolUseID);
+        if (dialogStore.getState().open.some(d => d.id === id)) {
+          dialogStore.dismiss(id);
+        }
+      },
+      setStickyFooter: isFullscreenEnvEnabled() ? setPermissionStickyFooter : undefined,
+    }),
+    [verbose, getToolUseContext, messages, abortController, mainLoopModel, handleQueuedCommandOnCancel, dialogStore],
+  );
   // densable BUo — willow crate sidebar width (0 when GB off / not main / no git)
   const replDiffSidebarWidth = computeDiffSidebarWidth({
     willowCrateEnabled,
@@ -7616,124 +7625,122 @@ export function REPL({
           stamp divider/pill state. */}
       <ScrollKeybindingHandler
         scrollRef={scrollRef}
-        isActive={
-          isFullscreenEnvEnabled() &&
-          (centeredModal != null || !focusedInputDialog || focusedInputDialog === 'tool-permission')
-        }
-        onScroll={composedOnScroll}
+        isActive={isFullscreenEnvEnabled() && (kZt || !focusedInputDialog || focusedInputDialog === 'tool-permission')}
+        onScroll={kZt || !!viewedAgentTask ? undefined : composedOnScroll}
       />
       {feature('MESSAGE_ACTIONS') && isFullscreenEnvEnabled() && !disableMessageActions ? (
         <MessageActionsKeybindings handlers={messageActionHandlers} isActive={cursor !== null} />
       ) : null}
       <CancelRequestHandler {...cancelRequestProps} />
       <MCPConnectionManager key={remountKey} dynamicMcpConfig={dynamicMcpConfig} isStrictMcpConfig={strictMcpConfig}>
-        <FullscreenLayout
-          scrollRef={scrollRef}
-          overlay={toolPermissionOverlay}
-          bottomFloat={buddyEnabled && companionVisible && !companionNarrow ? <CompanionFloatingBubble /> : undefined}
-          modal={centeredModal}
-          modalScrollRef={modalScrollRef}
-          dividerYRef={dividerYRef}
-          hidePill={!!viewedAgentTask}
-          hideSticky={!!viewedTeammateTask}
-          newMessageCount={unseenDivider?.count ?? 0}
-          sidebarWidth={replDiffSidebarWidth}
-          sidebar={
-            <ReplDiffSidebarController width={replDiffSidebarWidth} autoOpenBaseline={replDiffAutoOpenBaseline} />
-          }
-          onPillClick={() => {
-            setCursor(null);
-            jumpToNew(scrollRef.current);
-          }}
-          scrollable={
-            <>
-              <TeammateViewHeader />
-              <Messages
-                messages={displayedMessages}
-                tools={tools}
-                commands={commands}
-                verbose={verbose}
-                toolJSX={toolJSX}
-                toolUseConfirmQueue={toolUseConfirmQueue}
-                inProgressToolUseIDs={
-                  viewedTeammateTask ? (viewedTeammateTask.inProgressToolUseIDs ?? new Set()) : inProgressToolUseIDs
-                }
-                isMessageSelectorVisible={isMessageSelectorVisible}
-                conversationId={conversationId}
-                screen={screen}
-                streamingToolUses={streamingToolUses}
-                showAllInTranscript={showAllInTranscript}
-                agentDefinitions={agentDefinitions}
-                onOpenRateLimitOptions={handleOpenRateLimitOptions}
-                isLoading={isLoading}
-                hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText}
-                streamingPreview={isLoading && !viewedAgentTask && showStreamingText ? streamingPreviewEl : null}
-                isBriefOnly={viewedAgentTask ? false : isBriefOnly}
-                unseenDivider={viewedAgentTask ? undefined : unseenDivider}
-                scrollRef={isFullscreenEnvEnabled() ? scrollRef : undefined}
-                trackStickyPrompt={isFullscreenEnvEnabled() ? true : undefined}
-                cursor={cursor}
-                setCursor={setCursor}
-                cursorNavRef={cursorNavRef}
-              />
-              <AwsAuthStatusBox />
-              {/* Hide the processing placeholder while a modal is showing —
+        <PermissionDialogHostProvider value={permissionDialogHostValue}>
+          <FullscreenLayout
+            scrollRef={scrollRef}
+            overlay={toolPermissionOverlay}
+            bottomFloat={buddyEnabled && companionVisible && !companionNarrow ? <CompanionFloatingBubble /> : undefined}
+            modal={ozs}
+            modalScrollRef={modalScrollRef}
+            dividerYRef={dividerYRef}
+            hidePill={!!viewedAgentTask}
+            hideSticky={!!viewedTeammateTask}
+            newMessageCount={unseenDivider?.count ?? 0}
+            sidebarWidth={replDiffSidebarWidth}
+            sidebar={
+              <ReplDiffSidebarController width={replDiffSidebarWidth} autoOpenBaseline={replDiffAutoOpenBaseline} />
+            }
+            onPillClick={() => {
+              setCursor(null);
+              jumpToNew(scrollRef.current);
+            }}
+            scrollable={
+              <>
+                <TeammateViewHeader />
+                <Messages
+                  messages={displayedMessages}
+                  tools={tools}
+                  commands={commands}
+                  verbose={verbose}
+                  toolJSX={toolJSX}
+                  toolUseConfirmQueue={toolUseConfirmQueue}
+                  inProgressToolUseIDs={
+                    viewedTeammateTask ? (viewedTeammateTask.inProgressToolUseIDs ?? new Set()) : inProgressToolUseIDs
+                  }
+                  isMessageSelectorVisible={isMessageSelectorVisible}
+                  conversationId={conversationId}
+                  screen={screen}
+                  streamingToolUses={streamingToolUses}
+                  showAllInTranscript={showAllInTranscript}
+                  agentDefinitions={agentDefinitions}
+                  onOpenRateLimitOptions={handleOpenRateLimitOptions}
+                  isLoading={isLoading}
+                  hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText}
+                  streamingPreview={isLoading && !viewedAgentTask && showStreamingText ? streamingPreviewEl : null}
+                  isBriefOnly={viewedAgentTask ? false : isBriefOnly}
+                  unseenDivider={viewedAgentTask ? undefined : unseenDivider}
+                  scrollRef={isFullscreenEnvEnabled() ? scrollRef : undefined}
+                  trackStickyPrompt={isFullscreenEnvEnabled() ? true : undefined}
+                  cursor={cursor}
+                  setCursor={setCursor}
+                  cursorNavRef={cursorNavRef}
+                />
+                <AwsAuthStatusBox />
+                {/* Hide the processing placeholder while a modal is showing —
                   it would sit at the last visible transcript row right above
                   the ▔ divider, showing "❯ /config" as redundant clutter
                   (the modal IS the /config UI). Outside modals it stays so
                   the user sees their input echoed while Claude processes. */}
-              {!disabled && placeholderText && !centeredModal && (
-                <UserTextMessage param={{ text: placeholderText, type: 'text' }} addMargin={true} verbose={verbose} />
-              )}
-              {toolJSX && !(toolJSX.isLocalJSXCommand && toolJSX.isImmediate) && !toolJsxCentered && (
-                <Box flexDirection="column" width="100%">
-                  {toolJSX.jsx}
-                </Box>
-              )}
-              {process.env.USER_TYPE === 'ant' && <TungstenLiveMonitor />}
-              {/* WebBrowserPanel removed — browser-lite, no panel */}
-              <Box flexGrow={1} />
-              {showSpinner && (
-                <SpinnerWithVerb
-                  mode={streamMode}
-                  spinnerTip={spinnerTip}
-                  responseLengthRef={responseLengthRef}
-                  apiMetricsRef={apiMetricsRef}
-                  compactProgressActiveRef={compactProgressActiveRef}
-                  overrideMessage={spinnerMessage}
-                  spinnerSuffix={stopHookSpinnerSuffix}
-                  verbose={verbose}
-                  loadingStartTimeRef={loadingStartTimeRef}
-                  totalPausedMsRef={totalPausedMsRef}
-                  pauseStartTimeRef={pauseStartTimeRef}
-                  overrideColor={spinnerColor}
-                  overrideShimmerColor={spinnerShimmerColor}
-                  hasActiveTools={inProgressToolUseIDs.size > 0}
-                  leaderIsIdle={!isLoading}
-                  retryStatus={retryStatus}
-                />
-              )}
-              {!showSpinner &&
-                !isLoading &&
-                !userInputOnProcessing &&
-                !hasRunningTeammates &&
-                isBriefOnly &&
-                !viewedAgentTask && <BriefIdleStatus />}
-            </>
-          }
-          bottom={
-            <Box
-              flexDirection={buddyEnabled && companionNarrow ? 'column' : 'row'}
-              width="100%"
-              alignItems={buddyEnabled && companionNarrow ? undefined : 'flex-end'}
-            >
-              {buddyEnabled && companionNarrow && isFullscreenEnvEnabled() && companionVisible ? (
-                <CompanionSprite />
-              ) : null}
-              <Box flexDirection="column" flexGrow={1}>
-                {isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
-                {permissionStickyFooter}
-                {/* Immediate local-jsx commands (/btw, /sandbox, /assistant,
+                {!disabled && placeholderText && !kZt && (
+                  <UserTextMessage param={{ text: placeholderText, type: 'text' }} addMargin={true} verbose={verbose} />
+                )}
+                {toolJSX && !(toolJSX.isLocalJSXCommand && toolJSX.isImmediate) && !toolJsxCentered && (
+                  <Box flexDirection="column" width="100%">
+                    {toolJSX.jsx}
+                  </Box>
+                )}
+                {process.env.USER_TYPE === 'ant' && <TungstenLiveMonitor />}
+                {/* WebBrowserPanel removed — browser-lite, no panel */}
+                <Box flexGrow={1} />
+                {showSpinner && (
+                  <SpinnerWithVerb
+                    mode={streamMode}
+                    spinnerTip={spinnerTip}
+                    responseLengthRef={responseLengthRef}
+                    apiMetricsRef={apiMetricsRef}
+                    compactProgressActiveRef={compactProgressActiveRef}
+                    overrideMessage={spinnerMessage}
+                    spinnerSuffix={stopHookSpinnerSuffix}
+                    verbose={verbose}
+                    loadingStartTimeRef={loadingStartTimeRef}
+                    totalPausedMsRef={totalPausedMsRef}
+                    pauseStartTimeRef={pauseStartTimeRef}
+                    overrideColor={spinnerColor}
+                    overrideShimmerColor={spinnerShimmerColor}
+                    hasActiveTools={inProgressToolUseIDs.size > 0}
+                    leaderIsIdle={!isLoading}
+                    retryStatus={retryStatus}
+                  />
+                )}
+                {!showSpinner &&
+                  !isLoading &&
+                  !userInputOnProcessing &&
+                  !hasRunningTeammates &&
+                  isBriefOnly &&
+                  !viewedAgentTask && <BriefIdleStatus />}
+              </>
+            }
+            bottom={
+              <Box
+                flexDirection={buddyEnabled && companionNarrow ? 'column' : 'row'}
+                width="100%"
+                alignItems={buddyEnabled && companionNarrow ? undefined : 'flex-end'}
+              >
+                {buddyEnabled && companionNarrow && isFullscreenEnvEnabled() && companionVisible ? (
+                  <CompanionSprite />
+                ) : null}
+                <Box flexDirection="column" flexGrow={1}>
+                  {isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
+                  {permissionStickyFooter}
+                  {/* Immediate local-jsx commands (/btw, /sandbox, /assistant,
                   /issue) render here, NOT inside scrollable. They stay mounted
                   while the main conversation streams behind them, so ScrollBox
                   relayouts on each new message would drag them around. bottom
@@ -7742,850 +7749,697 @@ export function REPL({
                   stays in scrollable: the main loop is paused so no jiggle,
                   and their tall content (DiffDetailView renders up to 400
                   lines with no internal scroll) needs the outer ScrollBox. */}
-                {toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !toolJsxCentered && (
-                  <Box flexDirection="column" width="100%">
-                    {toolJSX.jsx}
-                  </Box>
-                )}
-                {/* densable rSh gGn — non-fullscreen host (fullscreen uses modal slot). */}
-                {!isFullscreenEnvEnabled() && peerInboundApprovalDialog != null && !isShowingLocalJSXCommand && (
-                  <Box flexDirection="column" width="100%">
-                    {peerInboundApprovalDialog}
-                  </Box>
-                )}
-                {!showSpinner && !toolJSX?.isLocalJSXCommand && showExpandedTodos && tasksV2 && tasksV2.length > 0 && (
-                  <Box width="100%" flexDirection="column">
-                    <TaskListV2 tasks={tasksV2} isStandalone={true} />
-                  </Box>
-                )}
-                {/* densable NMs inline — GSn + bEt (permission_prompt) */}
-                <PermissionDialogHostProvider
-                  value={{
-                    verbose,
-                    getToolUseContext: () =>
-                      getToolUseContext(messages, messages, abortController ?? createAbortController(), mainLoopModel),
-                    onReject: handleQueuedCommandOnCancel,
-                    dequeue: (toolUseID: string) => {
-                      setToolUseConfirmQueue(queue => queue.filter(item => item.toolUseID !== toolUseID));
-                      void import('../dialog/permissionConfirmRegistry.js').then(m => {
-                        m.unregisterPermissionConfirm(toolUseID);
-                      });
-                      // Tip mirror id only — doo mailbox uses dialog-N; dismissing
-                      // by requestId here races FilePermission onDone→onReject
-                      // (would cancel before Host can answer deny).
-                      const id = permissionPromptDialogId(toolUseID);
-                      if (dialogStore.getState().open.some(d => d.id === id)) {
-                        dialogStore.dismiss(id);
+                  {toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !toolJsxCentered && (
+                    <Box flexDirection="column" width="100%">
+                      {toolJSX.jsx}
+                    </Box>
+                  )}
+                  {!showSpinner &&
+                    !toolJSX?.isLocalJSXCommand &&
+                    showExpandedTodos &&
+                    tasksV2 &&
+                    tasksV2.length > 0 && (
+                      <Box width="100%" flexDirection="column">
+                        <TaskListV2 tasks={tasksV2} isStandalone={true} />
+                      </Box>
+                    )}
+                  {/* densable NMs inline — GSn + bEt (permission_prompt); tip sandbox is FRr */}
+                  <DialogHost variant="inline" suppressReason={dialogSuppressReason} />
+                  {focusedInputDialog === 'prompt' && (
+                    <PromptDialog
+                      key={promptQueue[0]!.request.prompt}
+                      title={promptQueue[0]!.title}
+                      toolInputSummary={promptQueue[0]!.toolInputSummary}
+                      request={promptQueue[0]!.request}
+                      onRespond={selectedKey => {
+                        const item = promptQueue[0];
+                        if (!item) return;
+                        item.resolve({
+                          prompt_response: item.request.prompt,
+                          selected: selectedKey,
+                        });
+                        setPromptQueue(([, ...tail]) => tail);
+                      }}
+                      onAbort={() => {
+                        const item = promptQueue[0];
+                        if (!item) return;
+                        item.reject(new Error('Prompt cancelled by user'));
+                        setPromptQueue(([, ...tail]) => tail);
+                      }}
+                    />
+                  )}
+                  {/* Show pending indicator on worker while waiting for leader approval */}
+                  {pendingWorkerRequest && (
+                    <WorkerPendingPermission
+                      toolName={pendingWorkerRequest.toolName}
+                      description={pendingWorkerRequest.description}
+                    />
+                  )}
+                  {/* Show pending indicator for sandbox permission on worker side */}
+                  {pendingSandboxRequest && (
+                    <WorkerPendingPermission
+                      toolName="Network Access"
+                      description={`Waiting for leader to approve network access to ${pendingSandboxRequest.host}`}
+                    />
+                  )}
+                  {/* Worker sandbox permission requests from swarm workers */}
+                  {focusedInputDialog === 'worker-sandbox-permission' && (
+                    <SandboxPermissionRequest
+                      key={workerSandboxPermissions.queue[0]!.requestId}
+                      hostPattern={
+                        {
+                          host: workerSandboxPermissions.queue[0]!.host,
+                          port: undefined,
+                        } as NetworkHostPattern
                       }
-                    },
-                    setStickyFooter: isFullscreenEnvEnabled() ? setPermissionStickyFooter : undefined,
-                  }}
-                >
-                  <DialogHost variant="inline" suppressReason={isPromptInputActive ? 'typing' : null} />
-                </PermissionDialogHostProvider>
-                {focusedInputDialog === 'sandbox-permission' && (
-                  <SandboxPermissionRequest
-                    key={sandboxPermissionRequestQueue[0]!.hostPattern.host}
-                    hostPattern={sandboxPermissionRequestQueue[0]!.hostPattern}
-                    onUserResponse={(response: { allow: boolean; persistToSettings: boolean }) => {
-                      const { allow, persistToSettings } = response;
-                      const currentRequest = sandboxPermissionRequestQueue[0];
-                      if (!currentRequest) return;
+                      onUserResponse={response => {
+                        const { allow, persistToSettings } =
+                          response === 'cancelled' ? { allow: false, persistToSettings: false } : response;
+                        const currentRequest = workerSandboxPermissions.queue[0];
+                        if (!currentRequest) return;
 
-                      const approvedHost = currentRequest.hostPattern.host;
+                        const approvedHost = currentRequest.host;
 
-                      if (persistToSettings) {
-                        const update = {
-                          type: 'addRules' as const,
-                          rules: [
-                            {
-                              toolName: WEB_FETCH_TOOL_NAME,
-                              // densable KXt(Vo) — bracket IPv6 in domain: rule
-                              ruleContent: `domain:${normalizeSandboxSessionHost(approvedHost)}`,
-                            },
-                          ],
-                          behavior: (allow ? 'allow' : 'deny') as 'allow' | 'deny',
-                          destination: 'localSettings' as const,
-                        };
+                        // Send response via mailbox to the worker
+                        void sendSandboxPermissionResponseViaMailbox(
+                          currentRequest.workerName,
+                          currentRequest.requestId,
+                          approvedHost,
+                          allow,
+                          teamContext?.teamName,
+                        );
 
-                        setAppState(prev => ({
-                          ...prev,
-                          toolPermissionContext: applyPermissionUpdate(prev.toolPermissionContext, update),
-                        }));
+                        if (persistToSettings && allow) {
+                          const update = {
+                            type: 'addRules' as const,
+                            rules: [
+                              {
+                                toolName: WEB_FETCH_TOOL_NAME,
+                                ruleContent: `domain:${normalizeSandboxSessionHost(approvedHost)}`,
+                              },
+                            ],
+                            behavior: 'allow' as const,
+                            destination: 'localSettings' as const,
+                          };
 
-                        // densable: allow → sessionAllowedHosts before/with persist refresh
-                        if (allow) SandboxManager.addSessionAllowedHost(approvedHost);
+                          setAppState(prev => ({
+                            ...prev,
+                            toolPermissionContext: applyPermissionUpdate(prev.toolPermissionContext, update),
+                          }));
 
-                        persistPermissionUpdate(update);
-
-                        // Immediately update sandbox in-memory config to prevent race conditions
-                        // where pending requests slip through before settings change is detected
-                        SandboxManager.refreshConfig();
-                      } else if (allow) {
-                        // densable else if(Rr) oi.addSessionAllowedHost(Vo)
-                        SandboxManager.addSessionAllowedHost(approvedHost);
-                      }
-
-                      // Resolve ALL pending requests for the same host (not just the first one)
-                      // This handles the case where multiple parallel requests came in for the same domain
-                      setSandboxPermissionRequestQueue(queue => {
-                        queue
-                          .filter(item => item.hostPattern.host === approvedHost)
-                          .forEach(item => item.resolvePromise(allow));
-                        return queue.filter(item => item.hostPattern.host !== approvedHost);
-                      });
-
-                      // Clean up bridge subscriptions and cancel remote prompts
-                      // for this host since the local user already responded.
-                      const cleanups = sandboxBridgeCleanupRef.current.get(approvedHost);
-                      if (cleanups) {
-                        for (const fn of cleanups) {
-                          fn();
+                          SandboxManager.addSessionAllowedHost(approvedHost);
+                          persistPermissionUpdate(update);
+                          SandboxManager.refreshConfig();
+                        } else if (allow) {
+                          SandboxManager.addSessionAllowedHost(approvedHost);
                         }
-                        sandboxBridgeCleanupRef.current.delete(approvedHost);
-                      }
-                    }}
-                  />
-                )}
-                {focusedInputDialog === 'prompt' && (
-                  <PromptDialog
-                    key={promptQueue[0]!.request.prompt}
-                    title={promptQueue[0]!.title}
-                    toolInputSummary={promptQueue[0]!.toolInputSummary}
-                    request={promptQueue[0]!.request}
-                    onRespond={selectedKey => {
-                      const item = promptQueue[0];
-                      if (!item) return;
-                      item.resolve({
-                        prompt_response: item.request.prompt,
-                        selected: selectedKey,
-                      });
-                      setPromptQueue(([, ...tail]) => tail);
-                    }}
-                    onAbort={() => {
-                      const item = promptQueue[0];
-                      if (!item) return;
-                      item.reject(new Error('Prompt cancelled by user'));
-                      setPromptQueue(([, ...tail]) => tail);
-                    }}
-                  />
-                )}
-                {/* Show pending indicator on worker while waiting for leader approval */}
-                {pendingWorkerRequest && (
-                  <WorkerPendingPermission
-                    toolName={pendingWorkerRequest.toolName}
-                    description={pendingWorkerRequest.description}
-                  />
-                )}
-                {/* Show pending indicator for sandbox permission on worker side */}
-                {pendingSandboxRequest && (
-                  <WorkerPendingPermission
-                    toolName="Network Access"
-                    description={`Waiting for leader to approve network access to ${pendingSandboxRequest.host}`}
-                  />
-                )}
-                {/* Worker sandbox permission requests from swarm workers */}
-                {focusedInputDialog === 'worker-sandbox-permission' && (
-                  <SandboxPermissionRequest
-                    key={workerSandboxPermissions.queue[0]!.requestId}
-                    hostPattern={
-                      {
-                        host: workerSandboxPermissions.queue[0]!.host,
-                        port: undefined,
-                      } as NetworkHostPattern
-                    }
-                    onUserResponse={(response: { allow: boolean; persistToSettings: boolean }) => {
-                      const { allow, persistToSettings } = response;
-                      const currentRequest = workerSandboxPermissions.queue[0];
-                      if (!currentRequest) return;
 
-                      const approvedHost = currentRequest.host;
-
-                      // Send response via mailbox to the worker
-                      void sendSandboxPermissionResponseViaMailbox(
-                        currentRequest.workerName,
-                        currentRequest.requestId,
-                        approvedHost,
-                        allow,
-                        teamContext?.teamName,
-                      );
-
-                      if (persistToSettings && allow) {
-                        const update = {
-                          type: 'addRules' as const,
-                          rules: [
-                            {
-                              toolName: WEB_FETCH_TOOL_NAME,
-                              ruleContent: `domain:${normalizeSandboxSessionHost(approvedHost)}`,
-                            },
-                          ],
-                          behavior: 'allow' as const,
-                          destination: 'localSettings' as const,
-                        };
-
+                        // Remove from queue
                         setAppState(prev => ({
                           ...prev,
-                          toolPermissionContext: applyPermissionUpdate(prev.toolPermissionContext, update),
+                          workerSandboxPermissions: {
+                            ...prev.workerSandboxPermissions,
+                            queue: prev.workerSandboxPermissions.queue.slice(1),
+                          },
                         }));
-
-                        SandboxManager.addSessionAllowedHost(approvedHost);
-                        persistPermissionUpdate(update);
-                        SandboxManager.refreshConfig();
-                      } else if (allow) {
-                        SandboxManager.addSessionAllowedHost(approvedHost);
-                      }
-
-                      // Remove from queue
-                      setAppState(prev => ({
-                        ...prev,
-                        workerSandboxPermissions: {
-                          ...prev.workerSandboxPermissions,
-                          queue: prev.workerSandboxPermissions.queue.slice(1),
-                        },
-                      }));
-                    }}
-                  />
-                )}
-                {focusedInputDialog === 'elicitation' && (
-                  <ElicitationDialog
-                    key={elicitation.queue[0]!.serverName + ':' + String(elicitation.queue[0]!.requestId)}
-                    event={elicitation.queue[0]!}
-                    onResponse={(action, content) => {
-                      const currentRequest = elicitation.queue[0];
-                      if (!currentRequest) return;
-                      // Call respond callback to resolve Promise
-                      currentRequest.respond({ action, content });
-                      // For URL accept, keep in queue for phase 2
-                      const isUrlAccept = currentRequest.params.mode === 'url' && action === 'accept';
-                      if (!isUrlAccept) {
+                      }}
+                    />
+                  )}
+                  {focusedInputDialog === 'elicitation' && (
+                    <ElicitationDialog
+                      key={elicitation.queue[0]!.serverName + ':' + String(elicitation.queue[0]!.requestId)}
+                      event={elicitation.queue[0]!}
+                      onResponse={(action, content) => {
+                        const currentRequest = elicitation.queue[0];
+                        if (!currentRequest) return;
+                        // Call respond callback to resolve Promise
+                        currentRequest.respond({ action, content });
+                        // For URL accept, keep in queue for phase 2
+                        const isUrlAccept = currentRequest.params.mode === 'url' && action === 'accept';
+                        if (!isUrlAccept) {
+                          setAppState(prev => ({
+                            ...prev,
+                            elicitation: {
+                              queue: prev.elicitation.queue.slice(1),
+                            },
+                          }));
+                        }
+                      }}
+                      onWaitingDismiss={action => {
+                        const currentRequest = elicitation.queue[0];
+                        // Remove from queue
                         setAppState(prev => ({
                           ...prev,
                           elicitation: {
                             queue: prev.elicitation.queue.slice(1),
                           },
                         }));
-                      }
-                    }}
-                    onWaitingDismiss={action => {
-                      const currentRequest = elicitation.queue[0];
-                      // Remove from queue
-                      setAppState(prev => ({
-                        ...prev,
-                        elicitation: {
-                          queue: prev.elicitation.queue.slice(1),
-                        },
-                      }));
-                      currentRequest?.onWaitingDismiss?.(action);
-                    }}
-                  />
-                )}
-                {focusedInputDialog === 'cost' && (
-                  <CostThresholdDialog
-                    onDone={() => {
-                      setShowCostDialog(false);
-                      setHaveShownCostDialog(true);
-                      saveGlobalConfig(current => ({
-                        ...current,
-                        hasAcknowledgedCostThreshold: true,
-                      }));
-                      logEvent('tengu_cost_threshold_acknowledged', {});
-                    }}
-                  />
-                )}
-                {focusedInputDialog === 'idle-return' && idleReturnPending && (
-                  <IdleReturnDialog
-                    idleMinutes={idleReturnPending.idleMinutes}
-                    totalInputTokens={getTotalInputTokens()}
-                    onDone={async action => {
-                      const pending = idleReturnPending;
-                      setIdleReturnPending(null);
-                      logEvent('tengu_idle_return_action', {
-                        action: action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                        idleMinutes: Math.round(pending.idleMinutes),
-                        messageCount: messagesRef.current.length,
-                        totalInputTokens: getTotalInputTokens(),
-                      });
-                      if (action === 'dismiss') {
-                        setInputValue(pending.input);
-                        setPastedContents(pending.pastedContents);
-                        return;
-                      }
-                      if (action === 'never') {
-                        saveGlobalConfig(current => {
-                          if (current.idleReturnDismissed) return current;
-                          return { ...current, idleReturnDismissed: true };
-                        });
-                      }
-                      if (action === 'clear') {
-                        const { clearConversation } = await import('../commands/clear/conversation.js');
-                        await clearConversation({
-                          setMessages,
-                          readFileState: readFileState.current,
-                          discoveredSkillNames: discoveredSkillNamesRef.current,
-                          loadedNestedMemoryPaths: loadedNestedMemoryPathsRef.current,
-                          pendingNestedMemoryTriggers: pendingNestedMemoryTriggersRef.current,
-                          getAppState: () => store.getState(),
-                          setAppState,
-                          setConversationId,
-                        });
-                        haikuTitleAttemptedRef.current = false;
-                        setHaikuTitle(undefined);
-                        bashTools.current.clear();
-                        bashHosts.current.clear();
-                        bashToolsProcessedIdx.current = 0;
-                      }
-                      skipIdleCheckRef.current = true;
-                      // Draft was left in the prompt while the dialog was open
-                      // (we no longer clear on intercept). Clear before re-submit
-                      // so the prompt doesn't flash the pending text; override
-                      // carries paste map even if setState has not committed.
-                      setInputValue('');
-                      setPastedContents(pending.pastedContents);
-                      void onSubmitRef.current(
-                        pending.input,
-                        {
-                          setCursorOffset: () => {},
-                          clearBuffer: () => {},
-                          resetHistory: () => {},
-                        },
-                        undefined,
-                        { pastedContentsOverride: pending.pastedContents },
-                      );
-                    }}
-                  />
-                )}
-                {focusedInputDialog === 'ide-onboarding' && (
-                  <IdeOnboardingDialog
-                    onDone={() => setShowIdeOnboarding(false)}
-                    installationStatus={ideInstallationStatus}
-                  />
-                )}
-                {process.env.USER_TYPE === 'ant' && focusedInputDialog === 'model-switch' && AntModelSwitchCallout && (
-                  <AntModelSwitchCallout
-                    onDone={(selection: string, modelAlias?: string) => {
-                      setShowModelSwitchCallout(false);
-                      if (selection === 'switch' && modelAlias) {
-                        setAppState(prev => ({
-                          ...prev,
-                          mainLoopModel: modelAlias,
-                          mainLoopModelForSession: null,
-                        }));
-                      }
-                    }}
-                  />
-                )}
-                {process.env.USER_TYPE === 'ant' &&
-                  focusedInputDialog === 'undercover-callout' &&
-                  UndercoverAutoCallout && <UndercoverAutoCallout onDone={() => setShowUndercoverCallout(false)} />}
-                {focusedInputDialog === 'effort-callout' && (
-                  <EffortCallout
-                    model={mainLoopModel}
-                    onDone={selection => {
-                      setShowEffortCallout(false);
-                      if (selection !== 'dismiss') {
-                        setAppState(prev => ({
-                          ...prev,
-                          effortValue: selection,
-                        }));
-                      }
-                    }}
-                  />
-                )}
-                {focusedInputDialog === 'remote-callout' && (
-                  <RemoteCallout
-                    onDone={selection => {
-                      setAppState(prev => {
-                        if (!prev.showRemoteCallout) return prev;
-                        return {
-                          ...prev,
-                          showRemoteCallout: false,
-                          ...(selection === 'enable' && {
-                            replBridgeEnabled: true,
-                            replBridgeExplicit: true,
-                            replBridgeOutboundOnly: false,
-                          }),
-                        };
-                      });
-                    }}
-                  />
-                )}
-
-                {exitFlow}
-
-                {focusedInputDialog === 'plugin-hint' && hintRecommendation && (
-                  <PluginHintMenu
-                    pluginName={hintRecommendation.pluginName}
-                    pluginDescription={hintRecommendation.pluginDescription}
-                    marketplaceName={hintRecommendation.marketplaceName}
-                    sourceCommand={hintRecommendation.sourceCommand}
-                    onResponse={handleHintResponse}
-                  />
-                )}
-
-                {focusedInputDialog === 'search-extra-tools-hint' && searchExtraToolsHint.visible && (
-                  <SearchExtraToolsHint
-                    tools={searchExtraToolsHint.tools}
-                    onSelect={searchExtraToolsHint.handleSelect}
-                    onDismiss={searchExtraToolsHint.handleDismiss}
-                  />
-                )}
-
-                {focusedInputDialog === 'lsp-recommendation' && lspRecommendation && (
-                  <LspRecommendationMenu
-                    pluginName={lspRecommendation.pluginName}
-                    pluginDescription={lspRecommendation.pluginDescription}
-                    fileExtension={lspRecommendation.fileExtension}
-                    onResponse={handleLspResponse}
-                  />
-                )}
-
-                {focusedInputDialog === 'desktop-upsell' && (
-                  <DesktopUpsellStartup onDone={() => setShowDesktopUpsellStartup(false)} />
-                )}
-
-                {focusedInputDialog === 'fullscreen-upsell' && (
-                  <FullscreenUpsellDialog onDone={() => setShowFullscreenUpsell(false)} />
-                )}
-
-                {feature('ULTRAPLAN')
-                  ? focusedInputDialog === 'ultraplan-choice' &&
-                    ultraplanPendingChoice && (
-                      <UltraplanChoiceDialog
-                        plan={ultraplanPendingChoice.plan}
-                        sessionId={ultraplanPendingChoice.sessionId}
-                        taskId={ultraplanPendingChoice.taskId}
-                        setMessages={setMessages}
-                        readFileState={readFileState.current}
-                        getAppState={() => store.getState()}
-                        setConversationId={setConversationId}
-                      />
-                    )
-                  : null}
-
-                {feature('ULTRAPLAN')
-                  ? focusedInputDialog === 'ultraplan-launch' &&
-                    ultraplanLaunchPending && (
-                      <UltraplanLaunchDialog
-                        onChoice={(choice, opts) => {
-                          const blurb = ultraplanLaunchPending.blurb;
-                          setAppState(prev =>
-                            prev.ultraplanLaunchPending ? { ...prev, ultraplanLaunchPending: undefined } : prev,
-                          );
-                          if (choice === 'cancel') return;
-                          // Command's onDone used display:'skip', so add the
-                          // echo here — gives immediate feedback before the
-                          // ~5s teleportToRemote resolves.
-                          setMessages(prev => [
-                            ...prev,
-                            createCommandInputMessage(formatCommandInputTags('ultraplan', blurb)),
-                          ]);
-                          const appendStdout = (msg: string) =>
-                            setMessages(prev => [
+                        currentRequest?.onWaitingDismiss?.(action);
+                      }}
+                    />
+                  )}
+                  {process.env.USER_TYPE === 'ant' &&
+                    focusedInputDialog === 'model-switch' &&
+                    AntModelSwitchCallout && (
+                      <AntModelSwitchCallout
+                        onDone={(selection: string, modelAlias?: string) => {
+                          setShowModelSwitchCallout(false);
+                          if (selection === 'switch' && modelAlias) {
+                            setAppState(prev => ({
                               ...prev,
-                              createCommandInputMessage(
-                                `<${LOCAL_COMMAND_STDOUT_TAG}>${escapeXml(msg)}</${LOCAL_COMMAND_STDOUT_TAG}>`,
-                              ),
-                            ]);
-                          // Defer the second message if a query is mid-turn
-                          // so it lands after the assistant reply, not
-                          // between the user's prompt and the reply.
-                          const appendWhenIdle = (msg: string) => {
-                            if (!queryGuard.isActive) {
-                              appendStdout(msg);
-                              return;
-                            }
-                            const unsub = queryGuard.subscribe(() => {
-                              if (queryGuard.isActive) return;
-                              unsub();
-                              // Skip if the user stopped ultraplan while we
-                              // were waiting — avoids a stale "Monitoring
-                              // <url>" message for a session that's gone.
-                              if (!store.getState().ultraplanSessionUrl) return;
-                              appendStdout(msg);
-                            });
-                          };
-                          void launchUltraplan({
-                            blurb,
-                            promptIdentifier: opts?.promptIdentifier,
-                            getAppState: () => store.getState(),
-                            setAppState,
-                            signal: createAbortController().signal,
-                            disconnectedBridge: opts?.disconnectedBridge,
-                            onSessionReady: appendWhenIdle,
-                          })
-                            .then(appendStdout)
-                            .catch(logError);
+                              mainLoopModel: modelAlias,
+                              mainLoopModelForSession: null,
+                            }));
+                          }
                         }}
                       />
-                    )
-                  : null}
-
-                {mrRender()}
-
-                {!toolJSX?.shouldHidePromptInput && !focusedInputDialog && !isExiting && !disabled && !cursor && (
-                  <>
-                    {autoRunIssueReason && (
-                      <AutoRunIssueNotification
-                        onRun={handleAutoRunIssue}
-                        onCancel={handleCancelAutoRunIssue}
-                        reason={getAutoRunIssueReasonText(autoRunIssueReason)}
-                      />
                     )}
-                    {postCompactSurvey.state !== 'closed' ? (
-                      <FeedbackSurvey
-                        state={postCompactSurvey.state}
-                        lastResponse={postCompactSurvey.lastResponse}
-                        handleSelect={postCompactSurvey.handleSelect}
-                        inputValue={inputValue}
-                        setInputValue={setInputValue}
-                        onRequestFeedback={handleSurveyRequestFeedback}
-                      />
-                    ) : memorySurvey.state !== 'closed' ? (
-                      <FeedbackSurvey
-                        state={memorySurvey.state}
-                        lastResponse={memorySurvey.lastResponse}
-                        handleSelect={memorySurvey.handleSelect}
-                        handleTranscriptSelect={memorySurvey.handleTranscriptSelect}
-                        inputValue={inputValue}
-                        setInputValue={setInputValue}
-                        onRequestFeedback={handleSurveyRequestFeedback}
-                        message="How well did Claude use its memory? (optional)"
-                      />
-                    ) : (
-                      <FeedbackSurvey
-                        state={feedbackSurvey.state}
-                        lastResponse={feedbackSurvey.lastResponse}
-                        handleSelect={feedbackSurvey.handleSelect}
-                        handleTranscriptSelect={feedbackSurvey.handleTranscriptSelect}
-                        inputValue={inputValue}
-                        setInputValue={setInputValue}
-                        onRequestFeedback={didAutoRunIssueRef.current ? undefined : handleSurveyRequestFeedback}
-                      />
-                    )}
-                    {/* Frustration-triggered transcript sharing prompt */}
-                    {frustrationDetection.state !== 'closed' && (
-                      <FeedbackSurvey
-                        state={frustrationDetection.state}
-                        lastResponse={null}
-                        handleSelect={() => {}}
-                        handleTranscriptSelect={frustrationDetection.handleTranscriptSelect}
-                        inputValue={inputValue}
-                        setInputValue={setInputValue}
-                      />
-                    )}
-                    {/* Skill improvement survey - appears when improvements detected */}
-                    {skillImprovementSurvey.suggestion && (
-                      <SkillImprovementSurvey
-                        isOpen={skillImprovementSurvey.isOpen}
-                        skillName={skillImprovementSurvey.suggestion.skillName}
-                        updates={skillImprovementSurvey.suggestion.updates}
-                        handleSelect={skillImprovementSurvey.handleSelect}
-                        inputValue={inputValue}
-                        setInputValue={setInputValue}
-                      />
-                    )}
-                    {showIssueFlagBanner && <IssueFlagBanner />}
-                    {}
-                    <PromptInput
-                      debug={debug}
-                      ideSelection={ideSelection}
-                      hasSuppressedDialogs={!!hasSuppressedDialogs}
-                      isLocalJSXCommandActive={isShowingLocalJSXCommand}
-                      getToolUseContext={getToolUseContext}
-                      toolPermissionContext={toolPermissionContext}
-                      setToolPermissionContext={setToolPermissionContext}
-                      apiKeyStatus={apiKeyStatus}
-                      commands={commands}
-                      agents={agentDefinitions.activeAgents}
-                      isLoading={isLoading}
-                      onExit={handleExit}
-                      verbose={verbose}
-                      messages={messages}
-                      onAutoUpdaterResult={setAutoUpdaterResult}
-                      autoUpdaterResult={autoUpdaterResult}
-                      input={inputValue}
-                      onInputChange={setInputValue}
-                      mode={inputMode}
-                      onModeChange={setInputMode}
-                      stashedPrompt={stashedPrompt}
-                      setStashedPrompt={setStashedPrompt}
-                      submitCount={submitCount}
-                      onShowMessageSelector={handleShowMessageSelector}
-                      onMessageActionsEnter={
-                        // Works during isLoading — edit cancels first; uuid selection survives appends.
-                        feature('MESSAGE_ACTIONS') && isFullscreenEnvEnabled() && !disableMessageActions
-                          ? enterMessageActions
-                          : undefined
-                      }
-                      mcpClients={mcpClients}
-                      pastedContents={pastedContents}
-                      setPastedContents={setPastedContents}
-                      vimMode={vimMode}
-                      setVimMode={setVimMode}
-                      showBashesDialog={showBashesDialog}
-                      setShowBashesDialog={setShowBashesDialog}
-                      onSubmit={onSubmit}
-                      onAgentSubmit={onAgentSubmit}
-                      isSearchingHistory={isSearchingHistory}
-                      setIsSearchingHistory={setIsSearchingHistory}
-                      helpOpen={isHelpOpen}
-                      setHelpOpen={setIsHelpOpen}
-                      onLeftArrowOnEmpty={
-                        onOpenAgents
-                          ? () => {
-                              // Official Fco/MVr/CAo portable: mid-turn partial from
-                              // transcript + live stream, boundary uuid, task checkpoint.
-                              const snap = messagesRef.current as Array<{
-                                type: string;
-                                uuid?: string;
-                                isMeta?: boolean;
-                                message?: {
-                                  content?: unknown;
-                                  stop_reason?: string | null;
-                                };
-                              }>;
-                              // Lazy import to keep REPL cold path light.
-                              // eslint-disable-next-line @typescript-eslint/no-require-imports
-                              const { buildInFlightPartialText, findForkBoundaryUuid, collectPortableCheckpoint } =
-                                require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
-                              // eslint-disable-next-line @typescript-eslint/no-require-imports
-                              const { getSessionCronTasks } =
-                                require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
-                              const partialFromMsgs = buildInFlightPartialText(
-                                snap,
-                                isLoading ? getStreamingTextRaw() : null,
-                              );
-                              const boundaryUuid = findForkBoundaryUuid(snap);
-                              // Official CAo/fDs: detach shells + snapshot; disown after handoff.
-                              const collected = collectPortableCheckpoint({
-                                tasks: tasks as unknown as Record<
-                                  string,
-                                  import('../utils/bgCheckpoint.js').PortableTaskLike
-                                >,
-                                cron: getSessionCronTasks(),
-                              });
-                              const checkpoint = collected?.payload;
-                              // Official aAf: session allow/deny + memoryToggledOff into hcn.
-                              const allow = toolPermissionContext?.alwaysAllowRules?.session ?? [];
-                              const deny = toolPermissionContext?.alwaysDenyRules?.session ?? [];
-                              const sessionPermissionRules =
-                                allow.length > 0 || deny.length > 0
-                                  ? {
-                                      allow: [...allow],
-                                      deny: [...deny],
-                                    }
-                                  : undefined;
-                              let memoryToggledOff: boolean | undefined;
-                              try {
-                                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                const { isAutoMemoryEnabled } =
-                                  require('../memdir/paths.js') as typeof import('../memdir/paths.js');
-                                memoryToggledOff = !isAutoMemoryEnabled() ? true : undefined;
-                              } catch {
-                                memoryToggledOff = undefined;
-                              }
-                              // Official aAf: CAo stays live across Jlr write, then
-                              // checkpointAgents + disown. Local unmounts REPL first —
-                              // stash live handle for openAgentsViaLeftArrow post-write.
-                              // densable: do NOT removeSessionCronTasks here — pre-detach
-                              // is irreversible if adopt/spawn fails. Cron is disowned
-                              // in runLeftArrowPostAdoptCheckpoint after adopt write ok.
-                              if (collected) {
-                                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                const { stashLeftArrowCheckpointLive } =
-                                  require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
-                                stashLeftArrowCheckpointLive(collected);
-                              }
-                              // densable aAf Cl payload:
-                              //   abort-then-fork → replyOnResume:true + abortAfterFlush:fn
-                              //   idle-fork → replyOnResume:nzu(je,tl)
-                              // eslint-disable-next-line @typescript-eslint/no-require-imports
-                              const { shouldReplyOnIdleFork } =
-                                require('../cli/bg/leftArrowAgents.js') as typeof import('../cli/bg/leftArrowAgents.js');
-                              const via = isLoading ? 'abort-then-fork' : 'idle-fork';
-                              const replyOnResume =
-                                via === 'abort-then-fork' ? true : shouldReplyOnIdleFork(turnStartRef.current, snap);
-                              const abortAfterFlush =
-                                via === 'abort-then-fork' &&
-                                abortControllerRef.current &&
-                                !abortControllerRef.current.signal.aborted
-                                  ? abortControllerRef.current
-                                  : undefined;
-                              onOpenAgents({
-                                // Snapshot for official Sj4 / Vy6 seed (main → A8q).
-                                messages: snap,
-                                // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
-                                via,
-                                partialText: isLoading ? partialFromMsgs || getStreamingTextRaw() : null,
-                                boundaryUuid,
-                                agentsCount: checkpoint?.agents?.length ?? 0,
-                                checkpoint: checkpoint
-                                  ? {
-                                      shells: checkpoint.shells,
-                                      cron: checkpoint.cron,
-                                      agents: checkpoint.agents,
-                                      workflows: checkpoint.workflows,
-                                    }
-                                  : undefined,
-                                sessionPermissionRules,
-                                memoryToggledOff,
-                                replyOnResume,
-                                abortAfterFlush,
-                              });
-                            }
-                          : undefined
-                      }
-                      insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}
-                      voiceInterimRange={voice.interimRange}
-                    />
-                    <SessionBackgroundHint onBackgroundSession={handleBackgroundSession} isLoading={isLoading} />
-                    <BackgroundAgentSelector />
-                  </>
-                )}
-                {cursor && (
-                  // inputValue is REPL state; typed text survives the round-trip.
-                  <MessageActionsBar cursor={cursor} />
-                )}
-                {focusedInputDialog === 'message-selector' && (
-                  <MessageSelector
-                    messages={messages}
-                    preselectedMessage={messageSelectorPreselect}
-                    onPreRestore={onCancel}
-                    onRestoreCode={async (message: UserMessage) => {
-                      // densable: return skippedLinks so MessageSelector can show TYn
-                      const { skippedLinks } = await fileHistoryRewind(
-                        (updater: (prev: FileHistoryState) => FileHistoryState) => {
+                  {process.env.USER_TYPE === 'ant' &&
+                    focusedInputDialog === 'undercover-callout' &&
+                    UndercoverAutoCallout && <UndercoverAutoCallout onDone={() => setShowUndercoverCallout(false)} />}
+                  {focusedInputDialog === 'effort-callout' && (
+                    <EffortCallout
+                      model={mainLoopModel}
+                      onDone={selection => {
+                        setShowEffortCallout(false);
+                        if (selection !== 'dismiss') {
                           setAppState(prev => ({
                             ...prev,
-                            fileHistory: updater(prev.fileHistory),
+                            effortValue: selection,
                           }));
-                        },
-                        message.uuid,
-                      );
-                      return { skippedLinks };
-                    }}
-                    onSummarize={async (
-                      message: UserMessage,
-                      feedback?: string,
-                      direction: PartialCompactDirection = 'from',
-                    ) => {
-                      // Project snipped messages so the compact model
-                      // doesn't summarize content that was intentionally removed.
-                      const compactMessages = getMessagesAfterCompactBoundary(messages);
-
-                      const messageIndex = compactMessages.indexOf(message);
-                      if (messageIndex === -1) {
-                        // Selected a snipped or pre-compact message that the
-                        // selector still shows (REPL keeps full history for
-                        // scrollback). Surface why nothing happened instead
-                        // of silently no-oping.
-                        setMessages(prev => [
-                          ...prev,
-                          createSystemMessage(
-                            'That message is no longer in the active context (snipped or pre-compact). Choose a more recent message.',
-                            'warning',
-                          ),
-                        ]);
-                        return;
-                      }
-
-                      const newAbortController = createAbortController();
-                      const context = getToolUseContext(compactMessages, [], newAbortController, mainLoopModel);
-
-                      const appState = context.getAppState();
-                      const defaultSysPrompt = await getSystemPrompt(
-                        context.options.tools,
-                        context.options.mainLoopModel,
-                        Array.from(appState.toolPermissionContext.additionalWorkingDirectories.keys()),
-                        context.options.mcpClients,
-                      );
-                      const systemPrompt = buildEffectiveSystemPrompt({
-                        mainThreadAgentDefinition: undefined,
-                        toolUseContext: context,
-                        customSystemPrompt: context.options.customSystemPrompt,
-                        defaultSystemPrompt: defaultSysPrompt,
-                        appendSystemPrompt: context.options.appendSystemPrompt,
-                      });
-                      const [userContext, systemContext] = await Promise.all([getUserContext(), getSystemContext()]);
-
-                      const result = await partialCompactConversation(
-                        compactMessages,
-                        messageIndex,
-                        context,
-                        {
-                          systemPrompt,
-                          userContext,
-                          systemContext,
-                          toolUseContext: context,
-                          forkContextMessages: compactMessages,
-                        },
-                        feedback,
-                        direction,
-                      );
-
-                      // densable Pid: zero kept-assistant usage (Edt) so
-                      // /context + status line do not report stale pre-compact
-                      // API usage after message-picker compact (#6 / 2.1.218).
-                      const postCompact = buildPartialPostCompactMessages(result, direction);
-                      // Fullscreen 'from' keeps scrollback; 'up_to' must not
-                      // (old[0] unchanged + grown array means incremental
-                      // useLogMessages path, so boundary never persisted).
-                      // Find by uuid since old is raw REPL history and snipped
-                      // entries can shift the projected messageIndex.
-                      if (isFullscreenEnvEnabled() && direction === 'from') {
-                        setMessages(old => {
-                          const rawIdx = old.findIndex(m => m.uuid === message.uuid);
-                          return [...old.slice(0, rawIdx === -1 ? 0 : rawIdx), ...postCompact];
-                        });
-                      } else {
-                        setMessages(postCompact);
-                      }
-                      // Partial compact bypasses handleMessageFromStream — clear
-                      // the context-blocked flag so proactive ticks resume.
-                      if (feature('PROACTIVE') || feature('KAIROS')) {
-                        proactiveModule?.setContextBlocked(false);
-                      }
-                      setConversationId(randomUUID());
-                      // densable z$l after message-picker summarize (Sd.current)
-                      setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
-                      runPostCompactCleanup(context.options.querySource);
-
-                      if (direction === 'from') {
-                        const r = textForResubmit(message);
-                        if (r) {
-                          setInputValue(r.text);
-                          setInputMode(r.mode);
                         }
-                      }
+                      }}
+                    />
+                  )}
+                  {focusedInputDialog === 'remote-callout' && (
+                    <RemoteCallout
+                      onDone={selection => {
+                        setAppState(prev => {
+                          if (!prev.showRemoteCallout) return prev;
+                          return {
+                            ...prev,
+                            showRemoteCallout: false,
+                            ...(selection === 'enable' && {
+                              replBridgeEnabled: true,
+                              replBridgeExplicit: true,
+                              replBridgeOutboundOnly: false,
+                            }),
+                          };
+                        });
+                      }}
+                    />
+                  )}
 
-                      // Show notification with ctrl+o hint
-                      const historyShortcut = getShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
-                      addNotification({
-                        key: 'summarize-ctrl-o-hint',
-                        text: `Conversation summarized (${historyShortcut} for history)`,
-                        priority: 'medium',
-                        timeoutMs: 8000,
-                      });
-                    }}
-                    onRestoreMessage={handleRestoreMessage}
-                    onClose={() => {
-                      setIsMessageSelectorVisible(false);
-                      setMessageSelectorPreselect(undefined);
-                    }}
-                  />
-                )}
-                {process.env.USER_TYPE === 'ant' && <DevBar />}
+                  {exitFlow}
+
+                  {focusedInputDialog === 'plugin-hint' && hintRecommendation && (
+                    <PluginHintMenu
+                      pluginName={hintRecommendation.pluginName}
+                      pluginDescription={hintRecommendation.pluginDescription}
+                      marketplaceName={hintRecommendation.marketplaceName}
+                      sourceCommand={hintRecommendation.sourceCommand}
+                      onResponse={handleHintResponse}
+                    />
+                  )}
+
+                  {focusedInputDialog === 'search-extra-tools-hint' && searchExtraToolsHint.visible && (
+                    <SearchExtraToolsHint
+                      tools={searchExtraToolsHint.tools}
+                      onSelect={searchExtraToolsHint.handleSelect}
+                      onDismiss={searchExtraToolsHint.handleDismiss}
+                    />
+                  )}
+
+                  {focusedInputDialog === 'lsp-recommendation' && lspRecommendation && (
+                    <LspRecommendationMenu
+                      pluginName={lspRecommendation.pluginName}
+                      pluginDescription={lspRecommendation.pluginDescription}
+                      fileExtension={lspRecommendation.fileExtension}
+                      onResponse={handleLspResponse}
+                    />
+                  )}
+
+                  {focusedInputDialog === 'desktop-upsell' && (
+                    <DesktopUpsellStartup onDone={() => setShowDesktopUpsellStartup(false)} />
+                  )}
+
+                  {focusedInputDialog === 'fullscreen-upsell' && (
+                    <FullscreenUpsellDialog onDone={() => setShowFullscreenUpsell(false)} />
+                  )}
+
+                  {feature('ULTRAPLAN')
+                    ? focusedInputDialog === 'ultraplan-choice' &&
+                      ultraplanPendingChoice && (
+                        <UltraplanChoiceDialog
+                          plan={ultraplanPendingChoice.plan}
+                          sessionId={ultraplanPendingChoice.sessionId}
+                          taskId={ultraplanPendingChoice.taskId}
+                          setMessages={setMessages}
+                          readFileState={readFileState.current}
+                          getAppState={() => store.getState()}
+                          setConversationId={setConversationId}
+                        />
+                      )
+                    : null}
+
+                  {feature('ULTRAPLAN')
+                    ? focusedInputDialog === 'ultraplan-launch' &&
+                      ultraplanLaunchPending && (
+                        <UltraplanLaunchDialog
+                          onChoice={(choice, opts) => {
+                            const blurb = ultraplanLaunchPending.blurb;
+                            setAppState(prev =>
+                              prev.ultraplanLaunchPending ? { ...prev, ultraplanLaunchPending: undefined } : prev,
+                            );
+                            if (choice === 'cancel') return;
+                            // Command's onDone used display:'skip', so add the
+                            // echo here — gives immediate feedback before the
+                            // ~5s teleportToRemote resolves.
+                            setMessages(prev => [
+                              ...prev,
+                              createCommandInputMessage(formatCommandInputTags('ultraplan', blurb)),
+                            ]);
+                            const appendStdout = (msg: string) =>
+                              setMessages(prev => [
+                                ...prev,
+                                createCommandInputMessage(
+                                  `<${LOCAL_COMMAND_STDOUT_TAG}>${escapeXml(msg)}</${LOCAL_COMMAND_STDOUT_TAG}>`,
+                                ),
+                              ]);
+                            // Defer the second message if a query is mid-turn
+                            // so it lands after the assistant reply, not
+                            // between the user's prompt and the reply.
+                            const appendWhenIdle = (msg: string) => {
+                              if (!queryGuard.isActive) {
+                                appendStdout(msg);
+                                return;
+                              }
+                              const unsub = queryGuard.subscribe(() => {
+                                if (queryGuard.isActive) return;
+                                unsub();
+                                // Skip if the user stopped ultraplan while we
+                                // were waiting — avoids a stale "Monitoring
+                                // <url>" message for a session that's gone.
+                                if (!store.getState().ultraplanSessionUrl) return;
+                                appendStdout(msg);
+                              });
+                            };
+                            void launchUltraplan({
+                              blurb,
+                              promptIdentifier: opts?.promptIdentifier,
+                              getAppState: () => store.getState(),
+                              setAppState,
+                              signal: createAbortController().signal,
+                              disconnectedBridge: opts?.disconnectedBridge,
+                              onSessionReady: appendWhenIdle,
+                            })
+                              .then(appendStdout)
+                              .catch(logError);
+                          }}
+                        />
+                      )
+                    : null}
+
+                  {mrRender()}
+
+                  {!toolJSX?.shouldHidePromptInput &&
+                    !focusedInputDialog &&
+                    !hidePromptForHardNms &&
+                    !isExiting &&
+                    !disabled &&
+                    !cursor && (
+                      <>
+                        {autoRunIssueReason && (
+                          <AutoRunIssueNotification
+                            onRun={handleAutoRunIssue}
+                            onCancel={handleCancelAutoRunIssue}
+                            reason={getAutoRunIssueReasonText(autoRunIssueReason)}
+                          />
+                        )}
+                        {postCompactSurvey.state !== 'closed' ? (
+                          <FeedbackSurvey
+                            state={postCompactSurvey.state}
+                            lastResponse={postCompactSurvey.lastResponse}
+                            handleSelect={postCompactSurvey.handleSelect}
+                            inputValue={inputValue}
+                            setInputValue={setInputValue}
+                            onRequestFeedback={handleSurveyRequestFeedback}
+                          />
+                        ) : memorySurvey.state !== 'closed' ? (
+                          <FeedbackSurvey
+                            state={memorySurvey.state}
+                            lastResponse={memorySurvey.lastResponse}
+                            handleSelect={memorySurvey.handleSelect}
+                            handleTranscriptSelect={memorySurvey.handleTranscriptSelect}
+                            inputValue={inputValue}
+                            setInputValue={setInputValue}
+                            onRequestFeedback={handleSurveyRequestFeedback}
+                            message="How well did Claude use its memory? (optional)"
+                          />
+                        ) : (
+                          <FeedbackSurvey
+                            state={feedbackSurvey.state}
+                            lastResponse={feedbackSurvey.lastResponse}
+                            handleSelect={feedbackSurvey.handleSelect}
+                            handleTranscriptSelect={feedbackSurvey.handleTranscriptSelect}
+                            inputValue={inputValue}
+                            setInputValue={setInputValue}
+                            onRequestFeedback={didAutoRunIssueRef.current ? undefined : handleSurveyRequestFeedback}
+                          />
+                        )}
+                        {/* Frustration-triggered transcript sharing prompt */}
+                        {frustrationDetection.state !== 'closed' && (
+                          <FeedbackSurvey
+                            state={frustrationDetection.state}
+                            lastResponse={null}
+                            handleSelect={() => {}}
+                            handleTranscriptSelect={frustrationDetection.handleTranscriptSelect}
+                            inputValue={inputValue}
+                            setInputValue={setInputValue}
+                          />
+                        )}
+                        {/* Skill improvement survey - appears when improvements detected */}
+                        {skillImprovementSurvey.suggestion && (
+                          <SkillImprovementSurvey
+                            isOpen={skillImprovementSurvey.isOpen}
+                            skillName={skillImprovementSurvey.suggestion.skillName}
+                            updates={skillImprovementSurvey.suggestion.updates}
+                            handleSelect={skillImprovementSurvey.handleSelect}
+                            inputValue={inputValue}
+                            setInputValue={setInputValue}
+                          />
+                        )}
+                        {showIssueFlagBanner && <IssueFlagBanner />}
+                        {}
+                        <PromptInput
+                          debug={debug}
+                          ideSelection={ideSelection}
+                          hasSuppressedDialogs={!!hasSuppressedDialogs}
+                          isLocalJSXCommandActive={isShowingLocalJSXCommand}
+                          getToolUseContext={getToolUseContext}
+                          toolPermissionContext={toolPermissionContext}
+                          setToolPermissionContext={setToolPermissionContext}
+                          apiKeyStatus={apiKeyStatus}
+                          commands={commands}
+                          agents={agentDefinitions.activeAgents}
+                          isLoading={isLoading}
+                          onExit={handleExit}
+                          verbose={verbose}
+                          messages={messages}
+                          onAutoUpdaterResult={setAutoUpdaterResult}
+                          autoUpdaterResult={autoUpdaterResult}
+                          input={inputValue}
+                          onInputChange={setInputValue}
+                          mode={inputMode}
+                          onModeChange={setInputMode}
+                          stashedPrompt={stashedPrompt}
+                          setStashedPrompt={setStashedPrompt}
+                          submitCount={submitCount}
+                          onShowMessageSelector={handleShowMessageSelector}
+                          onMessageActionsEnter={
+                            // Works during isLoading — edit cancels first; uuid selection survives appends.
+                            feature('MESSAGE_ACTIONS') && isFullscreenEnvEnabled() && !disableMessageActions
+                              ? enterMessageActions
+                              : undefined
+                          }
+                          mcpClients={mcpClients}
+                          pastedContents={pastedContents}
+                          setPastedContents={setPastedContents}
+                          vimMode={vimMode}
+                          setVimMode={setVimMode}
+                          showBashesDialog={showBashesDialog}
+                          setShowBashesDialog={setShowBashesDialog}
+                          onSubmit={onSubmit}
+                          onAgentSubmit={onAgentSubmit}
+                          isSearchingHistory={isSearchingHistory}
+                          setIsSearchingHistory={setIsSearchingHistory}
+                          helpOpen={isHelpOpen}
+                          setHelpOpen={setIsHelpOpen}
+                          onLeftArrowOnEmpty={
+                            onOpenAgents
+                              ? () => {
+                                  // Official Fco/MVr/CAo portable: mid-turn partial from
+                                  // transcript + live stream, boundary uuid, task checkpoint.
+                                  const snap = messagesRef.current as Array<{
+                                    type: string;
+                                    uuid?: string;
+                                    isMeta?: boolean;
+                                    message?: {
+                                      content?: unknown;
+                                      stop_reason?: string | null;
+                                    };
+                                  }>;
+                                  // Lazy import to keep REPL cold path light.
+                                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                  const { buildInFlightPartialText, findForkBoundaryUuid, collectPortableCheckpoint } =
+                                    require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
+                                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                  const { getSessionCronTasks } =
+                                    require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
+                                  const partialFromMsgs = buildInFlightPartialText(
+                                    snap,
+                                    isLoading ? getStreamingTextRaw() : null,
+                                  );
+                                  const boundaryUuid = findForkBoundaryUuid(snap);
+                                  // Official CAo/fDs: detach shells + snapshot; disown after handoff.
+                                  const collected = collectPortableCheckpoint({
+                                    tasks: tasks as unknown as Record<
+                                      string,
+                                      import('../utils/bgCheckpoint.js').PortableTaskLike
+                                    >,
+                                    cron: getSessionCronTasks(),
+                                  });
+                                  const checkpoint = collected?.payload;
+                                  // Official aAf: session allow/deny + memoryToggledOff into hcn.
+                                  const allow = toolPermissionContext?.alwaysAllowRules?.session ?? [];
+                                  const deny = toolPermissionContext?.alwaysDenyRules?.session ?? [];
+                                  const sessionPermissionRules =
+                                    allow.length > 0 || deny.length > 0
+                                      ? {
+                                          allow: [...allow],
+                                          deny: [...deny],
+                                        }
+                                      : undefined;
+                                  let memoryToggledOff: boolean | undefined;
+                                  try {
+                                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                    const { isAutoMemoryEnabled } =
+                                      require('../memdir/paths.js') as typeof import('../memdir/paths.js');
+                                    memoryToggledOff = !isAutoMemoryEnabled() ? true : undefined;
+                                  } catch {
+                                    memoryToggledOff = undefined;
+                                  }
+                                  // Official aAf: CAo stays live across Jlr write, then
+                                  // checkpointAgents + disown. Local unmounts REPL first —
+                                  // stash live handle for openAgentsViaLeftArrow post-write.
+                                  // densable: do NOT removeSessionCronTasks here — pre-detach
+                                  // is irreversible if adopt/spawn fails. Cron is disowned
+                                  // in runLeftArrowPostAdoptCheckpoint after adopt write ok.
+                                  if (collected) {
+                                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                    const { stashLeftArrowCheckpointLive } =
+                                      require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
+                                    stashLeftArrowCheckpointLive(collected);
+                                  }
+                                  // densable aAf Cl payload:
+                                  //   abort-then-fork → replyOnResume:true + abortAfterFlush:fn
+                                  //   idle-fork → replyOnResume:nzu(je,tl)
+                                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                  const { shouldReplyOnIdleFork } =
+                                    require('../cli/bg/leftArrowAgents.js') as typeof import('../cli/bg/leftArrowAgents.js');
+                                  const via = isLoading ? 'abort-then-fork' : 'idle-fork';
+                                  const replyOnResume =
+                                    via === 'abort-then-fork'
+                                      ? true
+                                      : shouldReplyOnIdleFork(turnStartRef.current, snap);
+                                  const abortAfterFlush =
+                                    via === 'abort-then-fork' &&
+                                    abortControllerRef.current &&
+                                    !abortControllerRef.current.signal.aborted
+                                      ? abortControllerRef.current
+                                      : undefined;
+                                  onOpenAgents({
+                                    // Snapshot for official Sj4 / Vy6 seed (main → A8q).
+                                    messages: snap,
+                                    // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
+                                    via,
+                                    partialText: isLoading ? partialFromMsgs || getStreamingTextRaw() : null,
+                                    boundaryUuid,
+                                    agentsCount: checkpoint?.agents?.length ?? 0,
+                                    checkpoint: checkpoint
+                                      ? {
+                                          shells: checkpoint.shells,
+                                          cron: checkpoint.cron,
+                                          agents: checkpoint.agents,
+                                          workflows: checkpoint.workflows,
+                                        }
+                                      : undefined,
+                                    sessionPermissionRules,
+                                    memoryToggledOff,
+                                    replyOnResume,
+                                    abortAfterFlush,
+                                  });
+                                }
+                              : undefined
+                          }
+                          insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}
+                          voiceInterimRange={voice.interimRange}
+                        />
+                        <SessionBackgroundHint onBackgroundSession={handleBackgroundSession} isLoading={isLoading} />
+                        <BackgroundAgentSelector />
+                      </>
+                    )}
+                  {cursor && (
+                    // inputValue is REPL state; typed text survives the round-trip.
+                    <MessageActionsBar cursor={cursor} />
+                  )}
+                  {focusedInputDialog === 'message-selector' && (
+                    <MessageSelector
+                      messages={messages}
+                      preselectedMessage={messageSelectorPreselect}
+                      onPreRestore={onCancel}
+                      onRestoreCode={async (message: UserMessage) => {
+                        // densable: return skippedLinks so MessageSelector can show TYn
+                        const { skippedLinks } = await fileHistoryRewind(
+                          (updater: (prev: FileHistoryState) => FileHistoryState) => {
+                            setAppState(prev => ({
+                              ...prev,
+                              fileHistory: updater(prev.fileHistory),
+                            }));
+                          },
+                          message.uuid,
+                        );
+                        return { skippedLinks };
+                      }}
+                      onSummarize={async (
+                        message: UserMessage,
+                        feedback?: string,
+                        direction: PartialCompactDirection = 'from',
+                      ) => {
+                        // Project snipped messages so the compact model
+                        // doesn't summarize content that was intentionally removed.
+                        const compactMessages = getMessagesAfterCompactBoundary(messages);
+
+                        const messageIndex = compactMessages.indexOf(message);
+                        if (messageIndex === -1) {
+                          // Selected a snipped or pre-compact message that the
+                          // selector still shows (REPL keeps full history for
+                          // scrollback). Surface why nothing happened instead
+                          // of silently no-oping.
+                          setMessages(prev => [
+                            ...prev,
+                            createSystemMessage(
+                              'That message is no longer in the active context (snipped or pre-compact). Choose a more recent message.',
+                              'warning',
+                            ),
+                          ]);
+                          return;
+                        }
+
+                        const newAbortController = createAbortController();
+                        const context = getToolUseContext(compactMessages, [], newAbortController, mainLoopModel);
+
+                        const appState = context.getAppState();
+                        const defaultSysPrompt = await getSystemPrompt(
+                          context.options.tools,
+                          context.options.mainLoopModel,
+                          Array.from(appState.toolPermissionContext.additionalWorkingDirectories.keys()),
+                          context.options.mcpClients,
+                        );
+                        const systemPrompt = buildEffectiveSystemPrompt({
+                          mainThreadAgentDefinition: undefined,
+                          toolUseContext: context,
+                          customSystemPrompt: context.options.customSystemPrompt,
+                          defaultSystemPrompt: defaultSysPrompt,
+                          appendSystemPrompt: context.options.appendSystemPrompt,
+                        });
+                        const [userContext, systemContext] = await Promise.all([getUserContext(), getSystemContext()]);
+
+                        const result = await partialCompactConversation(
+                          compactMessages,
+                          messageIndex,
+                          context,
+                          {
+                            systemPrompt,
+                            userContext,
+                            systemContext,
+                            toolUseContext: context,
+                            forkContextMessages: compactMessages,
+                          },
+                          feedback,
+                          direction,
+                        );
+
+                        // densable Pid: zero kept-assistant usage (Edt) so
+                        // /context + status line do not report stale pre-compact
+                        // API usage after message-picker compact (#6 / 2.1.218).
+                        const postCompact = buildPartialPostCompactMessages(result, direction);
+                        // Fullscreen 'from' keeps scrollback; 'up_to' must not
+                        // (old[0] unchanged + grown array means incremental
+                        // useLogMessages path, so boundary never persisted).
+                        // Find by uuid since old is raw REPL history and snipped
+                        // entries can shift the projected messageIndex.
+                        if (isFullscreenEnvEnabled() && direction === 'from') {
+                          setMessages(old => {
+                            const rawIdx = old.findIndex(m => m.uuid === message.uuid);
+                            return [...old.slice(0, rawIdx === -1 ? 0 : rawIdx), ...postCompact];
+                          });
+                        } else {
+                          setMessages(postCompact);
+                        }
+                        // Partial compact bypasses handleMessageFromStream — clear
+                        // the context-blocked flag so proactive ticks resume.
+                        if (feature('PROACTIVE') || feature('KAIROS')) {
+                          proactiveModule?.setContextBlocked(false);
+                        }
+                        setConversationId(randomUUID());
+                        // densable z$l after message-picker summarize (Sd.current)
+                        setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
+                        runPostCompactCleanup(context.options.querySource);
+
+                        if (direction === 'from') {
+                          const r = textForResubmit(message);
+                          if (r) {
+                            setInputValue(r.text);
+                            setInputMode(r.mode);
+                          }
+                        }
+
+                        // Show notification with ctrl+o hint
+                        const historyShortcut = getShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
+                        addNotification({
+                          key: 'summarize-ctrl-o-hint',
+                          text: `Conversation summarized (${historyShortcut} for history)`,
+                          priority: 'medium',
+                          timeoutMs: 8000,
+                        });
+                      }}
+                      onRestoreMessage={handleRestoreMessage}
+                      onClose={() => {
+                        setIsMessageSelectorVisible(false);
+                        setMessageSelectorPreselect(undefined);
+                      }}
+                    />
+                  )}
+                  {process.env.USER_TYPE === 'ant' && <DevBar />}
+                </Box>
+                {buddyEnabled && !(companionNarrow && isFullscreenEnvEnabled()) && companionVisible ? (
+                  <CompanionSprite />
+                ) : null}
               </Box>
-              {buddyEnabled && !(companionNarrow && isFullscreenEnvEnabled()) && companionVisible ? (
-                <CompanionSprite />
-              ) : null}
-            </Box>
-          }
-        />
+            }
+          />
+        </PermissionDialogHostProvider>
       </MCPConnectionManager>
     </KeybindingSetup>
   );
   if (isFullscreenEnvEnabled()) {
+    // MainScreenShell supplies height={rows} + mouse (AlternateScreen would
+    // suspend Axc). AxcFrameSinkBridge installs frameSink from FullscreenLayout
+    // when this gate is on.
+    if (isAxcStickyMainEnabled()) {
+      return <MainScreenShell mouseTracking={mouseTrackingProp()}>{mainReturn}</MainScreenShell>;
+    }
     return <AlternateScreen mouseTracking={mouseTrackingProp()}>{mainReturn}</AlternateScreen>;
   }
   return mainReturn;
