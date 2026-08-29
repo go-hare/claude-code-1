@@ -92,6 +92,8 @@ import {
   SYNC_OUTPUT_SUPPORTED,
   supportsExtendedKeys,
   type Terminal,
+  recordSlowestWrite,
+  writeContentToTerminal,
   writeDiffToTerminal,
 } from './terminal.js';
 import type { TerminalQuerier } from './terminal-querier.js';
@@ -386,6 +388,13 @@ export default class Ink {
   // so App.tsx's handleMouseEvent is stateless — dispatchHover diffs
   // against this set and mutates it in place.
   private readonly hoveredNodes = new Set<dom.DOMElement>();
+  /**
+   * densable `frameSink` — installed by AxcStickyHost (`xxc`). When truthy
+   * (`true` | `"tick"`), onRender swaps frames and skips cell-diff write;
+   * `"tick"` re-arms drainTimer so Axc.tickPump drains. Falsy / absent →
+   * normal paint. Alt-screen suspend is inside the sink (returns false).
+   */
+  frameSink: ((frame: Frame, stylePool: StylePool) => 'tick' | true | false) | null = null;
   // Set by <AlternateScreen> via setAltScreenActive(). Controls the
   // renderer's cursor.y clamping (keeps cursor in-viewport to avoid
   // LF-induced scroll when screen.height === terminalRows) and gates
@@ -581,6 +590,12 @@ export default class Ink {
     this.displayCursor = null;
     // Official: this.nativeCursorVisible=this.accessibilityMode; reset SR diff
     this.resetScreenReaderDiffState();
+    // handleSuspend disabled mouse. Alt path re-enters via reenterAltScreen;
+    // sticky-main (MainScreenShell / setMouseTracking) must re-assert here —
+    // resize already does, but SIGCONT is not a resize.
+    if (this.altScreenMouseTracking !== 'off') {
+      this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
+    }
   };
 
   /** Official resetScreenReaderDiffState — clear prev SR frame + park + anchor. */
@@ -620,12 +635,17 @@ export default class Ink {
     // by handleResume (SIGCONT) and the sleep-wake detector; resize itself
     // doesn't exit alt-screen. Do NOT write ERASE_SCREEN: render() below
     // can take ~80ms; erasing first leaves the screen blank that whole time.
-    if (this.altScreenActive && !this.isPaused && this.options.stdout.isTTY) {
+    if (!this.isPaused && this.options.stdout.isTTY) {
+      // Re-assert mouse for alt-screen OR main-screen sticky shell
+      // (MainScreenShell / setMouseTracking). Some emulators reset modes
+      // on resize.
       if (this.altScreenMouseTracking !== 'off') {
         this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
       }
-      this.resetFramesForAltScreen();
-      this.needsEraseBeforePaint = true;
+      if (this.altScreenActive) {
+        this.resetFramesForAltScreen();
+        this.needsEraseBeforePaint = true;
+      }
     }
 
     // Re-render the React tree with updated props so the context value changes.
@@ -934,6 +954,33 @@ export default class Ink {
     });
     const rendererMs = performance.now() - renderStart;
 
+    // densable Z2t.onRender frameSink (xxc / AxcStickyHost). Truthy → swap
+    // frames, skip cell-diff; "tick" keeps pump draining via drainTimer.
+    // Local `frame.scrollDrainPending` is NOT a gold field — gold xxc returns
+    // `w||R?"tick":!0` (pump/prime only) and never sees Ink pendingScrollDelta.
+    // Sticky wheel drain lives on that local flag; gold's truthy early-return
+    // would starve it. OR the local flag here; do not fold it into xxc's
+    // `'tick'` return (that would invent gold). consumeFollowScroll stays
+    // after this early-return — gold never reaches it on the sink path;
+    // oSf / resetRenderFrameContext clears followScroll each frame.
+    if (this.frameSink) {
+      const sinkResult = this.frameSink(frame, this.stylePool);
+      if (sinkResult) {
+        this.backFrame = this.frontFrame;
+        this.frontFrame = frame;
+        this.prevFrameContaminated = false;
+        this.maybeResetPools(renderStart);
+        if (sinkResult === 'tick' || frame.scrollDrainPending) {
+          this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
+        }
+        this.options.onFrame?.({
+          durationMs: performance.now() - renderStart,
+          flickers: [],
+        });
+        return;
+      }
+    }
+
     // Sticky/auto-follow scrolled the ScrollBox this frame. Translate the
     // selection by the same delta so the highlight stays anchored to the
     // TEXT (native terminal behavior — the selection walks up the screen
@@ -1120,13 +1167,7 @@ export default class Ink {
     this.backFrame = this.frontFrame;
     this.frontFrame = frame;
 
-    // Periodically reset char/hyperlink pools to prevent unbounded growth
-    // during long sessions. 5 minutes is infrequent enough that the O(cells)
-    // migration cost is negligible. Reuses renderStart to avoid extra clock call.
-    if (renderStart - this.lastPoolResetTime > 5 * 60 * 1000) {
-      this.resetPools();
-      this.lastPoolResetTime = renderStart;
-    }
+    this.maybeResetPools(renderStart);
 
     const flickers: FrameEvent['flickers'] = [];
     for (const patch of diff) {
@@ -1780,8 +1821,45 @@ export default class Ink {
   /** Official densable getMouseMode — current alt-screen tracking mode. */
   getMouseMode = (): MouseTrackingMode => this.altScreenMouseTracking;
 
+  /**
+   * Main-screen mouse tracking (Axc sticky / MainScreenShell). Does not
+   * toggle alt-screen. Mode is stored in altScreenMouseTracking so resize
+   * / handoff paths re-assert the same sequences.
+   */
+  setMouseTracking(mouseTracking: boolean | MouseTrackingMode): void {
+    const mode: MouseTrackingMode = mouseTracking === true ? 'full' : mouseTracking === false ? 'off' : mouseTracking;
+    this.altScreenMouseTracking = mode;
+    if (mode !== 'off') this.ensureInteractive();
+  }
+
   get isAltScreenActive(): boolean {
     return this.altScreenActive;
+  }
+
+  /**
+   * densable `recordContentWrite=(e,t)=>{Nki(this.terminal,e,t)}`.
+   * Axc `onWrite` after commitImmediate / restore flush.
+   */
+  recordContentWrite = (startedMs: number, bytes: number): void => {
+    recordSlowestWrite(this.terminal, startedMs, bytes);
+  };
+
+  /** densable `writeContent(e){g7a(this.terminal,e)}`. */
+  writeContent(content: string): void {
+    writeContentToTerminal(this.terminal, content);
+  }
+
+  /** densable `getStylePool()` — exposed for xxc / J$0 gap serializer. */
+  getStylePool(): StylePool {
+    return this.stylePool;
+  }
+
+  getCharPool(): CharPool {
+    return this.charPool;
+  }
+
+  getHyperlinkPool(): HyperlinkPool {
+    return this.hyperlinkPool;
   }
 
   get hasUnmounted(): boolean {
@@ -1822,11 +1900,13 @@ export default class Ink {
     if (supportsExtendedKeys()) {
       this.options.stdout.write(DISABLE_KITTY_KEYBOARD + ENABLE_KITTY_KEYBOARD + ENABLE_MODIFY_OTHER_KEYS);
     }
-    if (!this.altScreenActive) return;
-    // Mouse tracking — idempotent, safe to re-assert on every stdin gap.
+    // Mouse tracking — alt-screen OR main-screen sticky (MainScreenShell).
+    // Must run before the altScreenActive early-return: sleep-wake
+    // (eventLoopStallDetector) calls this with includeAltScreen=false.
     if (this.altScreenMouseTracking !== 'off') {
       this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
     }
+    if (!this.altScreenActive) return;
     // Alt-screen re-entry — destructive (ERASE_SCREEN). Only for callers that
     // have a strong signal the terminal actually dropped mode 1049.
     if (includeAltScreen) {
@@ -2470,6 +2550,8 @@ export default class Ink {
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
         dispatchPasteEvent={this.dispatchPasteEvent}
+        focusManager={this.focusManager}
+        rootNode={this.rootNode}
         getMouseMode={this.getMouseMode}
         isScreenReaderEnabled={this.isScreenReaderEnabled || this.accessibilityMode}
       >
@@ -2552,6 +2634,9 @@ export default class Ink {
       writeSync(1, DBP);
       // Show cursor
       writeSync(1, SHOW_CURSOR);
+      // Do NOT write RESET_SCROLL_REGION (CSI r homes the cursor). Sticky-main
+      // DECSTBM is owned by Axc.restore() in useAxcFrameSink cleanup, which
+      // follows with cursorPosition(contentHeight+1).
       // Clear iTerm2 progress bar
       writeSync(1, CLEAR_ITERM2_PROGRESS);
       // Clear tab status (OSC 21337) so a stale dot doesn't linger
@@ -2612,6 +2697,18 @@ export default class Ink {
       // frontFrame is reset, so frame.cursor on the next render is (0,0).
       // Clear displayCursor so the preamble doesn't compute a stale delta.
       this.displayCursor = null;
+    }
+  }
+
+  /**
+   * densable `maybeResetPools(e)` — 5-minute char/hyperlink pool recycle.
+   * Gold Z2t.onRender calls this on the frameSink early-return and the
+   * cell-diff path. `renderStart` is the same clock sample as gold.
+   */
+  maybeResetPools(renderStart: number): void {
+    if (renderStart - this.lastPoolResetTime > 5 * 60 * 1000) {
+      this.resetPools();
+      this.lastPoolResetTime = renderStart;
     }
   }
 

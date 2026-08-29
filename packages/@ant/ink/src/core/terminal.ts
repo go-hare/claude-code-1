@@ -213,9 +213,74 @@ export function hasCursorUpViewportYankBug(): boolean {
 // Exported so callers can pass a sync-skip hint gated to specific modes.
 export const SYNC_OUTPUT_SUPPORTED = isSynchronizedOutputSupported()
 
+export type SlowestWrite = {
+  startedMs: number
+  endedMs: number
+  bytes: number
+}
+
 export type Terminal = {
   stdout: Writable
   stderr: Writable
+  /** densable `Nki` bag — longest stdout write this session. */
+  slowestWrite?: SlowestWrite
+  /** densable `g7a` — once set, further writes are dropped. */
+  stdoutDead?: boolean
+  tolerateDeadStdout?: boolean
+}
+
+/**
+ * densable `Nki(e,t,r)` — keep the slowest write on `terminal`.
+ * `startedMs` is the time just before the write; duration is now - startedMs.
+ */
+export function recordSlowestWrite(
+  terminal: Terminal,
+  startedMs: number,
+  bytes: number,
+): void {
+  const endedMs = performance.now()
+  const prev = terminal.slowestWrite
+  if (
+    prev === undefined ||
+    endedMs - startedMs >= prev.endedMs - prev.startedMs
+  ) {
+    terminal.slowestWrite = { startedMs, endedMs, bytes }
+  }
+}
+
+function stdoutErrno(err: unknown): string | undefined {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code?: unknown }).code
+    return typeof code === 'string' ? code : undefined
+  }
+  return undefined
+}
+
+/**
+ * densable `g7a(e,t)` / Ink `writeContent` — write then `Nki`.
+ * Dead-stdout swallow is opt-in (`tolerateDeadStdout`) and only for EIO/EPIPE.
+ */
+export function writeContentToTerminal(
+  terminal: Terminal,
+  content: string,
+): void {
+  if (terminal.stdoutDead) return
+  const startedMs = performance.now()
+  const bytes = Buffer.byteLength(content)
+  try {
+    terminal.stdout.write(content)
+  } catch (err) {
+    if (
+      terminal.tolerateDeadStdout &&
+      (stdoutErrno(err) === 'EIO' || stdoutErrno(err) === 'EPIPE')
+    ) {
+      terminal.stdoutDead = true
+      recordSlowestWrite(terminal, startedMs, bytes)
+      return
+    }
+    throw err
+  }
+  recordSlowestWrite(terminal, startedMs, bytes)
 }
 
 export function writeDiffToTerminal(
@@ -279,5 +344,6 @@ export function writeDiffToTerminal(
 
   // Add synchronized update end and flush buffer
   if (useSync) buffer += ESU
-  terminal.stdout.write(buffer)
+  // densable y7a flush → g7a (write + Nki)
+  writeContentToTerminal(terminal, buffer)
 }

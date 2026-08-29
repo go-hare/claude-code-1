@@ -171,6 +171,12 @@ type Props = {
   // Official densable lag: bracketed paste → PasteEvent on focused node.
   readonly dispatchPasteEvent: (text: string) => void;
   /**
+   * densable Twe.focusManager / rootNode — provided via AppContext for lRc
+   * reclaim and other Twe consumers (not getFocusManager(wrap)).
+   */
+  readonly focusManager: import('../core/focus.js').FocusManager;
+  readonly rootNode: import('../core/dom.js').DOMElement;
+  /**
    * Official densable getMouseMode — "off" | "scroll" | "full".
    * Scroll mode skips click/drag selection (wheel still routes).
    */
@@ -310,6 +316,9 @@ export default class App extends PureComponent<Props, State> {
         <AppContext.Provider
           value={{
             exit: this.handleExit,
+            focusManager: this.props.focusManager,
+            rootNode: this.props.rootNode,
+            dispatchPasteEvent: this.props.dispatchPasteEvent,
           }}
         >
           <StdinContext.Provider

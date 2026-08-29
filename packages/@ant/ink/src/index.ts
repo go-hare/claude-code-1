@@ -185,6 +185,8 @@ export {
 export {
   DISABLE_KITTY_KEYBOARD,
   DISABLE_MODIFY_OTHER_KEYS,
+  RESET_SCROLL_REGION,
+  cursorPosition,
 } from './core/termio/csi.js'
 export {
   SHOW_CURSOR,
@@ -214,6 +216,9 @@ export {
   hasCursorUpViewportYankBug,
   supportsExtendedKeys,
   writeDiffToTerminal,
+  writeContentToTerminal,
+  recordSlowestWrite,
+  type SlowestWrite,
 } from './core/terminal.js'
 export {
   isJediTermEnv,
@@ -272,6 +277,22 @@ export {
   type ScrollBoxHandle,
 } from './components/ScrollBox.js'
 export { AlternateScreen } from './components/AlternateScreen.js'
+export { MainScreenShell } from './components/MainScreenShell.js'
+export {
+  AxcStickyHost,
+  AxcFrameSinkBridge,
+  AxcScrollAnchor,
+  AxcScrollAnchorContext,
+  type AxcStickyHostProps,
+} from './components/AxcStickyHost.js'
+export { useAxcFrameSink } from './hooks/useAxcFrameSink.js'
+export { Axc } from './core/axc.js'
+export {
+  NativeHistoryPump,
+  NATIVE_HISTORY_BOTTOM_CHROME,
+  NATIVE_HISTORY_CAP,
+  NATIVE_HISTORY_PUMP_BATCH,
+} from './core/nativeHistoryPump.js'
 export { setAppCallbacks } from './components/App.js'
 
 // App types
@@ -362,6 +383,7 @@ export {
   useIsInsideModal,
   useModalOrTerminalSize,
   useModalScrollRef,
+  useModalClaimScrollBox,
 } from './theme/modalContext.js'
 export { Byline } from './theme/Byline.js'
 export { KeyboardShortcutHint } from './theme/KeyboardShortcutHint.js'

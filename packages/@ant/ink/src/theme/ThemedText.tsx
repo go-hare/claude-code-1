@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import React, { useContext } from 'react';
 import Text from '../components/Text.js';
+import type { DOMAccessibility } from '../core/dom.js';
 import type { Color, Styles } from '../core/styles.js';
 import { getTheme, type Theme } from './theme-types.js';
 import { useTheme } from './ThemeProvider.js';
@@ -64,6 +65,9 @@ export type Props = {
    */
   readonly 'aria-preserve-whitespace'?: boolean;
 
+  /** densable accessibility bag — forwarded to base Text. */
+  readonly accessibility?: DOMAccessibility;
+
   readonly children?: ReactNode;
 };
 
@@ -95,6 +99,7 @@ export default function ThemedText({
   inverse = false,
   wrap = 'wrap',
   'aria-preserve-whitespace': ariaPreserveWhitespace,
+  accessibility,
   children,
 }: Props): React.ReactNode {
   const [themeName] = useTheme();
@@ -121,6 +126,7 @@ export default function ThemedText({
       inverse={inverse}
       wrap={wrap}
       aria-preserve-whitespace={ariaPreserveWhitespace}
+      accessibility={accessibility}
     >
       {children}
     </Text>

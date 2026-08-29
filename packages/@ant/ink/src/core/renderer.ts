@@ -7,9 +7,7 @@ import Output from './output.js'
 import renderNodeToOutput, {
   getScrollDrainNode,
   getScrollHint,
-  resetLayoutShifted,
-  resetScrollDrainNode,
-  resetScrollHint,
+  resetRenderFrameContext,
 } from './render-node-to-output.js'
 import { createScreen, type StylePool } from './screen.js'
 
@@ -119,9 +117,7 @@ export default function createRenderer(
       output = new Output({ width, height, stylePool, screen })
     }
 
-    resetLayoutShifted()
-    resetScrollHint()
-    resetScrollDrainNode()
+    resetRenderFrameContext()
 
     // prevFrameContaminated: selection overlay mutated the returned screen
     // buffer post-render (in ink.tsx), resetFramesForAltScreen() replaced it

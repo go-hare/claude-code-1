@@ -33,82 +33,106 @@ function isXtermJsHost(): boolean {
   return process.env.TERM_PROGRAM === 'vscode' || isXtermJs()
 }
 
-// Per-frame scratch: set when any node's yoga position/size differs from
-// its cached value, or a child was removed. Read by ink.tsx to decide
-// whether the full-damage sledgehammer (PR #20120) is needed this frame.
-// Applies on both alt-screen and main-screen. Steady-state frames
-// (spinner tick, clock tick, text append into a fixed-height box) don't
-// shift layout → narrow damage bounds → O(changed cells) diff instead of
-// O(rows×cols).
-let layoutShifted = false
-
-export function resetLayoutShifted(): void {
-  layoutShifted = false
-}
-
-export function didLayoutShift(): boolean {
-  return layoutShifted
-}
-
-// DECSTBM scroll optimization hint. When a ScrollBox's scrollTop changes
-// between frames (and nothing else moved), log-update.ts can emit a
-// hardware scroll (DECSTBM + SU/SD) instead of rewriting the whole
-// viewport. top/bottom are 0-indexed inclusive screen rows; delta > 0 =
-// content moved up (scrollTop increased, CSI n S).
+/**
+ * densable `b9r()` — per-paint render context.
+ * Gold J$0: `v9r(i, p, b9r(), {offsetX:0, offsetY:-c, prevScreen:void 0})`.
+ * `consumeClears` is tip-only: pendingClears lives on the DOM WeakMap, so
+ * offscreen J$0 paints then leaves the entry for the live frame.
+ */
 export type ScrollHint = { top: number; bottom: number; delta: number }
-let scrollHint: ScrollHint | null = null
 
-// Rects of position:absolute nodes from the PREVIOUS frame, used by
-// ScrollBox's blit+shift third-pass repair (see usage site). Recorded at
-// three paths — full-render nodeCache.set, node-level blit early-return,
-// blitEscapingAbsoluteDescendants — so clean-overlay consecutive scrolls
-// still have the rect.
-let absoluteRectsPrev: Rectangle[] = []
-let absoluteRectsCur: Rectangle[] = []
-
-export function resetScrollHint(): void {
-  scrollHint = null
-  absoluteRectsPrev = absoluteRectsCur
-  absoluteRectsCur = []
-}
-
-export function getScrollHint(): ScrollHint | null {
-  return scrollHint
-}
-
-// The ScrollBox DOM node (if any) with pendingScrollDelta left after this
-// frame's drain. renderer.ts calls markDirty(it) post-render so the NEXT
-// frame's root blit check fails and we descend to continue draining.
-// Without this, after the scrollbox's dirty flag is cleared (line ~721),
-// the next frame blits root and never reaches the scrollbox — drain stalls.
-let scrollDrainNode: DOMElement | null = null
-
-export function resetScrollDrainNode(): void {
-  scrollDrainNode = null
-}
-
-export function getScrollDrainNode(): DOMElement | null {
-  return scrollDrainNode
-}
-
-// At-bottom follow scroll event this frame. When streaming content
-// triggers scrollTop = maxScroll, the ScrollBox records the delta +
-// viewport bounds here. ink.tsx consumes it post-render to translate any active
-// text selection by -delta so the highlight stays anchored to the TEXT
-// (native terminal behavior — the selection walks up the screen as content
-// scrolls, eventually clipping at the top). The frontFrame screen buffer
-// still holds the old content at that point — captureScrolledRows reads
-// from it before the front/back swap to preserve the text for copy.
 export type FollowScroll = {
   delta: number
   viewportTop: number
   viewportBottom: number
 }
-let followScroll: FollowScroll | null = null
+
+export type RenderFrameContext = {
+  overlayActive: boolean
+  layoutShifted: boolean
+  scrollHint: ScrollHint | null
+  scrollDrainNode: DOMElement | null
+  followScroll: FollowScroll | null
+  absoluteRectsPrev: Rectangle[]
+  absoluteRectsCur: Rectangle[]
+  segmentMapScratch: Uint32Array
+  rawBgRewriteCache: WeakMap<object, unknown>
+  consumeClears: boolean
+}
+
+export function createRenderFrameContext(opts?: {
+  consumeClears?: boolean
+}): RenderFrameContext {
+  return {
+    overlayActive: false,
+    layoutShifted: false,
+    scrollHint: null,
+    scrollDrainNode: null,
+    followScroll: null,
+    absoluteRectsPrev: [],
+    absoluteRectsCur: [],
+    segmentMapScratch: new Uint32Array(0),
+    rawBgRewriteCache: new WeakMap(),
+    consumeClears: opts?.consumeClears ?? true,
+  }
+}
+
+let ctx: RenderFrameContext = createRenderFrameContext()
+
+export function runWithRenderFrameContext<T>(
+  next: RenderFrameContext,
+  fn: () => T,
+): T {
+  const prev = ctx
+  ctx = next
+  try {
+    return fn()
+  } finally {
+    ctx = prev
+  }
+}
+
+/** densable `oSf(e)` — one reset for every per-paint field. */
+export function resetRenderFrameContext(): void {
+  ctx.overlayActive = false
+  ctx.layoutShifted = false
+  ctx.scrollHint = null
+  ctx.scrollDrainNode = null
+  ctx.followScroll = null
+  ctx.absoluteRectsPrev = ctx.absoluteRectsCur
+  ctx.absoluteRectsCur = []
+}
+
+export function resetLayoutShifted(): void {
+  ctx.layoutShifted = false
+}
+
+export function didLayoutShift(): boolean {
+  return ctx.layoutShifted
+}
+
+export function resetScrollHint(): void {
+  ctx.scrollHint = null
+  ctx.followScroll = null
+  ctx.absoluteRectsPrev = ctx.absoluteRectsCur
+  ctx.absoluteRectsCur = []
+}
+
+export function getScrollHint(): ScrollHint | null {
+  return ctx.scrollHint
+}
+
+export function resetScrollDrainNode(): void {
+  ctx.scrollDrainNode = null
+}
+
+export function getScrollDrainNode(): DOMElement | null {
+  return ctx.scrollDrainNode
+}
 
 export function consumeFollowScroll(): FollowScroll | null {
-  const f = followScroll
-  followScroll = null
+  const f = ctx.followScroll
+  ctx.followScroll = null
   return f
 }
 
@@ -457,7 +481,7 @@ function renderNodeToOutput(
           // the blit check at line ~432 passes and copies EMPTY cells from
           // prevScreen (cleared here) → content vanishes.
           dropSubtreeCache(node)
-          layoutShifted = true
+          ctx.layoutShifted = true
         }
       }
       return
@@ -500,7 +524,7 @@ function renderNodeToOutput(
       const fh = Math.floor(height)
       output.blit(prevScreen, fx, fy, fw, fh)
       if (node.style.position === 'absolute') {
-        absoluteRectsCur.push(cached)
+        ctx.absoluteRectsCur.push(cached)
       }
       // Absolute descendants can paint outside this node's layout bounds
       // (e.g. a slash menu with position='absolute' bottom='100%' floats
@@ -522,7 +546,7 @@ function renderNodeToOutput(
         cached.width !== width ||
         cached.height !== height)
     if (positionChanged) {
-      layoutShifted = true
+      ctx.layoutShifted = true
     }
     if (cached && (node.dirty || positionChanged)) {
       output.clear(
@@ -541,7 +565,7 @@ function renderNodeToOutput(
     const clears = pendingClears.get(node)
     const hasRemovedChild = clears !== undefined
     if (hasRemovedChild) {
-      layoutShifted = true
+      ctx.layoutShifted = true
       for (const rect of clears) {
         output.clear({
           x: Math.floor(rect.x),
@@ -550,7 +574,7 @@ function renderNodeToOutput(
           height: Math.floor(rect.height),
         })
       }
-      pendingClears.delete(node)
+      if (ctx.consumeClears) pendingClears.delete(node)
     }
 
     // Yoga squeezed this node to zero height (overflow in a height-constrained
@@ -855,7 +879,7 @@ function renderNodeToOutput(
         const followDelta = (node.scrollTop ?? 0) - scrollTopBeforeFollow
         if (followDelta > 0) {
           const vpTop = node.scrollViewportTop ?? 0
-          followScroll = {
+          ctx.followScroll = {
             delta: followDelta,
             viewportTop: vpTop,
             viewportBottom: vpTop + innerHeight - 1,
@@ -926,7 +950,7 @@ function renderNodeToOutput(
         // Clamp hitting top/bottom consumes any remainder. Set drainPending
         // only after clamp so a wasted no-op frame isn't scheduled.
         if (storedScrollTop !== cur) node.pendingScrollDelta = undefined
-        if (node.pendingScrollDelta !== undefined) scrollDrainNode = node
+        if (node.pendingScrollDelta !== undefined) ctx.scrollDrainNode = node
         scrollTop = clamped
 
         if (content && contentYoga) {
@@ -957,9 +981,9 @@ function renderNodeToOutput(
               Math.abs(delta) < innerHeight
             ) {
               hint = { top: regionTop, bottom: regionBottom, delta }
-              scrollHint = hint
+              ctx.scrollHint = hint
             } else {
-              layoutShifted = true
+              ctx.layoutShifted = true
             }
           }
           // Fast path: scroll (hint captured) with usable prevScreen.
@@ -993,7 +1017,7 @@ function renderNodeToOutput(
           // is false the full path renders a next.screen that doesn't match
           // the DECSTBM shift — emitting DECSTBM leaves stale rows (seen as
           // content bleeding through during scroll-up + streaming). Clear it.
-          if (!safeForFastPath) scrollHint = null
+          if (!safeForFastPath) ctx.scrollHint = null
           if (hint && prevScreen && safeForFastPath) {
             const { top, bottom, delta } = hint
             const w = Math.floor(width)
@@ -1149,8 +1173,8 @@ function renderNodeToOutput(
             // pixels sit at (rect.y - delta) — neither edge render nor the
             // overlay's own re-render covers them. Wipe and re-render
             // ScrollBox content so the diff writes correct cells.
-            const spaces = absoluteRectsPrev.length ? ' '.repeat(w) : ''
-            for (const r of absoluteRectsPrev) {
+            const spaces = ctx.absoluteRectsPrev.length ? ' '.repeat(w) : ''
+            for (const r of ctx.absoluteRectsPrev) {
               if (r.y >= bottom + 1 || r.y + r.height <= top) continue
               const shiftedTop = Math.max(top, Math.floor(r.y) - delta)
               const shiftedBottom = Math.min(
@@ -1307,7 +1331,7 @@ function renderNodeToOutput(
     const rect = { x, y, width, height, top: yogaTop }
     nodeCache.set(node, rect)
     if (node.style.position === 'absolute') {
-      absoluteRectsCur.push(rect)
+      ctx.absoluteRectsCur.push(rect)
     }
     node.dirty = false
   }
@@ -1440,7 +1464,7 @@ function blitEscapingAbsoluteDescendants(
     if (elem.style.position === 'absolute') {
       const cached = nodeCache.get(elem)
       if (cached) {
-        absoluteRectsCur.push(cached)
+        ctx.absoluteRectsCur.push(cached)
         const cx = Math.floor(cached.x)
         const cy = Math.floor(cached.y)
         const cw = Math.floor(cached.width)

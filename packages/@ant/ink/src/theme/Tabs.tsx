@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { useIsInsideModal, useModalOrTerminalSize, useModalScrollRef } from './modalContext.js';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useState } from 'react';
+import { useIsInsideModal, useModalClaimScrollBox, useModalOrTerminalSize, useModalScrollRef } from './modalContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import ScrollBox from '../components/ScrollBox.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
@@ -98,6 +98,15 @@ export function Tabs({
   const selectedTabIndex = isControlled ? (controlledTabIndex !== -1 ? controlledTabIndex : 0) : internalSelectedTab;
 
   const modalScrollRef = useModalScrollRef();
+  const claimScrollBox = useModalClaimScrollBox();
+  // densable lRc claim: Tabs owns vJ so lRc does not attach its inner ScrollBox.
+  useLayoutEffect(() => {
+    if (!claimScrollBox || !modalScrollRef) {
+      return;
+    }
+    claimScrollBox(0);
+    return () => claimScrollBox(null);
+  }, [claimScrollBox, modalScrollRef]);
 
   // Header focus: left/right/tab only switch tabs when the header row is
   // focused. Children with interactive content call focusHeader() (via

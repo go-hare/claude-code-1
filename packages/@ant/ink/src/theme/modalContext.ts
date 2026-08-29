@@ -20,6 +20,11 @@ type ModalCtx = {
   rows: number
   columns: number
   scrollRef: RefObject<ScrollBoxHandle | null> | null
+  /**
+   * densable lRc claimScrollBox. Outer Tyn Bxc passes null; inner lRc
+   * provides a setter so a descendant (Tabs) can claim the scroller.
+   */
+  claimScrollBox?: ((height: number | null) => void) | null
 }
 
 export const ModalContext = createContext<ModalCtx | null>(null)
@@ -44,4 +49,12 @@ export function useModalOrTerminalSize(fallback: {
 
 export function useModalScrollRef(): RefObject<ScrollBoxHandle | null> | null {
   return useContext(ModalContext)?.scrollRef ?? null
+}
+
+/** densable lRc claimScrollBox from inner ModalContext. */
+export function useModalClaimScrollBox():
+  | ((height: number | null) => void)
+  | null
+  | undefined {
+  return useContext(ModalContext)?.claimScrollBox
 }
