@@ -162,7 +162,8 @@ export const permissionExitPlanModeV2Spec = defineDialogSpec({
 /** densable Cno */
 export const permissionBrowserSpec = defineDialogSpec({
   kind: PERMISSION_BROWSER_KIND,
-  payload: () => objectWithKeys('requestId', 'toolName', 'permissionResult'),
+  payload: () =>
+    objectWithKeys('requestId', 'toolName', 'permissionResult', 'verbPhrase'),
   result: permissionResultSchema,
   default: permissionResultDefault,
 })

@@ -4,10 +4,9 @@
 import React, { useMemo } from 'react';
 import { CostThresholdDialog } from '../components/CostThresholdDialog.js';
 import { FableConsentDialog } from '../components/FableConsentDialog.js';
-import { IdleReturnDialog } from '../components/IdleReturnDialog.js';
 import { IdeOnboardingDialog } from '../components/IdeOnboardingDialog.js';
+import { ResumeReturnDialog } from '../components/ResumeReturnDialog.js';
 import { PeerInboundApprovalDialog } from '../components/PeerInboundApprovalDialog.js';
-import { ClaudeInChromeOnboarding } from '../components/ClaudeInChromeOnboarding.js';
 import { ElicitationDialog } from '../components/mcp/ElicitationDialog.js';
 import { ComputerUseApproval } from '../components/permissions/ComputerUseApproval/ComputerUseApproval.js';
 import { SandboxPermissionRequest } from '../components/permissions/SandboxPermissionRequest.js';
@@ -15,8 +14,15 @@ import { It2SetupPrompt } from '../utils/swarm/It2SetupPrompt.js';
 import type { DialogRendererProps } from './DialogHost.js';
 import { AutoDefaultNudgeDialog } from './dialogs/AutoDefaultNudgeDialog.js';
 import { AutoModeFlaggedAllowDialog, AutoModeSetupReviewDialog } from './dialogs/AutoModeSetupDialogs.js';
+import {
+  ChromeInstallSetupDialog,
+  ChromeInstallUpsellDialog,
+  isChromeInstallSetupPhase,
+  type ChromeInstallSetupPayload,
+} from './dialogs/ChromeInstallDialogs.js';
 import { GoalProposalDialog } from './dialogs/GoalProposalDialog.js';
 import { RefusalFallbackDialog } from './dialogs/RefusalFallbackDialog.js';
+import { withSandboxNetworkPersistRow } from './sandboxNetworkAccess.js';
 import {
   AUTO_DEFAULT_NUDGE_KIND,
   AUTO_MODE_FLAGGED_ALLOW_KIND,
@@ -39,19 +45,21 @@ import {
 type DialogRenderer = (props: DialogRendererProps) => React.ReactNode;
 
 const costThresholdRenderer: DialogRenderer = ({ answer }) => (
-  <CostThresholdDialog onDone={() => answer('acknowledged')} />
+  <CostThresholdDialog onDone={() => answer('acknowledged')} onCancel={() => answer('cancelled')} />
 );
 
+/** densable W8c / Gxt — compact | continue | never; Esc → dismiss */
 const resumeReturnRenderer: DialogRenderer = ({ payload, answer }) => {
   const p = (payload ?? {}) as {
     sessionAgeMinutes?: number;
     estimatedTokens?: number;
   };
   return (
-    <IdleReturnDialog
-      idleMinutes={p.sessionAgeMinutes ?? 0}
-      totalInputTokens={p.estimatedTokens ?? 0}
-      onDone={action => answer(action)}
+    <ResumeReturnDialog
+      sessionAgeMinutes={p.sessionAgeMinutes ?? 0}
+      estimatedTokens={p.estimatedTokens ?? 0}
+      onChoice={choice => answer(choice)}
+      onCancel={() => answer('dismiss')}
     />
   );
 };
@@ -66,12 +74,13 @@ const ideOnboardingRenderer: DialogRenderer = ({ payload, answer }) => {
   );
 };
 
+/** densable m2A / FRr — yes-dont-ask-again mints persistRow.applies for K8c */
 const sandboxNetworkRenderer: DialogRenderer = ({ payload, answer }) => {
   const p = payload as { host: string; port?: number | string };
   return (
     <SandboxPermissionRequest
       hostPattern={{ host: p.host, port: p.port as never }}
-      onUserResponse={response => answer(response)}
+      onUserResponse={response => answer(withSandboxNetworkPersistRow(response, p.host))}
     />
   );
 };
@@ -98,7 +107,7 @@ const peerInboundRenderer: DialogRenderer = ({ payload, answer }) => {
     preview?: string;
   };
   if (!p?.holdCause || typeof p.preview !== 'string') {
-    answer('cancelled');
+    answer({ behavior: 'cancelled' });
     return null;
   }
   return (
@@ -110,12 +119,25 @@ const peerInboundRenderer: DialogRenderer = ({ payload, answer }) => {
         holdCause: p.holdCause as never,
         preview: p.preview,
       }}
-      onAnswer={result => answer(result)}
+      onAnswer={result => answer({ behavior: result })}
     />
   );
 };
 
-const chromeSetupRenderer: DialogRenderer = ({ answer }) => <ClaudeInChromeOnboarding onDone={() => answer(null)} />;
+/** densable Kmy / jOo — installUpsell Mby (HAVE) */
+const chromeInstallSetupRenderer: DialogRenderer = ({ payload, answer }) => {
+  const p = (payload ?? {}) as ChromeInstallSetupPayload;
+  if (!isChromeInstallSetupPhase(p.phase)) {
+    answer('cancelled');
+    return null;
+  }
+  return <ChromeInstallSetupDialog payload={p} onAnswer={result => answer(result)} />;
+};
+
+/** densable znu / zOo — installUpsell KBA (HAVE) */
+const chromeInstallUpsellRenderer: DialogRenderer = ({ answer }) => (
+  <ChromeInstallUpsellDialog onAnswer={result => answer(result)} />
+);
 
 /** densable l2A / _Bi */
 const it2SetupRenderer: DialogRenderer = ({ payload, answer }) => {
@@ -160,6 +182,7 @@ function McpUrlElicitationRenderer({ payload, answer }: DialogRendererProps): Re
       }}
       onWaitingDismiss={action => {
         if (action === 'cancel') answer({ action: 'cancel' });
+        if (action === 'retry') answer({ action: 'accept' });
       }}
     />
   );
@@ -254,8 +277,8 @@ export const JSU_NON_PERMISSION_COMPONENTS: Record<string, DialogRenderer> = {
   [AUTO_MODE_SETUP_REVIEW_KIND]: autoModeSetupReviewRenderer,
   [AUTO_MODE_FLAGGED_ALLOW_KIND]: autoModeFlaggedAllowRenderer,
   [PEER_INBOUND_APPROVAL_KIND]: peerInboundRenderer,
-  [CHROME_INSTALL_SETUP_KIND]: chromeSetupRenderer,
-  [CHROME_INSTALL_UPSELL_KIND]: chromeSetupRenderer,
+  [CHROME_INSTALL_SETUP_KIND]: chromeInstallSetupRenderer,
+  [CHROME_INSTALL_UPSELL_KIND]: chromeInstallUpsellRenderer,
 };
 
 export const JSU_NON_PERMISSION_KIND_LIST = Object.keys(JSU_NON_PERMISSION_COMPONENTS) as readonly string[];

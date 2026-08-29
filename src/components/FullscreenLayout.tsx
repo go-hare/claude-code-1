@@ -15,16 +15,31 @@ import { fileURLToPath } from 'url';
 import { ModalContext } from '../context/modalContext.js';
 import { PromptOverlayProvider, usePromptOverlay, usePromptOverlayDialog } from '../context/promptOverlayContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, ScrollBox, type ScrollBoxHandle, Text, instances, stringWidth, useTerminalFocus } from '@anthropic/ink';
+import {
+  AxcFrameSinkBridge,
+  AxcScrollAnchor,
+  Box,
+  Divider,
+  type DOMElement,
+  NATIVE_HISTORY_BOTTOM_CHROME,
+  ScrollBox,
+  type ScrollBoxHandle,
+  Text,
+  instances,
+  stringWidth,
+  useTerminalFocus,
+} from '@anthropic/ink';
 import type { Message } from '../types/message.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { openBrowser, openPath } from '../utils/browser.js';
 import { getAutoScrollEnabled } from '../utils/config.js';
 import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fullscreen.js';
+import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { getPlatform } from '../utils/platform.js';
 import { recordJumpToBottomClick } from '../utils/scrollTelemetry.js';
 import { plural } from '../utils/stringUtils.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
+import { ModalScroller } from './ModalScroller.js';
 import PromptInputFooterSuggestions from './PromptInput/PromptInputFooterSuggestions.js';
 import type { StickyPrompt } from './VirtualMessageList.js';
 
@@ -62,11 +77,11 @@ type Props = {
    *  region (not the bottom slot) so the overflowY:hidden cap doesn't clip
    *  it. Fullscreen only — used for the companion speech bubble. */
   bottomFloat?: ReactNode;
-  /** Slash-command dialog content. Rendered in an absolute-positioned
-   *  bottom-anchored pane (▔ divider, paddingX=2) that paints over the
-   *  ScrollBox AND bottom slot. Provides ModalContext so Pane/Dialog inside
-   *  skip their own frame. Fullscreen only; inline after overlay otherwise. */
-  modal?: ReactNode;
+  /**
+   * densable ozs / fCt — `{content, visible}`. Gold Tyn Bxc is a flex
+   * sibling (not absolute). `visible` drives Uxc/Bxc display.
+   */
+  modal?: { content: ReactNode; visible: boolean };
   /** Ref passed via ModalContext so Tabs (or any scroll-owning descendant)
    *  can attach it to their own ScrollBox for tall content. */
   modalScrollRef?: React.RefObject<ScrollBoxHandle | null>;
@@ -319,6 +334,8 @@ export function FullscreenLayout({
   sidebarWidth = 0,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
+  const axcBottomRef = useRef<DOMElement | null>(null);
+  const axcOverlayRef = useRef<DOMElement | null>(null);
   // Scroll-derived chrome state lives HERE, not in REPL. StickyTracker
   // writes via ScrollChromeContext; pillVisible subscribes directly to
   // ScrollBox. Both change rarely (pill flips once per threshold crossing,
@@ -400,12 +417,40 @@ export function FullscreenLayout({
     const headerPrompt = sticky != null && sticky !== 'clicked' && overlay == null ? sticky : null;
     const padCollapsed = sticky != null;
     const mainColumns = Math.max(1, columns - sidebarWidth);
-    return (
+    const axcSticky = isAxcStickyMainEnabled() && scrollRef != null;
+    // densable xxc: ScrollBox-only content band (no Wrn top sticky inside
+    // DECSTBM). Pill lives in bottom pushUp so it stays outside scroll region.
+    const showWrnStickyHeader = !axcSticky && headerPrompt != null;
+    const showPill = !hidePill && pillVisible && overlay == null;
+    const pillNode = showPill ? (
+      <NewMessagesPill
+        count={newMessageCount}
+        onClick={() => {
+          // densable i8l: onClick={zxh} only — StickyTracker clears
+          // when scrollToBottom repins isSticky.
+          onPillClick?.();
+        }}
+      />
+    ) : null;
+    // Project C: densable xxc frameSink when CLAUDE_CODE_AXC_STICKY_MAIN=1
+    // (REPL must skip AlternateScreen so Axc is not suspended). Pass
+    // bottom/overlay refs so prompt chrome + modal paint under frameSink.
+    const wrapAxc = (node: React.ReactNode): React.ReactNode =>
+      axcSticky && scrollRef ? (
+        <AxcFrameSinkBridge scrollRef={scrollRef} bottomRef={axcBottomRef} overlayRef={axcOverlayRef}>
+          {node}
+        </AxcFrameSinkBridge>
+      ) : (
+        node
+      );
+    const modalVisible = modal?.visible ?? false;
+    return wrapAxc(
       <PromptOverlayProvider>
-        <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
-          <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
-            <Box flexGrow={1} flexDirection="column" overflow="hidden">
-              {headerPrompt && <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />}
+        <Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">
+          {/* $xc — scroll + sidebar row */}
+          <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
+            <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
+              {showWrnStickyHeader && <StickyPromptHeader text={headerPrompt!.text} onClick={headerPrompt!.scrollTo} />}
               <ScrollBox
                 ref={scrollRef}
                 flexGrow={1}
@@ -414,93 +459,74 @@ export function FullscreenLayout({
                 stickyScroll
                 followGrowth={getAutoScrollEnabled()}
               >
+                {axcSticky ? <AxcScrollAnchor /> : null}
                 <ScrollChromeContext value={chromeCtx}>{scrollable}</ScrollChromeContext>
                 {overlay}
               </ScrollBox>
-              {!hidePill && pillVisible && overlay == null && (
-                <NewMessagesPill
-                  count={newMessageCount}
-                  onClick={() => {
-                    // densable i8l: onClick={zxh} only — StickyTracker clears
-                    // when scrollToBottom repins isSticky.
-                    onPillClick?.();
-                  }}
-                />
-              )}
+              {!axcSticky && pillNode}
               {bottomFloat != null && (
                 <Box position="absolute" bottom={0} right={0} opaque>
                   {bottomFloat}
                 </Box>
               )}
             </Box>
-            <Box
-              flexDirection="column"
-              flexShrink={0}
-              width="100%"
-              maxHeight={Math.max(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS)}
-            >
-              <SuggestionsOverlay />
-              <DialogOverlay />
-              <Box flexDirection="column" width="100%" flexGrow={1} flexShrink={0} overflowY="hidden">
-                {bottom}
+            {sidebar != null && (
+              <Box flexDirection="column" width={sidebarWidth} flexShrink={0} overflow="hidden">
+                {sidebar}
               </Box>
+            )}
+          </Box>
+          {/* Uxc — prompt chrome (hidden while ozs visible) */}
+          <Box
+            ref={axcBottomRef}
+            flexDirection="column"
+            flexShrink={0}
+            width="100%"
+            minHeight={axcSticky ? NATIVE_HISTORY_BOTTOM_CHROME : undefined}
+            maxHeight={Math.max(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS)}
+            display={modalVisible ? 'none' : 'flex'}
+          >
+            {axcSticky && pillNode}
+            <SuggestionsOverlay />
+            <DialogOverlay />
+            <Box flexDirection="column" width="100%" flexGrow={1} flexShrink={0} overflowY="hidden">
+              {bottom}
             </Box>
           </Box>
-          {sidebar != null && (
-            <Box flexDirection="column" width={sidebarWidth} flexShrink={0} overflow="hidden">
-              {sidebar}
-            </Box>
+          {/* Bxc — ozs pane */}
+          {modal != null && (
+            <ModalContext
+              value={{
+                rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
+                columns: columns - 4,
+                scrollRef: modalScrollRef ?? null,
+                claimScrollBox: null,
+              }}
+            >
+              <Box
+                ref={axcOverlayRef}
+                flexShrink={0}
+                width="100%"
+                maxHeight={terminalRows - MODAL_TRANSCRIPT_PEEK}
+                flexDirection="column"
+                overflow="hidden"
+                display={modalVisible ? 'flex' : 'none'}
+              >
+                <Box flexShrink={0}>
+                  <Divider color="permission" char="▔" />
+                </Box>
+                {axcSticky ? (
+                  modal.content
+                ) : (
+                  <ModalScroller scrollRef={modalScrollRef} maxRows={terminalRows - MODAL_TRANSCRIPT_PEEK - 1}>
+                    {modal.content}
+                  </ModalScroller>
+                )}
+              </Box>
+            </ModalContext>
           )}
         </Box>
-        {modal != null && (
-          <ModalContext
-            value={{
-              rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
-              columns: columns - 4,
-              scrollRef: modalScrollRef ?? null,
-            }}
-          >
-            {/* Bottom-anchored, grows upward to fit content. maxHeight keeps a
-                few rows of transcript peek above the ▔ divider. Short modals
-                (/model) sit small at the bottom with lots of transcript above;
-                tall modals (/buddy Card) grow as needed, clipped by overflow.
-                Previously fixed-height (top+bottom anchored) — any fixed cap
-                either clipped tall content or left short content floating in
-                a mostly-empty pane.
-
-                flexShrink=0 on the inner Box is load-bearing: with Shrink=1,
-                yoga squeezes deep children to h=0 when content > maxHeight,
-                and sibling Texts land on the same row → ghost overlap
-                ("5 serversP servers"). Clipping at the outer Box's maxHeight
-                keeps children at natural size.
-
-                Divider wrapped in flexShrink=0: when the inner box overflows
-                (tall /config option list), yoga shrinks the divider Text to
-                h=0 to absorb the deficit — it's the only shrinkable sibling.
-                The wrapper keeps it at 1 row; overflow past maxHeight is
-                clipped at the bottom by overflow=hidden instead. */}
-            <Box
-              position="absolute"
-              bottom={0}
-              left={0}
-              right={0}
-              maxHeight={terminalRows - MODAL_TRANSCRIPT_PEEK}
-              flexDirection="column"
-              overflow="hidden"
-              opaque
-            >
-              <Box flexShrink={0}>
-                <Text color="permission">{'▔'.repeat(columns)}</Text>
-              </Box>
-              {/* densable 2.1.216 #23: minWidth=0 clamps dialog children to panel
-                  width so content never paints past the right-hand edge. */}
-              <Box flexDirection="column" paddingX={2} flexShrink={0} overflow="hidden" minWidth={0} width="100%">
-                {modal}
-              </Box>
-            </Box>
-          </ModalContext>
-        )}
-      </PromptOverlayProvider>
+      </PromptOverlayProvider>,
     );
   }
 
@@ -509,7 +535,7 @@ export function FullscreenLayout({
       {scrollable}
       {bottom}
       {overlay}
-      {modal}
+      {modal?.content}
     </>
   );
 }

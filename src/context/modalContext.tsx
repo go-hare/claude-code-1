@@ -15,4 +15,5 @@ export {
   useIsInsideModal,
   useModalOrTerminalSize,
   useModalScrollRef,
+  useModalClaimScrollBox,
 } from '@anthropic/ink';

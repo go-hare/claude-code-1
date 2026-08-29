@@ -79,11 +79,11 @@ describe('densable foo order (Fwl → file → bash → bEt)', () => {
     expect(fwl?.descriptor).toMatchObject({ intervalMs: 0 })
   })
 
-  test('Fwl: claude-in-chrome MCP → permission_browser', () => {
+  test('Fwl: LUt default false → chrome MCP is not Cno', () => {
     const fwl = selectPermissionDialogFwl(
       confirm({ name: 'mcp__claude-in-chrome__click' }, {}),
     )
-    expect(fwl?.spec.kind).toBe(PERMISSION_BROWSER_KIND)
+    expect(fwl).toBeNull()
   })
 
   test('file arm → await Lno → permission_file', async () => {

@@ -1,10 +1,18 @@
 /**
- * densable snu / anu — auto_mode_setup_review + auto_mode_flagged_allow.
+ * densable snu / anu / gmn / hmn — auto_mode_setup_review + flagged_allow.
  * Tip bridge: accept/decline (review) and multi-select remove (flagged).
+ * Wizard nlg flagged step uses AutoModeFlaggedAllowPicker (hmn).
  */
 import React, { useState } from 'react';
-import { Box, Dialog, Text } from '@anthropic/ink';
-import { Select } from '../../components/CustomSelect/index.js';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { Select, SelectMulti } from '../../components/CustomSelect/index.js';
+import { Markdown } from '../../components/Markdown.js';
+import { AUTO_MODE_DEFAULTS_SENTINEL } from '../../services/autoModeSetup/write.js';
+
+/** densable gmn */
+export function filterDefaultsSentinel(rules: readonly string[]): string[] {
+  return rules.filter(rule => rule !== AUTO_MODE_DEFAULTS_SENTINEL);
+}
 
 export type AutoModeSetupReviewPayload = {
   environment?: string[];
@@ -21,32 +29,100 @@ export type AutoModeSetupReviewResult = 'accept' | 'decline' | 'cancelled';
 type ReviewProps = {
   payload: AutoModeSetupReviewPayload;
   onAnswer: (result: AutoModeSetupReviewResult) => void;
+  /** densable ymn hideIndexes — Host/wizard omit */
+  hideIndexes?: boolean;
+  /** densable ymn defaultFocusValue — Host/wizard omit */
+  defaultFocusValue?: AutoModeSetupReviewResult;
+  /** densable ymn onFocus — Host/wizard omit */
+  onFocus?: (value: AutoModeSetupReviewResult) => void;
 };
 
-export function AutoModeSetupReviewDialog({ payload, onAnswer }: ReviewProps): React.ReactNode {
-  const allowCount = payload.allow?.length ?? 0;
-  const denyCount = (payload.soft_deny?.length ?? 0) + (payload.hard_deny?.length ?? 0);
+/** densable xy0 — Markdown renderer around each M9e entry */
+function renderAutoModeEntry(entry: string): React.ReactNode {
+  return <Markdown>{entry}</Markdown>;
+}
+
+/** densable M9e */
+function AutoModeProposalSection({
+  label,
+  entries,
+  empty,
+  dim,
+  headers,
+}: {
+  label: string;
+  entries: readonly string[];
+  empty?: string;
+  dim?: boolean;
+  headers?: boolean;
+}): React.ReactNode {
+  return (
+    <Box flexDirection="column">
+      <Text bold>{label}</Text>
+      {entries.length === 0 ? (
+        <Text dimColor>{` ${empty ?? 'nothing found'}`}</Text>
+      ) : (
+        entries.map((entry, index) =>
+          headers && entry.startsWith('### ') ? (
+            <Text key={index} dimColor>
+              {'  '}
+              {renderAutoModeEntry(entry.slice(4))}
+            </Text>
+          ) : (
+            <Text key={index} dimColor={dim}>
+              {'  · '}
+              {renderAutoModeEntry(entry)}
+            </Text>
+          ),
+        )
+      )}
+    </Box>
+  );
+}
+
+const YMN_INPUT_GUIDE = (
+  <Byline>
+    <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+    <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+  </Byline>
+);
+
+/** densable ymn — Host + nlg review step */
+export function AutoModeSetupReviewDialog({
+  payload,
+  onAnswer,
+  hideIndexes,
+  defaultFocusValue,
+  onFocus,
+}: ReviewProps): React.ReactNode {
+  const allow = filterDefaultsSentinel(payload.allow ?? []);
+  const softDeny = filterDefaultsSentinel(payload.soft_deny ?? []);
+  const hardDeny = filterDefaultsSentinel(payload.hard_deny ?? []);
 
   return (
     <Dialog
-      title="Auto-mode setup proposal is ready for review"
-      color="permission"
+      title="Review proposed auto-mode setup"
       onCancel={() => onAnswer('cancelled')}
+      inputGuide={() => YMN_INPUT_GUIDE}
     >
       <Box flexDirection="column" gap={1}>
-        <Text>
-          Mode: {payload.mode ?? 'append'} · allow {allowCount} · deny {denyCount}
-        </Text>
-        {(payload.notes ?? []).slice(0, 3).map(note => (
-          <Text key={note} dimColor>
-            {note}
-          </Text>
-        ))}
+        <AutoModeProposalSection label="Environment" entries={payload.environment ?? []} headers />
+        <AutoModeProposalSection
+          label="Allow carve-outs"
+          entries={allow}
+          empty="none suggested — defaults look like they cover your usage"
+        />
+        <AutoModeProposalSection label="Extra soft blocks" entries={softDeny} empty="none suggested" />
+        <AutoModeProposalSection label="Extra hard blocks" entries={hardDeny} empty="none suggested" />
+        <AutoModeProposalSection label="Notes" entries={payload.notes ?? []} empty="none" dim />
         <Select
           options={[
-            { value: 'accept', label: 'Accept proposal' },
-            { value: 'decline', label: 'Decline' },
+            { value: 'accept', label: 'Looks good — save it' },
+            { value: 'decline', label: 'Discard and exit' },
           ]}
+          hideIndexes={hideIndexes}
+          defaultFocusValue={defaultFocusValue}
+          onFocus={onFocus}
           onChange={value => onAnswer(value as 'accept' | 'decline')}
           onCancel={() => onAnswer('cancelled')}
         />
@@ -68,52 +144,92 @@ type FlaggedProps = {
 };
 
 export function AutoModeFlaggedAllowDialog({ payload, onAnswer }: FlaggedProps): React.ReactNode {
-  const [selected, setSelected] = useState<string[]>([]);
+  return (
+    <AutoModeFlaggedAllowPicker
+      flagged={payload.flagged}
+      onCancel={() => onAnswer('cancelled')}
+      onResolve={toRemove => onAnswer({ toRemove })}
+    />
+  );
+}
+
+const HMN_INPUT_GUIDE = (
+  <Byline>
+    <Text>Your setup is saved either way</Text>
+    <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+    <KeyboardShortcutHint shortcut="Esc" action="skip" />
+  </Byline>
+);
+
+/** densable hmn — nlg flagged step + Host flagged_allow */
+export function AutoModeFlaggedAllowPicker(props: {
+  flagged?: string[];
+  initialPicking?: boolean;
+  onPickingChange?: (picking: boolean) => void;
+  initialSelection?: string[];
+  onSelectionChange?: (selected: string[]) => void;
+  hideIndexes?: boolean;
+  onCancel: () => void;
+  onResolve: (toRemove: string[]) => void;
+}): React.ReactNode {
+  const rawFlagged = props.flagged ?? [];
+  const flagged = filterDefaultsSentinel(rawFlagged);
+  const [picking, setPicking] = useState(props.initialPicking ?? false);
+
+  const setPickingBoth = (next: boolean) => {
+    setPicking(next);
+    props.onPickingChange?.(next);
+  };
+
+  if (picking) {
+    return (
+      <Dialog title="Pick which to remove" onCancel={props.onCancel} inputGuide={() => HMN_INPUT_GUIDE}>
+        <SelectMulti
+          hideIndexes={props.hideIndexes}
+          options={flagged.map(rule => ({ value: rule, label: rule }))}
+          defaultValue={props.initialSelection}
+          onChange={props.onSelectionChange}
+          submitButtonText="Remove selected"
+          onSubmit={props.onResolve}
+          onCancel={props.onCancel}
+        />
+      </Dialog>
+    );
+  }
 
   return (
-    <Dialog
-      title="Auto-mode setup flagged some permission rules for review"
-      color="warning"
-      onCancel={() => onAnswer('cancelled')}
-    >
+    <Dialog title="Review rules that skip checks" onCancel={props.onCancel} inputGuide={() => HMN_INPUT_GUIDE}>
       <Box flexDirection="column" gap={1}>
-        <Text dimColor>Select rules to remove, or keep all flagged allows.</Text>
-        {(payload.flagged ?? []).slice(0, 12).map(rule => {
-          const on = selected.includes(rule);
-          return (
-            <Text key={rule}>
-              {on ? '[x] ' : '[ ] '}
-              {rule}
-            </Text>
-          );
-        })}
+        <Text dimColor>
+          These permissions.allow entries in your user settings are broad enough that auto mode either ignores them at
+          runtime, or auto-approves destructive commands with no check. Removing one means matching commands prompt
+          again outside auto mode too.
+        </Text>
+        <Box flexDirection="column">
+          {flagged.map(rule => (
+            <Text key={rule}>{` · ${rule}`}</Text>
+          ))}
+        </Box>
+        <Text dimColor>Removed entries can be restored by re-adding them verbatim.</Text>
         <Select
+          hideIndexes={props.hideIndexes}
           options={[
-            {
-              value: 'toggle-first',
-              label: payload.flagged[0] !== undefined ? `Toggle remove: ${payload.flagged[0]}` : 'No flagged rules',
-            },
-            {
-              value: 'remove-selected',
-              label: `Remove selected (${selected.length})`,
-            },
-            { value: 'keep-all', label: 'Keep all flagged allows' },
+            { value: 'all', label: 'Remove them all' },
+            { value: 'pick', label: 'Pick which to remove' },
+            { value: 'leave', label: 'Leave them' },
           ]}
           onChange={value => {
-            if (value === 'toggle-first' && payload.flagged[0]) {
-              const rule = payload.flagged[0];
-              setSelected(prev => (prev.includes(rule) ? prev.filter(r => r !== rule) : [...prev, rule]));
+            if (value === 'all') {
+              props.onResolve(rawFlagged);
               return;
             }
-            if (value === 'remove-selected') {
-              onAnswer({ toRemove: selected });
+            if (value === 'pick') {
+              setPickingBoth(true);
               return;
             }
-            if (value === 'keep-all') {
-              onAnswer({ toRemove: [] });
-            }
+            props.onResolve([]);
           }}
-          onCancel={() => onAnswer('cancelled')}
+          onCancel={props.onCancel}
         />
       </Box>
     </Dialog>

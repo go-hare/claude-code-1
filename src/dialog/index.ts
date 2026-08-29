@@ -23,15 +23,23 @@ export {
   useDialogStore,
   useTopDialog,
   useHasOpenDialogs,
+  useHasBlockingOpenDialogs,
+  useNhtHidesPromptInput,
   useTopDialogKind,
 } from './DialogStoreContext.js'
 export { useDialogMailboxBridge } from './useDialogMailboxBridge.js'
 export {
   DialogHost,
   DIALOG_ANSWER_SWAP_DEBOUNCE_MS,
+  getDialogHostLayout,
+  getModalChromeVisibility,
+  isFullscreenModalChromeActive,
   isManagedSettingsSecurityDialog,
   isPermissionPromptDialog,
+  isTopDialogModalLayout,
+  shouldOccupyFullscreenModalSlot,
   type DialogHostVariant,
+  type ModalChromeVisibility,
 } from './DialogHost.js'
 export {
   PermissionDialogHostProvider,
@@ -80,6 +88,7 @@ export {
   buildPowerShellPermissionDescriptor,
   buildWebFetchPermissionDescriptor,
   buildAskUserQuestionPermissionDescriptor,
+  buildBrowserPermissionDescriptor,
 } from './permissionDescriptor.js'
 export {
   buildFilePermissionDescriptor,
@@ -105,7 +114,24 @@ export {
   CHROME_INSTALL_UPSELL_KIND,
   NON_PERMISSION_DIALOG_KINDS,
   isNonPermissionDialogKind,
+  isSoftNmsDialogKind,
+  costThresholdSpec,
+  resumeReturnSpec,
+  ideOnboardingSpec,
+  peerInboundApprovalSpec,
+  autoDefaultNudgeSpec,
+  sandboxNetworkAccessSpec,
+  chromeInstallSetupSpec,
+  chromeInstallUpsellSpec,
 } from './specs/jsuKinds.js'
+export {
+  openCostThresholdIfNeeded,
+  isCostThresholdDialog,
+} from './openCostThreshold.js'
+export { openResumeReturnIfNeeded } from './openResumeReturn.js'
+export { maybeRequestAutoDefaultNudge } from './openAutoDefaultNudge.js'
+export { shouldShowAutoDefaultNudge } from './shouldShowAutoDefaultNudge.js'
+export { nhtHidesPromptInput } from './nhtPrompt.js'
 export {
   MANAGED_SETTINGS_SECURITY_KIND,
   managedSettingsSecuritySpec,

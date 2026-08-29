@@ -4,6 +4,16 @@
  * File Lno/X_w lives in filePermissionPreview.ts (async).
  */
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
+import {
+  computeIsAskCappedByOrg,
+  computeShowAlwaysAllow,
+  extractChromeHostTarget,
+  formatBrowserVerbPhrase,
+} from './permissionBrowser.js'
+import {
+  resolvePermissionRequestSource,
+  type PermissionRequestSourceContext,
+} from './permissionRequestSource.js'
 
 const RENDER_FAIL = 'parameters could not be rendered — deny unless expected'
 
@@ -164,6 +174,41 @@ export function buildSkillPermissionDescriptor(
   const skillDescription =
     typeof fromMeta?.description === 'string' ? fromMeta.description : undefined
   return { ...base, skill, skillDescription }
+}
+
+/** densable vum — permission_browser (Cno) */
+export function buildBrowserPermissionDescriptor(
+  input: BuildInput,
+): PermissionDescriptorBase & {
+  verbPhrase: string
+  chrome?: ReturnType<typeof extractChromeHostTarget>
+  showAlwaysAllow: boolean
+  isAskCappedByOrg: boolean
+  requestSource: ReturnType<typeof resolvePermissionRequestSource>
+} {
+  const base = buildPermissionDescriptorBase(input)
+  const requestSource = resolvePermissionRequestSource(
+    input.confirm.toolUseContext as PermissionRequestSourceContext,
+  )
+  return {
+    ...base,
+    verbPhrase: formatBrowserVerbPhrase(
+      input.confirm.tool.name,
+      input.confirm.input,
+    ),
+    chrome: extractChromeHostTarget(
+      input.confirm.permissionResult,
+      input.confirm.input,
+    ),
+    showAlwaysAllow: computeShowAlwaysAllow({
+      permissionResult: input.confirm.permissionResult,
+      tool: input.confirm.tool,
+      input: input.confirm.input,
+      requestSource,
+    }),
+    isAskCappedByOrg: computeIsAskCappedByOrg(input.confirm.tool),
+    requestSource,
+  }
 }
 
 /** densable wum — permission_ask_user_question */

@@ -7,10 +7,11 @@ import {
 } from '../../services/analytics/index.js';
 import { Select } from '../CustomSelect/select.js';
 import { PermissionDialog } from './PermissionDialog.js';
+import type { SandboxNetworkAccessResult } from '../../dialog/sandboxNetworkAccess.js';
 
 export type SandboxPermissionRequestProps = {
   hostPattern: NetworkHostPattern;
-  onUserResponse: (response: { allow: boolean; persistToSettings: boolean }) => void;
+  onUserResponse: (response: SandboxNetworkAccessResult) => void;
 };
 
 export function SandboxPermissionRequest({
@@ -88,7 +89,8 @@ export function SandboxPermissionRequest({
                   result: 'cancel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 });
               }
-              onUserResponse({ allow: false, persistToSettings: false });
+              // densable FRr Esc → "cancelled" so K8c can take the bridge-race branch
+              onUserResponse('cancelled');
             }}
           />
         </Box>

@@ -67,11 +67,12 @@ export const computerUseApprovalSpec = defineDialogSpec({
   default: null,
 })
 
-/** densable Wxt */
+/** densable Wxt — Esc/dismiss is cancelled (oXg); Got it is acknowledged. */
 export const costThresholdSpec = defineDialogSpec({
   kind: COST_THRESHOLD_KIND,
   payload: passthrough,
-  ...ack,
+  result: () => z.union([z.literal('acknowledged'), z.literal('cancelled')]),
+  default: 'cancelled' as const,
 })
 
 /** densable Gxt */
@@ -84,8 +85,9 @@ export const resumeReturnSpec = defineDialogSpec({
         estimatedTokens: z.number().optional(),
       })
       .passthrough(),
-  result: () => z.unknown(),
-  default: null,
+  result: () =>
+    z.enum(['compact', 'continue', 'dismiss', 'never', 'cancelled']),
+  default: 'cancelled' as const,
 })
 
 /** densable CHr */
@@ -102,17 +104,25 @@ export const sandboxNetworkAccessSpec = defineDialogSpec({
   kind: SANDBOX_NETWORK_ACCESS_KIND,
   payload: () =>
     z.object({ host: z.string(), port: z.unknown().optional() }).passthrough(),
-  result: () => z.unknown(),
-  default: null,
+  result: () =>
+    z.union([
+      z.object({
+        allow: z.boolean(),
+        persistToSettings: z.boolean(),
+        persistRow: z.unknown().optional(),
+      }),
+      z.literal('cancelled'),
+    ]),
+  default: 'cancelled' as const,
 })
 
-/** densable qSn */
+/** densable qSn — Esc/dismiss is cancelled (no hasSeen latch). */
 export const autoDefaultNudgeSpec = defineDialogSpec({
   kind: AUTO_DEFAULT_NUDGE_KIND,
   payload: () =>
     z.object({ currentMode: z.unknown().optional() }).passthrough(),
-  result: () => z.enum(['accepted', 'declined']),
-  default: 'declined' as const,
+  result: () => z.enum(['accepted', 'declined', 'cancelled']),
+  default: 'cancelled' as const,
 })
 
 /** densable Gbt */
@@ -139,52 +149,75 @@ export const fableOverageConsentPromptSpec = defineDialogSpec({
   default: 'cancelled' as const,
 })
 
-/** densable Dot */
+/** densable Dot — result {approved, explicit?}, default {approved:false} */
 export const goalProposalSpec = defineDialogSpec({
   kind: GOAL_PROPOSAL_KIND,
-  payload: passthrough,
-  result: () => z.unknown(),
-  default: null,
+  payload: () => z.object({ condition: z.string() }).passthrough(),
+  result: () =>
+    z.object({
+      approved: z.boolean(),
+      explicit: z.boolean().optional(),
+    }),
+  default: { approved: false },
 })
 
-/** densable AEo */
+/** densable AEo — result Or(["accept","decline","cancelled"]), default cancelled */
 export const autoModeSetupReviewSpec = defineDialogSpec({
   kind: AUTO_MODE_SETUP_REVIEW_KIND,
   payload: passthrough,
-  result: () => z.unknown(),
-  default: null,
+  result: () => z.enum(['accept', 'decline', 'cancelled']),
+  default: 'cancelled' as const,
 })
 
-/** densable TEo */
+/** densable TEo — result Es([{toRemove:string[]}, "cancelled"]), default cancelled */
 export const autoModeFlaggedAllowSpec = defineDialogSpec({
   kind: AUTO_MODE_FLAGGED_ALLOW_KIND,
-  payload: passthrough,
-  result: () => z.unknown(),
-  default: null,
+  payload: () =>
+    z.object({ flagged: z.array(z.string()), runId: z.string() }).passthrough(),
+  result: () =>
+    z.union([
+      z.object({ toRemove: z.array(z.string()) }),
+      z.literal('cancelled'),
+    ]),
+  default: 'cancelled' as const,
 })
 
 /** densable UOo */
 export const peerInboundApprovalSpec = defineDialogSpec({
   kind: PEER_INBOUND_APPROVAL_KIND,
-  payload: passthrough,
-  result: () => z.unknown(),
-  default: null,
+  payload: () =>
+    z.object({ holdCause: z.unknown(), preview: z.string() }).passthrough(),
+  result: () =>
+    z.object({
+      behavior: z.enum(['approve', 'deny', 'cancelled']),
+    }),
+  default: { behavior: 'cancelled' as const },
 })
 
 /** densable jOo */
 export const chromeInstallSetupSpec = defineDialogSpec({
   kind: CHROME_INSTALL_SETUP_KIND,
-  payload: passthrough,
-  result: () => z.unknown(),
-  default: null,
+  payload: () =>
+    z.object({
+      phase: z.enum([
+        'waiting_install',
+        'connecting',
+        'stalled',
+        'connected',
+        'failed',
+      ]),
+      installPageOpened: z.boolean(),
+    }),
+  result: () => z.enum(['continue', 'keep_waiting', 'skip', 'cancelled']),
+  default: 'cancelled' as const,
 })
 
 /** densable zOo */
 export const chromeInstallUpsellSpec = defineDialogSpec({
   kind: CHROME_INSTALL_UPSELL_KIND,
   payload: passthrough,
-  result: () => z.unknown(),
-  default: null,
+  result: () => z.enum(['install', 'not_now', 'dont_ask_again', 'cancelled']),
+  default: 'cancelled' as const,
 })
 
 export function isNonPermissionDialogKind(
@@ -194,4 +227,16 @@ export function isNonPermissionDialogKind(
     kind !== undefined &&
     (NON_PERMISSION_DIALOG_KINDS as readonly string[]).includes(kind)
   )
+}
+
+/** densable i_y — soft kinds keep PromptInput (Wxt / Gxt / qSn / CHr). */
+const SOFT_NMS_KINDS = new Set<string>([
+  COST_THRESHOLD_KIND,
+  RESUME_RETURN_KIND,
+  AUTO_DEFAULT_NUDGE_KIND,
+  IDE_ONBOARDING_KIND,
+])
+
+export function isSoftNmsDialogKind(kind: string | undefined): boolean {
+  return kind !== undefined && SOFT_NMS_KINDS.has(kind)
 }

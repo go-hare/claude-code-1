@@ -53,6 +53,7 @@ import {
   createResolveOnce,
   isPermissionHookReprompt,
 } from '../PermissionContext.js'
+import { notifyBridgeFromDooResult } from '../notifyBridgeFromDooResult.js'
 
 type InteractivePermissionParams = {
   ctx: PermissionContext
@@ -373,25 +374,34 @@ function handleInteractivePermission(
         // Tip dynamic import gap vs densable sync doo: claim may already have
         // won (classifier/bridge/pipe/hook) while modules were loading.
         if (isResolved()) return
+        const notifyBridge = (msg: {
+          behavior: 'allow' | 'deny'
+          updatedInput?: Record<string, unknown>
+          updatedPermissions?: PermissionUpdate[]
+          message?: string
+        }): void => {
+          if (!bridgeCallbacks || !bridgeRequestId) return
+          if (msg.behavior === 'allow') {
+            bridgeCallbacks.sendResponse(bridgeRequestId, {
+              behavior: 'allow',
+              updatedInput: msg.updatedInput,
+              ...(msg.updatedPermissions !== undefined
+                ? { updatedPermissions: msg.updatedPermissions }
+                : {}),
+            })
+          } else {
+            bridgeCallbacks.sendResponse(bridgeRequestId, {
+              behavior: 'deny',
+              message: msg.message ?? 'User denied permission',
+            })
+          }
+          bridgeCallbacks.cancelRequest(bridgeRequestId)
+        }
         const session = startPermissionDoo({
           requestDialog: requestDialog as never,
           confirm: toolUseConfirm,
           signal: ctx.toolUseContext.abortController.signal,
-          notifyBridge: msg => {
-            if (!bridgeCallbacks || !bridgeRequestId) return
-            if (msg.behavior === 'allow') {
-              bridgeCallbacks.sendResponse(bridgeRequestId, {
-                behavior: 'allow',
-                updatedInput: msg.updatedInput,
-              })
-            } else {
-              bridgeCallbacks.sendResponse(bridgeRequestId, {
-                behavior: 'deny',
-                message: msg.message ?? 'User denied permission',
-              })
-            }
-            bridgeCallbacks.cancelRequest(bridgeRequestId)
-          },
+          notifyBridge,
           onRacersReady: api => {
             // densable foo file arm: odm → idm/Mrf claim racer + addTeardown(closeTab)
             const elig = getIdeDiffEligibility(
@@ -465,9 +475,13 @@ function handleInteractivePermission(
               : 'Permission dialog resolved via requestDialog',
           )
           channelUnsubscribe?.()
-          if (bridgeCallbacks && bridgeRequestId) {
-            bridgeCallbacks.cancelRequest(bridgeRequestId)
-          }
+          // densable W() / kdm D: sendResponse then cancelRequest.
+          // cancelled is deny + "User aborted", not cancel-only.
+          notifyBridgeFromDooResult(
+            notifyBridge,
+            result,
+            displayInput as Record<string, unknown>,
+          )
           clearClassifierChecking(ctx.toolUseID)
           clearClassifierIndicator()
           // densable W() settles the turn; tip queue must clear or REPL keeps

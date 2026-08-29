@@ -3,34 +3,24 @@
  *
  * SEA rSh(e,t,r,n):
  *   sya → warning toast on hold
- *   n(gGn, …, {signal, queueBehind:!0}) for mode-mismatch | no-mode-asserted
+ *   n(UOo, …, {signal, queueBehind:!0}) for mode-mismatch | no-mode-asserted
  *   IRn → release toast (qqp delivers inside Kei/zqp; we deliver in onReleased)
  *   xRn mode getter; vPr policy/mode
  *
- * Dialog host: createPeerInboundApprovalQueue (densable Oy/Ns queueBehind).
- * Renders via returned ReactNode into REPL FullscreenLayout `modal` slot —
- * NOT promptOverlay (Provider is inside FullscreenLayout; PromptInput writes null).
+ * Dialog host: requestDialog(peerInboundApprovalSpec) queueBehind (densable n(UOo)).
  *
  * selfSent: densable UTf/zTf — kernel peer ancestry only. Never wire meta.selfSent
  * and never forgeable message.from === own socket path.
  */
 import { feature } from 'bun:bundle'
 import { randomUUID } from 'crypto'
-import {
-  createElement,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react'
-import { PeerInboundApprovalDialog } from '../components/PeerInboundApprovalDialog.js'
+import { useEffect, useRef } from 'react'
+import type { RequestDialog } from '../dialog/requestDialog.js'
+import { peerInboundApprovalSpec } from '../dialog/specs/jsuKinds.js'
 import { useNotifications } from '../context/notifications.js'
 import { useAppStateStore } from '../state/AppState.js'
 import { logForDebugging } from '../utils/debug.js'
 import { enqueue } from '../utils/messageQueueManager.js'
-import { createPeerInboundApprovalQueue } from '../utils/peerInboundApprovalQueue.js'
 import {
   buildHeldPeerMessageToast,
   buildPeerInboundHoldPreview,
@@ -42,44 +32,20 @@ import {
 import { jsonStringify } from '../utils/slowOperations.js'
 
 export type UsePeerInboundUdsDrainOptions = {
-  /**
-   * densable: dialog host waits behind other top-level dialogs (queueBehind).
-   * When false, peer approval stays queued until the slot is free.
-   */
-  isDialogSlotFree?: () => boolean
+  /** densable n(UOo) host — queueBehind on the DialogStore mailbox. */
+  requestDialog: RequestDialog
 }
 
 /**
- * Wire UDS peer inbound drain + densable rSh hold surface.
- * Returns the active approval dialog node (or null) for REPL modal slot.
+ * Wire UDS peer inbound drain + densable rSh n(UOo) hold surface.
  */
 export function usePeerInboundUdsDrain(
-  options?: UsePeerInboundUdsDrainOptions,
-): ReactNode {
+  options: UsePeerInboundUdsDrainOptions,
+): void {
   const store = useAppStateStore()
   const { addNotification } = useNotifications()
-  const isDialogSlotFreeRef = useRef(options?.isDialogSlotFree)
-  isDialogSlotFreeRef.current = options?.isDialogSlotFree
-
-  const queue = useMemo(
-    () =>
-      createPeerInboundApprovalQueue({
-        isSlotFree: () => isDialogSlotFreeRef.current?.() ?? true,
-      }),
-    [],
-  )
-
-  const activePayload = useSyncExternalStore(
-    queue.subscribe,
-    queue.getActivePayload,
-    () => null,
-  )
-
-  // densable host advances queueBehind when the modal slot frees.
-  const slotFree = options?.isDialogSlotFree?.() ?? true
-  useEffect(() => {
-    if (slotFree) queue.tryPump()
-  }, [slotFree, queue])
+  const requestDialogRef = useRef(options.requestDialog)
+  requestDialogRef.current = options.requestDialog
 
   useEffect(() => {
     if (!feature('UDS_INBOX')) return
@@ -105,6 +71,11 @@ export function usePeerInboundUdsDrain(
     type PeerInboundHoldCause =
       import('../utils/crossSessionInbound.js').PeerInboundHoldCause
     /* eslint-enable @typescript-eslint/no-require-imports */
+
+    const controllers = new Map<
+      object,
+      { abort: AbortController; expired: () => boolean; superseded: boolean }
+    >()
 
     const deliverReleased = (entries: HeldPeerInboundMessage[]): void => {
       for (const entry of entries) {
@@ -167,30 +138,47 @@ export function usePeerInboundUdsDrain(
           preview: d.dialogBody,
         }
 
-        // densable n(gGn, …, {signal, queueBehind:!0}).then → Kei
-        void queue
-          .open(payload, { signal: ac.signal, key: entry as object })
-          .then(behavior => {
+        // densable n(UOo, …, {signal, queueBehind:!0}).then → ctn
+        const hold = { abort: ac, expired: () => expired, superseded: false }
+        controllers.set(entry as object, hold)
+        void requestDialogRef
+          .current(peerInboundApprovalSpec, payload, {
+            signal: ac.signal,
+            queueBehind: true,
+          })
+          .then(k => {
             if (timer) clearTimeout(timer)
-            // densable: cancelled + expired → Kei cancelled (expire);
-            // cancelled without expire → deny
-            if (behavior === 'cancelled') {
+            controllers.delete(entry as object)
+            if (hold.superseded) return
+            // gold: cancelled + expired → expire; cancelled → deny
+            if (k.behavior === 'cancelled') {
               resolveHeldPeerInboundMessage(
                 entry as HeldPeerInboundMessage,
-                expired ? 'expire' : 'deny',
+                hold.expired() ? 'expire' : 'deny',
               )
               return
             }
-            resolveHeldPeerInboundMessage(
+            const outcome = resolveHeldPeerInboundMessage(
               entry as HeldPeerInboundMessage,
-              behavior,
+              k.behavior,
             )
+            // gold: dropped ∧ approve → policy turned off while dialog was open
+            if (outcome === 'dropped' && k.behavior === 'approve') {
+              addNotification({
+                key: `peer-inbound-dropped-approve-${Date.now()}`,
+                text: 'That held message was NOT delivered: cross-session messaging was turned off (or set to refuse) while this prompt was open.',
+                color: 'warning',
+                priority: 'high',
+              })
+            }
           })
           .catch(() => {
             if (timer) clearTimeout(timer)
+            controllers.delete(entry as object)
+            if (hold.superseded) return
             resolveHeldPeerInboundMessage(
               entry as HeldPeerInboundMessage,
-              expired ? 'expire' : 'deny',
+              hold.expired() ? 'expire' : 'deny',
             )
           })
       },
@@ -198,7 +186,14 @@ export function usePeerInboundUdsDrain(
         // densable IRn: toast only (qqp already ran in zqp/Kei).
         // Local: deliver here; cancel only dialogs for released keys so a
         // concurrent hold's gGn is not clobbered.
-        queue.cancelKeys(entries as object[])
+        for (const entry of entries) {
+          const hold = controllers.get(entry as object)
+          if (hold) {
+            hold.superseded = true
+            hold.abort.abort('released')
+            controllers.delete(entry as object)
+          }
+        }
         deliverReleased(entries as HeldPeerInboundMessage[])
         if (entries.length > 0) {
           addNotification({
@@ -366,20 +361,11 @@ export function usePeerInboundUdsDrain(
       clearPeerInboundModeGetter()
       clearPeerInboundHoldBuffer()
       setPeerInboundHoldListeners({})
-      queue.dispose()
+      for (const hold of controllers.values()) {
+        hold.superseded = true
+        hold.abort.abort('dispose')
+      }
+      controllers.clear()
     }
-  }, [store, addNotification, queue])
-
-  const onAnswer = useCallback(
-    (result: 'approve' | 'deny' | 'cancelled') => {
-      queue.answer(result)
-    },
-    [queue],
-  )
-
-  if (!activePayload) return null
-  return createElement(PeerInboundApprovalDialog, {
-    payload: activePayload,
-    onAnswer,
-  })
+  }, [store, addNotification])
 }

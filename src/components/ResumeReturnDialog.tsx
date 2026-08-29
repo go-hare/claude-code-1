@@ -16,15 +16,20 @@ export type ResumeReturnDialogProps = {
   sessionAgeMinutes: number;
   estimatedTokens: number;
   onChoice: (choice: ResumeReturnChoice) => void;
+  onCancel?: () => void;
 };
 
 export function ResumeReturnDialog({
   sessionAgeMinutes,
   estimatedTokens,
   onChoice,
+  onCancel,
 }: ResumeReturnDialogProps): React.ReactNode {
   return (
-    <Dialog title={formatResumeReturnBanner(sessionAgeMinutes, estimatedTokens)} onCancel={() => onChoice('continue')}>
+    <Dialog
+      title={formatResumeReturnBanner(sessionAgeMinutes, estimatedTokens)}
+      onCancel={() => (onCancel !== undefined ? onCancel() : onChoice('continue'))}
+    >
       <Box flexDirection="column">
         <Text>{getResumeReturnWarning()}</Text>
       </Box>

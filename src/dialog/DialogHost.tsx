@@ -31,6 +31,8 @@ import {
   PERMISSION_WORKFLOW_KIND,
 } from './specs/permissionKinds.js';
 import { JSU_NON_PERMISSION_COMPONENTS } from './jsuRenderers.js';
+import { PermissionBrowserDialog } from './dialogs/PermissionBrowserDialog.js';
+import type { DialogSuppressReason } from './legacyDialogFocus.js';
 
 /** densable c_y */
 export const DIALOG_ANSWER_SWAP_DEBOUNCE_MS = 150;
@@ -44,12 +46,55 @@ export type DialogRendererProps = {
 
 type DialogRenderer = (props: DialogRendererProps) => React.ReactNode;
 
-/** densable mLo — only kinds that force modal; GSn / bEt default inline.
- * Leave empty until SEA peel lists modal kinds; mount modal NMs anyway. */
-const DIALOG_LAYOUTS: Record<string, DialogHostVariant> = {};
+/** densable mLo — only EQr (exit-plan v2) forces modal; GSn / bEt default inline. */
+const DIALOG_LAYOUTS: Record<string, DialogHostVariant> = {
+  [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: 'modal',
+};
 
 /** @internal test — densable mLo map */
 export const DIALOG_LAYOUTS_FOR_TEST = DIALOG_LAYOUTS;
+
+/** densable Bsu — mLo lookup, default inline. */
+export function getDialogHostLayout(kind: string | undefined): DialogHostVariant {
+  if (!kind) return 'inline';
+  return DIALOG_LAYOUTS[kind] ?? 'inline';
+}
+
+/** densable KA = Bsu()==="modal" */
+export function isTopDialogModalLayout(kind: string | undefined): boolean {
+  return getDialogHostLayout(kind) === 'modal';
+}
+
+export type ModalChromeVisibility = 'none' | 'suppressed' | 'visible';
+
+/** densable RPs — !KUe() ? none : zIr()!=null ? suppressed : visible */
+export function getModalChromeVisibility(opts: {
+  hasOpenDialogs: boolean;
+  suppressReason: DialogSuppressReason;
+}): ModalChromeVisibility {
+  if (!opts.hasOpenDialogs) return 'none';
+  if (opts.suppressReason != null) return 'suppressed';
+  return 'visible';
+}
+
+/** densable ozs occupy: KA || PCn (local-jsx centered). */
+export function shouldOccupyFullscreenModalSlot(opts: { toolJsxCentered?: boolean; topDialogKind?: string }): boolean {
+  return opts.toolJsxCentered === true || isTopDialogModalLayout(opts.topDialogKind);
+}
+
+/**
+ * densable kZt — `KA && wi==="visible" || PCn!=null`.
+ * Gates placeholder / scroll onScroll / scrollRef swap — NOT bare KA||PCn.
+ * When typing suppresses RPs, KA alone must not keep chrome-active gates.
+ */
+export function isFullscreenModalChromeActive(opts: {
+  toolJsxCentered?: boolean;
+  topDialogKind?: string;
+  modalChrome: ModalChromeVisibility;
+}): boolean {
+  const kaVisible = isTopDialogModalLayout(opts.topDialogKind) && opts.modalChrome === 'visible';
+  return kaVisible || opts.toolJsxCentered === true;
+}
 /**
  * densable h2A — managed_settings_security → zko
  * densable Host answer goes through c_y debounce (same as permission kinds).
@@ -147,7 +192,7 @@ const DIALOG_COMPONENTS: Record<string, DialogRenderer> = {
   [PERMISSION_ASK_USER_QUESTION_KIND]: PermissionPromptRenderer,
   [PERMISSION_ENTER_PLAN_MODE_KIND]: PermissionPromptRenderer,
   [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: PermissionPromptRenderer,
-  [PERMISSION_BROWSER_KIND]: PermissionPromptRenderer,
+  [PERMISSION_BROWSER_KIND]: PermissionBrowserDialog,
   [PERMISSION_MONITOR_KIND]: PermissionPromptRenderer,
   [PERMISSION_WORKFLOW_KIND]: PermissionPromptRenderer,
   ...JSU_NON_PERMISSION_COMPONENTS,

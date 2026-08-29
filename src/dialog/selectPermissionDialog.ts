@@ -21,14 +21,17 @@ import {
   parseSedEditCommand,
 } from '@claude-code/builtin-tools/tools/BashTool/sedEditParser.js'
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
-import { CLAUDE_IN_CHROME_MCP_SERVER_NAME } from '../utils/claudeInChrome/common.js'
 import { isENOENT } from '../utils/errors.js'
 import { readFileSync } from '../utils/fileRead.js'
-import { normalizeNameForMCP } from '../services/mcp/normalization.js'
 import type { DialogKindSpec } from './requestDialog.js'
+import {
+  isClaudeInChromeInProductPermissions,
+  isClaudeInChromeToolName,
+} from './permissionBrowser.js'
 import {
   buildAskUserQuestionPermissionDescriptor,
   buildBashPermissionDescriptor,
+  buildBrowserPermissionDescriptor,
   buildPermissionDescriptorBase,
   buildPowerShellPermissionDescriptor,
   buildSkillPermissionDescriptor,
@@ -68,12 +71,6 @@ export type SelectedPermissionDialog = {
   descriptor: Record<string, unknown>
 }
 
-const CHROME_MCP_PREFIX = `mcp__${normalizeNameForMCP(CLAUDE_IN_CHROME_MCP_SERVER_NAME)}__`
-
-function isClaudeInChromeTool(tool: ToolUseConfirm['tool']): boolean {
-  return tool.name.startsWith(CHROME_MCP_PREFIX)
-}
-
 /**
  * densable Fwl(tool) — specialized non-file / non-bash arms.
  */
@@ -89,10 +86,14 @@ export function selectPermissionDialogFwl(
       descriptor: buildWebFetchPermissionDescriptor(buildInput),
     }
   }
-  if (isClaudeInChromeTool(tool)) {
+  // densable Fwl: LUt() && startsWith(lwe) → Cno + vum
+  if (
+    isClaudeInChromeInProductPermissions() &&
+    isClaudeInChromeToolName(tool.name)
+  ) {
     return {
       spec: permissionBrowserSpec as never,
-      descriptor: buildPermissionDescriptorBase(buildInput),
+      descriptor: buildBrowserPermissionDescriptor(buildInput),
     }
   }
   if (tool === AskUserQuestionTool) {
