@@ -43,18 +43,23 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.46**），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.47**），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.239 对齐说明（工作树 tip；未进 2.7.46）
+#### densable 2.1.239 leftover 对齐说明（2.7.47）
 
-对照文档：`docs/upstream-extraction/v2.1.239/official-239-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0**）、`cross-pack-residuals.md`。叠在 **2.1.238**（npm **2.7.46**）之上。changelog 本机路径按**当前工作树**收口；部分 leftover（CRI webhook、`@synced` hydrate、artifact auto-react、NMs permission Host）**尚未提交**。官方无 2.1.240/241 bullets，勿折入。
+对照文档：`docs/upstream-extraction/v2.1.239/official-239-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0**）、`cross-pack-residuals.md`。叠在 **2.7.46**（236–238）之上。**2.7.47** 把 239 leftover 与 236/234 收口一并进仓：`@synced` hydrate、artifact auto-react、NMs permission Host、plan-resume 硬门、核心壳 + 账本；另含本机 Multi-API 窗口表与 Win32 标题解粘（**不是** densable 1:1）。官方无 2.1.240/241 bullets，勿折入。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
 | **#4 云同步插件** | `@synced` + 磁盘 hydrate + `setSyncedPluginDirs` | 默认 `CLAUDE_CODE_SYNC_PLUGINS` OFF（官方 opt-in）；不 invent cowork 店 |
-| **#13 plan resume** | resume 跑 `y_u`；**continue 不跑**（`Jqy`） | 不 invent 云端 CCR E2E / `EaT` / RCS store |
-| **#44 / #56** | `createCriPolicyPrecheck` 接 `buildFetch`；`Ohu`/`G1s` NO_PROXY | 官方无本地 cri writer / `KFy` hosted MITM — 同缺 = 对齐 |
+| **#13 plan resume** | resume 跑 `y_u` / `applyPlanModeResume`；**continue 硬门不跑**（`skipPlanModeResumeBecauseContinue` / `Jqy`）；print `--continue` 不调 `applyPrintPlanModeResume` | 不 invent 云端 CCR E2E / `EaT` / RCS store |
+| **artifact auto-react** | watch / reply / relay + parse5 + `MonitorWsTask` | 不 invent 云端 artifact host |
+| **NMs permission** | permission Host 拆分（`NMs`） | 不 invent VSCode host |
+| **#44 / #56 CRI** | `createCriPolicyPrecheck` 接 `buildFetch`；`Ohu`/`G1s` NO_PROXY | 官方无本地 cri writer / `KFy` hosted MITM — 同缺 = 对齐 |
 | **#59 VSCode usage** | CLI SEA 0 hits | 不 invent VSCode banner |
+| **236 收口** | 删 tip invent `goalIdleArmGeneration`（cancel = `clearTimeout` only） | 不把 generation gate 加回来 |
+| **234 leftover** | anthropic profile / OIDC / oRr「Run /login」 | 不 invent storageV5 |
+| **本机（非 densable）** | Win32 Terminal 标题 40ms 解粘；DeepSeek / Grok / Kimi 上下文窗口表 + 国内 DeepSeek vision-exp 行 | 官方 SEA 无此 delay / 无 Multi-API 表 |
 
 #### densable 2.1.236–2.1.238 对齐说明（2.7.46）
 
@@ -247,11 +252,12 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.46）
+### 近期更新（2.7.5 → 2.7.47）
 
 | 版本 | 要点 |
 | ---- | ---- |
-| **2.7.46** | **densable 2.1.236–2.1.238**：236 HAVE **32** / N/A 1（`ANTHROPIC_DEFAULT_MODEL`、`notify_when_idle`、sandbox deny、fullscreen fallback、goal check-in、`/model` `LFh`/`sgM`）；237 HAVE 3（`canMarkApiSystem`、Concise、`r7` truncate）；238 HAVE **39**（`keybindingFlavor`、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation pin、RC Stop/sign-out/403、update check 10s）。并接回官方 238 仍保留的 **234 leftover**（stale Enter、SendMessage `to`/truncated、`GGc`、session persist、markdown `d0l`）。发版时曾写 PARTIAL，之后本机合同收口。不 invent leftover #3 / G0S / chrome UI。**2.1.239 leftover 在工作树，未进本 npm。** |
+| **2.7.47** | **densable 2.1.239 leftover 收口**（叠在 2.7.46 / 236–238 上）：`@synced` 磁盘 hydrate（`CLAUDE_CODE_SYNC_PLUGINS` 默认 OFF）；artifact auto-react（watch/reply/relay + parse5）；NMs permission Host 拆分；plan resume **continue 硬门**（resume 跑 `y_u`，print `--continue` 不跑）；CRI `createCriPolicyPrecheck` + NO_PROXY。**236** 删 invent `goalIdleArmGeneration`。**234 leftover** anthropic profile / OIDC / oRr「Run /login」。本机：Win32 标题 40ms 解粘；DeepSeek/Grok/Kimi 上下文窗口 + 国内 vision-exp。不 invent cowork / CCR E2E / VSCode banner / 240·241。 |
+| **2.7.46** | **densable 2.1.236–2.1.238**：236 HAVE **32** / N/A 1（`ANTHROPIC_DEFAULT_MODEL`、`notify_when_idle`、sandbox deny、fullscreen fallback、goal check-in、`/model` `LFh`/`sgM`）；237 HAVE 3（`canMarkApiSystem`、Concise、`r7` truncate）；238 HAVE **39**（`keybindingFlavor`、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation pin、RC Stop/sign-out/403、update check 10s）。并接回官方 238 仍保留的 **234 leftover**（stale Enter、SendMessage `to`/truncated、`GGc`、session persist、markdown `d0l`）。发版时曾写 PARTIAL，之后本机合同收口。不 invent leftover #3 / G0S / chrome UI。 |
 | **2.7.45** | **densable 2.1.235（HAVE 15 + analog 3 / N/A 1）** + tip **2.1.234** quota auto-resume：spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP 门 / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX 门**；CLI IDE bridge `uSm`；quota rearm `HEv=2`。**#19 VSCode host focus N/A**。analog 是注脚，不是缺口。 |
 | **2.7.44** | **teammate 默认模型跟随 leader**：`teammateDefaultModel` unset/null 经 leader → `mainLoopModel` / `ANTHROPIC_MODEL` 解析，硬编码 Opus 仅最后兜底；Config/ModelPicker 文案对齐；向 teammate 转发 `ANTHROPIC_MODEL` 与 `ANTHROPIC_DEFAULT_*_MODEL`。 |
 | **2.7.43** | **densable 1:1 审查收口 + 兼容层 PTL**：thinking-only re-stream 前 credit session cost；G7 mint-time `cse_*` 放弃/teardown 清理（reattach 暂态保留）；`epoch_stale`-only Ot（`epoch_conflict` 不进 Ba remint）；OpenAI/Grok/Gemini catch 经 `getAssistantMessageFromError`，`maximum prompt length` 可进 reactive compact。 |

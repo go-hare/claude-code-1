@@ -43,18 +43,23 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.46**; trust `package.json` / npm) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.47**; trust `package.json` / npm) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
 
-#### densable 2.1.239 alignment (working-tree tip; not in 2.7.46)
+#### densable 2.1.239 leftover alignment (2.7.47)
 
-Source of truth: `docs/upstream-extraction/v2.1.239/official-239-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0**), `cross-pack-residuals.md`. Stacked on **2.1.238** (npm **2.7.46**). Changelog local paths are closed on the **current working tree**; some leftover (CRI webhook, `@synced` hydrate, artifact auto-react, NMs permission Host) is **still uncommitted**. No official 2.1.240/241 bullets — do not fold them in.
+Source of truth: `docs/upstream-extraction/v2.1.239/official-239-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0**), `cross-pack-residuals.md`. Stacked on **2.7.46** (236–238). **2.7.47** ships the 239 leftover plus 236/234 closeout: `@synced` hydrate, artifact auto-react, NMs permission Host, plan-resume hard gate, core shell + ledger; plus local Multi-API window tables and Win32 title unstick (**not** densable 1:1). No official 2.1.240/241 bullets — do not fold them in.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
 | **#4 cloud-synced plugins** | `@synced` + disk hydrate + `setSyncedPluginDirs` | default `CLAUDE_CODE_SYNC_PLUGINS` OFF (official opt-in); no cowork store invent |
-| **#13 plan resume** | resume runs `y_u`; **continue does not** (`Jqy`) | no cloud CCR E2E / `EaT` / RCS store invent |
-| **#44 / #56** | `createCriPolicyPrecheck` on `buildFetch`; `Ohu`/`G1s` NO_PROXY | official has no local cri writer / hosted `KFy` MITM — same-missing = aligned |
+| **#13 plan resume** | resume runs `y_u` / `applyPlanModeResume`; **continue is hard-gated off** (`skipPlanModeResumeBecauseContinue` / `Jqy`); print `--continue` does not call `applyPrintPlanModeResume` | no cloud CCR E2E / `EaT` / RCS store invent |
+| **artifact auto-react** | watch / reply / relay + parse5 + `MonitorWsTask` | no cloud artifact host invent |
+| **NMs permission** | permission Host split (`NMs`) | no VSCode host invent |
+| **#44 / #56 CRI** | `createCriPolicyPrecheck` on `buildFetch`; `Ohu`/`G1s` NO_PROXY | official has no local cri writer / hosted `KFy` MITM — same-missing = aligned |
 | **#59 VSCode usage** | CLI SEA 0 hits | no VSCode banner invent |
+| **236 closeout** | drop tip invent `goalIdleArmGeneration` (cancel = `clearTimeout` only) | do not restore the generation gate |
+| **234 leftover** | anthropic profile / OIDC / oRr “Run /login” | no storageV5 invent |
+| **Local (not densable)** | Win32 Terminal title 40ms unstick; DeepSeek / Grok / Kimi context-window tables + China DeepSeek vision-exp row | official SEA has neither the delay nor Multi-API tables |
 
 #### densable 2.1.236–2.1.238 alignment (2.7.46)
 
@@ -247,11 +252,12 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.46)
+### Recent updates (2.7.5 → 2.7.47)
 
 | Version | Highlights |
 | ------- | ---------- |
-| **2.7.46** | **densable 2.1.236–2.1.238**: 236 HAVE **32** / N/A 1 (`ANTHROPIC_DEFAULT_MODEL`, `notify_when_idle`, sandbox deny, fullscreen fallback, goal check-in, `/model` `LFh`/`sgM`); 237 HAVE 3 (`canMarkApiSystem`, Concise, `r7` truncate); 238 HAVE **39** (`keybindingFlavor`, marketplace/MCP `headersHelper`, runner defer-shutdown / Proxy-Authorization, isolation pin, RC Stop/sign-out/403, update check 10s). Restores **234 leftovers** still in official 238 SEA (stale Enter, SendMessage `to`/truncated, `GGc`, session persist, markdown `d0l`). Ship-time README said PARTIAL; local contracts later closed. No leftover #3 / G0S / chrome UI invent. **2.1.239 leftover is in the working tree, not this npm.** |
+| **2.7.47** | **densable 2.1.239 leftover closeout** (on 2.7.46 / 236–238): `@synced` disk hydrate (`CLAUDE_CODE_SYNC_PLUGINS` default OFF); artifact auto-react (watch/reply/relay + parse5); NMs permission Host split; plan resume **continue hard gate** (resume runs `y_u`; print `--continue` does not); CRI `createCriPolicyPrecheck` + NO_PROXY. **236** drops invent `goalIdleArmGeneration`. **234 leftover** anthropic profile / OIDC / oRr “Run /login”. Local: Win32 title 40ms unstick; DeepSeek/Grok/Kimi context windows + China vision-exp. No cowork / CCR E2E / VSCode banner / 240·241 invent. |
+| **2.7.46** | **densable 2.1.236–2.1.238**: 236 HAVE **32** / N/A 1 (`ANTHROPIC_DEFAULT_MODEL`, `notify_when_idle`, sandbox deny, fullscreen fallback, goal check-in, `/model` `LFh`/`sgM`); 237 HAVE 3 (`canMarkApiSystem`, Concise, `r7` truncate); 238 HAVE **39** (`keybindingFlavor`, marketplace/MCP `headersHelper`, runner defer-shutdown / Proxy-Authorization, isolation pin, RC Stop/sign-out/403, update check 10s). Restores **234 leftovers** still in official 238 SEA (stale Enter, SendMessage `to`/truncated, `GGc`, session persist, markdown `d0l`). Ship-time README said PARTIAL; local contracts later closed. No leftover #3 / G0S / chrome UI invent. |
 | **2.7.45** | **densable 2.1.235 (HAVE 15 + analog 3 / N/A 1)** + tip **2.1.234** quota auto-resume: spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP gate / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX gate**; CLI IDE bridge `uSm`; quota rearm `HEv=2`. **#19 VSCode host focus N/A**. analog is a footnote, not a gap. |
 | **2.7.44** | **teammate default model follows leader**: unset/null `teammateDefaultModel` resolves via leader → `mainLoopModel` / `ANTHROPIC_MODEL`, with hardcoded Opus only as last resort; Config/ModelPicker copy aligned; forward `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_*_MODEL` to teammates. |
 | **2.7.43** | **densable 1:1 review close-out + compat PTL**: credit session cost before thinking-only re-stream; clear G7 mint-time `cse_*` on abandon/teardown (keep on reattach); `epoch_stale`-only Ot (`epoch_conflict` does not enter Ba remint); OpenAI/Grok/Gemini catch via `getAssistantMessageFromError` so `maximum prompt length` reaches reactive compact. |

@@ -1,8 +1,8 @@
 # Cross-pack residual inventory (go-hare vs densable)
 
-> 更新：**2026-09-02** — tip **densable 2.1.239 leftover** + npm **2.7.46**。  
+> 更新：**2026-09-02** — tip **densable 2.1.239 leftover** + npm **2.7.47**。  
 > 原则：densable-first 1:1；**不 invent** VSCode/cloud-only；**不 auto commit/push/bump**。  
-> 分 pack 金标仍以各 `official-*-checklist.md` / board 为准。README / README_EN 计数已按本文件纠偏（229 `#12` tip=`localhost`；232 PARTIAL 2；236/238 本机 HAVE；239 工作树）。  
+> 分 pack 金标仍以各 `official-*-checklist.md` / board 为准。README / README_EN 计数已按本文件纠偏（229 `#12` tip=`localhost`；232 PARTIAL 2；236/238 本机 HAVE；239 leftover 已进 **2.7.47**）。  
 > **口径（钉死）**：同缺 / 无函数体 / 官方 opt-in / tip=现行官方 → **已对齐**，**不是 tip 缺口**，**禁止**再写进「还差什么」。  
 > **过期勿再当 open**：08-27「#11/#27/#4/#13 → PARTIAL」、08-29「239 PARTIAL 2」、09-01「#25 保持 generation gate」、把 invent-ban 表当成待办。
 
@@ -22,7 +22,7 @@
 | 238 | HAVE **39** / PARTIAL **0** |
 | 240 / 241 | 官方无 bullets。**不**折入 |
 
-**交付面（唯一还差）：** 工作树大量未提交源码 + 全量 `precheck` 未跑。不是再挖 229–239 changelog。
+**交付面：** 239 leftover 已进仓（npm **2.7.47**）。全量 `precheck` 本机未跑。不是再挖 229–239 changelog。
 
 ---
 
