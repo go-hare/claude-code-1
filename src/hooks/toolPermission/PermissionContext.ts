@@ -530,6 +530,26 @@ function createPermissionQueueOps(
       )
       const prev = getPermissionConfirm(toolUseID)
       if (prev) registerPermissionConfirm({ ...prev, ...patch })
+      if (!dialogStore) return
+      const id = permissionPromptDialogId(toolUseID)
+      const entry = dialogStore.getState().open.find(d => d.id === id)
+      if (
+        !entry ||
+        typeof entry.payload !== 'object' ||
+        entry.payload === null
+      ) {
+        return
+      }
+      const payload = entry.payload as { classifierState?: string }
+      if (payload.classifierState === undefined) return
+      let classifierState = payload.classifierState
+      if (patch.classifierAutoApproved === true) classifierState = 'approved'
+      else if (patch.classifierCheckInProgress === true)
+        classifierState = 'checking'
+      else if (patch.classifierCheckInProgress === false)
+        classifierState = 'none'
+      if (classifierState === payload.classifierState) return
+      dialogStore.update(id, { ...payload, classifierState })
     },
   }
 }

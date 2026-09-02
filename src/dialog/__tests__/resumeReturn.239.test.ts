@@ -144,6 +144,26 @@ describe('openResumeReturnIfNeeded (densable iXg/Gxt)', () => {
     expect(events.some(e => e[0] === 'tengu_resume_return_action')).toBe(true)
   })
 
+  test('dismiss (W8c Esc) logs tengu_resume_return_action', async () => {
+    const store = createDialogStore()
+    const requestDialog = wireMailbox(store)
+    const pending = openResumeReturnIfNeeded({
+      requestDialog,
+      dialogStore: store,
+      messages: oldLargeMessages(),
+      estimateTokens: () => 200_000,
+      runCompact: () => {},
+    })
+    const top = await waitForTop(store, RESUME_RETURN_KIND)
+    store.answer(top.id, 'dismiss')
+    expect(await pending).toBe('dismiss')
+    expect(
+      events.some(
+        e => e[0] === 'tengu_resume_return_action' && e[1].action === 'dismiss',
+      ),
+    ).toBe(true)
+  })
+
   test('cancelled returns before tengu_resume_return_action', async () => {
     const store = createDialogStore()
     const requestDialog = wireMailbox(store)
@@ -193,11 +213,19 @@ describe('iXg placement (picker vs REPL)', () => {
     expect(picker).not.toContain('evaluateResumeReturnOffer')
     expect(picker).not.toContain('resumeReturnOffer')
     expect(repl).toContain('openResumeReturnIfNeeded')
+    expect(repl).toContain('tokenCountFromLastAPIResponse')
+    expect(repl).not.toContain('tokenCountWithEstimation')
     expect(repl).toContain('offerResumeReturnIfNeeded(messages)')
     expect(repl).toContain("if (entrypoint !== 'fork')")
     expect(repl).toContain('if (initialMessage !== null)')
     expect(repl).toContain("'/compact'")
     expect(jsu).toContain('ResumeReturnDialog')
+    expect(jsu).toMatch(
+      /ResumeReturnDialog[\s\S]{0,400}onCancel=\{\(\) => answer\('dismiss'\)\}/,
+    )
+    expect(jsu).not.toMatch(
+      /ResumeReturnDialog[\s\S]{0,400}onCancel=\{\(\) => answer\('cancelled'\)\}/,
+    )
     expect(jsu).not.toMatch(/RESUME_RETURN_KIND[\s\S]{0,200}IdleReturnDialog/)
   })
 })

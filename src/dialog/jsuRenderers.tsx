@@ -48,7 +48,7 @@ const costThresholdRenderer: DialogRenderer = ({ answer }) => (
   <CostThresholdDialog onDone={() => answer('acknowledged')} onCancel={() => answer('cancelled')} />
 );
 
-/** densable W8c / Gxt — compact | continue | never; Esc → dismiss */
+/** densable W8c / Gxt — compact | continue | never; Esc → PPo("dismiss") */
 const resumeReturnRenderer: DialogRenderer = ({ payload, answer }) => {
   const p = (payload ?? {}) as {
     sessionAgeMinutes?: number;
@@ -85,14 +85,10 @@ const sandboxNetworkRenderer: DialogRenderer = ({ payload, answer }) => {
   );
 };
 
-const computerUseRenderer: DialogRenderer = ({ payload, answer }) => {
-  const p = payload as { request?: unknown };
-  if (!p?.request) {
-    answer(null);
-    return null;
-  }
-  return <ComputerUseApproval request={p.request as never} onDone={response => answer(response)} />;
-};
+/** densable c2A / DIi — payload is the request body, not `{request}` */
+const computerUseRenderer: DialogRenderer = ({ payload, answer }) => (
+  <ComputerUseApproval request={payload as never} onDone={response => answer(response)} />
+);
 
 const fableOverageRenderer: DialogRenderer = ({ answer }) => (
   <FableConsentDialog onAccept={() => answer('consent')} onDecline={() => answer('cancelled')} />
@@ -215,27 +211,14 @@ const refusalFallbackRenderer: DialogRenderer = ({ payload, answer }) => {
   );
 };
 
-/** densable xou / Dot */
+/** densable xou / Dot — payload is `{condition}` only; extras are live-read in xou. */
 const goalProposalRenderer: DialogRenderer = ({ payload, answer }) => {
-  const p = payload as {
-    condition?: string;
-    currentCondition?: string;
-    stillWorking?: boolean;
-  };
+  const p = payload as { condition?: string };
   if (typeof p?.condition !== 'string' || p.condition === '') {
     answer({ approved: false });
     return null;
   }
-  return (
-    <GoalProposalDialog
-      payload={{
-        condition: p.condition,
-        currentCondition: p.currentCondition,
-        stillWorking: p.stillWorking,
-      }}
-      onAnswer={result => answer(result)}
-    />
-  );
+  return <GoalProposalDialog payload={{ condition: p.condition }} onAnswer={result => answer(result)} />;
 };
 
 /** densable Veu / qSn */

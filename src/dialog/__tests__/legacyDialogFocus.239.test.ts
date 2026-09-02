@@ -46,15 +46,15 @@ describe('legacyDialogFocus (densable uQc / oIA)', () => {
 })
 
 describe('legacyFocusForUqc (gold _Zt allowlist)', () => {
-  test('passes gold _Zt / tip overlay focus through', () => {
+  test('passes gold _Zt focus through; tip SUPERSET stays out of uQc', () => {
     expect(legacyFocusForUqc('message-selector')).toBe('message-selector')
     expect(legacyFocusForUqc('left-arrow-confirm')).toBe('left-arrow-confirm')
     expect(legacyFocusForUqc('elicitation')).toBe('elicitation')
     expect(legacyFocusForUqc('worker-sandbox-permission')).toBe(
       'worker-sandbox-permission',
     )
-    expect(legacyFocusForUqc('effort-callout')).toBe('effort-callout')
-    expect(legacyFocusForUqc('prompt')).toBe('prompt')
+    expect(legacyFocusForUqc('effort-callout')).toBe(null)
+    expect(legacyFocusForUqc('prompt')).toBe(null)
     expect(legacyFocusForUqc(undefined)).toBe(null)
     expect(legacyFocusForUqc(null)).toBe(null)
   })
@@ -74,6 +74,17 @@ describe('legacyFocusForUqc (gold _Zt allowlist)', () => {
     ]) {
       expect(UQC_FOCUS_ALLOWLIST_FOR_TEST.has(id)).toBe(true)
       expect(legacyFocusForUqc(id)).toBe(id)
+    }
+    for (const id of [
+      'prompt',
+      'effort-callout',
+      'desktop-upsell',
+      'model-switch',
+      'undercover-callout',
+      'search-extra-tools-hint',
+    ]) {
+      expect(UQC_FOCUS_ALLOWLIST_FOR_TEST.has(id)).toBe(false)
+      expect(legacyFocusForUqc(id)).toBe(null)
     }
   })
 
@@ -106,7 +117,7 @@ describe('zIr (legacy + IW.active)', () => {
   })
 
   test('RPs suppressed for either zIr arm', () => {
-    setLegacyDialogFocus('effort-callout')
+    setLegacyDialogFocus('elicitation')
     expect(
       getModalChromeVisibility({
         hasOpenDialogs: true,
@@ -134,6 +145,97 @@ describe('REPL densable uQc sync', () => {
     )
     expect(replSrc).toContain('return () => setLegacyDialogFocus(null)')
     expect(replSrc).toContain('setPromptInputStoreActive')
+  })
+
+  test('gold _Zt overlay router: elicitation Be.queue, As/Ur/vr/ly order', () => {
+    const start = replSrc.indexOf('function getFocusedInputDialog()')
+    const end = replSrc.indexOf(
+      'const focusedInputDialog = getFocusedInputDialog()',
+      start,
+    )
+    const zt = replSrc.slice(start, end)
+    expect(zt).toContain(
+      "if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation'",
+    )
+    expect(zt).toContain('if (isBgSession())')
+    expect(zt).toContain('viewingAgentTaskId != null')
+    // Single-host: no Host peek / tip queue → focused tool-permission
+    expect(zt).not.toContain("return 'tool-permission'")
+    expect(zt).not.toContain("return 'managed-settings'")
+    expect(zt).not.toContain('isPermissionPromptDialog(topDialogKind)')
+    expect(zt).not.toContain('isManagedSettingsSecurityDialog(topDialogKind)')
+    expect(zt).not.toContain('toolUseConfirmQueue[0]) return')
+    // Gold As() exits whole function — no SUPERSET after bg
+    const bg = zt.indexOf('if (isBgSession())')
+    const bgBlock = zt.slice(
+      bg,
+      zt.indexOf('if (allowDialogsWithAnimation && showFullscreenUpsell)'),
+    )
+    expect(bgBlock).toContain('return undefined')
+    const fs = zt.indexOf(
+      "if (allowDialogsWithAnimation && showFullscreenUpsell) return 'fullscreen-upsell'",
+    )
+    const remote = zt.indexOf(
+      "if (allowDialogsWithAnimation && showRemoteCallout) return 'remote-callout'",
+      fs,
+    )
+    const lsp = zt.indexOf(
+      "if (allowDialogsWithAnimation && lspRecommendation && !viewingAgent) return 'lsp-recommendation'",
+    )
+    const plugin = zt.indexOf(
+      "if (allowDialogsWithAnimation && hintRecommendation && !viewingAgent) return 'plugin-hint'",
+    )
+    expect(fs).toBeGreaterThan(-1)
+    expect(remote).toBeGreaterThan(fs)
+    expect(lsp).toBeGreaterThan(remote)
+    expect(plugin).toBeGreaterThan(lsp)
+    expect(zt).toContain("if (pke.kind !== 'none') return undefined")
+    expect(zt).toContain("return 'left-arrow-confirm'")
+    expect(zt).toContain('leftArrowConfirm')
+    expect(zt).not.toContain("return 'prompt'")
+    expect(zt).not.toContain("return 'effort-callout'")
+    expect(zt).not.toContain('tip SUPERSET extras')
+    expect(replSrc).toContain('function getTipNonGoldOverlay()')
+    expect(replSrc).toContain('const tipOverlay = getTipNonGoldOverlay()')
+    expect(replSrc).toContain(
+      'if (hasOpenDialogs || hasBlockingOpenDialogs) return undefined',
+    )
+    expect(replSrc).toContain("setPke({ kind: 'shutting-down' })")
+    // densable wZt: onDone:()=>{} + Qn clear; no onBeforeExit (iwg is wO0/TTc)
+    expect(replSrc).toContain('onDone={() => {}}')
+    expect(replSrc).toContain("const clearPke = () => setPke({ kind: 'none' })")
+    expect(replSrc).not.toContain(
+      "onBeforeExit={() => setPke({ kind: 'shutting-down' })}",
+    )
+    expect(replSrc).not.toContain(
+      "prev.kind === 'shutting-down' ? prev : { kind: 'none' }",
+    )
+    expect(replSrc).toContain(
+      'const anyInputOverlay = focusedInputDialog ?? tipOverlay',
+    )
+    // densable yMe — nHt | Fe | Be only
+    expect(replSrc).toContain('hasBlockingOpenDialogs ||')
+    expect(replSrc).toContain('leftArrowConfirm != null')
+    expect(replSrc).toContain("pke.kind === 'dialog'")
+    expect(replSrc).toContain('workerSandboxPermissions.queue[0] ||')
+    expect(replSrc).toContain('elicitation.queue[0]);')
+    expect(replSrc).not.toContain(
+      'toolUseConfirmQueue[0] ||\n      promptQueue[0]',
+    )
+    expect(replSrc).toContain('<ElicitationDialog')
+    expect(replSrc).toContain("focusedInputDialog === 'elicitation'")
+  })
+
+  test('Host permission side-effects bind open-stack, not focused peek', () => {
+    expect(replSrc).toContain('hostPermissionOpen')
+    expect(replSrc).toContain('const isPaused = viewingAgentTaskId != null')
+    expect(replSrc).not.toContain("focusedInputDialog === 'tool-permission'")
+    const promptSrc = readFileSync(
+      join(import.meta.dir, '../../components/PromptInput/PromptInput.tsx'),
+      'utf8',
+    )
+    expect(promptSrc).toContain('useHasBlockingOpenDialogs')
+    expect(promptSrc).toContain('hostBlocksKeys')
   })
 
   test('REPL derives zIr same-render (no useSyncExternalStore tear on keystroke)', () => {

@@ -1,19 +1,21 @@
 /**
  * densable xou — goal_proposal DialogHost renderer.
+ * Gold: `wou=wt(nFA),ApN=vou()` live-read inside the renderer. Producer
+ * payload is `{condition}` only — do not invent extras on the dialog payload.
  */
-import React, { useRef } from 'react';
+import React, { useRef, useSyncExternalStore } from 'react';
 import { Box, Dialog, Text } from '@anthropic/ink';
+import { truncateGoalConditionForRender } from '@claude-code/builtin-tools/tools/ProposeGoalTool/canonicalize.js';
+import { getMainLoopBusy, subscribeMainLoopBusy } from '../../bootstrap/state.js';
 import { Select } from '../../components/CustomSelect/index.js';
+import { useAppState } from '../../state/AppState.js';
+import { firstLineOf } from '../../utils/stringUtils.js';
 
 /** densable THr answer debounce */
 const ANSWER_DEBOUNCE_MS = 150;
 
 export type GoalProposalDialogPayload = {
   condition: string;
-  /** Current goal condition if replacing */
-  currentCondition?: string;
-  /** densable vou() — agent still working */
-  stillWorking?: boolean;
 };
 
 export type GoalProposalResult = {
@@ -34,10 +36,16 @@ export function GoalProposalDialog({ payload, onAnswer }: Props): React.ReactNod
     onAnswer(result);
   }
 
-  const stillWorking = payload.stillWorking === true;
+  // densable vou() — official qGo host; subscribe so help flips when turn ends.
+  const stillWorking = useSyncExternalStore(subscribeMainLoopBusy, getMainLoopBusy, getMainLoopBusy);
   const help = stillWorking
     ? 'Claude continues with the current work while you decide.'
     : 'Claude has finished its current work — approving starts it working again, toward this goal. Esc dismisses without setting it.';
+  // densable wt(nFA) — replace-line iff AppState.activeGoal exists.
+  // Gold xou: `Y4t(fp(wou.condition), 200)` — first line then official truncate.
+  // Do not read the in-memory goalState store — /goal writes activeGoal.
+  const liveGoal = useAppState(s => s.activeGoal?.condition);
+  const replaceLine = liveGoal !== undefined ? truncateGoalConditionForRender(firstLineOf(liveGoal), 200) : null;
 
   return (
     <Dialog
@@ -45,39 +53,29 @@ export function GoalProposalDialog({ payload, onAnswer }: Props): React.ReactNod
       color="permission"
       onCancel={() => answer({ approved: false, explicit: true })}
     >
-      <Box flexDirection="column" gap={1} paddingX={1}>
-        <Text bold color="permission">
-          Claude proposes a goal
-        </Text>
+      <Box paddingX={1}>
         <Text>{payload.condition}</Text>
-        <Text dimColor>
-          Approving sets this as the session goal, like running /goal: after each turn a separate check decides whether
-          the condition is met, and Claude keeps working until it is. {help}
-        </Text>
-        {payload.currentCondition !== undefined && (
-          <Text dimColor>
-            Approving replaces the current goal:{' '}
-            {payload.currentCondition.length > 200
-              ? `${payload.currentCondition.slice(0, 200)}…`
-              : payload.currentCondition}
-          </Text>
-        )}
-        <Select
-          options={[
-            { value: 'cancel', label: 'Not now' },
-            { value: 'confirm', label: 'Set this goal' },
-          ]}
-          defaultValue="cancel"
-          onChange={value => {
-            if (value === 'confirm') {
-              answer({ approved: true, explicit: true });
-            } else {
-              answer({ approved: false, explicit: true });
-            }
-          }}
-          onCancel={() => answer({ approved: false, explicit: true })}
-        />
       </Box>
+      <Text dimColor>
+        Approving sets this as the session goal, like running /goal: after each turn a separate check decides whether
+        the condition is met, and Claude keeps working until it is. {help}
+      </Text>
+      {replaceLine !== null && <Text dimColor>Approving replaces the current goal: {replaceLine}</Text>}
+      <Select
+        options={[
+          { value: 'cancel', label: 'Not now' },
+          { value: 'confirm', label: 'Set this goal' },
+        ]}
+        defaultFocusValue="cancel"
+        onChange={value => {
+          if (value === 'confirm') {
+            answer({ approved: true, explicit: true });
+          } else {
+            answer({ approved: false, explicit: true });
+          }
+        }}
+        onCancel={() => answer({ approved: false, explicit: true })}
+      />
     </Dialog>
   );
 }

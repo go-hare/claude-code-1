@@ -5,7 +5,7 @@
  * LUt GB default false — do not LOCAL_GATE_DEFAULTS. Fwl LUt=true is
  * source-locked (process-global mock.module cannot reliably rebind
  * already-imported growthbook; chromeInstallOpener.239 pattern).
- * Do not invent BLS/ULS, ConsentRow mint, or /chrome extra allow-rules.
+ * Lmy is gold S3 mint. Do not invent BLS/ULS or /chrome extra allow-rules.
  * requestSource is gold iK/xSl → Hnu → Cm → G2e (not a local banner).
  */
 import { describe, expect, test } from 'bun:test'
@@ -293,22 +293,20 @@ describe('Nmy / Lmy / Omy', () => {
   test('Lmy session addRules ClaudeInChromeDomain', () => {
     expect(buildChromeDomainAllowRow(undefined)).toBe(null)
     expect(buildChromeDomainAllowRow({ host: '   ' })).toBe(null)
-    expect(buildChromeDomainAllowRow({ host: 'example.com' })).toEqual({
-      display: 'example.com',
-      applies: [
-        {
-          type: 'addRules',
-          rules: [
-            {
-              toolName: CLAUDE_IN_CHROME_DOMAIN,
-              ruleContent: 'example.com',
-            },
-          ],
-          behavior: 'allow',
-          destination: 'session',
-        },
-      ],
-    })
+    const row = buildChromeDomainAllowRow({ host: 'example.com' })
+    expect(row?.applies).toEqual([
+      {
+        type: 'addRules',
+        rules: [
+          {
+            toolName: CLAUDE_IN_CHROME_DOMAIN,
+            ruleContent: 'example.com',
+          },
+        ],
+        behavior: 'allow',
+        destination: 'session',
+      },
+    ])
   })
 
   test('Omy allow / allow-domain / deny; invalid row degrades to allow', () => {
@@ -324,7 +322,7 @@ describe('Nmy / Lmy / Omy', () => {
     ).toEqual({
       behavior: 'allow',
       updatedInput: allowDomainPayload.input,
-      permissionUpdates: row!.applies,
+      permissionUpdates: [...row!.applies],
     })
     expect(
       resolveBrowserPermissionAnswer('allow-domain', allowDomainPayload, null),
@@ -421,8 +419,14 @@ describe('LUt / Fwl / Host source-lock', () => {
     expect(src).toContain("behavior: 'cancelled'")
     expect(src).toContain('Deny')
     expect(src).toContain('(esc)')
-    expect(src).toContain('Allow all actions on')
+    expect(src).toContain('row.node')
     expect(src).toContain('requestSource={p.requestSource}')
+    const helper = readFileSync(
+      join(root, 'src/dialog/permissionBrowser.ts'),
+      'utf8',
+    )
+    expect(helper).toContain('mintConsentRow')
+    expect(helper).toContain('Allow all actions on ')
     expect(src).toContain('&& !withheld')
     expect(src).not.toMatch(/\bopenInChrome\s*\(/)
     expect(src).not.toContain('extra allow-rules')

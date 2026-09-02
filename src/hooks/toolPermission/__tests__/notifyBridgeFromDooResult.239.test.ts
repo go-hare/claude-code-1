@@ -78,8 +78,24 @@ describe('notifyBridgeFromDooResult (W / Hnu)', () => {
     expect(src).toContain('notifyBridgeFromDooResult(')
     const settle = src.slice(src.indexOf('void session.result.then'))
     expect(settle).toContain('notifyBridgeFromDooResult(')
+    expect(settle).toContain('popQueuedCommandsOnPermissionDeny()')
     expect(settle.slice(0, 800)).not.toMatch(
       /if \(bridgeCallbacks && bridgeRequestId\) \{\s*bridgeCallbacks\.cancelRequest/,
+    )
+  })
+
+  test('onReject and pipe deny pop queued drafts', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../handlers/interactiveHandler.ts'),
+      'utf8',
+    )
+    const onReject = src.slice(src.indexOf('onReject(feedback?'))
+    expect(onReject.slice(0, 280)).toContain(
+      'popQueuedCommandsOnPermissionDeny()',
+    )
+    const pipeElse = src.slice(src.lastIndexOf('} else {\n        popQueued'))
+    expect(pipeElse.slice(0, 120)).toContain(
+      'popQueuedCommandsOnPermissionDeny()',
     )
   })
 })

@@ -2,16 +2,22 @@
  * densable Cno / Hnu / vum / wXn / Nmy / Lmy / Omy / Wce helpers.
  *
  * Gold 2.1.239: Fwl `LUt()&&startsWith(lwe)` → Cno; jsu `vM(Cno,Hnu)`.
- * Do not invent BLS/ULS (browser_batch → "use the browser"), ConsentRow mint,
- * or Xil. requestSource is gold iK/xSl (G2e), not a local banner.
+ * Lmy mints via S3 (ZNA=addRules, session). Wce is sanitizeHostDisplay —
+ * no oge/Xil. Do not invent BLS/ULS (browser_batch → "use the browser").
+ * requestSource is gold iK/xSl (G2e), not a local banner.
  */
+import React from 'react'
+import { Text } from '@anthropic/ink'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { normalizeNameForMCP } from '../services/mcp/normalization.js'
 import { CLAUDE_IN_CHROME_MCP_SERVER_NAME } from '../utils/claudeInChrome/common.js'
 import { shouldShowAlwaysAllowOptions } from '../utils/permissions/permissionsLoader.js'
-import type { PermissionUpdate } from '../types/permissions.js'
+import { ConsentRow, mintConsentRow } from './consentRow.js'
 import type { PermissionRequestSource } from './permissionRequestSource.js'
 import type { PermissionPromptResult } from './specs/permissionKinds.js'
+
+/** densable ZNA */
+const BROWSER_DAA_TYPES = new Set(['addRules'])
 
 /** densable rvt */
 export const CLAUDE_IN_CHROME_DOMAIN = 'ClaudeInChromeDomain'
@@ -94,10 +100,7 @@ export type BrowserPermissionPayload = {
   requestSource?: PermissionRequestSource
 }
 
-export type ChromeDomainAllowRow = {
-  display: string
-  applies: PermissionUpdate[]
-}
+export type ChromeDomainAllowRow = ConsentRow
 
 export type UrlPreview =
   | { kind: 'full'; text: string; needsGutter: boolean }
@@ -261,16 +264,13 @@ export function shouldShowChromeDomainAllow(
   )
 }
 
-/** densable Lmy — {display, applies} stand-in for ConsentRow (no mint token). */
+/** densable Lmy — S3 addRules ClaudeInChromeDomain session. */
 export function buildChromeDomainAllowRow(
   chrome: ChromeHostTarget | undefined,
 ): ChromeDomainAllowRow | null {
   if (!chrome) return null
-  const sanitized = sanitizeHostDisplay(chrome.host)
-  if (sanitized === null) return null
-  return {
-    display: sanitized.display,
-    applies: [
+  return mintConsentRow(
+    [
       {
         type: 'addRules',
         rules: [
@@ -283,11 +283,37 @@ export function buildChromeDomainAllowRow(
         destination: 'session',
       },
     ],
-  }
+    {
+      displayedTypes: BROWSER_DAA_TYPES,
+      renderLabel: updates => {
+        const update = updates.length === 1 ? updates[0] : undefined
+        if (
+          update === undefined ||
+          update.type !== 'addRules' ||
+          update.rules.length !== 1 ||
+          update.rules[0]?.toolName !== CLAUDE_IN_CHROME_DOMAIN ||
+          update.rules[0]?.ruleContent !== chrome.host
+        ) {
+          return null
+        }
+        const sanitized = sanitizeHostDisplay(chrome.host)
+        if (sanitized === null) return null
+        return React.createElement(
+          Text,
+          null,
+          'Allow all actions on ',
+          React.createElement(Text, { bold: true }, sanitized.display),
+          ' for this session',
+        )
+      },
+    },
+  )
 }
 
-function isValidAllowRow(row: ChromeDomainAllowRow | null): boolean {
-  return row !== null && Array.isArray(row.applies) && row.applies.length > 0
+function isValidAllowRow(
+  row: ChromeDomainAllowRow | null,
+): row is ChromeDomainAllowRow {
+  return ConsentRow.is(row) && row.applies.length > 0
 }
 
 /** densable Omy */
@@ -306,7 +332,7 @@ export function resolveBrowserPermissionAnswer(
       return {
         behavior: 'allow',
         updatedInput: payload.input,
-        permissionUpdates: row!.applies,
+        permissionUpdates: [...row!.applies],
       }
     case 'deny':
       return { behavior: 'deny' }

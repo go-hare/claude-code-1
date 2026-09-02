@@ -2,11 +2,10 @@
  * densable Hnu — permission_browser DialogHost renderer.
  *
  * Gold 2.1.239: jsu `vM(Cno,Hnu)`. Allow / optional allow-domain
- * (`ConsentRow.node`) / Deny(esc). Esc/onCancel → `{behavior:"cancelled"}`.
- * URL preview is yO-string (wP) withheld vs full. Wrap PermissionDialog
- * with gold Cm `requestSource` (G2e · from-the-… copy). Host answer is
- * store.answer; do not dequeue (doo W() already removeFromQueue). Do not
- * invent BLS/ULS, ConsentRow mint, or dh gutter.
+ * (`ConsentRow.node` from Lmy S3) / Deny(esc). Esc/onCancel →
+ * `{behavior:"cancelled"}`. URL preview is yO-string (wP) withheld vs
+ * full. Wrap PermissionDialog with gold Cm `requestSource` (G2e). Host
+ * answer is store.answer; do not dequeue. Do not invent BLS/ULS or dh.
  */
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
@@ -55,11 +54,7 @@ export function PermissionBrowserDialog({ payload, answer }: DialogRendererProps
   }> = [{ label: 'Allow', value: 'allow' }];
   if (row !== null) {
     options.push({
-      label: (
-        <Text>
-          Allow all actions on <Text bold>{row.display}</Text> for this session
-        </Text>
-      ),
+      label: row.node,
       value: 'allow-domain',
     });
   }

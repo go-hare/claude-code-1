@@ -106,4 +106,19 @@ describe('Gbt complete / opener source lock', () => {
       "if (action === 'retry') answer({ action: 'accept' })",
     )
   })
+
+  test('interactive elicitation/create still AppState Be.queue, not NMs Host', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../../services/mcp/elicitationHandler.ts'),
+      'utf8',
+    )
+    const create = src.slice(
+      src.indexOf("setRequestHandler('elicitation/create'"),
+    )
+    expect(create).toContain('setAppState(prev => ({')
+    expect(create).toContain('elicitation:')
+    expect(create).toContain('queue:')
+    expect(create).not.toContain('mcpUrlElicitationSpec')
+    expect(create).not.toContain('requestDialog(')
+  })
 })

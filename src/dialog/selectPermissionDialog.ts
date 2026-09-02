@@ -27,11 +27,15 @@ import type { DialogKindSpec } from './requestDialog.js'
 import {
   isClaudeInChromeInProductPermissions,
   isClaudeInChromeToolName,
+  previewUrlString,
+  type UrlPreview,
 } from './permissionBrowser.js'
 import {
   buildAskUserQuestionPermissionDescriptor,
   buildBashPermissionDescriptor,
   buildBrowserPermissionDescriptor,
+  buildEnterPlanModePermissionDescriptor,
+  buildExitPlanModePermissionDescriptor,
   buildPermissionDescriptorBase,
   buildPowerShellPermissionDescriptor,
   buildSkillPermissionDescriptor,
@@ -105,13 +109,13 @@ export function selectPermissionDialogFwl(
   if (tool === EnterPlanModeTool) {
     return {
       spec: permissionEnterPlanModeSpec as never,
-      descriptor: buildPermissionDescriptorBase(buildInput),
+      descriptor: buildEnterPlanModePermissionDescriptor(buildInput),
     }
   }
   if (tool === ExitPlanModeV2Tool) {
     return {
       spec: permissionExitPlanModeV2Spec as never,
-      descriptor: buildPermissionDescriptorBase(buildInput),
+      descriptor: buildExitPlanModePermissionDescriptor(buildInput),
     }
   }
   if (tool === SkillTool) {
@@ -127,17 +131,67 @@ export function selectPermissionDialogFwl(
     }
   }
   if (tool === MonitorTool) {
-    const input = confirm.input as { command?: unknown }
+    const input = confirm.input as {
+      command?: unknown
+      description?: unknown
+      intervalMs?: unknown
+      interval_ms?: unknown
+      mcp?: unknown
+      ws?: unknown
+    }
     const intervalMs =
-      typeof (confirm.input as { intervalMs?: unknown }).intervalMs === 'number'
-        ? (confirm.input as { intervalMs: number }).intervalMs
-        : 0
+      typeof input.intervalMs === 'number'
+        ? input.intervalMs
+        : typeof input.interval_ms === 'number'
+          ? input.interval_ms
+          : 0
+    const commandPreview: UrlPreview | undefined =
+      typeof input.command === 'string'
+        ? (previewUrlString(input.command) ?? undefined)
+        : undefined
+    const mcpRaw = input.mcp
+    const mcpArgsDisplay =
+      mcpRaw !== null &&
+      typeof mcpRaw === 'object' &&
+      (mcpRaw as { argsDisplay?: unknown }).argsDisplay !== undefined
+        ? previewUrlString((mcpRaw as { argsDisplay?: unknown }).argsDisplay)
+        : null
+    const mcp =
+      mcpRaw !== null &&
+      typeof mcpRaw === 'object' &&
+      typeof (mcpRaw as { server?: unknown }).server === 'string' &&
+      typeof (mcpRaw as { tool?: unknown }).tool === 'string'
+        ? {
+            server: (mcpRaw as { server: string }).server,
+            tool: (mcpRaw as { tool: string }).tool,
+            ...(mcpArgsDisplay ? { argsDisplay: mcpArgsDisplay } : {}),
+          }
+        : undefined
+    const wsRaw = input.ws
+    const wsUrl =
+      wsRaw !== null && typeof wsRaw === 'object'
+        ? previewUrlString((wsRaw as { url?: unknown }).url)
+        : null
+    const ws =
+      wsUrl !== null
+        ? {
+            url: wsUrl,
+            ...((wsRaw as { protocols?: unknown }).protocols !== undefined
+              ? { protocols: (wsRaw as { protocols?: unknown }).protocols }
+              : {}),
+          }
+        : undefined
     return {
       spec: permissionMonitorSpec as never,
       descriptor: {
         ...buildPermissionDescriptorBase(buildInput),
-        command: typeof input.command === 'string' ? input.command : '',
+        ...(commandPreview ? { command: commandPreview } : {}),
         intervalMs,
+        ...(typeof input.description === 'string'
+          ? { monitorDescription: input.description }
+          : {}),
+        ...(mcp ? { mcp } : {}),
+        ...(ws ? { ws } : {}),
       },
     }
   }

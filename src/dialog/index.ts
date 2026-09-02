@@ -28,6 +28,15 @@ export {
   useTopDialogKind,
 } from './DialogStoreContext.js'
 export { useDialogMailboxBridge } from './useDialogMailboxBridge.js'
+export { usePermissionMirrorSink } from './usePermissionMirrorSink.js'
+export {
+  setPermissionDenyQueuePop,
+  popQueuedCommandsOnPermissionDeny,
+} from './permissionDenyQueuePop.js'
+export {
+  settlePermissionMirror,
+  toolUseIdFromMirrorDialogId,
+} from './settlePermissionMirror.js'
 export {
   DialogHost,
   DIALOG_ANSWER_SWAP_DEBOUNCE_MS,
@@ -87,6 +96,7 @@ export {
   buildSkillPermissionDescriptor,
   buildPowerShellPermissionDescriptor,
   buildWebFetchPermissionDescriptor,
+  buildEnterPlanModePermissionDescriptor,
   buildAskUserQuestionPermissionDescriptor,
   buildBrowserPermissionDescriptor,
 } from './permissionDescriptor.js'
@@ -115,6 +125,8 @@ export {
   NON_PERMISSION_DIALOG_KINDS,
   isNonPermissionDialogKind,
   isSoftNmsDialogKind,
+  it2SetupSpec,
+  computerUseApprovalSpec,
   costThresholdSpec,
   resumeReturnSpec,
   ideOnboardingSpec,

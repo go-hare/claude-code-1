@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import type { ToolUseConfirm } from '../../components/permissions/PermissionRequest.js'
 import { AskUserQuestionTool } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js'
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js'
+import { ExitPlanModeV2Tool } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
 import { FileEditTool } from '@claude-code/builtin-tools/tools/FileEditTool/FileEditTool.js'
 import { FileReadTool } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { MonitorTool } from '@claude-code/builtin-tools/tools/MonitorTool/MonitorTool.js'
@@ -27,6 +28,7 @@ import {
   PERMISSION_BASH_KIND,
   PERMISSION_BROWSER_KIND,
   PERMISSION_DIALOG_KINDS,
+  PERMISSION_EXIT_PLAN_MODE_V2_KIND,
   PERMISSION_FILE_KIND,
   PERMISSION_MONITOR_KIND,
   PERMISSION_POWERSHELL_KIND,
@@ -76,7 +78,13 @@ describe('densable foo order (Fwl → file → bash → bEt)', () => {
       confirm(MonitorTool, { command: 'tail -f x', description: 'watch' }),
     )
     expect(fwl?.spec.kind).toBe(PERMISSION_MONITOR_KIND)
-    expect(fwl?.descriptor).toMatchObject({ intervalMs: 0 })
+    expect(fwl?.descriptor).toMatchObject({
+      intervalMs: 0,
+      monitorDescription: 'watch',
+      command: { kind: 'full', text: 'tail -f x', needsGutter: false },
+    })
+    expect(typeof fwl?.descriptor.showAlwaysAllow).toBe('boolean')
+    expect('requestSource' in (fwl?.descriptor ?? {})).toBe(true)
   })
 
   test('Fwl: LUt default false → chrome MCP is not Cno', () => {
@@ -178,6 +186,22 @@ describe('densable foo order (Fwl → file → bash → bEt)', () => {
       selectPermissionDialogFwl(confirm(AskUserQuestionTool, { questions: [] }))
         ?.spec.kind,
     ).toBe(PERMISSION_ASK_USER_QUESTION_KIND)
+  })
+
+  test('Fwl: ExitPlanModeV2 stamps plan / planFilePath / usage from input', () => {
+    const fwl = selectPermissionDialogFwl(
+      confirm(ExitPlanModeV2Tool, {
+        plan: 'ship it',
+        planFilePath: '/tmp/plan.md',
+        usage: { tokens: 1 },
+      }),
+    )
+    expect(fwl?.spec.kind).toBe(PERMISSION_EXIT_PLAN_MODE_V2_KIND)
+    expect(fwl?.descriptor).toMatchObject({
+      plan: 'ship it',
+      planFilePath: '/tmp/plan.md',
+      usage: { tokens: 1 },
+    })
   })
 })
 

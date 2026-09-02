@@ -184,9 +184,7 @@ describe('REPL densable ozs / RPs wiring', () => {
   test('placeholder/scroll gate on densable kZt (not bare occupyModalSlot)', () => {
     expect(replSrc).toContain('isFullscreenModalChromeActive')
     expect(replSrc).toContain('placeholderText && !kZt')
-    expect(replSrc).toContain(
-      "kZt || !focusedInputDialog || focusedInputDialog === 'tool-permission'",
-    )
+    expect(replSrc).toContain('kZt || !anyInputOverlay || hostPermissionOpen')
     expect(replSrc).toContain(
       'onScroll={kZt || !!viewedAgentTask ? undefined : composedOnScroll}',
     )
@@ -221,20 +219,90 @@ describe('FullscreenLayout densable Tyn visible gate', () => {
     expect(layoutSrc).toContain('claimScrollBox: null')
   })
 
+  test('AXC sticky overlay insets content with densable Aee paddingX=2', () => {
+    const qvtStart = layoutSrc.indexOf('if (axcSticky)')
+    const elseStart = layoutSrc.indexOf('// Gold else:')
+    const qvt = layoutSrc.slice(qvtStart, elseStart)
+    expect(qvt).toContain('<AxcStickyHost')
+    expect(qvt).toContain('<Box flexDirection="column" paddingX={2}>')
+    expect(qvt).toContain('{modal.content}')
+    expect(qvt).not.toContain('Divider')
+    expect(qvt).not.toContain('char="▔"')
+    expect(qvt).not.toContain('ModalScroller')
+    expect(qvt).not.toContain('AxcFrameSinkBridge')
+  })
+
+  test('AXC sticky overlay omits Tyn Bxc divider (gold Qvt)', () => {
+    const tynStart = layoutSrc.indexOf('{/* Bxc — ozs pane')
+    const tynEnd = layoutSrc.indexOf('</PromptOverlayProvider>', tynStart)
+    const tyn = layoutSrc.slice(tynStart, tynEnd)
+    expect(tyn).toContain('Divider')
+    expect(tyn).toContain('char="▔"')
+    expect(tyn).toContain('ModalScroller')
+    expect(tyn).not.toContain('AxcStickyHost')
+  })
+
   test('modal pane is flex sibling like gold Tyn (not absolute/opaque)', () => {
     // Gold Tyn Bxc: no position:absolute, no opaque on the ▔ pane.
     expect(layoutSrc).toContain('<Divider color="permission" char="▔" />')
     expect(layoutSrc).toContain('{/* $xc — scroll + sidebar row */}')
     expect(layoutSrc).toContain('{/* Uxc — prompt chrome')
     expect(layoutSrc).toContain('{/* Bxc — ozs pane')
-    // Prop checks: modal Box must not use absolute/opaque (companion float may).
-    const modalBox = layoutSrc.slice(
-      layoutSrc.indexOf('ref={axcOverlayRef}'),
-      layoutSrc.indexOf('{modal.content}'),
+    const tynPaneStart = layoutSrc.indexOf('{/* Bxc — ozs pane')
+    const tynPaneEnd = layoutSrc.indexOf(
+      '</PromptOverlayProvider>',
+      tynPaneStart,
     )
-    expect(modalBox).not.toMatch(/position=["']absolute["']/)
-    expect(modalBox).not.toMatch(/^\s*opaque\s*$/m)
-    expect(modalBox).not.toMatch(/\bopaque\b/)
+    const tynPane = layoutSrc.slice(tynPaneStart, tynPaneEnd)
+    expect(tynPane).not.toMatch(/position=["']absolute["']/)
+    expect(tynPane).not.toMatch(/\bopaque\b/)
+  })
+
+  test('Qvt arm mounts gold xxc (AxcStickyHost) not Tyn Bxc hybrid', () => {
+    expect(layoutSrc).toContain('<AxcStickyHost')
+    expect(layoutSrc).toContain('overlay={overlayNode}')
+    expect(layoutSrc).toContain('modal != null && modal.visible')
+    expect(layoutSrc).not.toContain('AxcFrameSinkBridge')
+    expect(layoutSrc).not.toContain('wrapAxc')
+    expect(layoutSrc).not.toContain('axcOverlayRef')
+  })
+
+  test('Qvt IKe is C9t{[b9t, pyn]} — kxc in chrome ctx, no overlay-in-ScrollBox', () => {
+    const qvtStart = layoutSrc.indexOf('if (axcSticky)')
+    const elseStart = layoutSrc.indexOf('// Gold else:')
+    const qvt = layoutSrc.slice(qvtStart, elseStart)
+    expect(qvt).toContain('<ScrollChromeContext value={chromeCtx}>')
+    expect(qvt).toContain('{scrollable}')
+    expect(qvt).toContain('<AxcScrollAnchor />')
+    expect(qvt).not.toContain('{overlay}')
+    const tynStart = layoutSrc.indexOf('{/* $xc — scroll + sidebar row */}')
+    const tynSticky = layoutSrc.indexOf('const sticky = hideSticky')
+    const tynEnd = layoutSrc.indexOf('</PromptOverlayProvider>', tynStart)
+    const tyn = layoutSrc.slice(tynSticky, tynEnd)
+    expect(tyn).toContain('<AxcScrollAnchor />')
+    expect(tyn).not.toContain('{overlay}')
+    expect(tyn).not.toContain('&& overlay == null')
+  })
+
+  test('gold Tyn order: Vs $xc returns before sibling Qvt if (axcSticky)', () => {
+    const xc = layoutSrc.indexOf('{/* $xc — scroll + sidebar row */}')
+    const qvt = layoutSrc.indexOf('if (axcSticky)')
+    expect(xc).toBeGreaterThan(-1)
+    expect(qvt).toBeGreaterThan(xc)
+  })
+
+  test('gold else Fragment has no overlay slot', () => {
+    const elseStart = layoutSrc.indexOf('// Gold else:')
+    const elseEnd = layoutSrc.indexOf('function NewMessagesPill')
+    const elseArm = layoutSrc.slice(elseStart, elseEnd)
+    expect(elseArm).toContain('{scrollable}')
+    expect(elseArm).toContain('{bottom}')
+    expect(elseArm).toContain('{modal?.content}')
+    expect(elseArm).not.toContain('{overlay}')
+    expect(elseArm).not.toContain('AxcStickyHost')
+    expect(layoutSrc).not.toContain('overlay?: ReactNode')
+    expect(replSrc).not.toContain('overlay={toolPermissionOverlay}')
+    expect(replSrc).not.toContain('const toolPermissionOverlay')
   })
 
   test('lRc ModalScroller reclaim uses Twe focusManager via useApp', () => {

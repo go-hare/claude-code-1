@@ -1,6 +1,9 @@
 /**
  * Host chrome for densable Iiu / tip PermissionRequest inside DialogHost.
  * toolUseConfirm itself is looked up via permissionConfirmRegistry.
+ *
+ * densable Host renderers do not dequeue (doo W() / opener callbacks do).
+ * `dequeue` is tip chrome escape hatch → removeLeaderToolUseConfirm.
  */
 import React, { createContext, useContext } from 'react';
 import type { ToolUseContext } from '../Tool.js';

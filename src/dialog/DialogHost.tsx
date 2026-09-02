@@ -5,12 +5,35 @@
  * answer debounce densable c_y=150 after swap (swappedAt / suppress lift).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Box } from '@anthropic/ink';
+import { Box, useTerminalNotification } from '@anthropic/ink';
 import { ManagedSettingsSecurityDialog } from '../components/ManagedSettingsSecurityDialog/ManagedSettingsSecurityDialog.js';
-import { PermissionRequest } from '../components/permissions/PermissionRequest.js';
+import { useNotifyAfterTimeout } from '../hooks/useNotifyAfterTimeout.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { useDialogStore, useTopDialog } from './DialogStoreContext.js';
-import { getPermissionConfirm } from './permissionConfirmRegistry.js';
-import { usePermissionDialogHost } from './PermissionDialogHostContext.js';
+import { AX_BELL_CLAIM_KEY, claimIfChanged, noteAxBellNow } from './dialogHostBell.js';
+import { PermissionAskUserQuestionDialog } from './dialogs/PermissionAskUserQuestionDialog.js';
+import { PermissionBashDialog } from './dialogs/PermissionBashDialog.js';
+import { PermissionBrowserDialog } from './dialogs/PermissionBrowserDialog.js';
+import { PermissionEnterPlanModeDialog } from './dialogs/PermissionEnterPlanModeDialog.js';
+import { PermissionExitPlanModeDialog } from './dialogs/PermissionExitPlanModeDialog.js';
+import { PermissionFileDialog } from './dialogs/PermissionFileDialog.js';
+import { PermissionMonitorDialog } from './dialogs/PermissionMonitorDialog.js';
+import { PermissionPowerShellDialog } from './dialogs/PermissionPowerShellDialog.js';
+import { PermissionPromptDialog } from './dialogs/PermissionPromptDialog.js';
+import { PermissionSkillDialog } from './dialogs/PermissionSkillDialog.js';
+import { PermissionWebFetchDialog } from './dialogs/PermissionWebFetchDialog.js';
+import { JSU_NON_PERMISSION_COMPONENTS } from './jsuRenderers.js';
+import type { DialogSuppressReason } from './legacyDialogFocus.js';
+import {
+  AUTO_MODE_FLAGGED_ALLOW_KIND,
+  AUTO_MODE_SETUP_REVIEW_KIND,
+  CHROME_INSTALL_SETUP_KIND,
+  CHROME_INSTALL_UPSELL_KIND,
+  FABLE_OVERAGE_CONSENT_PROMPT_KIND,
+  GOAL_PROPOSAL_KIND,
+  PEER_INBOUND_APPROVAL_KIND,
+  REFUSAL_FALLBACK_PROMPT_KIND,
+} from './specs/jsuKinds.js';
 import {
   MANAGED_SETTINGS_SECURITY_KIND,
   type ManagedSettingsSecurityPayload,
@@ -30,9 +53,7 @@ import {
   PERMISSION_WEBFETCH_KIND,
   PERMISSION_WORKFLOW_KIND,
 } from './specs/permissionKinds.js';
-import { JSU_NON_PERMISSION_COMPONENTS } from './jsuRenderers.js';
-import { PermissionBrowserDialog } from './dialogs/PermissionBrowserDialog.js';
-import type { DialogSuppressReason } from './legacyDialogFocus.js';
+import { resolveHostWaitingFor } from './permissionWaiting.js';
 
 /** densable c_y */
 export const DIALOG_ANSWER_SWAP_DEBOUNCE_MS = 150;
@@ -53,6 +74,40 @@ const DIALOG_LAYOUTS: Record<string, DialogHostVariant> = {
 
 /** @internal test — densable mLo map */
 export const DIALOG_LAYOUTS_FOR_TEST = DIALOG_LAYOUTS;
+
+/** densable But */
+const CLAUDE_NEEDS_PERMISSION = 'Claude needs your permission';
+
+/**
+ * densable Usu — OS notify title per kind. Missing key → no nau child.
+ * Not in Usu (gold): GSn / Wxt / Gxt / CHr / FRr / DIi / qSn / _Bi / Gbt.
+ * HMs review-artifact is feature-gated in gold; local has no that kind — do not invent.
+ */
+const DIALOG_NOTIFICATIONS: Record<string, string> = {
+  [PERMISSION_PROMPT_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_WEBFETCH_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_SKILL_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_POWERSHELL_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_FILE_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_ASK_USER_QUESTION_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_ENTER_PLAN_MODE_KIND]: 'Claude Code wants to enter plan mode',
+  [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: 'Claude Code needs your approval for the plan',
+  [PERMISSION_MONITOR_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_BASH_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_BROWSER_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [PERMISSION_WORKFLOW_KIND]: CLAUDE_NEEDS_PERMISSION,
+  [REFUSAL_FALLBACK_PROMPT_KIND]: 'Session paused',
+  [FABLE_OVERAGE_CONSENT_PROMPT_KIND]: 'Session paused',
+  [PEER_INBOUND_APPROVAL_KIND]: 'A message from another session needs your approval',
+  [CHROME_INSTALL_UPSELL_KIND]: 'Claude wants to use your browser',
+  [CHROME_INSTALL_SETUP_KIND]: 'Setting up Claude in Chrome',
+  [AUTO_MODE_SETUP_REVIEW_KIND]: 'Auto-mode setup proposal is ready for review',
+  [AUTO_MODE_FLAGGED_ALLOW_KIND]: 'Auto-mode setup flagged some permission rules for review',
+  [GOAL_PROPOSAL_KIND]: 'Claude proposed a session goal',
+};
+
+/** @internal test — densable Usu map */
+export const DIALOG_NOTIFICATIONS_FOR_TEST = DIALOG_NOTIFICATIONS;
 
 /** densable Bsu — mLo lookup, default inline. */
 export function getDialogHostLayout(kind: string | undefined): DialogHostVariant {
@@ -122,84 +177,46 @@ const managedSettingsSecurityRenderer: DialogRenderer = ({ payload, answer }) =>
 };
 
 /**
- * densable Iiu — permission_prompt. Tip: PermissionRequest + confirm registry.
+ * densable nau — WRr(message, "permission_prompt") + claimIfChanged("ax-bell")
+ * then aAr (screen-reader + lastBellAt 500ms + notifyBell). Returns null.
+ * Process-singleton bag (no Ink WeakMap host API).
  */
-function PermissionPromptRenderer({ payload, answer }: DialogRendererProps): React.ReactNode {
-  const host = usePermissionDialogHost();
-  const store = useDialogStore();
-  const requestId =
-    typeof payload === 'object' &&
-    payload !== null &&
-    'requestId' in payload &&
-    typeof (payload as { requestId: unknown }).requestId === 'string'
-      ? (payload as { requestId: string }).requestId
-      : '';
-  const confirm = requestId ? getPermissionConfirm(requestId) : undefined;
-
+function DialogHostNotification({ dialogId, message }: { dialogId: string; message: string }): null {
+  useNotifyAfterTimeout(message, 'permission_prompt');
+  const terminal = useTerminalNotification();
+  const screenReader = isScreenReaderModeEnabled();
   useEffect(() => {
-    if (host && confirm) return;
-    // Missing host/confirm: settle cancelled. Bypass Host answer debounce
-    // (c_y) via store.answer — one-shot answer() can be swallowed right after
-    // suppress lift / swap and leave a blank top dialog forever.
-    const entry = store.getState().open.find(d => {
-      if (!requestId) return false;
-      const p = d.payload as { requestId?: unknown };
-      return p?.requestId === requestId;
-    });
-    if (entry) {
-      store.answer(entry.id, { behavior: 'cancelled' });
-    } else {
-      answer({ behavior: 'cancelled' });
-    }
-    if (requestId) host?.dequeue(requestId);
-  }, [host, confirm, requestId, store, answer]);
-
-  if (!host || !confirm) return null;
-
-  return (
-    <PermissionRequest
-      key={confirm.toolUseID}
-      toolUseConfirm={confirm}
-      toolUseContext={confirm.toolUseContext ?? host.getToolUseContext()}
-      verbose={host.verbose}
-      workerBadge={confirm.workerBadge}
-      setStickyFooter={host.setStickyFooter}
-      onDone={() => {
-        // densable: accept already claims via confirm.onAllow + dismissAndTeardown.
-        // Do NOT answer allow here — FilePermissionDialog reject calls onDone()
-        // before onReject; answering allow would settle doo W() as allow.
-        host.dequeue(confirm.toolUseID);
-      }}
-      onReject={() => {
-        // densable deny path: pop queued cmds then answer deny for doo W
-        host.onReject();
-        answer({ behavior: 'deny' });
-        host.dequeue(confirm.toolUseID);
-      }}
-    />
-  );
+    if (!claimIfChanged(AX_BELL_CLAIM_KEY, dialogId)) return;
+    if (!screenReader) return;
+    if (!noteAxBellNow()) return;
+    terminal.notifyBell();
+  }, [dialogId, screenReader, terminal]);
+  return null;
 }
 
 /** densable jsu — GSn + permission_* + pealed non-permission arms */
 const DIALOG_COMPONENTS: Record<string, DialogRenderer> = {
   [MANAGED_SETTINGS_SECURITY_KIND]: managedSettingsSecurityRenderer,
-  [PERMISSION_PROMPT_KIND]: PermissionPromptRenderer,
-  [PERMISSION_BASH_KIND]: PermissionPromptRenderer,
-  [PERMISSION_FILE_KIND]: PermissionPromptRenderer,
-  [PERMISSION_SKILL_KIND]: PermissionPromptRenderer,
-  [PERMISSION_POWERSHELL_KIND]: PermissionPromptRenderer,
-  [PERMISSION_WEBFETCH_KIND]: PermissionPromptRenderer,
-  [PERMISSION_ASK_USER_QUESTION_KIND]: PermissionPromptRenderer,
-  [PERMISSION_ENTER_PLAN_MODE_KIND]: PermissionPromptRenderer,
-  [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: PermissionPromptRenderer,
+  [PERMISSION_PROMPT_KIND]: PermissionPromptDialog,
+  [PERMISSION_BASH_KIND]: PermissionBashDialog,
+  [PERMISSION_FILE_KIND]: PermissionFileDialog,
+  [PERMISSION_SKILL_KIND]: PermissionSkillDialog,
+  [PERMISSION_POWERSHELL_KIND]: PermissionPowerShellDialog,
+  [PERMISSION_WEBFETCH_KIND]: PermissionWebFetchDialog,
+  [PERMISSION_ASK_USER_QUESTION_KIND]: PermissionAskUserQuestionDialog,
+  [PERMISSION_ENTER_PLAN_MODE_KIND]: PermissionEnterPlanModeDialog,
+  [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: PermissionExitPlanModeDialog,
   [PERMISSION_BROWSER_KIND]: PermissionBrowserDialog,
-  [PERMISSION_MONITOR_KIND]: PermissionPromptRenderer,
-  [PERMISSION_WORKFLOW_KIND]: PermissionPromptRenderer,
+  [PERMISSION_MONITOR_KIND]: PermissionMonitorDialog,
+  [PERMISSION_WORKFLOW_KIND]: PermissionPromptDialog,
   ...JSU_NON_PERMISSION_COMPONENTS,
 };
 
 /** @internal test — densable jsu registered kinds */
 export const DIALOG_COMPONENTS_KINDS_FOR_TEST = Object.keys(DIALOG_COMPONENTS);
+
+/** @internal test — densable jsu renderer identity */
+export const DIALOG_COMPONENTS_FOR_TEST = DIALOG_COMPONENTS;
 
 type Props = {
   variant?: DialogHostVariant;
@@ -228,15 +245,55 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
     wasSuppressed.current = now;
   }, [suppressReason]);
 
+  // densable P1u / msf permission needs — Host top owns emit (not tip queue).
+  useEffect(() => {
+    let cancelled = false;
+    if (suppressReason != null) {
+      void import('../utils/bgNeedsInputBridge.js').then(m => {
+        if (cancelled) return;
+        if (!m.isBgJobSession()) return;
+        m.emitBgNeedsInput(null, 'permission');
+        m.emitBgNeedsFromDialogKind(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    void import('../utils/bgNeedsInputBridge.js').then(m => {
+      if (cancelled) return;
+      if (!m.isBgJobSession()) return;
+      m.ensureBgNeedsPermissionBridge();
+      const label = resolveHostWaitingFor(top?.kind, top?.payload);
+      if (label && isPermissionDialogKind(top?.kind)) {
+        m.emitBgNeedsInput(label, 'permission');
+        m.emitBgNeedsFromDialogKind(null);
+        return;
+      }
+      m.emitBgNeedsInput(null, 'permission');
+      // densable UIb dialog slot — keys in DIALOG_NEEDS_BY_KIND only
+      // (refusal / fable / mcp_url / cost / resume / auto_default / ide).
+      // goal_proposal is Host waitingFor / Usu notify, not UIb (gold table has no Dot).
+      m.emitBgNeedsFromDialogKind(top?.kind);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [suppressReason, top?.kind, top?.id, top?.payload]);
+
   // tip bg needs-input when managed-settings is top (old REPL register path)
   useEffect(() => {
     if (suppressReason != null) return;
     if (top?.kind !== MANAGED_SETTINGS_SECURITY_KIND) return;
+    let cancelled = false;
     void import('../utils/bgNeedsInputBridge.js').then(m => {
+      if (cancelled) return;
       if (!m.isBgJobSession()) return;
       m.ensureBgNeedsPermissionBridge();
       m.emitBgNeedsInput(m.MANAGED_SETTINGS_NEEDS, 'managed-settings');
     });
+    return () => {
+      cancelled = true;
+    };
   }, [suppressReason, top?.kind, top?.id]);
 
   // densable dQc
@@ -263,8 +320,11 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
     store.answer(top.id, result);
   };
 
+  const title = DIALOG_NOTIFICATIONS[top.kind];
+
   return (
     <Box flexDirection="column" key={top.id}>
+      {title !== undefined ? <DialogHostNotification dialogId={top.id} message={title} /> : null}
       <Renderer payload={payload} answer={answer} />
     </Box>
   );

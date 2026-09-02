@@ -43,6 +43,7 @@ import {
   hasPermissionsToUseTool,
   stripWholeToolGrantsForAsk,
 } from '../../../utils/permissions/permissions.js'
+import { popQueuedCommandsOnPermissionDeny } from '../../../dialog/permissionDenyQueuePop.js'
 import { shouldQueuePermissionBehind } from '../../../dialog/permissionQueueBehind.js'
 import type {
   PermissionDooReprompt,
@@ -259,6 +260,7 @@ function handleInteractivePermission(
     },
     onAbort() {
       if (!claim()) return
+      popQueuedCommandsOnPermissionDeny()
       forgetPipePermission('Permission request was aborted locally in sub.')
       if (bridgeCallbacks && bridgeRequestId) {
         bridgeCallbacks.sendResponse(bridgeRequestId, {
@@ -313,6 +315,7 @@ function handleInteractivePermission(
     },
     onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
       if (!claim()) return
+      popQueuedCommandsOnPermissionDeny()
       forgetPipePermission('Permission request was rejected locally in sub.')
 
       if (bridgeCallbacks && bridgeRequestId) {
@@ -503,6 +506,7 @@ function handleInteractivePermission(
               return
             }
             case 'deny': {
+              popQueuedCommandsOnPermissionDeny()
               ctx.logDecision(
                 {
                   decision: 'reject',
@@ -523,6 +527,7 @@ function handleInteractivePermission(
               return
             }
             case 'cancelled': {
+              popQueuedCommandsOnPermissionDeny()
               ctx.logCancelled()
               ctx.logDecision(
                 { decision: 'reject', source: { type: 'user_abort' } },
@@ -594,6 +599,7 @@ function handleInteractivePermission(
           )
         })()
       } else {
+        popQueuedCommandsOnPermissionDeny()
         ctx.logDecision(
           {
             decision: 'reject',

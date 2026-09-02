@@ -11,9 +11,9 @@
  *   dQc()   → zIr()!=null ? null : wrs()
  *
  * REPL sync: useLayoutEffect(() => (uQc(legacyFocusForUqc(e$)), () => uQc(null)), [e$])
- * Tip `focusedInputDialog` is a SUPERSET of gold `_Zt`. Only allowlisted focus
- * ids enter uQc — Host-owned NMs (permission / managed-settings) and any future
- * Host kind stay out, or dQc would self-suppress the Host that paints them.
+ * Only gold `_Zt` focus ids enter uQc. Tip SUPERSET overlays (hook prompt /
+ * callouts) paint via tipOverlay and stay out of uQc. Host-owned NMs stay out
+ * or dQc would self-suppress the Host that paints them.
  */
 import { useSyncExternalStore } from 'react'
 import { createStore } from '../state/store.js'
@@ -25,11 +25,10 @@ import {
 export type LegacyDialogFocus = string | null
 
 /**
- * densable `_Zt` returns (239 SEA) + tip focused overlays that are NOT NMs Host.
- * Allowlist — unknown / Host-owned tip ids map to null for uQc.
+ * densable `_Zt` returns (239 SEA) only.
+ * Allowlist — tip SUPERSET / Host-owned / unknown → null for uQc.
  */
 const UQC_FOCUS_ALLOWLIST = new Set<string>([
-  // gold _Zt
   'message-selector',
   'left-arrow-confirm',
   'worker-sandbox-permission',
@@ -40,13 +39,6 @@ const UQC_FOCUS_ALLOWLIST = new Set<string>([
   'fullscreen-upsell',
   'lsp-recommendation',
   'plugin-hint',
-  // tip focused overlays (not DialogHost content)
-  'prompt',
-  'model-switch',
-  'undercover-callout',
-  'effort-callout',
-  'search-extra-tools-hint',
-  'desktop-upsell',
 ])
 
 /**

@@ -2,6 +2,7 @@
  * densable jsu non-permission DialogKindSpec set (from SEA Qg kinds).
  * Renderers live in DialogHost; tip UI components where already present.
  */
+import { DEFAULT_GRANT_FLAGS } from '@ant/computer-use-mcp/types'
 import { z } from 'zod/v4'
 import { defineDialogSpec } from '../requestDialog.js'
 
@@ -46,25 +47,21 @@ export type NonPermissionDialogKind =
   (typeof NON_PERMISSION_DIALOG_KINDS)[number]
 
 const passthrough = () => z.record(z.string(), z.unknown())
-const ack = {
-  result: () => z.literal('acknowledged'),
-  default: 'acknowledged' as const,
-}
 
-/** densable _Bi */
+/** densable _Bi — result Or(["installed","use-tmux","cancelled"]), default cancelled */
 export const it2SetupSpec = defineDialogSpec({
   kind: IT2_SETUP_KIND,
-  payload: () =>
-    z.object({ tmuxAvailable: z.boolean().optional() }).passthrough(),
-  ...ack,
+  payload: () => z.object({ tmuxAvailable: z.boolean() }).passthrough(),
+  result: () => z.enum(['installed', 'use-tmux', 'cancelled']),
+  default: 'cancelled' as const,
 })
 
-/** densable DIi */
+/** densable DIi — payload/result iU(object); default {granted:[],denied:[],flags:uIe} */
 export const computerUseApprovalSpec = defineDialogSpec({
   kind: COMPUTER_USE_APPROVAL_KIND,
   payload: passthrough,
   result: () => z.unknown(),
-  default: null,
+  default: { granted: [], denied: [], flags: DEFAULT_GRANT_FLAGS },
 })
 
 /** densable Wxt — Esc/dismiss is cancelled (oXg); Got it is acknowledged. */
@@ -116,7 +113,7 @@ export const sandboxNetworkAccessSpec = defineDialogSpec({
   default: 'cancelled' as const,
 })
 
-/** densable qSn — Esc/dismiss is cancelled (no hasSeen latch). */
+/** densable qSn — Esc/dismiss is cancelled; lHr treats it as decline + latch. */
 export const autoDefaultNudgeSpec = defineDialogSpec({
   kind: AUTO_DEFAULT_NUDGE_KIND,
   payload: () =>

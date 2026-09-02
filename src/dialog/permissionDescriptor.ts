@@ -4,12 +4,17 @@
  * File Lno/X_w lives in filePermissionPreview.ts (async).
  */
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
+import { getPlan, getPlanFilePath } from '../utils/plans.js'
 import {
   computeIsAskCappedByOrg,
   computeShowAlwaysAllow,
   extractChromeHostTarget,
   formatBrowserVerbPhrase,
 } from './permissionBrowser.js'
+import {
+  paramFormatHintsFromSchema,
+  type ParamFormatHints,
+} from './permissionMcpTable.js'
 import {
   resolvePermissionRequestSource,
   type PermissionRequestSourceContext,
@@ -27,8 +32,12 @@ export type PermissionDescriptorBase = {
   hasMcpSuffix: boolean
   renderedToolUseMessage: string | unknown
   toolUseRenderFailed?: boolean
+  paramFormatHints?: ParamFormatHints
   messageId: string
   isMcp: boolean
+  showAlwaysAllow: boolean
+  isAskCappedByOrg: boolean
+  requestSource: ReturnType<typeof resolvePermissionRequestSource>
 }
 
 type BuildInput = {
@@ -78,6 +87,10 @@ export function buildPermissionDescriptorBase(
       ? String(confirm.assistantMessage.message.id)
       : ''
 
+  const requestSource = resolvePermissionRequestSource(
+    confirm.toolUseContext as PermissionRequestSourceContext,
+  )
+
   return {
     requestId: confirm.toolUseID,
     toolName: tool.name,
@@ -88,8 +101,17 @@ export function buildPermissionDescriptorBase(
     hasMcpSuffix: isMcp,
     renderedToolUseMessage,
     toolUseRenderFailed,
+    paramFormatHints: paramFormatHintsFromSchema(tool.inputJSONSchema),
     messageId,
     isMcp,
+    showAlwaysAllow: computeShowAlwaysAllow({
+      permissionResult: confirm.permissionResult,
+      tool,
+      input: confirm.input,
+      requestSource,
+    }),
+    isAskCappedByOrg: computeIsAskCappedByOrg(tool),
+    requestSource,
   }
 }
 
@@ -143,7 +165,12 @@ export function buildPowerShellPermissionDescriptor(
 /** densable Sum — permission_webfetch */
 export function buildWebFetchPermissionDescriptor(
   input: BuildInput,
-): PermissionDescriptorBase & { hostname: string } {
+): PermissionDescriptorBase & {
+  hostname: string
+  showAlwaysAllow: boolean
+  isAskCappedByOrg: boolean
+  requestSource: ReturnType<typeof resolvePermissionRequestSource>
+} {
   const base = buildPermissionDescriptorBase(input)
   const url = (input.confirm.input as { url?: unknown }).url
   let hostname = ''
@@ -154,7 +181,36 @@ export function buildWebFetchPermissionDescriptor(
       hostname = ''
     }
   }
-  return { ...base, hostname }
+  const requestSource = resolvePermissionRequestSource(
+    input.confirm.toolUseContext as PermissionRequestSourceContext,
+  )
+  return {
+    ...base,
+    hostname,
+    showAlwaysAllow: computeShowAlwaysAllow({
+      permissionResult: input.confirm.permissionResult,
+      tool: input.confirm.tool,
+      input: input.confirm.input,
+      requestSource,
+    }),
+    isAskCappedByOrg: computeIsAskCappedByOrg(input.confirm.tool),
+    requestSource,
+  }
+}
+
+/** densable xno Fwl — permission_enter_plan_mode (iK + xSl requestSource) */
+export function buildEnterPlanModePermissionDescriptor(
+  input: BuildInput,
+): PermissionDescriptorBase & {
+  requestSource: ReturnType<typeof resolvePermissionRequestSource>
+} {
+  const base = buildPermissionDescriptorBase(input)
+  return {
+    ...base,
+    requestSource: resolvePermissionRequestSource(
+      input.confirm.toolUseContext as PermissionRequestSourceContext,
+    ),
+  }
 }
 
 /** densable kum — permission_skill */
@@ -227,5 +283,35 @@ export function buildAskUserQuestionPermissionDescriptor(
     ...base,
     questions: Array.isArray(parsed.questions) ? parsed.questions : [],
     metadataSource: parsed.metadata?.source,
+  }
+}
+
+/**
+ * densable teu payload extras — plan / planFilePath / usage.
+ * SDK injects plan fields on confirm.input; DualInk getPlan /
+ * getPlanFilePath is the disk fallback. Do not invent storageV5.
+ */
+export function buildExitPlanModePermissionDescriptor(
+  input: BuildInput,
+): PermissionDescriptorBase & {
+  plan: string
+  planFilePath: string
+  usage?: unknown
+} {
+  const base = buildPermissionDescriptorBase(input)
+  const parsed = input.confirm.input as {
+    plan?: unknown
+    planFilePath?: unknown
+    usage?: unknown
+  }
+  const planFromInput =
+    typeof parsed.plan === 'string' ? parsed.plan : undefined
+  const pathFromInput =
+    typeof parsed.planFilePath === 'string' ? parsed.planFilePath : undefined
+  return {
+    ...base,
+    plan: planFromInput ?? getPlan() ?? '',
+    planFilePath: pathFromInput ?? getPlanFilePath(),
+    ...(parsed.usage !== undefined ? { usage: parsed.usage } : {}),
   }
 }
