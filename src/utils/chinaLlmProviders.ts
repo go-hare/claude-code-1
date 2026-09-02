@@ -69,6 +69,14 @@ export const CHINA_LLM_PROVIDERS: ProviderPreset[] = [
         contextWindow: '1M',
         tags: ['Fast'],
       },
+      {
+        id: 'deepseek-v4-flash-vision-exp',
+        label: 'DeepSeek V4 Flash Vision Exp',
+        inputPricePerMTok: 1,
+        outputPricePerMTok: 2,
+        contextWindow: '1M',
+        tags: ['Vision', 'Experimental'],
+      },
     ],
   },
   {
