@@ -3,6 +3,7 @@
 // By using execa, Windows automatically gets shell escaping + BAT / CMD handling
 
 import { type ExecaError, execa } from 'execa'
+import { tryProcessCwd } from './cachePaths.js'
 import { getCwd } from '../utils/cwd.js'
 import { logError } from './log.js'
 
@@ -119,7 +120,9 @@ export function execFileNoThrowWithCwd(
       maxBuffer,
       cancelSignal: abortSignal,
       timeout: finalTimeout,
-      cwd: finalCwd,
+      // densable 236 #4: omitted cwd still used process.cwd() inside execa
+      // and threw after a switched-into directory was removed.
+      cwd: finalCwd ?? tryProcessCwd(),
       env: finalEnv,
       ...(extendEnv === false ? { extendEnv: false } : {}),
       shell,

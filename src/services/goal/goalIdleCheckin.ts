@@ -8,11 +8,8 @@
  *         new deferral run → reset count; else inject + re-arm
  *   mTi — queue task-notification origin `{kind, source: goal-checkin}`
  *
- * tip invent (explicit, vs SEA):
- *   1. After idle inject with empty deferring ("no longer running"), clear
- *      deferral fields like turn_end — do NOT Bqn forever-nudge parked sessions.
- *   2. Arm generation gate: cancel/arm bumps gen so an in-flight Wsv after
- *      stopHooks Uqn/turn_end inject cannot double-inject.
+ * Empty deferring still injects + re-arms Bqn (gold Wsv). Cancel = clearTimeout
+ * only (no tip invent generation gate).
  */
 
 import { getMainLoopBusy, getMainThreadAgentId } from '../../bootstrap/state.js'
@@ -26,7 +23,6 @@ import { wrapInSystemReminder } from '../../utils/messages.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logEvent } from '../analytics/index.js'
 import {
-  clearGoalDeferralFields,
   escapeGoalCheckinXml,
   formatGoalCheckinBody,
   getGoalCheckinIntervalMs,
@@ -57,8 +53,6 @@ export type GoalIdleCheckinContext = {
 }
 
 let pendingGoalIdleCheckin: ReturnType<typeof setTimeout> | undefined
-/** tip invent — supersede in-flight Wsv when cancel/arm races turn_end. */
-let goalIdleArmGeneration = 0
 
 function clearPendingTimerOnly(): void {
   if (pendingGoalIdleCheckin !== undefined) {
@@ -68,7 +62,6 @@ function clearPendingTimerOnly(): void {
 }
 
 export function cancelPendingGoalIdleCheckin(): void {
-  goalIdleArmGeneration++
   clearPendingTimerOnly()
 }
 
@@ -85,11 +78,6 @@ export function getPendingGoalIdleCheckin():
   | ReturnType<typeof setTimeout>
   | undefined {
   return pendingGoalIdleCheckin
-}
-
-/** Test/diagnostic: current arm generation after cancel/arm bumps. */
-export function getGoalIdleArmGeneration(): number {
-  return goalIdleArmGeneration
 }
 
 /** densable Yht — queued idle check-in still waiting to drain. */
@@ -140,14 +128,10 @@ function defaultHasQueued(pred: (cmd: QueuedCommand) => boolean): boolean {
   return peek(pred) !== undefined
 }
 
-function scheduleFire(
-  ctx: GoalIdleCheckinContext,
-  delayMs: number,
-  armGeneration: number,
-): void {
+function scheduleFire(ctx: GoalIdleCheckinContext, delayMs: number): void {
   const timer = setTimeout(() => {
     pendingGoalIdleCheckin = undefined
-    fireGoalIdleCheckin(ctx, armGeneration)
+    fireGoalIdleCheckin(ctx)
   }, delayMs)
   timer.unref()
   pendingGoalIdleCheckin = timer
@@ -167,28 +151,15 @@ export function armGoalIdleCheckin(ctx: GoalIdleCheckinContext): void {
     deferredSince: ctx.goal.deferredSince,
     now: ctx.now,
   })
-  // Capture generation after cancel bump so this arm owns the next fire.
-  scheduleFire(ctx, delayMs, goalIdleArmGeneration)
+  scheduleFire(ctx, delayMs)
 }
 
 function retrySoon(ctx: GoalIdleCheckinContext): void {
-  // Busy/queued retry keeps current generation (same arm epoch).
-  scheduleFire(ctx, GOAL_CHECKIN_TIMER_MIN_MS, goalIdleArmGeneration)
+  scheduleFire(ctx, GOAL_CHECKIN_TIMER_MIN_MS)
 }
 
-/**
- * densable Wsv — idle timer fire.
- * @param armGeneration tip invent — if cancel/arm advanced past this, no-op.
- */
-export function fireGoalIdleCheckin(
-  ctx: GoalIdleCheckinContext,
-  armGeneration: number = goalIdleArmGeneration,
-): void {
-  // tip invent: stale fire after cancel/arm must not inject.
-  if (armGeneration !== goalIdleArmGeneration) {
-    return
-  }
-  // Clear timer only — do NOT bump generation (that would invalidate ourselves).
+/** densable Wsv — idle timer fire. */
+export function fireGoalIdleCheckin(ctx: GoalIdleCheckinContext): void {
   clearPendingTimerOnly()
   let armed = ctx.goal
   try {
@@ -201,19 +172,13 @@ export function fireGoalIdleCheckin(
     ) {
       return
     }
-    // Another cancel/arm raced after we entered fire — abort before inject.
-    if (armGeneration !== goalIdleArmGeneration) {
-      return
-    }
     const baseMs = (ctx.getIntervalMs ?? getGoalCheckinIntervalMs)()
     if (baseMs === 0) return
 
     const busy = ctx.isMainLoopBusy ?? getMainLoopBusy
     const hasQueued = ctx.hasQueued ?? defaultHasQueued
     if (busy() || hasQueued(isGoalCheckinQueuedCommand)) {
-      if (armGeneration === goalIdleArmGeneration) {
-        retrySoon(ctx)
-      }
+      retrySoon(ctx)
       return
     }
 
@@ -225,9 +190,7 @@ export function fireGoalIdleCheckin(
       deferring.length === 0 &&
       hasQueued(cmd => isMainThreadActiveTaskNotification(cmd))
     ) {
-      if (armGeneration === goalIdleArmGeneration) {
-        retrySoon(ctx)
-      }
+      retrySoon(ctx)
       return
     }
 
@@ -248,10 +211,6 @@ export function fireGoalIdleCheckin(
       return
     }
 
-    if (armGeneration !== goalIdleArmGeneration) {
-      return
-    }
-
     const deferredMs = now - run.deferredSince
     const checkinCount = run.checkinCount + 1
     const formatted = formatGoalCheckinBody(
@@ -259,31 +218,6 @@ export function fireGoalIdleCheckin(
       deferredMs,
       deferring,
     )
-
-    // tip invent: empty deferring → one "no longer running" inject, then clear
-    // like turn_end (SEA Wsv would re-arm forever; we stop parked nudges).
-    if (deferring.length === 0) {
-      const cleared = clearGoalDeferralFields({
-        ...current,
-        checkinCount,
-        lastDeferralPassAt: now,
-      })
-      ctx.setAppState(prev =>
-        prev.activeGoal !== current ? prev : { ...prev, activeGoal: cleared },
-      )
-      armed = cleared
-      ;(ctx.deliver ?? defaultDeliver)(formatted)
-      logEvent('tengu_goal_checkin_injected', {
-        deferredMs,
-        activeShells: 0,
-        activeAgents: 0,
-        checkinCount,
-      })
-      logForDebugging(
-        `[goal] check-in injected (idle_timer) after ${Math.round(deferredMs / 1000)}s deferred — cleared deferral (empty)`,
-      )
-      return
-    }
 
     const next: GoalCheckinActiveGoal = {
       ...current,
@@ -315,10 +249,7 @@ export function fireGoalIdleCheckin(
       { level: 'error' },
     )
     try {
-      if (
-        armed.deferredSince !== undefined &&
-        armGeneration === goalIdleArmGeneration
-      ) {
+      if (armed.deferredSince !== undefined) {
         armGoalIdleCheckin({
           ...ctx,
           goal: armed,

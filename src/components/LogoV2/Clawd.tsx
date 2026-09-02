@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { env } from '../../utils/env.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 
 export type ClawdPose =
   | 'default'
@@ -14,13 +15,11 @@ type Props = {
 
 // Standard-terminal pose fragments. Each row is split into segments so we can
 // vary only the parts that change (eyes, arms) while keeping the body/bg spans
-// stable. All poses end up 9 cols wide (densable tRp / KB).
+// stable. All poses end up 9 cols wide (densable 239 Bwg / KB).
 //
-// arms-up: the row-2 arm shapes (▝▜ / ▛▘) move to row 1 as their
-// bottom-heavy mirrors (▗▟ / ▙▖) — same silhouette, one row higher.
-//
-// look-* use top-quadrant eye chars (▙/▟) so both eyes change from the
-// default (▛/▜, bottom pupils) — otherwise only one eye would appear to move.
+// 236 #18 / 239 Bwg: iTerm (and every non-Apple TERM) uses this table — there
+// is no iTerm.app branch. Eyes/feet evenness is the glyph set, not font-size
+// math. r1 stays 8 cols (r1R empty except arms-up ▄); r2/feet stay 9.
 type Segments = {
   /** row 1 left (no bg): optional raised arm + side */
   r1L: string;
@@ -45,13 +44,13 @@ type Segments = {
  */
 export const CLAWD_WIDTH = 9;
 
-// densable tRp — do NOT pad r1R; densable r1 is 8 cols, r2/r3 are 9.
+// densable 239 Bwg — do NOT pad default/look r1R; r1 is 8 cols, r2/feet are 9.
 // densable KB root: flexDirection column + flexShrink:0 only (no width).
 const POSES: Record<ClawdPose, Segments> = {
-  default: { r1L: ' ▐', r1E: '▛███▜', r1R: '▌', r2L: '▝▜', r2R: '▛▘' },
-  'look-left': { r1L: ' ▐', r1E: '▟███▟', r1R: '▌', r2L: '▝▜', r2R: '▛▘' },
-  'look-right': { r1L: ' ▐', r1E: '▙███▙', r1R: '▌', r2L: '▝▜', r2R: '▛▘' },
-  'arms-up': { r1L: '▗▟', r1E: '▛███▜', r1R: '▙▖', r2L: ' ▜', r2R: '▛ ' },
+  default: { r1L: ' ▐', r1E: '▛███▛█', r1R: '', r2L: '▝▜', r2R: '█▀' },
+  'look-left': { r1L: ' ▐', r1E: '▟███▟█', r1R: '', r2L: '▝▜', r2R: '█▀' },
+  'look-right': { r1L: ' ▐', r1E: '█▟███▟', r1R: '', r2L: '▝▜', r2R: '█▀' },
+  'arms-up': { r1L: '▗▟', r1E: '▛███▛█', r1R: '▄', r2L: ' ▜', r2R: '█▘' },
 };
 
 // Apple Terminal uses a bg-fill trick (see below), so only eye poses make
@@ -72,6 +71,10 @@ const APPLE_EYES: Record<ClawdPose, string> = {
  * width={CLAWD_WIDTH}: fixed width clips half-block rows into a solid bar.
  */
 export function Clawd({ pose = 'default' }: Props = {}): React.ReactNode {
+  // densable `if(fl()) return null` — hide half-block art from screen readers.
+  if (isScreenReaderModeEnabled()) {
+    return null;
+  }
   if (env.terminal === 'Apple_Terminal') {
     return <AppleTerminalClawd pose={pose} />;
   }
@@ -93,7 +96,7 @@ export function Clawd({ pose = 'default' }: Props = {}): React.ReactNode {
         <Text color="clawd_body">{p.r2R}</Text>
       </Text>
       <Text color="clawd_body">
-        {'  '}▘▘ ▝▝{'  '}
+        {'  '}▝▝ ▝▝{'  '}
       </Text>
     </Box>
   );

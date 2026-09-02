@@ -20,7 +20,7 @@ import {
   SHOW_CURSOR,
   CLEAR_ITERM2_PROGRESS,
   CLEAR_TAB_STATUS,
-  CLEAR_TERMINAL_TITLE,
+  clearTerminalTitle,
   instances,
   NATIVE_HISTORY_BOTTOM_CHROME,
   RESET_SCROLL_REGION,
@@ -151,11 +151,10 @@ function cleanupTerminalModes(): void {
       // residual helpers optional
     }
     if (!terminalTitleDisabled) {
-      if (process.platform === 'win32') {
-        process.title = ''
-      } else {
-        writeSync(1, CLEAR_TERMINAL_TITLE)
-      }
+      // densable: win32 process.title=''; elsewhere CLEAR_TERMINAL_TITLE (OSC 0).
+      clearTerminalTitle(data => {
+        writeSync(1, data)
+      })
     }
   } catch {
     // Terminal may already be gone (e.g., SIGHUP after terminal close).
@@ -539,6 +538,21 @@ export async function gracefulShutdown(
     return
   }
   shutdownInProgress = true
+
+  // densable nst/WFl: Q6e(..., "process_exit") before oc(0, "prompt_input_exit").
+  // Wire cancel here so every prompt_input_exit path clears quota auto-resume
+  // (exitPromptShutdown, ExitFlow, /exit, BackgroundAndExit after handoff).
+  // Idempotent if caller already cancelled with background_handoff.
+  if (reason === 'prompt_input_exit') {
+    try {
+      const { cancelQuotaAutoResume } = await import(
+        '../services/quotaAutoResume.js'
+      )
+      cancelQuotaAutoResume('process_exit')
+    } catch {
+      // best-effort — never block shutdown
+    }
+  }
 
   // Set the exit code that will be used when process naturally exits
   process.exitCode = exitCode

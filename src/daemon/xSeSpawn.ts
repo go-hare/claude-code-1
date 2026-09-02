@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto'
 import { mkdirSync } from 'fs'
 import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
+import { tryProcessCwd } from '../utils/cachePaths.js'
 import { getGlobalConfig } from '../utils/config.js'
 import { errorMessage } from '../utils/errors.js'
 import {
@@ -390,7 +391,7 @@ function buildDispatchRequest(opts: XSeOpts): {
     name: derivedName,
     agent,
     routine: opts.routine,
-    cwd: opts.cwd || process.cwd(),
+    cwd: opts.cwd || tryProcessCwd(),
     // densable X.respawnFlags = w (n2o)
     respawnFlags: respawnFlagsField,
     source,

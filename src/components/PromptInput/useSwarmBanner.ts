@@ -29,20 +29,73 @@ import type { Theme } from '../../utils/theme.js'
 type SwarmBannerInfo = {
   text: string
   bgColor: keyof Theme
+  /** densable zRr `gradient:c` — raw prideGradient when `tZg` is undefined. */
+  gradient?: string[]
 } | null
+
+type UseSwarmBannerOptions = {
+  /** densable FSh/kPE: hide standalone /color chip when Tasks V2 list is visible. */
+  hideSessionTitle?: boolean
+}
+
+/**
+ * densable kPE + FSh: `bu(Crs(), e => e !== void 0 && e.length > 0) ?? false`.
+ * Hidden/disabled snapshot is `undefined` → do not hide the title chip.
+ */
+export function hideSessionTitleFromTasks(
+  tasks: readonly unknown[] | undefined,
+): boolean {
+  return tasks !== undefined && tasks.length > 0
+}
+
+/**
+ * densable $Ir fill: `max(0, columns - chip - trailing)`.
+ * Chip is padded text (`stringWidth+2`); trailing is one `─` when a chip exists.
+ */
+export function swarmBannerFillColumns(
+  columns: number,
+  textWidth: number,
+): number {
+  const chip = textWidth > 0 ? textWidth + 2 : 0
+  const trailing = chip > 0 ? 1 : 0
+  return Math.max(0, columns - chip - trailing)
+}
+
+/**
+ * densable Biy — split fill dashes across gradient colors.
+ * `min(colors.length, count)` buckets; remainder goes to the first colors.
+ */
+export function swarmBannerGradientSegments(
+  count: number,
+  colors: readonly string[],
+): Array<{ color: string; dashes: number }> {
+  if (count <= 0 || colors.length === 0) return []
+  const used = Math.min(colors.length, count)
+  const base = Math.floor(count / used)
+  let extra = count - base * used
+  return colors.slice(0, used).map(color => ({
+    color,
+    dashes: base + (extra-- > 0 ? 1 : 0),
+  }))
+}
 
 /**
  * Hook that returns banner information for swarm, standalone agent, or --agent CLI context.
  * densable zRr: teammates Object.keys.length > 1 (no teamName gate); external attach = tmux only.
  * Fork: Windows Terminal copy only when detection cache already says windows-terminal
- * (no getResolvedTeammateMode widen). prideGradient / hideSessionTitle not ported (0 tip hits).
+ * (no getResolvedTeammateMode widen). prideGradient: 239 `tZg` is undefined so
+ * zRr uses the raw list (`l&&tZg?tZg(l,i):l` → `l`). $Ir paints it as dash colors.
+ * hideSessionTitle is FSh/kPE (Tasks V2 visible) — not a footer titleChip invent.
  * - Leader (in tmux / in-process) viewing a teammate: `@name` with their color
  * - Teammate process: `@name` with assigned color (in-process teammates are headless)
  * - Viewing a background agent (CoordinatorTaskPanel): agent name with its color
  * - Standalone agent: name and/or /color background (no @team)
  * - --agent CLI flag: agent type with cyan/prompt border
  */
-export function useSwarmBanner(): SwarmBannerInfo {
+export function useSwarmBanner(
+  options: UseSwarmBannerOptions = {},
+): SwarmBannerInfo {
+  const hideSessionTitle = options.hideSessionTitle ?? false
   const teamContext = useAppState(s => s.teamContext)
   const standaloneAgentContext = useAppState(s => s.standaloneAgentContext)
   const agent = useAppState(s => s.agent)
@@ -129,21 +182,27 @@ export function useSwarmBanner(): SwarmBannerInfo {
     }
   }
 
-  // Standalone agent (/rename, /color): name and/or custom color, no @team.
+  // densable zRr: `f` (agent def) before standalone; KUt = userOverride ?? agentDef.color.
+  // Gate: `!hideSessionTitle && (name || color || gradient)`.
+  const agentDef = agent
+    ? state.agentDefinitions.activeAgents.find(a => a.agentType === agent)
+    : undefined
   const standaloneName = getStandaloneAgentName(state)
   const standaloneColor = standaloneAgentContext?.color
-  if (standaloneName || standaloneColor) {
+  const prideGradient = standaloneAgentContext?.prideGradient
+  if (
+    !hideSessionTitle &&
+    (standaloneName || standaloneColor || prideGradient?.length)
+  ) {
     return {
-      text: standaloneName ?? '',
-      bgColor: toThemeColor(standaloneColor),
+      text: standaloneName || agent || '',
+      bgColor: toThemeColor(standaloneColor ?? agentDef?.color),
+      gradient: prideGradient,
     }
   }
 
   // --agent CLI flag (when not handled above).
   if (agent) {
-    const agentDef = state.agentDefinitions.activeAgents.find(
-      a => a.agentType === agent,
-    )
     return {
       text: agent,
       bgColor: toThemeColor(agentDef?.color, 'promptBorder'),

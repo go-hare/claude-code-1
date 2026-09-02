@@ -36,6 +36,18 @@ export function getCachePathCwd(): string {
   }
 }
 
+/**
+ * densable IHn sibling for spawn / clipboard — live `process.cwd()`;
+ * `$n()` (`getOriginalCwd`) when the switched-into directory is gone.
+ */
+export function tryProcessCwd(): string {
+  try {
+    return process.cwd()
+  } catch {
+    return getOriginalCwd()
+  }
+}
+
 export const CACHE_PATHS = {
   baseLogs: () => join(paths.cache, getProjectDir(getCachePathCwd())),
   errors: () => join(paths.cache, getProjectDir(getCachePathCwd()), 'errors'),

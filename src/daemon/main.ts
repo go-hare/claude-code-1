@@ -1,5 +1,6 @@
 import { type ChildProcess } from 'child_process'
 import { resolve } from 'path'
+import { tryProcessCwd } from '../utils/cachePaths.js'
 import { buildCliLaunch, spawnCli } from '../utils/cliLaunch.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1049,7 +1050,7 @@ async function runBgManagerStandalone(opts?: {
   // Legacy state file (status / stop helpers)
   writeDaemonState({
     pid: process.pid,
-    cwd: process.cwd(),
+    cwd: tryProcessCwd(),
     startedAt: new Date(startedAt).toISOString(),
     workerKinds: ['bg-manager'],
     lastStatus: 'running',

@@ -55,6 +55,35 @@ type Props = {
   isNarrow?: boolean;
 };
 
+function NotificationBody({ notification }: { notification: Notification }): ReactNode {
+  if ('segments' in notification && notification.segments) {
+    return (
+      <Text wrap="truncate" key={notification.key}>
+        {notification.segments.map((segment, i) => (
+          <Text key={i} dimColor={segment.dim} color={segment.color}>
+            {segment.text}
+          </Text>
+        ))}
+      </Text>
+    );
+  }
+  if ('jsx' in notification) {
+    return (
+      <Text wrap="truncate" key={notification.key}>
+        {notification.jsx}
+      </Text>
+    );
+  }
+  if ('text' in notification) {
+    return (
+      <Text color={notification.color} dimColor={!notification.color} wrap="truncate">
+        {notification.text}
+      </Text>
+    );
+  }
+  return null;
+}
+
 export function Notifications({
   apiKeyStatus,
   autoUpdaterResult,
@@ -67,7 +96,6 @@ export function Notifications({
   ideSelection,
   mcpClients,
   isInputWrapped = false,
-  isNarrow = false,
 }: Props): ReactNode {
   const tokenUsage = useMemo(() => {
     const messagesForTokenCount = getMessagesAfterCompactBoundary(messages);
@@ -208,7 +236,8 @@ export function Notifications({
 
   return (
     <SentryErrorBoundary>
-      <Box flexDirection="column" alignItems={isNarrow ? 'flex-start' : 'flex-end'} flexShrink={0} overflowX="hidden">
+      {/* densable Notifications column: alignItems flex-end, flexShrink 1, overflowX hidden. isNarrow is 0-hit in 239 SEA. */}
+      <Box flexDirection="column" alignItems="flex-end" flexShrink={1} overflowX="hidden">
         <NotificationContent
           ideSelection={ideSelection}
           mcpClients={mcpClients}
@@ -252,6 +281,7 @@ function NotificationContent({
   notifications: {
     current: Notification | null;
     queue: Notification[];
+    pinned?: Notification[];
   };
   isInOverageMode: boolean;
   isTeamOrEnterprise: boolean;
@@ -298,16 +328,14 @@ function NotificationContent({
   return (
     <>
       <IdeStatusIndicator ideSelection={ideSelection} mcpClients={mcpClients} />
-      {notifications.current &&
-        ('jsx' in notifications.current ? (
-          <Text wrap="truncate" key={notifications.current.key}>
-            {notifications.current.jsx}
-          </Text>
-        ) : (
-          <Text color={notifications.current.color} dimColor={!notifications.current.color} wrap="truncate">
-            {notifications.current.text}
-          </Text>
-        ))}
+      {notifications.current && <NotificationBody notification={notifications.current} />}
+      {(notifications.pinned?.length ?? 0) > 0 && (
+        <Box flexDirection="column" paddingX={2}>
+          {notifications.pinned!.map(notice => (
+            <NotificationBody key={notice.key} notification={notice} />
+          ))}
+        </Box>
+      )}
       {isInOverageMode && !isTeamOrEnterprise && (
         <Box>
           <Text dimColor wrap="truncate">

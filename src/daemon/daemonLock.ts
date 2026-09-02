@@ -7,6 +7,7 @@
 
 import { lstat, readFile, writeFile, unlink, rename, rm } from 'fs/promises'
 import { join } from 'path'
+import { tryProcessCwd } from '../utils/cachePaths.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { errorMessage, isENOENT } from '../utils/errors.js'
 
@@ -642,7 +643,7 @@ export function buildSpawnedByPayload(input?: {
 }): string {
   return JSON.stringify({
     label: input?.label ?? daemonSpawnedByLabel(),
-    cwd: input?.cwd ?? process.cwd(),
+    cwd: input?.cwd ?? tryProcessCwd(),
     pid: input?.pid ?? process.pid,
   })
 }

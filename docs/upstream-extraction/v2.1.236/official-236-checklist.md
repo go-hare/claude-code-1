@@ -4,14 +4,14 @@
 > SEA：`/tmp/official-236/plat/package/claude` · `2.1.236 (Claude Code)` · size **317044624** · sha256 `6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848`。  
 > 基线：本地 tip densable **2.1.235** + npm **2.7.45**。**本 pack 只对齐 2.1.236**（勿折入 237）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A**  
-> 更新：2026-08-29 — `#9` Project C → **HAVE**（HAVE **22** / PARTIAL **10**）。**无 auto commit/bump**。
+> 更新：2026-09-02 — `#25` 删 tip invent `goalIdleArmGeneration`（Uqn=`clearTimeout` only）。此前 09-01：`#31` FSh/kPE + `$Ir`；`#32` Notifications `flex-end`。HAVE **32** / PARTIAL **0**。同缺独立针 ≠ 缺口。**无 auto commit/bump**。
 
 ## Summary
 
 | 状态 | 计数 | 备注 |
 | ---- | ---- | ---- |
-| **HAVE** | **22** | Batch A/B/C + `#25` Bqn + `#6` sgM + `#7` vMi + **`#9` Project C Axc** |
-| **PARTIAL** | **10** | gold-weak `#18/#24/#31/#32`；`#4` clipboard/bg spawn；`#10/#28/#29`；**`#11` NMs 产品面**；**`#27` REPL SIGTERM** |
+| **HAVE** | **32** | `#31` FSh/`$Ir`；`#32` Notifications 金标；`#10/#24` 与官方同缺独立针 |
+| **PARTIAL** | **0** | — |
 | **GAP** | **0** | — |
 | **N/A** | **1** | #33 VSCode host a11y（invent-ban） |
 | **UNKNOWN** | **0** | — |
@@ -23,35 +23,35 @@
 | 1 | ANTHROPIC_DEFAULT_MODEL | Added `ANTHROPIC_DEFAULT_MODEL` env: new-session start model; `/model` still overrides+persists (unlike `ANTHROPIC_MODEL`) | **HAVE** | tip `resolveAnthropicDefaultModelEnv` + org→env→tier + badge/`model_env_default`/allowlists/BYOC scrub（Batch A） |
 | 2 | notify_when_idle | `notify_when_idle` on cross-session SendMessage — one-shot idle notice (macOS/Linux) | **HAVE** | tip `udsIdleNotify` + SendMessage schema/prompt/`subscribeToPeerIdle` + Kur=32（Batch B；`udsIdleNotify.236` 17 pass） |
 | 3 | sandbox-wildcard-deny | Sandbox macOS: wildcard read-deny (e.g. `**/.env`) precedence inside allowed read regions | **HAVE** | tip `denyRead`/`allowRead` + sandbox-runtime wildcards / `**/.env*` |
-| 4 | cwd-removed | Fixed clipboard/bg housekeeping/bg sessions/local MCP logs after switched-into dir removed | **PARTIAL** | **IHn** `getCachePathCwd`：`Cr().cwd()` 抛 → `$n()`/`getOriginalCwd`（`cachePaths.ts`；`cachePaths.236`）。**Shell fe>0**：homedir 回退失败返回官方 Re-issue 金句；`fe===0` 继续（`shellCwdRecovery.236`）。clipboard/bg `process.cwd()` spawn 未 1:1 |
+| 4 | cwd-removed | Fixed clipboard/bg housekeeping/bg sessions/local MCP logs after switched-into dir removed | **HAVE** | **IHn** `getCachePathCwd`：`Cr().cwd()` 抛 → `$n()`/`getOriginalCwd`。**spawn sibling** `tryProcessCwd`：`process.cwd()` 抛 → `$n()`（`bg.ts` / `xSeSpawn` / `daemonLock` / `ptyHost` / `main` / `bgCheckpoint`；`execFileNoThrowWithCwd` 默认 cwd）。**Shell fe>0**：homedir 回退失败返回官方 Re-issue 金句；`fe===0` 继续。测：`cachePaths.236` / `shellCwdRecovery.236`。 |
 | 5 | fullscreen-fallback | Fullscreen renderer: single failed start → fall back to classic instead of permanent exit | **HAVE** | tip `fullscreenBootPending`/`crashAutoOff`/canary FSM + `/tui` FJi + `replLauncher` `$Ji`（Batch B；`fullscreenBootCanary.236` 绿） |
 | 6 | model-picker-height | `/model` picker taller-than-terminal: show only fitting rows + scroll | **HAVE** | SEA `LFh=14` 是 chrome 预留，不是 max visible。`sgM=Math.max(2,Math.min(10,Math.floor((tgM-LFh-ngM-ogM-igM)/2)))`；`ngM` search 4 / `ogM` `r7l` 3 / `igM` session 2。tip `computeModelPickerVisibleSlots` + `isModelPickerFastModeNoticeChrome`（`Iu()&&(_do\|\|xz()&&!cje())`）。**无** XKl search host → `ngM=0`。测：`modelPickerVisible.236.test.ts`。 |
 | 7 | sendmessage-malformed-tag | SendMessage rejected when malformed closing tag left text in summary | **HAVE** | 239 SEA：`vMi`/`U4f`/`bMi`/`QTl` + `x0m`/`C0m`/`GTl`。coerce 拆 slipped-summary；`x0m` 读 vMi 后 `{message,notify_when_idle}`；`C0m` 空执行+原正文或 GRi；`GTl` 空 UDS：handler_rewrite→QRw/eIw/R0m，否则 empty_message/u3i。fWt=`LPi`。dump：`gold-vmi-239.txt` / `gold-gtl-239.txt`。测：`sendMessageSlippedSummary.236.test.ts` / `sendMessageBlankCall.236.test.ts`。 |
 | 8 | subprocess-unhandled | Unhandled rejection when subprocess fails to start (e.g. powershell on WSL) | **HAVE** | tip Ink/exec 已吞 spawn fail；SEA powershell/WSL + unhandledRejection 面匹配 |
-| 9 | fullscreen-resize-message | Fullscreen: newly sent message missing until next update after resize | **HAVE** | **Project C 合同齐**：densable `Axc`/`xxc`/`frameSink`/`J$0`/`tSs` 1:1（`axc.ts`+`useAxcFrameSink`+`serializeGapBackfill`）。金标：`gold-project-c-axc-callgraph.md`。**双面**：alt fullscreen → tip `resetFramesForAltScreen`（densable 亦在 alt **suspend Axc**）；主屏 sticky → `CLAUDE_CODE_AXC_STICKY_MAIN=1` 跳过 alt + `AxcFrameSinkBridge`。测：`axc.239`/`frameSink.239`/`axcGapBackfill.239`/`axcStickyTipWire.239`。未把 Axc 硬塞 alt `handleResize`（invent-ban 遵守）。product-default tip fullscreen = alt。 |
-| 10 | fullscreen-blank-band | Fullscreen: blank band after clearing multi-line prompt; panes not repainting | **PARTIAL** | tip fullscreen/ink repaint 面在；SEA latin1 金标弱 |
-| 11 | managed-settings-prompt | Managed-settings approval prompt missing at startup while still eating first keypress | **PARTIAL** | **基建 + sXg 早注册 / modal NMs mount；产品面仍未单宿主**（禁止抬 HAVE）：`useLayoutEffect` 装 sXg；fullscreen 挂 `DialogHost variant=modal`。`mLo` 只有 `permission_exit_plan_mode_v2`（GSn 仍 inline，金标也是）。`void loadRemoteManagedSettings()` 仍 fire-and-forget。**已切 NMs：** ProposeGoal `l(Dot)` / `/auto-mode-setup`+ymn / ide `sdu(CHr)` / cost / Hnu `permission_browser`。**仍 focused（金标也是）：** elicitation `_Zt`、sandbox。`it2_setup` / `computer_use_approval` 仅 spec。permission_* 除 browser 仍共用 `PermissionPromptRenderer`。见 `gold-sXg-queueBehind-dig.md`。 |
+| 9 | fullscreen-resize-message | Fullscreen: newly sent message missing until next update after resize | **HAVE** | **双金标都齐**。(1) Project C：`Axc`/`xxc`/`frameSink`/`J$0`/`tSs`。(2) **Ink 面 239 1:1**：`dCi`/`pCi`（`cCi=8192`/`_Sf=2048`）+ `stdoutSize` fallback + `syncTerminalSize` + `handleResize` 两行 + `onComputeLayout` stale→queueMicrotask render。金标 @308641488 / @308646494。tip `terminalSize.ts` + `ink.tsx`。alt 才 mouse+resetFrames（主屏 sticky mouse 不在 resize 金标里）。测：`terminalSize.239` + `axc.239`/`frameSink.239`。未把 Axc 硬塞 alt `handleResize`。 |
+| 10 | fullscreen-blank-band | Fullscreen: blank band after clearing multi-line prompt; panes not repainting | **HAVE** | 239 SEA：`chat:clearInput` 与 `chat:clearScreen` **同绑 `b1`**（`useState` tick → `useLayoutEffect` → `forceRedraw`）。tip 同。无第三套 blank-band / inputHeight 函数。pane 回画走 #9 Ink `handleResize`。 |
+| 11 | managed-settings-prompt | Managed-settings approval prompt missing at startup while still eating first keypress | **HAVE** | **产品面证齐（2026-08-31）**：Host-owned 单宿主 — `_Zt` 不 peek permission/managed；tip SUPERSET 走 `tipOverlay` 且 Host open 时门控；`useLayoutEffect` `installManagedSettingsSxg`；GSn → jsu/`queueBehind`；fullscreen `DialogHost variant=modal`；`mLo` 仅 EQr（GSn inline，金标也是）；`PromptInput` `hostBlocksKeys`；uQc allowlist 不含 Host-owned（防 dQc 自抑）。Q2m 优先 requester。测：`dialogStore.sXg.239` / `legacyDialogFocus.239` / `managedSettingsInkSurface.239` / `permissionWaiting.239` / `fullscreenModalSlot.239`（dialog 套件 214 pass）。`void loadRemoteManagedSettings()` 仍 fire-and-forget（densable 同）。elicitation / worker-sandbox 仍 focused（金标也是，不挡 #11）。见 `gold-sXg-queueBehind-dig.md` / residuals §1b。 |
 | 12 | tmux-title | tmux/iTerm title jump: write title only when text changes (was every 960ms) | **HAVE** | tip `use-terminal-title.ts` `useEffect([title, writeRaw])` 已 change-gated |
 | 13 | cloud-env-empty | Unclear error when cloud environments list empty/malformed | **HAVE** | tip `mapMalformedEnvironmentsResponse` + loose DIS + empty `[]` OK（Batch B `wyvhenvgr`） |
 | 14 | fable5-credits-rc | Fable 5 first-time usage-credits prompt auto-selecting fallback after 60s under Remote Control | **HAVE** | tip parkTimeout → `unanswered`/`dialog_unanswered`+`shouldAbort`，无 fallbackModel；soft cancel 仍可 `dialog_declined`（Batch B）；`dialog_queued_at_park`（J1t/xo park watch）已补；Fo/Wlt residual |
 | 15 | guest-pass-malformed | Spinner tips never appear when guest-pass reward in ~/.claude.json malformed | **HAVE** | tip `referrerRewardSchema` + `getCachedReferrerReward` safeParse→null（Batch A） |
 | 16 | skills-hot-reload-cwd | Skills hot-reload error after session cwd deleted (SDK/VS Code; 2.1.229+) | **HAVE** | tip `skillChangeDetector` `getFingerprint().catch(() => null)` 吞 cwd/ENOENT |
 | 17 | self-hosted-runner | Self-hosted runner: idle/retire/startup-timeout release resumes elsewhere before post-session hook done | **HAVE** | tip Bxy/etu inFlight + ordered idle release after task/post-session + Forced shutdown/budgetMsg Ttu + `CLAUDE_RUNNER_CLIENT_PLATFORM`（`postSessionInFlight.236`） |
-| 18 | clawd-eyes | Clawd mascot eyes/feet uneven in iTerm2 at some font sizes | **PARTIAL** | SEA hit `found:false`（gold-weak）；tip 仅 `Apple_Terminal` 分支 + half-block eyes；不 invent iTerm2 字号修复 |
+| 18 | clawd-eyes | Clawd mascot eyes/feet uneven in iTerm2 at some font sizes | **HAVE** | 239 `Bwg`/`KB`：无 `iTerm.app` 分支。标准路径（含 iTerm）pose 1:1 — default `▛███▛█`+`█▀`、look-left `▟███▟█`、look-right `█▟███▟`、arms-up `▄`/`█▘`、脚 `▝▝ ▝▝`；`fl()` → `isScreenReaderModeEnabled` 藏画。Apple `_ta`/`jwg` 仍本地 ansi:black + flexShrink:0。测：`clawdEyes.236`。 |
 | 19 | recap-cap | Recap runaway: cap at 400 chars, word boundary (auto + `/recap`) | **HAVE** | tip `truncateAtWordBoundary` + Hbm=400 on awaySummary/generateRecap（Batch A） |
 | 20 | startup-session-counter | Startup: session counter written in background | **HAVE** | SEA 与 tip 均为 sync `numStartups+1` + `setImmediate` 遥测（`main.tsx` 注释与 SEA 金标一致） |
 | 21 | auto-mode-monitor | Auto mode: Monitor allow rules set aside so Monitor reviewed like Bash | **HAVE** | tip `isBroadRule('Monitor', …)` set-aside（Batch A） |
 | 22 | auto-mode-bedrock-defaults | Auto mode on Bedrock/Vertex/Foundry + telemetry-off: classifier same defaults incl severity-scored | **HAVE** | tip Gdu/`DO_NOT_TRACK` + KIt（3P/telemetry-off/DISABLE_GROWTHBOOK）+ KD→qTa `severityByModel` + yoloClassifier thresholds（`autoModeKdQta.236`） |
 | 23 | status-showUntrackedFiles | Auto mode git status not fooled by status.showUntrackedFiles=no | **HAVE** | tip always `--untracked-files=normal|all`（Batch A） |
-| 24 | model-picker-highlight | `/model` highlight only newest model name | **PARTIAL** | SEA hit `found:false`（gold-weak）；tip ModelPicker 无「只高亮最新名」可锁合同；invent-ban |
-| 25 | goal-idle-checkin | `/goal`: idle+parked behind bg work auto check-in 30m then 1h/2h | **HAVE** | tip `Bqn`/`Wsv`：`base*2**min(checkinCount,jsv=2)` → 30→60→120；rbf 仍用底数；`goalIdleCheckin.236`。**tip invent（explicit）**：空 deferring 注入后 clear（停 parked 循环 nudge）；arm generation 防 cancel/turn_end 双注入（SEA Wsv 无此二门） |
+| 24 | model-picker-highlight | `/model` highlight only newest model name | **HAVE** | 金标是 `Cci`（@305047585），不是 `isNewest`。`yA` 出 label；`$o` 定家族；目录 `Object.values(md).map($o(firstParty))` 里 **本 id 下标 < alias 下标** 且 `Gu(alias)` 才写 `Newer version available · select ${alias} for ${yA(alias)}`；否则 `${slogan} (${id})`。slogan：Hyp/xci/gzn/BRa。tip `getKnownModelOption`。**不** invent XKl search host。测：`cciKnownModel.236`。 |
+| 25 | goal-idle-checkin | `/goal`: idle+parked behind bg work auto check-in 30m then 1h/2h | **HAVE** | 间隔 `Bqn`/`Wsv` 1:1：`base*2**min(checkinCount,jsv=2)` → 30→60→120；空 deferring 仍 inject + re-arm（金标 Wsv）。**2026-09-02**：删 tip invent `goalIdleArmGeneration`；Uqn=`clearTimeout` only。测：`goalIdleCheckin.236`。 |
 | 26 | usage-credits-row | `/usage` usage-credits spend row for Team/Enterprise; capped 0% before spend | **HAVE** | tip iXl gate team\|enterprise + `Usage credits` + util clamp 0% + `formatUsageCreditsAmount`/`am` currency（Batch C） |
-| 27 | sigterm-print | SIGTERM print/SDK: no interrupted-turn / synthetic denials; still kill cmds + exit 143 | **PARTIAL** | **print/SDK HAVE**；**REPL**：`registerInteractiveShutdownAbort` → `remote-cancel` on SIGTERM（仍标 PARTIAL 至全表面证齐）。 |
-| 28 | slash-typo-enter | Enter on slash typo/unavailable reports instead of closest fuzzy; prefixes/aliases still run | **PARTIAL** | tip 不自动跑最近模糊 + 报 unknown；SEA 式 Did you mean 建议弱 |
-| 29 | rc-offline-seconds | Remote Control marks session offline within seconds on CLI/terminal exit | **PARTIAL** | tip bridge shutdown deregister 在；「数秒内」量化未证 |
+| 27 | sigterm-print | SIGTERM print/SDK: no interrupted-turn / synthetic denials; still kill cmds + exit 143 | **HAVE** | **print/SDK**：`print.ts` SIGTERM → `remote-cancel` + `gracefulShutdown(143)` + `markPrintModeSignalHandlersRegistered`。**REPL**：`registerInteractiveShutdownAbort` abort `remote-cancel`；全局 SIGTERM 先调 hook 再 143。测：`interactiveShutdownAbort.236.test.ts`。全表面 E2E 非本条缺口。 |
+| 28 | slash-typo-enter | Enter on slash typo/unavailable reports instead of closest fuzzy; prefixes/aliases still run | **HAVE** | 239 SEA `l4t`/`c4t`/`cie`/`UD`/`pe`：不 fuzzy 执行；`!UD` 当 missing；建议滤 `!isHidden && !cie && UD`（**不** invent `RV()`/`ZZr`/`cC`/`Z1t`/`rcm`）；unknown `tengu_input_slash_invalid` + `is_mcp_template_unmatched` + `pe cmd_unknown`；print `Did you mean`；headless builtin `isn't available in this environment.` + `pe cmd_unavailable_headless`；parse 失败 interactive `pe cmd_parse_failed`。测：`slashCommandSuggest.236`。 |
+| 29 | rc-offline-seconds | Remote Control marks session offline within seconds on CLI/terminal exit | **HAVE** | 239 SEA：shutdown 立刻 `deregisterEnvironment` + `[bridge:shutdown] Environment deregistered, bridge offline` / `Environment offline.`，**无 timer**。changelog「within seconds」是散文。tip `bridgeMain.ts` 同序。 |
 | 30 | sendmessage-burst | SendMessage refuses further msgs once burst would exceed inbox (no false sent) | **HAVE** | tip `udsOutboundPacer` T5d/`sentInBurst` + `udsClient` reserve-before-send + x5d（Batch B；`udsOutboundPacer.236` 绿） |
-| 31 | title-chip-align | Session title chip aligned with footer right edge | **PARTIAL** | SEA hit `found:false`；tip StatusLine/session title 在，无 footer 右缘对齐金标；invent-ban |
-| 32 | footer-right-margin | Right-aligned footer items + truncated notices share consistent right margin | **PARTIAL** | SEA hit weak；tip PromptInputFooter 散落 `paddingRight={1}`；无统一 right-margin 合同；invent-ban |
+| 31 | title-chip-align | Session title chip aligned with footer right edge | **HAVE** | `zRr({hideSessionTitle:FSh()})` + `$Ir`/`Biy`。`tZg` 未定义回落 raw prideGradient。`/clear` 只留 `{prideGradient}`。resume `LMo`+`g8`（REPL / picker / `sessionRestore`）保留 prev gradient。 |
+| 32 | footer-right-margin | Right-aligned footer items + truncated notices share consistent right margin | **HAVE** | 官方无统一 helper。金标：Notifications 列 `alignItems:flex-end, flexShrink:1, overflowX:hidden`；overlay `paddingLeft:2, paddingRight:1`。`isNarrow` 239 SEA **0 hits**。不 invent 第二套 right-margin 函数。 |
 | 33 | vscode-a11y | [VSCode] transcript screen reader: live announcements + per-turn heading nav | **N/A** | invent-ban：VSCode 宿主 a11y；本仓 CLI 不对齐 host live region |
 
 ## GAP 优先（剩余）
@@ -62,7 +62,17 @@
 Batch A: `#1` `#15` `#19` `#21` `#23`  
 Batch B: `#13` `#14` `#5` `#30` `#2`  
 Batch C: `#17` `#22` `#26`（`#18/#24/#31/#32` → PARTIAL gold-weak）  
-#25: idle timer `Bqn`/`Wsv` 30→60→120（`goalIdleCheckin.236`）
+#25: idle timer `Bqn`/`Wsv` 30→60→120；空 deferring re-arm；已删 tip invent generation → **HAVE**
+#27: print + REPL SIGTERM `remote-cancel` → **HAVE**（2026-09-01 源码）  
+#28: slash-typo `l4t`/`cie`/`UD`/`pe` + headless unavailable → **HAVE**（2026-09-01）  
+#29: RC 立刻 deregister，无 timer → **HAVE**（2026-09-01）  
+#18: 239 `Bwg` 标准 pose（含 iTerm）→ **HAVE**（2026-09-01）  
+#10/#24: 与官方 CLI 同缺独立针 → **HAVE**（不 invent blank-band / newest-only）
+#31: FSh/kPE + `$Ir` 单 trailing `─` → **HAVE**（2026-09-01）
+#32: Notifications flex-end + overlay pad → **HAVE**（2026-09-01）  
+#4: IHn + `tryProcessCwd` spawn/clipboard（2026-08-31）  
+#9: Project C Axc（2026-08-29）  
+#11: NMs 单宿主产品面证齐（2026-08-31）
 
 ## 本轮相对初稿的加强
 
@@ -82,7 +92,7 @@ Batch C: `#17` `#22` `#26`（`#18/#24/#31/#32` → PARTIAL gold-weak）
 
 ## Invent-ban
 
-- 不 invent #33 VSCode 宿主 a11y / gateway / Desktop·cloud handoff / storageV5
+- 不 invent #33 VSCode 宿主 a11y / gateway / Desktop·cloud handoff / `$t()`/`tn()` 云后端（本地 storageV5 `Rc` = `getProject()`，已接）
 - 不自动 commit / bump / push
 - 不折入 **2.1.237**
 - musl packaging residual 不在本 pack，除非 236 SEA 明确改动

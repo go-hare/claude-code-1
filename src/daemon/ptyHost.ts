@@ -17,6 +17,7 @@
  */
 
 import { createServer, type Server, type Socket } from 'net'
+import { tryProcessCwd } from '../utils/cachePaths.js'
 import { writeFileSync } from 'fs'
 import { unlink } from 'fs/promises'
 
@@ -261,7 +262,7 @@ export async function runPtyHost(args: string[]): Promise<void> {
       },
     })
     child = Bun.spawn([cliFile, ...cliArgs], {
-      cwd: process.cwd(),
+      cwd: tryProcessCwd(),
       env: { ...process.env, TERM: 'xterm-256color' },
       terminal,
       windowsHide: true,

@@ -21,7 +21,6 @@ import {
   cancelPendingGoalIdleCheckin,
   fireGoalIdleCheckin,
   formatGoalIdleCheckinNotification,
-  getGoalIdleArmGeneration,
   getPendingGoalIdleCheckin,
   isGoalCheckinQueuedCommand,
   replacePendingGoalIdleCheckin,
@@ -216,7 +215,7 @@ describe('goalIdleCheckin densable 2.1.236 (#25)', () => {
     ).toBe(false)
   })
 
-  test('tip invent: empty deferring injects once then clears — no re-arm', () => {
+  test('Wsv: empty deferring still injects and re-arms Bqn', () => {
     const { ctx, delivered, state } = makeCtx(goal(), {
       getDeferringTasks: () => [],
       nowMs: () => BASE_MS,
@@ -224,20 +223,19 @@ describe('goalIdleCheckin densable 2.1.236 (#25)', () => {
     fireGoalIdleCheckin(ctx)
     expect(delivered).toHaveLength(1)
     expect(delivered[0]!.summary).toContain('no longer running')
-    expect(state.activeGoal?.deferredSince).toBeUndefined()
-    expect(state.activeGoal?.checkinCount).toBe(0)
-    expect(getPendingGoalIdleCheckin()).toBeUndefined()
+    expect(state.activeGoal?.checkinCount).toBe(1)
+    expect(state.activeGoal?.deferredSince).toBe(BASE_MS)
+    expect(getPendingGoalIdleCheckin()).toBeDefined()
   })
 
-  test('tip invent: cancel bumps generation so stale fire does not inject', () => {
+  test('Uqn cancel clears pending timer; fire still injects when goal live', () => {
     const { ctx, delivered } = makeCtx(goal())
-    const genBefore = getGoalIdleArmGeneration()
+    replacePendingGoalIdleCheckin(setTimeout(() => {}, 60_000))
     cancelPendingGoalIdleCheckin()
-    expect(getGoalIdleArmGeneration()).toBe(genBefore + 1)
-    // Simulate in-flight timer that captured the pre-cancel generation.
-    fireGoalIdleCheckin(ctx, genBefore)
-    expect(delivered).toHaveLength(0)
     expect(getPendingGoalIdleCheckin()).toBeUndefined()
+    // Gold: cancel = clearTimeout only; direct Wsv fire still runs if goal live.
+    fireGoalIdleCheckin(ctx)
+    expect(delivered).toHaveLength(1)
   })
 
   test('L15: replacePendingGoalIdleCheckin clears prior timer before assign', async () => {

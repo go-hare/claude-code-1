@@ -164,6 +164,8 @@ Full 1:1 `#11` host requires a **chunk**, not a patch:
 
 **Closed 2026-08-28**：`#11` **HAVE**（dual-Ink + NMs product openers + mLo EQr）。ConsentRow brand / form elicitation / worker-sandbox 仍 invent-ban 或金标 focused，不挡 #11。
 
+**产品面复核 2026-08-31**：结构门 10/10 + dialog/sXg/legacyFocus/ink-surface 回归绿 → checklist / residuals / board 正式抬 HAVE（23/9）。
+
 ## Snippet files
 
 | file | content |

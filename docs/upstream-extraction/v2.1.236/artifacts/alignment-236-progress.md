@@ -1,7 +1,8 @@
 # densable 2.1.236 · Alignment Progress
 
 > 2026-08-20 · SEA `2.1.236` · tip baseline **2.1.235 / npm 2.7.45** · **no auto commit/bump**  
-> 口径：**加强升档 + 其余与 SEA 1:1** · Batch A/B/C **done** · GAP **0**
+> 口径：**加强升档 + 其余与 SEA 1:1** · Batch A/B/C **done** · GAP **0**  
+> **计数以 `official-236-checklist.md` 为准**（2026-09-01：HAVE **28** / PARTIAL **4**）。本文件下列表为 08-20 快照。
 
 ## Status
 

@@ -8,7 +8,7 @@ Updated: 2026-08-20
 | ----- | ----- |
 | Changelog / GitHub body | **done** |
 | densable SEA npm pack | **done** — `/tmp/official-236/plat/package/claude` · `2.1.236 (Claude Code)` · size **317044624** · sha256 `6bc4ba992d2786cbf0237c4453ca53c1fdf0c3b3d83ffa0025c0d8190ed27848` |
-| Checklist HAVE/GAP | **done** — 以 `official-236-checklist.md` 为准（2026-08-26：HAVE **23** / PARTIAL **9**；`#11` 双 Ink + sXg DialogStore HAVE） |
+| Checklist HAVE/GAP | **done** — 以 `official-236-checklist.md` 为准（2026-09-01：HAVE **28** / PARTIAL **4**；`#18` Bwg + `#27` SIGTERM HAVE） |
 | Implement 1:1 | **Batch A/B/C done** · **no auto commit/bump** |
 
 ## Baseline
@@ -24,7 +24,7 @@ Updated: 2026-08-20
 | ---- | ------- | --- | --- | ------- |
 | 19 | 13 | 0 | 1 (#33) | 0 |
 
-> **计数以 `official-236-checklist.md` 为准**（现 HAVE **23** / PARTIAL **9**）。本表下方列表为历史快照。
+> **计数以 `official-236-checklist.md` 为准**（现 HAVE **28** / PARTIAL **4**）。本表下方列表为历史快照。
 
 ### HAVE
 

@@ -186,7 +186,7 @@ export async function applySpareClaimAndRunMain(
   setProjectRoot(cwd)
   setCwdState(cwd)
   if (claim.sessionId) {
-    switchSession(asSessionId(claim.sessionId))
+    switchSession(asSessionId(claim.sessionId), null, 'spare_claim')
   }
   // densable: strip host auth tokens then Object.assign(process.env, e.env).
   // Product: also deny loader/shell injection keys from claim.env.

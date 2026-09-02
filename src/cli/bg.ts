@@ -1,6 +1,7 @@
 import { readdir, readFile, unlink } from 'fs/promises'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
+import { tryProcessCwd } from '../utils/cachePaths.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { isProcessRunning } from '../utils/genericProcessUtils.js'
 import { jsonParse } from '../utils/slowOperations.js'
@@ -483,7 +484,7 @@ export async function handleBgStart(args: string[]): Promise<void> {
       args: filteredArgs,
       env: { ...process.env },
       logPath,
-      cwd: process.cwd(),
+      cwd: tryProcessCwd(),
     })
 
     // Official Vdt post-spawn hints.
