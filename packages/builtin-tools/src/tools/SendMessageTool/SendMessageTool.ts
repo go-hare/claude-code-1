@@ -87,7 +87,9 @@ import {
   buildPeerCandidates,
   formatAmbiguousMessage,
   leftoverClosestPeers,
+  listingRefMatchesCandidate,
   localClaimedRemoteBodies,
+  parseNameRef,
   resolvePeerByName,
   setSendMessagePinOnAppState,
   type PeerCandidate,
@@ -136,7 +138,7 @@ function formatDeeMessage(to: string, context?: { agentId?: string }): string {
   return formatSelfSendMessage(to, self?.name ?? null, callerIsSubagent)
 }
 
-/** leftover Qen/Zen/Jen on not-found. Official DEe only after resolve. */
+/** leftover Qen/Zen/Jen on not-found. Local: no mailbox fake-send. */
 function leftoverOwnNameMiss(
   to: string,
   message: unknown,
@@ -164,8 +166,7 @@ function leftoverOwnNameMiss(
         display: string
         errorClass: 'not_reachable'
       }
-    }
-  | { kind: 'mailbox' } {
+    } {
   const qen = typeof message === 'string' ? classifyOwnNameTarget(to) : 'no'
   const zen = isOwnNameSearchComplete({
     searchTruncated: opts.searchTruncated,
@@ -181,9 +182,6 @@ function leftoverOwnNameMiss(
         errorClass: SELF_SEND_ERROR_CLASS,
       },
     }
-  }
-  if (qen === 'no' && !opts.searchTruncated && opts.closest.length === 0) {
-    return { kind: 'mailbox' }
   }
   const didYouMean =
     opts.closest.length > 0
@@ -1579,8 +1577,26 @@ async function tryDeliverToLocalAgent(
     return null
   }
   const appState = context.getAppState()
-  const registered = appState.agentNameRegistry.get(to)
-  const agentId = registered ?? toAgentId(to)
+  const parsedTo = parseNameRef(to)
+  const registeredExact = appState.agentNameRegistry.get(to)
+  const registeredBare = parsedTo
+    ? appState.agentNameRegistry.get(parsedTo.name)
+    : undefined
+  // `Name [ref]` only stays local when the ref matches this subagent.
+  // Otherwise fall through so a UDS/bridge peer with that listing ref wins.
+  if (
+    parsedTo &&
+    registeredBare &&
+    !registeredExact &&
+    !listingRefMatchesCandidate(
+      { kind: 'subagent', id: registeredBare },
+      parsedTo.ref,
+    )
+  ) {
+    return null
+  }
+  const registered = registeredExact ?? registeredBare
+  const agentId = registered ?? toAgentId(parsedTo?.name ?? to)
   if (!agentId) {
     return null
   }
@@ -2805,10 +2821,24 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         // densable Mhf / g(): searchTruncated = cloud.truncated || bridge.truncated
         const searchTruncated =
           cloudList.truncated === true || accountStatus.truncated === true
+        const appStateNow = context.getAppState()
+        const listingUniqueness: Array<{ kind: string; id: string }> = []
+        for (const [id] of Object.entries(
+          appStateNow.teamContext?.teammates ?? {},
+        )) {
+          listingUniqueness.push({ kind: 'teammate', id })
+        }
+        for (const [name, id] of appStateNow.agentNameRegistry) {
+          if (name) listingUniqueness.push({ kind: 'subagent', id })
+        }
+        for (const row of cloudList.sessions) {
+          listingUniqueness.push({ kind: 'cloud-session', id: row.id })
+        }
         const candidates = buildPeerCandidates({
           udsPeers,
           bridgePeers: bridgeList,
           accountBridgePeers: accountBridge,
+          listingUniqueness,
         })
         const pins = context.getAppState().sendMessagePins ?? {}
         const resolved = resolvePeerByName({
@@ -3060,11 +3090,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             },
             context,
           )
-          if (miss.kind !== 'mailbox') {
-            return { data: miss.data }
-          }
+          return { data: miss.data }
         }
-        // leftover mailbox: Qen==="no" && !truncated && no closest
       }
 
       // densable U2f — notify_when_idle never rides teammate mailbox / broadcast.

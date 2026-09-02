@@ -19,8 +19,8 @@ import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { SessionKind } from './concurrentSessions.js'
 import {
   MAX_UDS_FRAME_BYTES,
-  MAX_UDS_LINE_CHARS,
-  UdsMessageTooLargeError,
+  assertUdsPayloadUnderLineCap,
+  serializeUdsAuthFrame,
   type UdsMessage,
 } from './udsMessaging.js'
 import {
@@ -530,19 +530,20 @@ export async function sendToUdsSocket(
     from: ownSocket,
     msg_id: msgId,
     meta: {
-      ...(authToken !== undefined ? { authToken } : {}),
       msg_id: msgId,
       ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
       ...(opts.selfSent === true ? { selfSent: true } : {}),
     },
   }
 
-  // densable oFd/X1r: refuse oversized on-wire line BEFORE createConnection.
-  // Local has no separate BVs auth preamble — auth lives in meta — so n = wire.length.
-  const wire = `${jsonStringify(udsMsg)}\n`
-  if (wire.length > MAX_UDS_LINE_CHARS) {
-    throw new UdsMessageTooLargeError(wire.length, MAX_UDS_LINE_CHARS)
-  }
+  // densable lmp / oFd: HWd + He(msg) + 1, even when the auth line is omitted.
+  const payload = jsonStringify(udsMsg)
+  assertUdsPayloadUnderLineCap(payload)
+  // densable cmp: `c+i+\n` — H_a(token) prefix when IWd found a token.
+  const wire =
+    (authToken !== undefined ? serializeUdsAuthFrame(authToken) : '') +
+    payload +
+    '\n'
 
   // densable CDn / P5d / jLb / T5d — reserve BEFORE send so paced messages are
   // never falsely marked sent. Windows + no own inbox → noop (zLb).

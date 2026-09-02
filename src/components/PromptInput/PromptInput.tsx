@@ -32,6 +32,7 @@ import { isUltrareviewEnabled } from '../../commands/review/ultrareviewEnabled.j
 import { getNativeCSIuTerminalDisplayName } from '../../commands/terminalSetup/terminalSetup.js';
 import { type Command, hasCommand } from '../../commands.js';
 import { useIsModalOverlayActive } from '../../context/overlayContext.js';
+import { useHasBlockingOpenDialogs } from '../../dialog/DialogStoreContext.js';
 import { useSetPromptOverlayDialog } from '../../context/promptOverlayContext.js';
 import {
   formatImageRef,
@@ -50,6 +51,7 @@ import type { IDESelection } from '../../hooks/useIdeSelection.js';
 import { useInputBuffer } from '../../hooks/useInputBuffer.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { usePromptSuggestion } from '../../hooks/usePromptSuggestion.js';
+import { useTasksV2 } from '../../hooks/useTasksV2.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTypeahead } from '../../hooks/useTypeahead.js';
 import {
@@ -140,6 +142,7 @@ import { cyclePermissionMode, getNextPermissionMode } from '../../utils/permissi
 import { getPlatform } from '../../utils/platform.js';
 import type { ProcessUserInputContext } from '../../utils/processUserInput/processUserInput.js';
 import { editPromptInEditor } from '../../utils/promptEditor.js';
+import { collectLastAssistantTextsForEditor } from '../../utils/messages.js';
 // hasAutoModeOptIn removed — auto mode is available to all users
 import { findBtwTriggerPositions } from '../../utils/sideQuestion.js';
 import { findSlashCommandPositions } from '../../utils/suggestions/commandSuggestions.js';
@@ -192,7 +195,12 @@ import { PromptInputStashNotice } from './PromptInputStashNotice.js';
 import { useMaybeTruncateInput } from './useMaybeTruncateInput.js';
 import { usePromptInputPlaceholder } from './usePromptInputPlaceholder.js';
 import { useShowFastIconHint } from './useShowFastIconHint.js';
-import { useSwarmBanner } from './useSwarmBanner.js';
+import {
+  hideSessionTitleFromTasks,
+  swarmBannerFillColumns,
+  swarmBannerGradientSegments,
+  useSwarmBanner,
+} from './useSwarmBanner.js';
 import { isNonSpacePrintable, isVimModeEnabled } from './utils.js';
 
 type Props = {
@@ -356,7 +364,10 @@ function PromptInput({
   // shouldHidePromptInput: false. Those dialogs don't register in the overlay
   // system, so treat them as a modal overlay here to stop navigation keys from
   // leaking into TextInput/footer handlers and stacking a second dialog.
-  const isModalOverlayActive = useIsModalOverlayActive() || isLocalJSXCommandActive;
+  // densable single-host: Host blocking open (permission / managed / …) keeps
+  // the draft mounted but must not steal keys from DialogHost Select.
+  const hostBlocksKeys = useHasBlockingOpenDialogs();
+  const isModalOverlayActive = useIsModalOverlayActive() || isLocalJSXCommandActive || hostBlocksKeys;
   // densable 2.1.238 #36 dT: ctrl+l / cmd+k bump → useLayoutEffect forceRedraw.
   const [clearScreenTick, setClearScreenTick] = useState(0);
   useLayoutEffect(() => {
@@ -1935,8 +1946,11 @@ function PromptInput({
     setIsExternalEditorActive(true);
 
     try {
-      // Pass pastedContents to expand collapsed text references
-      const result = await editPromptInEditor(input, pastedContents);
+      // densable Gge(K,w,Hr): last assistant texts when externalEditorContext.
+      const lastResponse = getGlobalConfig().externalEditorContext
+        ? collectLastAssistantTextsForEditor(messages).messages.join('\n\n') || undefined
+        : undefined;
+      const result = await editPromptInEditor(input, pastedContents, lastResponse);
 
       if (result.error) {
         addNotification({
@@ -1967,7 +1981,7 @@ function PromptInput({
     } finally {
       setIsExternalEditorActive(false);
     }
-  }, [input, cursorOffset, pastedContents, pushToBuffer, trackAndSetInput, addNotification]);
+  }, [input, cursorOffset, pastedContents, messages, pushToBuffer, trackAndSetInput, addNotification]);
 
   // Handler for chat:stash - stash/unstash prompt
   const handleStash = useCallback(() => {
@@ -2331,8 +2345,10 @@ function PromptInput({
         navigateFooter(-1);
       },
       'footer:openSelected': () => {
+        // selecting-agent Enter is owned by useBackgroundTaskNavigation.
+        // Return false so this Footer handler does not swallow the key.
         if (viewSelectionMode === 'selecting-agent') {
-          return;
+          return false;
         }
         // When shells/tasks pill is focused, Enter is Footer openSelected — not
         // chat:submit. Paste inserts the image pill without deselecting the
@@ -2415,7 +2431,7 @@ function PromptInput({
               exitTeammateView(setAppState);
             } else {
               const picked = bgAgentList[selectedBgAgentIndex];
-              if (picked) enterTeammateView(picked.agentId, setAppState);
+              if (picked) enterTeammateView(picked.id, setAppState);
             }
             // Keep the pill focused so ↑/↓ continue to work after Enter.
             break;
@@ -2466,7 +2482,7 @@ function PromptInput({
     // Skip all input handling when a full-screen dialog is open. These dialogs
     // render via early return, but hooks run unconditionally — so without this
     // guard, Escape inside a dialog leaks to the double-press message-selector.
-    if (showTeamsDialog || showQuickOpen || showGlobalSearch || showHistoryPicker) {
+    if (showBashesDialog || showTeamsDialog || showQuickOpen || showGlobalSearch || showHistoryPicker) {
       return;
     }
 
@@ -2506,7 +2522,11 @@ function PromptInput({
     // the input and type the char. Nav keys are captured by useKeybindings
     // above, so anything reaching here is genuinely not a footer action.
     // onChange clears footerSelection, so no explicit deselect.
-    if (footerItemSelected && char && !key.ctrl && !key.meta && !key.escape && !key.return) {
+    // Bare \n is name "enter" (key.return is false). Windows ConPTY often
+    // delivers Enter as \r\n — the \r already ran footer:openSelected; if
+    // \n type-to-exits it inserts a newline and clears the pill (flash,
+    // first Enter looks like it missed).
+    if (footerItemSelected && char && char !== '\n' && !key.ctrl && !key.meta && !key.escape && !key.return) {
       onChange(input.slice(0, cursorOffset) + char + input.slice(cursorOffset));
       setCursorOffset(cursorOffset + char.length);
       return;
@@ -2588,7 +2608,9 @@ function PromptInput({
     }
   });
 
-  const swarmBanner = useSwarmBanner();
+  const tasksV2 = useTasksV2();
+  const hideSessionTitle = hideSessionTitleFromTasks(tasksV2);
+  const swarmBanner = useSwarmBanner({ hideSessionTitle });
 
   const fastModeCooldown = isFastModeEnabled() ? isFastModeCooldown() : false;
   const showFastIcon = isFastModeEnabled() ? isFastMode && (isFastModeAvailable() || fastModeCooldown) : false;
@@ -3100,19 +3122,34 @@ function PromptInput({
       <PromptInputStashNotice hasStash={stashedPrompt !== undefined} />
       {swarmBanner ? (
         <>
-          <Text color={swarmBanner.bgColor}>
-            {swarmBanner.text ? (
-              <>
-                {'─'.repeat(Math.max(0, promptInputColumns - stringWidth(swarmBanner.text) - 4))}
-                <Text backgroundColor={swarmBanner.bgColor} color="inverseText">
-                  {' '}
-                  {swarmBanner.text}{' '}
-                </Text>
-                {'──'}
-              </>
-            ) : (
-              '─'.repeat(promptInputColumns)
-            )}
+          <Text color={(swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ?? swarmBanner.bgColor}>
+            {(() => {
+              const fill = swarmBanner.text
+                ? swarmBannerFillColumns(promptInputColumns, stringWidth(swarmBanner.text))
+                : promptInputColumns;
+              const fillEl =
+                swarmBanner.gradient && swarmBanner.gradient.length > 0
+                  ? swarmBannerGradientSegments(fill, swarmBanner.gradient).map((seg, i) => (
+                      <Text key={i} color={seg.color as keyof Theme}>
+                        {'─'.repeat(seg.dashes)}
+                      </Text>
+                    ))
+                  : '─'.repeat(fill);
+              if (!swarmBanner.text) return fillEl;
+              return (
+                <>
+                  {fillEl}
+                  <Text
+                    backgroundColor={(swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ?? swarmBanner.bgColor}
+                    color="inverseText"
+                  >
+                    {' '}
+                    {swarmBanner.text}{' '}
+                  </Text>
+                  {'─'}
+                </>
+              );
+            })()}
           </Text>
           <Box flexDirection="row" width="100%">
             <PromptInputModeIndicator
@@ -3218,6 +3255,7 @@ function PromptInput({
           paddingLeft={2}
           paddingRight={1}
           flexDirection="column"
+          alignItems="flex-end"
           justifyContent="flex-end"
           overflow="hidden"
         >

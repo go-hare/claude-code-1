@@ -93,20 +93,68 @@ export type ProcessUserInputBaseResult = {
 }
 
 /**
- * densable 2.1.214 EndConversation product UI allows `/clear` to continue.
- * clear command aliases: clear | reset | new (src/commands/clear/index.ts).
- * Only these escape the endedByModel input gate — not a general slash allowlist.
+ * densable Byw — slash names that escape endedByModel (aQr).
+ * Gold: `new Set(["clear","resume","help","exit","feedback"])`.
+ */
+export const ENDED_BY_MODEL_ALLOWED_COMMANDS = new Set([
+  'clear',
+  'resume',
+  'help',
+  'exit',
+  'feedback',
+])
+
+const ENDED_BY_MODEL_ALIAS_TO_NAME: Record<string, string> = {
+  reset: 'clear',
+  new: 'clear',
+  quit: 'exit',
+  continue: 'resume',
+  bug: 'feedback',
+}
+
+type EndedByModelCommand = {
+  name: string
+  type?: string
+  aliases?: string[]
+}
+
+/**
+ * densable aQr(cmd, endedByModel) — true ⇒ block (toast / refuse).
+ * `if(!t)return!1; return!(e&&e.type!=="prompt"&&Byw.has(e.name))`
+ */
+export function isEndedByModelCommandBlocked(
+  command: EndedByModelCommand | null | undefined,
+  endedByModel: boolean,
+): boolean {
+  if (!endedByModel) return false
+  return !(
+    command != null &&
+    command.type !== 'prompt' &&
+    ENDED_BY_MODEL_ALLOWED_COMMANDS.has(command.name)
+  )
+}
+
+/**
+ * Typed-input escape for endedByModel. Resolves first token via command
+ * name/alias when a list is given; otherwise Byw names + known aliases.
  */
 export function isEndedByModelClearEscape(
   input: string | null | undefined,
+  commands?: readonly EndedByModelCommand[],
 ): boolean {
   if (typeof input !== 'string') return false
   const t = input.trim()
   if (!t.startsWith('/')) return false
-  // First token is the command (strip leading /); ignore args.
   const first = t.slice(1).split(/\s+/, 1)[0]?.toLowerCase() ?? ''
-  // Optional trailing punctuation like /clear! is not accepted.
-  return first === 'clear' || first === 'reset' || first === 'new'
+  if (!first) return false
+  if (commands && commands.length > 0) {
+    const cmd = commands.find(
+      c => c.name === first || c.aliases?.includes(first),
+    )
+    return !isEndedByModelCommandBlocked(cmd, true)
+  }
+  const canonical = ENDED_BY_MODEL_ALIAS_TO_NAME[first] ?? first
+  return ENDED_BY_MODEL_ALLOWED_COMMANDS.has(canonical)
 }
 
 export async function processUserInput({
@@ -202,13 +250,12 @@ export async function processUserInput({
 
   const appState = context.getAppState()
 
-  // densable 2.1.214: after EndConversation sets endedByModel, refuse further
-  // queries until /clear or a new session (fnr / processUserInput gate).
-  // Product UI: "Start a new session (or /clear) to continue." — typed /clear
-  // (and clear aliases /reset /new) must reach processSlashCommand so
-  // clearConversation can set endedByModel:false. Do not invent a broader
-  // slash allowlist.
-  if (appState.endedByModel && !isEndedByModelClearEscape(inputString)) {
+  // densable aQr / Byw: after EndConversation, only clear|resume|help|exit|
+  // feedback (plus their aliases) reach processSlashCommand.
+  if (
+    appState.endedByModel &&
+    !isEndedByModelClearEscape(inputString, context.options.commands)
+  ) {
     const { END_CONVERSATION_SESSION_ENDED_MESSAGE } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
@@ -660,6 +707,7 @@ async function processUserInputBase(
       canUseTool,
       autonomy,
       modelScheduledOrigin,
+      origin,
     )
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
@@ -736,6 +784,7 @@ async function processUserInputBase(
       canUseTool,
       autonomy,
       modelScheduledOrigin,
+      origin,
     )
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }

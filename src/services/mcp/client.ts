@@ -134,6 +134,7 @@ import {
   runElicitationResultHooks,
 } from './elicitationHandler.js'
 import { buildMcpToolName } from './mcpStringUtils.js'
+import { filterListedMcpToolsBySchema } from './mcpToolSchema.js'
 import { normalizeNameForMCP } from './normalization.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
 
@@ -1025,16 +1026,20 @@ export const connectToServer = memoize(
         const { createChromeContext } = await import(
           '../../utils/claudeInChrome/mcpServer.js'
         )
-        const { createClaudeForChromeMcpServer } = await import(
-          '@ant/claude-for-chrome-mcp'
-        )
+        const { createChromeSocketClient, createClaudeForChromeMcpServer } =
+          await import('@ant/claude-for-chrome-mcp')
         const { createLinkedTransportPair } = await import(
           './InProcessTransport.js'
         )
+        const { registerChromeTabGroupCleanup, setChromeBinding } =
+          await import('../../utils/claudeInChrome/tabGroupCleanup.js')
         const context = createChromeContext(
           (serverRef as McpStdioServerConfig).env,
         )
-        inProcessServer = createClaudeForChromeMcpServer(context)
+        const socketClient = createChromeSocketClient(context)
+        setChromeBinding(context, socketClient)
+        registerChromeTabGroupCleanup()
+        inProcessServer = createClaudeForChromeMcpServer(context, socketClient)
         const [clientTransport, serverTransport] = createLinkedTransportPair()
         await inProcessServer.connect(serverTransport)
         transport = clientTransport
@@ -2306,8 +2311,14 @@ export const fetchToolsForClient = memoizeWithLRU(
         }
       }
 
+      // densable vxi/wxi after toolPermissions warn — flatten or skip
+      const listedAfterSchema = filterListedMcpToolsBySchema(toolsToProcess, {
+        serverName: client.name,
+        config: client.config,
+      })
+
       // Convert MCP tools to our Tool format
-      return toolsToProcess
+      return listedAfterSchema
         .map((tool): Tool => {
           const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
           return {

@@ -225,9 +225,10 @@ export async function clearConversation({
         endedByModel: false,
         // densable session reset: clear MessageDisplay salvage map
         displayedMessageContent: {},
-        // Clear standalone agent context (name/color set by /rename, /color)
-        // so the new session doesn't display the old session's identity badge
-        standaloneAgentContext: undefined,
+        // densable session_clear: drop name/color, keep prideGradient if set
+        standaloneAgentContext: prev.standaloneAgentContext?.prideGradient
+          ? { prideGradient: prev.standaloneAgentContext.prideGradient }
+          : undefined,
         fileHistory: {
           snapshots: [],
           trackedFiles: new Set(),

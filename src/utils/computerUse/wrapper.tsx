@@ -7,7 +7,7 @@
  * merge, screenshot stash) lives in `@ant/computer-use-mcp`'s
  * `bindSessionContext`. This file binds it once per process,
  * caches the dispatcher, and updates a per-call ref for the pieces of
- * `ToolUseContext` that vary per-call (`abortController`, `setToolJSX`,
+ * `ToolUseContext` that vary per-call (`abortController`, `requestDialog`,
  * `sendOSNotification`). AppState accessors are read through the ref too —
  * they're likely stable but we don't depend on that.
  *
@@ -25,9 +25,8 @@ import {
   DEFAULT_GRANT_FLAGS,
   type ScreenshotDims,
 } from '@ant/computer-use-mcp';
-import * as React from 'react';
+import { computerUseApprovalSpec } from '../../dialog/specs/jsuKinds.js';
 import { getSessionId } from '../../bootstrap/state.js';
-import { ComputerUseApproval } from '../../components/permissions/ComputerUseApproval/ComputerUseApproval.js';
 import type { Tool, ToolUseContext } from '../../Tool.js';
 import { logForDebugging } from '../debug.js';
 import { detectImageFormatFromBase64 } from '../imageResizer.js';
@@ -50,7 +49,7 @@ type Binding = {
  *
  * `currentToolUseContext` is updated on every call. Every getter/callback in
  * `ctx` reads through it, so the per-call pieces (`abortController`,
- * `setToolJSX`, `sendOSNotification`) are always current.
+ * `requestDialog`, `sendOSNotification`) are always current.
  *
  * Module-level `let` is a deliberate exception to the no-module-scope-state
  * rule (src/CLAUDE.md): the dispatcher closure must persist across calls so
@@ -93,11 +92,9 @@ export function buildSessionContext(): ComputerUseSessionContext {
     },
 
     // ── Write-backs ────────────────────────────────────────────────────────
-    // `setToolJSX` is guaranteed present — the gate in `main.tsx` excludes
-    // non-interactive sessions. The package's `_dialogSignal` (tool-finished
-    // dismissal) is irrelevant here: `setToolJSX` blocks the tool call, so
-    // the dialog can't outlive it. Ctrl+C is what matters, and
-    // `runPermissionDialog` wires that from the per-call ref's abortController.
+    // Gold mNS / DIi: `requestDialog(DIi, e, {signal})`. No requestDialog →
+    // empty grant + DEFAULT_GRANT_FLAGS (gold `uIe`). Abort is mailbox
+    // cancel → spec.default, not a Promise reject.
     onPermissionRequest: (req, _dialogSignal) => runPermissionDialog(req),
 
     // Package does the merge (dedupe + truthy-only flags). We just persist.
@@ -326,47 +323,19 @@ export function getComputerUseMCPToolOverrides(toolName: string): ComputerUseMCP
 }
 
 /**
- * Render the approval dialog mid-call via `setToolJSX` + `Promise`, wait for
- * the user. Mirrors `spawnMultiAgent.ts:419-436` (the `It2SetupPrompt` pattern).
+ * densable mNS / DIi — `r(DIi, e, {signal: t.abortController.signal})`.
+ * No queueBehind. Cancel/abort → spec.default (empty grant + uIe).
  *
  * The merge-into-AppState that used to live here (dedupe + truthy-only flags)
  * is now in the package's `bindSessionContext` → `onAllowedAppsChanged`.
  */
 async function runPermissionDialog(req: CuPermissionRequest): Promise<CuPermissionResponse> {
   const context = tuc();
-  const setToolJSX = context.setToolJSX;
-  if (!setToolJSX) {
-    // Shouldn't happen — main.tsx gate excludes non-interactive. Fail safe.
+  const requestDialog = context.requestDialog;
+  if (!requestDialog) {
     return { granted: [], denied: [], flags: DEFAULT_GRANT_FLAGS };
   }
-
-  try {
-    return await new Promise<CuPermissionResponse>((resolve, reject) => {
-      const signal = context.abortController.signal;
-      // If already aborted, addEventListener won't fire — reject now so the
-      // promise doesn't hang waiting for a user who Ctrl+C'd.
-      if (signal.aborted) {
-        reject(new Error('Computer Use permission dialog aborted'));
-        return;
-      }
-      const onAbort = (): void => {
-        signal.removeEventListener('abort', onAbort);
-        reject(new Error('Computer Use permission dialog aborted'));
-      };
-      signal.addEventListener('abort', onAbort);
-
-      setToolJSX({
-        jsx: React.createElement(ComputerUseApproval, {
-          request: req,
-          onDone: (resp: CuPermissionResponse) => {
-            signal.removeEventListener('abort', onAbort);
-            resolve(resp);
-          },
-        }),
-        shouldHidePromptInput: true,
-      });
-    });
-  } finally {
-    setToolJSX(null);
-  }
+  return (await requestDialog(computerUseApprovalSpec, req, {
+    signal: context.abortController.signal,
+  })) as CuPermissionResponse;
 }

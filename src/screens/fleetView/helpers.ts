@@ -5,6 +5,8 @@
  * agent view dashboard.
  */
 
+import { mkdir, writeFile } from 'fs/promises'
+import { join } from 'path'
 import type { SessionEntry } from '../../cli/bg/engine.js'
 import figures from 'figures'
 import { formatDuration } from '../../utils/format.js'
@@ -167,6 +169,16 @@ export function sortSessions(sessions: SessionEntry[]): SessionEntry[] {
     const bandA = BAND_ORDER[deriveBand(a)]
     const bandB = BAND_ORDER[deriveBand(b)]
     if (bandA !== bandB) return bandA - bandB
+    // State-mode unpinned: V0n (stateSortOrder) before directory pOs.
+    if (!a.pinned && !b.pinned) {
+      const ssoA = a.stateSortOrder
+      const ssoB = b.stateSortOrder
+      if (ssoA !== undefined && ssoB !== undefined && ssoA !== ssoB) {
+        return ssoA - ssoB
+      }
+      if (ssoA !== undefined && ssoB === undefined) return -1
+      if (ssoA === undefined && ssoB !== undefined) return 1
+    }
     // Manual reorder (lower sortOrder first) when both set
     const soA = a.sortOrder
     const soB = b.sortOrder
@@ -336,6 +348,477 @@ export function shouldFleetViewVimHandleEscape(
   )
 }
 
+/** densable aVA — composed dispatch (intent / routine / match / cwd / exec). */
+export function hasComposedDispatch(
+  parsed: ParsedDispatch | null | undefined,
+): boolean {
+  return !!(
+    parsed &&
+    (parsed.intent ||
+      parsed.routine ||
+      parsed.matched ||
+      parsed.cwd !== undefined ||
+      parsed.exec !== undefined)
+  )
+}
+
+/**
+ * densable JIy: physical up/down with a newline → leftover `u(t)`.
+ * ctrl+p / ctrl+n never take this branch.
+ */
+export function shouldFleetViewArrowDelegateToEditor(
+  previewOpen: boolean,
+  query: string,
+): boolean {
+  return !previewOpen && query.includes('\n')
+}
+
+/**
+ * densable JIy tab: empty prompt + templates → toggle showAllAgents.
+ * simpleView returns before this (no-op).
+ */
+export function shouldFleetViewTabToggleAllAgents(
+  simpleView: boolean,
+  query: string,
+  mode: 'prompt' | 'bash',
+  templateCount: number,
+): boolean {
+  return !simpleView && query === '' && mode === 'prompt' && templateCount > 0
+}
+
+/**
+ * densable JIy right: empty prompt, no shift, no preview → open focused row.
+ */
+export function shouldFleetViewRightOpenFocusedRow(
+  shift: boolean,
+  query: string,
+  mode: 'prompt' | 'bash',
+  previewOpen: boolean,
+): boolean {
+  return !shift && query === '' && mode === 'prompt' && !previewOpen
+}
+
+/**
+ * densable JIy: simpleView && !preview && renaming==null → q/l then skip leftover.
+ */
+export function shouldFleetViewSimpleViewSkipLeftover(
+  simpleView: boolean,
+  previewOpen: boolean,
+  renaming: boolean,
+): boolean {
+  return simpleView && !previewOpen && !renaming
+}
+
+/**
+ * densable ICy — sort templates by agentLastUsed desc, then name.
+ * Callers pass `getGlobalConfig().agentLastUsed ?? {}`.
+ */
+export function sortFleetTemplatesByLastUsed<T extends { name: string }>(
+  templates: readonly T[],
+  lastUsed: Record<string, number> = {},
+): T[] {
+  return templates.slice().sort((a, b) => {
+    const delta = (lastUsed[b.name] ?? 0) - (lastUsed[a.name] ?? 0)
+    return delta !== 0 ? delta : a.name.localeCompare(b.name)
+  })
+}
+
+/**
+ * densable CAe.name analog — A8q default template when no agent is set.
+ * UCy skips this so idle/default jobs do not pollute last-used sort.
+ */
+export const FLEET_DEFAULT_TEMPLATE_NAME = 'bg'
+
+/**
+ * densable UCy — backfill agentLastUsed from job createdAt.
+ * Skip default template; skip keys already present; keep max createdAt.
+ */
+export function migrateAgentLastUsedFromJobs(
+  current: Record<string, number>,
+  jobs: readonly { template?: string; createdAt?: string }[],
+  skipTemplate: string = FLEET_DEFAULT_TEMPLATE_NAME,
+): { next: Record<string, number>; changed: boolean } {
+  const next = { ...current }
+  let changed = false
+  for (const job of jobs) {
+    const template = job.template
+    if (!template || template === skipTemplate) continue
+    if (current[template] !== undefined) continue
+    const created = Date.parse(job.createdAt ?? '')
+    if (Number.isNaN(created)) continue
+    if (created > (next[template] ?? 0)) {
+      next[template] = created
+      changed = true
+    }
+  }
+  return { next, changed }
+}
+
+/** densable AqA — VIy poll window after xAe. */
+export const FLEET_NEW_SESSION_WAIT_MS = 5000
+
+/** densable VIy `await Pr(100)`. */
+export const FLEET_NEW_SESSION_POLL_MS = 100
+
+/** densable VIy row_pending copy. */
+export const FLEET_NEW_SESSION_PENDING_MSG =
+  'Still starting \u2014 open the new session once it appears'
+
+/** densable VIy: `newSessionOpening || attachingJobId !== null`. */
+export function isFleetNewSessionSpawnBusy(
+  newSessionOpening: boolean,
+  attachingJobId: string | null,
+): boolean {
+  return newSessionOpening || attachingJobId !== null
+}
+
+/** densable VIy throw copy: `Couldn't start a new session — ${le(d)}`. */
+export function formatFleetNewSessionThrow(err: unknown): string {
+  const msg =
+    err instanceof Error ? err.message : err !== undefined ? String(err) : ''
+  return `Couldn't start a new session \u2014 ${msg}`
+}
+
+/** densable VIy `n.jobs?.find(f => f.id === u.short)`. */
+export function findFleetJobByShort<T extends { short?: string; id?: string }>(
+  jobs: readonly T[] | undefined,
+  short: string,
+): T | undefined {
+  return jobs?.find(j => j.id === short || j.short === short)
+}
+
+/** densable VIy reload + poll until short appears or AqA. */
+export async function waitForFleetJobByShort<
+  T extends { short?: string; id?: string },
+>(
+  loadJobs: () => Promise<readonly T[] | undefined>,
+  short: string,
+  opts: {
+    deadlineAt: number
+    isCurrent: () => boolean
+    now?: () => number
+    sleep?: (ms: number) => Promise<void>
+    intervalMs?: number
+  },
+): Promise<T | undefined> {
+  const now = opts.now ?? Date.now
+  const sleep = opts.sleep ?? (ms => new Promise(r => setTimeout(r, ms)))
+  const interval = opts.intervalMs ?? FLEET_NEW_SESSION_POLL_MS
+  let job = findFleetJobByShort(await loadJobs(), short)
+  while (!job && now() < opts.deadlineAt && opts.isCurrent()) {
+    await sleep(interval)
+    job = findFleetJobByShort(await loadJobs(), short)
+  }
+  return job
+}
+
+/** densable JIy ctrl+s: simpleView returns before cycling group mode. */
+export function shouldFleetViewCycleGroupMode(simpleView: boolean): boolean {
+  return !simpleView
+}
+
+/**
+ * densable JIy `!` → bash: `vgn()&&!simpleView` + empty prompt.
+ */
+export function shouldFleetViewEnterBashFromBang(
+  simpleView: boolean,
+  query: string,
+  mode: 'prompt' | 'bash',
+): boolean {
+  return !simpleView && query === '' && mode === 'prompt'
+}
+
+/** densable JIy `?`: empty prompt only. */
+export function shouldFleetViewToggleHelp(
+  query: string,
+  mode: 'prompt' | 'bash',
+): boolean {
+  return query === '' && mode === 'prompt'
+}
+
+/**
+ * densable GP `isActive: Ct` — leftover always `u(t)`; editor is live unless
+ * simpleView / preview / rename / group / attach / resume picker.
+ * Official: previewOpen gates the composer; Esc closes peek first.
+ */
+export function isFleetComposerActive(opts: {
+  simpleView: boolean
+  previewOpen: boolean
+  renaming: boolean
+  groupEdit: boolean
+  attaching: boolean
+  resumePicker: boolean
+}): boolean {
+  return (
+    !opts.simpleView &&
+    !opts.previewOpen &&
+    !opts.renaming &&
+    !opts.groupEdit &&
+    !opts.attaching &&
+    !opts.resumePicker
+  )
+}
+
+/**
+ * densable JIy: shift+↑/↓ → RqA when no suggestions and preview closed.
+ * No focusArea check — works from list or dispatch.
+ */
+export function shouldFleetViewReorder(
+  suggestionCount: number,
+  previewOpen: boolean,
+): boolean {
+  return suggestionCount === 0 && !previewOpen
+}
+
+/** densable Plu / LCy kinds for FCy suggestions. */
+export type FleetComposerSuggestionKind =
+  | 'agent'
+  | 'routine'
+  | 'repo'
+  | 'worktree'
+  | 'skill'
+  | 'command'
+  | 'workflow'
+  | 'model'
+
+export type FleetComposerSuggestion = {
+  kind: FleetComposerSuggestionKind
+  name: string
+  description?: string
+}
+
+const FLEET_SUGGESTION_PREFIX: Record<FleetComposerSuggestionKind, '@' | '/'> =
+  {
+    agent: '@',
+    repo: '@',
+    worktree: '@',
+    routine: '@',
+    skill: '/',
+    command: '/',
+    workflow: '/',
+    model: '/',
+  }
+
+/** densable Plu — apply prefix for a FCy suggestion kind. */
+export function fleetSuggestionDisplayText(
+  suggestion: FleetComposerSuggestion,
+): string {
+  return `${FLEET_SUGGESTION_PREFIX[suggestion.kind]}${suggestion.name}`
+}
+
+function asFleetAgent(t: {
+  name: string
+  description?: string
+}): FleetComposerSuggestion {
+  return { kind: 'agent', name: t.name, description: t.description }
+}
+
+function asFleetRoutine(t: {
+  name: string
+  description?: string
+}): FleetComposerSuggestion {
+  return { kind: 'routine', name: t.name, description: t.description }
+}
+
+/** densable HCy */
+function fleetRepoOrWorktree(
+  name: string,
+  repos: Record<string, string>,
+  worktreeBranches: Record<string, string>,
+): FleetComposerSuggestion {
+  const branch = worktreeBranches[name]
+  if (branch === undefined) {
+    return { kind: 'repo', name, description: repos[name] }
+  }
+  return {
+    kind: 'worktree',
+    name,
+    description: branch || repos[name],
+  }
+}
+
+/**
+ * densable FCy — Fleet composer suggestions.
+ * Slash `/` commands stay with tip `generateCommandSuggestions` (skills/B5A
+ * not a second command catalog). Models/skills default [].
+ */
+export function buildFleetComposerSuggestions(
+  query: string,
+  opts: {
+    templates?: readonly { name: string; description?: string }[]
+    routines?: readonly { name: string; description?: string }[]
+    repos?: Record<string, string>
+    worktreeBranches?: Record<string, string>
+    skills?: readonly FleetComposerSuggestion[]
+    models?: readonly { name: string }[]
+    dispatch: ParsedDispatch | null | undefined
+    showAllAgents?: boolean
+    lastUsed?: Record<string, number>
+  },
+): FleetComposerSuggestion[] {
+  const templates = opts.templates ?? []
+  const routines = opts.routines ?? []
+  const repos = opts.repos ?? {}
+  const worktreeBranches = opts.worktreeBranches ?? {}
+  const skills = opts.skills ?? []
+  const models = opts.models ?? []
+  const space = query.indexOf(' ')
+  const first = (space === -1 ? query : query.slice(0, space)).toLowerCase()
+  const isSlashQuery = first.startsWith('/')
+  const atMatch = query.match(/(?:^|\s)@(\S*)$/)
+  const atPartial = atMatch?.[1]?.toLowerCase()
+  const prefixBeforeAt = atMatch
+    ? query.slice(0, query.length - atMatch[0].length)
+    : ''
+  const prefixHasCwd =
+    !!atMatch &&
+    parseDispatch(
+      prefixBeforeAt,
+      templates.map(t => ({ name: t.name })),
+      repos,
+      routines.map(r => ({ name: r.name })),
+    ).cwd !== undefined
+  const claimed = new Set([
+    ...templates.map(t => t.name.toLowerCase()),
+    ...routines.map(r => r.name.toLowerCase()),
+  ])
+  const repoNames = Object.keys(repos).filter(
+    n => !claimed.has(n.toLowerCase()) && !/\s/.test(n),
+  )
+  const byName = (a: { name: string }, b: { name: string }) =>
+    a.name.localeCompare(b.name)
+  const atSuggestions =
+    atPartial === undefined
+      ? []
+      : [
+          ...sortFleetTemplatesByLastUsed(templates, opts.lastUsed)
+            .filter(t => t.name.toLowerCase().startsWith(atPartial))
+            .map(asFleetAgent),
+          ...routines
+            .filter(r => r.name.toLowerCase().startsWith(atPartial))
+            .sort(byName)
+            .map(asFleetRoutine),
+          ...(prefixHasCwd
+            ? []
+            : repoNames
+                .filter(n => n.toLowerCase().startsWith(atPartial))
+                .sort((a, b) => a.localeCompare(b))
+                .map(n => fleetRepoOrWorktree(n, repos, worktreeBranches))),
+        ]
+  const slashMatch = query.match(/(?:^|\s)\/(\S*)$/)
+  const slashPartial = slashMatch?.[1]?.toLowerCase()
+  const fleetModelCmd: FleetComposerSuggestion = {
+    kind: 'model',
+    name: 'model',
+    description: 'Set model for this FleetView session (not persisted)',
+  }
+  const slashSuggestions =
+    slashPartial === undefined
+      ? []
+      : [...(isSlashQuery ? [fleetModelCmd] : []), ...skills]
+          .filter(s => s.name.toLowerCase().includes(slashPartial))
+          .sort((a, b) => {
+            const aPre = a.name.toLowerCase().startsWith(slashPartial)
+            const bPre = b.name.toLowerCase().startsWith(slashPartial)
+            if (aPre !== bPre) return aPre ? -1 : 1
+            return a.name.localeCompare(b.name)
+          })
+  const modelArg = query.match(/^\s*\/model\s+(\S*)$/i)
+  const modelPartial = modelArg?.[1]?.toLowerCase()
+  const modelSuggestions =
+    modelPartial === undefined
+      ? []
+      : models
+          .filter(m => m.name.toLowerCase().startsWith(modelPartial))
+          .map(m => ({ kind: 'model' as const, name: m.name }))
+  const leadSuggestions = isSlashQuery
+    ? []
+    : [
+        ...templates
+          .filter(t => t.name.toLowerCase().startsWith(first))
+          .sort(byName)
+          .map(asFleetAgent),
+        ...routines
+          .filter(r => r.name.toLowerCase().startsWith(first))
+          .sort(byName)
+          .map(asFleetRoutine),
+        ...repoNames
+          .filter(n => n.toLowerCase().startsWith(first))
+          .sort((a, b) => a.localeCompare(b))
+          .map(n => fleetRepoOrWorktree(n, repos, worktreeBranches)),
+        ...skills.filter(s => s.name.toLowerCase().startsWith(first)),
+      ]
+  const parsed = opts.dispatch
+  if (!parsed || parsed.exec !== undefined) return []
+  if (modelArg) return modelSuggestions
+  if (atMatch) return atSuggestions
+  if (slashMatch) return slashSuggestions
+  if (opts.showAllAgents && !query) {
+    return sortFleetTemplatesByLastUsed(templates, opts.lastUsed).map(
+      asFleetAgent,
+    )
+  }
+  if (!parsed.matched && first && !query.includes(' ')) {
+    return leadSuggestions
+  }
+  return []
+}
+
+/**
+ * densable Ouu — wrap list navigation. Composed+state/cwd freezes;
+ * composed otherwise lands on non-pinned headers; preview lands on jobs.
+ */
+export function navigateFleetViewByArrow(
+  rows: readonly FleetFlatRow[],
+  focusedIdx: number,
+  delta: -1 | 1,
+  opts: {
+    hasComposedDispatch: boolean
+    byState: boolean
+    dispatchRepoCwd?: string
+    previewOpen: boolean
+  },
+): number {
+  const len = rows.length
+  if (len === 0) return 0
+  if (opts.hasComposedDispatch && (opts.byState || opts.dispatchRepoCwd)) {
+    return focusedIdx
+  }
+  const skip = opts.hasComposedDispatch
+    ? (row: FleetFlatRow | undefined) =>
+        row?.kind !== 'header' || row.group === 'pinned'
+    : opts.previewOpen
+      ? (row: FleetFlatRow | undefined) => row?.kind !== 'job'
+      : null
+  let next = (focusedIdx + delta + len) % len
+  if (skip) {
+    while (next !== focusedIdx && skip(rows[next])) {
+      next = (next + delta + len) % len
+    }
+  }
+  return next
+}
+
+/** densable JIy home/end/pageup/pagedown step (`Math.max(1, termRows-6)`). */
+export function fleetViewPageJump(
+  key: 'home' | 'end' | 'pageup' | 'pagedown',
+  focusedIdx: number,
+  rowCount: number,
+  termRows: number,
+): number {
+  if (rowCount === 0) return 0
+  const page = Math.max(1, termRows - 6)
+  const raw =
+    key === 'home'
+      ? 0
+      : key === 'end'
+        ? rowCount - 1
+        : key === 'pageup'
+          ? focusedIdx - page
+          : focusedIdx + page
+  return Math.max(0, Math.min(rowCount - 1, raw))
+}
+
 export function parseDispatch(
   input: string,
   templates: readonly DispatchMentionTarget[] = [],
@@ -432,26 +915,131 @@ export function formatPastedTextPlaceholder(
 /**
  * Official jye — expand `[Pasted text #N …]` refs using stored paste map.
  */
+/** Official W2v / rR — paste placeholders including Image / Audio. */
+const FLEET_PASTE_REF_RE =
+  /\[(Pasted text|Image|Audio|\.\.\.Truncated text) #(\d+)(?: \+\d+ lines)?(\.)*\]/g
+
+export type FleetPasteRef = {
+  id: number
+  match: string
+  index: number
+  kind: string
+}
+
+export function parseFleetPasteRefs(text: string): FleetPasteRef[] {
+  if (!text) return []
+  return [...text.matchAll(FLEET_PASTE_REF_RE)]
+    .map(r => ({
+      id: parseInt(r[2] || '0', 10),
+      match: r[0],
+      index: r.index ?? 0,
+      kind: r[1] ?? '',
+    }))
+    .filter(r => r.id > 0)
+}
+
+/** Official Ghi — `[Image #N]`. */
+export function formatFleetImagePlaceholder(id: number): string {
+  return `[Image #${id}]`
+}
+
+/**
+ * Official Eet / jye — expand text refs only.
+ * Image/Audio stay as placeholders (wbs rewrites Image to a job-dir path).
+ */
 export function expandPastedTextRefs(
   text: string,
   pastes: Readonly<Record<number, string>>,
 ): string {
   if (!text) return text
-  const re =
-    /\[(Pasted text|Image|Audio|\.\.\.Truncated text) #(\d+)(?: \+\d+ lines)?(\.)*\]/g
-  const matches = [...text.matchAll(re)].filter(m => {
-    const id = parseInt(m[2] || '0', 10)
-    return id > 0 && pastes[id] !== undefined
+  const matches = parseFleetPasteRefs(text).filter(m => {
+    if (m.kind === 'Image' || m.kind === 'Audio') return false
+    return pastes[m.id] !== undefined
   })
   if (matches.length === 0) return text
   let out = text
   for (let i = matches.length - 1; i >= 0; i--) {
     const m = matches[i]!
-    const id = parseInt(m[2]!, 10)
-    const content = pastes[id]
+    const content = pastes[m.id]
     if (content === undefined) continue
-    const index = m.index ?? 0
-    out = out.slice(0, index) + content + out.slice(index + m[0].length)
+    out = out.slice(0, m.index) + content + out.slice(m.index + m.match.length)
+  }
+  return out
+}
+
+/** Official LOs setHint copies. */
+export const FLEET_CLIPBOARD_IMAGE_NOT_FOUND = 'No image found in clipboard'
+export const FLEET_CLIPBOARD_IMAGE_READ_FAILED =
+  "Couldn't read an image from the clipboard"
+
+/**
+ * Official OOs — leftover image-paste chord.
+ * ctrl+v on non-Windows; meta+v on windows|wsl. WSL accepts both.
+ */
+export function isFleetImagePasteKey(
+  input: string,
+  mods: { ctrl?: boolean; meta?: boolean },
+  platform: string,
+): boolean {
+  if (input !== 'v') return false
+  if (mods.ctrl && !mods.meta) return platform !== 'windows'
+  if (mods.meta && !mods.ctrl) {
+    return platform === 'windows' || platform === 'wsl'
+  }
+  return false
+}
+
+export type FleetImagePaste = {
+  type: 'image'
+  content: string
+  mediaType?: string
+}
+
+/** Official wbs leaf: subtype before `;`, alphanumeric only. */
+export function fleetPastedImageExt(mediaType?: string): string {
+  const raw = (mediaType ?? 'image/png').split('/')[1] ?? 'png'
+  const ext = raw.split(';')[0]?.trim() ?? ''
+  return /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'png'
+}
+
+/**
+ * Official wbs — replace `[Image #N]` with `jobs/<short>/pasted-N.ext`.
+ * storageV5 write is official-only; tip uses writeFile encoding:base64.
+ */
+export async function materializeFleetPastedImages(
+  text: string,
+  pastes: Readonly<Record<number, FleetImagePaste | undefined>>,
+  jobDir: string,
+  io?: {
+    mkdir?: (dir: string) => Promise<void>
+    writeBase64?: (file: string, content: string) => Promise<void>
+    join?: (...parts: string[]) => string
+  },
+): Promise<string> {
+  const refs = parseFleetPasteRefs(text).filter(
+    c => pastes[c.id]?.type === 'image',
+  )
+  if (refs.length === 0) return text
+  const joinPath = io?.join ?? join
+  const makeDir =
+    io?.mkdir ??
+    ((dir: string) => mkdir(dir, { recursive: true }).then(() => {}))
+  const write =
+    io?.writeBase64 ??
+    ((file: string, content: string) =>
+      writeFile(file, content, { encoding: 'base64' }))
+  await makeDir(jobDir)
+  let out = text
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i]!
+    const paste = pastes[ref.id]
+    if (!paste) continue
+    const ext = fleetPastedImageExt(paste.mediaType)
+    const name = `pasted-${ref.id}.${ext}`
+    const file = joinPath(jobDir, name)
+    await write(file, paste.content)
+    out =
+      out.slice(0, ref.index) + file + out.slice(ref.index + ref.match.length)
   }
   return out
 }
@@ -699,8 +1287,272 @@ export const FLEET_STATE_GROUP_DESCRIPTIONS: Record<
 
 export type FleetFlatRow =
   | { kind: 'header'; group: string }
-  | { kind: 'job'; session: SessionEntry }
+  | { kind: 'job'; session: SessionEntry; group?: string }
   | { kind: 'fold'; group: string; hidden: number }
+  | { kind: 'earlier'; session: SessionEntry }
+  | { kind: 'newsession' }
+
+/** Official job.origin for Wky — launcher cwd match. */
+export function fleetJobOrigin(session: SessionEntry): string {
+  return session.cwd
+}
+
+/** Official pOs — sortOrder ?? Date.parse(createdAt). */
+export function fleetDirectorySortKey(session: SessionEntry): number {
+  return session.sortOrder ?? session.startedAt
+}
+
+/** Official V0n — stateSortOrder ?? Date.parse(group==="done" ? firstTerminalAt??updatedAt : updatedAt). */
+export function fleetStateSortKey(
+  session: SessionEntry,
+  group: string,
+): number {
+  const state = group.startsWith('state:') ? group.slice(6) : group
+  if (session.stateSortOrder !== undefined) return session.stateSortOrder
+  if (state === 'done') {
+    return session.firstTerminalAt ?? session.updatedAt ?? session.startedAt
+  }
+  return session.updatedAt ?? session.startedAt
+}
+
+export type FleetReorderPatch = {
+  short: string
+  field: 'sortOrder' | 'stateSortOrder'
+  value: number
+}
+
+function fleetJobVisualGroup(
+  rows: readonly FleetFlatRow[],
+  idx: number,
+): string | undefined {
+  const row = rows[idx]
+  if (row?.kind === 'job' && row.group) return row.group
+  if (row?.kind !== 'job') return undefined
+  for (let i = idx; i >= 0; i--) {
+    const prev = rows[i]
+    if (prev?.kind === 'header') return prev.group
+  }
+  return undefined
+}
+
+function fleetJobShort(session: SessionEntry): string {
+  return session.short ?? session.sessionId?.slice(0, 8) ?? ''
+}
+
+/**
+ * Official RqA — swap two daemon jobs in the same visual group.
+ * Do not invent reorderIssued. Skip earlier rows; fold/header is a hard stop.
+ */
+export function planFleetReorder(
+  rows: readonly FleetFlatRow[],
+  focusedIdx: number,
+  direction: -1 | 1,
+  opts: {
+    simpleView: boolean
+    groupMode: 'state' | 'directory' | 'group'
+    pendingIds?: ReadonlySet<string>
+  },
+): { patches: FleetReorderPatch[]; nextFocusedIdx: number } | null {
+  const pending = opts.pendingIds ?? new Set<string>()
+  const p = rows[focusedIdx]
+  if (p?.kind !== 'job') return null
+  let f = focusedIdx + direction
+  while (rows[f]?.kind === 'earlier') f += direction
+  const m = rows[f]
+  if (m?.kind !== 'job') return null
+  const pGroup = fleetJobVisualGroup(rows, focusedIdx)
+  const mGroup = fleetJobVisualGroup(rows, f)
+  if (!pGroup || pGroup !== mGroup) return null
+  const h = p.session
+  const g = m.session
+  const hId = fleetJobShort(h)
+  const gId = fleetJobShort(g)
+  if (!hId || !gId) return null
+  if (pending.has(hId) || pending.has(gId)) return null
+  if (h.backend && h.backend !== 'daemon') return null
+  if (g.backend && g.backend !== 'daemon') return null
+  const pinnedGroup =
+    pGroup === 'pinned' || pGroup === FLEET_SIMPLE_PINNED_GROUP
+  if ((opts.groupMode === 'group' || opts.simpleView) && !pinnedGroup) {
+    return null
+  }
+  const useState = opts.groupMode === 'state' && !pinnedGroup
+  const keyOf = (s: SessionEntry): number =>
+    useState ? fleetStateSortKey(s, pGroup) : fleetDirectorySortKey(s)
+  const S = keyOf(h)
+  const W = keyOf(g)
+  const field: FleetReorderPatch['field'] = useState
+    ? 'stateSortOrder'
+    : 'sortOrder'
+  const order = new Map<string, number>()
+  if (S === W) {
+    let x = 0
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      if (row?.kind !== 'job') continue
+      if (fleetJobVisualGroup(rows, i) !== pGroup) continue
+      const id = fleetJobShort(row.session)
+      if (!id || pending.has(id)) continue
+      order.set(id, x++)
+    }
+    const from = order.get(hId)
+    const to = order.get(gId)
+    if (from === undefined || to === undefined) return null
+    order.set(hId, to)
+    order.set(gId, from)
+  } else {
+    order.set(hId, W)
+    order.set(gId, S)
+  }
+  const patches: FleetReorderPatch[] = []
+  for (const [short, value] of order) {
+    patches.push({ short, field, value })
+  }
+  return { patches, nextFocusedIdx: f }
+}
+
+/**
+ * densable Wky(rows, launcherCwd) — default list focus for grouped view.
+ * Simple view uses 0 (the newsession row) instead.
+ */
+export function fleetHomeIdx(
+  rows: ReadonlyArray<FleetFlatRow>,
+  launcherOrigin: string,
+): number {
+  const second = rows[1]
+  if (
+    second?.kind === 'job' &&
+    fleetJobOrigin(second.session) === launcherOrigin
+  ) {
+    return 1
+  }
+  if (second?.kind === 'earlier') return 1
+  const earlierIdx = rows.findIndex(r => r.kind === 'earlier')
+  return earlierIdx !== -1 && !rows.some(r => r.kind === 'job') ? earlierIdx : 0
+}
+
+/** densable oxy constants (2.1.239). */
+export const FLEET_SIMPLE_PINNED_GROUP = 'simple:pinned' // iAn
+export const FLEET_SIMPLE_FINISHED_GROUP = 'simple:finished' // OXt
+const SIMPLE_Y5A = 172_800_000 // 48h
+const SIMPLE_X5A = 3
+const SIMPLE_J5A = 3
+const SIMPLE_Z5A = 2
+const SIMPLE_Q5A = 2
+const SIMPLE_EVA = 4
+const SIMPLE_TVA = 1
+const SIMPLE_OLU = 4
+
+export type SimpleStatusBand = 'needs' | 'live' | 'done'
+
+/**
+ * densable sAn — simple-view bucket. busy/shell → live; terminal → done;
+ * waiting / waitingFor → needs; else live.
+ */
+export function simpleStatusBand(session: SessionEntry): SimpleStatusBand {
+  const status = session.status
+  if (status === 'busy' || status === 'running' || status === 'shell') {
+    return 'live'
+  }
+  if (
+    status === 'completed' ||
+    status === 'done' ||
+    status === 'failed' ||
+    status === 'killed' ||
+    status === 'stopped' ||
+    status === 'idle'
+  ) {
+    return 'done'
+  }
+  if (status === 'waiting' || session.waitingFor) return 'needs'
+  return 'live'
+}
+
+/** densable Qlu — recency for done sort / age fold. */
+export function simpleJobRecencyMs(session: SessionEntry): number {
+  return session.updatedAt ?? session.startedAt ?? 0
+}
+
+/** densable nVA(termRows, used) = max(0, rows - X5A - olu - used). */
+export function simpleDoneCap(terminalRows: number, usedRows: number): number {
+  return Math.max(0, terminalRows - SIMPLE_X5A - SIMPLE_OLU - usedRows)
+}
+
+export type SimpleModeBuilt = {
+  rows: FleetFlatRow[]
+  needsCount: number
+  liveCount: number
+}
+
+/**
+ * densable oxy — simple FleetView rows.
+ * First row is always + new session. No Working/Completed headers.
+ * Done fold uses capExpanded (`showFinishedEarlier`) as OXt.
+ */
+export function buildSimpleModeFlatRows(input: {
+  sessions: readonly SessionEntry[]
+  now: number
+  terminalRows: number
+  showFinishedEarlier: boolean
+}): SimpleModeBuilt {
+  const pinned: SessionEntry[] = []
+  const needs: SessionEntry[] = []
+  const live: SessionEntry[] = []
+  const done: SessionEntry[] = []
+  let needsCount = 0
+  let liveCount = 0
+  for (const session of input.sessions) {
+    const band = simpleStatusBand(session)
+    if (band === 'needs') needsCount++
+    else if (band === 'live') liveCount++
+    if (session.pinned) {
+      pinned.push(session)
+      continue
+    }
+    switch (band) {
+      case 'needs':
+        needs.push(session)
+        break
+      case 'live':
+        live.push(session)
+        break
+      case 'done':
+        done.push(session)
+        break
+    }
+  }
+  done.sort((a, b) => simpleJobRecencyMs(b) - simpleJobRecencyMs(a))
+
+  const rows: FleetFlatRow[] = [{ kind: 'newsession' }]
+  const pushJobs = (items: readonly SessionEntry[], group: string): void => {
+    for (const session of items) rows.push({ kind: 'job', session, group })
+  }
+  pushJobs(pinned, FLEET_SIMPLE_PINNED_GROUP)
+  pushJobs(needs, 'simple:needs')
+  pushJobs(live, 'simple:live')
+
+  const usedRows =
+    1 +
+    (live.length * SIMPLE_Z5A + (pinned.length + needs.length) * SIMPLE_J5A) +
+    (needsCount + liveCount === 0 ? SIMPLE_EVA : 0) +
+    (done.length > 0 ? 1 + SIMPLE_TVA : 0)
+  const doneCap = simpleDoneCap(input.terminalRows, usedRows)
+  const olderThanFold = done.filter(
+    s => input.now - simpleJobRecencyMs(s) > SIMPLE_Y5A,
+  ).length
+  const overflow = Math.max(0, done.length - olderThanFold - doneCap)
+  const hideRaw = input.showFinishedEarlier ? 0 : olderThanFold + overflow
+  const hidden = hideRaw >= SIMPLE_Q5A ? hideRaw : 0
+  pushJobs(done.slice(0, done.length - hidden), 'simple:done')
+  if (hidden > 0) {
+    rows.push({
+      kind: 'fold',
+      group: FLEET_SIMPLE_FINISHED_GROUP,
+      hidden,
+    })
+  }
+  return { rows, needsCount, liveCount }
+}
 
 /**
  * Build selectable flat rows for state-mode FleetView.
@@ -741,7 +1593,7 @@ export function buildStateModeFlatRows(input: {
     ) {
       const cap = Math.max(0, input.doneCap)
       for (const session of items.slice(0, cap)) {
-        rows.push({ kind: 'job', session })
+        rows.push({ kind: 'job', session, group: 'state:done' })
       }
       rows.push({
         kind: 'fold',
@@ -749,8 +1601,9 @@ export function buildStateModeFlatRows(input: {
         hidden: items.length - cap,
       })
     } else {
+      const jobGroup = group === 'pinned' ? 'pinned' : `state:${group}`
       for (const session of items) {
-        rows.push({ kind: 'job', session })
+        rows.push({ kind: 'job', session, group: jobGroup })
       }
     }
   }
@@ -771,7 +1624,7 @@ export function buildDirectoryModeFlatRows(input: {
     rows.push({ kind: 'header', group })
     if (input.foldedGroups.has(group)) continue
     for (const session of items) {
-      rows.push({ kind: 'job', session })
+      rows.push({ kind: 'job', session, group })
     }
   }
   return rows
@@ -794,7 +1647,7 @@ export function buildCustomGroupModeFlatRows(input: {
     rows.push({ kind: 'header', group })
     if (input.foldedGroups.has(group)) continue
     for (const session of items) {
-      rows.push({ kind: 'job', session })
+      rows.push({ kind: 'job', session, group })
     }
   }
   const earlier = input.earlier ?? []
@@ -802,7 +1655,7 @@ export function buildCustomGroupModeFlatRows(input: {
     rows.push({ kind: 'header', group: 'earlier' })
     if (!input.foldedGroups.has('earlier') && input.earlierExpanded) {
       for (const session of earlier) {
-        rows.push({ kind: 'job', session })
+        rows.push({ kind: 'earlier', session })
       }
     } else if (!input.foldedGroups.has('earlier') && !input.earlierExpanded) {
       rows.push({ kind: 'fold', group: 'earlier', hidden: earlier.length })
@@ -822,7 +1675,7 @@ export function buildFleetFooterHints(input: {
   ungroupPending: boolean
   /** densable cy.justKilled — first X stopped the worker. */
   justKilled?: boolean
-  rowKind?: 'header' | 'job' | 'fold'
+  rowKind?: FleetFlatRow['kind']
   band?: StatusBand
   canPin: boolean
   canGroup: boolean
@@ -895,6 +1748,9 @@ export function buildFleetFooterHints(input: {
     parts.push('enter to show')
   } else if (input.rowKind === 'header') {
     parts.push('enter to fold')
+  } else if (input.rowKind === 'newsession') {
+    // densable Wcu idle: `${arrowRight} or enter to start`
+    parts.push('\u2192 or enter to start')
   } else {
     parts.push('enter to open')
     if (input.band === 'blocked') parts.push('space to reply')

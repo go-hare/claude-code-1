@@ -45,6 +45,12 @@ export interface SessionEntry {
   archived?: boolean
   /** Manual sort order override (lower = higher) */
   sortOrder?: number
+  /** densable V0n — state-mode unpinned order (not directory pOs). */
+  stateSortOrder?: number
+  /** densable firstTerminalAt — V0n fallback when group==="done". */
+  firstTerminalAt?: number
+  /** densable job.state.backend — RqA only swaps daemon rows. */
+  backend?: 'daemon' | 'peer'
 }
 
 export interface BgStartOptions {

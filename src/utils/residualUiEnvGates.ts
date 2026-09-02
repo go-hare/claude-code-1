@@ -18,6 +18,22 @@ export function isAgentViewDisabled(
 }
 
 /**
+ * densable cHy `h` — simple FleetView (`oxy`).
+ * Gold: `V.CLAUDE_CODE_FLEETVIEW_SIMPLE || it("tengu_fleetview_simple", false)`.
+ * Default OFF: grouped `zky` (Working / Completed headers). Do not invent
+ * always-on simple, and do not insert newsession into zky.
+ */
+export function isFleetSimpleViewEnabled(input?: {
+  env?: NodeJS.ProcessEnv
+  gbValue?: boolean
+}): boolean {
+  const env = input?.env ?? process.env
+  if (isEnvTruthy(env.CLAUDE_CODE_FLEETVIEW_SIMPLE)) return true
+  if (input?.gbValue !== undefined) return input.gbValue
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_fleetview_simple', false)
+}
+
+/**
  * Official oUn densable — human-readable agent-view disable reason, or null.
  */
 export function getAgentViewDisabledReason(
@@ -41,9 +57,11 @@ export function isAlternateScreenDisabled(
 
 /**
  * densable main-screen sticky compositor (Axc / xxc) opt-in.
- * When set with fullscreen ON, tip skips `<AlternateScreen>` and mounts
- * `AxcFrameSinkBridge` so Ink.frameSink drives Axc (Project C / 236 #9).
- * Default OFF — tip fullscreen remains alt-screen until product-defaulted.
+ * Gold Tyn: Vs() (alt fullscreen) returns first; Qvt() is the sibling AFTER.
+ * When CLAUDE_CODE_AXC_STICKY_MAIN is set AND fullscreen is OFF, REPL wraps
+ * with MainScreenShell and FullscreenLayout takes the gold Qvt arm
+ * (`AxcStickyHost` / `xxc`). Default OFF — Qvt() body is not in the 239 dump;
+ * do not product-default.
  */
 export function isAxcStickyMainEnabled(
   env: NodeJS.ProcessEnv = process.env,

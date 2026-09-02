@@ -21,15 +21,29 @@ import {
   describeOwnSession,
   formatOwnSessionListing,
 } from '../SendMessageTool/ownSession.js'
+import { basename } from 'path'
 import {
+  buildListingCandidateMap,
   callerTeammateIdFromContext,
+  formatCappedSection,
+  formatListingAge,
+  formatListingRow,
+  formatSubagentsSection,
   formatTeammatesSection,
+  isAddressableListingName,
+  listSubagentsForListing,
   listTeammatesForListing,
-  teammateCandidatesFromRows,
+  sanitizeListingName,
+  sanitizeTeammateLabel,
+  type ListingCandidate,
 } from './teammatesListing.js'
 
 /** densable yWp */
 const LIST_AGENTS_MAX_RESULT_CHARS = 10_000
+
+/** densable V1w machine-empty copy when self is listed and no peers. */
+const NO_OTHER_SESSION_ON_MACHINE =
+  'No reachable agents \u2014 no other Claude session is running on this machine right now (peer messaging itself is available; a session appears here once it is started).'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -64,6 +78,11 @@ type PeerInfo = {
   status?: string
   /** Official D5v / xSf — cloud session cannot reach this elevated RC peer. */
   unreachableFromHere?: boolean
+  /** densable Q1w — UDS sock / cloud|bridge id for GCe `session\x00` keys. */
+  listingId?: string
+  listingKind?: string
+  startedAt?: number
+  tmux?: string
 }
 
 /** densable m5b — model-facing listing string. */
@@ -80,11 +99,72 @@ function resolvePeerStatusLabel(p: PeerInfo): string | undefined {
   return undefined
 }
 
+const TMUX_LABEL_RE = /^[^\s/\\\p{Cc}\p{Cf}]{1,64}$/u
+
+function listingKey(kind: string, id: string): string {
+  return `${kind}\x00${id}`
+}
+
+function peerCandidateKind(
+  p: PeerInfo,
+): 'session' | 'cloud-session' | 'bridge-session' {
+  if (p.transport === 'cloud') return 'cloud-session'
+  if (p.transport === 'bridge') return 'bridge-session'
+  return 'session'
+}
+
+function peerListingId(p: PeerInfo): string {
+  return p.listingId ?? p.address
+}
+
+function formatPeerLead(
+  p: PeerInfo,
+  candidates: Map<string, ListingCandidate> | undefined,
+): string {
+  const kind = peerCandidateKind(p)
+  const cand = candidates?.get(listingKey(kind, peerListingId(p)))
+  if (cand) return `${cand.name} [${cand.ref}]`
+  const fallback =
+    sanitizeTeammateLabel(p.name) ??
+    (p.cwd ? sanitizeTeammateLabel(basename(p.cwd)) : null) ??
+    '(untitled)'
+  return fallback
+}
+
+function formatQ1wPeerRow(
+  p: PeerInfo,
+  candidates: Map<string, ListingCandidate> | undefined,
+  now: number,
+): string {
+  if (p.transport === 'cloud') {
+    return formatListingRow(formatPeerLead(p, candidates), [
+      'cloud session',
+      p.unreachableFromHere ? CLOUD_PEER_UNREACHABLE_FROM_HERE : undefined,
+    ])
+  }
+  if (p.transport === 'bridge') {
+    return formatListingRow(formatPeerLead(p, candidates), [
+      resolvePeerStatusLabel(p),
+    ])
+  }
+  const tmux =
+    p.tmux !== undefined && TMUX_LABEL_RE.test(p.tmux) && !p.tmux.includes('@')
+      ? `tmux ${p.tmux}`
+      : undefined
+  const started =
+    typeof p.startedAt === 'number' && Number.isFinite(p.startedAt)
+      ? `started ${formatListingAge(now - p.startedAt)} ago`
+      : undefined
+  return formatListingRow(formatPeerLead(p, candidates), [
+    p.listingKind,
+    resolvePeerStatusLabel(p),
+    tmux,
+    started,
+  ])
+}
+
 /**
- * densable 2.1.225 listing — every row leads with `name [ref]`.
- * densable 2.1.229 — append offline/cloud when known.
- * densable 2.1.234 #34 — append CSf / cloud-failed / account-incomplete notes.
- * Local peers still use address as the ref token when distinct from name.
+ * densable V1w / Q1w listing — Eao rows + G1w / Z1w / J1w sections.
  */
 function formatPeersListing(
   peers: PeerInfo[],
@@ -96,6 +176,10 @@ function formatPeersListing(
     selfHeader?: string | null
     /** densable Z1w — Teammates (n): section */
     teammatesSection?: string | null
+    /** densable J1w — Subagents (n): section */
+    subagentsSection?: string | null
+    candidates?: Map<string, ListingCandidate>
+    now?: number
   },
 ): string {
   const notes = listAgentsIncompleteNotes({
@@ -106,43 +190,34 @@ function formatPeersListing(
   const teammatesSection = opts?.teammatesSection?.trim()
     ? opts.teammatesSection
     : null
+  const subagentsSection = opts?.subagentsSection?.trim()
+    ? opts.subagentsSection
+    : null
+  const hosted = Boolean(teammatesSection || subagentsSection)
 
   let peerBody: string | null
   if (peers.length === 0) {
-    // densable V1w: teammates-only listing does not append "No agents found."
-    if (teammatesSection && notes.length === 0) {
+    // densable V1w / Q1w: teammates/subagents-only or notes-only omit the empty banner.
+    if (hosted && notes.length === 0) {
       peerBody = null
-    } else if (teammatesSection) {
-      // densable Q1w empty-rows: keep indent on every note
+    } else if (notes.length > 0) {
       peerBody = notes.map(n => `  ${n}`).join('\n')
+    } else if (opts?.selfHeader) {
+      peerBody = NO_OTHER_SESSION_ON_MACHINE
     } else {
-      peerBody =
-        notes.length === 0
-          ? 'No agents found.'
-          : `No agents found.\n${notes.map(n => `  ${n}`).join('\n')}`
+      peerBody = 'No reachable agents.'
     }
   } else {
-    const lines = peers.map(p => {
-      const name = p.name?.trim() || p.address
-      const ref = p.address
-      const bits = [`${name} [${ref}]`]
-      const status = resolvePeerStatusLabel(p)
-      if (status) bits.push(status)
-      if (p.cwd) bits.push(`@ ${p.cwd}`)
-      if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
-      if (p.unreachableFromHere) {
-        bits.push(CLOUD_PEER_UNREACHABLE_FROM_HERE)
-      }
-      return bits.join(' ')
-    })
-    peerBody = `Found ${lines.length} agent(s):\n${lines.join('\n')}`
+    const now = opts?.now ?? Date.now()
+    const rows = peers.map(p => formatQ1wPeerRow(p, opts?.candidates, now))
+    peerBody = formatCappedSection('Peer sessions', rows)
     if (notes.length > 0) {
       peerBody += `\n${notes.map(n => `  ${n}`).join('\n')}`
     }
   }
 
-  const sections = [teammatesSection, peerBody].filter((s): s is string =>
-    Boolean(s),
+  const sections = [subagentsSection, teammatesSection, peerBody].filter(
+    (s): s is string => Boolean(s),
   )
   const body = sections.join('\n\n')
   if (opts?.selfHeader) {
@@ -252,6 +327,9 @@ export const ListAgentsTool = buildTool({
         transport: 'uds',
         // densable-ish: dead registry entries surface as offline
         connected: peer.alive !== false,
+        listingId: peer.messagingSocketPath,
+        listingKind: peer.kind,
+        startedAt: peer.startedAt,
       })
     }
 
@@ -266,6 +344,9 @@ export const ListAgentsTool = buildTool({
           (peer.address.startsWith('bridge:') ? 'bridge' : undefined),
         connected: peer.connected,
         status: peer.status,
+        listingId: peer.address.startsWith('bridge:')
+          ? peer.address.slice('bridge:'.length)
+          : peer.address,
       })
     }
 
@@ -284,6 +365,7 @@ export const ListAgentsTool = buildTool({
         transport: 'bridge',
         connected: row.connected,
         status: row.connected === false ? 'offline' : row.status,
+        listingId: row.id,
       })
     }
 
@@ -297,6 +379,7 @@ export const ListAgentsTool = buildTool({
         transport: 'cloud',
         connected: true,
         status: 'cloud',
+        listingId: row.id,
         ...(row.unreachableFromHere ? { unreachableFromHere: true } : {}),
       })
     }
@@ -328,10 +411,9 @@ export const ListAgentsTool = buildTool({
       }),
     )
 
-    // densable SRl / OHm / Z1w — live teammates section
-    // leftover: official reads e.teammateContext / e.agentContext on the tool
-    // context; tip maps ALS + context.agentId. Hy is teamContext.teamName only.
+    // densable SRl / OHm / Z1w / MHm / J1w / GCe — live listing
     let teammatesSection: string | null = null
+    let subagentsSection: string | null = null
     const appState = context.getAppState()
     const teamName = appState.teamContext?.teamName
     const teamFile = teamName ? await readTeamFileAsync(teamName) : null
@@ -344,11 +426,40 @@ export const ListAgentsTool = buildTool({
       teamFile,
       callerTeammateId,
     )
+    const subagentRows = listSubagentsForListing(appState)
+    const candidateEntries = [
+      ...teammateRows.flatMap(row => {
+        if (row.nameShadowed !== false) return []
+        const name = sanitizeListingName(row.name)
+        if (name === null || !isAddressableListingName(name)) return []
+        return [{ kind: 'teammate' as const, id: row.teammateId, name }]
+      }),
+      ...subagentRows.flatMap(row => {
+        if (!row.name) return []
+        const name = sanitizeListingName(row.name)
+        if (name === null || !isAddressableListingName(name)) return []
+        return [{ kind: 'subagent' as const, id: row.agentId, name }]
+      }),
+      ...peers.flatMap(peer => {
+        const name =
+          sanitizeListingName(peer.name) ??
+          (peer.cwd ? sanitizeListingName(basename(peer.cwd)) : null)
+        if (name === null || !isAddressableListingName(name)) return []
+        return [
+          {
+            kind: peerCandidateKind(peer),
+            id: peerListingId(peer),
+            name,
+          },
+        ]
+      }),
+    ]
+    const candidates = buildListingCandidateMap(candidateEntries)
     if (teammateRows.length > 0) {
-      teammatesSection = formatTeammatesSection(
-        teammateRows,
-        teammateCandidatesFromRows(teammateRows),
-      )
+      teammatesSection = formatTeammatesSection(teammateRows, candidates)
+    }
+    if (subagentRows.length > 0) {
+      subagentsSection = formatSubagentsSection(subagentRows, candidates)
     }
 
     return {
@@ -359,6 +470,8 @@ export const ListAgentsTool = buildTool({
           bridgeWalkIncomplete,
           selfHeader: formatOwnSessionListing(self),
           teammatesSection,
+          subagentsSection,
+          candidates,
         }),
       },
     }

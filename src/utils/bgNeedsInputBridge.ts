@@ -110,13 +110,18 @@ export const MCP_URL_ELICITATION_NEEDS = 'MCP input: open link'
 
 /**
  * densable UIb — top-level dialog kind → needs text (msf dialog source).
- * Keys match printRequestDialog / userDialog kind registry.
+ * Keys match 239 SEA contiguous table (no goal_proposal — Dot is waitingFor/Usu only).
  */
 export const DIALOG_NEEDS_BY_KIND: Readonly<Record<string, string>> = {
   refusal_fallback_prompt: 'choose: retry on fallback model or edit prompt',
   fable_overage_consent_prompt:
     'choose: continue Fable 5 on usage credits or switch models',
   mcp_url_elicitation: MCP_URL_ELICITATION_NEEDS,
+  // densable UIb soft / notice dialogs (236 SEA contiguous table)
+  cost_threshold: 'acknowledge: $5 session cost notice',
+  resume_return: 'choose: resume from summary or full session',
+  auto_default_nudge: 'choose: make auto mode the default permission mode',
+  ide_onboarding: 'dismiss: IDE welcome',
 }
 
 /** densable Eqo→UIb emit for dialog slot. Pass null/unknown kind to clear. */

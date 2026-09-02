@@ -95,12 +95,20 @@ describe('getEffectivePermissionMode (snt)', () => {
     ).toBe('auto')
   })
 
-  test('plan+bypass-available is elevated', () => {
+  test('plan is elevated only when prePlanMode is bypass', () => {
     const tool = { mcpInfo: { serverName: 'acme' } }
     expect(
       getEffectivePermissionMode(tool, {
         mode: 'plan',
         isBypassPermissionsModeAvailable: true,
+        mcpPermissionModeOverrides: { acme: 'default' },
+      }),
+    ).toBe('plan')
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'plan',
+        isBypassPermissionsModeAvailable: true,
+        prePlanMode: 'bypassPermissions',
         mcpPermissionModeOverrides: { acme: 'default' },
       }),
     ).toBe('default')

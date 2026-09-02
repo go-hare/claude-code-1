@@ -30,6 +30,7 @@ import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js'
 import {
   getLeaderToolUseConfirmQueue,
   pushLeaderToolUseConfirm,
+  removeLeaderToolUseConfirm,
 } from '../utils/swarm/leaderPermissionBridge.js'
 import {
   sendPermissionResponseViaMailbox,
@@ -320,6 +321,7 @@ export function useInboxPoller({
             },
             onAbort() {
               // densable BQo: await soft-fail — log if worker never gets response
+              removeLeaderToolUseConfirm(parsed.tool_use_id)
               void sendPermissionResponseViaMailbox(
                 parsed.agent_id,
                 { decision: 'rejected', resolvedBy: 'leader' },
@@ -337,6 +339,7 @@ export function useInboxPoller({
               updatedInput: Record<string, unknown>,
               permissionUpdates: PermissionUpdate[],
             ) {
+              removeLeaderToolUseConfirm(parsed.tool_use_id)
               void sendPermissionResponseViaMailbox(
                 parsed.agent_id,
                 {
@@ -356,6 +359,7 @@ export function useInboxPoller({
               })
             },
             onReject(feedback?: string) {
+              removeLeaderToolUseConfirm(parsed.tool_use_id)
               void sendPermissionResponseViaMailbox(
                 parsed.agent_id,
                 {
@@ -453,6 +457,7 @@ export function useInboxPoller({
         const decision = resolveSandboxNetworkAskDecision(
           ctx.mode,
           ctx.isBypassPermissionsModeAvailable,
+          ctx.prePlanMode,
         )
         const mode = ctx.mode
         switch (decision) {

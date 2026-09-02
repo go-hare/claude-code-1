@@ -621,11 +621,22 @@ export async function* withRetry<T>(
         gcpAuthRetryCount++
       }
 
-      // AWS/GCP errors aren't always APIError, but can be retried
+      // AWS/GCP errors aren't always APIError, but can be retried.
+      // leftover 239: !(Aew||Tew||kew) && (!Os || !Cew) → CannotRetry.
       const handledCloudAuthError =
         handleAwsCredentialError(error) || handleGcpCredentialError(error)
+      let handledWifAuthError = false
+      try {
+        const { invalidateOidcFederationCacheOnRetry } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/anthropicOidc.js') as typeof import('../../utils/anthropicOidc.js')
+        handledWifAuthError = await invalidateOidcFederationCacheOnRetry(error)
+      } catch {
+        handledWifAuthError = false
+      }
       if (
         !handledCloudAuthError &&
+        !handledWifAuthError &&
         (!(error instanceof APIError) || !shouldRetry(error))
       ) {
         throw new CannotRetryError(error, retryContext)
@@ -1075,7 +1086,11 @@ function isNonRetryableCreditsRequired(error: APIError): boolean {
   return reason !== 'fetch_error' && reason !== 'org_level_disabled_until'
 }
 
-function shouldRetry(error: APIError): boolean {
+/**
+ * densable 2.1.239 Cew. Exported so #44 En_ (400 policy_blocked +
+ * x-should-retry:false) can be locked without inventing a second retry gate.
+ */
+export function shouldRetry(error: APIError): boolean {
   // Never retry mock errors - they're from /mock-limits command for testing
   if (isMockRateLimitError(error)) {
     return false

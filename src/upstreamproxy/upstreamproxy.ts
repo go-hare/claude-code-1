@@ -26,41 +26,17 @@ import { registerCleanup } from '../utils/cleanupRegistry.js'
 import { logForDebugging } from '../utils/debug.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { isENOENT } from '../utils/errors.js'
+import { NO_PROXY_EMBEDDED } from '../utils/agentProxy/noProxy.js'
 import { startUpstreamProxyRelay } from './relay.js'
 
 export const SESSION_TOKEN_PATH = '/run/ccr/session_token'
 const SYSTEM_CA_BUNDLE = '/etc/ssl/certs/ca-certificates.crt'
 
-// Hosts the proxy must NOT intercept. Covers loopback, RFC1918, the IMDS
-// range, and the package registries + GitHub that CCR containers already
-// reach directly. Mirrors airlock/scripts/sandbox-shell-ccr.sh.
-const NO_PROXY_LIST = [
-  'localhost',
-  '127.0.0.1',
-  '::1',
-  '169.254.0.0/16',
-  '10.0.0.0/8',
-  '172.16.0.0/12',
-  '192.168.0.0/16',
-  // Anthropic API: no upstream route will ever match, and the MITM breaks
-  // non-Bun runtimes (Python httpx/certifi doesn't trust the forged CA).
-  // Three forms because NO_PROXY parsing differs across runtimes:
-  //   *.anthropic.com  — Bun, curl, Go (glob match)
-  //   .anthropic.com   — Python urllib/httpx (suffix match, strips leading dot)
-  //   anthropic.com    — apex domain fallback
-  'anthropic.com',
-  '.anthropic.com',
-  '*.anthropic.com',
-  'github.com',
-  'api.github.com',
-  '*.github.com',
-  '*.githubusercontent.com',
-  'registry.npmjs.org',
-  'pypi.org',
-  'files.pythonhosted.org',
-  'index.crates.io',
-  'proxy.golang.org',
-].join(',')
+/**
+ * densable 2.1.239 G1s (embedded). Only API anthropic hosts bypass the
+ * session proxy — www / docs / apex go through (#56).
+ */
+const NO_PROXY_LIST = NO_PROXY_EMBEDDED
 
 type UpstreamProxyState = {
   enabled: boolean

@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, sep } from 'path'
+import { basename, dirname, isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -19,6 +19,7 @@ import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { isPerforceModeEnabled } from 'src/utils/perforceMode.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { getFileModificationTime, writeTextContent } from 'src/utils/file.js'
 import {
@@ -94,9 +95,54 @@ const outputSchema = lazySchema(() =>
         'The original file content before the write (null for new files)',
       ),
     gitDiff: gitDiffSchema().optional(),
+    userModified: z
+      .boolean()
+      .optional()
+      .describe('Whether the user modified the proposed content'),
+    memdirStamped: z
+      .boolean()
+      .optional()
+      .describe('Whether auto-memory stamping rewrote the content'),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
+
+/** densable 2.1.239 — subagent REPORT/SUMMARY/FINDINGS/ANALYSIS.md gate. */
+const SUBAGENT_REPORT_NAME = /^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$/i
+const SUBAGENT_REPORT_BLOCKED =
+  'Subagents should return findings as text, not write report files. Include this content in your final response instead.'
+
+const USER_MODIFIED_NOTE =
+  ' The user modified your proposed content before accepting it.'
+
+/** densable mNr — Perforce unopened read-only copy. */
+const PERFORCE_UNOPENED_READONLY =
+  'File is read-only — it has not been opened for edit in Perforce. Run `p4 edit <file>` to check it out, then retry. Do not chmod the file writable; that bypasses Perforce tracking.'
+
+/** densable hNr(mode) — CLAUDE_CODE_PERFORCE_MODE && (mode & 128) === 0 */
+function isPerforceUnopenedReadOnly(mode: number): boolean {
+  return isPerforceModeEnabled() && (mode & 128) === 0
+}
+
+/**
+ * Local safety (not densable): directory / FIFO must not reach call().
+ * Raw EISDIR after shouldSkipWriteUnreadGate lets the model try to delete
+ * the directory. errorCode 10 matches FileRead/FileEdit directory rejects;
+ * do not reuse 5 (subagent report) or 6 (Perforce). FIFO is detected via
+ * mode bits so the densable 239 source lock stays intact.
+ */
+const STAT_FILE_TYPE_MASK = 0o170000
+const STAT_FIFO_TYPE = 0o010000
+
+function isExistingDirectoryOrFifo(fileStat: {
+  mode: number
+  isDirectory: () => boolean
+}): boolean {
+  return (
+    fileStat.isDirectory() ||
+    (fileStat.mode & STAT_FILE_TYPE_MASK) === STAT_FIFO_TYPE
+  )
+}
 
 export type Output = z.infer<OutputSchema>
 export type FileWriteToolInput = InputSchema
@@ -131,6 +177,19 @@ export const FileWriteTool = buildTool({
   },
   getPath(input): string {
     return input.file_path
+  },
+  inputsEquivalent(a, b) {
+    if (a.file_path !== b.file_path) return false
+    if (a.content === b.content) return true
+    return a.content.replace(/\n+$/, '') === b.content.replace(/\n+$/, '')
+  },
+  stripForStorage(output) {
+    if (typeof output !== 'object' || output === null) return output
+    if (output.type !== 'update') return output
+    if (output.content === '' && (output.originalFile ?? '') === '') {
+      return output
+    }
+    return { ...output, content: '', originalFile: null }
   },
   backfillObservableInput(input) {
     // hooks.mdx documents file_path as absolute; expand so hook allowlists
@@ -171,6 +230,21 @@ export const FileWriteTool = buildTool({
     })
     if (isolationBlock) {
       return { result: false, message: isolationBlock, errorCode: 7 }
+    }
+
+    // densable 2.1.239: subagent must return findings as text, not report.md
+    if (
+      toolUseContext.agentId &&
+      SUBAGENT_REPORT_NAME.test(basename(fullFilePath))
+    ) {
+      logEvent('tengu_subagent_md_report_blocked', {
+        contentBytes: Buffer.byteLength(content),
+      })
+      return {
+        result: false,
+        message: SUBAGENT_REPORT_BLOCKED,
+        errorCode: 5,
+      }
     }
 
     // Reject writes to team memory files that contain secrets
@@ -219,15 +293,23 @@ export const FileWriteTool = buildTool({
     let fileMtimeMs: number
     try {
       const fileStat = await fs.stat(fullFilePath)
-      // 预检：如果路径已是一个存在的目录，及时拒绝并给出指引
-      // 避免 AI 模型传入目录路径（如 my-docs/analysis/api/）后，
-      // Write 工具先 mkdir 再写文件时抛出原始 EISDIR 错误，
-      // 导致模型不知如何处理、可能误删目录内容。
-      if (fileStat.isDirectory()) {
+      // densable hNr(d.mode) → errorCode 6 + mNr.
+      if (isPerforceUnopenedReadOnly(fileStat.mode)) {
         return {
           result: false,
-          message: `Cannot write to '${file_path}': the specified path is an existing directory. To write a file inside this directory, use a path that includes a filename with extension, e.g. '${file_path}/<filename>.md'. Use Bash ls to list existing files in this directory.`,
-          errorCode: 5,
+          message: PERFORCE_UNOPENED_READONLY,
+          errorCode: 6,
+        }
+      }
+      // Local: refuse directory/FIFO with a filename hint (errorCode 10).
+      if (isExistingDirectoryOrFifo(fileStat)) {
+        const kind = fileStat.isDirectory()
+          ? 'an existing directory'
+          : 'a FIFO or pipe, not a regular file'
+        return {
+          result: false,
+          message: `Cannot write '${file_path}': the specified path is ${kind}. Specify a path that includes a filename.`,
+          errorCode: 10,
         }
       }
       fileMtimeMs = fileStat.mtimeMs
@@ -311,8 +393,12 @@ export const FileWriteTool = buildTool({
     _,
     parentMessage,
   ) {
-    const { readFileState, updateFileHistoryState, dynamicSkillDirTriggers } =
-      toolUseContext
+    const {
+      readFileState,
+      updateFileHistoryState,
+      dynamicSkillDirTriggers,
+      userModified,
+    } = toolUseContext
     const fullFilePath = expandPath(file_path)
     const dir = dirname(fullFilePath)
 
@@ -396,6 +482,7 @@ export const FileWriteTool = buildTool({
     // densable Zto: stamp auto-memory .md with originSessionId + ISO modified
     // before disk (preserves inline # via quoteLossyValues / hRg).
     const contentToWrite = stampNewMemoryContent(fullFilePath, content)
+    const memdirStamped = contentToWrite !== content
 
     // Write is a full content replacement — the model sent explicit line endings
     // in `content` and meant them. Do not rewrite them. Previously we preserved
@@ -487,6 +574,8 @@ export const FileWriteTool = buildTool({
         content: contentToWrite,
         structuredPatch: patch,
         originalFile: oldContent,
+        userModified: userModified ?? false,
+        memdirStamped,
         ...(gitDiff && { gitDiff }),
       }
       // Track lines added and removed for file updates, right before yielding result
@@ -510,6 +599,8 @@ export const FileWriteTool = buildTool({
       content: contentToWrite,
       structuredPatch: [],
       originalFile: null,
+      userModified: userModified ?? false,
+      memdirStamped,
       ...(gitDiff && { gitDiff }),
     }
 
@@ -527,19 +618,23 @@ export const FileWriteTool = buildTool({
       data,
     }
   },
-  mapToolResultToToolResultBlockParam({ filePath, type }, toolUseID) {
+  mapToolResultToToolResultBlockParam(
+    { filePath, type, userModified },
+    toolUseID,
+  ) {
+    const modifiedNote = userModified ? USER_MODIFIED_NOTE : ''
     switch (type) {
       case 'create':
         return {
           tool_use_id: toolUseID,
           type: 'tool_result',
-          content: `File created successfully at: ${filePath}`,
+          content: `File created successfully at: ${filePath}${modifiedNote}`,
         }
       case 'update':
         return {
           tool_use_id: toolUseID,
           type: 'tool_result',
-          content: `The file ${filePath} has been updated successfully.`,
+          content: `The file ${filePath} has been updated successfully.${modifiedNote}`,
         }
     }
   },

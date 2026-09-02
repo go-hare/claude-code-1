@@ -252,7 +252,7 @@ Based on your findings, fix it.
 
 Swarm 的核心是团队，而不是一次 `Agent` 调用。`TeamCreate` 建 team，`Agent({ name })` 加 teammate，`TaskCreate/Update/List/Get` 提供任务白板，`SendMessage` 和 mailbox 提供通信与控制。
 
-当前实现默认启用 Agent Teams；设置 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED` 才会关闭。
+官方 `xd` 默认关闭 Agent Teams。需要 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 或启动带 `--agent-teams`，再过 GrowthBook `tengu_amber_flint`（默认 true）。
 
 ### 团队生命周期
 
@@ -590,7 +590,7 @@ pane-based team 主要通过 footer TeamStatus 和 TeamsDialog 管理：Enter �
 | 误区 | 正确理解 |
 |---|---|
 | Coordinator 就是 Swarm 的 Team Lead | 不是。Coordinator worker 是 async subagent，不是 teammate。 |
-| Swarm 必须设置 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` | 当前实现默认启用；用 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED` 关闭。 |
+| Swarm 必须设置 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` | 对。官方 `xd` 默认关；`--agent-teams` 等价 opt-in。`tengu_amber_flint` 是 kill switch（默认 true）。 |
 | `TaskCreate` 创建了一个运行中的 agent | 它只创建 work item JSON；运行体是 `LocalAgentTask` / `InProcessTeammateTask` 等。 |
 | teammate 完成一轮后结果自动给 lead | 不一定。teammate 需要通过 `SendMessage` 沟通；runner 也会发送 idle notification。 |
 | mailbox 按 agentId 寻址 | Swarm mailbox 按 teammate name 寻址。 |

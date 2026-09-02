@@ -238,6 +238,13 @@ export type ToolUseContext = {
     activeMcpTool?: string
   }
   abortController: AbortController
+  /**
+   * densable shouldStopBeforeNextApiCall — when true at the top of a main-thread
+   * query iteration (before the next API request), query returns
+   * `{ reason: 'background_requested' }` so left-arrow defer-then-fork can
+   * finish the turn without starting another model call (Ki armed).
+   */
+  shouldStopBeforeNextApiCall?: () => boolean
   activeTaskExecutionContext?: ActiveTaskExecutionContext
   readFileState: FileStateCache
   getAppState(): AppState
@@ -880,7 +887,12 @@ export type Tool<
    * click-to-expand in fullscreen — only messages where verbose actually
    * shows more get a hover/click affordance. Unset means never truncated.
    */
-  isResultTruncated?(output: Output): boolean
+  isResultTruncated?(output: Output, options?: { columns?: number }): boolean
+  /**
+   * densable Write stripForStorage — drop bulky update body from session
+   * persistence. Omit or return input unchanged when nothing to strip.
+   */
+  stripForStorage?(output: Output): Output
   /**
    * Renders an optional tag to display after the tool use message.
    * Used for additional metadata like timeout, model, resume ID, etc.

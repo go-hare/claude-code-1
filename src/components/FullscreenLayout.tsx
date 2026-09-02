@@ -16,12 +16,10 @@ import { ModalContext } from '../context/modalContext.js';
 import { PromptOverlayProvider, usePromptOverlay, usePromptOverlayDialog } from '../context/promptOverlayContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import {
-  AxcFrameSinkBridge,
   AxcScrollAnchor,
+  AxcStickyHost,
   Box,
   Divider,
-  type DOMElement,
-  NATIVE_HISTORY_BOTTOM_CHROME,
   ScrollBox,
   type ScrollBoxHandle,
   Text,
@@ -69,9 +67,6 @@ type Props = {
   scrollable: ReactNode;
   /** Content pinned to the bottom (spinner, prompt, permissions) */
   bottom: ReactNode;
-  /** Content rendered inside the ScrollBox after messages — user can scroll
-   *  up to see context while it's showing (used by PermissionRequest). */
-  overlay?: ReactNode;
   /** Absolute-positioned content anchored at the bottom-right of the
    *  ScrollBox area, floating over scrollback. Rendered inside the flexGrow
    *  region (not the bottom slot) so the overflowY:hidden cap doesn't clip
@@ -320,7 +315,6 @@ export function computeUnseenDivider(
 export function FullscreenLayout({
   scrollable,
   bottom,
-  overlay,
   bottomFloat,
   modal,
   modalScrollRef,
@@ -334,8 +328,6 @@ export function FullscreenLayout({
   sidebarWidth = 0,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
-  const axcBottomRef = useRef<DOMElement | null>(null);
-  const axcOverlayRef = useRef<DOMElement | null>(null);
   // Scroll-derived chrome state lives HERE, not in REPL. StickyTracker
   // writes via ScrollChromeContext; pillVisible subscribes directly to
   // ScrollBox. Both change rarely (pill flips once per threshold crossing,
@@ -394,15 +386,9 @@ export function FullscreenLayout({
   }, []);
 
   if (isFullscreenEnvEnabled()) {
-    // Overlay renders BELOW messages inside the same ScrollBox — user can
-    // scroll up to see prior context while a permission dialog is showing.
-    // The ScrollBox never unmounts across overlay transitions, so scroll
-    // position is preserved without save/restore. stickyScroll auto-scrolls
-    // to the appended overlay when it mounts (if user was already at
-    // bottom); REPL re-pins on the overlay appear/dismiss transition for
-    // the case where sticky was broken. Tall dialogs (FileEdit diffs) still
-    // get PgUp/PgDn/wheel — same scrollRef drives the same ScrollBox.
-    // densable 2.1.234 Wrn sticky chrome (SEA gold-layout-js-0):
+    // densable Tyn `if (Vs())` — $xc + Uxc + Bxc. Gold returns this tree
+    // before Qvt is even considered (`return MF0}if(Qvt())`). Qvt is NOT
+    // nested inside Vs. Sticky chrome (SEA gold-layout-js-0):
     //   null           — at bottom / cleared
     //   {text,scrollTo}— scrolled up, sticky header shows
     //   'clicked'      — header click: hide header so content ❯ takes row 0
@@ -411,17 +397,10 @@ export function FullscreenLayout({
     // scroll re-fires StickyTracker with a fresh {text} (1-row shift OK).
     // Anti-#185 is StickyTracker's idx early-return, not a pad latch.
     const sticky = hideSticky ? null : stickyPrompt;
-    // Overlay-in-ScrollBox is go-hare structure; densable modal is a separate
-    // absolute pane. Hide sticky chrome while overlay is up so permission UI
-    // isn't covered — not a densable invent; pad still follows sticky!=null.
-    const headerPrompt = sticky != null && sticky !== 'clicked' && overlay == null ? sticky : null;
+    const headerPrompt = sticky != null && sticky !== 'clicked' ? sticky : null;
     const padCollapsed = sticky != null;
     const mainColumns = Math.max(1, columns - sidebarWidth);
-    const axcSticky = isAxcStickyMainEnabled() && scrollRef != null;
-    // densable xxc: ScrollBox-only content band (no Wrn top sticky inside
-    // DECSTBM). Pill lives in bottom pushUp so it stays outside scroll region.
-    const showWrnStickyHeader = !axcSticky && headerPrompt != null;
-    const showPill = !hidePill && pillVisible && overlay == null;
+    const showPill = !hidePill && pillVisible;
     const pillNode = showPill ? (
       <NewMessagesPill
         count={newMessageCount}
@@ -432,25 +411,15 @@ export function FullscreenLayout({
         }}
       />
     ) : null;
-    // Project C: densable xxc frameSink when CLAUDE_CODE_AXC_STICKY_MAIN=1
-    // (REPL must skip AlternateScreen so Axc is not suspended). Pass
-    // bottom/overlay refs so prompt chrome + modal paint under frameSink.
-    const wrapAxc = (node: React.ReactNode): React.ReactNode =>
-      axcSticky && scrollRef ? (
-        <AxcFrameSinkBridge scrollRef={scrollRef} bottomRef={axcBottomRef} overlayRef={axcOverlayRef}>
-          {node}
-        </AxcFrameSinkBridge>
-      ) : (
-        node
-      );
     const modalVisible = modal?.visible ?? false;
-    return wrapAxc(
+
+    return (
       <PromptOverlayProvider>
         <Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">
           {/* $xc — scroll + sidebar row */}
           <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
             <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
-              {showWrnStickyHeader && <StickyPromptHeader text={headerPrompt!.text} onClick={headerPrompt!.scrollTo} />}
+              {headerPrompt != null && <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />}
               <ScrollBox
                 ref={scrollRef}
                 flexGrow={1}
@@ -459,11 +428,13 @@ export function FullscreenLayout({
                 stickyScroll
                 followGrowth={getAutoScrollEnabled()}
               >
-                {axcSticky ? <AxcScrollAnchor /> : null}
-                <ScrollChromeContext value={chromeCtx}>{scrollable}</ScrollChromeContext>
-                {overlay}
+                {/* Vs() QW children = C9t{[b9t, pyn]} — no overlay-in-ScrollBox */}
+                <ScrollChromeContext value={chromeCtx}>
+                  {scrollable}
+                  <AxcScrollAnchor />
+                </ScrollChromeContext>
               </ScrollBox>
-              {!axcSticky && pillNode}
+              {pillNode}
               {bottomFloat != null && (
                 <Box position="absolute" bottom={0} right={0} opaque>
                   {bottomFloat}
@@ -478,15 +449,12 @@ export function FullscreenLayout({
           </Box>
           {/* Uxc — prompt chrome (hidden while ozs visible) */}
           <Box
-            ref={axcBottomRef}
             flexDirection="column"
             flexShrink={0}
             width="100%"
-            minHeight={axcSticky ? NATIVE_HISTORY_BOTTOM_CHROME : undefined}
             maxHeight={Math.max(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS)}
             display={modalVisible ? 'none' : 'flex'}
           >
-            {axcSticky && pillNode}
             <SuggestionsOverlay />
             <DialogOverlay />
             <Box flexDirection="column" width="100%" flexGrow={1} flexShrink={0} overflowY="hidden">
@@ -504,7 +472,6 @@ export function FullscreenLayout({
               }}
             >
               <Box
-                ref={axcOverlayRef}
                 flexShrink={0}
                 width="100%"
                 maxHeight={terminalRows - MODAL_TRANSCRIPT_PEEK}
@@ -515,26 +482,70 @@ export function FullscreenLayout({
                 <Box flexShrink={0}>
                   <Divider color="permission" char="▔" />
                 </Box>
-                {axcSticky ? (
-                  modal.content
-                ) : (
-                  <ModalScroller scrollRef={modalScrollRef} maxRows={terminalRows - MODAL_TRANSCRIPT_PEEK - 1}>
-                    {modal.content}
-                  </ModalScroller>
-                )}
+                <ModalScroller scrollRef={modalScrollRef} maxRows={terminalRows - MODAL_TRANSCRIPT_PEEK - 1}>
+                  {modal.content}
+                </ModalScroller>
               </Box>
             </ModalContext>
           )}
         </Box>
-      </PromptOverlayProvider>,
+      </PromptOverlayProvider>
     );
   }
 
+  // densable Tyn `if (Qvt())` — sibling AFTER Vs return, not nested in it.
+  // Gold: xxc({scrollRef, scrollable:IKe, bottom:w9t, overlay:E9t})
+  // IKe = C9t{value:WTg, children:[b9t, pyn]} — pyn is kxc (AxcScrollAnchor).
+  // E9t = fCt!=null ? uN + H({flexDirection:"column", paddingX:Aee, children:fCt.content}) : null
+  // xxc overlay slot is absolute+opaque (owned by AxcStickyHost). No Ob/▔, no
+  // lRc, no pushUp, no sidebar. Qvt() body is not in the 239 dump — keep
+  // CLAUDE_CODE_AXC_STICKY_MAIN opt-in (do not product-default ON).
+  const axcSticky = isAxcStickyMainEnabled() && scrollRef != null;
+  if (axcSticky) {
+    // Match Vs ozs: only mount opaque overlay when RPs visible (not suppressed).
+    const overlayNode =
+      modal != null && modal.visible ? (
+        <ModalContext
+          value={{
+            rows: terminalRows - MODAL_TRANSCRIPT_PEEK - 1,
+            columns: columns - 4,
+            scrollRef: modalScrollRef ?? null,
+            claimScrollBox: null,
+          }}
+        >
+          <Box flexDirection="column" paddingX={2}>
+            {modal.content}
+          </Box>
+        </ModalContext>
+      ) : null;
+    return (
+      <PromptOverlayProvider>
+        <AxcStickyHost
+          scrollRef={scrollRef}
+          scrollable={
+            <ScrollChromeContext value={chromeCtx}>
+              {scrollable}
+              <AxcScrollAnchor />
+            </ScrollChromeContext>
+          }
+          bottom={
+            <>
+              <SuggestionsOverlay />
+              <DialogOverlay />
+              {bottom}
+            </>
+          }
+          overlay={overlayNode}
+        />
+      </PromptOverlayProvider>
+    );
+  }
+
+  // Gold else: Fragment{[C9t{b9t}, v9t, fCt?.content]} — no overlay.
   return (
     <>
       {scrollable}
       {bottom}
-      {overlay}
       {modal?.content}
     </>
   );

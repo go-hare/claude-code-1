@@ -10,6 +10,7 @@ import {
   isChromeMcpSafeForAutoMode,
 } from '../claudeInChrome/chromeMcpReadOnly.js'
 import { getEffectivePermissionMode } from './mcpPermissionMode.js'
+import { isSessionBypassClass } from './planBypass.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
 import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
@@ -201,7 +202,7 @@ export function findSafetyCheckDecision(
 }
 
 /**
- * densable ctn — auto mode (or plan acting as auto without bypass) is active.
+ * densable ctn — auto mode (or plan acting as auto without bypass inherit).
  */
 export function isPermissionContextAutoMode(
   context: ToolPermissionContext,
@@ -210,7 +211,7 @@ export function isPermissionContextAutoMode(
   if (
     context.mode === 'plan' &&
     (autoModeStateModule?.isAutoModeActive() ?? false) &&
-    !context.isBypassPermissionsModeAvailable
+    context.prePlanMode !== 'bypassPermissions'
   ) {
     return true
   }
@@ -1628,10 +1629,10 @@ async function hasPermissionsToUseToolInner(
   // Check if permissions should be bypassed:
   // - Direct bypassPermissions mode (after MCP effective-mode resolution)
   // - Plan mode when the user originally started with bypass mode
-  const shouldBypassPermissions =
-    effectiveMode === 'bypassPermissions' ||
-    (effectiveMode === 'plan' &&
-      toolPermissionContext.isBypassPermissionsModeAvailable)
+  const shouldBypassPermissions = isSessionBypassClass({
+    mode: effectiveMode,
+    prePlanMode: toolPermissionContext.prePlanMode,
+  })
   if (shouldBypassPermissions) {
     return {
       behavior: 'allow',

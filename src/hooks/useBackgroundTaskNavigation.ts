@@ -219,8 +219,12 @@ export function useBackgroundTaskNavigation(options?: {
       return
     }
 
-    // Enter to confirm selection (only when in selecting mode)
-    if (e.key === 'return' && viewSelectionMode === 'selecting-agent') {
+    // Enter to confirm selection (only when in selecting mode).
+    // KeyboardEvent.key is keyFromParsed: "return" for \r, "enter" for \n.
+    if (
+      (e.key === 'return' || e.key === 'enter') &&
+      viewSelectionMode === 'selecting-agent'
+    ) {
       e.preventDefault()
       if (selectedIPAgentIndex === -1) {
         exitTeammateView(setAppState)

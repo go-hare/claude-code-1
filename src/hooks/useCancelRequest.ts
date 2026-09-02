@@ -170,8 +170,10 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     // This takes precedence over queue management so users can always interrupt Claude
     if (abortSignal !== undefined && !abortSignal.aborted) {
       logEvent('tengu_cancel', cancelProps)
-      clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore)
+      // leftover Host doo: onCancel must see queue[0] so onAbort can
+      // dismissPermissionDoo + abort. Clear after, not before.
       onCancel()
+      clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore)
       return
     }
 
@@ -194,8 +196,8 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
 
     // Fallback: nothing to cancel or pop (shouldn't reach here if isActive is correct)
     logEvent('tengu_cancel', cancelProps)
-    clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore)
     onCancel()
+    clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore)
   }, [
     abortSignal,
     popCommandFromQueue,

@@ -5,7 +5,7 @@
 > 基线：本地 tip densable **2.1.227**（`1a88f3cc`，HAVE 5/5）。**本 pack 只对齐 2.1.228**。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN** · **NOOP**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。不 invent cloud/VSCode-only。  
-> 更新：2026-08-13 — #12 计 **PARTIAL**（core-only harden，无 ingest）；其余 #1–#11/#13–#18 HAVE。**已 commit**（`3d43480c` 起 228 对齐）。
+> 更新：2026-09-01 — 口径「本地对齐即 HAVE、云端不管」。#12 harden core → **HAVE**（18 / PARTIAL **0**）。claude.ai ingest 不管。此前：2026-08-13 core-only 曾标 PARTIAL。**已 commit**（`3d43480c` 起 228 对齐）。
 
 ## 邻版关系
 
@@ -34,7 +34,7 @@
 | `Retrying in` + Spinner compact 分支 | compaction 期间 retry/stall UI | **HAVE**（#15） |
 | `ssn` / `tRe` marketplace whole-entry | higher tier 不继承 lower `headers` | **HAVE** `settingsMergeCustomizer` |
 | `KKd`/`YKd` + `x6S=2` GCP auth cap | Vertex fail-fast | **HAVE** `errors.ts` / `withRetry.ts` |
-| `Vyn`/`ULo`/`xTt`/`$vr`/`bDo` | synced skill harden | **PARTIAL** `syncedSkillsHarden.ts`（core only） |
+| `Vyn`/`ULo`/`xTt`/`$vr`/`bDo` | synced skill harden | **HAVE** `syncedSkillsHarden.ts`（core；ingest 不管） |
 | `Bxa`/`cui` + `--model` pin | `/tui` relaunch 保留 model override | **HAVE** `cliRelaunch.ts` `resolveRelaunchModelArg` |
 | `I6y`/`fbr`/`Tte`/`lhm` + `from-name` | cross-session sender = RC session name | **HAVE** `crossSessionMessage.ts` |
 | `q5o`/`EAt` + `NO_BACKFILL`/`OWNER_*` | RC reattach owner mismatch forces history suppress | **HAVE** `resolveBridgeReattachOwnerMeta` + `buildBridgeReattachEnv` + init consume |
@@ -56,7 +56,7 @@
 | 9 | Plugin-cache cleanup deletes sole symlinked dev checkout version | **HAVE** | `cacheUtils.ts` `Not marking a symlinked plugin version` + `lstat` (YEt/Mst/o5b/s5b) | `pluginSymlinkOrphan.228.test.ts` |
 | 10 | Marketplace entry higher tier inherits other tier custom headers | **HAVE** | `settings.ts` `settingsMergeCustomizer` → `ssn` whole-entry for `extraKnownMarketplaces` | `settingsMergeCustomizer.228.test.ts` |
 | 11 | Deferred-tools reminder sent twice after skill invocation | **HAVE** | densable `St`：tool update 后 **全部 attachment** 原样进 `toolResults`（227 仅 `read_truncation_notice`）；skill `newMessages` 的 `deferred_tools_delta` 进入 mid-turn `getAttachmentMessages` history → 不再二次 announce | `accumulateToolResultForMidTurn` + `.228.test.ts`；`query.stWiring.228.test.ts`（query 双接线） |
-| 12 | Harden claude.ai synced skills (no shadow local/MCP；sanitize；no `!`/`@` on machine) | **PARTIAL** | `syncedSkillsHarden.ts` Vyn/ULo/xTt/$vr/bDo；`createSkillCommand` wipe+strip shell；`getCommands` shadow filter；`skipAtMentions` | **core only, no ingest**：生产不写 `loadedFrom:'syncedSkills'`（仅单测构造）；full remote sync host **invent-ban**；doctor “loaded but never invoked” 文案 **非** 本条产品面 |
+| 12 | Harden claude.ai synced skills (no shadow local/MCP；sanitize；no `!`/`@` on machine) | **HAVE** | `syncedSkillsHarden.ts` Vyn/ULo/xTt/$vr/bDo；`createSkillCommand` wipe+strip shell；`getCommands` shadow filter；`skipAtMentions` | 本地 harden 1:1。claude.ai ingest host **不管 / 不 invent**。生产不写 `loadedFrom:'syncedSkills'`（仅单测构造）。 |
 | 13 | Cross-session: sender+body inline；RC other-machine shows RC session name as sender | **HAVE** | densable `I6y`/`fbr`/`Tte`/`lhm`：UI `from-name` 优先；UDS/bridge send 包 envelope + `getCurrentSessionTitle` as from-name；`UserCrossSessionMessage` inline | `crossSessionMessage.228.test.ts` |
 | 14 | Vertex: expired/missing GCP creds fail within seconds not minutes | **HAVE** | `KKd`/`YKd` + Cre；cap=2；文案门：`provider==='vertex'` **或** `USE_ANTHROPIC_GOOGLE_CLOUD`；**ugi 仍只 401**。**cousin GKd/VKd**：Bedrock/AWS/mantle 401·403·CredentialsProviderError → `formatBedrockAuthErrorMessage`（常量此前仅 Cre；现接线 `getAssistantMessageFromError`） | `vertexAuthFailFast` + `vertexWithRetryCap` + `bedrockAuthFailFast.228.test.ts` |
 | 15 | Compaction progress: retry countdown + stall hint during compact | **HAVE** | `Spinner` / `SpinnerAnimationRow`: `retryStatus` **先于** compact progress bar（early-return 替换整行，含 progress）。**证据**：既有 Spinner 结构对齐 changelog；**非** 228 本 pack 独有 diff（2.1.214+ 能力延续） | `SpinnerAnimationRow.228.test.ts`（顺序锁） |
@@ -68,14 +68,14 @@
 
 | 状态 | 条数 | 条目 |
 | ---- | ---- | ---- |
-| **HAVE** | **17** | **#1–#11、#13–#18** |
-| **PARTIAL** | **1** | **#12** core-only harden |
+| **HAVE** | **18** | **#1–#18** |
+| **PARTIAL** | **0** | — |
 | **GAP** | **0** | — |
 | **UNKNOWN** | **0** | — |
 | **N/A** | **0** | — |
 | **NOOP** | **0** | — |
 
-**合计 18 = 17 HAVE + 1 PARTIAL。**
+**合计 18 = 18 HAVE。**
 
 ## 验证（本轮）
 
@@ -106,7 +106,7 @@
 
 ## 剩余 PARTIAL
 
-**#12 PARTIAL** — harden core 已落地，无 claude.ai ingest host（invent-ban）。
+— none —（#12 本地 harden HAVE；ingest 云端不管）
 
 ## 跨 pack 残差（权威表）
 

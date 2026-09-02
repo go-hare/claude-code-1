@@ -2,7 +2,11 @@
  * densable 2.1.239 #51 — OHm / Z1w / NHm / Eao / LHm / K1w ListAgents teammates.
  * Refs via sBr/pYb (sha256 `${kind}:${id}` hex, grow from sti=6).
  */
-import { pinDigest } from '../SendMessageTool/nameResolve.js'
+import {
+  ownSessionRefExtra,
+  pinDigest,
+  uniqueHexPrefixes,
+} from '../SendMessageTool/nameResolve.js'
 import { normalizeAgentName } from '../SendMessageTool/nameResolve.js'
 import { parseAddress } from 'src/utils/peerAddress.js'
 import { formatDuration } from 'src/utils/format.js'
@@ -10,7 +14,6 @@ import { isUncOrNtObjectPath } from 'src/utils/path.js'
 import type { AppState } from 'src/state/AppState.js'
 import type { TeamFile } from 'src/utils/swarm/teamHelpers.js'
 import { getAgentId } from 'src/utils/teammate.js'
-import { getUdsMessagingSocketPath } from 'src/utils/udsMessaging.js'
 
 /** densable fle / dYb — ALe display-name cap */
 const LISTING_NAME_MAX = 200
@@ -31,11 +34,30 @@ export type TeammateListingRow = {
   nameShadowed: false | 'unreachable' | 'bare-only'
 }
 
-export type TeammateListingCandidate = {
-  kind: 'teammate'
+export type ListingKind =
+  | 'teammate'
+  | 'subagent'
+  | 'session'
+  | 'cloud-session'
+  | 'bridge-session'
+
+export type ListingCandidate = {
+  kind: ListingKind
   id: string
   name: string
   ref: string
+}
+
+export type TeammateListingCandidate = ListingCandidate & {
+  kind: 'teammate'
+}
+
+export type SubagentListingRow = {
+  agentId: string
+  name?: string
+  agentType: string
+  status: string
+  startTime: number
 }
 
 /** densable ALe */
@@ -76,7 +98,7 @@ export function sanitizeTeammateLabel(value: unknown): string | null {
 }
 
 /** densable __a */
-function isAddressableListingName(value: string): boolean {
+export function isAddressableListingName(value: string): boolean {
   return (
     !isAddressLikeName(value) &&
     isListingPathOk(value) &&
@@ -86,7 +108,7 @@ function isAddressableListingName(value: string): boolean {
 }
 
 /** densable Abr */
-function formatListingAge(ms: number): string {
+export function formatListingAge(ms: number): string {
   return formatDuration(Math.max(0, ms), { mostSignificantOnly: true })
 }
 
@@ -124,22 +146,8 @@ function nameShadowKind(
 export function assignTeammateRefs(
   rows: Array<{ kind: string; id: string }>,
 ): string[] {
-  const own = getUdsMessagingSocketPath()
-  const extra = own ? [pinDigest('session', own)] : []
   const digests = rows.map(r => pinDigest(r.kind, r.id))
-  const pool = [...digests, ...extra]
-  return digests.map((digest, i) => {
-    let len = REF_MIN
-    while (
-      len < digest.length &&
-      pool.some(
-        (other, j) => j !== i && other.slice(0, len) === digest.slice(0, len),
-      )
-    ) {
-      len++
-    }
-    return digest.slice(0, len)
-  })
+  return uniqueHexPrefixes(digests, ownSessionRefExtra(), REF_MIN)
 }
 
 /** densable VCe */
@@ -148,15 +156,15 @@ function formatNameRef(name: string, ref: string): string {
 }
 
 /** densable Eao */
-function formatListingRow(
+export function formatListingRow(
   lead: string,
   bits: Array<string | undefined>,
 ): string {
   return `  ${[lead, ...bits.filter((b): b is string => b !== undefined)].join('  \u00B7  ')}`
 }
 
-/** densable NHm */
-function formatCappedSection(title: string, rows: string[]): string {
+/** densable NHm / f5i */
+export function formatCappedSection(title: string, rows: string[]): string {
   const shown = rows.slice(0, TEAMMATES_LISTING_CAP)
   const hidden = rows.length - shown.length
   if (hidden > 0) {
@@ -235,6 +243,24 @@ export function listTeammatesForListing(
   return rows
 }
 
+/** densable GCe + pYb — one uniqueness pool, then `${kind}\x00${id}` map. */
+export function buildListingCandidateMap(
+  entries: Array<{ kind: ListingKind; id: string; name: string }>,
+): Map<string, ListingCandidate> {
+  const refs = assignTeammateRefs(entries)
+  const map = new Map<string, ListingCandidate>()
+  for (let i = 0; i < entries.length; i++) {
+    const row = entries[i]!
+    map.set(`${row.kind}\x00${row.id}`, {
+      kind: row.kind,
+      id: row.id,
+      name: row.name,
+      ref: refs[i]!,
+    })
+  }
+  return map
+}
+
 /** densable GCe teammate candidates that survive ALe + __a, then pYb refs. */
 export function teammateCandidatesFromRows(
   rows: TeammateListingRow[],
@@ -245,24 +271,72 @@ export function teammateCandidatesFromRows(
     if (name === null || !isAddressableListingName(name)) return []
     return [{ kind: 'teammate' as const, id: row.teammateId, name }]
   })
-  const refs = assignTeammateRefs(eligible)
-  const map = new Map<string, TeammateListingCandidate>()
-  for (let i = 0; i < eligible.length; i++) {
-    const row = eligible[i]!
-    map.set(`teammate\x00${row.id}`, {
-      kind: 'teammate',
-      id: row.id,
-      name: row.name,
-      ref: refs[i]!,
+  return buildListingCandidateMap(eligible) as Map<
+    string,
+    TeammateListingCandidate
+  >
+}
+
+/**
+ * densable MHm — in-process local_agent minus main-session.
+ * Name omitted when it collides with a teammate label.
+ */
+export function listSubagentsForListing(
+  appState: AppState,
+): SubagentListingRow[] {
+  const nameById = new Map<string, string>()
+  for (const [name, id] of appState.agentNameRegistry) {
+    nameById.set(id, name)
+  }
+  const teammateNames = new Set(
+    Object.values(appState.teamContext?.teammates ?? {}).map(mate => mate.name),
+  )
+  const rows: SubagentListingRow[] = []
+  for (const task of Object.values(appState.tasks)) {
+    if (task.type !== 'local_agent' || task.agentType === 'main-session') {
+      continue
+    }
+    const registered = nameById.get(task.id)
+    rows.push({
+      agentId: task.id,
+      name:
+        registered !== undefined && teammateNames.has(registered)
+          ? undefined
+          : registered,
+      agentType: task.agentType,
+      status: task.status,
+      startTime: task.startTime,
     })
   }
-  return map
+  return rows
+}
+
+/** densable J1w */
+export function formatSubagentsSection(
+  rows: SubagentListingRow[],
+  candidates: Map<string, ListingCandidate>,
+  now = Date.now(),
+): string {
+  return formatCappedSection(
+    'Subagents',
+    rows.map(row => {
+      const cand = row.name
+        ? candidates.get(`subagent\x00${row.agentId}`)
+        : undefined
+      const lead = cand ? formatNameRef(cand.name, cand.ref) : row.agentId
+      return formatListingRow(lead, [
+        row.agentType,
+        row.status,
+        `started ${formatListingAge(now - row.startTime)} ago`,
+      ])
+    }),
+  )
 }
 
 /** densable Z1w */
 export function formatTeammatesSection(
   rows: TeammateListingRow[],
-  candidates: Map<string, TeammateListingCandidate>,
+  candidates: Map<string, ListingCandidate>,
   now = Date.now(),
 ): string {
   return formatCappedSection(

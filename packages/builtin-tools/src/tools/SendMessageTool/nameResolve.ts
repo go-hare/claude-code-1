@@ -112,23 +112,86 @@ export function classifySendMessagePin(
 }
 
 /**
- * densable Czb — assign unique refs among candidates (grow prefix until unique).
+ * Grow each digest prefix until unique against `digests` + `extras`.
+ * Shared by ListAgents (`assignTeammateRefs`) and SendMessage so listing
+ * refs stay prefixes of send refs.
  */
-export function assignUniqueRefs(
-  candidates: Omit<PeerCandidate, 'ref'>[],
-): PeerCandidate[] {
-  const digests = candidates.map(c => pinDigest(c.kind, c.id))
-  return candidates.map((c, i) => {
-    const full = digests[i]!
-    let len = 6
+export function uniqueHexPrefixes(
+  digests: string[],
+  extras: string[] = [],
+  minLen = 6,
+): string[] {
+  const pool = [...digests, ...extras]
+  return digests.map((digest, i) => {
+    let len = minLen
     while (
-      len < full.length &&
-      digests.some((d, j) => j !== i && d.slice(0, len) === full.slice(0, len))
+      len < digest.length &&
+      pool.some(
+        (other, j) => j !== i && other.slice(0, len) === digest.slice(0, len),
+      )
     ) {
       len++
     }
-    return { ...c, ref: full.slice(0, len) }
+    return digest.slice(0, len)
   })
+}
+
+/** Own UDS session digest — ListAgents already puts this in the uniqueness pool. */
+export function ownSessionRefExtra(): string[] {
+  try {
+    // Lazy: udsMessaging must not load from this leaf at import time.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getUdsMessagingSocketPath } =
+      require('src/utils/udsMessaging.js') as typeof import('src/utils/udsMessaging.js')
+    const own = getUdsMessagingSocketPath()
+    return own ? [pinDigest('session', own)] : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * densable v_a: listed `[ref]` is a prefix of sha256(`${kind}:${id}`).
+ * ListAgents may print more than 6 hex chars; SendMessage must still hit the
+ * same identity. Do not treat "listed starts with send ref" as a match — that
+ * lets a 6-char send ref steal a longer listing from another kind.
+ */
+export function listingRefMatchesCandidate(
+  candidate: { kind: string; id: string },
+  listedRef: string,
+): boolean {
+  return (
+    listedRef.length >= 6 &&
+    pinDigest(candidate.kind, candidate.id).startsWith(listedRef)
+  )
+}
+
+/** @deprecated digest-prefix form — prefer listingRefMatchesCandidate. */
+export function refMatches(candidateRef: string, listedRef: string): boolean {
+  return (
+    listedRef.length >= 6 &&
+    (candidateRef === listedRef || candidateRef.startsWith(listedRef))
+  )
+}
+
+/**
+ * densable Czb — assign unique refs among candidates (grow prefix until unique).
+ * Pool includes own session digest so refs match ListAgents.
+ */
+export function assignUniqueRefs(
+  candidates: Omit<PeerCandidate, 'ref'>[],
+  listingUniqueness: Array<{ kind: string; id: string }> = [],
+): PeerCandidate[] {
+  const digests = candidates.map(c => pinDigest(c.kind, c.id))
+  const digestSet = new Set(digests)
+  const extras = [
+    ...ownSessionRefExtra(),
+    ...listingUniqueness
+      .map(e => pinDigest(e.kind, e.id))
+      .filter(d => !digestSet.has(d)),
+  ]
+  const refs = uniqueHexPrefixes(digests, extras)
+  return candidates.map((c, i) => ({ ...c, ref: refs[i]! }))
 }
 
 /** densable eOr — local sessions claiming a bridge body id */
@@ -226,18 +289,31 @@ export function resolvePeerByName(args: {
   const byKey = candidates.filter(c => c.key === key)
 
   if (parsed) {
-    const hit =
-      byKey.find(c => c.ref === parsed.ref) ??
-      candidates.find(c => c.key === key && c.ref.startsWith(parsed.ref)) ??
-      candidates.find(c => c.ref === parsed.ref)
-    if (!hit) {
+    const sameNameHits = byKey.filter(c =>
+      listingRefMatchesCandidate(c, parsed.ref),
+    )
+    if (sameNameHits.length === 1) {
+      return { kind: 'ok', candidate: sameNameHits[0]!, ...truncatedFlag }
+    }
+    if (sameNameHits.length > 1) {
       return {
-        kind: 'not-found',
-        message: `No agent named '${rawName}' with ref [${parsed.ref}] is reachable. Re-send with a ref from ListAgents, or use the bare name if unique.`,
+        kind: 'ambiguous',
+        candidates: sameNameHits.slice(0, CLOSEST_NAME_CAP),
+        matchedBy: 'exact',
+        total: sameNameHits.length,
         ...truncatedFlag,
       }
     }
-    return { kind: 'ok', candidate: hit, ...truncatedFlag }
+    // Global: full printed ref only — never prefix-steal across names.
+    const globalExact = candidates.filter(c => c.ref === parsed.ref)
+    if (globalExact.length === 1) {
+      return { kind: 'ok', candidate: globalExact[0]!, ...truncatedFlag }
+    }
+    return {
+      kind: 'not-found',
+      message: `No agent named '${rawName}' with ref [${parsed.ref}] is reachable. Re-send with a ref from ListAgents, or use the bare name if unique.`,
+      ...truncatedFlag,
+    }
   }
 
   // densable cKp: ambiguous → prefer live pin
@@ -450,6 +526,11 @@ export function buildPeerCandidates(args: {
     id: string
     title: string | null
   }>
+  /**
+   * densable pYb extras — teammate / subagent / cloud-session identities that
+   * ListAgents puts in the uniqueness pool even when SendMessage cannot deliver.
+   */
+  listingUniqueness?: Array<{ kind: string; id: string }>
 }): PeerCandidate[] {
   const raw: Omit<PeerCandidate, 'ref'>[] = []
   const seen = new Set<string>()
@@ -529,5 +610,5 @@ export function buildPeerCandidates(args: {
     })
   }
 
-  return assignUniqueRefs(raw)
+  return assignUniqueRefs(raw, args.listingUniqueness)
 }

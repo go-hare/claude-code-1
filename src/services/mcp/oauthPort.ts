@@ -14,6 +14,57 @@
 import { createServer } from 'http'
 import { getPlatform } from '../../utils/platform.js'
 
+/**
+ * densable Qpi — one AbortController per callback port.
+ * Re-claiming the same port aborts the previous listener so two MCP OAuth
+ * flows cannot share a localhost callback.
+ */
+const oauthPortAbort = new Map<number, AbortController>()
+/** Resolves when the previous listener on this port has closed. */
+const oauthPortReleased = new Map<number, Promise<void>>()
+
+/** densable `Qpi.get(y)?.abort(); Qpi.set(y, b)` */
+export function claimOAuthRedirectPort(port: number): AbortController {
+  oauthPortAbort.get(port)?.abort()
+  const next = new AbortController()
+  oauthPortAbort.set(port, next)
+  return next
+}
+
+/** Wait until a previous claim's listener has unbound this port. */
+export function waitForOAuthRedirectPortRelease(port: number): Promise<void> {
+  return oauthPortReleased.get(port) ?? Promise.resolve()
+}
+
+/** Register the close-promise for the listener currently bound to `port`. */
+export function setOAuthRedirectPortRelease(
+  port: number,
+  closed: Promise<void>,
+): void {
+  oauthPortReleased.set(port, closed)
+  void closed.finally(() => {
+    if (oauthPortReleased.get(port) === closed) {
+      oauthPortReleased.delete(port)
+    }
+  })
+}
+
+export function releaseOAuthRedirectPort(
+  port: number,
+  controller: AbortController,
+): void {
+  if (oauthPortAbort.get(port) === controller) {
+    oauthPortAbort.delete(port)
+  }
+}
+
+/** Test helper — drop the per-port abort map. */
+export function resetOAuthRedirectPortAborts(): void {
+  for (const c of oauthPortAbort.values()) c.abort()
+  oauthPortAbort.clear()
+  oauthPortReleased.clear()
+}
+
 // densable tLv — Windows dynamic range 49152–65535 is reserved
 const REDIRECT_PORT_RANGE =
   getPlatform() === 'windows'

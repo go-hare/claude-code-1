@@ -16,6 +16,9 @@ import {
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.js'
 import { getAPIProvider } from './providers.js'
+import { ALL_MODEL_CONFIGS } from './configs.js'
+import { isModelDenied } from './entitlementOverlay.js'
+import { FABLE_SLOGAN } from './fablePicker.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import {
   getGatewayModelsCachePath,
@@ -597,95 +600,97 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   return payg3pOptions
 }
 
-// @[MODEL LAUNCH]: Add the new model ID to the appropriate family pattern below
-// so the "newer version available" hint works correctly.
+/** Official xci. */
+const SONNET_SLOGAN = 'Efficient for routine tasks'
+/** Official gzn. */
+const OPUS_SLOGAN = 'Best for everyday, complex tasks'
+/** Official BRa. */
+const HAIKU_SLOGAN = 'Fastest for quick answers'
+
 /**
- * Map a full model name to its family alias and the marketing name of the
- * version the alias currently resolves to. Used to detect when a user has
- * a specific older version pinned and a newer one is available.
+ * Official Cci family arm — `$o(e).includes(...)` then aliasModel + slogan.
+ * fable → sonnet → opus → haiku. Unknown family → custom row.
  */
-function getModelFamilyInfo(
-  model: string,
-): { alias: string; currentVersionName: string } | null {
-  const canonical = getCanonicalName(model)
-
-  // Official Cci — fable before sonnet/opus/haiku.
+function getCciFamily(canonical: string): {
+  alias: string
+  aliasModel: string
+  slogan: string
+} | null {
   if (canonical.includes('fable')) {
-    const currentName = getMarketingNameForModel(getDefaultFableModel())
-    if (currentName) {
-      return { alias: 'Fable', currentVersionName: currentName }
+    return {
+      alias: 'Fable',
+      aliasModel: getDefaultFableModel(),
+      slogan: FABLE_SLOGAN,
     }
   }
-
-  // Sonnet family
-  if (
-    canonical.includes('claude-sonnet-5') ||
-    canonical.includes('claude-sonnet-4-6') ||
-    canonical.includes('claude-sonnet-4-5') ||
-    canonical.includes('claude-sonnet-4-') ||
-    canonical.includes('claude-3-7-sonnet') ||
-    canonical.includes('claude-3-5-sonnet')
-  ) {
-    const currentName = getMarketingNameForModel(getDefaultSonnetModel())
-    if (currentName) {
-      return { alias: 'Sonnet', currentVersionName: currentName }
+  if (canonical.includes('sonnet')) {
+    return {
+      alias: 'Sonnet',
+      aliasModel: getDefaultSonnetModel(),
+      slogan: SONNET_SLOGAN,
     }
   }
-
-  // Opus family
-  if (canonical.includes('claude-opus-4')) {
-    const currentName = getMarketingNameForModel(getDefaultOpusModel())
-    if (currentName) {
-      return { alias: 'Opus', currentVersionName: currentName }
+  if (canonical.includes('opus')) {
+    return {
+      alias: 'Opus',
+      aliasModel: getDefaultOpusModel(),
+      slogan: OPUS_SLOGAN,
     }
   }
-
-  // Haiku family
-  if (
-    canonical.includes('claude-haiku') ||
-    canonical.includes('claude-3-5-haiku')
-  ) {
-    const currentName = getMarketingNameForModel(getDefaultHaikuModel())
-    if (currentName) {
-      return { alias: 'Haiku', currentVersionName: currentName }
+  if (canonical.includes('haiku')) {
+    return {
+      alias: 'Haiku',
+      aliasModel: getDefaultHaikuModel(),
+      slogan: HAIKU_SLOGAN,
     }
   }
-
   return null
 }
 
 /**
- * Returns a ModelOption for a known Anthropic model with a human-readable
- * label, and an upgrade hint if a newer version is available via the alias.
- * Returns null if the model is not recognized.
+ * Official Cci — `/model` known-model row.
+ * Newer hint only when catalog index of this id is before the alias target
+ * (`s < indexOf($o(aliasModel))`) and `Gu(aliasModel)`.
+ * Otherwise description is `${slogan} (${id})`, not an arbitrary highlight.
  */
-function getKnownModelOption(model: string): ModelOption | null {
-  const marketingName = getMarketingNameForModel(model)
-  if (!marketingName) return null
+export function getKnownModelOption(model: string): ModelOption | null {
+  const label = getMarketingNameForModel(model)
+  if (!label) return null
 
-  const familyInfo = getModelFamilyInfo(model)
-  if (!familyInfo) {
+  const canonical = getCanonicalName(model)
+  const family = getCciFamily(canonical)
+  if (!family) {
     return {
       value: model,
-      label: marketingName,
-      description: model,
+      label,
+      description: `Custom model (${model})`,
     }
   }
 
-  // Check if the alias currently resolves to a different (newer) version
-  if (marketingName !== familyInfo.currentVersionName) {
+  const aliasLabel = getMarketingNameForModel(family.aliasModel)
+  const catalog = Object.values(ALL_MODEL_CONFIGS).map(c =>
+    getCanonicalName(c.firstParty),
+  )
+  const index = catalog.indexOf(canonical)
+  const aliasIndex = catalog.indexOf(getCanonicalName(family.aliasModel))
+  if (
+    aliasLabel &&
+    index !== -1 &&
+    index < aliasIndex &&
+    isModelAllowed(family.aliasModel) &&
+    !isModelDenied(family.aliasModel)
+  ) {
     return {
       value: model,
-      label: marketingName,
-      description: `Newer version available · select ${familyInfo.alias} for ${familyInfo.currentVersionName}`,
+      label,
+      description: `Newer version available · select ${family.alias} for ${aliasLabel}`,
     }
   }
 
-  // Same version as the alias — just show the friendly name
   return {
     value: model,
-    label: marketingName,
-    description: model,
+    label,
+    description: `${family.slogan} (${model})`,
   }
 }
 

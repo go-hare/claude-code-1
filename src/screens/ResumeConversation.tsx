@@ -291,7 +291,7 @@ export function ResumeConversation({
       }
 
       if (result.sessionId && !forkSession) {
-        switchSession(asSessionId(result.sessionId), log.fullPath ? dirname(log.fullPath) : null);
+        switchSession(asSessionId(result.sessionId), log.fullPath ? dirname(log.fullPath) : null, 'resume');
         await renameRecordingForSession();
         await resetSessionFilePointer();
         restoreCostStateForSession(result.sessionId);
@@ -309,16 +309,20 @@ export function ResumeConversation({
       if (feature('COORDINATOR_MODE')) {
         /* eslint-disable @typescript-eslint/no-require-imports */
         const { saveMode } = require('../utils/sessionStorage.js');
-        const { isCoordinatorMode } =
-          require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js');
+        const { isCoordinatorModeEnvEnabled } =
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
         /* eslint-enable @typescript-eslint/no-require-imports */
-        saveMode(isCoordinatorMode() ? 'coordinator' : 'normal');
+        saveMode(result.mode ?? (isCoordinatorModeEnvEnabled() ? 'coordinator' : 'normal'));
       }
 
-      const standaloneAgentContext = computeStandaloneAgentContext(result.agentName, result.agentColor);
-      if (standaloneAgentContext) {
-        setAppState(prev => ({ ...prev, standaloneAgentContext }));
-      }
+      setAppState(prev => {
+        const standaloneAgentContext = computeStandaloneAgentContext(
+          result.agentName,
+          result.agentColor,
+          prev.standaloneAgentContext?.prideGradient,
+        );
+        return { ...prev, standaloneAgentContext };
+      });
       void updateSessionName(result.agentName);
 
       restoreSessionMetadata(forkSession ? { ...result, worktreeSession: undefined } : result);

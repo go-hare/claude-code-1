@@ -87,8 +87,12 @@ function parseAuthorizationServerMetadata(
 
 import {
   buildRedirectUri,
+  claimOAuthRedirectPort,
   findAvailablePort,
   getPortFromLoopbackRedirectUri,
+  releaseOAuthRedirectPort,
+  setOAuthRedirectPortRelease,
+  waitForOAuthRedirectPortRelease,
 } from './oauthPort.js'
 import type { McpHTTPServerConfig, McpSSEServerConfig } from './types.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
@@ -1242,13 +1246,21 @@ export async function performMCPOAuthFlow(
     let server: Server | null = null
     let timeoutId: NodeJS.Timeout | null = null
     let abortHandler: (() => void) | null = null
+    let portAbort: AbortController | null = null
 
     const cleanup = () => {
       if (server) {
+        const closing = server
         server.removeAllListeners()
         // Defensive: removeAllListeners() strips the error handler, so swallow any late error during close
-        server.on('error', () => {})
-        server.close()
+        closing.on('error', () => {})
+        if (typeof closing.closeAllConnections === 'function') {
+          closing.closeAllConnections()
+        }
+        const closed = new Promise<void>(resolve => {
+          closing.close(() => resolve())
+        })
+        setOAuthRedirectPortRelease(port, closed)
         server = null
       }
       if (timeoutId) {
@@ -1258,6 +1270,10 @@ export async function performMCPOAuthFlow(
       if (abortSignal && abortHandler) {
         abortSignal.removeEventListener('abort', abortHandler)
         abortHandler = null
+      }
+      if (port > 0 && portAbort) {
+        releaseOAuthRedirectPort(port, portAbort)
+        portAbort = null
       }
       logMCPDebug(serverName, `MCP OAuth server cleaned up`)
     }
@@ -1366,91 +1382,115 @@ export async function performMCPOAuthFlow(
       if (hasCustomRedirectUri) {
         void startSdkAuth()
       } else {
-        server = createServer((req, res) => {
-          const parsedUrl = parse(req.url || '', true)
-
-          if (parsedUrl.pathname === '/callback') {
-            const code = parsedUrl.query.code as string
-            const state = parsedUrl.query.state as string
-            const error = parsedUrl.query.error
-            const errorDescription = parsedUrl.query.error_description as string
-            const errorUri = parsedUrl.query.error_uri as string
-
-            // Validate OAuth state to prevent CSRF attacks
-            if (!error && state !== oauthState) {
-              res.writeHead(400, { 'Content-Type': 'text/html' })
-              res.end(
-                `<h1>Authentication Error</h1><p>Invalid state parameter. Please try again.</p><p>You can close this window.</p>`,
-              )
-              cleanup()
-              rejectOnce(
-                new Error('OAuth state mismatch - possible CSRF attack'),
-              )
-              return
-            }
-
-            if (error) {
-              res.writeHead(200, { 'Content-Type': 'text/html' })
-              // Sanitize error messages to prevent XSS
-              const sanitizedError = xss(String(error))
-              const sanitizedErrorDescription = errorDescription
-                ? xss(String(errorDescription))
-                : ''
-              res.end(
-                `<h1>Authentication Error</h1><p>${sanitizedError}: ${sanitizedErrorDescription}</p><p>You can close this window.</p>`,
-              )
-              cleanup()
-              let errorMessage = `OAuth error: ${error}`
-              if (errorDescription) {
-                errorMessage += ` - ${errorDescription}`
-              }
-              if (errorUri) {
-                errorMessage += ` (See: ${errorUri})`
-              }
-              rejectOnce(new Error(errorMessage))
-              return
-            }
-
-            if (code) {
-              res.writeHead(200, { 'Content-Type': 'text/html' })
-              res.end(
-                `<h1>Authentication Successful</h1><p>You can close this window. Return to Claude Code.</p>`,
-              )
-              cleanup()
-              resolveOnce(code)
-            }
-          }
-        })
-
-        server.on('error', (err: NodeJS.ErrnoException) => {
+        // densable Qpi: abort any in-flight listener on this callback port,
+        // then wait for its close() so Windows can rebind.
+        portAbort = claimOAuthRedirectPort(port)
+        portAbort.signal.addEventListener('abort', () => {
           cleanup()
-          if (err.code === 'EADDRINUSE') {
-            const findCmd =
-              getPlatform() === 'windows'
-                ? `netstat -ano | findstr :${port}`
-                : `lsof -ti:${port} -sTCP:LISTEN`
-            rejectOnce(
-              new Error(
-                `OAuth callback port ${port} is already in use — another process may be holding it. ` +
-                  `Run \`${findCmd}\` to find it.`,
-              ),
-            )
-          } else {
-            rejectOnce(
-              new Error(`OAuth callback server failed: ${err.message}`),
-            )
-          }
+          rejectOnce(new AuthenticationCancelledError())
         })
+        const previousRelease = waitForOAuthRedirectPortRelease(port)
+        const listenOAuthCallback = (retriesLeft = 8) => {
+          server = createServer((req, res) => {
+            const parsedUrl = parse(req.url || '', true)
 
-        server.listen(port, '127.0.0.1', () => {
-          void startSdkAuth()
+            if (parsedUrl.pathname === '/callback') {
+              const code = parsedUrl.query.code as string
+              const state = parsedUrl.query.state as string
+              const error = parsedUrl.query.error
+              const errorDescription = parsedUrl.query
+                .error_description as string
+              const errorUri = parsedUrl.query.error_uri as string
+
+              // Validate OAuth state to prevent CSRF attacks
+              if (!error && state !== oauthState) {
+                res.writeHead(400, { 'Content-Type': 'text/html' })
+                res.end(
+                  `<h1>Authentication Error</h1><p>Invalid state parameter. Please try again.</p><p>You can close this window.</p>`,
+                )
+                cleanup()
+                rejectOnce(
+                  new Error('OAuth state mismatch - possible CSRF attack'),
+                )
+                return
+              }
+
+              if (error) {
+                res.writeHead(200, { 'Content-Type': 'text/html' })
+                // Sanitize error messages to prevent XSS
+                const sanitizedError = xss(String(error))
+                const sanitizedErrorDescription = errorDescription
+                  ? xss(String(errorDescription))
+                  : ''
+                res.end(
+                  `<h1>Authentication Error</h1><p>${sanitizedError}: ${sanitizedErrorDescription}</p><p>You can close this window.</p>`,
+                )
+                cleanup()
+                let errorMessage = `OAuth error: ${error}`
+                if (errorDescription) {
+                  errorMessage += ` - ${errorDescription}`
+                }
+                if (errorUri) {
+                  errorMessage += ` (See: ${errorUri})`
+                }
+                rejectOnce(new Error(errorMessage))
+                return
+              }
+
+              if (code) {
+                res.writeHead(200, { 'Content-Type': 'text/html' })
+                res.end(
+                  `<h1>Authentication Successful</h1><p>You can close this window. Return to Claude Code.</p>`,
+                )
+                cleanup()
+                resolveOnce(code)
+              }
+            }
+          })
+
+          server.on('error', (err: NodeJS.ErrnoException) => {
+            if (err.code === 'EADDRINUSE' && retriesLeft > 0) {
+              server?.removeAllListeners()
+              server = null
+              setTimeout(() => {
+                if (portAbort?.signal.aborted) return
+                listenOAuthCallback(retriesLeft - 1)
+              }, 25)
+              return
+            }
+            cleanup()
+            if (err.code === 'EADDRINUSE') {
+              const findCmd =
+                getPlatform() === 'windows'
+                  ? `netstat -ano | findstr :${port}`
+                  : `lsof -ti:${port} -sTCP:LISTEN`
+              rejectOnce(
+                new Error(
+                  `OAuth callback port ${port} is already in use — another process may be holding it. ` +
+                    `Run \`${findCmd}\` to find it.`,
+                ),
+              )
+            } else {
+              rejectOnce(
+                new Error(`OAuth callback server failed: ${err.message}`),
+              )
+            }
+          })
+
+          server.listen(port, '127.0.0.1', () => {
+            void startSdkAuth()
+          })
+
+          // Don't let the callback server or timeout pin the event loop — if the UI
+          // component unmounts without aborting (e.g. parent intercepts Esc), we'd
+          // rather let the process exit than stay alive for 5 minutes holding the
+          // port. The abortSignal is the intended lifecycle management.
+          server.unref()
+        }
+        void previousRelease.then(() => {
+          if (portAbort?.signal.aborted) return
+          listenOAuthCallback()
         })
-
-        // Don't let the callback server or timeout pin the event loop — if the UI
-        // component unmounts without aborting (e.g. parent intercepts Esc), we'd
-        // rather let the process exit than stay alive for 5 minutes holding the
-        // port. The abortSignal is the intended lifecycle management.
-        server.unref()
       }
 
       timeoutId = setTimeout(

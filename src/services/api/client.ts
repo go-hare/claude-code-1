@@ -5,6 +5,7 @@ import {
   checkAndRefreshOAuthTokenIfNeeded,
   getAnthropicApiKey,
   getApiKeyFromApiKeyHelper,
+  getActiveProfileWire,
   getClaudeAIOAuthTokens,
   getDefaultAwsProviderChain,
   hostManagedAwsSdkCredentials,
@@ -37,6 +38,7 @@ import {
   getVertexRegionForModel,
   isEnvTruthy,
 } from '../../utils/envUtils.js'
+import { criPolicyPrecheckFetchInput } from '../../utils/criPolicyWebhook.js'
 import { applyGzipRequestBodyInit } from '../../utils/gzipRequestBodies.js'
 import {
   formatGatewaySessionExpiredError,
@@ -657,25 +659,38 @@ export async function getAnthropicClient({
       }
     : undefined
 
+  // leftover 239 hct/uD / zqt — credentials/<profile>.json is a parallel
+  // bearer, not ua()/keychain. Expired-no-refresh throws oRr/DUr.
+  const profileWire = gatewaySession ? null : await getActiveProfileWire()
+  if (profileWire) {
+    Object.assign(defaultHeaders, profileWire.extraHeaders)
+  }
+
   // Determine authentication method based on available tokens
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
     apiKey: gatewaySession
       ? null
-      : isClaudeAISubscriber()
+      : profileWire
         ? null
-        : apiKey || getAnthropicApiKey(),
+        : isClaudeAISubscriber()
+          ? null
+          : apiKey || getAnthropicApiKey(),
     authToken: gatewaySession
       ? gatewaySession.jwt
-      : isClaudeAISubscriber()
-        ? getClaudeAIOAuthTokens()?.accessToken
-        : undefined,
-    // Gateway session wins; else staging OAuth baseURL when ant.
+      : profileWire
+        ? profileWire.token
+        : isClaudeAISubscriber()
+          ? getClaudeAIOAuthTokens()?.accessToken
+          : undefined,
+    // Gateway session wins; else profile base_url; else staging OAuth.
     ...(gatewaySession
       ? { baseURL: gatewaySession.url }
-      : process.env.USER_TYPE === 'ant' &&
-          isEnvTruthy(process.env.USE_STAGING_OAUTH)
-        ? { baseURL: getOauthConfig().BASE_API_URL }
-        : {}),
+      : profileWire?.baseURL
+        ? { baseURL: profileWire.baseURL }
+        : process.env.USER_TYPE === 'ant' &&
+            isEnvTruthy(process.env.USE_STAGING_OAUTH)
+          ? { baseURL: getOauthConfig().BASE_API_URL }
+          : {}),
     ...ARGS,
     ...(gatewayDefaultHeaders ? { defaultHeaders: gatewayDefaultHeaders } : {}),
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
@@ -747,7 +762,7 @@ function buildFetch(
   // and unknown headers risk rejection by strict proxies (inc-4029 class).
   const injectClientRequestId =
     getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
-  return (input, init) => {
+  return async (input, init) => {
     // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
     const headers = new Headers(init?.headers)
     // Generate a client-side request ID so timeouts (which return no server
@@ -768,12 +783,12 @@ function buildFetch(
     } catch {
       // never let logging crash the fetch
     }
+    const nextInit = { ...init, headers }
+    // densable En_ — real path/body; before gzip so webhook sees JSON.
+    await criPolicyPrecheckFetchInput(url || input, nextInit)
     // Official x_h: compress eligible first-party request bodies with gzip
     // and pad JSON body whitespace for length fingerprint resistance.
-    const withGzip = applyGzipRequestBodyInit(url, {
-      ...init,
-      headers,
-    })
-    return inner(input, withGzip ?? { ...init, headers })
+    const withGzip = applyGzipRequestBodyInit(url, nextInit)
+    return inner(input, withGzip ?? nextInit)
   }
 }

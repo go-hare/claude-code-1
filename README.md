@@ -43,30 +43,41 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 大包 HAVE 45 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 18 / N/A 1** + **236 HAVE 20 / PARTIAL 12** + **237 HAVE 3** + **238 HAVE 34 / PARTIAL 5**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.46**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.46**），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+
+#### densable 2.1.239 对齐说明（工作树 tip；未进 2.7.46）
+
+对照文档：`docs/upstream-extraction/v2.1.239/official-239-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0**）、`cross-pack-residuals.md`。叠在 **2.1.238**（npm **2.7.46**）之上。changelog 本机路径按**当前工作树**收口；部分 leftover（CRI webhook、`@synced` hydrate、artifact auto-react、NMs permission Host）**尚未提交**。官方无 2.1.240/241 bullets，勿折入。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **#4 云同步插件** | `@synced` + 磁盘 hydrate + `setSyncedPluginDirs` | 默认 `CLAUDE_CODE_SYNC_PLUGINS` OFF（官方 opt-in）；不 invent cowork 店 |
+| **#13 plan resume** | resume 跑 `y_u`；**continue 不跑**（`Jqy`） | 不 invent 云端 CCR E2E / `EaT` / RCS store |
+| **#44 / #56** | `createCriPolicyPrecheck` 接 `buildFetch`；`Ohu`/`G1s` NO_PROXY | 官方无本地 cri writer / `KFy` hosted MITM — 同缺 = 对齐 |
+| **#59 VSCode usage** | CLI SEA 0 hits | 不 invent VSCode banner |
 
 #### densable 2.1.236–2.1.238 对齐说明（2.7.46）
 
 对照文档：
 
-- `docs/upstream-extraction/v2.1.236/official-236-checklist.md`（**HAVE 20 / PARTIAL 12 / N/A 1**）
+- `docs/upstream-extraction/v2.1.236/official-236-checklist.md`（**HAVE 32 / PARTIAL 0 / N/A 1**）
 - `docs/upstream-extraction/v2.1.237/official-237-checklist.md`（**HAVE 3**）
-- `docs/upstream-extraction/v2.1.238/official-238-checklist.md`（**HAVE 34 / PARTIAL 5 / GAP 0**）
+- `docs/upstream-extraction/v2.1.238/official-238-checklist.md`（**HAVE 39 / PARTIAL 0 / GAP 0**）
 
-叠在 **2.7.45**（235 + 234 quota）之上。**2.7.46** 一次收口 **236–238** CLI 产品面，并把官方 238 SEA 仍保留的 **234 leftover**（stale Enter `qvm`/`hSl`、SendMessage `to` 300/`searchTruncated`、sessionRestore `GGc`、session persist、markdown `d0l`、marketplace allowlist）按金标接回。
+叠在 **2.7.45**（235 + 234 quota）之上。**2.7.46** 一次收口 **236–238** CLI 产品面，并把官方 238 SEA 仍保留的 **234 leftover**（stale Enter `qvm`/`hSl`、SendMessage `to` 300/`searchTruncated`、sessionRestore `GGc`、session persist、markdown `d0l`、marketplace allowlist）按金标接回。发版时 README 曾写 236 PARTIAL 12 / 238 PARTIAL 5；**之后本机合同收口为 HAVE**（live E2E / chrome UI 不另开缺口）。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
-| **236** | `ANTHROPIC_DEFAULT_MODEL`、SendMessage `notify_when_idle`、sandbox `**/.env` deny、fullscreen 单次失败回退 classic、goal idle check-in、`/model` `LFh`/`sgM` | gold-weak / live E2E 仍 PARTIAL；**#33 VSCode host a11y N/A** |
+| **236** | `ANTHROPIC_DEFAULT_MODEL`、SendMessage `notify_when_idle`、sandbox `**/.env` deny、fullscreen 单次失败回退 classic、goal idle check-in（已删 tip invent `goalIdleArmGeneration`）、`/model` `LFh`/`sgM`、slash `Did you mean`、REPL SIGTERM | **#33 VSCode host a11y N/A**；`#10/#24` 与官方同缺独立针 = 对齐 |
 | **237** | gateway/custom baseURL `canMarkApiSystem`；内置 **Concise** output style；`isOutputLineTruncated` `r7` typeof+wrap | **不** invent Proactive |
-| **238** | `keybindingFlavor` readline、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation `work-tree-elsewhere`、RC Stop/sign-out/403、update check 10s、`⊘ Disabled` 等 34 HAVE | PARTIAL：#4 live ceiling、#16 live discover、#18 用户可见 isolation、#24 chrome UI、#25 live remint。**不** invent leftover #3 `identity_changed` / G0S / storageV5 |
+| **238** | `keybindingFlavor` readline、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation `work-tree-elsewhere`、RC Stop/sign-out/403、update check 10s、`⊘ Disabled` 等 39 HAVE | live E2E / chrome UI 不 invent；**不** leftover #3 `identity_changed` / G0S / storageV5 |
 | **234 leftover** | stale Enter 续跑、`to` 单行+300、`searchTruncated`、UNC/NT 拒 chdir、session persist + `permissionRecheck`、markdown href/表/HR | 不 invent G0S unknowable-rescan |
 
 #### densable 2.1.234–2.1.235 对齐说明（2.7.45）
 
 对照文档：
 
-- `docs/upstream-extraction/v2.1.235/official-235-checklist.md`（**HAVE 18 / PARTIAL 0 / GAP 0 / N/A 1**；官方 19 条）
+- `docs/upstream-extraction/v2.1.235/official-235-checklist.md`（**HAVE 15 + analog 3 / N/A 1**；官方 19 条。analog = 注脚，不是缺口）
 - `docs/upstream-extraction/v2.1.235/changelog-2.1.235.md`、`progress.md`
 - 邻版：`docs/upstream-extraction/v2.1.235/changelog-2.1.234-neighbor.md`（quota auto-resume 等 tip 已有）
 
@@ -85,14 +96,14 @@
 对照文档：
 
 - `docs/upstream-extraction/v2.1.231/official-231-checklist.md`（**HAVE 1** + cup/r8o residual）
-- `docs/upstream-extraction/v2.1.232/official-232-checklist.md`（**HAVE 45 / N/A 4 / PARTIAL 0**；官方 49 条）
+- `docs/upstream-extraction/v2.1.232/official-232-checklist.md`（**HAVE 43 / PARTIAL 2 / N/A 4**；官方 49 条。`#14/#43` = 233 回滚账，tip=现行官方）
 - `docs/upstream-extraction/v2.1.233/official-233-checklist.md`（**HAVE 14** + verify-only/pre-exist；**N/A 3**）
 
 叠在 **2.1.229**（npm **2.7.39**）之上。**2.7.40** 一次收口 231→233（含 232 review residual：G7 `cse_*`、thinking-only re-stream、ERA 探测、remint 接线）。**2.7.41** 补齐 MCP v2 残留类型迁移：全量 method+params `setNotificationHandler`（channel/IDE/VSCode/print）、`ctx.mcpReq`、elicitation complete 守卫顺序、以及 `mock.module` 进程全局污染隔离。**2.7.42** 收口 tools/list 边界与 residual cast：`listToolsResult`、`createSdkMcpServer`/`tools/call` densable 路径、`k0i` implements、channel origin。**2.7.43** 审查收口：thinking-only cost credit、G7 `cse_*` abandon clear、`epoch_stale`-only Ot；OpenAI/Grok/Gemini catch 走 `getAssistantMessageFromError` 使 PTL 进 reactive compact。**2.7.44** teammate 默认模型：unset/null 跟随 leader / `ANTHROPIC_MODEL`（Opus 仅兜底），并转发 Anthropic 模型 env pin。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
-| **231 OAuth** | MCP 预注册 client（Slack 等）redirect：**JFr=`localhost`**（listen 仍 `127.0.0.1`）；preferred-port 复用；`preserveClientRegistration`；custom `redirectUri` 不启 localhost listener | 与 229「strict AS 用 127.0.0.1 redirect」目标不同——**redirect host ≠ listen host** 故意分离 |
+| **231 OAuth** | MCP 预注册 client（Slack 等）redirect：**JFr=`localhost`**（listen 仍 `127.0.0.1`）；preferred-port 复用；`preserveClientRegistration`；custom `redirectUri` 不启 localhost listener | **覆盖 229 #12** 的 `127.0.0.1` 主机名。**redirect host ≠ listen host** 故意分离；勿按 229 清单回写 |
 | **232 Agent / 跨会话** | fork 产品默认 ON（runtime gate，非 compile `FORK_SUBAGENT`）；`@` peer mention；SendMessage 裸名直达；本机 session 名唯一；Dialog expiry / 跨会话 inbound 策略 | 完整 cloud sessions / inProcess team-file 不 invent |
 | **232 安全 / 市场** | GitLab token 家族脱敏 + `glab` 路径保护；marketplace 别名；GitLab nested subgroup clone；PS `PSDefaultParameterValues`；nested git 独立 trust；UDS socket dir 硬化 | **#10/#11/#22 gateway、#45 Cowork N/A** |
 | **232 RC / 流** | remint ~30min / Ls+Hde/gzp；G7 teleported + `cse_*` 失败重连保留；thinking-only re-stream（Po=1/sr=2）；stream idle→`api_timeout`；mTLS 热更；region sanitize | 真网 e2e remint harness 非默认 |
@@ -109,7 +120,7 @@
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
 | **上下文 / PTL** | #20 messages-only >32MB `request_body_over_limit`；#25 Ysa/bua「automatic compaction failed」；**`REACTIVE_COMPACT` 产品默认 ON**；try 经 densable **ex()**（=`isAutoCompactEnabled`）+ **Jsa**（source/$Ir/yAt）+ **Rhe**（remote GB） | **CONTEXT_COLLAPSE / HISTORY_SNIP** 仍 OFF；precompute swap 未 ship |
-| **OAuth / 归因 / 1M** | #12 MCP OAuth `127.0.0.1`；#10 attribution `ignoreEnvOptOut` + auto-mode force；#11 subscriber 1M 仅 first-party/unix socket | — |
+| **OAuth / 归因 / 1M** | #12 本 pack 曾落 MCP OAuth `127.0.0.1` 主机名；**tip 现码 = 231 `localhost`**（listen 仍 `127.0.0.1`）；#10 attribution `ignoreEnvOptOut` + auto-mode force；#11 subscriber 1M 仅 first-party/unix socket | 勿按 229 行把 tip 改回 `127.0.0.1` |
 | **SHR / Windows** | #2 server launcher hooks；#23 GCM fail-fast；#29 win32 强制 `--base-dir`；#22 managed-mcp exclusive soft-skip | — |
 | **插件 / 列表 / 流** | #4 marketplace `command`+`link`；#5 ListAgents offline/cloud；#6 VirtualMessageList keys；#16 plugin in-use markers | — |
 | **工具 / 路径 / 空白** | #7 safeToolInput non-string；#8 ProgressBar/MarkdownTable clamp；#9 Windows `\\?\`/UNC strip；#19 stream-json blank gate | — |
@@ -240,14 +251,14 @@
 
 | 版本 | 要点 |
 | ---- | ---- |
-| **2.7.46** | **densable 2.1.236–2.1.238**：236 HAVE 20 / PARTIAL 12（`ANTHROPIC_DEFAULT_MODEL`、`notify_when_idle`、sandbox deny、fullscreen fallback、goal check-in、`/model` `LFh`/`sgM`）；237 HAVE 3（`canMarkApiSystem`、Concise、`r7` truncate）；238 HAVE 34 / PARTIAL 5（`keybindingFlavor`、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation pin、RC Stop/sign-out/403、update check 10s）。并接回官方 238 仍保留的 **234 leftover**（stale Enter、SendMessage `to`/truncated、`GGc`、session persist、markdown `d0l`）。不 invent leftover #3 / G0S / chrome UI。 |
-| **2.7.45** | **densable 2.1.235（HAVE 18 / N/A 1）** + tip **2.1.234** quota auto-resume：spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP 门 / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX 门**；CLI IDE bridge `uSm`；quota rearm `HEv=2`。**#19 VSCode host focus N/A**。 |
+| **2.7.46** | **densable 2.1.236–2.1.238**：236 HAVE **32** / N/A 1（`ANTHROPIC_DEFAULT_MODEL`、`notify_when_idle`、sandbox deny、fullscreen fallback、goal check-in、`/model` `LFh`/`sgM`）；237 HAVE 3（`canMarkApiSystem`、Concise、`r7` truncate）；238 HAVE **39**（`keybindingFlavor`、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation pin、RC Stop/sign-out/403、update check 10s）。并接回官方 238 仍保留的 **234 leftover**（stale Enter、SendMessage `to`/truncated、`GGc`、session persist、markdown `d0l`）。发版时曾写 PARTIAL，之后本机合同收口。不 invent leftover #3 / G0S / chrome UI。**2.1.239 leftover 在工作树，未进本 npm。** |
+| **2.7.45** | **densable 2.1.235（HAVE 15 + analog 3 / N/A 1）** + tip **2.1.234** quota auto-resume：spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP 门 / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX 门**；CLI IDE bridge `uSm`；quota rearm `HEv=2`。**#19 VSCode host focus N/A**。analog 是注脚，不是缺口。 |
 | **2.7.44** | **teammate 默认模型跟随 leader**：`teammateDefaultModel` unset/null 经 leader → `mainLoopModel` / `ANTHROPIC_MODEL` 解析，硬编码 Opus 仅最后兜底；Config/ModelPicker 文案对齐；向 teammate 转发 `ANTHROPIC_MODEL` 与 `ANTHROPIC_DEFAULT_*_MODEL`。 |
 | **2.7.43** | **densable 1:1 审查收口 + 兼容层 PTL**：thinking-only re-stream 前 credit session cost；G7 mint-time `cse_*` 放弃/teardown 清理（reattach 暂态保留）；`epoch_stale`-only Ot（`epoch_conflict` 不进 Ba remint）；OpenAI/Grok/Gemini catch 经 `getAssistantMessageFromError`，`maximum prompt length` 可进 reactive compact。 |
 | **2.7.42** | **MCP tools/list 边界 + residual cast 收口**：`listToolsResult` 统一 wire 边界（chrome/weixin `as unknown as ListToolsResult`）；`createSdkMcpServer` densable `cr4` registerTool 无 cast；`entrypoints/mcp.ts` tools/call 对齐 `coerceInput`→`safeParse`→`validateInput`→`call`；`DensableAjvJsonSchemaValidator implements jsonSchemaValidator`；channel enqueue `origin` 无 `as any`。 |
 | **2.7.41** | **MCP v2 residual 收口**：全量 densable string `setNotificationHandler`（channel/IDE/VSCode/print enable+reconnect）；`ctx.mcpReq` / elicitation complete 守卫顺序；type residual（deny source keys、callTool 二元、GB boolean）；测试隔离 process-global `mock.module`/env。 |
-| **2.7.40** | **densable 2.1.231–2.1.233 收口**（无官方 2.1.230）：**231** MCP OAuth 预注册 redirect FLv（`localhost` + port 复用 + preserveClient）；**232** HAVE 45 / N/A 4 — fork 默认、@mention/SendMessage 裸名、session 名唯一、GitLab token/marketplace、PS/nested-git、MCP connect timeout、RC remint/G7 `cse_*`、thinking-only re-stream、OpenAI/Grok PTL、sandbox.ripgrep 源限制等；**233** HAVE 14 — MCP **client@2/server@2 产品单栈**、cgroup 内存、WebFetch TTL、`\??\` UNC、Todo/Tds、`/effort` a11y；**官方回滚 232 Cygwin + Bash `<` 产品门**（residual 保留）。N/A：gateway / Desktop Notification / Cowork。 |
-| **2.7.39** | **densable 2.1.229（HAVE 27 / N/A 5 / GAP 0）** + 产品默认 **`REACTIVE_COMPACT`**：长会话 413/PTL withhold + try 恢复（Ysa/bua #25；messages >32MB unrecoverable #20）；try 门控 densable **ex/Jsa/Rhe**；OAuth `127.0.0.1`、attribution force、SHR launcher hooks/GCM/base-dir、plugin command 源、ListAgents offline/cloud、safeToolInput、UNC path、workflow host 并发/prefix stagger、IPv6 doctor、commit-push-pr deny 等。N/A：#3 SSE host、#21 Desktop OTEL、#30–32 VSCode。**不含** collapse/snip。 |
+| **2.7.40** | **densable 2.1.231–2.1.233 收口**（无官方 2.1.230）：**231** MCP OAuth 预注册 redirect FLv（`localhost` + port 复用 + preserveClient；**覆盖 229 #12** 主机名）；**232** 发版时 HAVE 45，**之后 #14/#43 → PARTIAL**（233 回滚，tip=现行官方）/ N/A 4 — fork 默认、@mention/SendMessage 裸名、session 名唯一、GitLab token/marketplace、PS/nested-git、MCP connect timeout、RC remint/G7 `cse_*`、thinking-only re-stream、OpenAI/Grok PTL、sandbox.ripgrep 源限制等；**233** HAVE 14 — MCP **client@2/server@2 产品单栈**、cgroup 内存、WebFetch TTL、`\??\` UNC、Todo/Tds、`/effort` a11y；**官方回滚 232 Cygwin + Bash `<` 产品门**（residual 保留，勿复活）。N/A：gateway / Desktop Notification / Cowork。 |
+| **2.7.39** | **densable 2.1.229（HAVE 27 / N/A 5 / GAP 0）** + 产品默认 **`REACTIVE_COMPACT`**：长会话 413/PTL withhold + try 恢复（Ysa/bua #25；messages >32MB unrecoverable #20）；try 门控 densable **ex/Jsa/Rhe**；OAuth **本 pack 曾落 `127.0.0.1` 主机名，tip 现码 = 231 `localhost`**（listen 仍 `127.0.0.1`）、attribution force、SHR launcher hooks/GCM/base-dir、plugin command 源、ListAgents offline/cloud、safeToolInput、UNC path、workflow host 并发/prefix stagger、IPv6 doctor、commit-push-pr deny 等。N/A：#3 SSE host、#21 Desktop OTEL、#30–32 VSCode。**不含** collapse/snip。 |
 | **2.7.38** | **Grok 4.6 推理档 catalog**：按模型 ID 最长匹配加 `grok-4.6` 行（不按厂商启发式）。官方 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)（2026-08-12）：`grok-4.6` 为 `low \| medium \| high \| xhigh`（默认 `high`）；`grok-4.5` 仍三档（xhigh 当 high）。另有 `grok-4.20-reasoning` 三档、`grok-4.20-multi-agent` 含 xhigh（agent count）。`queryModelGrok` 对**映射后** id 发 Chat Completions `reasoning_effort`。不加裸 `grok-4` / `grok-4.20` 行。 |
 | **2.7.37** | **densable 2.1.228（HAVE 17 + PARTIAL 1 / GAP 0；#12 core-only）** + 已并入 223–227：Ink layout recover；kTd whole-token re-ESC + incomplete buffer；Windows `uio`；SHR checkout skip + follow-up hold；UDS `key_publish` fail-closed + LAN TCP auth；RC reattach owner / left-arrow；syncedSkills harden core；Write/Edit Jqy/MCt+l8t；Vertex fail-fast + Bedrock GKd；St mid-turn；cross-session from-name；cleanup memory / plugin symlink / marketplace ssn；`/tui` model pin；title ◐/◑；auto-mode 去 expensive；DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS 外围 ON**；221 #10 null-proto + createSdkMcpServer。跨 pack 残差见 `cross-pack-residuals.md`（teleport invent-ban）。 |
 | **2.7.36** | **streaming 空 `●` hotfix（densable 222 residual）**：`hasContentAfter` 对齐 densable `y\|\|aem`（去掉 invent `\|\|streamingPreview`）；whitespace / strip-empty 不画 XEl；`Qci` trim-empty 清 `STREAM_FLAG_DISPLAYED`。避免 collapsed 工具组后假 past-tense「Ran N…」+ Cooking 前 lone bullet。 |

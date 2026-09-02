@@ -260,7 +260,11 @@ export async function* handleStopHooks(
   }
 
   // densable 2.1.236 Bqn: arm idle+parked check-in after Stop hooks (finally).
+  // densable: y = removed goal Stop hook; finally{if(y) registry.add(...y)}
   let goalToArm: GoalCheckinActiveGoal | undefined
+  let removedGoalStopHook:
+    | import('../utils/settings/types.js').HookCommand
+    | undefined
   try {
     const blockingErrors: Message[] = [...briefEnforceBlocking]
     const appState = toolUseContext.getAppState()
@@ -298,19 +302,20 @@ export async function* handleStopHooks(
         const hooks = getSessionHooks(appState, sessionId, 'Stop')
         const stopMatchers = hooks.get('Stop')
         if (stopMatchers) {
-          for (const matcher of stopMatchers) {
+          outer: for (const matcher of stopMatchers) {
             for (const hook of matcher.hooks) {
               if (
                 hook.type === 'prompt' &&
                 hook.prompt === appState.activeGoal.condition
               ) {
+                removedGoalStopHook = hook
                 removeSessionHook(
                   toolUseContext.setAppState,
                   sessionId,
                   'Stop',
                   hook,
                 )
-                break
+                break outer
               }
             }
           }
@@ -673,6 +678,30 @@ export async function* handleStopHooks(
     )
     return { blockingErrors: [], preventContinuation: false }
   } finally {
+    // densable: finally{if(y) sessionHooksRegistry.add(Vt(),"Stop","",y)}
+    // DMv defer tip-removes Stop; must re-arm so later turns re-evaluate.
+    if (removedGoalStopHook !== undefined) {
+      try {
+        const { addSessionHook } = await import(
+          '../utils/hooks/sessionHooks.js'
+        )
+        const sessionId =
+          toolUseContext.agentId ??
+          (await import('../bootstrap/state.js')).getSessionId()
+        addSessionHook(
+          toolUseContext.setAppState,
+          sessionId,
+          'Stop',
+          '',
+          removedGoalStopHook,
+        )
+      } catch (err) {
+        logForDebugging(
+          `[goal] Stop hook restore failed: ${errorMessage(err)}`,
+          { level: 'error' },
+        )
+      }
+    }
     // densable Bqn: interactive + planned nextGoal only (not after clear).
     if (
       goalToArm !== undefined &&

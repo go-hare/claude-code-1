@@ -1,5 +1,16 @@
 import { describe, expect, test } from 'bun:test'
-import { parseGitNumstat, parseGitDiff, parseShortstat } from '../gitDiff'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import {
+  foldEmptyRepoWorkingTreeStats,
+  hunkRefForDiff,
+  isPreSessionStat,
+  nextHunksOnVFf,
+  parseGitDiff,
+  parseGitNumstat,
+  parseShortstat,
+  type PerFileStats,
+} from '../gitDiff'
 
 describe('parseGitNumstat', () => {
   test('parses single file', () => {
@@ -90,8 +101,9 @@ describe('parseGitDiff', () => {
     ].join('\n')
 
     const result = parseGitDiff(input)
-    expect(result.size).toBe(1)
-    const hunks = result.get('foo.ts')!
+    expect(result.hunks.size).toBe(1)
+    expect(result.skippedLarge.size).toBe(0)
+    const hunks = result.hunks.get('foo.ts')!
     expect(hunks).toHaveLength(1)
     expect(hunks[0].oldStart).toBe(1)
     expect(hunks[0].oldLines).toBe(3)
@@ -117,7 +129,7 @@ describe('parseGitDiff', () => {
     ].join('\n')
 
     const result = parseGitDiff(input)
-    const hunks = result.get('bar.ts')!
+    const hunks = result.hunks.get('bar.ts')!
     expect(hunks).toHaveLength(2)
     expect(hunks[0].oldStart).toBe(1)
     expect(hunks[1].oldStart).toBe(10)
@@ -131,7 +143,8 @@ describe('parseGitDiff', () => {
 
     const result = parseGitDiff(input)
     // Binary file has no hunks, so it's not in the result
-    expect(result.size).toBe(0)
+    expect(result.hunks.size).toBe(0)
+    expect(result.skippedLarge.size).toBe(0)
   })
 
   test('parses new file mode', () => {
@@ -146,7 +159,7 @@ describe('parseGitDiff', () => {
     ].join('\n')
 
     const result = parseGitDiff(input)
-    const hunks = result.get('new.ts')!
+    const hunks = result.hunks.get('new.ts')!
     expect(hunks).toHaveLength(1)
     expect(hunks[0].lines).toEqual(['+line1', '+line2'])
   })
@@ -163,13 +176,14 @@ describe('parseGitDiff', () => {
     ].join('\n')
 
     const result = parseGitDiff(input)
-    const hunks = result.get('old.ts')!
+    const hunks = result.hunks.get('old.ts')!
     expect(hunks).toHaveLength(1)
   })
 
-  test('returns empty map for empty input', () => {
+  test('returns empty hunks and skippedLarge for empty input', () => {
     const result = parseGitDiff('')
-    expect(result.size).toBe(0)
+    expect(result.hunks.size).toBe(0)
+    expect(result.skippedLarge.size).toBe(0)
   })
 
   test('handles multiple files', () => {
@@ -189,9 +203,9 @@ describe('parseGitDiff', () => {
     ].join('\n')
 
     const result = parseGitDiff(input)
-    expect(result.size).toBe(2)
-    expect(result.has('a.ts')).toBe(true)
-    expect(result.has('b.ts')).toBe(true)
+    expect(result.hunks.size).toBe(2)
+    expect(result.hunks.has('a.ts')).toBe(true)
+    expect(result.hunks.has('b.ts')).toBe(true)
   })
 
   test('skips hunk without comma (single line)', () => {
@@ -205,7 +219,7 @@ describe('parseGitDiff', () => {
     ].join('\n')
 
     const result = parseGitDiff(input)
-    const hunks = result.get('solo.ts')!
+    const hunks = result.hunks.get('solo.ts')!
     expect(hunks[0].oldLines).toBe(1) // default when no comma
     expect(hunks[0].newLines).toBe(1)
   })
@@ -290,5 +304,142 @@ describe('parseShortstat', () => {
       linesAdded: 0,
       linesRemoved: 0,
     })
+  })
+})
+
+describe('densable PPi CJn hunk ref', () => {
+  test('working-tree uses HEAD; noCommits uses --cached; branch uses baseRef', () => {
+    const empty = {
+      stats: { filesCount: 0, linesAdded: 0, linesRemoved: 0 },
+      perFileStats: new Map(),
+      hunks: new Map(),
+    }
+    expect(hunkRefForDiff({ ...empty, source: { kind: 'working-tree' } })).toBe(
+      'HEAD',
+    )
+    expect(
+      hunkRefForDiff({
+        ...empty,
+        source: { kind: 'working-tree' },
+        noCommits: true,
+      }),
+    ).toBe('--cached')
+    expect(
+      hunkRefForDiff({
+        ...empty,
+        source: { kind: 'branch', baseBranch: 'main', baseRef: 'abc123' },
+      }),
+    ).toBe('abc123')
+  })
+
+  test('VFf null keeps hunks when CJn matches, else empty', () => {
+    const result = {
+      stats: { filesCount: 0, linesAdded: 0, linesRemoved: 0 },
+      perFileStats: new Map(),
+      hunks: new Map(),
+      source: { kind: 'working-tree' as const },
+    }
+    const kept = {
+      hunks: new Map([['a.ts', []]]),
+      skippedLarge: new Set<string>(),
+    }
+    expect(nextHunksOnVFf(null, { result, hunks: kept }, 'HEAD')).toBe(kept)
+    expect(
+      nextHunksOnVFf(null, { result, hunks: kept }, '--cached').hunks.size,
+    ).toBe(0)
+    const fresh = {
+      hunks: new Map([['b.ts', []]]),
+      skippedLarge: new Set<string>(),
+    }
+    expect(nextHunksOnVFf(fresh, { result, hunks: kept }, 'HEAD')).toBe(fresh)
+  })
+})
+
+describe('densable _zS / AzS preSession', () => {
+  test('isPreSessionStat is max(mtime,ctime) < GZt', () => {
+    expect(isPreSessionStat(10, 20, 30)).toBe(true)
+    expect(isPreSessionStat(40, 10, 30)).toBe(false)
+    expect(isPreSessionStat(30, 30, 30)).toBe(false)
+  })
+
+  test('bzS folds unstaged numstat into Sil cached rows', () => {
+    const staged: {
+      stats: { filesCount: number; linesAdded: number; linesRemoved: number }
+      perFileStats: Map<string, PerFileStats>
+    } = {
+      stats: { filesCount: 2, linesAdded: 4, linesRemoved: 1 },
+      perFileStats: new Map([
+        ['a.ts', { added: 4, removed: 1, isBinary: false }],
+        ['b.ts', { added: 0, removed: 0, isBinary: false }],
+      ]),
+    }
+    foldEmptyRepoWorkingTreeStats(staged, {
+      perFileStats: new Map([
+        ['a.ts', { added: 3, removed: 2, isBinary: false }],
+        ['c.ts', { added: 9, removed: 0, isBinary: false }],
+      ]),
+    })
+    expect(staged.stats).toEqual({
+      filesCount: 2,
+      linesAdded: 5,
+      linesRemoved: 1,
+    })
+    expect(staged.perFileStats.get('a.ts')).toEqual({
+      added: 5,
+      removed: 0,
+      isBinary: false,
+      isUntracked: false,
+    })
+    expect(staged.perFileStats.get('b.ts')).toEqual({
+      added: 0,
+      removed: 0,
+      isBinary: false,
+    })
+    expect(staged.perFileStats.has('c.ts')).toBe(false)
+  })
+
+  test('bzS binary either side zeros added', () => {
+    const staged: {
+      stats: { filesCount: number; linesAdded: number; linesRemoved: number }
+      perFileStats: Map<string, PerFileStats>
+    } = {
+      stats: { filesCount: 1, linesAdded: 2, linesRemoved: 0 },
+      perFileStats: new Map([
+        ['a.bin', { added: 2, removed: 0, isBinary: false }],
+      ]),
+    }
+    foldEmptyRepoWorkingTreeStats(staged, {
+      perFileStats: new Map([
+        ['a.bin', { added: 4, removed: 1, isBinary: true }],
+      ]),
+    })
+    expect(staged.perFileStats.get('a.bin')).toEqual({
+      added: 0,
+      removed: 0,
+      isBinary: true,
+      isUntracked: false,
+    })
+    expect(staged.stats.linesAdded).toBe(0)
+  })
+
+  test('PPi session runs _zS + AzS includePreSession', () => {
+    const src = readFileSync(join(import.meta.dir, '../gitDiff.ts'), 'utf8')
+    expect(src).toContain('markPreSessionFiles')
+    expect(src).toContain('getSessionStartTime')
+    expect(src).toContain("if (mode === 'session')")
+    expect(src).toContain('fetchUntrackedFiles(remaining, abort, true)')
+    expect(src).toContain('fetchUntrackedFiles(remaining, abort, false)')
+    expect(src).toContain('foldEmptyRepoWorkingTreeStats')
+    expect(src).toContain("diff', '--numstat'")
+  })
+
+  test('VFf / vzS source lock: skippedLarge, --cached GFf, kJn shortstat', () => {
+    const src = readFileSync(join(import.meta.dir, '../gitDiff.ts'), 'utf8')
+    expect(src).toContain('skippedLarge.add')
+    expect(src).toContain("if (ref === '--cached' && parsed.hunks.size > 0)")
+    expect(src).toContain('fetchWorkingTreeNumstat')
+    expect(src).toContain('quick && quick.filesCount > MAX_FILES_FOR_DETAILS')
+    expect(src).toContain('hunks.size + skippedLarge.size >= MAX_FILES')
+    expect(src).toContain('...RAW_GIT_DIFF_FLAGS')
   })
 })

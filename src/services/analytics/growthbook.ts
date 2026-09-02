@@ -446,6 +446,9 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_auto_background_agents: true, // Auto-background agents after 120s
   tengu_fleet_needs_input_nudge: true, // Footer "← N agent(s)" when fleet jobs need input
   tengu_fgts: true, // Fine-grained tool state in system prompt
+  // Resume-return dialog (rXg / iXg). Official GB default is false; self-hosted
+  // forks never get remote true, so overnight /resume stays silent.
+  tengu_gleaming_fair: true,
 
   // ── P1: API-dependent features ───────────────────────────────────
   tengu_session_memory: true, // Session memory (cross-session persistence)

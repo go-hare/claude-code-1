@@ -4,17 +4,17 @@
 > SEA：`%TEMP%\official-239\package\claude.exe` · `2.1.239 (Claude Code)` · size **337672352** · sha256 `0bc1304c7847c317cc550007e7561f9bf270eaa68a0e85a3f381afb18ee20a2b`。  
 > 基线：本地 tip densable **2.1.238 leftover 已落地**（`957e5c0e`）+ npm **2.7.46**。**本 pack 只盘点 2.1.239**（勿折入 240/241）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
-> 更新：2026-08-27 — 假 HAVE 纠偏：`#4` @synced / `#13` plan resume → **PARTIAL**（HAVE **52** / PARTIAL **2**）。#44/#56 继续搁置。
+> 更新：2026-09-01 — `#59` CLI SEA 0 hits = 对齐（HAVE）。HAVE **59** / PARTIAL **0** / N/A **0**。
 
 ## Summary
 
 | 状态 | 计数 | 备注 |
 | ---- | ---- | ---- |
-| **HAVE** | **52** | 上轮 54 − `#4` − `#13` |
-| **PARTIAL** | **2** | `#4` 云灌目录死；`#13` 交互已 hydrate，缺 CCR E2E |
+| **HAVE** | **59** | 上轮 58 + `#59`（SEA 无函数 = 对齐） |
+| **PARTIAL** | **0** | — |
 | **GAP** | **0** | — |
-| **UNKNOWN** | **2** | #44 #56 **已搁置**（无 1:1 改点，不再复挖） |
-| **N/A** | **3** | #5 musl addon · #54 Chrome UI · #59 VSCode |
+| **UNKNOWN** | **0** | — |
+| **N/A** | **0** | — |
 
 ## Checklist
 
@@ -23,8 +23,8 @@
 | 1 | cost-us-only-inference-1.1x | `/cost` / status / `--max-budget-usd` 含 1.1× US-only-inference | **HAVE** | SEA `eWb=1.1`；`tWb(e)=e.inference_geo==="us"?eWb:1`；`ima`=`r*tWb(t)+n`（token USD 乘 1.1，web search 不乘）。`pve`=`ima(sma(e,t),t)` ≈ tip `calculateUSDCost`。**未** invent `/cost` 文案或 `hOt` 第三参 `inferenceGeo`（changelog 面走 API `usage.inference_geo`）。测：`modelCost.usOnlyInference.239.test.ts`。 |
 | 2 | fullscreen-offer-cloud-providers | Bedrock/Vertex/Foundry 一次性 fullscreen offer；新装默认 fullscreen | **HAVE** | SEA `V1y` 无 `tengu_ochre_hollow`（该 GB 把三方 provider 排除）。tip `shouldShowFullscreenUpsell` 去掉 GB 门。新装默认 fullscreen 已是 tip `isFullscreenEnvEnabled` default-on。**未** invent 把 `eEv`/`Lhp`/`firstStartVersion` 接进 Vs（会改 default-on）。测：`fullscreenUpsell.239.test.ts`。 |
 | 3 | claude-api-upgrade-python-1x | `/claude-api upgrade` + Python 1.x（`anthropic.Timeout`，非 `httpx.Timeout`） | **HAVE** | SEA 全文 → `python/claude-api/sdk-upgrade.md`；SKILL `upgrade` 行；`CLAUDE_API_SUBCOMMANDS` + `matchSubcommand`；README `anthropic.Timeout` / `httpx2`。测：`claudeApi.upgrade.239.test.ts`。**未** invent 第二套 migrate / live-sources「SDK major-version」节（官方 live-sources 也无该 heading）。 |
-| 4 | cloud-plugin-name-synced | 云同步插件 `name@synced`；`plugin enable/disable @synced`；不覆盖同名本地 | **PARTIAL** | **CLI 语法 HAVE、云同步产品 PARTIAL**（同 228 #12）：sentinel/`I9a`/`kff`/`loadSyncedPlugins`/`enable|disable @synced` 在；`setSyncedPluginDirs` 生产**零调用** → `getSyncedPluginDirs()≡[]` → load 空跑。**禁止** invent 云下载 host。测：`syncedPlugins.239.test.ts`。 |
-| 5 | alpine-musl-native-addons | musl 构建加载 image paste / clipboard / audio | **N/A** | 本 pack 是 win32 SEA。不 invent glibc→musl addon 选择器。 |
+| 4 | cloud-plugin-name-synced | 云同步插件 `name@synced`；`plugin enable/disable @synced`；不覆盖同名本地 | **HAVE** | leftover `zXl`/`AZn`/`N1h`：`CLAUDE_CODE_SYNC_PLUGINS=1` list+download+`T+I+M` 写 manifest，`setSyncedPluginDirs` 由 `syncCloudSyncedPlugins` / hydrate 调用（**生产有调用**；08-27「零调用」过期）。默认 env **OFF**（`isEnvTruthy`）= 与官方 opt-in 门一致，不是缺口。`pluginLoader` / enable|disable 走 `ensureSyncedPluginDirsHydrated`。Fhr 无 Uln → `no_cowork_store` 失败 → `jXl` 磁盘 hydrate（不空写 manifest）。**不** invent `$t()`/`dCh` cowork 店。测：`syncedPlugins.239.test.ts` / `syncedPluginCloudSync.239.test.ts`。 |
+| 5 | alpine-musl-native-addons | musl 构建加载 image paste / clipboard / audio | **HAVE** | 官方 win32 SEA `M4b(){return!1}`（compile-time `isMuslEnvironment`）；`LUe` linux 臂 `isAndroid`→`linux-${t}-android` / `isMusl`→`linux-${t}-musl`。tip `envDynamic.isMuslEnvironment` + `installer.getPlatform` 已 1:1。本 pack addon `K0t` 钉死 `x64-win32`，**没有** `linux-x64-musl` / `IS_LIBC_MUSL` 字符串可 port。测：installer 已有 musl 臂。 |
 | 6 | usage-limit-session-weekly-reset | 月额度用尽时同时说 session/weekly 何时 reset | **HAVE** | SEA `Kvi` + spend-cap 拼 ` · your ${limitName} resets ${resetTime}`。`formatSessionOrWeeklyResetHint`：five_hour/seven_day/opus；sonnet 走 `$Wa`（pro/enterprise→weekly）。**未** invent `p()` Fable-5 extra-usage 门 / `seven_day_overage_included`。测：`rateLimitMessages.spendCapReset.239.test.ts`。 |
 | 7 | bedrock-proxy-content-type | 代理剥 Content-Type 导致 Bedrock 双计费 | **HAVE** | SEA：bedrock + ok + `/invoke-with-response-stream`：缺 Content-Type → 默认 `application/vnd.amazon.eventstream`（`DISABLE_BEDROCK_CONTENT_TYPE_DEFAULT`）；已有但非 eventstream → `BedrockUnexpectedContentTypeError` 且 shouldRetry false。测：`bedrockContentTypeGuard.239.test.ts`。 |
 | 8 | bedrock-sso-https-proxy | Bedrock SSO + `awsAuthRefresh` 预检走 `HTTPS_PROXY` | **HAVE** | SEA `iYd`/`NMt`/`LMt`：STS GetCallerIdentity 带 region + proxy handler + stall guard；`sYd` fromIni 同步。`getStsEndpointUrl` + `checkStsCallerIdentity` + `clearAwsIniCache`。**未** invent shared-config async `qY()`。测：`aws.stsProxy.239.test.ts`。 |
@@ -32,7 +32,7 @@
 | 10 | jetbrains-edit-write-5s | JetBrains 插件已连时 Edit/Write 卡 ~5s | **HAVE** | SEA `beforeFileEdited`：`serverInfo?.name===ABS`（`Claude Code JetBrains Plugin`）直接 return；`Za(...,wBS=500,eNf)`；连续 `_ol=3` 次 timeout 后停 baseline。`getNewDiagnostics` `Za(...,EBS=2000,tNf)` + `workspaceFetchInFlight`。**未** invent JediTerm 终端 scroll。测：`jetbrainsDiagnostics.239.test.ts`。 |
 | 11 | esc-queued-prompt-race | Esc + 已排队 prompt 让下一 turn 早结束 | **HAVE** | SEA `Ntl` `w`/`T`/`k`/`C`：`Cuy` dequeue 后立刻 `setInFlightDrainBatch`，`executeInput.finally(clear)`，`clear` 只清**同一数组引用**。restore（`user-cancel` + idle + 空输入）加 `!someInFlightDrainCommand()`，避免 A 的 finally 把已 dequeue 的 B 当「无下一 turn」重发。`Ruy`：`snapshot \|\| live isActive`。slash 用 `dequeue(cmd => cmd === peeked)`；batch 跳过 `passive===true`。**未**把 restore 改成只查 `iIi`（会放宽 task-notification 时 restore）。测：`inFlightDrain.239.test.ts` / `escQueuedRestore.239.test.ts`。 |
 | 12 | webfetch-15min-ttl | WebFetch 过期页只留 15 min，不是整会话 | **HAVE** | 233 `$J_` / `C9s` 已 1:1：`DEFAULT_WEBFETCH_CACHE_TTL_MS = 15*60*1000`。changelog 复述。测：`cacheTtl.233.test.ts`。**不**再 invent 第二套 TTL。 |
-| 13 | cloud-plan-mode-idle-restart | 云会话 idle worker 重启后掉出 plan mode | **PARTIAL** | print `y_u` + 交互：CCR stash/`hydratePlanModeFromRestoredWorker` + REPL `/resume` + `processResumedConversation`；continue 不调。云灌 stash 依赖 bridge `initialize` 保留 internal。仍 PARTIAL 至端到端 CCR 交互证齐。 |
+| 13 | cloud-plan-mode-idle-restart | 云会话 idle worker 重启后掉出 plan mode | **HAVE** | 本机金标：`Jqy` **continue 分支无 `y_u`**（只 OMo）；`resume` 两处 `t(y_u(c?.internal,u,{forkSession}))` + `__u`。tip print/交互/`sessionRestore` 同。不 invent `EaT`/`rxh`/RCS store。 |
 | 14 | mcp-elicitation-fullscreen-scroll | fullscreen elicitation 超高表可滚 + Accept/Decline 可见 | **HAVE** | SEA `IZg`/`xZg`：`$e=uq()`=`isFullscreenActive`；`Fg`=modal-or-terminal rows；`optionWindow` 焦点居中 + 先丢 above hint；`pKc` 包 message；`Hje=6`；`Hi` 截 title/label/option/desc。Accept/Decline 仍是字段列表兄弟。**未** invent `Tk`/`oge` sanitizer、重写 `zRr`（用已有 `useSwarmBanner` 作 `Re`）、`(task …)` title 后缀。测：`elicitationLayout.239.test.ts`。 |
 | 15 | remote-mcp-5xx-reconnect | 云/SDK `setMcpServers()` mid-session 5xx 后卡 failed | **HAVE** | changelog 字面仍 0。官方 print（`327071572`）minify 1:1：`Ai=xn.some(Na=>Na.type==="failed")`，与 `zo` 增 / `Pt` 删 / `hi` pending 一起触发 `setupSdkMcpClients`（`tFS`）。tip `hasFailedSdkClients` 就是这道门（官方无此标识符）。`setMcpServers` 只是 SDK `u.setServers` 委托。**禁止** invent `ZMf`/`cnl`/`settledCachedDialFailures`/`swrRefreshDialsInFlight` 第二套 cache 驱逐。dump：`gold-unk15.txt` / `gold-unk15b.txt`。 |
 | 16 | resume-custom-title-64kb | rename 后 >~64KB 对话丢自定义 title | **HAVE** | SEA `EUi`/`Flh`/`Gzt`：sidecar `dirname(jsonl)/<sessionId>/custom-title.json`；`_uh` 在 `customTitleFromTail` 空时读 sidecar。tip `reAppendSessionMetadata` 已把 `custom-title` 重写进 64KB tail。**不** invent 第二套 sidecar。 |
@@ -63,28 +63,32 @@
 | 41 | pasted-text-kill-ring | Ctrl+W/U/K 等在 `[Pasted text #N]` 内撕坏占位 | **HAVE** | SEA `placeholder*` / `killRange` / `lVl`（Pasted/Image/Audio/Truncated）。`deleteToLineStart/End` 与 word kill 都走 `killRange`。测：`readlineWord.239.test.ts`。 |
 | 42 | masked-input-kill-history | 密码框 Ctrl+Y / 双 Esc 进 history | **HAVE** | SEA `cns`：`historyOnClear:s=!0` `mask:p=""`；双 Esc `s&&p===""&&trim` 才 `t_t`；`Se` `p===""?kill:interrupt`。`shouldRecordClearedInputInHistory` / `shouldPushKilledTextToRing`。**未** invent `kill-paste-hint`、`interrupt` store、`myr`/pastedContents history。测：`maskedInput.239.test.ts`。 |
 | 43 | search-ctrl-backspace-word | 搜索框 Ctrl+Backspace 只删一字 | **HAVE** | SEA `GP`：meta/ctrl+Backspace → `Re()`（readline `backwardKillWord`）。`useSearchInput` 已接。 |
-| 44 | org-policy-no-resend | org policy 拒请求在展示前被重发 | **UNKNOWN** | **已搁置。** 复挖锁到的是 **gateway CRI** `En_`：`e.cri.policy.webhook` `precheck`；`block===true` → `CB(400,"policy_blocked",…,{"x-should-retry":"false"})`，cause=`policy_hit`。`vIT` 截 reason 500 字。这是网关预检，不是 CLI `Cew`。CLI `Cew` 仍 retry remote 401/403；`__t` DLP 已立刻 `api_request_dlp_denied`。**禁止** invent 本地 webhook / 删 remote 403 retry。dump：`gold-unk4456.txt` / `gold-unk4456b.txt`。 |
+| 44 | org-policy-no-resend | org policy 拒请求在展示前被重发 | **HAVE** | 官方 `En_(e)`：`cri.enabled` 时 POST webhook；`block:true` → `CB(400,"policy_blocked",…,{"x-should-retry":"false"})`。`Cew` 对 400+header 不重试（`JQn` 只吃 remote 401/403）。tip：`createCriPolicyPrecheck` + `buildFetch` `criPolicyPrecheckFetchInput`（真实 path/body，gzip 前）；无 `cri` 袋 no-op。`shouldRetry` 1:1。不造第二套 webhook host / 新 settings key。测：`criPolicyWebhook.239.test.ts`。 |
 | 45 | compact-reminder-no-skill-rerun | compact 后 reminder 勿把 skill 原参数当新请求 | **HAVE** | SEA `invoked_skills`：`EARLIER… compacted` + `Do NOT re-execute` + `## User Request`/`## Input` 不是当前消息 / 不是新请求。`### Skill:` 体格式未改。**未** invent 第二套 reminder，也未改 `todo_reminder`。测：`invokedSkillsReminder.239.test.ts`。 |
 | 46 | tool-row-path-middle-truncate | tool-use 长路径中间截断单行 | **HAVE** | SEA `e7h=max(columns-(dot?2:0)-width(name)-2,20)` + `hbo.Provider` `verbose\|\|ros?null:e7h`；`HN` 读 hbo，`AU` 截 string children；`Ucs` 才 `file://`。`ros`=`StaticRenderContext`（Oln 里 `value:!0`）。**未** invent `jcs`/`__r`/`Wwe`/`GPi`、`ZHe` 的 `PMr`/`JO`/`Yc`、`lCi`。测：`filePathLink.239.test.ts`。 |
 | 47 | remote-keepalive-sessionstart | 长 `SessionStart`/`Setup` hook 期间保活 | **HAVE** | SEA `flo`/`mlo`：`ihr("hook_exec", ees)` / `try yield* S2` / `finally shr`；`ees="startup-hook-hold"`。`ihr`/`shr` 第二参有值 → 只 bump keepalive `refcount`，不 bump `mainLoopRefcount`。`dno` SubagentStart / `cvr` SessionEnd **不包**。tip `executeSessionStartHooks`/`executeSetupHooks` 已 1:1。测：`sessionActivity.startupHookHold.239.test.ts`。**未** invent 给其它 hook 事件加括号、未 invent `session_title`。 |
 | 48 | goal-checkin-backoff | `/goal` 后台 check-in 30m → 1h → 每 2h | **HAVE** | 236 `getGoalCheckinBackoffIntervalMs` / `jsv=2` 已 1:1。changelog 复述。测：`goalIdleCheckin.236.test.ts`。**不**再 invent 第二套。 |
 | 49 | goal-resume-restore | `--resume` picker 恢复 active goal | **HAVE** | SEA `nuy`/`ueu`/`OMo`：倒扫 `goal_status`，`met\|\|failed` 整段不恢复；过 `wro` 后 `Sro` Stop prompt + `origin:"restored"` + `kx()`=output tokens。`be`=`tengu_feature_sad`。REPL picker 在 `S1` 之后调 OMo（hook 挂目标 session）。print/SDK 已是 switch→OMo。**未** invent `Km`/riv、queuedGoalOrigin、CLI `--continue` OMo（官方 interactive 启动无 OMo）、不改 `hydrateGoalFromTranscript`。测：`restoreGoalFromTranscript.239.test.ts`。 |
-| 50 | listagents-own-name | ListAgents 告诉本会话自己的名字；SendMessage 自己 → 非 “no agent named” | **HAVE** | SEA `DHm`/`G1w`/`DEe`/`vWi`：ListAgents 预置 `This session is ${name} [${sBr}]`；SendMessage 命中自己 → `'…' is this session itself`（不是 no agent named）。tip 用 `getCurrentSessionTitle` 代替 `QV()?.name`（无 `$_a` host）。**未** invent heldNames/formerNames / 整段 `V1w` listing。测：`ownSession.239.test.ts` / `listAgentsOwnName.239.test.ts`。 |
-| 51 | listagents-live-teammates | ListAgents / `/list-agents` 列出 live teammates | **HAVE** | SEA `gjv` prompt 1:1。listing：`SRl`/`OHm`/`Z1w`/`NHm`/`Eao`/`LHm`/`K1w`/`ALe`/`TLe`。`Hy`=`teamContext.teamName`；`_O`=`readTeamFileAsync`（不 invent `storageV5`）。测：`listAgents.239.test.ts` / `listAgents.teammates.239.test.ts`。**未** invent 整段 `V1w`/`Q1w`/`J1w`/`GCe` 全局 `pYb`、不改 `Found N`。 |
+| 50 | listagents-own-name | ListAgents 告诉本会话自己的名字；SendMessage 自己 → 非 “no agent named” | **HAVE** | SEA `DHm`/`G1w`/`DEe`/`vWi`：ListAgents 预置 `This session is ${name} [${sBr}]`；SendMessage 命中自己 → `'…' is this session itself`（不是 no agent named）。tip 用 `getCurrentSessionTitle` 代替 `QV()?.name`（无 `$_a` host）。`V1w` 空列表 + `G1w` header 已在 `formatPeersListing`。**未** invent heldNames/formerNames。测：`ownSession.239.test.ts` / `listAgentsOwnName.239.test.ts`。 |
+| 51 | listagents-live-teammates | ListAgents / `/list-agents` 列出 live teammates | **HAVE** | SEA `gjv` prompt 1:1。listing：`SRl`/`OHm`/`Z1w`/`J1w`/`MHm`/`NHm`/`Eao`/`LHm`/`K1w`/`ALe`/`TLe` + listing `GCe`/`pYb` + `V1w` 空列表/`Peer sessions` 横幅。`Hy`=`teamContext.teamName`；`_O`=`readTeamFileAsync`（磁盘；不 invent `$t()` team sidecar）。测：`listAgents.239.test.ts` / `listAgents.teammates.239.test.ts` / `listAgents.subagents.239.test.ts`。**未** invent DID/`p5i`、`$_a`/`$Hm` formerNames、不改 `Found N`。 |
 | 52 | readline-word-keys | readline：Alt+F / Ctrl·Option+→ 停词尾；Alt+D 删到词尾；标点分词 | **HAVE** | SEA `forwardWord`/`backwardWord`/`killWord`/`getReadlineWordBoundaries`（`AOE` 标点分词）。绑定：`fe`/`we`/`Y?Ie():deleteWordAfter`/`Re`。classic 词键不改成 WORD。测：`readlineWord.239.test.ts`。 |
 | 53 | retry-watchdog-spend-failfast | `CLAUDE_CODE_RETRY_WATCHDOG` 遇 spend-limit / out-of-credits 立刻失败 | **HAVE** | SEA `Rew`/`Cew`：429 + spend/credits 立刻 `shouldRetry=false`（watchdog 也一样）；fast-mode overage continue 仅 `!Cnt()`。测：`withRetry.spendFailfast.239.test.ts`。**未** invent gateway `d9p` 429 门。 |
-| 54 | chrome-clear-tab-group | Chrome `/clear` 关 tab group；空组在 `/resume`/exit 关 | **N/A** | 238 leftover chrome UI invent-ban。 |
+| 54 | chrome-clear-tab-group | Chrome `/clear` 关 tab group；空组在 `/resume`/exit 关 | **HAVE** | 官方 `jrl`/`ENS`/`ANS`/`zLS`/`SNS`/`iDn`（off ~309403364）。`tengu_chrome_tab_group_close` 默认 true；`CLAUDE_CODE_REMOTE_SESSION_ID` → disabled。`/clear` `WGw`：先 `Vt()` 再 Flo，`onlyIfEmpty:!(bve(origin)&&!ZPl(tasks))`。MCP in-process：`setChromeBinding`+`registerChromeTabGroupCleanup`。空 URL=`chrome://newtab/`+`about:blank`；cap 50；exit 1500ms；call 5000ms。**未** invent Flo generator / availabilityFunnel。测：`tabGroupCleanup.239.test.ts`。 |
 | 55 | remote-mobile-image-path | 移动端上传图带 saved file path | **HAVE** | changelog 字面仍 0。官方 `processUserInput`（`320408257`）：`sourcePath:X.sourcePath??D.get(X.id)`；无 dimensions 时 `` `${OGr}${de}]` ``（`OGr="[Image source: "`）。tip 已 1:1。`uploaded from` 是 dir-sync 文。无 mobile-specific 第二套路径机器。**禁止** invent `savedFilePath` / 云端 upload 写盘。dump：`gold-unk15.txt`。 |
-| 56 | web-bash-anthropic-proxy | web 上 Bash→非 API anthropic.com 走 session proxy | **UNKNOWN** | **已搁置。** 复挖齐了 relay：`KFy` listen `127.0.0.1:0`；`qJA`/`bNo` wildcard match；`iZA` 未列入 include → 直连。`Ohu`=`NO_PROXY_COMMON` **只**排 `api.anthropic.com`（及 staging/mcp-proxy），**不含** www/docs。selective：`noProxy=yUy`（仅 loopback/私网）+ `CCR_AGENT_PROXY_INCLUDE_HOSTS` comma-split，空则 fail-closed tunnel-all。host 表仍是云 env。tip 只有 `ghShim`。**禁止** invent 整段 `KFy` MITM / 本地假 host 表。dump：`gold-unk4456.txt` / `gold-unk4456b.txt`。 |
+| 56 | web-bash-anthropic-proxy | web 上 Bash→非 API anthropic.com 走 session proxy | **HAVE** | 官方 `Ohu` 只排 `api.anthropic.com`（+ staging/mcp-proxy），**没有** `*.anthropic.com` / www / docs。`c0T`=`anthropic.com\|\|*.anthropic.com`。tip `NO_PROXY_COMMON`/`isAnthropicHost`；CCR `upstreamproxy` 用 `NO_PROXY_EMBEDDED`=`G1s`，www/docs/apex 走现有 relay。`KFy` 对等是 `startUpstreamProxyRelay`，不另造一套 MITM。测：`noProxy.239.test.ts`。 |
 | 57 | rc-doctor-not-enabled | RC 未对账号启用时更清晰 + `claude doctor` | **HAVE** | `getBridgeDisabledReason` gate-false 文 1:1：`isn't enabled for this account` + logout/login + `claude doctor`。**未** invent SEA `ile()` / policy-verdict 新机器。测：`bridgeDisabledReason.239.test.ts`。 |
 | 58 | windows-cross-session | Windows 上 SendMessage / ListAgents 跨会话 | **HAVE** | `jWe`+`lQ`/`CWd` + `HYb`/`IWd`/`xWd`：key 在 `sessions/${pid}.${sha256}.key`，body `{peerToken, procStart?\|procStartFt?}`（R_a=16 / xYb 32 hex）；IWd 按 `.${hash}.key` 扫、单文件 / 多文件 BFn 排名；`requireLiveOwner` → `dead-owner`；PYb 扫 CYb tmp。写走完整官方 `od`/`KGo`：`j4e`+`FDn` `wx`（VGo=3）+ `kw`/`EY_`；rename 命中 AZ（`EXDEV\|EPERM\|EEXIST\|EBUSY`）走 in-place truncate + `TY_`/`kY_` snapshot 还原 + `Jer`；`exactMode`/`flush` 走 `CY_`+`B4e` fsync；`inPlaceOnTempCreateRefused` 在 staging `EACCES` 且目标存在时落 in-place。xWd 仍只传 `od(path, json, 384)`。**未** invent RC 跨机 hop / `qGo`/`bfe` sync 变体。测：`messagingKey.239.test.ts` / `messagingSocketCanon.239.test.ts` / `atomicWriteOd.239.test.ts`。 |
-| 59 | vscode-view-usage-inline | VSCode usage banner “View usage” 与警告同行 | **N/A** | VSCode host invent-ban。 |
+| 59 | vscode-view-usage-inline | VSCode usage banner “View usage” 与警告同行 | **HAVE** | 官方 239 CLI SEA 对 `View usage` / `View Usage` / `viewUsage` **0 hits**。CLI 无机器，tip 也无。**对齐**。不 invent VSCode banner。 |
 
 ## Invent-ban / scope gate
 
 - **#3** 已落 SEA upgrade 文 + Python timeout 符号；**禁止**自造 migrate CLI / 第二套 `/claude-api migrate` / 假 live-sources 节。
-- **#4** 已落 CLI `iN`/`kff`/`I9a`/`lQt`。**禁止** invent 下载/同步谁往 `syncedPluginDirs` 灌目录、`R9a` disable-all mint、`T0r`/`zXl` 云 sync、官方 `e.skill` merge、整段 `vas` iN 机。session↔marketplace 名匹配保持 exact，**不要**把 `zD` 扩到那两臂。
-- **#5 / #54 / #59** 本 pack N/A；不 port Chrome / VSCode / musl addon loader。
+- **#4** 已落 CLI `iN`/`kff`/`I9a`/`lQt` + zXl list/download + `setSyncedPluginDirs`。**禁止** invent `R9a` disable-all mint、官方 `e.skill` merge、整段 `vas` iN 机、`$t()`/`dCh` cowork 店。session↔marketplace 名匹配保持 exact，**不要**把 `zD` 扩到那两臂。
+- **#5** 已落 `M4b`/`LUe`。**禁止** invent addon `*-musl` 路径（本 pack `K0t` 无此字符串）。
+- **#54** 已落 `jrl`/`ANS`/`ENS`。**禁止** invent Flo generator、`availabilityFunnel`/`credentials` 第二参、整段 Chrome 扩展 UI。
+- **#59** 已对齐（SEA 0 hits）。**禁止** invent VSCode banner。
+- **#44** 已落 `En_` 生产路径（`createCriPolicyPrecheck` + `buildFetch`）。官方也无本地 `cri` writer；无袋 no-op = 对齐。**禁止** invent 本地 cri writer / 第二套 webhook host / 把 `JQn` 改成先看 header。
+- **#56** 已落 `Ohu`/`c0T` + CCR `G1s`。官方 `KFy` 是 hosted MITM。**禁止** invent INCLUDE host 表 / 第二套 `KFy`。
 - **#48** 已 HAVE；changelog 复述 236，勿改 interval。
 - **#12** 已 HAVE；changelog 复述 233 `$J_=15min`，勿改 TTL。
 - **#38** 已 HAVE；OLp/b4v 已 1:1，勿 invent 对 resolvedPath 二次排除。
@@ -96,7 +100,7 @@
 - **#40** 已落 `xD`；**禁止** invent `ALe` 去 `/`、`did:` scheme、删 `tcp:`。
 - **#50** `DHm`/`G1w` 金标已锁；无 `QV` host / SendMessage 自指文不 invent header。
 - **#36** 已落 `G()` + CXq 路径；**禁止** invent official `j()` 的整段 ancestor `U` 集 walker。
-- **#51** 已落 OHm/Z1w；**禁止** invent 整段 `V1w` 空列表文（`No reachable agents.`）、`Q1w` Peer sessions、`J1w` Subagents、`GCe` 全局 `pYb`（含本机 socket）、`storageV5`、把 ALS 写成 ToolUseContext `teammateContext`/`agentContext` 字段。
+- **#51** 已落 OHm/Z1w + `J1w`/`MHm` Subagents + `Q1w` `Eao` + listing `GCe`/`pYb`。**禁止** invent DID/`p5i`、`$_a`/`$Hm` formerNames、`$t()` team sidecar、把 ALS 写成 ToolUseContext `teammateContext`/`agentContext` 字段。
 - **#25** 已落 `$ta`；**禁止** invent `tQ_` 把坏条目 stub 成 `unsupported`。
 - **#58** 已落 `HYb`/`IWd`/`xWd` + 完整 `od`/`KGo`（含 in-place/snapshot/`exactMode`/`flush`）；**禁止** invent RC 跨机 hop、`qGo`/`bfe` sync 变体。
 - **#47** 已落 flo/mlo `hook_exec`+`startup-hook-hold`；**禁止** invent 给 SubagentStart/SessionEnd/其它 hook 加括号，不 invent official `session_title`/`session` 入参。
@@ -105,7 +109,7 @@
 - **#29** 已落 JIy vim Esc 门；**禁止** invent 完整 FleetView vim（hjkl/operators）。
 - **#13** 已落 `planModeResume`（`YWy`/`QnT`/`y_u`/`XWy`/`__u`/`Ibu`）。`qqe`=ExitPlanMode，`KS`=`getDenyRuleForTool`。**禁止** invent 官方空 stub `EaT`、`nxh` `session_allow_rules`、升级 tip `externalMetadataToAppState` 成官方 `rxh`（bypass refuse / oHe）、RCS `internal_metadata` store、`running_background_tasks`。QnT 非法必须 `invalid`，不能回落 `default`。continue 不跑 y_u。`$qy` notify 在 UDS if 之后、不在 `run()` 里。
 - **#15** 已 HAVE（print `type==="failed"` 重跑 `setupSdkMcpClients`）。**禁止** invent `ZMf`/`cnl`/`settledCachedDialFailures`/`swrRefreshDialsInFlight`。
-- **#44 / #56 已搁置**（2026-08-24；复挖补邻近图）。#44 是 gateway `En_` webhook `precheck`，**禁止** invent 本地 webhook、不删 tip remote 401/403 retry。#56 **禁止** invent INCLUDE host 表 / 整段 `KFy` MITM。
+- **#44 / #56 已 HAVE。** #44=`En_` 接到 `buildFetch`（官方无本地 cri writer）；#56=`Ohu`/`G1s`（官方 `KFy` hosted）。同缺 = 对齐。不 invent 本地 cri writer / 第二套 `KFy`。
 - **#55** 已 HAVE（`sourcePath??storedImagePaths.get`）。**禁止** invent `savedFilePath` / 云端 mobile upload 写盘。
 - **#49** 已落 nuy/ueu + OMo；**禁止** invent `Km`/riv 自动 trust、`queuedGoalOrigin`、把 `hydrateGoalFromTranscript` 改成 `goal_status` walker、在 interactive CLI `--continue` 再造一套 OMo（官方启动无此调用点）。
 - **#19** 已落 `MTs`/`MoA`；**禁止** invent 把 tip `ccb` 改成官方 `claude`、不 invent `existsSync` 第二套门（官方是 `Yc\|\|rft\|\|MoA`）。
@@ -125,7 +129,7 @@
 - **#45** 已落 invoked_skills reminder 文；**禁止** invent 第二套 compact-skill reminder，不改 `todo_reminder`。
 - **#39** 已落 `_ts`；**禁止** invent `title_write_coalesced` 遥测、`/rename` `userInitiated`、repl `shouldSend` 断连门、GET-first spawn 整段。
 - **#27** 整套 `loadCustomThemes` tip 无，不 invent。
-- 延续 238 leftover invent-ban：`identity_changed` / G0S / storageV5 / 完整 sIn MDM。
+- 延续 238 leftover invent-ban：`identity_changed` / G0S / 完整 sIn MDM。storageV5 本地 `Rc` 已接 `getProject()`；**不** invent `$t()`/`tn()` 云后端。
 
 ## 邻版
 

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { type DiffData, useDiffData } from '../../hooks/useDiffData.js';
+import { useAppState } from '../../state/AppState.js';
 import { type TurnDiff, useTurnDiffs } from '../../hooks/useTurnDiffs.js';
 import { Box, Text } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -49,11 +50,14 @@ function turnDiffToDiffData(turn: TurnDiff): DiffData {
     files,
     hunks,
     loading: false,
+    source: { kind: 'working-tree' },
+    baseMode: 'uncommitted',
   };
 }
 
 export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
-  const gitDiffData = useDiffData();
+  const revision = useAppState(s => s.fileHistory.snapshotSequence);
+  const gitDiffData = useDiffData('uncommitted', revision);
   const turnDiffs = useTurnDiffs(messages);
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');

@@ -36,7 +36,7 @@ const firstBlock = (content: unknown): ContentBlock | undefined => {
 };
 import { MessageModel } from './MessageModel.js';
 import { shouldRenderStatically } from './Messages.js';
-import { MessageTimestamp } from './MessageTimestamp.js';
+import { MessageTimestamp, shouldShowMessageTimestamp } from './MessageTimestamp.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
 
 export type Props = {
@@ -62,6 +62,8 @@ export type Props = {
   columns: number;
   isLoading: boolean;
   lookups: ReturnType<typeof buildMessageLookups>;
+  /** densable uko — silk_hinge && AppState.showMessageTimestamps */
+  showMessageTimestamps?: boolean;
 };
 
 /**
@@ -140,6 +142,7 @@ function MessageRowImpl({
   columns,
   isLoading,
   lookups,
+  showMessageTimestamps = false,
 }: Props): React.ReactNode {
   const isTranscriptMode = screen === 'transcript';
   const isGrouped = msg.type === 'grouped_tool_use';
@@ -182,12 +185,14 @@ function MessageRowImpl({
     }
   }
 
+  // densable cko(...) || sko(...) — setting stamps live REPL; model only in transcript.
   const hasMetadata =
-    isTranscriptMode &&
-    displayMsg.type === 'assistant' &&
-    Array.isArray(displayMsg.message.content) &&
-    (displayMsg.message.content as Array<{ type: string }>).some(c => c.type === 'text') &&
-    (displayMsg.timestamp || displayMsg.message.model);
+    shouldShowMessageTimestamp(displayMsg, isTranscriptMode, showMessageTimestamps) ||
+    (isTranscriptMode &&
+      displayMsg.type === 'assistant' &&
+      !!displayMsg.message?.model &&
+      Array.isArray(displayMsg.message.content) &&
+      (displayMsg.message.content as Array<{ type: string }>).some(c => c.type === 'text'));
 
   const messageEl = (
     <Message
@@ -225,7 +230,11 @@ function MessageRowImpl({
     <OffscreenFreeze>
       <Box width={columns} flexDirection="column">
         <Box flexDirection="row" justifyContent="flex-end" gap={1} marginTop={1}>
-          <MessageTimestamp message={displayMsg} isTranscriptMode={isTranscriptMode} />
+          <MessageTimestamp
+            message={displayMsg}
+            isTranscriptMode={isTranscriptMode}
+            showMessageTimestamps={showMessageTimestamps}
+          />
           <MessageModel message={displayMsg} isTranscriptMode={isTranscriptMode} />
         </Box>
         {messageEl}
@@ -298,6 +307,9 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
 
   // Verbose toggle changes thinking block visibility
   if (prev.verbose !== next.verbose) return false;
+
+  // densable l10 — silk_hinge stamp chrome
+  if (prev.showMessageTimestamps !== next.showMessageTimestamps) return false;
 
   // collapsed_read_search is never static in prompt mode (matches shouldRenderStatically)
   if (prev.message.type === 'collapsed_read_search' && next.screen !== 'transcript') {

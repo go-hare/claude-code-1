@@ -4,6 +4,7 @@ import figures from 'figures'
 
 import {
   computeVisibleWindow,
+  fitAgentColumns,
   formatVisibleWindowHint,
   workflowDetailListBudgets,
 } from '../WorkflowDetailDialog.js'
@@ -79,6 +80,28 @@ describe('workflowDetailListBudgets', () => {
       tight: true,
       phaseViewport: 2,
       agentViewport: 6,
+    })
+  })
+})
+
+describe('fitAgentColumns', () => {
+  test('keeps meta and shrinks the label when both do not fit', () => {
+    expect(
+      fitAgentColumns(
+        'scan:artifacts-very-long-name',
+        'grok-4.6 · 206k tok',
+        28,
+      ),
+    ).toEqual({
+      label: 'scan:art',
+      meta: 'grok-4.6 · 206k tok',
+    })
+  })
+
+  test('truncates meta when it alone exceeds the width', () => {
+    expect(fitAgentColumns('x', 'grok-4.6 · 206k tok · 111 tool', 12)).toEqual({
+      label: '',
+      meta: 'grok-4.6 · 2',
     })
   })
 })

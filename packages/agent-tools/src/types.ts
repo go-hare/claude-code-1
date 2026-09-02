@@ -193,7 +193,8 @@ export interface CoreTool<
   mapToolResultToToolResultBlockParam(content: Output, toolUseID: string): any
 
   // ── Optional output helpers ──
-  isResultTruncated?(output: Output): boolean
+  isResultTruncated?(output: Output, options?: { columns?: number }): boolean
+  stripForStorage?(output: Output): Output
   getToolUseSummary?(input: Partial<z.infer<Input>> | undefined): string | null
   getActivityDescription?(
     input: Partial<z.infer<Input>> | undefined,

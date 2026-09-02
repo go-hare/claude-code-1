@@ -23,9 +23,15 @@ describe('resolveSandboxNetworkAskDecision (wkr)', () => {
     )
   })
 
-  test('plan + bypass available → allow; plan alone → ask', () => {
-    expect(resolveSandboxNetworkAskDecision('plan', true)).toBe('allow')
+  test('plan inherits bypass only via prePlanMode, not listable flag', () => {
+    expect(resolveSandboxNetworkAskDecision('plan', true)).toBe('ask')
     expect(resolveSandboxNetworkAskDecision('plan', false)).toBe('ask')
+    expect(
+      resolveSandboxNetworkAskDecision('plan', true, 'bypassPermissions'),
+    ).toBe('allow')
+    expect(resolveSandboxNetworkAskDecision('plan', true, 'default')).toBe(
+      'ask',
+    )
   })
 
   test('dontAsk → deny', () => {
@@ -188,6 +194,31 @@ describe('wrapSandboxAskCallbackWithPermissionMode (W4g)', () => {
     })
     await expect(denyWrap({ host: 'x.com' })).resolves.toBe(false)
     expect(ask).not.toHaveBeenCalled()
+  })
+
+  test('plan with listable bypass still asks; inherited bypass allows', async () => {
+    const ask = mock(() => Promise.resolve(true))
+    const planWrap = wrapSandboxAskCallbackWithPermissionMode({
+      ask,
+      getPermissionContext: () => ctx('plan', true),
+      getMessages: () => [],
+      getTools: () => [],
+    })
+    await expect(planWrap({ host: 'x.com' })).resolves.toBe(true)
+    expect(ask).toHaveBeenCalledTimes(1)
+
+    const inherited = wrapSandboxAskCallbackWithPermissionMode({
+      ask,
+      getPermissionContext: () =>
+        ({
+          ...ctx('plan', true),
+          prePlanMode: 'bypassPermissions',
+        }) as ToolPermissionContext,
+      getMessages: () => [],
+      getTools: () => [],
+    })
+    await expect(inherited({ host: 'x.com' })).resolves.toBe(true)
+    expect(ask).toHaveBeenCalledTimes(1)
   })
 
   test('ask delegates to underlying callback', async () => {

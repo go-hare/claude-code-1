@@ -1,6 +1,7 @@
-import React, { Suspense, use, useState } from 'react';
+import React, { Suspense, use, useEffect, useRef, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js';
 import { logEvent } from '../../services/analytics/index.js';
 import type { Message } from '../../types/message.js';
 import {
@@ -67,42 +68,51 @@ type PermissionExplanationProps = {
 type ExplainerState = {
   visible: boolean;
   enabled: boolean;
+  chord: string;
   promise: Promise<PermissionExplanationType | null> | null;
 };
 
 /**
- * Creates an explanation promise that never rejects.
- * Errors are caught and returned as null.
+ * densable IOo — lazy fetch; abort on unmount; chord from wk.
  */
-function createExplanationPromise(props: PermissionExplanationProps): Promise<PermissionExplanationType | null> {
+function createExplanationPromise(
+  props: PermissionExplanationProps,
+  signal: AbortSignal,
+): Promise<PermissionExplanationType | null> {
   return generatePermissionExplanation({
     toolName: props.toolName,
     toolInput: props.toolInput,
     toolDescription: props.toolDescription,
     messages: props.messages,
-    signal: new AbortController().signal, // Won't abort - request is fast enough
+    signal,
   }).catch(() => null);
 }
 
 /**
- * Hook that manages the permission explainer state.
- * Creates the fetch promise lazily (only when user hits Ctrl+E)
- * to avoid consuming tokens for explanations users never view.
+ * densable IOo.
  */
 export function usePermissionExplainerUI(props: PermissionExplanationProps): ExplainerState {
   const enabled = isPermissionExplainerEnabled();
+  const chord = getShortcutDisplay('confirm:toggleExplanation', 'Confirmation', 'ctrl+e');
   const [visible, setVisible] = useState(false);
   const [promise, setPromise] = useState<Promise<PermissionExplanationType | null> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  // Use keybinding for ctrl+e toggle (configurable via keybindings.json)
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   useKeybinding(
     'confirm:toggleExplanation',
     () => {
       if (!visible) {
         logEvent('tengu_permission_explainer_shortcut_used', {});
-        // Only create the promise on first toggle (lazy loading)
         if (!promise) {
-          setPromise(createExplanationPromise(props));
+          const controller = new AbortController();
+          abortRef.current = controller;
+          setPromise(createExplanationPromise(props, controller.signal));
         }
       }
       setVisible(v => !v);
@@ -110,7 +120,7 @@ export function usePermissionExplainerUI(props: PermissionExplanationProps): Exp
     { context: 'Confirmation', isActive: enabled },
   );
 
-  return { visible, enabled, promise };
+  return { visible, enabled, chord, promise };
 }
 
 /**

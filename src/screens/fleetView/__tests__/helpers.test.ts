@@ -6,7 +6,11 @@ import {
   buildDirectoryModeFlatRows,
   buildFleetFooterHints,
   buildStateModeFlatRows,
+  buildSimpleModeFlatRows,
+  FLEET_SIMPLE_FINISHED_GROUP,
+  simpleStatusBand,
   computeFleetColumnWidths,
+  fleetHomeIdx,
   deriveBand,
   deriveStatsBand,
   doneCapForRows,
@@ -16,14 +20,47 @@ import {
   shouldCompactFleetHeader,
   expandPastedTextRefs,
   formatPastedTextPlaceholder,
+  formatFleetImagePlaceholder,
+  parseFleetPasteRefs,
+  isFleetImagePasteKey,
+  fleetPastedImageExt,
+  materializeFleetPastedImages,
+  fleetStateSortKey,
+  planFleetReorder,
+  shouldFleetViewReorder,
+  FLEET_CLIPBOARD_IMAGE_NOT_FOUND,
+  FLEET_CLIPBOARD_IMAGE_READ_FAILED,
+  FLEET_SIMPLE_PINNED_GROUP,
   FLEET_STATE_GROUP_DESCRIPTIONS,
   FLEET_STATE_GROUP_LABELS,
+  fleetViewPageJump,
   formatAttachError,
   formatJobAge,
+  hasComposedDispatch,
   isOriginSessionId,
+  navigateFleetViewByArrow,
   normalizeFleetGroupName,
   parseDispatch,
   partitionArchivedSessions,
+  shouldFleetViewArrowDelegateToEditor,
+  shouldFleetViewRightOpenFocusedRow,
+  shouldFleetViewSimpleViewSkipLeftover,
+  shouldFleetViewTabToggleAllAgents,
+  shouldFleetViewCycleGroupMode,
+  shouldFleetViewEnterBashFromBang,
+  shouldFleetViewToggleHelp,
+  isFleetComposerActive,
+  buildFleetComposerSuggestions,
+  fleetSuggestionDisplayText,
+  sortFleetTemplatesByLastUsed,
+  migrateAgentLastUsedFromJobs,
+  isFleetNewSessionSpawnBusy,
+  formatFleetNewSessionThrow,
+  findFleetJobByShort,
+  waitForFleetJobByShort,
+  FLEET_DEFAULT_TEMPLATE_NAME,
+  FLEET_NEW_SESSION_PENDING_MSG,
+  FLEET_NEW_SESSION_WAIT_MS,
   pickIcon,
   sessionArtifactLabel,
   sortSessions,
@@ -140,6 +177,7 @@ describe('buildStateModeFlatRows', () => {
       { kind: 'header', group: 'review' },
       {
         kind: 'job',
+        group: 'state:review',
         session: expect.objectContaining({ name: 'needs-review' }),
       },
     ])
@@ -251,6 +289,7 @@ describe('buildDirectoryModeFlatRows', () => {
       { kind: 'header', group: 'dir:/a' },
       {
         kind: 'job',
+        group: 'dir:/a',
         session: expect.objectContaining({ pid: 1 }),
       },
       { kind: 'header', group: 'dir:/b' },
@@ -490,6 +529,156 @@ describe('sortSessions', () => {
     ])
     expect(rows.map(s => s.pid)).toEqual([3, 2, 1])
   })
+
+  test('honors stateSortOrder for unpinned after band', () => {
+    const rows = sortSessions([
+      session({ pid: 1, status: 'busy', stateSortOrder: 2, startedAt: 100 }),
+      session({ pid: 2, status: 'busy', stateSortOrder: 0, startedAt: 50 }),
+    ])
+    expect(rows.map(s => s.pid)).toEqual([2, 1])
+  })
+})
+
+describe('buildSimpleModeFlatRows (densable oxy)', () => {
+  const now = 1_700_000_000_000
+  const old = now - 172_800_000 - 1
+
+  test('first row is newsession; no headers; home is 0', () => {
+    const { rows } = buildSimpleModeFlatRows({
+      sessions: [
+        session({ pid: 1, status: 'busy', name: 'live' }),
+        session({ pid: 2, status: 'waiting', name: 'need' }),
+        session({ pid: 3, status: 'completed', name: 'done', updatedAt: now }),
+      ],
+      now,
+      terminalRows: 40,
+      showFinishedEarlier: false,
+    })
+    expect(rows[0]).toEqual({ kind: 'newsession' })
+    expect(rows.some(r => r.kind === 'header')).toBe(false)
+    expect(
+      rows
+        .filter(r => r.kind === 'job')
+        .map(r => (r.kind === 'job' ? r.session.name : '')),
+    ).toEqual(['need', 'live', 'done'])
+  })
+
+  test('pinned before needs/live/done; pinned still counted for budget', () => {
+    const { rows } = buildSimpleModeFlatRows({
+      sessions: [
+        session({ pid: 1, status: 'busy', pinned: true, name: 'pin' }),
+        session({ pid: 2, status: 'waiting', name: 'need' }),
+        session({ pid: 3, status: 'busy', name: 'live' }),
+      ],
+      now,
+      terminalRows: 40,
+      showFinishedEarlier: false,
+    })
+    expect(rows.map(r => (r.kind === 'job' ? r.session.name : r.kind))).toEqual(
+      ['newsession', 'pin', 'need', 'live'],
+    )
+  })
+
+  test('Q5A=2: a single old done job does not fold', () => {
+    const { rows } = buildSimpleModeFlatRows({
+      sessions: [
+        session({ pid: 1, status: 'completed', name: 'old', updatedAt: old }),
+      ],
+      now,
+      terminalRows: 40,
+      showFinishedEarlier: false,
+    })
+    expect(rows.find(r => r.kind === 'fold')).toBeUndefined()
+    expect(rows.filter(r => r.kind === 'job')).toHaveLength(1)
+  })
+
+  test('old done jobs fold behind simple:finished; expand shows all', () => {
+    const sessions = Array.from({ length: 5 }, (_, i) =>
+      session({
+        pid: 10 + i,
+        status: 'completed',
+        name: `d${i}`,
+        updatedAt: old,
+      }),
+    )
+    const folded = buildSimpleModeFlatRows({
+      sessions,
+      now,
+      terminalRows: 20,
+      showFinishedEarlier: false,
+    })
+    expect(folded.rows[0]).toEqual({ kind: 'newsession' })
+    expect(folded.rows.find(r => r.kind === 'header')).toBeUndefined()
+    expect(folded.rows.find(r => r.kind === 'fold')).toEqual({
+      kind: 'fold',
+      group: FLEET_SIMPLE_FINISHED_GROUP,
+      hidden: 5,
+    })
+    expect(folded.rows.filter(r => r.kind === 'job')).toHaveLength(0)
+
+    const expanded = buildSimpleModeFlatRows({
+      sessions,
+      now,
+      terminalRows: 20,
+      showFinishedEarlier: true,
+    })
+    expect(expanded.rows.find(r => r.kind === 'fold')).toBeUndefined()
+    expect(expanded.rows.filter(r => r.kind === 'job')).toHaveLength(5)
+  })
+
+  test('sAn maps waiting → needs, busy → live, completed → done', () => {
+    expect(simpleStatusBand(session({ pid: 1, status: 'waiting' }))).toBe(
+      'needs',
+    )
+    expect(simpleStatusBand(session({ pid: 2, status: 'busy' }))).toBe('live')
+    expect(simpleStatusBand(session({ pid: 3, status: 'completed' }))).toBe(
+      'done',
+    )
+  })
+})
+
+describe('fleetHomeIdx (densable Wky)', () => {
+  test('grouped: first same-cwd job at index 1 is home', () => {
+    const job = session({ pid: 1, status: 'busy', cwd: '/proj', name: 'w' })
+    const rows = [
+      { kind: 'header' as const, group: 'working' },
+      { kind: 'job' as const, session: job },
+    ]
+    expect(fleetHomeIdx(rows, '/proj')).toBe(1)
+    expect(fleetHomeIdx(rows, '/other')).toBe(0)
+  })
+
+  test('earlier-only list homes on first earlier row', () => {
+    const rows = [
+      { kind: 'header' as const, group: 'earlier' },
+      {
+        kind: 'earlier' as const,
+        session: session({ pid: 9, status: 'completed', archived: true }),
+      },
+    ]
+    expect(fleetHomeIdx(rows, '/proj')).toBe(1)
+  })
+})
+
+describe('buildFleetFooterHints newsession', () => {
+  test('densable Wcu: arrowRight or enter to start', () => {
+    expect(
+      buildFleetFooterHints({
+        focusArea: 'list',
+        viewMode: 'list',
+        deletePending: false,
+        ungroupPending: false,
+        rowKind: 'newsession',
+        canPin: false,
+        canGroup: false,
+        canRename: false,
+        openSlots: 0,
+        exitArmed: false,
+        runningCount: 0,
+        helpOpen: false,
+      }),
+    ).toContain('\u2192 or enter to start')
+  })
 })
 
 describe('buildCustomGroupModeFlatRows', () => {
@@ -687,6 +876,59 @@ describe('paste helpers', () => {
     expect(expanded).toBe('before HELLO after')
   })
 
+  test('Eet skips Image so base64 never becomes intent', () => {
+    expect(formatFleetImagePlaceholder(2)).toBe('[Image #2]')
+    expect(
+      expandPastedTextRefs('see [Image #2] please', { 2: 'iVBORw0KGgo=' }),
+    ).toBe('see [Image #2] please')
+    expect(parseFleetPasteRefs('see [Image #2] please')[0]).toMatchObject({
+      id: 2,
+      kind: 'Image',
+    })
+  })
+
+  test('OOs: ctrl+v off Windows; meta+v on windows|wsl', () => {
+    expect(isFleetImagePasteKey('v', { ctrl: true }, 'macos')).toBe(true)
+    expect(isFleetImagePasteKey('v', { ctrl: true }, 'linux')).toBe(true)
+    expect(isFleetImagePasteKey('v', { ctrl: true }, 'windows')).toBe(false)
+    expect(isFleetImagePasteKey('v', { ctrl: true }, 'wsl')).toBe(true)
+    expect(isFleetImagePasteKey('v', { meta: true }, 'windows')).toBe(true)
+    expect(isFleetImagePasteKey('v', { meta: true }, 'wsl')).toBe(true)
+    expect(isFleetImagePasteKey('v', { meta: true }, 'macos')).toBe(false)
+    expect(isFleetImagePasteKey('x', { ctrl: true }, 'macos')).toBe(false)
+    expect(FLEET_CLIPBOARD_IMAGE_NOT_FOUND).toBe('No image found in clipboard')
+    expect(FLEET_CLIPBOARD_IMAGE_READ_FAILED).toBe(
+      "Couldn't read an image from the clipboard",
+    )
+  })
+
+  test('wbs writes pasted-N.ext and replaces [Image #N]', async () => {
+    const wrote: string[] = []
+    const out = await materializeFleetPastedImages(
+      'look at [Image #1] thanks',
+      { 1: { type: 'image', content: 'abc123', mediaType: 'image/png' } },
+      '/jobs/abcd1234',
+      {
+        mkdir: async () => {},
+        writeBase64: async (file, content) => {
+          wrote.push(`${file}:${content}`)
+        },
+        join: (...parts) => parts.join('/'),
+      },
+    )
+    expect(out).toBe('look at /jobs/abcd1234/pasted-1.png thanks')
+    expect(wrote).toEqual(['/jobs/abcd1234/pasted-1.png:abc123'])
+  })
+
+  test('wbs ext is alphanumeric subtype only', () => {
+    expect(fleetPastedImageExt('image/png')).toBe('png')
+    expect(fleetPastedImageExt('image/jpeg')).toBe('jpeg')
+    expect(fleetPastedImageExt('image/png; charset=utf-8')).toBe('png')
+    expect(fleetPastedImageExt('image/svg+xml')).toBe('png')
+    expect(fleetPastedImageExt('image/..\\secret')).toBe('png')
+    expect(fleetPastedImageExt(undefined)).toBe('png')
+  })
+
   test('buildCwdBasenameMap', () => {
     const map = buildCwdBasenameMap([
       session({ pid: 1, status: 'running', cwd: '/a/myproj' }),
@@ -694,5 +936,353 @@ describe('paste helpers', () => {
     ])
     expect(map.myproj).toBe('/a/myproj')
     expect(map.other).toBe('/b/other')
+  })
+})
+
+describe('densable 2.1.239 JIy Ouu / aVA / page keys', () => {
+  test('aVA composed when intent, match, cwd, or exec is set', () => {
+    expect(hasComposedDispatch(parseDispatch('do the thing'))).toBe(true)
+    expect(
+      hasComposedDispatch(parseDispatch('review', [{ name: 'review' }])),
+    ).toBe(true)
+    expect(hasComposedDispatch(parseDispatch('!ls'))).toBe(true)
+    expect(hasComposedDispatch(parseDispatch(''))).toBe(false)
+  })
+
+  test('JIy newline up/down delegates to leftover editor', () => {
+    expect(shouldFleetViewArrowDelegateToEditor(false, 'a\nb')).toBe(true)
+    expect(shouldFleetViewArrowDelegateToEditor(true, 'a\nb')).toBe(false)
+    expect(shouldFleetViewArrowDelegateToEditor(false, 'single')).toBe(false)
+  })
+
+  test('Ouu wraps; composed+state freezes; composed else skips non-headers', () => {
+    const rows = [
+      { kind: 'header' as const, group: 'working' },
+      { kind: 'job' as const, session: session({ pid: 1, status: 'busy' }) },
+      { kind: 'header' as const, group: 'done' },
+      {
+        kind: 'job' as const,
+        session: session({ pid: 2, status: 'completed' }),
+      },
+    ]
+    expect(
+      navigateFleetViewByArrow(rows, 1, 1, {
+        hasComposedDispatch: false,
+        byState: true,
+        previewOpen: false,
+      }),
+    ).toBe(2)
+    expect(
+      navigateFleetViewByArrow(rows, 1, 1, {
+        hasComposedDispatch: true,
+        byState: true,
+        previewOpen: false,
+      }),
+    ).toBe(1)
+    expect(
+      navigateFleetViewByArrow(rows, 0, 1, {
+        hasComposedDispatch: true,
+        byState: false,
+        previewOpen: false,
+      }),
+    ).toBe(2)
+  })
+
+  test('JIy tab toggles all-agents only on empty prompt', () => {
+    expect(shouldFleetViewTabToggleAllAgents(false, '', 'prompt', 2)).toBe(true)
+    expect(shouldFleetViewTabToggleAllAgents(true, '', 'prompt', 2)).toBe(false)
+    expect(shouldFleetViewTabToggleAllAgents(false, 'x', 'prompt', 2)).toBe(
+      false,
+    )
+    expect(shouldFleetViewTabToggleAllAgents(false, '', 'bash', 2)).toBe(false)
+    expect(shouldFleetViewTabToggleAllAgents(false, '', 'prompt', 0)).toBe(
+      false,
+    )
+  })
+
+  test('JIy right opens row only on empty prompt', () => {
+    expect(shouldFleetViewRightOpenFocusedRow(false, '', 'prompt', false)).toBe(
+      true,
+    )
+    expect(shouldFleetViewRightOpenFocusedRow(true, '', 'prompt', false)).toBe(
+      false,
+    )
+    expect(
+      shouldFleetViewRightOpenFocusedRow(false, 'x', 'prompt', false),
+    ).toBe(false)
+    expect(shouldFleetViewRightOpenFocusedRow(false, '', 'bash', false)).toBe(
+      false,
+    )
+    expect(shouldFleetViewRightOpenFocusedRow(false, '', 'prompt', true)).toBe(
+      false,
+    )
+  })
+
+  test('JIy simpleView skips leftover when not preview/rename', () => {
+    expect(shouldFleetViewSimpleViewSkipLeftover(true, false, false)).toBe(true)
+    expect(shouldFleetViewSimpleViewSkipLeftover(true, true, false)).toBe(false)
+    expect(shouldFleetViewSimpleViewSkipLeftover(true, false, true)).toBe(false)
+    expect(shouldFleetViewSimpleViewSkipLeftover(false, false, false)).toBe(
+      false,
+    )
+  })
+
+  test('JIy simpleView skips group-cycle and bang-bash', () => {
+    expect(shouldFleetViewCycleGroupMode(true)).toBe(false)
+    expect(shouldFleetViewCycleGroupMode(false)).toBe(true)
+    expect(shouldFleetViewEnterBashFromBang(true, '', 'prompt')).toBe(false)
+    expect(shouldFleetViewEnterBashFromBang(false, '', 'prompt')).toBe(true)
+    expect(shouldFleetViewEnterBashFromBang(false, 'x', 'prompt')).toBe(false)
+    expect(shouldFleetViewToggleHelp('', 'prompt')).toBe(true)
+    expect(shouldFleetViewToggleHelp('x', 'prompt')).toBe(false)
+    expect(shouldFleetViewToggleHelp('', 'bash')).toBe(false)
+  })
+
+  test('GP isActive Ct: live unless simpleView/preview/overlay', () => {
+    const live = {
+      simpleView: false,
+      previewOpen: false,
+      renaming: false,
+      groupEdit: false,
+      attaching: false,
+      resumePicker: false,
+    }
+    expect(isFleetComposerActive(live)).toBe(true)
+    expect(isFleetComposerActive({ ...live, simpleView: true })).toBe(false)
+    expect(isFleetComposerActive({ ...live, previewOpen: true })).toBe(false)
+    expect(isFleetComposerActive({ ...live, renaming: true })).toBe(false)
+    expect(isFleetComposerActive({ ...live, groupEdit: true })).toBe(false)
+    expect(isFleetComposerActive({ ...live, attaching: true })).toBe(false)
+    expect(isFleetComposerActive({ ...live, resumePicker: true })).toBe(false)
+  })
+
+  test('JIy shift+↑↓ is RqA reorder, not selection extend', () => {
+    expect(shouldFleetViewReorder(0, false)).toBe(true)
+    expect(shouldFleetViewReorder(1, false)).toBe(false)
+    expect(shouldFleetViewReorder(0, true)).toBe(false)
+  })
+
+  test('RqA skips earlier; simpleView only pinned; state writes stateSortOrder', () => {
+    const a = session({
+      pid: 1,
+      status: 'busy',
+      short: 'job-aaaa',
+      sessionId: 'job-aaaa-id',
+      pinned: true,
+      startedAt: 10,
+    })
+    const b = session({
+      pid: 2,
+      status: 'busy',
+      short: 'job-bbbb',
+      sessionId: 'job-bbbb-id',
+      pinned: true,
+      startedAt: 20,
+    })
+    const c = session({
+      pid: 3,
+      status: 'busy',
+      short: 'job-cccc',
+      sessionId: 'job-cccc-id',
+      startedAt: 30,
+    })
+    const d = session({
+      pid: 4,
+      status: 'busy',
+      short: 'job-dddd',
+      sessionId: 'job-dddd-id',
+      startedAt: 40,
+    })
+    const pinnedRows = [
+      { kind: 'job' as const, session: a, group: FLEET_SIMPLE_PINNED_GROUP },
+      { kind: 'job' as const, session: b, group: FLEET_SIMPLE_PINNED_GROUP },
+    ]
+    const simplePin = planFleetReorder(pinnedRows, 0, 1, {
+      simpleView: true,
+      groupMode: 'state',
+    })
+    expect(simplePin?.nextFocusedIdx).toBe(1)
+    expect(simplePin?.patches.every(p => p.field === 'sortOrder')).toBe(true)
+
+    const simpleLive = [
+      { kind: 'job' as const, session: c, group: 'simple:live' },
+      { kind: 'job' as const, session: d, group: 'simple:live' },
+    ]
+    expect(
+      planFleetReorder(simpleLive, 0, 1, {
+        simpleView: true,
+        groupMode: 'state',
+      }),
+    ).toBeNull()
+
+    const stateRows = [
+      { kind: 'header' as const, group: 'working' },
+      { kind: 'job' as const, session: c, group: 'state:working' },
+      { kind: 'earlier' as const, session: a },
+      { kind: 'job' as const, session: d, group: 'state:working' },
+    ]
+    const skipped = planFleetReorder(stateRows, 1, 1, {
+      simpleView: false,
+      groupMode: 'state',
+    })
+    expect(skipped?.nextFocusedIdx).toBe(3)
+    expect(skipped?.patches.every(p => p.field === 'stateSortOrder')).toBe(true)
+
+    const groupRows = [
+      { kind: 'job' as const, session: c, group: 'group:alpha' },
+      { kind: 'job' as const, session: d, group: 'group:alpha' },
+    ]
+    expect(
+      planFleetReorder(groupRows, 0, 1, {
+        simpleView: false,
+        groupMode: 'group',
+      }),
+    ).toBeNull()
+  })
+
+  test('V0n: state:done uses firstTerminalAt', () => {
+    const done = session({
+      pid: 9,
+      status: 'idle',
+      short: 'job-done',
+      sessionId: 'job-done-id',
+      firstTerminalAt: 10,
+      updatedAt: 99,
+      startedAt: 1,
+    })
+    expect(fleetStateSortKey(done, 'state:done')).toBe(10)
+    expect(fleetStateSortKey(done, 'done')).toBe(10)
+    expect(fleetStateSortKey(done, 'state:working')).toBe(99)
+  })
+
+  test('FCy showAllAgents / @ / lead / matched hide', () => {
+    const templates = [{ name: 'review', description: 'pr' }]
+    const routines = [{ name: 'nightly' }]
+    const repos = { myproj: '/a/myproj' }
+    expect(
+      buildFleetComposerSuggestions('', {
+        templates,
+        dispatch: parseDispatch(''),
+        showAllAgents: true,
+      }).map(s => s.name),
+    ).toEqual(['review'])
+    expect(
+      buildFleetComposerSuggestions('@re', {
+        templates,
+        routines,
+        repos,
+        dispatch: parseDispatch('@re', templates, repos, routines),
+      }).map(s => `${s.kind}:${s.name}`),
+    ).toEqual(['agent:review'])
+    expect(
+      buildFleetComposerSuggestions('re', {
+        templates,
+        routines,
+        repos,
+        dispatch: parseDispatch('re', templates, repos, routines),
+      }).map(s => fleetSuggestionDisplayText(s)),
+    ).toEqual(['@review'])
+    expect(
+      buildFleetComposerSuggestions('review', {
+        templates,
+        dispatch: parseDispatch('review', templates),
+      }),
+    ).toEqual([])
+    expect(
+      buildFleetComposerSuggestions('!ls', {
+        templates,
+        dispatch: parseDispatch('!ls'),
+      }),
+    ).toEqual([])
+  })
+
+  test('ICy sorts by lastUsed desc then name', () => {
+    const names = sortFleetTemplatesByLastUsed(
+      [{ name: 'zeta' }, { name: 'alpha' }, { name: 'beta' }],
+      { beta: 10, zeta: 5 },
+    ).map(t => t.name)
+    expect(names).toEqual(['beta', 'zeta', 'alpha'])
+    expect(
+      sortFleetTemplatesByLastUsed([{ name: 'b' }, { name: 'a' }]).map(
+        t => t.name,
+      ),
+    ).toEqual(['a', 'b'])
+  })
+
+  test('UCy backfills max createdAt and skips default/existing/NaN', () => {
+    const { next, changed } = migrateAgentLastUsedFromJobs({ keep: 1 }, [
+      {
+        template: FLEET_DEFAULT_TEMPLATE_NAME,
+        createdAt: '2020-01-01T00:00:00Z',
+      },
+      { template: 'review', createdAt: '2024-01-01T00:00:00Z' },
+      { template: 'review', createdAt: '2025-01-01T00:00:00Z' },
+      { template: 'keep', createdAt: '2026-01-01T00:00:00Z' },
+      { template: 'bad', createdAt: 'not-a-date' },
+      { createdAt: '2024-01-01T00:00:00Z' },
+    ])
+    expect(changed).toBe(true)
+    expect(next.keep).toBe(1)
+    expect(next.review).toBe(Date.parse('2025-01-01T00:00:00Z'))
+    expect(next.bad).toBeUndefined()
+    expect(next[FLEET_DEFAULT_TEMPLATE_NAME]).toBeUndefined()
+    expect(
+      migrateAgentLastUsedFromJobs({ review: 9 }, [
+        { template: 'review', createdAt: '2025-01-01T00:00:00Z' },
+      ]).changed,
+    ).toBe(false)
+  })
+
+  test('VIy busy gate and throw/pending copy', () => {
+    expect(isFleetNewSessionSpawnBusy(false, null)).toBe(false)
+    expect(isFleetNewSessionSpawnBusy(true, null)).toBe(true)
+    expect(isFleetNewSessionSpawnBusy(false, 'abc')).toBe(true)
+    expect(formatFleetNewSessionThrow(new Error('disk full'))).toBe(
+      "Couldn't start a new session \u2014 disk full",
+    )
+    expect(FLEET_NEW_SESSION_PENDING_MSG).toBe(
+      'Still starting \u2014 open the new session once it appears',
+    )
+    expect(FLEET_NEW_SESSION_WAIT_MS).toBe(5000)
+  })
+
+  test('VIy wait polls until short appears or deadline', async () => {
+    expect(
+      findFleetJobByShort(
+        [{ short: 'aaaa1111' }, { id: 'bbbb2222' }],
+        'bbbb2222',
+      )?.id,
+    ).toBe('bbbb2222')
+    let loads = 0
+    const found = await waitForFleetJobByShort(
+      async () => {
+        loads += 1
+        return loads < 3 ? [] : [{ short: 'deadbeef' }]
+      },
+      'deadbeef',
+      {
+        deadlineAt: 1000,
+        isCurrent: () => true,
+        now: () => (loads < 3 ? 0 : 10),
+        sleep: async () => {},
+      },
+    )
+    expect(found?.short).toBe('deadbeef')
+    expect(loads).toBe(3)
+
+    const missed = await waitForFleetJobByShort(async () => [], 'nope', {
+      deadlineAt: 0,
+      isCurrent: () => true,
+      now: () => 1,
+      sleep: async () => {},
+    })
+    expect(missed).toBeUndefined()
+  })
+
+  test('page jump uses termRows-6', () => {
+    expect(fleetViewPageJump('home', 4, 10, 20)).toBe(0)
+    expect(fleetViewPageJump('end', 4, 10, 20)).toBe(9)
+    expect(fleetViewPageJump('pageup', 8, 10, 20)).toBe(0)
+    expect(fleetViewPageJump('pagedown', 0, 10, 20)).toBe(9)
   })
 })

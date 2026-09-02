@@ -1,6 +1,6 @@
 /**
- * densable `xxc` frameSink install + resize — shared by AxcStickyHost and
- * tip FullscreenLayout bridge (keeps tip Yoga tree, installs Axc sink).
+ * densable `xxc` frameSink install + resize — used by AxcStickyHost (live Qvt
+ * / gold xxc) and AxcFrameSinkBridge (tip-only foreign Yoga).
  *
  * Gold: docs/upstream-extraction/v2.1.239/snippets/gold-project-c-xxc-host.txt
  */

@@ -297,6 +297,13 @@ export const init = memoize(async (): Promise<void> => {
       logForDebugging('[init] ripgrep status check skipped')
     }
 
+    // leftover 239 L1h — fire-and-forget first zXl (TaT analog)
+    void import('../utils/plugins/syncedPluginCloudSync.js')
+      .then(({ kickFirstSyncedPluginSync }) => {
+        kickFirstSyncedPluginSync()
+      })
+      .catch(() => {})
+
     logForDiagnosticsNoPII('info', 'init_completed', {
       duration_ms: Date.now() - initStartTime,
     })

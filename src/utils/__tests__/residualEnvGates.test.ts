@@ -98,6 +98,7 @@ import {
   getTerminalMcpTools,
   getTerminalMcpToolSet,
   isAgentViewDisabled,
+  isFleetSimpleViewEnabled,
   getAgentViewDisabledReason,
   isUserPresentForNotification,
   messagesEndWithSuccessfulTerminalMcpTool,
@@ -985,6 +986,14 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
     ).toBe(true)
     expect(isMenuKindLanesEnabled({ env: {}, gbValue: true })).toBe(true)
     expect(isMenuKindLanesEnabled({ env: {}, gbValue: false })).toBe(false)
+    expect(
+      isFleetSimpleViewEnabled({
+        env: { CLAUDE_CODE_FLEETVIEW_SIMPLE: '1' },
+        gbValue: false,
+      }),
+    ).toBe(true)
+    expect(isFleetSimpleViewEnabled({ env: {}, gbValue: true })).toBe(true)
+    expect(isFleetSimpleViewEnabled({ env: {}, gbValue: false })).toBe(false)
     expect(resolveCommandSourceTag('projectSettings')).toBe('project')
     expect(resolveCommandSourceTag('plugin')).toBe('org')
     expect(resolveCommandSourceTag('policySettings')).toBe('org')

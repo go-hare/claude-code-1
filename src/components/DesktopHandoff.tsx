@@ -68,6 +68,15 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
         return;
       }
 
+      // leftover 239 Q6e(..., "desktop_handoff") — K9/jfE persist remains
+      // invent-ban (no storageV5). Cancel side-effect is _6i.
+      try {
+        const { beginQuotaAutoResumeHandoff } = await import('../services/quotaAutoResume.js');
+        beginQuotaAutoResumeHandoff('desktop_handoff');
+      } catch {
+        /* best-effort */
+      }
+
       // Flush session storage to ensure transcript is fully written
       setState('flushing');
       await flushSessionStorage();
@@ -77,6 +86,13 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
       const result = await openCurrentSessionInDesktop();
 
       if (!result.success) {
+        // leftover 239 kHe after qyg fail
+        try {
+          const { endQuotaAutoResumeHandoff } = await import('../services/quotaAutoResume.js');
+          endQuotaAutoResumeHandoff();
+        } catch {
+          /* best-effort */
+        }
         setError(result.error ?? 'Failed to open Claude Desktop');
         setState('error');
         return;
@@ -97,6 +113,12 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
     }
 
     performHandoff().catch(err => {
+      // leftover 239 kHe after Q6e/open throw
+      void import('../services/quotaAutoResume.js')
+        .then(({ endQuotaAutoResumeHandoff }) => {
+          endQuotaAutoResumeHandoff();
+        })
+        .catch(() => {});
       setError(errorMessage(err));
       setState('error');
     });
@@ -104,7 +126,7 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
 
   if (state === 'error') {
     return (
-      <Box flexDirection="column" paddingX={2}>
+      <Box flexDirection="column" paddingX={2} tabIndex={0} autoFocus>
         <Text color="error">Error: {error}</Text>
         <Text dimColor>Press any key to continue…</Text>
       </Box>
@@ -113,7 +135,7 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
 
   if (state === 'prompt-download') {
     return (
-      <Box flexDirection="column" paddingX={2}>
+      <Box flexDirection="column" paddingX={2} tabIndex={0} autoFocus>
         <Text>{downloadMessage}</Text>
         <Text>Download now? (y/n)</Text>
       </Box>

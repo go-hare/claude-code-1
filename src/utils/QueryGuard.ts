@@ -100,6 +100,15 @@ export class QueryGuard {
     return this._status !== 'idle'
   }
 
+  /**
+   * densable Si.isRunning — true only while onQuery owns the turn.
+   * Distinct from isActive (which also covers dispatching). Used for
+   * getIsResponseStreaming / nst responseStreaming parity.
+   */
+  get isRunning(): boolean {
+    return this._status === 'running'
+  }
+
   get generation(): number {
     return this._generation
   }

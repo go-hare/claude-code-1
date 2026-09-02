@@ -4609,6 +4609,17 @@ function runHeadlessStreaming(
             }
           } else if (msg.request.subtype === 'reload_plugins') {
             try {
+              // leftover 239 $1h — Uln.discardInflight + remint zXl raced with fun()
+              const {
+                isSyncedPluginSyncKickEnabled,
+                remintFirstSyncedPluginSync,
+              } = await import('../utils/plugins/syncedPluginCloudSync.js')
+              if (isSyncedPluginSyncKickEnabled()) {
+                await raceWithTimeoutMs(
+                  Promise.allSettled([remintFirstSyncedPluginSync()]),
+                  resolveSyncPluginsInstallTimeoutMs(),
+                )
+              }
               // Official REMOTE densable.
               let isRemoteReload = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
               try {
@@ -6951,6 +6962,7 @@ async function loadInitialMessages(
             switchSession(
               asSessionId(result.sessionId),
               result.fullPath ? dirname(result.fullPath) : null,
+              'resume',
             )
             if (persistSession) {
               await resetSessionFilePointer()
@@ -7291,6 +7303,7 @@ async function loadInitialMessages(
         switchSession(
           asSessionId(result.sessionId),
           result.fullPath ? dirname(result.fullPath) : null,
+          'resume',
         )
         if (persistSession) {
           await resetSessionFilePointer()

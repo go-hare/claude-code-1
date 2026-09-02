@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 
 import {
@@ -6,14 +8,17 @@ import {
 } from '../../../Tool.js'
 import {
   applyPlanModeResumeFromInternal,
+  applyStashedPlanModeResumeForLaunch,
   classifyPlanModeOnResume,
   clearRestoredWorkerForPlanResumeForTests,
   createPlanModeResumeTracker,
   hydratePlanModeFromRestoredWorker,
+  isPlanModeResumeSkippedBecauseContinue,
   isRestartedWorker,
   parseExternalPermissionMode,
   parseRecordedWorkerPermissionMode,
   restoredWorkerHasMetadata,
+  setSkipPlanModeResumeBecauseContinue,
   stashRestoredWorkerForPlanResume,
   subscribeRestoredWorkerForPlanResume,
   syncWorkerPermissionModeRecord,
@@ -309,5 +314,92 @@ describe('densable 2.1.239 #13 interactive hydrate helper', () => {
     expect(takeRestoredWorkerForPlanResume()).toBeNull()
     unsub()
     clearRestoredWorkerForPlanResumeForTests()
+  })
+})
+
+describe('densable 2.1.239 #13 continue hard gate (Jqy)', () => {
+  test('continueRequested drains stash and does not y_u', () => {
+    clearRestoredWorkerForPlanResumeForTests()
+    stashRestoredWorkerForPlanResume({
+      external: null,
+      internal: { worker_permission_mode: 'plan' },
+    })
+    const next = applyStashedPlanModeResumeForLaunch(state('default'), {
+      forkSession: false,
+      continueRequested: true,
+    })
+    expect(next.toolPermissionContext.mode).toBe('default')
+    expect(takeRestoredWorkerForPlanResume()).toBeNull()
+    expect(isPlanModeResumeSkippedBecauseContinue()).toBe(true)
+  })
+
+  test('hydrate no-ops while continue skip is set, even with leaked stash', () => {
+    clearRestoredWorkerForPlanResumeForTests()
+    setSkipPlanModeResumeBecauseContinue(true)
+    let app = state('default')
+    const onResume = hydratePlanModeFromRestoredWorker(
+      f => {
+        app = f(app)
+      },
+      { external: null, internal: { worker_permission_mode: 'plan' } },
+      { lane: 'interactive' },
+    )
+    expect(onResume).toBe('none')
+    expect(app.toolPermissionContext.mode).toBe('default')
+  })
+
+  test('resume launch clears skip and consumes stash', () => {
+    clearRestoredWorkerForPlanResumeForTests()
+    setSkipPlanModeResumeBecauseContinue(true)
+    stashRestoredWorkerForPlanResume({
+      external: null,
+      internal: { worker_permission_mode: 'plan' },
+    })
+    applyStashedPlanModeResumeForLaunch(state('default'), {
+      forkSession: false,
+      continueRequested: false,
+    })
+    expect(isPlanModeResumeSkippedBecauseContinue()).toBe(false)
+    expect(takeRestoredWorkerForPlanResume()).toBeNull()
+  })
+
+  test('late CCR subscribe after continue does not restore plan', () => {
+    clearRestoredWorkerForPlanResumeForTests()
+    applyStashedPlanModeResumeForLaunch(state('default'), {
+      forkSession: false,
+      continueRequested: true,
+    })
+    let app = state('default')
+    const unsub = subscribeRestoredWorkerForPlanResume(restored => {
+      takeRestoredWorkerForPlanResume()
+      hydratePlanModeFromRestoredWorker(
+        f => {
+          app = f(app)
+        },
+        restored,
+        { lane: 'interactive' },
+      )
+    })
+    stashRestoredWorkerForPlanResume({
+      external: null,
+      internal: { worker_permission_mode: 'plan' },
+    })
+    expect(app.toolPermissionContext.mode).toBe('default')
+    unsub()
+    clearRestoredWorkerForPlanResumeForTests()
+  })
+
+  test('interactive --continue passes continueRequested into processResumedConversation', () => {
+    const main = readFileSync(
+      join(import.meta.dir, '../../../main.tsx'),
+      'utf8',
+    )
+    const restore = readFileSync(
+      join(import.meta.dir, '../../sessionRestore.ts'),
+      'utf8',
+    )
+    expect(main).toContain('continueRequested: true')
+    expect(restore).toContain('continueRequested: !!opts.continueRequested')
+    expect(restore).toContain('applyStashedPlanModeResumeForLaunch')
   })
 })

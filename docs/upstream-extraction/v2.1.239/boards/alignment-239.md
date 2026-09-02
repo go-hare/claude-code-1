@@ -1,19 +1,19 @@
 # Alignment board — densable 2.1.239
 
 > Living board · 2026-08-29 · SEA `%TEMP%\official-239\package\claude.exe`  
-> 计数 HAVE **52** / PARTIAL **2** / GAP **0** / UNKNOWN **2** / N/A **3**  
+> 计数 HAVE **59** / PARTIAL **0** / GAP **0** / UNKNOWN **0** / N/A **0**  
 > tip：npm **2.7.46** + 239 leftover（willow crate）· **不**折入 240/241  
-> 计数以 `official-239-checklist.md` 为准（2026-08-27 假 HAVE 纠偏 `#4`/`#13` → PARTIAL）。
+> 计数以 `official-239-checklist.md` 为准（2026-09-01：`#59` SEA 0 hits = 对齐）。
 
 ## 桶
 
 | 桶 | # |
 | -- | - |
-| HAVE | #1 #2 #3 #6 #7 #8 #9 #10 #11 #12 #14 #15 #16 #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 #32 #33 #34 #35 #36 #37 #38 #39 #40 #41 #42 #43 #45 #46 #47 #48 #49 #50 #51 #52 #53 #55 #57 #58 |
-| PARTIAL | #4 @synced 灌目录死 · #13 交互 plan resume 缺 CCR E2E |
+| HAVE | #1–#59 |
+| PARTIAL | — |
 | GAP | — |
-| N/A | #5 #54 #59 |
-| UNKNOWN | #44 #56（已搁置） |
+| N/A | — |
+| UNKNOWN | — |
 
 ## 本轮落地（缺功能按官方补）
 
@@ -36,11 +36,11 @@
 
 ## 刻意不落
 
-- **#4** 已落 CLI。**不** invent 云端谁灌 `syncedPluginDirs`、`R9a` disable-all、`T0r`/`zXl`、`e.skill` merge、整段 `vas` iN。
-- **#13** 已落 CLI 写/读。**不** invent `EaT` / `nxh` / `rxh` 升级 / RCS `internal_metadata` store / `running_background_tasks`。
+- **#4** 已落 CLI + zXl list/download + `setSyncedPluginDirs`。**不** invent `R9a` disable-all mint、`e.skill` merge、整段 `vas` iN、`$t()`/`dCh` cowork 店。
+- **#13** 已落 CLI 写/读 → HAVE。**不** invent `EaT` / `nxh` / `rxh` 升级 / RCS `internal_metadata` store / `running_background_tasks`。云端 CCR E2E 不管。
 - **#15** print `type==="failed"` 已 1:1。**不** invent `ZMf`/`cnl`/`settledCachedDialFailures`。
 - **#55** `sourcePath??storedImagePaths.get` 已 1:1。**不** invent `savedFilePath` / 云端 upload。
-- **#44 / #56 已搁置**（2026-08-24）：复挖补了邻近图，仍无本地 1:1。#44=`En_` gateway webhook；#56=`KFy`/`Ohu`/`yUy` 云 relay。不 invent。
+- **#44 / #56 已 HAVE**：#44=`En_` 接到 `buildFetch`（官方无本地 `cri` writer；无袋 no-op）；#56=`Ohu`/`G1s`（CCR relay；官方 `KFy` hosted）。同缺 = 对齐。不 invent 本地 cri writer / 第二套 `KFy`。
 - **#6 `p()`** Fable-5 extra-usage 隐藏 reset 后缀；无 tip 对等类型。
 - **#16 sidecar** `dirname(jsonl)/<id>/custom-title.json`；tip 已有 `reAppendSessionMetadata`。
 - **#17 `H8s`** symlink-ancestor walker；`iHn` 只落 `hg\|\|Hg`。
@@ -48,10 +48,10 @@
 - **#25 `tQ_`** 运行时把坏条目 stub 成 `unsupported`；无 tip 对等机器，不 invent。
 - **#31 `voice.mode`** hold/tap 是官方 /voice 另面，changelog 不是它。
 - **#40 `ALe`/`did:`** 不 invent strip `/`、不删 `tcp:`。
-- **#50** 未 invent `$_a` heldNames/formerNames host；用 `getCurrentSessionTitle` 代替 `QV()?.name`。不 invent 整段 `V1w`。
+- **#50** 未 invent `$_a` heldNames/formerNames host；用 `getCurrentSessionTitle` 代替 `QV()?.name`。`V1w` 空列表 + `G1w` header **已有**（`formatPeersListing`）；不 invent `$_a`。
 - **#36 `j()` U-set** ancestor walker 不 invent。
 - **#38 二次 OLp** 对 resolvedPath 不 invent。
-- **#51** 已落 OHm/Z1w；不 invent 整段 `V1w`/`Q1w`/`J1w`/`GCe` 全局 `pYb`。
+- **#51** 已落 OHm/Z1w + `J1w`/`MHm` Subagents + `Q1w` `Eao` + listing `GCe`/`pYb`。仍不 invent DID/`p5i`、`$_a`/`$Hm` formerNames、`$t()` team sidecar。
 - **#58** 已落 HYb/IWd + 完整 `od`/`KGo`；不 invent RC 跨机 hop、`qGo`/`bfe`。
 - **#53 `d9p`** gateway+429 不重试；未 invent。
 - live-sources **无**「SDK major-version upgrade guides」heading。
@@ -75,19 +75,19 @@
 - **#1** 不 invent `/cost` 文案 / `hOt` 第三参；web search 不乘 1.1。
 - **#45** 不 invent 第二套 compact-skill reminder；不改 `todo_reminder`。
 - **#39** 不 invent `title_write_coalesced` 遥测、`/rename` `userInitiated`、repl `shouldSend` 断连门。
-- **storageV5**（2026-08-25 用户明确不接）：`MQA` 第二参 / `_O` / `BMi` host 不接；team 文件保持磁盘-only。
+- **storageV5 `Rc`**（2026-09-01 纠偏）：本地 host **已接** = `getProject().appendEntry`；REPL `claimLedgerOwnership`。team 文件仍磁盘 `_O`=`readTeamFileAsync`。persist 槽仍 `void`。**不** invent `$t()`/`tn()` 云后端 / `dCh` cowork / `MQA` 第二参 sidecar。
 - **AppState `teammateColors` / `Iin`**：tip 已有模块级 `assignTeammateColor`，不迁 AppState 字段。
 - **artifact `readArtifactForModel` / cobalt `ASe`/`UQ`/`fxv`**：官方 Artifact 读面未接。`RJr`/`ASe` 在无 cobalt host 时为 false；`_pr` fail copy 已按官方字符串落地。
 - **Lto `extractAttachments` / `n4t` / `SXr`**：`n4t` 0-hit 不 invent。Lto 保留 optional collector + `SXr` drain；slash 不传 `n4t`。
-- **Lto `recordInvocation` / `forkReadFileState` / `isMeta` prompt**：已按官方落地。`a()` 读 `iXe` 已有 content（首次为空）；bg 走 `onTerminalSuccess`；live-duplicate 立刻 `T()`。`g` 用 tip `READ_FILE_STATE_CACHE_SIZE`（官方 `pq=5000` 不改全局）。不 invent `applyAttributionOp`/`HJr`/`shareFileHistory`/`storageV5` sidecar。
+- **Lto `recordInvocation` / `forkReadFileState` / `isMeta` prompt**：已按官方落地。`a()` 读 `iXe` 已有 content（首次为空）；bg 走 `onTerminalSuccess`；live-duplicate 立刻 `T()`。`g` 用 tip `READ_FILE_STATE_CACHE_SIZE`（官方 `pq=5000` 不改全局）。不 invent `applyAttributionOp`/`HJr`/`shareFileHistory` / `$t()` sidecar。
 - **SendMessage `Qei`/`ELe`/`g0m`**：已按官方落地。`w0m` 只是 UDS 下 `message` 空串 default（不是 first-line summary 自动填）。不 invent `VEt` 进 validate（自送仍在 `call()` / `hasInlineUdsToken`）、`did:` strip、`p_a` decode、官方 `cloud-session` 专臂 / `Ken`/`GEt`、`rg()` GrowthBook harbor kite（本地仍用 `UDS_INBOX`）。
 - **`/model` `URa`/`wyp`/`W4r`/`I0v G4r`**：已按官方 C0v 门落地。subscriber / firstParty PAYG / gateway **不**硬编码 URa；anthropicAws 与真 3P 才插入；wyp 只用 `ANTHROPIC_DEFAULT_FABLE_MODEL`；当前模型是 fable 时 rewrite Iyp 同行或 W4r URa。G4r 用官方 `fht`（`includes("claude-fable-5")`），与 Iyp 正则分开。print/SDK `stepFamilyAliasToAllowed` 的 fable 走 `XNn`，不再掉进 haiku else。不 invent `H0v` Fable (disabled)、`$Ra` inject、`OPENAI_DEFAULT_FABLE_MODEL`、W4r 内 `Nyp` remap、完整 `UNn` catalog 倒序扫描。
 
 ## 下一刀
 
-1. **#44 / #56 已搁置**，不进下一刀。
+1. **#44 / #56 HAVE**（无本地 cri writer / 不造第二套 MITM），不进下一刀。`xCs` `if(r)` KEEP；`uea`/`HR0` leftover 无定义 KEEP。232 `#14/#43` tip 对现行官方 1:1，不复活。
 2. Artifact 读面仍无 cobalt host，不 invent `readArtifactForModel` / `ASe`/`UQ`/`fxv`/`J4n`。
-3. leftover 停着：`PPi` session/branch · `V1w` · `/config` bvr · `U_c` catalog · `H_a` preamble · storageV5。不 invent。
+3. leftover 功能对齐已落：`PPi`+`_zS`/`AzS`/`Sil`/`bzS`/`H_s` revision/`Zmu` `H1s`/`VFf`/`vzS` `skippedLarge`、`V1w` `J1w`/`Q1w`/`GCe` listing、`bvr` recap/workflows/artifacts + `switchModelsOnFlag`/`externalEditorContext`/`precomputeCompactionEnabled`/`timestamps`（含 `MessageTimestamp` 画）、`U_c`、`H_a`、comment census `Y_r`/`jso`/`lTm`/`n1w`/`r1w`/`t1w`（`status` 文案，无 Ink 面板）。下一刀不要再挖这些。仍不 invent `$t()`/`tn()`、DID/`p5i`、`$_a`/`$Hm`、`agentsView` `/config` 行、`kpw`、`fvl` 当终端控件、cobalt `readArtifactForModel`。`Rc` 已接 `getProject()`。`uea`/`HR0` leftover 无定义 KEEP。
 4. **跨 pack 236 #9**（fullscreen-resize）：Project C 已落 HAVE（`Axc`/`xxc`/`frameSink`）。sticky 默认 OFF。**不要**把 pending 折进 xxc `'tick'`。不折入本 pack changelog HAVE。
 
 ## 日志
@@ -143,3 +143,19 @@
 - 2026-08-26：跨 pack **236 #9** 以 **239 SEA** 复核锁定 invent-ban（`Axc`/`q$0=100`/`uyn=1e4`）；tip-equiv≠HAVE；真 1:1=Project C。见 `cross-pack-residuals.md` / `official-236-checklist` #9。
 - 2026-08-26：邻 pack 236 `#6` 收口：`LFh=14` chrome + `sgM` 动态槽；固定 `maxVisible=10` 已删。无 XKl → `ngM=0`。测：`modelPickerVisible.236.test.ts`。
 - 2026-08-29：诚实度对齐 checklist — 桶从 HAVE 54 / PARTIAL 0 改为 HAVE **52** / PARTIAL **2**（`#4`/`#13`）。不抬 HAVE。08-26 日志里 236 #9 invent-ban 已被 Project C HAVE 取代（见 `official-236-checklist.md`）。
+- 2026-09-01 账本纠偏（不改上列历史条目）：storageV5 本地 `Rc` **已接**（`getProject().appendEntry` / REPL `claimLedgerOwnership`）。08-25「按用户不接 / 无本地 host」过期。persist 槽仍 `void`。**不** invent `$t()`/`tn()` 云后端 / `dCh` cowork。`#4` zXl + `setSyncedPluginDirs` 已是 HAVE；刻意不落只禁 `R9a`/`e.skill`/`vas`/`dCh`，不再禁 zXl 本身。
+- 2026-09-01 gold-weak 再挖：`#13` `hydratePlanModeFromRestoredWorker` 是 tip 名（官方 0 hits）；continue **不得**调 `y_u`。仍 PARTIAL（缺 CCR 交互 E2E）。
+- 2026-09-01 晚（不改上列历史）：口径「本地对齐即 HAVE、云端不管」。`#13` → HAVE。`#44/#56` → N/A。PARTIAL / UNKNOWN 清零。
+- 2026-09-01 leftover 挖（不改产品）：`PPi`/`V1w`/`bvr`/`U_c`/`H_a` 不再「无 host」。`U_c`=`sortConfigCatalog`；`H_a`=`serializeUdsAuthFrame`；`PPi` 决策树 + REPL `baseMode`；`V1w` 空列表+`Peer sessions`+`G1w`；`bvr`=`Config.tsx` analog。仍 parked：`_zS`/`GZt`、`J1w`、官方无 host catalog 行、`$t()`。peel：`_peel_leftover_ppi_notes.md`。
+- 2026-09-01 leftover 再挖：`GZt` ≠ 缺时钟（`STATE.startTime`）。`J1w` ≠ 0-host（`local_agent` 已有）。`assignTeammateRefs` = 队友 pYb（含本机 sock），不是全局 `GCe`。`recap` 无 `awaySummaryEnabled` schema；`artifacts`/`workflows` settings 有、`/config` 行不造。不接线除非「对齐」。
+- 2026-09-01 leftover **功能对齐**：`PPi` `_zS`/`AzS` preSession + `Zmu`；`V1w` `J1w`/`MHm` + `Q1w` `Eao` + listing `GCe`/`pYb`；`bvr` recap/workflows/artifacts（门 `workflowsToggleable`/`artifactToggleable` analog）。不 invent `$t()`/`tn()`、DID/`p5i`、`$_a`/`$Hm`、无 schema 行。测：`gitDiff.test.ts` / `listAgents.subagents.239.test.ts` / `bvrCatalog.239.test.ts`。
+- 2026-09-01 leftover **bvr 余行 + census UI**：官方 schema 有键，不是 invent。`switchModelsOnFlag` / `externalEditorContext` / `precomputeCompactionEnabled` / `timestamps` 挂 `/config`；timestamps 另画 `MessageTimestamp`（`tengu_silk_hinge`）。comment census 官方无 Ink 面板，对齐 `status` `r1w` 文案 + connected `n1w`。测：`bvrConfigRows.239.test.ts` / `messageTimestamp.239.test.ts` / `commentCensus.239.test.ts` / `precomputeCompactionUJr.239.test.ts`。不 invent `kpw` / footer chip / `fvl` 终端控件。
+- 2026-09-01 leftover **收口**：`H_s` 接 `snapshotSequence` 重拉；`Sil`+`GFf`+`bzS` 空仓库折入；`Zmu` `H1s` preSession footer 数字；#44 `En_` 接到 `withRetry`；#56 CCR `G1s`。234 #35 `/login` OAuth = 产品面。测：`gitDiff.test.ts` / `replDiffTab.239.test.ts` / `criPolicyWebhook.239.test.ts` / `noProxy.239.test.ts`。peel：`_peel_leftover_ppi_notes.md`。
+- 2026-09-01 leftover **H_s noCommits**：`useDiffData` 透出 `Sil` `noCommits`（官方 `s.result.noCommits`）。xCs `if(r)` 不走 `t5c` = 金标 KEEP，不另造 monitor_ws detail / 不给 `initialDetailTaskId` 加 t5c 门。测：`replDiffTab.239.test.ts`。
+- 2026-09-01 leftover **`uea`/`HR0` → HAVE**：leftover 只有 `H_s` 调用点（`uea(()=>p(f=>f+1))`、`setTimeout(..., alreadyFetched?HR0:0)`），无函数体 / 无毫秒数。抽出金标是第一参 `e`=`snapshotSequence` + 首次 delay 0，已接。不另造文件监听。
+- 2026-09-01 leftover **H_s keep-previous + En_ 作用域**：官方 `H_s` 在 `PPi` `null`/throw 只关 loading，不清 `s`；`VFf` `null` 同 `CJn` 留 hunks（`nextHunksOnVFf`）。`En_` 是 request-scoped intercept，接到 `buildFetch`（真实 path/body，gzip 前），**不是**所有 `withRetry`。测：`gitDiff.test.ts` / `replDiffTab.239.test.ts` / `criPolicyWebhook.239.test.ts`。
+- 2026-09-01 leftover **H_s `s.baseMode` + En_ 无袋不 parse**：`s`=`{result,baseMode,hunks}`，Zmu 标题/empty 用 `iNo`/`displayMode`。`criPolicyPrecheckFetchInput` 无 webhook 立刻 return。测：`replDiffTab.239.test.ts` / `criPolicyWebhook.239.test.ts`。
+- 2026-09-01 leftover **H_s `be`/`Ee`**：`be`=`tengu_feature_sad`（`repl_diff_read` + `git_diff_failed`/`git_hunks_failed`/`git_diff_threw`）；`Ee`=`tengu_feature_ok`。字面量走 `AnalyticsMetadata` 标记。测：`replDiffTab.239.test.ts`。
+- 2026-09-01 leftover **金标 KEEP（只改文档）**：`xCs` `if(r)` 不走 `t5c`；`uea`/`HR0` leftover 无定义，不造文件监听 / debounce；#44 官方无本地 cri writer；#56 官方 `KFy` hosted，不造第二套 MITM；232 `#14/#43` tip 对现行官方 1:1（232 桶仍 PARTIAL），不复活。
+- 2026-09-02：`cross-pack-residuals.md` 纠偏 — 同缺/无函数体/opt-in **不是 tip 缺口**，禁止再当「还差」。236 #25 删 `goalIdleArmGeneration`。交付面只剩 WT 未提交 + `precheck`。
+- 2026-09-01 leftover **VFf / vzS HAVE**：`fetchGitDiffHunks` shortstat `> kJn` 空 `r_g`；raw + `ANr`；`--cached` + `GFf` 只删 hunks。`parseGitDiff` 回 `{hunks, skippedLarge}`。`H_s` `isLargeFile` 只 `skippedLarge.has`。不另造 1MB runtime 测。测：`gitDiff.test.ts` / `replDiffTab.239.test.ts`。

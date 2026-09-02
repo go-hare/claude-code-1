@@ -14,7 +14,13 @@ import {
   cycleDiffBaseMode,
   getPersistedDiffBaseMode,
   openReplDiffTabFromAutoOpen,
+  REPL_DIFF_EMPTY_SESSION,
+  REPL_DIFF_EMPTY_UNCOMMITTED,
+  replDiffEmptyCopy,
+  replDiffPreSessionStats,
   replDiffTerminalWidthBucket,
+  replDiffVisibleFiles,
+  replDiffVisibleStats,
   resetReplTabToConvo,
   shouldAutoOpenDiffSidebar,
   toggleReplDiffTab,
@@ -161,8 +167,91 @@ describe('densable 2.1.239 Mcs / BUo / W7A / Ncs', () => {
     expect(cycleDiffBaseMode('branch')).toBe('session')
   })
 
+  test('$cs last-arg slot is forwarded to saveGlobalConfig', () => {
+    expect(src).toContain('_storageV5?: unknown')
+    expect(src).toMatch(/saveGlobalConfig\(\s*config =>[\s\S]*?,\s*_storageV5,/)
+  })
+
   test('Mcs pins closed when diffSidebarOpen===false', () => {
     saveGlobalConfig(c => ({ ...c, diffSidebarOpen: false }))
     expect(shouldAutoOpenDiffSidebar(200)).toBe(false)
+  })
+})
+
+describe('densable Zmu visible stats + empty copy', () => {
+  test('header +/- sums visible files, not preSession', () => {
+    const files = [
+      { path: 'a.ts', linesAdded: 2, linesRemoved: 1 },
+      { path: 'old.ts', linesAdded: 40, linesRemoved: 9, preSession: true },
+    ]
+    const visible = replDiffVisibleFiles(files)
+    expect(visible.map(f => f.path)).toEqual(['a.ts'])
+    expect(replDiffVisibleStats(visible)).toEqual({
+      filesCount: 1,
+      linesAdded: 2,
+      linesRemoved: 1,
+    })
+    expect(replDiffPreSessionStats(files)).toEqual({
+      filesCount: 1,
+      linesAdded: 40,
+      linesRemoved: 9,
+    })
+  })
+
+  test('empty copy follows baseMode / source', () => {
+    expect(replDiffEmptyCopy('uncommitted', { kind: 'working-tree' })).toBe(
+      REPL_DIFF_EMPTY_UNCOMMITTED,
+    )
+    expect(replDiffEmptyCopy('session', { kind: 'working-tree' })).toBe(
+      REPL_DIFF_EMPTY_SESSION,
+    )
+    expect(
+      replDiffEmptyCopy('branch', {
+        kind: 'branch',
+        baseBranch: 'main',
+      }),
+    ).toBe('No changes vs main')
+  })
+
+  test('ReplDiffPanel uses visible stats and mode empty copy', () => {
+    const panel = readFileSync(
+      join(import.meta.dir, '../../components/diff/ReplDiffPanel.tsx'),
+      'utf8',
+    )
+    expect(panel).toContain('replDiffVisibleFiles')
+    expect(panel).toContain('replDiffVisibleStats')
+    expect(panel).toContain('replDiffPreSessionStats')
+    expect(panel).toContain('replDiffEmptyCopy')
+    expect(panel).not.toContain('No uncommitted changes')
+  })
+
+  test('H_s revision: snapshotSequence is the fetch activity signal', () => {
+    const hook = readFileSync(
+      join(import.meta.dir, '../../hooks/useDiffData.ts'),
+      'utf8',
+    )
+    const panel = readFileSync(
+      join(import.meta.dir, '../../components/diff/ReplDiffPanel.tsx'),
+      'utf8',
+    )
+    expect(hook).toContain('[mode, revision]')
+    expect(hook).toContain('noCommits')
+    expect(hook).toContain('diffResult.noCommits')
+    expect(hook).toContain('nextHunksOnVFf')
+    expect(hook).toContain('emptyDiffHunks()')
+    expect(hook).toContain('hunksBundle.skippedLarge.has(path)')
+    expect(hook).toContain('statsResult === null')
+    expect(hook).toContain('logError(error)')
+    expect(hook).toContain("replDiffReadSad('git_diff_failed')")
+    expect(hook).toContain("replDiffReadSad('git_hunks_failed')")
+    expect(hook).toContain("replDiffReadSad('git_diff_threw')")
+    expect(hook).toContain("logEvent('tengu_feature_ok'")
+    expect(hook).toContain('baseMode: mode')
+    expect(hook).toContain('baseMode: fetchedMode')
+    expect(hook).not.toContain('setDiffResult(null)')
+    expect(panel).toContain('fileHistory.snapshotSequence')
+    expect(panel).toContain('useDiffData(')
+    expect(panel).toContain('requestedMode')
+    expect(panel).toContain('replDiffEmptyCopy(displayMode, source)')
   })
 })

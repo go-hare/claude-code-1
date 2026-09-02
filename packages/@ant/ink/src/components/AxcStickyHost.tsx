@@ -7,11 +7,9 @@
  * While `Ink.isAltScreenActive`, sink suspends Axc and returns `false` so
  * Ink falls through to normal cell-diff paint. Axc is main-screen only.
  *
- * Nothing in this repo mounts `AxcStickyHost`: it owns the Yoga structure, and
- * the local REPL keeps FullscreenLayout's, so the live sink install goes through
- * `AxcFrameSinkBridge` below. Kept as the 1:1 gold port of `xxc` and exported
- * from the package index — grep for `AxcFrameSinkBridge` when tracing which
- * component actually installs the sink.
+ * Live Qvt arm (`CLAUDE_CODE_AXC_STICKY_MAIN`) mounts this from FullscreenLayout
+ * as densable `xxc({scrollable,bottom,overlay})`. `AxcFrameSinkBridge` remains
+ * the tip-only install against a foreign Yoga tree — not the Qvt host.
  */
 
 import React, { createContext, type ReactNode, type RefObject, useContext, useRef } from 'react';

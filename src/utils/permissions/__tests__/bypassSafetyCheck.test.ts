@@ -14,11 +14,17 @@ mock.module('src/utils/log.ts', logMock)
 
 const { hasPermissionsToUseTool } = await import('../permissions')
 
-function makeContext(mode: 'bypassPermissions' | 'default'): ToolUseContext {
+function makeContext(
+  mode: 'bypassPermissions' | 'default' | 'plan',
+  extra?: { prePlanMode?: 'bypassPermissions' | 'default' },
+): ToolUseContext {
   const toolPermissionContext = {
     ...getEmptyToolPermissionContext(),
     mode,
     isBypassPermissionsModeAvailable: true,
+    ...(extra?.prePlanMode !== undefined
+      ? { prePlanMode: extra.prePlanMode }
+      : {}),
   }
   return {
     getAppState: () =>
@@ -86,5 +92,27 @@ describe('bypassPermissions + safetyCheck (densable 2.1.218)', () => {
       'tu_3',
     )
     expect(result.behavior).toBe('ask')
+  })
+
+  test('plan with listable bypass still asks (does not inherit 2a)', async () => {
+    const result = await hasPermissionsToUseTool(
+      makeSafetyTool(true),
+      { file_path: 'src/a.ts', content: 'x' },
+      makeContext('plan'),
+      dummyMsg,
+      'tu_plan',
+    )
+    expect(result.behavior).toBe('ask')
+  })
+
+  test('plan entered from bypassPermissions still allows classifierApprovable', async () => {
+    const result = await hasPermissionsToUseTool(
+      makeSafetyTool(true),
+      { file_path: '.claude/workflow-runs/from-cli.md', content: 'x' },
+      makeContext('plan', { prePlanMode: 'bypassPermissions' }),
+      dummyMsg,
+      'tu_plan_bypass',
+    )
+    expect(result.behavior).toBe('allow')
   })
 })

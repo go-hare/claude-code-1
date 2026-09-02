@@ -140,16 +140,27 @@ describe('densable 2.1.224 #5 decidePeerInboundPolicy (Bqp)', () => {
     })
   })
 
-  test('plan + isBypassPermissionsModeAvailable → bypass class', () => {
+  test('plan + prePlanMode bypass → bypass class; listable flag alone is prompting', () => {
     expect(
       permissionModeClassOf({
         mode: 'plan',
         isBypassPermissionsModeAvailable: true,
       }),
+    ).toBe('prompting')
+    expect(
+      permissionModeClassOf({
+        mode: 'plan',
+        isBypassPermissionsModeAvailable: true,
+        prePlanMode: 'bypassPermissions',
+      }),
     ).toBe('bypass')
     expect(
       decideSessionInboundPolicy({
-        selfMode: { mode: 'plan', isBypassPermissionsModeAvailable: true },
+        selfMode: {
+          mode: 'plan',
+          isBypassPermissionsModeAvailable: true,
+          prePlanMode: 'bypassPermissions',
+        },
       }).policy,
     ).toBe('hold')
   })

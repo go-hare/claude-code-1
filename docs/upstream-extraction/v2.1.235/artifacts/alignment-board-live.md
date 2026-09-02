@@ -6,7 +6,7 @@
 
 | HAVE | PARTIAL | GAP | UNKNOWN | N/A |
 | ---- | ------- | --- | ------- | --- |
-| **18** | **0** | **0** | **0** | **1** |
+| **15 + analog 3** | **0** | **0** | **0** | **1** |
 
 ## Status by item
 
@@ -22,9 +22,9 @@
 | 8 | slash `oX` unescape | HAVE |
 | 9 | update-footer failureHint | HAVE |
 | 10 | tasklist expand persist | HAVE |
-| 11 | cloud CPU delta/same-ref | HAVE |
-| 12 | `suppressAlwaysAllowRule` | HAVE |
-| 13 | embedded/vendor ripgrep | **HAVE** |
+| 11 | cloud CPU delta/same-ref | HAVE (analog) |
+| 12 | `suppressAlwaysAllowRule` | HAVE (analog) — 235 无独立 SEA producer；239 leftover Artifact 生产赋值 |
+| 13 | embedded/vendor ripgrep | HAVE (analog) |
 | 14 | compact-off `/config` | HAVE |
 | 15 | vim `savedCursorOffset` | HAVE |
 | 16 | dialog `getFocusedValue` | HAVE |

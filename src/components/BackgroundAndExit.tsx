@@ -254,9 +254,20 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
     started.current = true;
 
     void (async () => {
+      const cancelBgHandoffQuota = async () => {
+        // densable CTo → Q6e(..., "background_handoff") cancel side-effect
+        try {
+          const { beginQuotaAutoResumeHandoff } = await import('../services/quotaAutoResume.js');
+          beginQuotaAutoResumeHandoff('background_handoff');
+        } catch {
+          /* best-effort */
+        }
+      };
+
       const seed = deriveBackgroundSeed(messages, '');
       if (seed === null) {
         onDone('Nothing to background — exiting.');
+        await cancelBgHandoffQuota();
         await gracefulShutdown(0, 'prompt_input_exit');
         return;
       }
@@ -269,6 +280,8 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
           sessionId = undefined;
         }
 
+        await cancelBgHandoffQuota();
+
         const tasks = getTasks?.() ?? null;
         const result = await runExitBackgroundHandoff({
           seed: { intent: seed.intent, name: seed.name },
@@ -279,6 +292,13 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
         });
 
         if (!result.ok) {
+          // leftover 239 Q6e catch → kHe after _6i persist fail
+          try {
+            const { endQuotaAutoResumeHandoff } = await import('../services/quotaAutoResume.js');
+            endQuotaAutoResumeHandoff();
+          } catch {
+            /* best-effort */
+          }
           onDone(result.error);
           await gracefulShutdown(0, 'prompt_input_exit', {
             finalMessage: result.error,
@@ -294,6 +314,13 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
           finalMessage: hint,
         });
       } catch (e) {
+        await cancelBgHandoffQuota();
+        try {
+          const { endQuotaAutoResumeHandoff } = await import('../services/quotaAutoResume.js');
+          endQuotaAutoResumeHandoff();
+        } catch {
+          /* leftover 239 Q6e catch kHe */
+        }
         const err = e instanceof Error ? e.message : String(e);
         onDone(err);
         await gracefulShutdown(0, 'prompt_input_exit', { finalMessage: err });

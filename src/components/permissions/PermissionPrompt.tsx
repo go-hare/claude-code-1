@@ -1,4 +1,4 @@
-import React, { type ReactNode, type Ref, useCallback, useMemo, useState } from 'react';
+import React, { type ReactNode, type Ref, useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, type DOMElement, Text } from '@anthropic/ink';
 import type { KeybindingAction } from '../../keybindings/types.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -7,17 +7,34 @@ import {
   logEvent,
 } from '../../services/analytics/index.js';
 import { useSetAppState } from '../../state/AppState.js';
+import type { PastedContent } from '../../utils/config.js';
+import type { ImageDimensions } from '../../utils/imageResizer.js';
 import { type OptionWithDescription, Select } from '../CustomSelect/select.js';
+import { resolveConfirmCycleModeAction } from './FilePermissionDialog/confirmCycleMode.js';
 
 export type FeedbackType = 'accept' | 'reject';
+
+/** DualInk analog: Select `type:'input'` for YAe/Qgy prefix (not Tab Mut). */
+export type PermissionPromptInputConfig = {
+  placeholder?: string;
+  initialValue?: string;
+  onChange: (value: string) => void;
+  allowEmptySubmitToCancel?: boolean;
+  showLabelWithValue?: boolean;
+  labelValueSeparator?: string;
+  resetCursorOnUpdate?: boolean;
+};
 
 export type PermissionPromptOption<T extends string> = {
   value: T;
   label: ReactNode;
+  /** densable Select description — Iiu/Cmy DPo kOo. */
+  description?: string;
   feedbackConfig?: {
     type: FeedbackType;
     placeholder?: string;
   };
+  inputConfig?: PermissionPromptInputConfig;
   keybinding?: KeybindingAction;
 };
 
@@ -34,6 +51,31 @@ export type PermissionPromptProps<T extends string> = {
   toolAnalyticsContext?: ToolAnalyticsContext;
   /** densable sVc `SYg` — measure the Select container for DAA maxLabelWidth. */
   selectRef?: Ref<DOMElement>;
+  /** DualInk analog Vru — Select image paste on input options. */
+  onImagePaste?: (
+    base64Image: string,
+    mediaType?: string,
+    filename?: string,
+    dimensions?: ImageDimensions,
+    sourcePath?: string,
+  ) => void;
+  pastedContents?: Record<number, PastedContent>;
+  onRemoveImage?: (id: number) => void;
+  /**
+   * DualInk analog gold Mhy / File confirm:cycleMode idle arm.
+   * Open accept/reject input collapses; otherwise this runs (accept-session).
+   * Omit on non-File PermissionPrompt callers.
+   */
+  cycleModeAction?: () => void;
+  /**
+   * densable Mut chrome: Host Cmy/tyy/Mhy draw escape+amend+IOo.
+   * Hide the built-in Esc/Tab footer.
+   */
+  hostChrome?: boolean;
+  /** densable Mut hintNode — tab amend when focused on yes/no. */
+  onAmendHintChange?: (visible: boolean) => void;
+  /** densable Cmy classifier approved — lock Select + Esc. */
+  isDisabled?: boolean;
 };
 
 const DEFAULT_PLACEHOLDERS: Record<FeedbackType, string> = {
@@ -58,6 +100,13 @@ export function PermissionPrompt<T extends string>({
   question = 'Do you want to proceed?',
   toolAnalyticsContext,
   selectRef,
+  onImagePaste,
+  pastedContents,
+  onRemoveImage,
+  cycleModeAction,
+  hostChrome,
+  onAmendHintChange,
+  isDisabled = false,
 }: PermissionPromptProps<T>): React.ReactNode {
   const setAppState = useSetAppState();
   const [acceptFeedback, setAcceptFeedback] = useState('');
@@ -77,16 +126,36 @@ export function PermissionPrompt<T extends string>({
   const showTabHint =
     (focusedFeedbackType === 'accept' && !acceptInputMode) || (focusedFeedbackType === 'reject' && !rejectInputMode);
 
+  useEffect(() => {
+    onAmendHintChange?.(showTabHint);
+  }, [showTabHint, onAmendHintChange]);
+
   // Transform options to Select-compatible format
   const selectOptions = useMemo((): OptionWithDescription<T>[] => {
     return options.map(opt => {
-      const { value, label, feedbackConfig } = opt;
+      const { value, label, description, feedbackConfig, inputConfig } = opt;
+
+      if (inputConfig) {
+        return {
+          type: 'input' as const,
+          label,
+          value,
+          placeholder: inputConfig.placeholder,
+          initialValue: inputConfig.initialValue,
+          onChange: inputConfig.onChange,
+          allowEmptySubmitToCancel: inputConfig.allowEmptySubmitToCancel,
+          showLabelWithValue: inputConfig.showLabelWithValue,
+          labelValueSeparator: inputConfig.labelValueSeparator,
+          resetCursorOnUpdate: inputConfig.resetCursorOnUpdate,
+        };
+      }
 
       // No feedback config = simple option
       if (!feedbackConfig) {
         return {
           label,
           value,
+          ...(description !== undefined ? { description } : {}),
         };
       }
 
@@ -153,6 +222,7 @@ export function PermissionPrompt<T extends string>({
   // Handle selection
   const handleSelect = useCallback(
     (value: T) => {
+      if (isDisabled) return;
       const option = options.find(opt => opt.value === value);
       if (!option) return;
 
@@ -186,6 +256,7 @@ export function PermissionPrompt<T extends string>({
       onSelect(value, feedback);
     },
     [
+      isDisabled,
       options,
       acceptFeedback,
       rejectFeedback,
@@ -196,6 +267,27 @@ export function PermissionPrompt<T extends string>({
     ],
   );
 
+  // DualInk analog gold Mhy Mi({"confirm:cycleMode":w}) / File ERg.
+  const handleCycleMode = useCallback(() => {
+    const action = resolveConfirmCycleModeAction({
+      yesInputMode: acceptInputMode,
+      noInputMode: rejectInputMode,
+    });
+    if (action === 'collapse-yes') {
+      setAcceptInputMode(false);
+      const acceptOpt = options.find(opt => opt.feedbackConfig?.type === 'accept');
+      if (acceptOpt) setFocusedValue(acceptOpt.value);
+      return;
+    }
+    if (action === 'collapse-no') {
+      setRejectInputMode(false);
+      const rejectOpt = options.find(opt => opt.feedbackConfig?.type === 'reject');
+      if (rejectOpt) setFocusedValue(rejectOpt.value);
+      return;
+    }
+    cycleModeAction?.();
+  }, [acceptInputMode, rejectInputMode, options, cycleModeAction]);
+
   // Register keybinding handlers for options that have a keybinding set
   const keybindingHandlers = useMemo(() => {
     const handlers: Record<string, () => void> = {};
@@ -204,13 +296,17 @@ export function PermissionPrompt<T extends string>({
         handlers[opt.keybinding] = () => handleSelect(opt.value);
       }
     }
+    if (cycleModeAction) {
+      handlers['confirm:cycleMode'] = handleCycleMode;
+    }
     return handlers;
-  }, [options, handleSelect]);
+  }, [options, handleSelect, cycleModeAction, handleCycleMode]);
 
   useKeybindings(keybindingHandlers, { context: 'Confirmation' });
 
   // Handle cancel (Esc)
   const handleCancel = useCallback(() => {
+    if (isDisabled) return;
     logEvent('tengu_permission_request_escape', {});
     // Increment escape count for attribution tracking
     setAppState(prev => ({
@@ -221,12 +317,13 @@ export function PermissionPrompt<T extends string>({
       },
     }));
     onCancel?.();
-  }, [onCancel, setAppState]);
+  }, [isDisabled, onCancel, setAppState]);
 
   const select = (
     <Select
       options={selectOptions}
       inlineDescriptions
+      isDisabled={isDisabled}
       onChange={handleSelect}
       onCancel={handleCancel}
       onFocus={value => {
@@ -241,12 +338,15 @@ export function PermissionPrompt<T extends string>({
         setFocusedValue(value);
       }}
       onInputModeToggle={handleInputModeToggle}
+      onImagePaste={onImagePaste}
+      pastedContents={pastedContents}
+      onRemoveImage={onRemoveImage}
     />
   );
 
   return (
     <Box flexDirection="column">
-      {typeof question === 'string' ? <Text>{question}</Text> : question}
+      {typeof question === 'string' ? <Text dimColor={isDisabled}>{question}</Text> : question}
       {selectRef ? (
         <Box ref={selectRef} width="100%">
           {select}
@@ -254,9 +354,11 @@ export function PermissionPrompt<T extends string>({
       ) : (
         select
       )}
-      <Box marginTop={1}>
-        <Text dimColor>Esc to cancel{showTabHint && ' · Tab to amend'}</Text>
-      </Box>
+      {!hostChrome && (
+        <Box marginTop={1}>
+          <Text dimColor>Esc to cancel{showTabHint && ' · Tab to amend'}</Text>
+        </Box>
+      )}
     </Box>
   );
 }

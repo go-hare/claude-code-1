@@ -84,13 +84,18 @@ Uses DECSET 1004 focus reporting. Returns `true` when focused.
 
 ### `useTerminalTitle(title)`
 
-Set the terminal window title.
+Set the terminal window / tab title.
 
 ```ts
 function useTerminalTitle(title: string | null): void
 ```
 
-Pass `null` to clear the title.
+Pass `null` to leave the title untouched. densable: Windows uses
+`process.title` only (no OSC); elsewhere OSC 0. On win32, idle↔busy prefix
+flips (`✳` ↔ `◐`/`◑`) SetConsoleTitle to the plain title, then the
+prefixed title after a short delay so Windows Terminal can drop a sticky
+tab glyph (same-tick writes are coalesced). Still `process.title` only.
+Also exports `applyTerminalTitle` / `clearTerminalTitle` for startup/shutdown.
 
 ### `useTerminalViewport()`
 

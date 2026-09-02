@@ -7,6 +7,8 @@
  *
  * Invent-ban: Desktop/cloud handoff product paths are cancel *reasons* only —
  * we do not invent Desktop/cloud clients. Local CLI paths are implemented.
+ * Print/SDK has no wait loop — gold `$Fm` requires interactive, `kDl` is
+ * REPL-hook-only. Do not invent a `-p` wait UI.
  */
 
 import { randomUUID } from 'crypto'
@@ -14,12 +16,19 @@ import {
   getMainThreadAgentId,
   getIsNonInteractiveSession,
   isMainThreadQueuedCommand,
+  getMainLoopModelOverride,
+  getInitialMainLoopModel,
+  isReplBridgeActive,
+  onSessionSwitch,
+  type SessionSwitchReason,
 } from '../bootstrap/state.js'
+import { getAgentId } from '../utils/teammate.js'
 import { createSignal } from '../utils/signal.js'
 import { logError } from '../utils/log.js'
 import { isClaudeAISubscriber, getOauthAccountInfo } from '../utils/auth.js'
 import {
   getSettingsForSource,
+  getSettings_DEPRECATED,
   updateSettingsForSource,
 } from '../utils/settings/settings.js'
 import type { SettingSource } from '../utils/settings/constants.js'
@@ -35,10 +44,13 @@ import {
   statusListeners,
 } from './claudeAiLimits.js'
 import { getMainLoopModel } from '../utils/model/model.js'
+import { isModelAllowed } from '../utils/model/modelAllowlist.js'
+import { stepFamilyAliasToAllowed } from '../utils/model/printSetModel.js'
 import {
   enqueue,
   getCommandQueue,
   isQueuedCommandEditable,
+  someInFlightDrainCommand,
 } from '../utils/messageQueueManager.js'
 import type { QueuedCommand } from '../types/textInputTypes.js'
 
@@ -61,6 +73,12 @@ const REARM_CAP = 2
 const REARM_MIN_DELAY_MS = [60_000, 300_000] as const
 /** densable iYm — tick while armed */
 export const QUOTA_AUTO_RESUME_TICK_MS = 30_000
+/** densable R5w — default sleep-through grace */
+export const MARBLE_HERON_GRACE_DEFAULT_MS = 1_800_000
+/** densable D5w — min grace */
+export const MARBLE_HERON_GRACE_MIN_MS = 60_000
+/** densable I5w — max clamp for marble_heron ms values */
+export const MARBLE_HERON_MS_MAX = 21_600_000
 
 /** densable hAm bucket for s0v — only main_thread continues the rearm path */
 export type QuotaRejectQuerySourceBucket = 'main_thread' | 'other'
@@ -161,6 +179,8 @@ type Episode = {
   armedResetKeys: Set<number>
   autoArmDedupeResetKeys: Set<number>
   autoContinueKeyPresence: AutoContinueKeyPresence
+  /** densable O4f / kxi / xfe — block auto-arm for the handoff window */
+  handoffInProgress: boolean
   changed: ReturnType<typeof createSignal>
   events: SignalWithEvent
 }
@@ -198,6 +218,7 @@ function createEpisode(): Episode {
     armedResetKeys: new Set(),
     autoArmDedupeResetKeys: new Set(),
     autoContinueKeyPresence: 'unscanned',
+    handoffInProgress: false,
     changed: createSignal(),
     events: createEventSignal(),
   }
@@ -244,6 +265,30 @@ function getMarbleHeronConfig(): Record<string, unknown> {
     return raw as Record<string, unknown>
   }
   return {}
+}
+
+/**
+ * densable yDl(e, t, r=0) — coerce marble_heron ms, clamp to [r, I5w].
+ * Non-number/string or non-finite/<0 → fallback t.
+ */
+export function clampMarbleHeronMs(
+  value: unknown,
+  fallback: number,
+  min = 0,
+): number {
+  if (typeof value !== 'number' && typeof value !== 'string') return fallback
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return fallback
+  return Math.min(Math.max(Math.round(n), min), MARBLE_HERON_MS_MAX)
+}
+
+/** densable kDl grace: yDl(bDl().graceMs, R5w, D5w) */
+export function getMarbleHeronGraceMs(): number {
+  return clampMarbleHeronMs(
+    getMarbleHeronConfig().graceMs,
+    MARBLE_HERON_GRACE_DEFAULT_MS,
+    MARBLE_HERON_GRACE_MIN_MS,
+  )
 }
 
 /** densable zqn — killswitch (default ON when unset) */
@@ -313,12 +358,36 @@ export function isAutoContinueAtUsageLimitEffective(
   return presence === 'absent'
 }
 
-/** densable R4f ≈ subscriber && interactive */
-function isQuotaAutoResumeSurfaceEligible(): boolean {
-  return isClaudeAISubscriber() && !getIsNonInteractiveSession()
+/** densable As / KWe — CLAUDE_CODE_SESSION_KIND === "bg" */
+function isQuotaAutoResumeBgSession(): boolean {
+  return process.env.CLAUDE_CODE_SESSION_KIND === 'bg'
 }
 
-/** densable Vqn */
+/**
+ * densable $Fm / 234 R4f — interactive && not bg.
+ * Gold 239: `fD()&&!As()` where fD = launchOptions.isInteractive.
+ * Print/SDK (`claude -p`) is non-interactive → cannot offer or arm.
+ */
+function isQuotaAutoResumeSurfaceEligible(): boolean {
+  return !getIsNonInteractiveSession() && !isQuotaAutoResumeBgSession()
+}
+
+/**
+ * densable 239 QOt — extra auto-arm veto.
+ * Gold: `Cx()||As()||Kxn()!==void 0`
+ * (replBridgeActive || bg || teammateAgentId).
+ * Kxn analog: getAgentId() — same as fableConsent vIt (ALS then
+ * dynamicTeamContext). Does not read CLAUDE_CODE_AGENT_ID.
+ */
+export function isQuotaAutoArmVetoed(): boolean {
+  return (
+    isReplBridgeActive() ||
+    isQuotaAutoResumeBgSession() ||
+    getAgentId() !== undefined
+  )
+}
+
+/** densable Vqn / hvr */
 export function isQuotaRejectedForAutoContinue(
   limits: ClaudeAILimits,
 ): boolean {
@@ -326,7 +395,8 @@ export function isQuotaRejectedForAutoContinue(
     limits.status === 'rejected' &&
     limits.resetsAt !== undefined &&
     Number.isFinite(limits.resetsAt) &&
-    limits.isUsingOverage !== true
+    limits.isUsingOverage !== true &&
+    limits.overageInUse !== true
   )
 }
 
@@ -336,12 +406,13 @@ function isNotUsageBasedBilling(): boolean {
   return billing !== 'usage_based'
 }
 
-/** densable M0S / d$t prechecks (without limits) */
+/** densable r3t / d$t — ls + billing + Vqn + $Fm + Xlo */
 export function canOfferQuotaAutoResume(limits: ClaudeAILimits): boolean {
   return (
-    isQuotaAutoResumeSurfaceEligible() &&
+    isClaudeAISubscriber() &&
     isNotUsageBasedBilling() &&
     isQuotaRejectedForAutoContinue(limits) &&
+    isQuotaAutoResumeSurfaceEligible() &&
     isQuotaAutoResumeKillswitchEnabled()
   )
 }
@@ -380,8 +451,7 @@ export function isQuotaAutoResumeEpisodeActive(
 /**
  * densable qlr — episode is live for O4f / Yqn / Axi.
  * Gold: armed || stale || activeTurnClaim || dispatchingTakeover ||
- * RU().some(bxi) || sxa(bxi). Local has no in-flight drain tracker (sxa);
- * WXa covers the queued continuation; takeoverUuids covers Yqn-owned humans.
+ * RU().some(bxi) || sxa(bxi). sxa = someInFlightDrainCommand.
  */
 export function isQuotaAutoResumeLive(): boolean {
   if (
@@ -392,7 +462,8 @@ export function isQuotaAutoResumeLive(): boolean {
   ) {
     return true
   }
-  return getCommandQueue().some(isQuotaEpisodeOwnedCommand)
+  if (getCommandQueue().some(isQuotaEpisodeOwnedCommand)) return true
+  return someInFlightDrainCommand(isQuotaEpisodeOwnedCommand)
 }
 
 /** densable Klr */
@@ -633,16 +704,98 @@ export function offerArmQuotaAutoResume(
   return true
 }
 
+/**
+ * densable n2r — alias family for X5w escape (not full model id family).
+ * opusplan|opusplan[1m] → opus; haiku → sonnet; else null.
+ */
+export function resolveQuotaAutoArmAliasFamily(
+  alias: string | null | undefined,
+): 'opus' | 'sonnet' | null {
+  if (alias === 'opusplan' || alias === 'opusplan[1m]') return 'opus'
+  if (alias === 'haiku') return 'sonnet'
+  return null
+}
+
+/**
+ * densable bZo — allowlist remap after SU alias resolve.
+ * Gold: if (e && !Gu(e)) return L4(e) ?? void 0; return e
+ * Tip: Gu ≈ isModelAllowed; L4 ≈ stepFamilyAliasToAllowed (family aliases only).
+ * Non-family values (opusplan/haiku/full ids) that fail Gu → undefined (L4 null).
+ */
+export function applyQuotaAutoArmAliasAllowlist(
+  alias: string | null | undefined,
+): string | null | undefined {
+  if (!alias) return alias
+  if (isModelAllowed(alias)) return alias
+  return stepFamilyAliasToAllowed(alias) ?? undefined
+}
+
+/**
+ * densable SU — alias setting for n2r (X5w escape only).
+ * Order: JA (mainLoopModelOverride) → mae (initialMainLoopModel) →
+ * ANTHROPIC_MODEL || settings.model → bZo.
+ *
+ * Gold body (SEA @ 303273396) uses `!== void 0` for JA/mae. Tip ModelSetting
+ * uses null for Default — keep ?? so null falls through (tip hardening).
+ */
+export function getQuotaAutoArmAliasSetting(): string | null | undefined {
+  const raw =
+    getMainLoopModelOverride() ??
+    getInitialMainLoopModel() ??
+    (process.env.ANTHROPIC_MODEL ||
+      getSettings_DEPRECATED()?.model ||
+      undefined)
+  return applyQuotaAutoArmAliasAllowlist(raw)
+}
+
+/**
+ * densable X0S / X5w — block auto-arm on cross-family week limits.
+ * Returns true ⇒ O4f must refuse.
+ *
+ * Gold: seven_day_opus|sonnet; if yxi(model) → don't block; if n2r(SU())
+ * matches window family → don't block; else block.
+ */
+export function blocksQuotaAutoArmForFamilyWindow(
+  rateLimitType: ClaudeAILimits['rateLimitType'],
+  model?: string,
+): boolean {
+  if (
+    rateLimitType !== 'seven_day_opus' &&
+    rateLimitType !== 'seven_day_sonnet'
+  ) {
+    return false
+  }
+  if (isQuotaRearmEligibleRateLimit(rateLimitType, model)) return false
+  const aliasFamily = resolveQuotaAutoArmAliasFamily(
+    getQuotaAutoArmAliasSetting(),
+  )
+  if (rateLimitType === 'seven_day_opus' && aliasFamily === 'opus') return false
+  if (rateLimitType === 'seven_day_sonnet' && aliasFamily === 'sonnet') {
+    return false
+  }
+  return true
+}
+
 /** densable O4f — auto-arm when setting effective */
 export function tryAutoArmQuotaAutoResume(
   limits: ClaudeAILimits,
   nowMs: number = Date.now(),
 ): boolean {
   if (!canOfferQuotaAutoResume(limits)) return false
+  // densable O4f/zFm: if(r.handoffInProgress) return !1
+  if (episode.handoffInProgress) return false
+  // densable zFm: if(QOt()) return !1
+  if (isQuotaAutoArmVetoed()) return false
   if (!isAutoContinueAtUsageLimitEffective()) return false
   if (!isAutoArmEnabled()) return false
   const resetsAt = limits.resetsAt ?? 0
   if (resetsAt * 1000 - nowMs > AUTO_CONTINUE_HORIZON_MS) return false
+  // densable O4f: if(X0S(e.rateLimitType,Ni())) return !1
+  if (
+    blocksQuotaAutoArmForFamilyWindow(limits.rateLimitType, getMainLoopModel())
+  ) {
+    return false
+  }
   // densable O4f: if(qlr(r)||autoArmDedupe.has(n)) return !1
   if (isQuotaAutoResumeLive() || episode.autoArmDedupeResetKeys.has(resetsAt)) {
     return false
@@ -703,6 +856,10 @@ function dropPendingQuotaContinuationOwnership(keepIfDrained = false): boolean {
  * keep it so WXa can still see the continuation after qXa fire / Yqn Xqn.
  */
 export function cancelQuotaAutoResume(reason: CancelReason): void {
+  // densable V4f: conversation_reset also drops the kxi latch (even if idle)
+  if (reason === 'conversation_reset') {
+    episode.handoffInProgress = false
+  }
   if (episode.state.phase === 'idle' && !hasPendingQuotaContinuationInQueue()) {
     return
   }
@@ -724,6 +881,23 @@ export function cancelQuotaAutoResume(reason: CancelReason): void {
   if (wasActive && shouldEmitCancelledEvent(reason)) {
     episode.events.emit('cancelled')
   }
+}
+
+/**
+ * densable kxi — set handoffInProgress then Axi. Flag stays up until xfe.
+ * Returns whether the episode was active (Exi) before cancel.
+ */
+export function beginQuotaAutoResumeHandoff(reason: CancelReason): boolean {
+  episode.handoffInProgress = true
+  if (!isQuotaAutoResumeLive()) return false
+  const wasActive = isQuotaAutoResumeEpisodeActive()
+  cancelQuotaAutoResume(reason)
+  return wasActive
+}
+
+/** densable xfe — clear the O4f handoff latch */
+export function endQuotaAutoResumeHandoff(): void {
+  episode.handoffInProgress = false
 }
 
 /**
@@ -983,8 +1157,8 @@ export function tickQuotaAutoResume(
   const last = episode.lastObservedMs ?? armed.fireAtMs
   const gap = nowMs - last
   episode.lastObservedMs = nowMs
-  // densable: large clock gap past fireAt ⇒ slept through → stale
-  if (gap > 30 * 60 * 1000 && nowMs >= armed.fireAtMs) {
+  // densable kDl: yDl(bDl().graceMs, R5w, D5w); gap > grace && now >= fireAt
+  if (gap > getMarbleHeronGraceMs() && nowMs >= armed.fireAtMs) {
     episode.sleptThroughReset = true
   }
   if (stillRejected || nowMs < armed.fireAtMs) return 'pending'
@@ -1089,6 +1263,26 @@ export function setAutoContinueAtUsageLimitSetting(enabled: boolean): {
   return result
 }
 
+/** leftover 239 RDl — clear/resume/remote_attach drop the kxi latch. */
+export function isQuotaAutoResumeSessionReset(
+  reason: SessionSwitchReason | undefined,
+): boolean {
+  switch (reason) {
+    case 'clear':
+    case 'resume':
+    case 'remote_attach':
+      return true
+    case 'fork':
+    case 'cd':
+    case 'spare_claim':
+    case 'hydrate':
+    case 'startup_custom_id':
+      return false
+    default:
+      return false
+  }
+}
+
 /** Hook limits → try auto-arm + densable s0v rearm (idempotent) */
 export function ensureQuotaAutoResumeLimitsSubscription(): void {
   if (limitsHooked) return
@@ -1101,6 +1295,13 @@ export function ensureQuotaAutoResumeLimitsSubscription(): void {
   })
   // densable yYp → s0v (429 error path only; headers do not emit quotaRejected)
   quotaRejectedListeners.add(onQuotaRejectedForAutoResume)
+  // leftover 239 eUm/oU: RDl → g6i('conversation_reset') + kHe
+  onSessionSwitch((_id, reason) => {
+    if (isQuotaAutoResumeSessionReset(reason)) {
+      cancelQuotaAutoResume('conversation_reset')
+      episode.handoffInProgress = false
+    }
+  })
   // Opportunistic arm on existing rejected state
   if (currentLimits.status === 'rejected') {
     tryAutoArmQuotaAutoResume(currentLimits)

@@ -264,8 +264,22 @@ export function recordPlanModeResumeTelemetry(
 }
 
 /**
+ * densable Jqy: continue never runs y_u, even if a CCR stash leaks in.
+ * Resume / mid-session /resume clears this before applying.
+ */
+let skipPlanModeResumeBecauseContinue = false
+
+export function setSkipPlanModeResumeBecauseContinue(skip: boolean): void {
+  skipPlanModeResumeBecauseContinue = skip
+}
+
+export function isPlanModeResumeSkippedBecauseContinue(): boolean {
+  return skipPlanModeResumeBecauseContinue
+}
+
+/**
  * densable OMo-then-y_u hydrate — print + interactive share this.
- * `continue` must not call (gold). Pass null restored when no CCR metadata.
+ * `continue` must not call (gold). Hard-gated by the continue skip flag.
  */
 export function hydratePlanModeFromRestoredWorker<
   T extends PlanModeResumeAppState,
@@ -277,6 +291,9 @@ export function hydratePlanModeFromRestoredWorker<
     lane: 'print' | 'sdk_url' | 'interactive'
   },
 ): PlanModeOnResume {
+  if (skipPlanModeResumeBecauseContinue) {
+    return 'none'
+  }
   const tracker = createPlanModeResumeTracker()
   setAppState(
     applyPlanModeResumeFromInternal<T>(
@@ -291,6 +308,39 @@ export function hydratePlanModeFromRestoredWorker<
     hadInternal: !!restored?.internal,
   })
   return classifyPlanModeOnResume(tracker)
+}
+
+/**
+ * Launch hydrate for processResumedConversation.
+ * Continue: drain stash, set skip, leave state alone (Jqy has no y_u).
+ * Resume: clear skip and apply stash when present.
+ */
+export function applyStashedPlanModeResumeForLaunch<
+  T extends PlanModeResumeAppState,
+>(state: T, opts: { forkSession: boolean; continueRequested?: boolean }): T {
+  if (opts.continueRequested) {
+    setSkipPlanModeResumeBecauseContinue(true)
+    takeRestoredWorkerForPlanResume()
+    return state
+  }
+  setSkipPlanModeResumeBecauseContinue(false)
+  const restored = takeRestoredWorkerForPlanResume()
+  if (!restored?.internal && !restored?.external) {
+    return state
+  }
+  const tracker = createPlanModeResumeTracker()
+  const next = applyPlanModeResumeFromInternal<T>(
+    restored.internal as WorkerInternalMetadata | null,
+    tracker,
+    { forkSession: opts.forkSession },
+  )(state)
+  recordPlanModeResumeTelemetry(tracker, {
+    lane: 'interactive',
+    hadExternal: !!restored.external,
+    hadInternal: !!restored.internal,
+  })
+  void classifyPlanModeOnResume(tracker)
+  return next
 }
 
 /** Bridge CCR initialize result — taken by REPL hydrate / resume. */
@@ -333,4 +383,5 @@ export function subscribeRestoredWorkerForPlanResume(
 export function clearRestoredWorkerForPlanResumeForTests(): void {
   stashedRestoredWorker = null
   restoredWorkerListeners.clear()
+  skipPlanModeResumeBecauseContinue = false
 }

@@ -7,6 +7,8 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import type { UUID } from 'crypto'
 import * as realAuth from '../../utils/auth.js'
 import * as realBootstrap from '../../bootstrap/state.js'
@@ -20,6 +22,16 @@ import {
   restoreSettingsMockWith,
   snapshotModuleExports,
 } from '../../../tests/mocks/settings.js'
+import {
+  clearDynamicTeamContext,
+  setDynamicTeamContext,
+} from '../../utils/teammate.js'
+import {
+  createTeammateContext,
+  runWithTeammateContext,
+} from '../../utils/teammateContext.js'
+
+const savedAnthropicModel = process.env.ANTHROPIC_MODEL
 
 const getSettingsForSourceMock = mock(
   (_source?: string) =>
@@ -34,6 +46,16 @@ const getOauthAccountInfoMock = mock(() => ({
   billingType: 'subscription' as string | undefined,
 }))
 const getIsNonInteractiveSessionMock = mock(() => false)
+const isReplBridgeActiveMock = mock(() => false)
+const getMainLoopModelOverrideMock = mock(
+  (): string | null | undefined => undefined,
+)
+const getInitialMainLoopModelMock = mock(
+  (): string | null | undefined => undefined,
+)
+const getSettingsDeprecatedMock = mock(
+  (): { model?: string } | undefined => undefined,
+)
 const logEventMock = mock((_name: string, _props?: unknown) => {})
 const formatResetTimeMock = mock((ts: number) => `formatted-${ts}`)
 
@@ -64,6 +86,7 @@ function settingsMock() {
     ...settingsSnap,
     getSettingsForSource: getSettingsForSourceMock,
     updateSettingsForSource: updateSettingsForSourceMock,
+    getSettings_DEPRECATED: getSettingsDeprecatedMock,
   }
 }
 function growthbookMockFactory() {
@@ -84,6 +107,9 @@ function bootstrapMock() {
     ...bootstrapSnap,
     getMainThreadAgentId: () => undefined,
     getIsNonInteractiveSession: getIsNonInteractiveSessionMock,
+    isReplBridgeActive: isReplBridgeActiveMock,
+    getMainLoopModelOverride: getMainLoopModelOverrideMock,
+    getInitialMainLoopModel: getInitialMainLoopModelMock,
   }
 }
 function analyticsMock() {
@@ -160,13 +186,28 @@ const {
   subscribeQuotaAutoResumeEvents,
   tickQuotaAutoResume,
   tryAutoArmQuotaAutoResume,
+  isQuotaAutoArmVetoed,
+  isQuotaAutoResumeLive,
+  beginQuotaAutoResumeHandoff,
+  endQuotaAutoResumeHandoff,
+  ensureQuotaAutoResumeLimitsSubscription,
+  isQuotaAutoResumeSessionReset,
+  blocksQuotaAutoArmForFamilyWindow,
   TENGU_MAPLE_SUNDIAL,
   TENGU_MARBLE_HERON,
   CONTINUATION_PROMPT,
+  clampMarbleHeronMs,
+  getMarbleHeronGraceMs,
+  MARBLE_HERON_GRACE_DEFAULT_MS,
+  MARBLE_HERON_GRACE_MIN_MS,
+  MARBLE_HERON_MS_MAX,
 } = await import('../quotaAutoResume.js')
-const { getCommandQueue, resetCommandQueue } = await import(
-  '../../utils/messageQueueManager.js'
-)
+const {
+  getCommandQueue,
+  resetCommandQueue,
+  setInFlightDrainBatch,
+  clearInFlightDrainBatch,
+} = await import('../../utils/messageQueueManager.js')
 
 afterAll(() => {
   mock.module('../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
@@ -191,6 +232,13 @@ afterAll(() => {
   mock.module('src/services/claudeAiLimits.js', () => ({
     ...claudeAiLimitsSnap,
   }))
+  delete process.env.CLAUDE_CODE_AGENT_ID
+  if (savedAnthropicModel === undefined) {
+    delete process.env.ANTHROPIC_MODEL
+  } else {
+    process.env.ANTHROPIC_MODEL = savedAnthropicModel
+  }
+  clearDynamicTeamContext()
 })
 
 describe('quotaAutoResume densable 2.1.234', () => {
@@ -208,6 +256,18 @@ describe('quotaAutoResume densable 2.1.234', () => {
     getOauthAccountInfoMock.mockReturnValue({ billingType: 'subscription' })
     getIsNonInteractiveSessionMock.mockReset()
     getIsNonInteractiveSessionMock.mockReturnValue(false)
+    isReplBridgeActiveMock.mockReset()
+    isReplBridgeActiveMock.mockReturnValue(false)
+    getMainLoopModelOverrideMock.mockReset()
+    getMainLoopModelOverrideMock.mockReturnValue(undefined)
+    getInitialMainLoopModelMock.mockReset()
+    getInitialMainLoopModelMock.mockReturnValue(undefined)
+    getSettingsDeprecatedMock.mockReset()
+    getSettingsDeprecatedMock.mockReturnValue(undefined)
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    delete process.env.CLAUDE_CODE_AGENT_ID
+    delete process.env.ANTHROPIC_MODEL
+    clearDynamicTeamContext()
     resetCommandQueue()
     logEventMock.mockReset()
     formatResetTimeMock.mockReset()
@@ -222,6 +282,11 @@ describe('quotaAutoResume densable 2.1.234', () => {
   afterEach(() => {
     resetQuotaAutoResumeForTests()
     resetCommandQueue()
+    clearInFlightDrainBatch()
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    delete process.env.CLAUDE_CODE_AGENT_ID
+    delete process.env.ANTHROPIC_MODEL
+    clearDynamicTeamContext()
   })
 
   test('BXa/Wqn: absent key ⇒ effective true', () => {
@@ -262,6 +327,15 @@ describe('quotaAutoResume densable 2.1.234', () => {
         resetsAt: 1_700_000_000,
         unifiedRateLimitFallbackAvailable: false,
         isUsingOverage: true,
+      }),
+    ).toBe(false)
+    expect(
+      isQuotaRejectedForAutoContinue({
+        status: 'rejected',
+        resetsAt: 1_700_000_000,
+        unifiedRateLimitFallbackAvailable: false,
+        isUsingOverage: false,
+        overageInUse: true,
       }),
     ).toBe(false)
   })
@@ -451,6 +525,105 @@ describe('quotaAutoResume densable 2.1.234', () => {
     expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
   })
 
+  test('$Fm: print/non-interactive cannot offer or auto-arm', () => {
+    getIsNonInteractiveSessionMock.mockReturnValue(true)
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    expect(canOfferQuotaAutoResume(limits)).toBe(false)
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+  })
+
+  test('$Fm: bg session cannot offer (gold As)', () => {
+    process.env.CLAUDE_CODE_SESSION_KIND = 'bg'
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    expect(canOfferQuotaAutoResume(limits)).toBe(false)
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+  })
+
+  test('QOt: replBridge vetoes auto-arm only', () => {
+    isReplBridgeActiveMock.mockReturnValue(true)
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    expect(canOfferQuotaAutoResume(limits)).toBe(true)
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+  })
+
+  test('QOt: teammateAgentId (dynamicTeamContext) vetoes auto-arm only', () => {
+    setDynamicTeamContext({
+      agentId: 'agent-1',
+      agentName: 'researcher',
+      teamName: 'team',
+      planModeRequired: false,
+    })
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    expect(canOfferQuotaAutoResume(limits)).toBe(true)
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+  })
+
+  test('QOt: teammateAgentId (ALS) vetoes auto-arm only', () => {
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    runWithTeammateContext(
+      createTeammateContext({
+        agentId: 'agent-1',
+        agentName: 'researcher',
+        teamName: 'team',
+        planModeRequired: false,
+        parentSessionId: 'parent-1',
+        abortController: new AbortController(),
+      }),
+      () => {
+        expect(canOfferQuotaAutoResume(limits)).toBe(true)
+        expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+      },
+    )
+  })
+
+  test('QOt: leftover CLAUDE_CODE_AGENT_ID does not veto', () => {
+    process.env.CLAUDE_CODE_AGENT_ID = 'agent-1'
+    expect(isQuotaAutoArmVetoed()).toBe(false)
+  })
+
+  test('REPL fork switchSession uses fork reason (RDl keep latch)', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../../screens/REPL.tsx'),
+      'utf8',
+    )
+    expect(src).toContain("entrypoint === 'fork' ? 'fork' : 'resume'")
+  })
+
+  test('print.ts has no quota auto-resume wait loop (gold kDl REPL-only)', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../../cli/print.ts'),
+      'utf8',
+    )
+    expect(src).not.toContain('quotaAutoResume')
+    expect(src).not.toContain('tickQuotaAutoResume')
+    expect(src).not.toContain('tryAutoArmQuotaAutoResume')
+  })
+
   test('DZi wait option labels', () => {
     const future = Math.floor(Date.now() / 1000) + 3600
     expect(getWaitThenContinueOption(future, true)).toEqual({
@@ -529,6 +702,118 @@ describe('quotaAutoResume densable 2.1.234', () => {
     }
     expect(tryAutoArmQuotaAutoResume(later)).toBe(false)
     expect(getQuotaAutoResumeState().phase).toBe('idle')
+  })
+
+  test('O4f: kxi handoffInProgress blocks tryAutoArm until xfe', () => {
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    expect(beginQuotaAutoResumeHandoff('background_handoff')).toBe(false)
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+    endQuotaAutoResumeHandoff()
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(true)
+    expect(getQuotaAutoResumeState().phase).toBe('armed')
+  })
+
+  test('RDl: clear/resume/remote_attach reset; fork/undefined keep latch', () => {
+    expect(isQuotaAutoResumeSessionReset('clear')).toBe(true)
+    expect(isQuotaAutoResumeSessionReset('resume')).toBe(true)
+    expect(isQuotaAutoResumeSessionReset('remote_attach')).toBe(true)
+    expect(isQuotaAutoResumeSessionReset('fork')).toBe(false)
+    expect(isQuotaAutoResumeSessionReset('spare_claim')).toBe(false)
+    expect(isQuotaAutoResumeSessionReset(undefined)).toBe(false)
+  })
+
+  test('remote_attach is passed on local hydrate / remote TUI create', () => {
+    const storage = readFileSync(
+      join(import.meta.dir, '../../utils/sessionStorage.ts'),
+      'utf8',
+    )
+    const main = readFileSync(join(import.meta.dir, '../../main.tsx'), 'utf8')
+    expect(storage).toContain(
+      "switchSession(asSessionId(sessionId), null, 'remote_attach')",
+    )
+    expect(main).toContain(
+      "switchSession(asSessionId(createdSession.id), null, 'remote_attach')",
+    )
+  })
+
+  test('eUm: resume/clear session switch drops kxi latch', async () => {
+    const { switchSession, regenerateSessionId } = await import(
+      '../../bootstrap/state.js'
+    )
+    const { asSessionId } = await import('../../types/ids.js')
+    // leftover 239 eUm uses real onSessionSwitch from bootstrapSnap
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 7200,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    ensureQuotaAutoResumeLimitsSubscription()
+    beginQuotaAutoResumeHandoff('background_handoff')
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+    switchSession(asSessionId(crypto.randomUUID()), null, 'resume')
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(true)
+    endQuotaAutoResumeHandoff()
+    beginQuotaAutoResumeHandoff('background_handoff')
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+    regenerateSessionId()
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(true)
+  })
+
+  test('eUm: fork session switch keeps kxi latch', async () => {
+    const { switchSession } = await import('../../bootstrap/state.js')
+    const { asSessionId } = await import('../../types/ids.js')
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 7200,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    ensureQuotaAutoResumeLimitsSubscription()
+    beginQuotaAutoResumeHandoff('background_handoff')
+    switchSession(asSessionId(crypto.randomUUID()), null, 'fork')
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+  })
+
+  test('V4f: conversation_reset clears handoff latch', () => {
+    const limits = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 7200,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    beginQuotaAutoResumeHandoff('background_handoff')
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(false)
+    cancelQuotaAutoResume('conversation_reset')
+    expect(tryAutoArmQuotaAutoResume(limits)).toBe(true)
+  })
+
+  test('qlr sxa: in-flight drain owned cmd blocks tryAutoArm', () => {
+    const uuid = fireQuotaAutoResumeContinuation() as UUID
+    resetCommandQueue()
+    expect(hasPendingQuotaContinuationInQueue()).toBe(false)
+    setInFlightDrainBatch([
+      {
+        value: CONTINUATION_PROMPT,
+        mode: 'prompt',
+        uuid,
+      },
+    ])
+    expect(isQuotaAutoResumeLive()).toBe(true)
+    const later = {
+      status: 'rejected' as const,
+      resetsAt: Math.floor(Date.now() / 1000) + 7200,
+      unifiedRateLimitFallbackAvailable: false,
+      isUsingOverage: false,
+    }
+    expect(tryAutoArmQuotaAutoResume(later)).toBe(false)
+    clearInFlightDrainBatch()
+    expect(isQuotaAutoResumeLive()).toBe(false)
   })
 
   test('z4f: Jqn killswitch strips continuation; otherwise keeps it', () => {
@@ -630,6 +915,50 @@ describe('quotaAutoResume densable 2.1.234', () => {
 
   test('T0S/HEv: getQuotaAutoResumeRearmCap === 2', () => {
     expect(getQuotaAutoResumeRearmCap()).toBe(2)
+  })
+
+  test('X0S: cross-family week limit blocks auto-arm', () => {
+    // densable X5w: seven_day_opus + sonnet model → block (absent n2r escape)
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('seven_day_opus', 'claude-sonnet-4'),
+    ).toBe(true)
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('seven_day_sonnet', 'claude-opus-4-6'),
+    ).toBe(true)
+    // same-family → do not block
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('seven_day_opus', 'claude-opus-4-6'),
+    ).toBe(false)
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('seven_day_sonnet', 'claude-sonnet-4'),
+    ).toBe(false)
+    // non-family windows never block via X0S
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('five_hour', 'claude-sonnet-4'),
+    ).toBe(false)
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('seven_day', 'claude-haiku-4'),
+    ).toBe(false)
+  })
+
+  test('X0S: n2r alias escape unblocks cross-family week limit', () => {
+    getMainLoopModelOverrideMock.mockReturnValue('opusplan')
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('seven_day_opus', 'claude-sonnet-4'),
+    ).toBe(false)
+    getMainLoopModelOverrideMock.mockReturnValue('haiku')
+    expect(
+      blocksQuotaAutoArmForFamilyWindow('seven_day_sonnet', 'claude-opus-4-6'),
+    ).toBe(false)
+  })
+
+  test('X5w n2r alias families', () => {
+    const { resolveQuotaAutoArmAliasFamily } =
+      require('../quotaAutoResume.js') as typeof import('../quotaAutoResume.js')
+    expect(resolveQuotaAutoArmAliasFamily('opusplan')).toBe('opus')
+    expect(resolveQuotaAutoArmAliasFamily('opusplan[1m]')).toBe('opus')
+    expect(resolveQuotaAutoArmAliasFamily('haiku')).toBe('sonnet')
+    expect(resolveQuotaAutoArmAliasFamily('claude-sonnet-4')).toBe(null)
   })
 
   test('xxi: five_hour/seven_day/overage eligible; undefined not', () => {
@@ -772,5 +1101,44 @@ describe('quotaAutoResume densable 2.1.234', () => {
       expect.objectContaining({ reason: 'rearm_cap' }),
     )
     unsub()
+  })
+})
+
+describe('kDl marble_heron graceMs (densable yDl / R5w / D5w / I5w)', () => {
+  test('yDl clamps non-number / negative / over-max', () => {
+    expect(clampMarbleHeronMs(undefined, 1800000, 60000)).toBe(1800000)
+    expect(clampMarbleHeronMs('nope', 1800000, 60000)).toBe(1800000)
+    expect(clampMarbleHeronMs(-1, 1800000, 60000)).toBe(1800000)
+    expect(clampMarbleHeronMs(1000, 1800000, 60000)).toBe(60000)
+    expect(clampMarbleHeronMs(MARBLE_HERON_MS_MAX + 1, 1800000, 0)).toBe(
+      MARBLE_HERON_MS_MAX,
+    )
+    expect(clampMarbleHeronMs('90000', 1800000, 60000)).toBe(90000)
+  })
+
+  test('default grace is 30m; config graceMs is read and clamped', () => {
+    expect(getMarbleHeronGraceMs()).toBe(MARBLE_HERON_GRACE_DEFAULT_MS)
+    getFeatureValueMock.mockImplementation((key, fallback) =>
+      key === TENGU_MARBLE_HERON ? { graceMs: 90_000 } : fallback,
+    )
+    expect(getMarbleHeronGraceMs()).toBe(90_000)
+    getFeatureValueMock.mockImplementation((key, fallback) =>
+      key === TENGU_MARBLE_HERON ? { graceMs: 1_000 } : fallback,
+    )
+    expect(getMarbleHeronGraceMs()).toBe(MARBLE_HERON_GRACE_MIN_MS)
+  })
+
+  test('qXa marks stale when gap exceeds configured grace past fireAt', () => {
+    getFeatureValueMock.mockImplementation((key, fallback) =>
+      key === TENGU_MARBLE_HERON ? { graceMs: 60_000 } : fallback,
+    )
+    const armNow = Date.now() - 120_000
+    armQuotaAutoResume(Math.floor(Date.now() / 1000) - 10, armNow, 'dialog')
+    const armed = getQuotaAutoResumeState()
+    expect(armed.phase).toBe('armed')
+    const fireAt = (armed as { fireAtMs: number }).fireAtMs
+    const nowMs = Math.max(fireAt, armNow + 60_000) + 1
+    expect(tickQuotaAutoResume(nowMs, false)).toBe('stale')
+    expect(getQuotaAutoResumeState().phase).toBe('stale')
   })
 })

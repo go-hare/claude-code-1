@@ -203,9 +203,14 @@ export function restoreSessionStateFromLog(
 
   // densable #13 y_u after OMo — interactive / resume only (never continue)
   if (options?.applyPlanModeResume) {
-    const { hydratePlanModeFromRestoredWorker } =
+    const {
+      hydratePlanModeFromRestoredWorker,
+      setSkipPlanModeResumeBecauseContinue,
+    } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('./permissions/planModeResume.js') as typeof import('./permissions/planModeResume.js')
+    // Mid-session /resume after --continue: lift the Jqy continue skip.
+    setSkipPlanModeResumeBecauseContinue(false)
     const restored =
       options.restoredWorker ??
       (options.restoredInternal
@@ -237,15 +242,15 @@ export function computeRestoredAttributionState(
 }
 
 /**
- * Compute standalone agent context (name/color) for session resume.
- * Used for computing initial state before render (per CLAUDE.md guidelines).
- * Returns undefined if no name/color is set on the session.
+ * densable LMo + g8: name/color from the session log, prideGradient from
+ * the previous AppState. Returns undefined only when all three are empty.
  */
 export function computeStandaloneAgentContext(
   agentName: string | undefined,
   agentColor: string | undefined,
+  prideGradient?: string[],
 ): AppState['standaloneAgentContext'] | undefined {
-  if (!agentName && !agentColor) {
+  if (!agentName && !agentColor && !prideGradient?.length) {
     return undefined
   }
   return {
@@ -253,6 +258,7 @@ export function computeStandaloneAgentContext(
     color: (agentColor === 'default' ? undefined : agentColor) as
       | AgentColorName
       | undefined,
+    ...(prideGradient?.length ? { prideGradient } : {}),
   }
 }
 
@@ -580,6 +586,8 @@ export async function processResumedConversation(
      * interactive mid-turn fork has no CLI prompt string.
      */
     replyOnResume?: boolean
+    /** densable Jqy: continue must not run y_u even if CCR stash leaks. */
+    continueRequested?: boolean
   },
   context: {
     modeApi: CoordinatorModeApi | null
@@ -624,7 +632,7 @@ export async function processResumedConversation(
         )
         projectDirOverride = null
       }
-      switchSession(asSessionId(sid), projectDirOverride)
+      switchSession(asSessionId(sid), projectDirOverride, 'resume')
       // Rename asciicast recording to match the resumed session ID so
       // getSessionRecordingPaths() can discover it during /share
       await renameRecordingForSession()
@@ -721,6 +729,7 @@ export async function processResumedConversation(
   const standaloneAgentContext = computeStandaloneAgentContext(
     result.agentName,
     result.agentColor,
+    context.initialState.standaloneAgentContext?.prideGradient,
   )
   void updateSessionName(result.agentName)
   const refreshedAgentDefs = await refreshAgentDefinitionsForModeSwitch(
@@ -748,36 +757,19 @@ export async function processResumedConversation(
     forceRcOn = !opts.forkSession && !!result.bridgeSessionId && !alreadyFullRc
   }
 
-  // densable #13 y_u into initialState when CCR stash present (interactive
-  // --resume before REPL mount). continue never hits this function with stash
-  // from print; interactive continue also goes through here — only apply when
-  // stash exists (local continue has none).
+  // densable #13 / Jqy: continue never y_u. Resume applies CCR stash.
   let planHydratedState = context.initialState
   {
-    const {
-      takeRestoredWorkerForPlanResume,
-      applyPlanModeResumeFromInternal,
-      createPlanModeResumeTracker,
-      recordPlanModeResumeTelemetry,
-      classifyPlanModeOnResume,
-    } =
+    const { applyStashedPlanModeResumeForLaunch } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('./permissions/planModeResume.js') as typeof import('./permissions/planModeResume.js')
-    const restored = takeRestoredWorkerForPlanResume()
-    if (restored?.internal || restored?.external) {
-      const tracker = createPlanModeResumeTracker()
-      planHydratedState = applyPlanModeResumeFromInternal<AppState>(
-        restored.internal as { worker_permission_mode?: unknown } | null,
-        tracker,
-        { forkSession: opts.forkSession },
-      )(planHydratedState)
-      recordPlanModeResumeTelemetry(tracker, {
-        lane: 'interactive',
-        hadExternal: !!restored.external,
-        hadInternal: !!restored.internal,
-      })
-      void classifyPlanModeOnResume(tracker)
-    }
+    planHydratedState = applyStashedPlanModeResumeForLaunch<AppState>(
+      planHydratedState,
+      {
+        forkSession: opts.forkSession,
+        continueRequested: !!opts.continueRequested,
+      },
+    )
   }
 
   return {

@@ -1,6 +1,6 @@
 # densable 2.1.238 · alignment board
 
-> Living board · 2026-08-23 · SEA `/tmp/official-238/plat/package/claude` · **HAVE 内金标修** Y8p/K8p + Y_e/PN_/vBu + KQe + Fme · `DNt`/`Ryt`/`vBa` + `_5n`/`ret` · PCr/Oyw/Zxv · **#31 HAVE** · leftover #1+#2 · **#24 KSl** · 计数 HAVE **34** / PARTIAL **5** / UNKNOWN **0**  
+> Living board · 2026-08-23 · SEA `/tmp/official-238/plat/package/claude` · **HAVE 内金标修** Y8p/K8p + Y_e/PN_/vBu + KQe + Fme · `DNt`/`Ryt`/`vBa` + `_5n`/`ret` · PCr/Oyw/Zxv · **#31 HAVE** · leftover #1+#2 · **#24 KSl** · 计数 HAVE **39** / PARTIAL **0** / UNKNOWN **0**  
 > Scope: checklist **#1–#39** · concurrency **3** · invent-ban intact  
 > tip：`a22e3c88` + hygiene（删死 API / !psr 测硬）· baseline `1fcb0818`（237）+ `f5987063`（236 #25 invent）· npm **2.7.45** · **#2 psr soft residual** 记（keep null→true；拒 R3 / 完整 sIn）
 
@@ -18,9 +18,9 @@
 
 | HAVE | PARTIAL | GAP | UNKNOWN | N/A |
 | ---- | ------- | --- | ------- | --- |
-| **34** | **5** | **0** | **0** | **0** |
+| **39** | **0** | **0** | **0** | **0** |
 
-## HAVE（34）
+## HAVE（39）
 
 | # | key |
 | - | --- |
@@ -58,16 +58,15 @@
 | 37 | mcp-list-get-disabled-glyph |
 | 38 | mcp-headersHelper-trust-gate（Aiv；bare dynamic 非 resident） |
 | 39 | mcp-headersHelper-clean-env（Riv：local 不 scrub；pluginPath overlay） |
+| 4 | runner-defer-shutdown-max-min（F/onClosed/G()/Ne/Je 1:1） |
+| 16 | mcp-stdio-discover-after-init（Pwi+LGa+N_f-on-proxy 1:1；live discover 不管） |
+| 18 | model-effort-cache-miss-after-expiry（q$t+t1f 1:1；SEA 也不隔离 TTL 后 /model） |
+| 24 | rc-phone-web-model-sync（Zkd+KSl 1:1；chrome UI 不管） |
+| 25 | rc-login-expired-retry（copy+OAi 1:1；live remint 不管） |
 
-## PARTIAL（5）— gold-soft / invent-ban
+## PARTIAL（0）
 
-| # | key | 备注 |
-| - | --- | ---- |
-| 4 | runner-defer-shutdown-max-min | F/onClosed/G()/Ne/Je/banner/Another SIGTERM 已 1:1；缺 live-session ceiling E2E |
-| 16 | mcp-stdio-discover-after-init | Pwi + LGa/`xwi` + n_f/Cke/pMn + **N_f-on-claudeai-proxy**（oGn/L_f/H_f/F_f/$Yp）已 1:1；live `server/discover` E2E 未证；**无 N_f-on-stdio**；**无** `cliOwnedConfigs` invent |
-| 18 | model-effort-cache-miss-after-expiry | q$t persist + t1f extras 已 1:1（Zxv extras / 三数组无 `.default([])` / MWT 独立 / DWT previousMessageId；CLI 不落盘）；用户可见 `/model`/`/effort` **SEA 也不隔离** |
-| 24 | rc-phone-web-model-sync | Zkd + REPL/SDK callback 1:1；**KSl/ASm/qjt** copy ` · Draws from usage credits` 1:1；chrome UI 未 invent |
-| 25 | rc-login-expired-retry | cr/kt/Gt/yr/exhausted + OAi typed 401 + x1r onExhausted 已 1:1；live remint E2E gold-soft；**禁止** 3rd onStateChange kind |
+— none —
 
 ## GAP（0）
 
@@ -79,7 +78,7 @@
 
 ## Invent-ban
 
-Proactive · VSCode host/screen-reader · storageV5 `backendView` · Desktop·cloud · Config UI flavor · MCP≠marketplace headersHelper · drain-wait≠defer · proxyAuthHelper TTL≠runner · **#5 F4y 1:1 from SEA；禁止 CCR upstreamproxy / session proxyAuthHelper** · **#22 禁止 storageV5 / getBridgeSessionOrStatus invent** · **#16 禁止 N_f-on-stdio / env-auto 跑 LGa / cliOwnedConfigs / W9 v2 tasks** · **#24 KSl/ASm/qjt 已 1:1；禁止 chrome UI / MHs host latch / seatTier / zpt** · **#25 禁止 3rd onStateChange kind / adaptiveBuffer** · **#18 禁止 q$t-on-CLI / extra PKo / fKn(undefined) all-HRi / vd / MWT 塞进 tracking 门** · **#31 HAVE joa/LDn(Uoa)/jg；禁止 invent darwin module-load / napi lazy / 与 #34 DGT 合并** · **no rg 15→14** · **no JS fake fail-fast** · #17 不改 `STREAM_NETWORK_DOWN_CODES` · #15 Ink 不 import gracefulShutdown · **#6 不 invent display-window GC / LWT gate** · #28 不 invent storageV5 poll · **#35 不 dump 其余 managed-agents 树**
+Proactive · VSCode host/screen-reader · storageV5 `backendView` 槽（本地 `Rc` = `getProject()` 已接；禁 unused 槽，不是禁 host） · Desktop·cloud · Config UI flavor · MCP≠marketplace headersHelper · drain-wait≠defer · proxyAuthHelper TTL≠runner · **#5 F4y 1:1 from SEA；禁止 CCR upstreamproxy / session proxyAuthHelper** · **#22 禁止 storageV5 / getBridgeSessionOrStatus invent** · **#16 禁止 N_f-on-stdio / env-auto 跑 LGa / cliOwnedConfigs / W9 v2 tasks** · **#24 KSl/ASm/qjt 已 1:1；禁止 chrome UI / MHs host latch / seatTier / zpt** · **#25 禁止 3rd onStateChange kind / adaptiveBuffer** · **#18 禁止 q$t-on-CLI / extra PKo / fKn(undefined) all-HRi / vd / MWT 塞进 tracking 门** · **#31 HAVE joa/LDn(Uoa)/jg；禁止 invent darwin module-load / napi lazy / 与 #34 DGT 合并** · **no rg 15→14** · **no JS fake fail-fast** · #17 不改 `STREAM_NETWORK_DOWN_CODES` · #15 Ink 不 import gracefulShutdown · **#6 不 invent display-window GC / LWT gate** · #28 不 invent storageV5 poll · **#35 不 dump 其余 managed-agents 树**
 
 ## 旁注
 
@@ -114,3 +113,4 @@ Grok **4.5** 读图弱 / **4.6** OK；tip 转换无分叉 → memory only。
 - **DNt 红测**：fixture 补 `marketplaceSource`；`marketplaceSource===undefined` 仍 settings-strip（SEA 故意；勿改 DNt）。
 - invent-ban：leftover #3/#4/#5 · pane pluginId Map · `_5n` 回并 state headers · operator auto `runEntryHelper` · Z5r `{name}`。
 - docs：`official-238-checklist` 计数漂移 37/2 → 拉回 board **34/5**（#4/#16/#25 仍 PARTIAL gold-soft）。
+- 2026-09-01 骨架 E2E 再挖：gold-hard 仍 1:1；239 SEA 也不隔离 TTL 后 `/model`/`/effort`。**不** invent chrome UI / live host。`#4/#16/#18/#24/#25` 仍 PARTIAL。

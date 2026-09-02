@@ -29,6 +29,79 @@ export const DIFF_PANEL_UNAVAILABLE_MESSAGE =
 export const DIFF_BASE_MODES = ['session', 'uncommitted', 'branch'] as const
 export type DiffBaseMode = (typeof DIFF_BASE_MODES)[number]
 
+/** Zmu leftover dump truncates before JSX; keep the existing uncommitted copy. */
+export const REPL_DIFF_EMPTY_UNCOMMITTED = 'No uncommitted changes'
+export const REPL_DIFF_EMPTY_SESSION = 'No session changes'
+export const REPL_DIFF_EMPTY_BRANCH = 'No branch changes'
+
+export type ReplDiffListFile = {
+  path: string
+  linesAdded: number
+  linesRemoved: number
+  preSession?: boolean
+}
+
+export type ReplDiffEmptySource =
+  | { kind: 'working-tree' }
+  | { kind: 'branch'; baseBranch: string }
+
+/** densable Zmu — main list drops `_zS` preSession rows. */
+export function replDiffVisibleFiles<T extends { preSession?: boolean }>(
+  files: readonly T[],
+): T[] {
+  return files.filter(file => !file.preSession)
+}
+
+/** Header +/- follows the visible list, not working-tree `stats`. */
+export function replDiffVisibleStats(
+  files: readonly Pick<ReplDiffListFile, 'linesAdded' | 'linesRemoved'>[],
+): { filesCount: number; linesAdded: number; linesRemoved: number } {
+  let linesAdded = 0
+  let linesRemoved = 0
+  for (const file of files) {
+    linesAdded += file.linesAdded
+    linesRemoved += file.linesRemoved
+  }
+  return { filesCount: files.length, linesAdded, linesRemoved }
+}
+
+/**
+ * densable Zmu `H1s` — first loop sums only `preSession` rows.
+ */
+export function replDiffPreSessionStats(files: readonly ReplDiffListFile[]): {
+  filesCount: number
+  linesAdded: number
+  linesRemoved: number
+} {
+  let filesCount = 0
+  let linesAdded = 0
+  let linesRemoved = 0
+  for (const file of files) {
+    if (!file.preSession) continue
+    filesCount += 1
+    linesAdded += file.linesAdded
+    linesRemoved += file.linesRemoved
+  }
+  return { filesCount, linesAdded, linesRemoved }
+}
+
+/**
+ * Empty copy follows `baseMode` / `source`. Leftover Zmu dump ends
+ * before the empty-string JSX; `H1s` is the preSession footer stats,
+ * not a second empty sentence.
+ */
+export function replDiffEmptyCopy(
+  baseMode: DiffBaseMode,
+  source: ReplDiffEmptySource,
+): string {
+  if (source.kind === 'branch') {
+    return `No changes vs ${source.baseBranch}`
+  }
+  if (baseMode === 'session') return REPL_DIFF_EMPTY_SESSION
+  if (baseMode === 'branch') return REPL_DIFF_EMPTY_BRANCH
+  return REPL_DIFF_EMPTY_UNCOMMITTED
+}
+
 export type ReplTab = 'convo' | 'diff'
 
 type ReplDiffHostState = {
@@ -153,15 +226,21 @@ export function getPersistedDiffBaseMode(): DiffBaseMode {
 }
 
 /** densable `$cs` */
-export function cycleDiffBaseMode(current: DiffBaseMode): DiffBaseMode {
+export function cycleDiffBaseMode(
+  current: DiffBaseMode,
+  /** densable $cs(mode, storageV5) — unused locally. */
+  _storageV5?: unknown,
+): DiffBaseMode {
   const next =
     DIFF_BASE_MODES[
       (DIFF_BASE_MODES.indexOf(current) + 1) % DIFF_BASE_MODES.length
     ] ?? 'session'
-  saveGlobalConfig(config =>
-    config.diffSidebarBaseMode === next
-      ? config
-      : { ...config, diffSidebarBaseMode: next },
+  saveGlobalConfig(
+    config =>
+      config.diffSidebarBaseMode === next
+        ? config
+        : { ...config, diffSidebarBaseMode: next },
+    _storageV5,
   )
   logEvent('repl_diff_base_switch', {
     mode: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

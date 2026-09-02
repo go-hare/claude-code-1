@@ -16,6 +16,9 @@ import { CellWidth, cellAt, cellAtIndex, setCellStyleId } from './screen.js'
 
 type Point = { col: number; row: number }
 
+/** densable d7a `scope` — column box `{x1,x2}` + optional official `node`. */
+export type SelectionScope = { x1: number; x2: number; node?: unknown }
+
 export type SelectionState = {
   /** Where the mouse-down occurred. Null when no selection. */
   anchor: Point | null
@@ -54,6 +57,15 @@ export type SelectionState = {
   virtualAnchorRow?: number
   /** Same for focus. */
   virtualFocusRow?: number
+  /** densable virtualAnchorCol — original col while the row is clamped. */
+  virtualAnchorCol?: number
+  /** densable virtualFocusCol — original col while the row is clamped. */
+  virtualFocusCol?: number
+  /**
+   * densable `e.scope` — when set, r9r/o9r clamp cols to `[x1, x2)`.
+   * Unset (`!r`) is official OEc on Scroll: full-width selection.
+   */
+  scope?: SelectionScope
   /** True if the mouse-down that started this selection had the alt
    *  modifier set (SGR button bit 0x08). On macOS xterm.js this is a
    *  signal that VS Code's macOptionClickForcesSelection is OFF — if it
@@ -76,12 +88,42 @@ export function createSelectionState(): SelectionState {
   }
 }
 
+/** densable r9r — clamp a col through optional scope. */
+export function clampSelectionCol(s: SelectionState, col: number): number {
+  if (!s.scope) return col
+  return clamp(col, s.scope.x1, s.scope.x2 - 1)
+}
+
+/**
+ * densable OEc — Scroll drag-to-scroll owns this selection when
+ * `scope.node` is unset or equals this ScrollBox DOM.
+ * Do not invent FleetView callers that pass `scope.node`.
+ */
+export function selectionOwnsScroll(
+  sel: { scope?: SelectionScope } | null | undefined,
+  scroll: { getDomElement?: () => unknown } | null | undefined,
+): boolean {
+  const node = sel?.scope?.node
+  return !node || node === scroll?.getDomElement?.()
+}
+
+/** densable o9r — inclusive col range for clamp-to-edge. */
+export function selectionColRange(
+  s: SelectionState,
+  width: number,
+): { lo: number; hi: number } {
+  if (!s.scope) return { lo: 0, hi: width - 1 }
+  return { lo: s.scope.x1, hi: Math.min(s.scope.x2, width) - 1 }
+}
+
 export function startSelection(
   s: SelectionState,
   col: number,
   row: number,
+  scope?: SelectionScope,
 ): void {
-  s.anchor = { col, row }
+  s.scope = scope
+  s.anchor = { col: clampSelectionCol(s, col), row }
   // Focus is not set until the first drag motion. A click-release with no
   // drag leaves focus null → hasSelection/selectionBounds return false/null
   // via the `!s.focus` check, so a bare click never highlights a cell.
@@ -94,6 +136,8 @@ export function startSelection(
   s.scrolledOffBelowSW = []
   s.virtualAnchorRow = undefined
   s.virtualFocusRow = undefined
+  s.virtualAnchorCol = undefined
+  s.virtualFocusCol = undefined
   s.lastPressHadAlt = false
 }
 
@@ -108,9 +152,10 @@ export function updateSelection(
   // motion-release pair). Setting focus here would turn a bare click into
   // a 1-cell selection and clobber the clipboard via useCopyOnSelect. Once
   // focus is set (real drag), we track normally including back to anchor.
-  if (!s.focus && s.anchor && s.anchor.col === col && s.anchor.row === row)
+  const clamped = clampSelectionCol(s, col)
+  if (!s.focus && s.anchor && s.anchor.col === clamped && s.anchor.row === row)
     return
-  s.focus = { col, row }
+  s.focus = { col: clamped, row }
 }
 
 export function finishSelection(s: SelectionState): void {
@@ -128,8 +173,11 @@ export function clearSelection(s: SelectionState): void {
   s.scrolledOffBelow = []
   s.scrolledOffAboveSW = []
   s.scrolledOffBelowSW = []
+  s.scope = undefined
   s.virtualAnchorRow = undefined
   s.virtualFocusRow = undefined
+  s.virtualAnchorCol = undefined
+  s.virtualFocusCol = undefined
   s.lastPressHadAlt = false
 }
 
@@ -447,6 +495,7 @@ export function moveFocus(s: SelectionState, col: number, row: number): void {
   // shiftSelection clamp) no longer reflects intent. Anchor stays put so
   // virtualAnchorRow is still valid for its own round-trip.
   s.virtualFocusRow = undefined
+  s.virtualFocusCol = undefined
 }
 
 /**
@@ -460,12 +509,9 @@ export function moveFocus(s: SelectionState, col: number, row: number): void {
  * for dRow<0 (scrolling down, top leaves, 'above' semantics) or width-1 for
  * dRow>0 (scrolling up, bottom leaves, 'below' semantics).
  *
- * If both ends overshoot the SAME viewport edge (select text → Home/End/g/G
- * jumps far enough that both are out of view), clear — otherwise both clamp
- * to the same corner cell and a ghost 1-cell highlight lingers, and
- * getSelectedText returns one unrelated char from that corner. Symmetric
- * with shiftSelectionForFollow's top-edge check, but bidirectional: keyboard
- * scroll can jump either way.
+ * densable ybf — span-overlap debt + flip-side accumulator swap.
+ * Both ends off the same edge stay selected (swap above↔below); tip
+ * follow-clear lives only on shiftSelectionForFollow.
  */
 export function shiftSelection(
   s: SelectionState,
@@ -475,21 +521,8 @@ export function shiftSelection(
   width: number,
 ): void {
   if (!s.anchor || !s.focus) return
-  // Virtual rows track pre-clamp positions so reverse scrolls restore
-  // correctly. Without this, clamp(5→0) + shift(+10) = 10, not the true 5,
-  // and scrolledOffAbove stays stale (highlight ≠ copy).
   const vAnchor = (s.virtualAnchorRow ?? s.anchor.row) + dRow
   const vFocus = (s.virtualFocusRow ?? s.focus.row) + dRow
-  if (
-    (vAnchor < minRow && vFocus < minRow) ||
-    (vAnchor > maxRow && vFocus > maxRow)
-  ) {
-    clearSelection(s)
-    return
-  }
-  // Debt = how far the nearer endpoint overshoots each edge. When debt
-  // shrinks (reverse scroll), those rows are back on-screen — pop from
-  // the accumulator so getSelectedText doesn't double-count them.
   const oldMin = Math.min(
     s.virtualAnchorRow ?? s.anchor.row,
     s.virtualFocusRow ?? s.focus.row,
@@ -498,62 +531,68 @@ export function shiftSelection(
     s.virtualAnchorRow ?? s.anchor.row,
     s.virtualFocusRow ?? s.focus.row,
   )
-  const oldAboveDebt = Math.max(0, minRow - oldMin)
-  const oldBelowDebt = Math.max(0, oldMax - maxRow)
-  const newAboveDebt = Math.max(0, minRow - Math.min(vAnchor, vFocus))
-  const newBelowDebt = Math.max(0, Math.max(vAnchor, vFocus) - maxRow)
-  if (newAboveDebt < oldAboveDebt) {
-    // scrolledOffAbove pushes newest at the end (closest to on-screen).
-    const drop = oldAboveDebt - newAboveDebt
+  const span = oldMax - oldMin + 1
+  const oldAbove = Math.min(span, Math.max(0, minRow - oldMin))
+  const oldBelow = Math.min(span, Math.max(0, oldMax - maxRow))
+  const newAbove = Math.min(
+    span,
+    Math.max(0, minRow - Math.min(vAnchor, vFocus)),
+  )
+  const newBelow = Math.min(
+    span,
+    Math.max(0, Math.max(vAnchor, vFocus) - maxRow),
+  )
+  if (oldBelow === span && newAbove === span) {
+    s.scrolledOffAbove = s.scrolledOffBelow
+    s.scrolledOffAboveSW = s.scrolledOffBelowSW
+    s.scrolledOffBelow = []
+    s.scrolledOffBelowSW = []
+  } else if (oldAbove === span && newBelow === span) {
+    s.scrolledOffBelow = s.scrolledOffAbove
+    s.scrolledOffBelowSW = s.scrolledOffAboveSW
+    s.scrolledOffAbove = []
+    s.scrolledOffAboveSW = []
+  }
+  if (newAbove < oldAbove) {
+    const drop = Math.min(oldAbove - newAbove, s.scrolledOffAbove.length)
     s.scrolledOffAbove.length -= drop
     s.scrolledOffAboveSW.length = s.scrolledOffAbove.length
   }
-  if (newBelowDebt < oldBelowDebt) {
-    // scrolledOffBelow unshifts newest at the front (closest to on-screen).
-    const drop = oldBelowDebt - newBelowDebt
+  if (newBelow < oldBelow) {
+    const drop = oldBelow - newBelow
     s.scrolledOffBelow.splice(0, drop)
     s.scrolledOffBelowSW.splice(0, drop)
   }
-  // Invariant: accumulator length ≤ debt. If the accumulator exceeds debt,
-  // the excess is stale — e.g., moveFocus cleared virtualFocusRow without
-  // trimming the accumulator, orphaning entries the pop above can never
-  // reach because oldDebt was ALREADY 0. Truncate to debt (keeping the
-  // newest = closest-to-on-screen entries). Check newDebt (not oldDebt):
-  // captureScrolledRows runs BEFORE this shift in the real flow (ink.tsx),
-  // so at entry the accumulator is populated but oldDebt is still 0 —
-  // that's the normal establish-debt path, not stale.
-  if (s.scrolledOffAbove.length > newAboveDebt) {
-    // Above pushes newest at END → keep END.
-    s.scrolledOffAbove =
-      newAboveDebt > 0 ? s.scrolledOffAbove.slice(-newAboveDebt) : []
+  if (s.scrolledOffAbove.length > newAbove) {
+    s.scrolledOffAbove = newAbove > 0 ? s.scrolledOffAbove.slice(-newAbove) : []
     s.scrolledOffAboveSW =
-      newAboveDebt > 0 ? s.scrolledOffAboveSW.slice(-newAboveDebt) : []
+      newAbove > 0 ? s.scrolledOffAboveSW.slice(-newAbove) : []
   }
-  if (s.scrolledOffBelow.length > newBelowDebt) {
-    // Below unshifts newest at FRONT → keep FRONT.
-    s.scrolledOffBelow = s.scrolledOffBelow.slice(0, newBelowDebt)
-    s.scrolledOffBelowSW = s.scrolledOffBelowSW.slice(0, newBelowDebt)
+  if (s.scrolledOffBelow.length > newBelow) {
+    s.scrolledOffBelow = s.scrolledOffBelow.slice(0, newBelow)
+    s.scrolledOffBelowSW = s.scrolledOffBelowSW.slice(0, newBelow)
   }
-  // Clamp col depends on which EDGE (not dRow direction): virtual tracking
-  // means a top-clamped point can stay top-clamped during a dRow>0 reverse
-  // shift — dRow-based clampCol would give it the bottom col.
-  const shift = (p: Point, vRow: number): Point => {
-    if (vRow < minRow) return { col: 0, row: minRow }
-    if (vRow > maxRow) return { col: width - 1, row: maxRow }
-    return { col: p.col, row: vRow }
+  const cols = selectionColRange(s, width)
+  const vAnchorCol = s.virtualAnchorCol ?? s.anchor.col
+  const vFocusCol = s.virtualFocusCol ?? s.focus.col
+  const shift = (vRow: number, col: number): Point => {
+    if (vRow < minRow) return { col: cols.lo, row: minRow }
+    if (vRow > maxRow) return { col: cols.hi, row: maxRow }
+    return { col, row: vRow }
   }
-  s.anchor = shift(s.anchor, vAnchor)
-  s.focus = shift(s.focus, vFocus)
+  s.anchor = shift(vAnchor, vAnchorCol)
+  s.focus = shift(vFocus, vFocusCol)
   s.virtualAnchorRow =
     vAnchor < minRow || vAnchor > maxRow ? vAnchor : undefined
   s.virtualFocusRow = vFocus < minRow || vFocus > maxRow ? vFocus : undefined
-  // anchorSpan not virtual-tracked: it's for word/line extend-on-drag,
-  // irrelevant to the keyboard-scroll round-trip case.
+  s.virtualAnchorCol =
+    vAnchor < minRow || vAnchor > maxRow ? vAnchorCol : undefined
+  s.virtualFocusCol = vFocus < minRow || vFocus > maxRow ? vFocusCol : undefined
   if (s.anchorSpan) {
     const sp = (p: Point): Point => {
       const r = p.row + dRow
-      if (r < minRow) return { col: 0, row: minRow }
-      if (r > maxRow) return { col: width - 1, row: maxRow }
+      if (r < minRow) return { col: cols.lo, row: minRow }
+      if (r > maxRow) return { col: cols.hi, row: maxRow }
       return { col: p.col, row: r }
     }
     s.anchorSpan = {
@@ -584,8 +623,12 @@ export function shiftAnchor(
   // row, under-counting total drift → shiftSelection's invariant-restore
   // prematurely clears valid drag-phase accumulator entries.
   const raw = (s.virtualAnchorRow ?? s.anchor.row) + dRow
-  s.anchor = { col: s.anchor.col, row: clamp(raw, minRow, maxRow) }
-  s.virtualAnchorRow = raw < minRow || raw > maxRow ? raw : undefined
+  const out = raw < minRow || raw > maxRow
+  const vCol = s.virtualAnchorCol ?? s.anchor.col
+  // densable _bf: in-bounds uses stored col; clamped keeps current edge col.
+  s.anchor = { col: out ? s.anchor.col : vCol, row: clamp(raw, minRow, maxRow) }
+  s.virtualAnchorRow = out ? raw : undefined
+  s.virtualAnchorCol = out ? vCol : undefined
   // anchorSpan not virtual-tracked (word/line extend, irrelevant to
   // keyboard-scroll round-trip) — plain clamp from current row.
   if (s.anchorSpan) {
@@ -647,12 +690,23 @@ export function shiftSelectionForFollow(
   }
   // Clamp from raw, not p.row+dRow — so a virtual position coming back
   // in-bounds lands at the TRUE position, not the stale clamped one.
-  s.anchor = { col: s.anchor.col, row: clamp(rawAnchor, minRow, maxRow) }
-  if (s.focus && rawFocus !== undefined) {
-    s.focus = { col: s.focus.col, row: clamp(rawFocus, minRow, maxRow) }
+  const anchorOut = rawAnchor < minRow || rawAnchor > maxRow
+  const vAnchorCol = s.virtualAnchorCol ?? s.anchor.col
+  s.anchor = {
+    col: anchorOut ? s.anchor.col : vAnchorCol,
+    row: clamp(rawAnchor, minRow, maxRow),
   }
-  s.virtualAnchorRow =
-    rawAnchor < minRow || rawAnchor > maxRow ? rawAnchor : undefined
+  if (s.focus && rawFocus !== undefined) {
+    const focusOut = rawFocus < minRow || rawFocus > maxRow
+    const vFocusCol = s.virtualFocusCol ?? s.focus.col
+    s.focus = {
+      col: focusOut ? s.focus.col : vFocusCol,
+      row: clamp(rawFocus, minRow, maxRow),
+    }
+    s.virtualFocusCol = focusOut ? vFocusCol : undefined
+  }
+  s.virtualAnchorRow = anchorOut ? rawAnchor : undefined
+  s.virtualAnchorCol = anchorOut ? vAnchorCol : undefined
   s.virtualFocusRow =
     rawFocus !== undefined && (rawFocus < minRow || rawFocus > maxRow)
       ? rawFocus

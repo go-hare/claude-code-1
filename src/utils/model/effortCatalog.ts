@@ -321,6 +321,18 @@ const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
     },
   },
   {
+    // Official pricing table lists this id with the same 1M CONTEXT LENGTH
+    // as flash: https://api-docs.deepseek.com/quick_start/pricing
+    match: 'deepseek-v4-flash-vision-exp',
+    entry: {
+      defaultEffort: 'high',
+      effort: true,
+      maxEffort: true,
+      xhighEffort: false,
+      levels: ['high', 'max'],
+    },
+  },
+  {
     match: 'deepseek-v4-flash',
     entry: {
       defaultEffort: 'high',

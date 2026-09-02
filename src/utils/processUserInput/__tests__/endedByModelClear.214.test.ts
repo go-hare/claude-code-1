@@ -27,20 +27,37 @@ import {
 } from '../processUserInput.js'
 
 describe('isEndedByModelClearEscape', () => {
-  test('accepts /clear and aliases', () => {
+  test('accepts Byw names and aliases', () => {
     expect(isEndedByModelClearEscape('/clear')).toBe(true)
     expect(isEndedByModelClearEscape('/clear ')).toBe(true)
     expect(isEndedByModelClearEscape('  /reset')).toBe(true)
     expect(isEndedByModelClearEscape('/new')).toBe(true)
     expect(isEndedByModelClearEscape('/CLEAR')).toBe(true)
+    expect(isEndedByModelClearEscape('/help')).toBe(true)
+    expect(isEndedByModelClearEscape('/exit')).toBe(true)
+    expect(isEndedByModelClearEscape('/quit')).toBe(true)
+    expect(isEndedByModelClearEscape('/resume')).toBe(true)
+    expect(isEndedByModelClearEscape('/continue')).toBe(true)
+    expect(isEndedByModelClearEscape('/feedback')).toBe(true)
+    expect(isEndedByModelClearEscape('/bug')).toBe(true)
   })
 
   test('rejects other input and other slash commands', () => {
     expect(isEndedByModelClearEscape('hello')).toBe(false)
-    expect(isEndedByModelClearEscape('/help')).toBe(false)
     expect(isEndedByModelClearEscape('/fork')).toBe(false)
     expect(isEndedByModelClearEscape(null)).toBe(false)
     expect(isEndedByModelClearEscape(undefined)).toBe(false)
+  })
+
+  test('with a command list, aQr uses resolved name (missing help stays blocked)', () => {
+    const onlyClear = [
+      { name: 'clear', type: 'local', aliases: ['reset', 'new'] },
+    ]
+    expect(isEndedByModelClearEscape('/clear', onlyClear)).toBe(true)
+    expect(isEndedByModelClearEscape('/help', onlyClear)).toBe(false)
+    expect(
+      isEndedByModelClearEscape('/help', [{ name: 'help', type: 'local-jsx' }]),
+    ).toBe(true)
   })
 })
 
@@ -97,9 +114,9 @@ describe('processUserInput endedByModel gate', () => {
     expect(result.resultText).toContain('ended this conversation')
   })
 
-  test('unrelated slash is still refused (no broad slash allowlist)', async () => {
+  test('unrelated slash is still refused (Byw only)', async () => {
     const result = await processUserInput({
-      input: '/help',
+      input: '/fork',
       mode: 'prompt',
       setToolJSX: () => {},
       context: makeContext(true),

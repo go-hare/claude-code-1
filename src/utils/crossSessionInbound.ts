@@ -10,6 +10,7 @@
 
 import type { MessageOrigin } from '../types/message.js'
 import type { PermissionMode } from '../types/permissions.js'
+import { isSessionBypassClass } from './permissions/planBypass.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
@@ -43,6 +44,8 @@ export type PeerModeSnapshot = {
   mode: PermissionMode
   /** densable: plan + isBypassPermissionsModeAvailable counts as bypass. */
   isBypassPermissionsModeAvailable?: boolean
+  /** Plan inherited from bypass — densable plan+bypass, not merely listable. */
+  prePlanMode?: PermissionMode
 }
 
 export type PeerOriginMeta = {
@@ -55,10 +58,7 @@ export function isBypassPermissionModeClass(
   snap: PeerModeSnapshot | null | undefined,
 ): boolean {
   if (!snap) return false
-  return (
-    snap.mode === 'bypassPermissions' ||
-    (snap.mode === 'plan' && snap.isBypassPermissionsModeAvailable === true)
-  )
+  return isSessionBypassClass(snap)
 }
 
 /** densable uya — map session mode → class. */

@@ -986,6 +986,25 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Continue the current task automatically when the claude.ai usage limit resets',
         ),
+      // densable 2.1.239 $c / bvr — default true. Off → pause instead of switch.
+      switchModelsOnFlag: z
+        .boolean()
+        .optional()
+        .describe(
+          'When safeguards flag a message, automatically switch to a different model to keep chatting. When off, your session will pause instead.',
+        ),
+      // densable 2.1.239 UJr / LJr default false. /config row gated tengu_sepia_moth.
+      precomputeCompactionEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Precompute the compaction summary in the background before it is needed. Only applies when auto-compact is on.',
+        ),
+      // densable 2.1.239 timestamps /config → showMessageTimestamps. GB tengu_silk_hinge.
+      showMessageTimestamps: z
+        .boolean()
+        .optional()
+        .describe('Stamp each message with its arrival time'),
       // Official settings.tui ("default" | "fullscreen") — explicit TUI renderer.
       // Consumed by isFullscreenEnvEnabled(); "default" forces classic layout,
       // "fullscreen" forces alt-screen / no-flicker. Absent → env / auto default.
@@ -1163,6 +1182,12 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'When false, the :emoji: shortcode typeahead (the suggestion popup and the :name: inline replacement) is disabled. When absent or true, it is enabled.',
+        ),
+      awaySummaryEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          '@internal When false, the session recap (shown when you return after being away for 5+ minutes) is disabled. When absent or true, recap is enabled. Hidden from public SDK types until external launch.',
         ),
       poorMode: z
         .boolean()

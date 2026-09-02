@@ -2,7 +2,16 @@ import { describe, expect, test } from 'bun:test'
 import {
   applyNonImmediateNotification,
   type Notification,
+  type NotificationsBucket,
 } from '../notifications.js'
+
+function bucket(
+  current: Notification | null,
+  queue: Notification[] = [],
+  pinned: Notification[] = [],
+): NotificationsBucket {
+  return { current, queue, pinned }
+}
 
 function textNotif(
   partial: Partial<Notification> & Pick<Notification, 'key' | 'priority'>,
@@ -26,10 +35,7 @@ describe('applyNonImmediateNotification', () => {
       text: '⦿ ultracode · xhigh effort + dynamic workflows for maximum thoroughness',
     })
 
-    const applied = applyNonImmediateNotification(
-      { current, queue: [] },
-      incoming,
-    )
+    const applied = applyNonImmediateNotification(bucket(current), incoming)
 
     expect(applied.timeoutAction).toBe('reset')
     expect(applied.notifications.current).toEqual(incoming)
@@ -54,7 +60,7 @@ describe('applyNonImmediateNotification', () => {
     })
 
     const applied = applyNonImmediateNotification(
-      { current, queue: [queued] },
+      bucket(current, [queued]),
       incoming,
     )
 
@@ -85,10 +91,7 @@ describe('applyNonImmediateNotification', () => {
       fold,
     })
 
-    const applied = applyNonImmediateNotification(
-      { current, queue: [] },
-      incoming,
-    )
+    const applied = applyNonImmediateNotification(bucket(current), incoming)
 
     expect(applied.timeoutAction).toBe('reset')
     expect(applied.notifications.current).toMatchObject({
@@ -110,13 +113,30 @@ describe('applyNonImmediateNotification', () => {
       invalidates: ['old-toast'],
     })
 
-    const applied = applyNonImmediateNotification(
-      { current, queue: [] },
-      incoming,
-    )
+    const applied = applyNonImmediateNotification(bucket(current), incoming)
 
     expect(applied.timeoutAction).toBe('clear')
     expect(applied.notifications.current).toBeNull()
+    expect(applied.notifications.queue).toEqual([incoming])
+  })
+
+  test('non-immediate toast preserves pinned list (gold Nu pinned[])', () => {
+    const pin = textNotif({
+      key: 'pin-1',
+      priority: 'low',
+      text: 'pinned',
+      pinned: true,
+    })
+    const incoming = textNotif({
+      key: 'effort-level',
+      priority: 'high',
+      text: '◉ high · /effort',
+    })
+    const applied = applyNonImmediateNotification(
+      bucket(null, [], [pin]),
+      incoming,
+    )
+    expect(applied.notifications.pinned).toEqual([pin])
     expect(applied.notifications.queue).toEqual([incoming])
   })
 
@@ -127,13 +147,31 @@ describe('applyNonImmediateNotification', () => {
       text: '◉ high · /effort',
     })
 
-    const applied = applyNonImmediateNotification(
-      { current: null, queue: [] },
-      incoming,
-    )
+    const applied = applyNonImmediateNotification(bucket(null), incoming)
 
     expect(applied.timeoutAction).toBe('none')
     expect(applied.notifications.current).toBeNull()
     expect(applied.notifications.queue).toEqual([incoming])
+  })
+
+  test('contextual idle hint is a normal toast (not a sticky slot)', () => {
+    const current: Notification = {
+      key: 'idle-return-hint',
+      kind: 'contextual',
+      priority: 'medium',
+      timeoutMs: 0x7fffffff,
+      segments: [{ text: 'new task? ', dim: true }],
+    }
+    const incoming: Notification = {
+      ...current,
+      segments: [
+        { text: 'new task? ', dim: true },
+        { text: '/clear', color: 'suggestion' },
+      ],
+    }
+    const applied = applyNonImmediateNotification(bucket(current), incoming)
+    expect(applied.timeoutAction).toBe('reset')
+    expect(applied.notifications.current).toEqual(incoming)
+    expect(applied.notifications.pinned).toEqual([])
   })
 })

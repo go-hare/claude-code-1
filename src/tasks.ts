@@ -13,6 +13,8 @@ const LocalWorkflowTask: Task | null = feature('WORKFLOW_SCRIPTS')
 const MonitorMcpTask: Task | null = feature('MONITOR_TOOL')
   ? require('./tasks/MonitorMcpTask/MonitorMcpTask.js').MonitorMcpTask
   : null
+const MonitorWsTask: Task =
+  require('./tasks/MonitorWsTask/MonitorWsTask.js').MonitorWsTask
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /**
@@ -27,6 +29,7 @@ export function getAllTasks(): Task[] {
     RemoteAgentTask,
     DreamTask,
     AutoModeScanTask,
+    MonitorWsTask,
   ]
   if (LocalWorkflowTask) tasks.push(LocalWorkflowTask)
   if (MonitorMcpTask) tasks.push(MonitorMcpTask)

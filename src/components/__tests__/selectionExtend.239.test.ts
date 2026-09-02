@@ -192,6 +192,7 @@ describe('extendSelectionByKey', () => {
     expect(lastCopied.current).toBe(null)
     expect(sel.focus).toEqual({ col: 4, row: 10 })
     expect(sel.virtualFocusRow).toBe(9)
+    expect(sel.virtualFocusCol).toBeUndefined()
   })
 
   test('up at top edge with scrollTop=0 does not scroll or moveFocus', () => {

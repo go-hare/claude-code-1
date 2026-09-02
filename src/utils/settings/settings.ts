@@ -650,7 +650,12 @@ export function getPolicySettingsOrigin():
 export function updateSettingsForSource(
   source: EditableSettingSource,
   settings: SettingsJson,
+  /**
+   * densable ga(..., D) — official persist handle when `$t()`. Unused locally.
+   */
+  _storageV5?: unknown,
 ): { error: Error | null } {
+  void _storageV5
   if (
     (source as unknown) === 'policySettings' ||
     (source as unknown) === 'flagSettings'

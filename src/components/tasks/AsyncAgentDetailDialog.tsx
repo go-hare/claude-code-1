@@ -18,9 +18,11 @@ type Props = {
   onDone: () => void;
   onKillAgent?: () => void;
   onBack?: () => void;
+  /** densable Qzc onForeground — DW(agent) → pje. */
+  onForeground?: () => void;
 };
 
-export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack }: Props): React.ReactNode {
+export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onForeground }: Props): React.ReactNode {
   const [theme] = useTheme();
 
   // Get tools for rendering activity messages
@@ -52,6 +54,9 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack }: P
     } else if (e.key === 'x' && agent.status === 'running' && onKillAgent) {
       e.preventDefault();
       onKillAgent();
+    } else if (e.key === 'f' && onForeground) {
+      e.preventDefault();
+      onForeground();
     }
   };
 
@@ -109,6 +114,7 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack }: P
               {onBack && <KeyboardShortcutHint shortcut="←" action="go back" />}
               <KeyboardShortcutHint shortcut="Esc/Enter/Space" action="close" />
               {agent.status === 'running' && onKillAgent && <KeyboardShortcutHint shortcut="x" action="stop" />}
+              {onForeground && <KeyboardShortcutHint shortcut="f" action="foreground" />}
             </Byline>
           )
         }

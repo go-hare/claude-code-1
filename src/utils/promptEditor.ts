@@ -136,10 +136,38 @@ function recollapsePastedContent(
   return collapsed
 }
 
+/** densable sMl — reply fence. Stripped on save (pqw). */
+export const EDITOR_REPLY_FENCE =
+  '# ─── Write your reply below this line ────────────────────────'
+
+const LAST_RESPONSE_LINE_CAP = 50
+
+/** densable dqw — comment-prefix last response above the reply fence. */
+export function wrapLastResponseForEditor(lastResponse: string): string {
+  let lines = lastResponse.split('\n')
+  if (lines.length > LAST_RESPONSE_LINE_CAP) {
+    lines = lines.slice(-LAST_RESPONSE_LINE_CAP)
+    lines.unshift('… (earlier output truncated)')
+  }
+  const body = lines.map(line => (line ? `# ${line}` : '#')).join('\n')
+  return (
+    `# ─── Claude's last response (for reference; removed on save) ───\n` +
+    `${body}\n${EDITOR_REPLY_FENCE}\n\n`
+  )
+}
+
+/** densable pqw — drop everything through the reply fence. */
+export function stripLastResponseFromEditor(edited: string): string {
+  const i = edited.indexOf(EDITOR_REPLY_FENCE)
+  if (i === -1) return edited
+  return edited.slice(i + EDITOR_REPLY_FENCE.length).replace(/^\r?\n\r?\n?/, '')
+}
+
 // sync IO: called from sync context (React components, sync command handlers)
 export function editPromptInEditor(
   currentPrompt: string,
   pastedContents?: Record<number, PastedContent>,
+  lastResponseContext?: string,
 ): EditorResult {
   const fs = getFsImplementation()
   const tempFile = generateTempFilePath()
@@ -149,9 +177,12 @@ export function editPromptInEditor(
     const expandedPrompt = pastedContents
       ? expandPastedTextRefs(currentPrompt, pastedContents)
       : currentPrompt
+    const fileContents = lastResponseContext
+      ? wrapLastResponseForEditor(lastResponseContext) + expandedPrompt
+      : expandedPrompt
 
     // Write expanded prompt to temp file
-    writeFileSync_DEPRECATED(tempFile, expandedPrompt, {
+    writeFileSync_DEPRECATED(tempFile, fileContents, {
       encoding: 'utf-8',
       flush: true,
     })
@@ -165,6 +196,9 @@ export function editPromptInEditor(
 
     // Trim a single trailing newline if present (common editor behavior)
     let finalContent = result.content
+    if (lastResponseContext) {
+      finalContent = stripLastResponseFromEditor(finalContent)
+    }
     if (finalContent.endsWith('\n') && !finalContent.endsWith('\n\n')) {
       finalContent = finalContent.slice(0, -1)
     }

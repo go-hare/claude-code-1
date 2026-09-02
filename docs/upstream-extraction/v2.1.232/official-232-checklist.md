@@ -5,7 +5,7 @@
 > 基线：本地 tip densable **2.1.231**（HAVE 1 + cup/r8o residual）+ npm **2.7.39**。**本 pack 只对齐 2.1.232**。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。不 invent gateway-only / Desktop-only。  
-> 更新：2026-08-27 — `#43` 假 HAVE 纠偏：**233 回滚 / 产品路径不调用** → **PARTIAL**（HAVE **44** · PARTIAL **1** · N/A **4**）。此前：2026-08-15 residual 对齐 #4/#16/#26/#39/#46/#47。
+> 更新：2026-09-01 — `#14/#43` tip **对现行官方 1:1**（233 回滚，产品路径不调 helper）。232 桶仍记 **PARTIAL**（changelog 账，不当 232 产品 HAVE），**不是 tip 缺口、不复活**。此前：2026-08-31 `#14` 假 HAVE 纠偏；2026-08-27 `#43`；2026-08-15 residual 对齐 #4/#16/#26/#39/#46/#47。
 
 ## 邻版关系
 
@@ -19,8 +19,8 @@
 
 | 状态 | 条数 | 说明 |
 | ---- | ---- | ---- |
-| **HAVE** | **44** | 产品主路径 + 测试/gold 已锁；不含 `#43`（233 回滚） |
-| **PARTIAL** | **1** | `#43` Bash `<`：233 回滚 / 产品路径不调用 |
+| **HAVE** | **43** | 产品主路径 + 测试/gold 已锁；不含 `#14` / `#43`（233 回滚） |
+| **PARTIAL** | **2** | `#14` Cygwin/Git-Bash symlink、`#43` Bash `<`：232 changelog 被 233 收回；tip 对现行官方 1:1 |
 | **GAP** | **0** | — |
 | **N/A** | **4** | #10/#11/#22 gateway；#45 Cowork |
 | **UNKNOWN** | **0** | — |
@@ -80,7 +80,7 @@
 | 11 | Gateway managed.policies empty groups / bad email_domain fail boot | **N/A** | 同上 |
 | 12 | Fable 5 再进 `/advisor` + usage-credits consent `/model fable` | **HAVE** | densable catalog `claude-fable-5` `advisor_rank:5` + `_Nb` 含 `fable`：`modelSupportsAdvisor`/`isValidAdvisorModel` 含 fable family；consent 文案 `fableConsent.ts`/`FABLE_ADVISOR_CREDITS_NOTICE`（gJt）+ `/model fable`。测试 `advisorApplied.test.ts`；snippet `gold-fable-advisor-sjc.md` |
 | 13 | PS：变量写参不能静默改 `$PSDefaultParameterValues` | **HAVE** | densable `Cer`/`CUp`/`Loi`/`Jka`：`commonParameters.ts` `hasDangerousVariableWriteCommonParam`；`isAllowlistedCommand` 在 allowAllFlags 前拒绝。Set-Variable 路径仍由 `checkRuntimeStateManipulation` 覆盖。测试 `cer.commonParams.232.test.ts` |
-| 14 | Win：Git Bash 跟 Cygwin 符号链接写需权限 | **HAVE** | densable `Yun`/`Xun`/`s8g`/`s8s`：`cygwinSymlinkCookie.ts` + `pathValidation` Windows 分支（cookie → chain deny-scan → safetyCheck `classifierApprovable:false`）；SAn `containsPathTraversal` 同步。测试 `cygwinSymlinkCookie.232.test.ts`。ADS/8.3 完整 n8g/ahs 用 trailing-dot fail-closed 近似 |
+| 14 | Win：Git Bash 跟 Cygwin 符号链接写需权限 | **PARTIAL** | **对现行官方 1:1**（233 回滚）：`validatePath` **不**调 `findCygwinEmulatedSymlink`。helper + `cygwinSymlinkCookie.232.test.ts` 留作 residual，**不当 232 产品 HAVE**，也**不复活**。SAn `containsPathTraversal` 仍在。ADS/8.3 完整 n8g/ahs 用 trailing-dot fail-closed 近似。 |
 | 15 | Nested git 不继承父目录 trust | **HAVE** | densable `ged`/`yed`/`v6e`/`TR_`：`walkHasTrustDialogAcceptedBounded`（git root 界内 walk，根上无 match 即停）；`walkHasTrustDialogAccepted` 用 `findGitRoot` 绑定；`isPathTrusted` 先查 canonical key 再 `ged`；`advisoryNoFsProbe` 无界 walk。测试 `nestedGitTrust.232.test.ts`；snippet `gold-nested-git-trust.md` |
 | 16 | MCP connect：协议版本探测失败/畸形不卡满 30s | **HAVE** | densable `y0`/`Obf`/`IiS`/`oMf`/`k5a` + auto→pinned-legacy：`mcpConnectTimeout.ts` classify/budget/preserve + `client.ts` recreate+remaining race。**v2 对齐**：`ERA_NEGOTIATION_FAILED` / SdkError；probe timeout 认 `Version negotiation probe timed out` + `REQUEST_TIMEOUT`（无 SEA stamp）。金文案 `probe_timeout`/`probe_failed`/`closed`。测试 `mcpConnectTimeout.232.test.ts`；snippet `gold-mcp-connect-timeout-y0.md` |
 | 17 | RC：云会话内 bridge 不继承 transcript/credentials | **HAVE** | densable：cloud→elevated bridge 拒达（`elevated-security session unreachable from a cloud session`）；reattach mint 用 fresh `/bridge` credentials，不回放本地 transcript。本地 `remoteBridgeCore` reattach + `/bridge` creds 分离；peer 门同文案族。**residual**：完整 cloud-worker isolation 面未再扩 |
@@ -101,7 +101,7 @@
 | 32 | `--advisor fable` consent 文案 | **HAVE** | densable gJt + `Run /model fable to review and enable`：`FABLE_ADVISOR_CREDITS_NOTICE`；CLI `--advisor` 已注册；Fable consent dialog 金句 1:1（`getFableConsentCopy`）。与 #12 同族 |
 | 33 | fullscreen 长会话不每帧全量 re-normalize | **HAVE** | densable `wih`/`pBE`/`mfT`：`useVirtualScroll` Float64Array offsets + 仅可见 range 测量；列宽变化 **scale** 缓存高度（不清空全量）；`mfT` 增量 itemKeys + dup `#N`。本地 `VirtualMessageList` + `useVirtualScroll` 1:1 注释 densable。**residual**：与 densable 同构，无额外全量 normalizeMessages 调用 |
 | 34 | managed settings 审批 dialog 改进 + sandbox binary 需批 | **HAVE** | densable `sJc`/`d7e`/`Dwv`/`Owv`：`extractDangerousSettings` 将 `sandbox.bwrapPath`/`socatPath`/`ripgrep` 写入 shellSettings 并进审批列表；schema 文案「Only honored from admin-controlled managed settings」。dialog 标题「Managed settings require approval」已有。测试 `benignEnv.218.test.ts`；snippet `gold-fable-advisor-sjc.md` |
-| 35 | `/feedback` `/bug` 响应中立即可开 | **HAVE** | densable/`local` `isEnabled` 仅 3P provider + `DISABLE_*` + essential-traffic + ant + `allow_product_feedback`；**无**「最后一条必须非中立」门。`/feedback` alias `/bug` 始终可进交互表单。 |
+| 35 | `/feedback` `/bug` 响应中即可开 | **HAVE** | 官方：while Claude is responding, open immediately。`immediate: true` + `isCommandImmediate` mid-turn 走 local-jsx；`isEnabled` 仍仅 3P/`DISABLE_*`/essential-traffic/ant/`allow_product_feedback`。测试 `feedback.232.test.ts`。 |
 | 36 | `/plugin install` 先 refresh marketplace | **HAVE** | densable `gvm`/`zqr`/`jqr`：scoped `name@mkt` **始终**先 refresh（非 miss-only）；essential-traffic 无 FORCE 例外；仅 github/git/url；seed ineligible。`tryRefreshMarketplaceBeforeScopedInstall` + install success 缓存告警。测试 `scopedInstallRefresh.232.test.ts`；snippet `gold-plugin-install-refresh-zqr.md`。221 miss 路径 `tryRefreshMarketplaceOnCatalogMiss` 仍用于 discovery |
 | 37 | `/code-review` high/xhigh/max 也走 bg agent | **HAVE** | densable `getContext`→`fork`（仅 coordinator `hS` / ReportFindings `zXh` 才 inline）；`Zyi`=`background??true`；effort 不门控 bg。本地 `context:'fork'`+`background:true` + `shouldBackgroundForkedSkill`。`FNb` 仅为 skill analytics set。测试 `codeReviewBg.232.test.ts`；snippet `gold-code-review-bg-levels.md` |
 | 38 | 粘贴/剪贴板图非阻塞读 | **HAVE** | densable `hasClipboardImage`/`readClipboardImage`/`chat:imagePaste`/`tengu_collage_kaleidoscope`：`usePasteHandler` `void getImageFromClipboard()` fire-and-forget + `.finally(finishPaste)`；`PASTE_PENDING_SAFETY_MS=30_000`；native darwin 快路径。测试 `imagePasteNonBlocking.232.test.ts`；snippet `gold-image-paste-nonblocking.md` |
@@ -109,7 +109,7 @@
 | 40 | RC resume 不静默抢同机另一 CC 的 RC | **HAVE** | densable/本地：`non-owner` / suppressed reattach（228 #5）+ pointer/owner 门；`Remote Control is already connected` 拒绝重复 Project 绑定。不静默抢已连接会话 |
 | 41 | agent panel：完成即隐 + `/tasks` footer；overflow 左移 | **HAVE** | densable `kye=30000`=`PANEL_GRACE_MS`；`kT` terminal→`evictAfter`；`isLocalAgentPanelActive` 完成且无 KA 不显示。Footer pill `getPillLabel` + ↓ view CTA；overflow `calculateHorizontalScrollWindow` 左右箭头（选中左移窗口）。`/tasks` 命令进 dialog |
 | 42 | RC 终端说明 takeover/end/delete | **HAVE** | densable 终端 hint 1:1：`space to show/hide QR code` · `w to toggle spawn mode`（`bridgeUI.ts`）；idle/active footer（`buildIdleFooterText`/`buildActiveFooterText`）；失败 `Run /remote-control to retry`（224+）。状态 Reconnecting/Failed/Reconnected。**residual**：changelog「takeover/end/delete」多为产品语义，非独立 slash 金句 |
-| 43 | Bash `< file` 重定向全平台权限检查 | **PARTIAL** | **233 回滚 / 产品路径不调用**：默认构建 **不含** `TREE_SITTER_BASH`（`defines.ts` 注释）；产品路径不跑 `validateInputRedirections`。helper + `inputRedirect.232.test.ts` 留作 residual / `FEATURE_TREE_SITTER_BASH=1` revive，**不当 232 产品 HAVE**。 |
+| 43 | Bash `< file` 重定向全平台权限检查 | **PARTIAL** | **对现行官方 1:1**（233 回滚）：默认构建 **不含** `TREE_SITTER_BASH`；产品路径不跑 `validateInputRedirections`。helper + `inputRedirect.232.test.ts` 留作 residual，**不当 232 产品 HAVE**，也**不复活** DEFAULT / 产品调用。 |
 | 44 | resume 已完成 bg agent 文案缩短 | **HAVE** | densable `D5f`/`Y8a`/`hi`/`dle`：`formatResumedAgentMessage` + `resumeAgentBackground.finalText`（`awaitCompletion`→`extractTextContent`）；SendMessage stopped/evicted 走 `awaitCompletion:true` + D5f 短文案（`Resumed agent…Result:` / `Resuming agent…`；id 截 7）。测试 `formatResumedAgentMessage.232.test.ts`；snippet `gold-resume-completed-d5f.md` |
 | 45 | Cowork 不 inline 用户记忆外链 @-import | **N/A** | Cowork 产品面；go-hare 不发 |
 | 46 | cross-session socket dir：拒 symlink/他人目录 | **HAVE** | densable `refusing to bind` / `owned by uid` / `ENOTOWNED`：UDS `ensureSocketParent` + `assertPrivateDirectory`（拒 symlink/非目录/broad `0o077`/wrong uid；mkdir `0o700`）；错误前缀 `[uds-messaging] Failed to set up sockets directory (refusing to bind):`。capability 同门。测试 `udsMessaging` + `crossSessionSocketDir.232`；snippet `gold-cross-session-socket-dir.md`。daemon/Chrome MCP 0700 为**独立产品面**（非本条 residual） |
@@ -122,7 +122,7 @@
 | 优先级 | 项 | 状态 |
 | ------ | -- | ---- |
 | done | #1 FORK 默认 ON、#3–9、#12–16、#23–25、#28–30、#34–38、#44、#46、#48–49… | **HAVE** |
-| stay | **#43** Bash `<` | **PARTIAL**（233 回滚 / 产品路径不调用） |
+| done（tip） | **#14** Cygwin/Git-Bash symlink、**#43** Bash `<` | **PARTIAL**（232 账）· tip 对现行官方 1:1 · 不复活 |
 | done | Gateway #10–11/#22、Cowork #45 | **N/A** |
 | done | **#39 remint** Ls+flight 编排集成测 | **HAVE**（2026-08-15） |
 | open（可选） | residual 清单 #17/#31/#42/#47 深抽 | HAVE 内 residual（#4/#16/#26/#39 已收口） |
@@ -142,4 +142,5 @@ npm pack @anthropic-ai/claude-code-win32-x64@2.1.232
 - **不要** invent Cowork-only（#45 = N/A）。  
 - Agent **background 默认** ≠ **fork 默认开**（#1 两句已分判；fork 产品默认 ON 已 HAVE）。  
 - **不要**把「HAVE + residual」写成 densable 零差距；#39 已升 **HAVE**，仍可有浅 residual（无全量 network e2e）。  
+- **#14 / #43** tip 对现行官方 1:1（233 回滚，产品路径不调 helper）。232 桶仍 PARTIAL（changelog 账），**不当 232 产品 HAVE**，也**不复活**。
 - **不要** `git add .` 整树提交：排除 logo 与 `v2.1.212` extract dumps。

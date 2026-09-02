@@ -708,6 +708,16 @@ async function* queryLoop(
         messages,
       )
 
+    // densable: if(ne&&y.toolUseContext.shouldStopBeforeNextApiCall?.())
+    // return {reason:"background_requested"} — ne = main thread (no agentId)
+    // or undefined querySource family. Tip: !agentId ≈ main REPL/SDK.
+    if (
+      !toolUseContext.agentId &&
+      toolUseContext.shouldStopBeforeNextApiCall?.()
+    ) {
+      return { reason: 'background_requested' }
+    }
+
     yield { type: 'stream_request_start' }
 
     queryCheckpoint('query_fn_entry')
@@ -1340,20 +1350,19 @@ async function* queryLoop(
                     resolveSilentRearmModel,
                     resolveRefusalFallbackModelAndLane,
                     isRefusalFallbackEnabled,
+                    getSwitchModelsOnFlag,
                   } =
                     require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
                   if (!isRefusalFallbackEnabled()) return {}
                   const isMainThread = toolUseContext.agentId === undefined
-                  // densable lkd: serverLane via dkd() (vK && switchModelsOnFlag && Cae)
-                  // when serverLaneEnabled omitted. Do not hardcode true —
-                  // firstParty + official base required (Cae).
+                  // densable lkd: serverLane via dkd() (vK && $c("switchModelsOnFlag", true))
                   const arm = planRefusalFallbackArm({
                     currentModel,
                     alreadyUsed: false,
                     declined: false,
                     requestDialog: toolUseContext.requestDialog,
                     isMainThread,
-                    switchModelsOnFlag: true,
+                    switchModelsOnFlag: getSwitchModelsOnFlag(),
                     resolveArmedFallbackModel: () => {
                       // densable y$c arm → _$c: when entitlement overlay is
                       // unavailable and target is opus-5, substitute opus-4-8.

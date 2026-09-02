@@ -67,7 +67,6 @@ export function SessionPreview({ log, onExit, onSelect }: Props): React.ReactNod
         commands={[]}
         verbose={true}
         toolJSX={null}
-        toolUseConfirmQueue={[]}
         inProgressToolUseIDs={new Set()}
         isMessageSelectorVisible={false}
         conversationId={conversationId}

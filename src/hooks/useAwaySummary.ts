@@ -3,8 +3,10 @@ import { useEffect, useRef } from 'react'
 import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { generateAwaySummary } from '../services/awaySummary.js'
+import { useAppState } from '../state/AppState.js'
 import type { Message } from '../types/message.js'
-import { isEnvTruthy } from '../utils/envUtils.js'
+import { isEnvDefinedFalsy } from '../utils/envUtils.js'
+import { isAwaySummaryEnvEnabled } from '../utils/residualFinalEnvGates.js'
 import { createAwaySummaryMessage } from '../utils/messages.js'
 
 const BLUR_DELAY_MS = 5 * 60_000
@@ -18,6 +20,40 @@ function hasSummarySinceLastUserTurn(messages: readonly Message[]): boolean {
     if (m.type === 'system' && m.subtype === 'away_summary') return true
   }
   return false
+}
+
+/**
+ * densable XiH — live recap gate. Env force-on overrides `/config` off;
+ * defined-falsy env force-off; else AppState/settings `=== false` wins.
+ */
+export function isAwaySummaryLiveEnabled(opts: {
+  awaySummaryEnabled: boolean | undefined
+  gbEnabled: boolean
+  featureOn: boolean
+  env?: NodeJS.ProcessEnv
+}): boolean {
+  const env = opts.env ?? process.env
+  if (isEnvDefinedFalsy(env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY)) return false
+  if (isAwaySummaryEnvEnabled(env)) return true
+  if (!opts.featureOn) return false
+  if (!opts.gbEnabled) return false
+  if (opts.awaySummaryEnabled === false) return false
+  return true
+}
+
+/**
+ * generate() first check — off must not append even if the timer already fired.
+ */
+export function shouldGenerateAwaySummary(opts: {
+  awaySummaryEnabled: boolean | undefined
+  gbEnabled: boolean
+  featureOn: boolean
+  messages: readonly Message[]
+  env?: NodeJS.ProcessEnv
+}): boolean {
+  if (!isAwaySummaryLiveEnabled(opts)) return false
+  if (hasSummarySinceLastUserTurn(opts.messages)) return false
+  return true
 }
 
 /**
@@ -40,27 +76,29 @@ export function useAwaySummary(
   const isLoadingRef = useRef(isLoading)
   const pendingRef = useRef(false)
   const generateRef = useRef<(() => Promise<void>) | null>(null)
+  const awaySummaryEnabled = useAppState(s => s.awaySummaryEnabled)
+  const awaySummaryEnabledRef = useRef(awaySummaryEnabled)
 
   messagesRef.current = messages
   isLoadingRef.current = isLoading
+  awaySummaryEnabledRef.current = awaySummaryEnabled
 
-  // 3P default: false; CLAUDE_CODE_ENABLE_AWAY_SUMMARY force-on (official densable).
-  let envForce = isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY)
-  try {
-    const { isAwaySummaryEnvEnabled } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-    envForce = isAwaySummaryEnvEnabled()
-  } catch {
-    // keep raw env fallback
-  }
   const gbEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_sedge_lantern',
     false,
   )
+  const featureOn = feature('AWAY_SUMMARY') ? true : false
+
   useEffect(() => {
-    if (!feature('AWAY_SUMMARY') && !envForce) return
-    if (!gbEnabled && !envForce) return
+    if (
+      !isAwaySummaryLiveEnabled({
+        awaySummaryEnabled,
+        gbEnabled,
+        featureOn,
+      })
+    ) {
+      return
+    }
 
     function clearTimer(): void {
       if (timerRef.current !== null) {
@@ -76,7 +114,16 @@ export function useAwaySummary(
 
     async function generate(): Promise<void> {
       pendingRef.current = false
-      if (hasSummarySinceLastUserTurn(messagesRef.current)) return
+      if (
+        !shouldGenerateAwaySummary({
+          awaySummaryEnabled: awaySummaryEnabledRef.current,
+          gbEnabled,
+          featureOn,
+          messages: messagesRef.current,
+        })
+      ) {
+        return
+      }
       abortInFlight()
       const controller = new AbortController()
       abortRef.current = controller
@@ -85,6 +132,15 @@ export function useAwaySummary(
         controller.signal,
       )
       if (controller.signal.aborted || text === null) return
+      if (
+        !isAwaySummaryLiveEnabled({
+          awaySummaryEnabled: awaySummaryEnabledRef.current,
+          gbEnabled,
+          featureOn,
+        })
+      ) {
+        return
+      }
       setMessages(prev => [...prev, createAwaySummaryMessage(text)])
     }
 
@@ -123,24 +179,40 @@ export function useAwaySummary(
       abortInFlight()
       generateRef.current = null
     }
-  }, [gbEnabled, setMessages])
+  }, [gbEnabled, setMessages, awaySummaryEnabled, featureOn])
 
   // Timer fired mid-turn → fire when turn ends (if still away)
   useEffect(() => {
     if (isLoading) return
     if (!pendingRef.current) return
+    if (
+      !isAwaySummaryLiveEnabled({
+        awaySummaryEnabled: awaySummaryEnabledRef.current,
+        gbEnabled,
+        featureOn,
+      })
+    ) {
+      return
+    }
     const state = getTerminalFocusState()
     if (state !== 'blurred' && state !== 'unknown') return
     void generateRef.current?.()
-  }, [isLoading])
+  }, [isLoading, gbEnabled, featureOn])
 
   // For 'unknown' terminals: use isLoading transitions as presence signal.
   // User starts a turn → they're present, cancel idle timer.
   // Turn ends → restart idle timer.
   useEffect(() => {
     if (getTerminalFocusState() !== 'unknown') return
-    if (!feature('AWAY_SUMMARY')) return
-    if (!gbEnabled) return
+    if (
+      !isAwaySummaryLiveEnabled({
+        awaySummaryEnabled: awaySummaryEnabledRef.current,
+        gbEnabled,
+        featureOn,
+      })
+    ) {
+      return
+    }
 
     if (isLoading) {
       // User is actively using — cancel idle timer
@@ -165,5 +237,5 @@ export function useAwaySummary(
         void generateRef.current?.()
       }, BLUR_DELAY_MS)
     }
-  }, [isLoading, gbEnabled])
+  }, [isLoading, gbEnabled, awaySummaryEnabled, featureOn])
 }

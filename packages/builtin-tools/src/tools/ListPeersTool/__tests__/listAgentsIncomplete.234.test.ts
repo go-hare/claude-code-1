@@ -27,7 +27,7 @@ describe('densable 2.1.234 #34 ListAgents incomplete notes', () => {
         bridgeWalkIncomplete: true,
       },
     )
-    expect(listing).toContain('Found 1 agent(s):')
+    expect(listing).toContain('Peer sessions (1):')
     expect(listing).toContain(ACCOUNT_SESSION_LIST_INCOMPLETE_LISTING_NOTE)
     expect(listing).toContain(CLOUD_SESSION_LIST_FAILED_LISTING_NOTE)
     expect(listing).toContain(SESSION_LIST_TRUNCATED_LISTING_NOTE)
@@ -49,7 +49,8 @@ describe('densable 2.1.234 #34 ListAgents incomplete notes', () => {
 
   test('empty peers still surface truncated notes', () => {
     const listing = __test.formatPeersListing([], { listTruncated: true })
-    expect(listing).toContain('No agents found.')
+    expect(listing).not.toContain('No agents found.')
+    expect(listing).not.toContain('No reachable agents.')
     expect(listing).toContain(SESSION_LIST_TRUNCATED_LISTING_NOTE)
   })
 })

@@ -41,7 +41,9 @@ import {
 import { type PermissionMode, toExternalPermissionMode } from '../../../utils/permissions/PermissionMode.js';
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js';
 import {
+  EXIT_PLAN_MODE_TRIGGER,
   isAutoModeGateEnabled,
+  logPermissionModeChanged,
   restoreDangerousPermissions,
   stripDangerousPermissionsForAutoMode,
 } from '../../../utils/permissions/permissionSetup.js';
@@ -73,6 +75,12 @@ import type { PastedContent } from '../../../utils/config.js';
 import type { ImageDimensions } from '../../../utils/imageResizer.js';
 import { maybeResizeAndDownsampleImageBlock } from '../../../utils/imageResizer.js';
 import { cacheImagePath, storeImage } from '../../../utils/imageStore.js';
+import {
+  buildExitPlanKeepContext,
+  type ExitPlanKeepContext,
+  offerExitPlanResumeAuto,
+  resolveExitPlanKeepContextAnswer,
+} from '../../../dialog/permissionExitPlan.js';
 
 type ResponseValue =
   | 'yes-bypass-permissions'
@@ -185,6 +193,17 @@ export function ExitPlanModePermissionRequest({
   const showUltraplan = feature('ULTRAPLAN') ? !ultraplanSessionUrl && !ultraplanLaunching : false;
   const usage = toolUseConfirm.assistantMessage.message.usage;
   const { mode, isAutoModeAvailable, isBypassPermissionsModeAvailable } = toolPermissionContext;
+  const autoGateOn = isAutoModeGateEnabled();
+  const keepContext = useMemo(
+    () =>
+      buildExitPlanKeepContext({
+        isBypassPermissionsModeAvailable,
+        offerResumeAuto: feature('TRANSCRIPT_CLASSIFIER')
+          ? offerExitPlanResumeAuto(isAutoModeAvailable, autoGateOn)
+          : false,
+      }),
+    [isBypassPermissionsModeAvailable, isAutoModeAvailable, autoGateOn],
+  );
   const options = useMemo(
     () =>
       buildPlanApprovalOptions({
@@ -198,9 +217,10 @@ export function ExitPlanModePermissionRequest({
           : null,
         isAutoModeAvailable,
         isBypassPermissionsModeAvailable,
+        keepContext,
         onFeedbackChange: setPlanFeedback,
       }),
-    [showClearContext, showUltraplan, usage, mode, isAutoModeAvailable, isBypassPermissionsModeAvailable],
+    [showClearContext, showUltraplan, usage, mode, isAutoModeAvailable, isBypassPermissionsModeAvailable, keepContext],
   );
 
   function onImagePaste(
@@ -318,10 +338,11 @@ export function ExitPlanModePermissionRequest({
       return;
     }
 
-    // Shift+Tab immediately selects "auto-accept edits"
+    // Shift+Tab approves the minted first keep-context slot (Lcy elevated).
     if (e.shift && e.key === 'tab') {
       e.preventDefault();
-      void handleResponse(showClearContext ? 'yes-accept-edits' : 'yes-accept-edits-keep-context');
+      const elevatedKeep = keepContext.options[0]?.value ?? 'yes-default-keep-context';
+      void handleResponse(showClearContext ? 'yes-accept-edits' : elevatedKeep);
       return;
     }
   };
@@ -416,6 +437,7 @@ export function ExitPlanModePermissionRequest({
         planStructureVariant,
         hasFeedback: !!acceptFeedback,
       });
+      logPermissionModeChanged('plan', mode, EXIT_PLAN_MODE_TRIGGER);
 
       // Set initial message - REPL will handle context clear and fresh query
       // Add verification instruction if the feature is enabled
@@ -464,6 +486,19 @@ export function ExitPlanModePermissionRequest({
     // buildPermissionUpdates keeps auto as 'auto' via toExternalPermissionMode (2.1.207).
     // We set the mode directly via setAppState and sync the bootstrap state.
     if (feature('TRANSCRIPT_CLASSIFIER') && value === 'yes-resume-auto-mode' && isAutoModeGateEnabled()) {
+      const mintedResume = resolveExitPlanKeepContextAnswer(
+        'yes-resume-auto-mode',
+        keepContext,
+        updatedInput,
+        acceptFeedback,
+      );
+      if (mintedResume.behavior === 'deny') {
+        setHasExitedPlanMode(true);
+        setNeedsPlanModeExitAttachment(true);
+        onDone();
+        toolUseConfirm.onReject(acceptFeedback);
+        return;
+      }
       logEvent('tengu_plan_exit', {
         planLengthChars: currentPlan.length,
         outcome: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -472,6 +507,7 @@ export function ExitPlanModePermissionRequest({
         planStructureVariant,
         hasFeedback: !!acceptFeedback,
       });
+      logPermissionModeChanged('plan', 'auto', EXIT_PLAN_MODE_TRIGGER);
       setHasExitedPlanMode(true);
       setNeedsPlanModeExitAttachment(true);
       autoModeStateModule?.setAutoModeActive(true);
@@ -484,24 +520,19 @@ export function ExitPlanModePermissionRequest({
         }),
       }));
       onDone();
-      toolUseConfirm.onAllow(updatedInput, [], acceptFeedback);
+      toolUseConfirm.onAllow(updatedInput, mintedResume.permissionUpdates ?? [], acceptFeedback);
       return;
     }
 
-    // Handle keep-context options (goes through normal onAllow flow)
-    // yes-resume-auto-mode falls through here when the auto mode gate is
-    // disabled (e.g. circuit breaker fired after the dialog rendered).
-    // Without this fallback the function would return without resolving the
-    // dialog, leaving the query loop blocked and safety state corrupted.
-    const keepContextModes: Record<string, PermissionMode> = {
-      'yes-accept-edits-keep-context': toolPermissionContext.isBypassPermissionsModeAvailable
-        ? 'bypassPermissions'
-        : 'acceptEdits',
-      'yes-default-keep-context': 'default',
-      ...(feature('TRANSCRIPT_CLASSIFIER') ? { 'yes-resume-auto-mode': 'default' as const } : {}),
-    };
-    const keepContextMode = keepContextModes[value];
-    if (keepContextMode) {
+    // DualInk circuit-breaker: resume-auto after gate off → minted default.
+    if (value === 'yes-resume-auto-mode' && !(feature('TRANSCRIPT_CLASSIFIER') ? isAutoModeGateEnabled() : false)) {
+      const mintedDefault = resolveExitPlanKeepContextAnswer(
+        'yes-default-keep-context',
+        keepContext,
+        updatedInput,
+        acceptFeedback,
+      );
+      const defaultMode = keepContext.keepContextModes['yes-default-keep-context'];
       logEvent('tengu_plan_exit', {
         planLengthChars: currentPlan.length,
         outcome: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -510,10 +541,49 @@ export function ExitPlanModePermissionRequest({
         planStructureVariant,
         hasFeedback: !!acceptFeedback,
       });
+      if (mintedDefault.behavior === 'deny' || defaultMode === undefined) {
+        setHasExitedPlanMode(true);
+        setNeedsPlanModeExitAttachment(true);
+        onDone();
+        toolUseConfirm.onReject(acceptFeedback);
+        return;
+      }
+      logPermissionModeChanged('plan', defaultMode, EXIT_PLAN_MODE_TRIGGER);
       setHasExitedPlanMode(true);
       setNeedsPlanModeExitAttachment(true);
       onDone();
-      toolUseConfirm.onAllow(updatedInput, buildPermissionUpdates(keepContextMode, allowedPrompts), acceptFeedback);
+      toolUseConfirm.onAllow(updatedInput, mintedDefault.permissionUpdates, acceptFeedback);
+      return;
+    }
+
+    // densable $cy keep-context: PYe/DPo minted applies. Missing row → deny.
+    if (
+      value === 'yes-accept-edits-keep-context' ||
+      value === 'yes-default-keep-context' ||
+      value === 'yes-resume-auto-mode'
+    ) {
+      const minted = resolveExitPlanKeepContextAnswer(value, keepContext, updatedInput, acceptFeedback);
+      const keepContextMode = keepContext.keepContextModes[value];
+      logEvent('tengu_plan_exit', {
+        planLengthChars: currentPlan.length,
+        outcome: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        clearContext: false,
+        interviewPhaseEnabled: isPlanModeInterviewPhaseEnabled(),
+        planStructureVariant,
+        hasFeedback: !!acceptFeedback,
+      });
+      if (minted.behavior === 'deny' || keepContextMode === undefined) {
+        setHasExitedPlanMode(true);
+        setNeedsPlanModeExitAttachment(true);
+        onDone();
+        toolUseConfirm.onReject(acceptFeedback);
+        return;
+      }
+      logPermissionModeChanged('plan', keepContextMode, EXIT_PLAN_MODE_TRIGGER);
+      setHasExitedPlanMode(true);
+      setNeedsPlanModeExitAttachment(true);
+      onDone();
+      toolUseConfirm.onAllow(updatedInput, minted.permissionUpdates ?? [], acceptFeedback);
       return;
     }
 
@@ -797,6 +867,7 @@ export function buildPlanApprovalOptions({
   usedPercent,
   isAutoModeAvailable,
   isBypassPermissionsModeAvailable,
+  keepContext,
   onFeedbackChange,
 }: {
   showClearContext: boolean;
@@ -804,6 +875,7 @@ export function buildPlanApprovalOptions({
   usedPercent: number | null;
   isAutoModeAvailable: boolean | undefined;
   isBypassPermissionsModeAvailable: boolean | undefined;
+  keepContext?: ExitPlanKeepContext;
   onFeedbackChange: (v: string) => void;
 }): OptionWithDescription<ResponseValue>[] {
   const options: OptionWithDescription<ResponseValue>[] = [];
@@ -828,28 +900,17 @@ export function buildPlanApprovalOptions({
     }
   }
 
-  // Slot 2: keep-context with elevated mode (same priority: auto > bypass > edits).
-  if (feature('TRANSCRIPT_CLASSIFIER') && isAutoModeAvailable) {
-    options.push({
-      label: 'Yes, and use auto mode',
-      value: 'yes-resume-auto-mode',
+  const mintedKeep =
+    keepContext ??
+    buildExitPlanKeepContext({
+      isBypassPermissionsModeAvailable,
+      offerResumeAuto: feature('TRANSCRIPT_CLASSIFIER')
+        ? offerExitPlanResumeAuto(isAutoModeAvailable, isAutoModeGateEnabled())
+        : false,
     });
-  } else if (isBypassPermissionsModeAvailable) {
-    options.push({
-      label: 'Yes, and bypass permissions',
-      value: 'yes-accept-edits-keep-context',
-    });
-  } else {
-    options.push({
-      label: 'Yes, auto-accept edits',
-      value: 'yes-accept-edits-keep-context',
-    });
+  for (const row of mintedKeep.options) {
+    options.push({ label: row.label, value: row.value });
   }
-
-  options.push({
-    label: 'Yes, manually approve edits',
-    value: 'yes-default-keep-context',
-  });
 
   if (showUltraplan) {
     options.push({

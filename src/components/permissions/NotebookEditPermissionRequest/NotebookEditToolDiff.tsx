@@ -22,6 +22,10 @@ type Props = {
   width: number;
   /** densable oldCellSource — when provided, skip local notebook re-read. */
   oldCellSource?: string;
+  /** densable _ou remoteOldContent — parse as notebook JSON. */
+  remoteOldContent?: string | null;
+  /** densable _ou skipLocalRead — DualInk analog remote workspace. */
+  skipLocalRead?: boolean;
 };
 
 type InnerProps = {
@@ -33,6 +37,8 @@ type InnerProps = {
   verbose: boolean;
   width: number;
   oldCellSource?: string;
+  remoteOldContent?: string | null;
+  skipLocalRead?: boolean;
   promise: Promise<NotebookContent | null>;
 };
 
@@ -45,11 +51,20 @@ export function NotebookEditToolDiff(props: Props): React.ReactNode {
     if (props.oldCellSource !== undefined) {
       return SKIP_NOTEBOOK_READ;
     }
+    if (props.remoteOldContent !== undefined) {
+      if (typeof props.remoteOldContent !== 'string') {
+        return SKIP_NOTEBOOK_READ;
+      }
+      return Promise.resolve(safeParseJSON(props.remoteOldContent) as NotebookContent | null);
+    }
+    if (props.skipLocalRead) {
+      return SKIP_NOTEBOOK_READ;
+    }
     return getFsImplementation()
       .readFile(props.notebook_path, { encoding: 'utf-8' })
       .then(content => safeParseJSON(content) as NotebookContent | null)
       .catch(() => null);
-  }, [props.notebook_path, props.oldCellSource]);
+  }, [props.notebook_path, props.oldCellSource, props.remoteOldContent, props.skipLocalRead]);
 
   return (
     <Suspense fallback={null}>

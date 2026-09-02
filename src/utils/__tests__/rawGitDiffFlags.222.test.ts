@@ -30,17 +30,18 @@ describe('densable gnr RAW_GIT_DIFF_FLAGS', () => {
 
   test('gitDiff URo/jRo paths spread RAW_GIT_DIFF_FLAGS', () => {
     const src = readFileSync(join(ROOT, 'src/utils/gitDiff.ts'), 'utf8')
-    // densable URo content: diff ...gnr HEAD
-    expect(src).toContain(
-      "['--no-optional-locks', 'diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']",
-    )
-    // densable jRo: single-file
+    // densable 239 PPi URo content: numstat / hunks spread gnr; shortstat does not
     expect(src).toContain('...RAW_GIT_DIFF_FLAGS,')
+    expect(src).toContain("'--numstat'")
     expect(src).toContain('diffRef,')
-    // shortstat probe intentionally without gnr (densable URo)
-    expect(src).toContain(
-      "['--no-optional-locks', 'diff', 'HEAD', '--shortstat']",
+    const numstatIdx = src.indexOf("'--numstat'")
+    expect(src.slice(Math.max(0, numstatIdx - 180), numstatIdx)).toContain(
+      '...RAW_GIT_DIFF_FLAGS,',
     )
+    const shortstatIdx = src.indexOf("'--shortstat'")
+    expect(
+      src.slice(Math.max(0, shortstatIdx - 180), shortstatIdx),
+    ).not.toContain('...RAW_GIT_DIFF_FLAGS,')
   })
 
   test('reviewRemote ultrareview probes reuse RAW_GIT_DIFF_FLAGS', () => {

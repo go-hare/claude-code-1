@@ -5,7 +5,7 @@
 > 基线：本地 tip densable **2.1.234**（quota auto-resume 等已有）+ npm **2.7.44**。**本 pack 只对齐 2.1.235**（勿折入 234 residual）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 约定：**extract densable first → 1:1**。不 invent gateway / VSCode host。不自动 commit/push/bump。  
-> 更新：2026-08-20 — #13 升 **HAVE**（本地 rg **15.0.x 新于** SEA **14.1.1**；sidecar 打包仅为 non-blocking 笔记）：HAVE **18** / PARTIAL **0** / GAP **0** / N/A **1** / UNKNOWN **0**。
+> 更新：2026-09-01 — `#12` analog 注脚纠偏：239 leftover `ArtifactTool/permissions.ts` **生产** `suppressAlwaysAllowRule:true`（不是 235 假 HAVE）。`#11`/`#13` 仍 analog。计数仍 HAVE **18**（含 analog **3**）/ PARTIAL **0** / GAP **0** / N/A **1**。此前：2026-08-31 analog 标注；2026-08-20 #13 升 HAVE（本地 rg **15.0.x 新于** SEA **14.1.1**）。
 
 ## 邻版关系
 
@@ -18,7 +18,8 @@
 
 | 状态 | 条数 | 说明 |
 | ---- | ---- | ---- |
-| **HAVE** | **18** | #1 spellcheck · #2 LSP · #3 md-list · #4 highlight · #5 Shift+Tab · #6 AVo · #7 notebook · #8 oX · #9 update-footer · #10 tasklist · #11 cloud CPU · #12 suppressAlways · #13 embedded grep（15.0.x **新于** SEA 14.1.1）· #14 compact-off · #15 vim · #16 getFocusedValue · #17 message_too_large · #18 rc gateway |
+| **HAVE** | **15** | #1–#10 · #14–#18（产品路径 + 金标可锁） |
+| **HAVE (analog)** | **3** | `#11` changelog≠SEA；`#12` 235 无独立 SEA producer（239 leftover Artifact 已生产赋值）；`#13` sidecar≠SEA argv0。**不**另计 PARTIAL，也不当无注脚 1:1 |
 | **PARTIAL** | **0** | — |
 | **GAP** | **0** | — |
 | **N/A** | **1** | #19 VSCode host-only focus jump |
@@ -40,9 +41,9 @@
 | `oX`/`C7_`/`Fud` unescape `&amp;|&lt;|&gt;` | mid-turn slash/local-command 显示实体 | **HAVE** — unescapeXmlEntities + User* display |
 | `Update installed · Restart to apply/update` / `autoUpdaterResult` / failureHint | bg auto-update footer | **HAVE** — failureHint 已落地；REPL useState residual（非 AppState） |
 | `showExpandedTodos` ↔ `expandedView` seed/persist | ctrl+t 恢复会话不再总折叠 | **HAVE** — GlobalConfig + main seed + onChangeAppState |
-| `/ultrareview` `/autofix-pr` + delta poll / same-ref skip | cloud bg 事件流勿每更新重扫重渲 | **HAVE** — RemoteAgentTask polling + updateTaskState |
-| `PermissionAskDecision.suppressAlwaysAllowRule` | don't-ask-again 与 grant 覆盖一致；无法完整展示则 withhold | **HAVE** — ask field + Tool.suppressesAlwaysAllowRule + showAlwaysAllow + stripWholeToolGrantsForAsk + contentWithheld |
-| SEA embed `rg 14.1.1` / local vendor `15.0.0` + `after_context_left` | embedded/sidecar ripgrep 病态 fail-fast + `-m`/`-A/-C` | **HAVE** — 本地 **15.0.x 新于** SEA；行为 1:1 + `RipgrepUsageError`；sidecar≠argv0 仅笔记；**禁止**降级；`embeddedRipgrep.235` / `ripgrepUsageError.235` |
+| `/ultrareview` `/autofix-pr` + delta poll / same-ref skip | cloud bg 事件流勿每更新重扫重渲 | **HAVE (analog)** — RemoteAgentTask polling + updateTaskState；changelog 非 SEA 字面 |
+| `PermissionAskDecision.suppressAlwaysAllowRule` | don't-ask-again 与 grant 覆盖一致；无法完整展示则 withhold | **HAVE (analog)** — consumer/UI/strip 在；235 无独立 SEA producer。**239 leftover** Artifact `permissions.ts` 生产赋 `suppressAlwaysAllowRule:true`（reply/watch/read_file/delete…） |
+| SEA embed `rg 14.1.1` / local vendor `15.0.0` + `after_context_left` | embedded/sidecar ripgrep 病态 fail-fast + `-m`/`-A/-C` | **HAVE (analog)** — fail-fast 行为 1:1；sidecar **15.0.x** ≠ SEA argv0 `rg 14.1.1`；**禁止**降级 |
 | ` · auto-compact is off · /config to turn it on` / `RPa` | context-limit 提示 autocompact off | **HAVE** — ZOl + shouldShowAutoCompactOffHint |
 | `savedCursorOffset` / `acf` / `RgE`/`Oyr` + `app:toggleTranscript` | vim NORMAL+cursor 跨 ctrl+o 保留 | **HAVE** — promptInputCursorStore + PromptInput remount/unmount |
 | `getFocusedValue` / `o.state` sync bag / `selectFocusedOption` live read | dialog 方向键+Enter 同 tick 选导航项 | **HAVE** — C4i bag + getFocusedValue + accept live read |
@@ -64,9 +65,9 @@
 | 8 | 流式响应中 slash 命令显示 HTML entities | **HAVE** | densable 写侧 Ua/EHe；显侧 `oX(C7_/Fud)`。本地 `unescapeXmlEntities`（仅 `&amp;|&lt;|&gt;`）+ `UserLocalCommandOutputMessage`/`UserBashOutputMessage`/`UserCommandMessage` 显示前解。**非** artifact `decodeHtmlEntities`/TDr。`unescapeXmlEntities.235.test.ts`。snippet `hit-slash-html.txt` |
 | 9 | bg auto-update 后 footer 不显示 Update installed | **HAVE** | success footer 已有；`failureHint`/`consecutiveExeLockFailures` + npm classify + AutoUpdater/Notifications 文案（npm prefix / exe lock / generic doctor）。REPL useState 非 AppState 记 residual。`autoUpdaterFailureHint.235.test.ts` |
 | 10 | ctrl+t 恢复/重开有 open tasks 的会话时任务列表总折叠 | **HAVE** | `GlobalConfig.showExpandedTodos` seed `expandedView`；onChange 双向持久化；`app:toggleTodos` + `tengu_toggle_todos`；TaskCreate/Update `set_expanded_view`。residual：`_e(todo_toggle_panel)`；teammates 循环差异。snippet `hit-tasklist-expand.txt` |
-| 11 | cloud `/ultrareview`/`/autofix-pr` bg 内存/CPU（勿每更新重扫重渲） | **HAVE** | changelog 优化文案非 SEA 字面；产品路径：RemoteAgentTask `lastEventId` delta poll + `cachedReviewContent` 增量 + `!logGrew&&statusUnchanged` same-ref skip（`updateTaskState`）。**不** invent VSCode host。snippet `hit-cloud-cpu.txt` |
-| 12 | permission 展示与 don't-ask-again 覆盖一致；无法完整展示则 withhold | **HAVE** | `PermissionAskDecision.suppressAlwaysAllowRule` + `Tool.suppressesAlwaysAllowRule`；`shouldShowPersistentAllowOption`（Ink hosts）；`stripWholeToolGrantsForAsk` on handleUserAllow / interactive+swarm；SDK `suppress_always_allow_rule` schema + remote/direct ingress map；notebook `contentWithheld` omit accept-session。`suppressAlwaysAllow.235.test.ts`。不 invent gateway/VSCode hosts。snippet `hit-perm-grant.txt` |
-| 13 | embedded grep 病态 fail-fast；`-m N`+`-A/-C` context | **HAVE** | sidecar microsoft/ripgrep-prebuilt **v15.0.1**（`15.0.0 rev 3a612f88b8`，**新于** SEA embed `14.1.1`）；`-m/-A/-C`+patho 行为 1:1；densable `rejectOnInputError`/`iaT`/`RipgrepUsageError`(YTm) 已接线 Grep+Glob。打包 sidecar≠SEA argv0 / 不移植 `N4Grep*` 为 **non-blocking 笔记**（用户确认「不是问题」）。**禁止**降级到 14.1.1 / **禁止** invent JS regex engine。`embeddedRipgrep.235.test.ts` + `ripgrepUsageError.235.test.ts`。snippet `hit-embedded-grep.txt` |
+| 11 | cloud `/ultrareview`/`/autofix-pr` bg 内存/CPU（勿每更新重扫重渲） | **HAVE (analog)** | changelog 优化文案**非** SEA 字面 / 无剥出的 235 金标函数。产品路径：RemoteAgentTask `lastEventId` delta poll + `cachedReviewContent` 增量 + `!logGrew&&statusUnchanged` same-ref skip（`updateTaskState`）。**不** invent VSCode host。snippet `hit-cloud-cpu.txt` |
+| 12 | permission 展示与 don't-ask-again 覆盖一致；无法完整展示则 withhold | **HAVE (analog)** | consumer/UI/strip 已接：`shouldShowPersistentAllowOption` + `stripWholeToolGrantsForAsk` + SDK schema + remote/direct ingress。235 无独立 SEA producer。**239 leftover** `ArtifactTool/permissions.ts` 生产多处 `suppressAlwaysAllowRule: true`（不是 235 假 HAVE，也不再写「生产零」）。`suppressAlwaysAllow.235.test.ts`。snippet `hit-perm-grant.txt` |
+| 13 | embedded grep 病态 fail-fast；`-m N`+`-A/-C` context | **HAVE (analog)** | fail-fast + `-m/-A/-C` 行为 1:1（`rejectOnInputError`/`RipgrepUsageError`）。sidecar microsoft/ripgrep-prebuilt **v15.0.1** ≠ SEA argv0 embed `rg 14.1.1`；不移植 `N4Grep*`。**禁止**降级 / **禁止** invent JS regex engine。不把包装差写成无注脚 1:1。`embeddedRipgrep.235.test.ts` + `ripgrepUsageError.235.test.ts`。snippet `hit-embedded-grep.txt` |
 | 14 | context-limit 在 auto-compact off 时提示 `/config` | **HAVE** | ZOl/`buildPromptTooLongContextLimitText` + RPa/`shouldShowAutoCompactOffHint`；nested MessageResponse 抑制；`*235*` tests。snippet `hit-compact-off-msg.txt` |
 | 15 | vim NORMAL + cursor 在 ctrl+o / 关 panel 时保留 | **HAVE** | densable `$4`/`acf`/`Oyr`/`RgE`：unmount 存 `savedCursorOffset`，remount NORMAL `Oyr` clamp；外部 input 变更 NORMAL 也走 Oyr。本地 `promptInputCursorStore` + PromptInput remount/unmount + q4a vimMode sync。residual：本地 VimMode 仅 INSERT|NORMAL（RgE 保 VISUAL* 字符串兼容）；hideVimModeIndicator / VISUAL LINE 深度不 invent。`promptInputCursorStore.235.test.ts`。snippet `hit-vim-preserve.txt` |
 | 16 | dialog 方向键+Enter 竞态选中导航项 | **HAVE** | densable C4i：`o.state` sync bag + `getFocusedValue()` live read；`selectFocusedOption`/`select:accept`/edge wrap 用 live getter；`getFocusedValue.235.test.tsx`。snippet `hit-dialog-race.txt` / `gold-dialog-getFocusedValue.txt` |
@@ -78,8 +79,9 @@
 
 - **#19**：VS Code extension host-only。CLI SEA / go-hare **不** invent webview panel focus 修复。  
 - **不 invent** apps gateway 控制面 / Desktop-only Notification / Cowork。  
-- **#11**：changelog「re-scanned and re-rendered」为 release-notes 语义；落地以 RemoteAgentTask delta/same-ref 为准，不 invent 新云端 UI 字符串。  
-- **#13**：对齐 densable **embedded** ripgrep 产品行为 + vendor **15.0.x**（**新于** SEA 14.1.1）；禁止用 JS prompt/settings 伪实现 / **禁止**降级；sidecar≠argv0 embed 仅为笔记，不挡 HAVE。  
+- **#11**：changelog「re-scanned and re-rendered」为 release-notes 语义，**无**剥出的 235 金标函数。落地以 RemoteAgentTask delta/same-ref 为准；标 **HAVE (analog)**，不 invent 新云端 UI。  
+- **#12**：consumer/UI/strip 已接；**禁止**为 checklist 在 `builtin-tools` 造假 `suppressAlwaysAllowRule:true` producer。  
+- **#13**：fail-fast 行为 1:1；sidecar **15.0.x** ≠ SEA argv0 `rg 14.1.1`。禁止 JS 伪实现 / **禁止**降级。包装差是 analog residual，不是无注脚 1:1。  
 - **#8**：artifact-only `decodeHtmlEntities`/`TDr` **不是**本条；本条是 slash/local-command 显示路径 `oX`。  
 - **#1**：spellcheck 整块仅 user/flag/managed；禁止把 project/local settings 块当成有效配置 invent 进产品。  
 - 提交时勿 stage `/tmp` SEA bin；docs snippets（文本）可入仓。  
@@ -90,7 +92,7 @@
 1. ~~**#14** compact-off 文案~~ → **HAVE**  
 2. ~~**#6** Agent `AVo`~~ → **HAVE**  
 3. ~~**#17** SendMessage `message_too_large` / X1r~~ → **HAVE**  
-4. ~~**#4 / #10 / #11 / #18**~~ → **HAVE**（map 确认既有/已对齐）  
+4. ~~**#4 / #10 / #18**~~ → **HAVE**；**#11** → **HAVE (analog)**  
 5. ~~**#16** dialog `getFocusedValue`~~ → **HAVE**  
 6. ~~**#8** slash/local-command `oX` unescape~~ → **HAVE**  
 7. ~~**#2** LSP `hasEverConnected` latch~~ → **HAVE**  

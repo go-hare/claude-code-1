@@ -1,5 +1,5 @@
 import type { ChildProcess, ExecFileException } from 'child_process'
-import { execFile, spawn } from 'child_process'
+import { execFile, spawn, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
@@ -123,10 +123,46 @@ export function resolveBundledRipgrep(
   }
 }
 
+function readRipgrepVersion(command: string): string | null {
+  try {
+    const r = spawnSync(command, ['--version'], {
+      encoding: 'utf8',
+      timeout: 3000,
+      windowsHide: true,
+    })
+    if (r.status !== 0) return null
+    const match = (r.stdout ?? '').match(/^ripgrep (\d+\.\d+\.\d+)/)
+    return match?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+
+function isRipgrep14_1(version: string | null): boolean {
+  return version !== null && version.startsWith('14.1.')
+}
+
 export const getRipgrepConfig = memoize((): RipgrepConfig => {
   const userWantsSystemRipgrep = isEnvDefinedFalsy(
     process.env.USE_BUILTIN_RIPGREP,
   )
+
+  // Local gold pin: prefer already-installed ripgrep 14.1.x (SEA embed).
+  // Do not download 14.1.1 — vendor 15 stays when 14.1 is absent.
+  if (!userWantsSystemRipgrep) {
+    const { cmd: goldSystem } = findExecutable('rg', [])
+    if (goldSystem !== 'rg') {
+      const ver = readRipgrepVersion('rg')
+      if (isRipgrep14_1(ver)) {
+        return {
+          mode: 'system',
+          command: 'rg',
+          args: [],
+          note: `local gold pin: system ripgrep ${ver}`,
+        }
+      }
+    }
+  }
 
   // Try system ripgrep if user wants it
   if (userWantsSystemRipgrep) {

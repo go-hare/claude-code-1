@@ -345,6 +345,20 @@ export type ObserverRefEntry = {
   sessionId?: UUID
 }
 
+/**
+ * densable ykl / artifact-autoreact-ledger — session transcript ledger append
+ * (storageV5 Rc().appendEntry). Tip also keeps JSON fallback under
+ * ~/.claude/autoreact-ledgers/ when storageV5 is unset.
+ */
+export type ArtifactAutoreactLedgerEntry = {
+  type: 'artifact-autoreact-ledger'
+  v: 1
+  sessionId: string
+  accountUuid: string | null
+  artifacts: Record<string, unknown>
+  timestamp?: string
+}
+
 export type FileHistorySnapshotMessage = {
   type: 'file-history-snapshot'
   messageId: UUID
@@ -491,6 +505,7 @@ export type Entry =
   | GoalMetadataEntry
   | GoalClearedEntry
   | ObserverRefEntry
+  | ArtifactAutoreactLedgerEntry
   | RelocatedEntry
 
 export function sortLogs(logs: LogOption[]): LogOption[] {

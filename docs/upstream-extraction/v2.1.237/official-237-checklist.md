@@ -57,7 +57,7 @@ BAT="Be concise: lead with the result, skip preamble and narration, keep only wh
 ## Invent-ban
 
 - 产品落地仅限用户 explicit（已落地：#1 canMarkApiSystem、#2 Concise、#3 r7）
-- 不 invent Proactive / VSCode host / storageV5 / 「关掉全部 ephemeral」假合同
+- 不 invent Proactive / VSCode host / `$t()`/`tn()` 云后端（本地 `Rc` = `getProject()`） / 「关掉全部 ephemeral」假合同
 - 不自动 commit / bump / push
 - 不折入 **2.1.238**
 

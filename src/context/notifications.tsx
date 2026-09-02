@@ -5,8 +5,19 @@ import type { Theme } from '../utils/theme.js';
 
 type Priority = 'low' | 'medium' | 'high' | 'immediate';
 
+/** densable addNotification segment (idle-return-hint / contextual). */
+export type NotificationSegment = {
+  text: string;
+  dim?: boolean;
+  color?: keyof Theme;
+};
+
 type BaseNotification = {
   key: string;
+  /** densable kind: contextual | feedback | warning | … (metadata only). */
+  kind?: string;
+  /** densable Nu `u.pinned` — sticky list, not the toast slot. */
+  pinned?: boolean;
   /**
    * Keys of notifications that this notification invalidates.
    * If a notification is invalidated, it will be removed from the queue
@@ -33,10 +44,14 @@ type JSXNotification = BaseNotification & {
   jsx: React.ReactNode;
 };
 
+type SegmentNotification = BaseNotification & {
+  segments: NotificationSegment[];
+};
+
 type AddNotificationFn = (content: Notification) => void;
 type RemoveNotificationFn = (key: string) => void;
 
-export type Notification = TextNotification | JSXNotification;
+export type Notification = TextNotification | JSXNotification | SegmentNotification;
 
 const DEFAULT_TIMEOUT_MS = 8000;
 
@@ -68,10 +83,10 @@ export function useNotifications(): {
             }
             return {
               ...prev,
-              notifications: {
+              notifications: withPinned(prev.notifications, {
                 queue: prev.notifications.queue,
                 current: null,
-              },
+              }),
             };
           });
           processQueue();
@@ -84,16 +99,33 @@ export function useNotifications(): {
 
       return {
         ...prev,
-        notifications: {
+        notifications: withPinned(prev.notifications, {
           queue: prev.notifications.queue.filter(_ => _ !== next),
           current: next,
-        },
+        }),
       };
     });
   }, [setAppState]);
 
   const addNotification = useCallback<AddNotificationFn>(
     (notif: Notification) => {
+      // densable Nu: pinned notices occupy the dedicated list, not current/queue.
+      if (notif.pinned) {
+        setAppState(prev => {
+          if (prev.notifications.pinned.some(n => n.key === notif.key)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            notifications: {
+              ...prev.notifications,
+              pinned: [...prev.notifications.pinned, notif],
+            },
+          };
+        });
+        return;
+      }
+
       // Handle immediate priority notifications
       if (notif.priority === 'immediate') {
         // Clear any existing timeout since we're showing a new immediate notification
@@ -113,10 +145,10 @@ export function useNotifications(): {
               }
               return {
                 ...prev,
-                notifications: {
+                notifications: withPinned(prev.notifications, {
                   queue: prev.notifications.queue.filter(_ => !notif.invalidates?.includes(_.key)),
                   current: null,
-                },
+                }),
               };
             });
             processQueue();
@@ -130,14 +162,14 @@ export function useNotifications(): {
         // Show the immediate notification right away
         setAppState(prev => ({
           ...prev,
-          notifications: {
+          notifications: withPinned(prev.notifications, {
             current: notif,
             queue:
               // Only re-queue the current notification if it's not immediate
               [...(prev.notifications.current ? [prev.notifications.current] : []), ...prev.notifications.queue].filter(
                 _ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key),
               ),
-          },
+          }),
         }));
         return; // IMPORTANT: Exit addNotification for immediate notifications
       }
@@ -161,10 +193,10 @@ export function useNotifications(): {
                   }
                   return {
                     ...p,
-                    notifications: {
+                    notifications: withPinned(p.notifications, {
                       queue: p.notifications.queue,
                       current: null,
-                    },
+                    }),
                   };
                 });
                 processQueue();
@@ -199,8 +231,9 @@ export function useNotifications(): {
       setAppState(prev => {
         const isCurrent = prev.notifications.current?.key === key;
         const inQueue = prev.notifications.queue.some(n => n.key === key);
+        const inPinned = prev.notifications.pinned.some(n => n.key === key);
 
-        if (!isCurrent && !inQueue) {
+        if (!isCurrent && !inQueue && !inPinned) {
           return prev;
         }
 
@@ -214,6 +247,7 @@ export function useNotifications(): {
           notifications: {
             current: isCurrent ? null : prev.notifications.current,
             queue: prev.notifications.queue.filter(n => n.key !== key),
+            pinned: prev.notifications.pinned.filter(n => n.key !== key),
           },
         };
       });
@@ -250,7 +284,20 @@ export function getNext(queue: Notification[]): Notification | undefined {
 export type NotificationsBucket = {
   current: Notification | null;
   queue: Notification[];
+  /** densable Nu `pinned[]` — RXc list. Idle hint is NOT pinned. */
+  pinned: Notification[];
 };
+
+function withPinned(
+  state: NotificationsBucket,
+  next: { current: Notification | null; queue: Notification[] },
+): NotificationsBucket {
+  return {
+    pinned: state.pinned ?? [],
+    current: next.current,
+    queue: next.queue,
+  };
+}
 
 /**
  * Pure merge for non-immediate addNotification.
@@ -270,10 +317,10 @@ export function applyNonImmediateNotification(
     if (state.current?.key === notif.key) {
       const folded = notif.fold(state.current, notif);
       return {
-        notifications: {
+        notifications: withPinned(state, {
           current: folded,
           queue: state.queue,
-        },
+        }),
         timeoutAction: 'reset',
       };
     }
@@ -283,10 +330,10 @@ export function applyNonImmediateNotification(
       const newQueue = [...state.queue];
       newQueue[foldIdx] = folded;
       return {
-        notifications: {
+        notifications: withPinned(state, {
           current: state.current,
           queue: newQueue,
-        },
+        }),
         timeoutAction: 'none',
       };
     }
@@ -295,10 +342,10 @@ export function applyNonImmediateNotification(
   // Same key already displayed: replace content (caller resets timeout).
   if (state.current?.key === notif.key) {
     return {
-      notifications: {
+      notifications: withPinned(state, {
         current: notif,
         queue: state.queue.filter(_ => _.key !== notif.key),
-      },
+      }),
       timeoutAction: 'reset',
     };
   }
@@ -309,10 +356,10 @@ export function applyNonImmediateNotification(
     const newQueue = [...state.queue];
     newQueue[queueIdx] = notif;
     return {
-      notifications: {
+      notifications: withPinned(state, {
         current: state.current,
         queue: newQueue,
-      },
+      }),
       timeoutAction: 'none',
     };
   }
@@ -320,10 +367,10 @@ export function applyNonImmediateNotification(
   const invalidatesCurrent = state.current !== null && notif.invalidates?.includes(state.current.key);
 
   return {
-    notifications: {
+    notifications: withPinned(state, {
       current: invalidatesCurrent ? null : state.current,
       queue: [...state.queue.filter(_ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key)), notif],
-    },
+    }),
     // Invalidate clears the current toast timeout; processQueue will arm the next.
     timeoutAction: invalidatesCurrent ? 'clear' : 'none',
   };

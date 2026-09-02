@@ -6,7 +6,6 @@ import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
   getBudgetContinuationCount,
-  getTotalInputTokens,
   getIsRemoteMode,
 } from '../bootstrap/state.js';
 import { parseTokenBudget } from '../utils/tokenBudget.js';
@@ -88,7 +87,8 @@ import {
   resolveIdleTokenThreshold,
 } from '../utils/residualMsEnvGates.js';
 import { formatTokens, truncateToWidth } from '../utils/format.js';
-import { tokenCountWithEstimation } from '../utils/tokens.js';
+import { tokenCountFromLastAPIResponse } from '../utils/tokens.js';
+import { idleReturnContextTokens } from '../utils/idleReturnHint.js';
 import { consumeEarlyInput } from '../utils/earlyInput.js';
 import {
   claimConsumableQueuedAutonomyCommands,
@@ -120,6 +120,7 @@ import {
   unregisterLeaderToolUseConfirmQueue,
   registerLeaderSetToolPermissionContext,
   unregisterLeaderSetToolPermissionContext,
+  removeLeaderToolUseConfirm,
 } from '../utils/swarm/leaderPermissionBridge.js';
 import { endInteractionSpan } from '../utils/telemetry/sessionTracing.js';
 import { useLogMessages } from '../hooks/useLogMessages.js';
@@ -149,24 +150,24 @@ import {
   getModalChromeVisibility,
   installManagedSettingsSxg,
   isFullscreenModalChromeActive,
-  isManagedSettingsSecurityDialog,
   isPermissionPromptDialog,
-  isSoftNmsDialogKind,
   isTopDialogModalLayout,
   maybeRequestAutoDefaultNudge,
   openCostThresholdIfNeeded,
   openResumeReturnIfNeeded,
   PermissionDialogHostProvider,
-  permissionPromptDialogId,
   SANDBOX_NETWORK_ACCESS_KIND,
+  setPermissionDenyQueuePop,
   useDialogMailboxBridge,
   useDialogStore,
+  usePermissionMirrorSink,
   useHasBlockingOpenDialogs,
   useHasOpenDialogs,
   useNhtHidesPromptInput,
   useTopDialog,
   useTopDialogKind,
 } from '../dialog/index.js';
+import { resolveHostWaitingFor } from '../dialog/permissionWaiting.js';
 import { legacyFocusForUqc, setLegacyDialogFocus } from '../dialog/legacyDialogFocus.js';
 import { setPromptInputStoreActive } from '../utils/promptInputCursorStore.js';
 import { SandboxNetworkAccessAsker } from '../dialog/sandboxNetworkAccess.js';
@@ -319,7 +320,7 @@ import {
 import { FORK_SUBAGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js';
 import { escapeXml } from '../utils/xml.js';
 import type { ThinkingConfig } from '../utils/thinking.js';
-import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
+import { gracefulShutdown, gracefulShutdownSync } from '../utils/gracefulShutdown.js';
 import { handlePromptSubmit, type PromptInputHelpers } from '../utils/handlePromptSubmit.js';
 import { useQueueProcessor } from '../hooks/useQueueProcessor.js';
 import { useMailboxBridge } from '../hooks/useMailboxBridge.js';
@@ -366,6 +367,7 @@ import { useStrandedAgentResume } from '../hooks/useStrandedAgentResume.js';
 import { useAppState, useSetAppState, useAppStateStore } from '../state/AppState.js';
 import type { ContentBlockParam, ContentBlock, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import type { ProcessUserInputContext } from '../utils/processUserInput/processUserInput.js';
+import { isEndedByModelCommandBlocked } from '../utils/processUserInput/processUserInput.js';
 import type { PastedContent } from '../utils/config.js';
 import type { InternalPermissionMode } from '../types/permissions.js';
 import { copyPlanForFork, copyPlanForResume, getPlanSlug, setPlanSlug } from '../utils/plans.js';
@@ -377,6 +379,8 @@ import {
   restoreSessionMetadata,
   getCurrentSessionTitle,
   getCurrentSessionAiTitle,
+  subscribeSessionTitleChanged,
+  saveAiGeneratedTitle,
   isEphemeralToolProgress,
   isLoggableMessage,
   saveWorktreeState,
@@ -467,9 +471,35 @@ import {
   type IdeType,
 } from '../utils/ide.js';
 import { useIDEIntegration } from '../hooks/useIDEIntegration.js';
-import exit from '../commands/exit/index.js';
 import { ExitFlow } from '../components/ExitFlow.js';
+import { LeftArrowConfirmDialog } from '../components/LeftArrowConfirmDialog.js';
+import { listExitBackgroundItems } from '../utils/exitBackgroundItems.js';
+import { exitPromptShutdown } from '../utils/exitPromptShutdown.js';
+import {
+  buildLeftArrowConfirmState,
+  collectFrameLiveMonitorSlugs,
+  countAbandonableLeftArrow,
+  countActiveInFlight,
+  countLeftArrowBlockingQueuedCommands,
+  countNewMonitorsSincePress,
+  evaluateLeftArrowIhtGates,
+  formatDeferCapRestartableToast,
+  formatDeferMonitorCancelToast,
+  formatDeferSkipAbandonToast,
+  isLeftArrowDeferStickyQueueCmd,
+  type LeftArrowConfirmState,
+} from '../utils/leftArrowConfirm.js';
+import { isPersistenceSuppressed } from '../utils/sessionPersistenceStatus.js';
+import {
+  isLeftArrowBetweenCalls,
+  isLeftArrowStreamOpen,
+  LEFT_ARROW_VIA_BLOCKED_TOAST,
+  resolveLeftArrowVia,
+  rewriteLeftArrowViaForAbortController,
+  type LeftArrowVia,
+} from '../utils/leftArrowVia.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
+import type { TaskState } from '../tasks/types.js';
 import {
   popAllEditable,
   enqueue,
@@ -871,7 +901,11 @@ function AnimatedTerminalTitle({
   const terminalFocused = useTerminalFocus();
   const [frame, setFrame] = useState(0);
   useEffect(() => {
-    if (disabled || noPrefix || !isAnimating || !terminalFocused) return;
+    if (!isAnimating) {
+      setFrame(0);
+      return;
+    }
+    if (disabled || noPrefix || !terminalFocused) return;
     const interval = setInterval(
       setFrame => setFrame(f => (f + 1) % TITLE_ANIMATION_FRAMES.length),
       TITLE_ANIMATION_INTERVAL_MS,
@@ -879,6 +913,7 @@ function AnimatedTerminalTitle({
     );
     return () => clearInterval(interval);
   }, [disabled, noPrefix, isAnimating, terminalFocused]);
+  // Idle / waiting: densable static ✳. Never leave a busy ◐/◑ frozen in the tab.
   const prefix = isAnimating ? (TITLE_ANIMATION_FRAMES[frame] ?? TITLE_STATIC_PREFIX) : TITLE_STATIC_PREFIX;
   useTerminalTitle(disabled ? null : noPrefix ? title : `${prefix} ${title}`);
   return null;
@@ -943,6 +978,17 @@ export type Props = {
       };
     }>;
     via?: string;
+    /** densable Mu confirmedInterstitial — LAc abandon summary was non-empty. */
+    confirmedInterstitial?: boolean;
+    /** densable Mu deferWaitMs — ms spent in defer-then-fork before handoff. */
+    deferWaitMs?: number;
+    /** densable Mu deferCapFired — tengu_defer_cap_ms upgraded to abort-then-fork. */
+    deferCapFired?: boolean;
+    /** densable Mu g8.inflightCount / kinds / restartableCount / partialChars */
+    inflightCount?: number;
+    inflightKinds?: string[];
+    restartableCount?: number;
+    partialChars?: number;
     partialText?: string | null;
     boundaryUuid?: string;
     agentsCount?: number;
@@ -959,13 +1005,20 @@ export type Props = {
       }>;
       agents?: unknown[];
       workflows?: unknown[];
+      frameLive?: Array<{ slug: string; writtenAtMs: number; title?: string }>;
     };
+    liveMonitorSlugs?: string[];
     sessionPermissionRules?: { allow: string[]; deny: string[] };
     memoryToggledOff?: boolean;
     /** densable aAf replyOnResume → spawn --reply-on-resume */
     replyOnResume?: boolean;
     /** densable aAf abortAfterFlush — main query AbortController */
     abortAfterFlush?: AbortController;
+    /**
+     * densable qpe already ran vHy (openAgentsViaLeftArrow). main skips
+     * a second fork and only mounts FleetView (yHy analog).
+     */
+    alreadyOpened?: import('../cli/bg/leftArrowAgents.js').LeftArrowOpenResult;
   }) => void;
   /**
    * Official resume-return densable — inject a continue prompt once after
@@ -1431,6 +1484,41 @@ export function REPL({
     void performStartupChecks(setAppState);
   }, [setAppState, isRemoteSession]);
 
+  // densable artifact autoReact product: Qem+Cji+yWt + watch_url MCP dialer
+  useEffect(() => {
+    let cancelled = false;
+    void import('../services/artifactAutoReact/index.js').then(ar => {
+      if (cancelled) return;
+      ar.installArtifactAutoReactProduct({
+        getMcpClients: () => store.getState().mcp.clients,
+        scan: {
+          getPermissionMode: () => store.getState().toolPermissionContext.mode ?? 'default',
+        },
+      });
+      // densable IAm + ykl — claim owner + wire storageV5 Rc().appendEntry
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getProject } = require('../utils/sessionStorage.js') as typeof import('../utils/sessionStorage.js');
+        ar.claimLedgerOwnership({
+          appendEntry: async (entry: unknown, sessionId?: string, _unused?: unknown, _urgent?: boolean) => {
+            void _unused;
+            void _urgent;
+            const e = entry as import('../types/logs.js').ArtifactAutoreactLedgerEntry;
+            await getProject().appendEntry(e, (sessionId ?? getSessionId()) as UUID);
+          },
+        });
+      } catch {
+        ar.claimLedgerOwnership();
+      }
+      if (process.env.CLAUDE_CODE_REMOTE) {
+        void ar.refreshRestoredDurableWatches();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [store]);
+
   // Allow Claude in Chrome MCP to send prompts through MCP notifications
   // and sync permission mode changes to the Chrome extension
   usePromptsFromClaudeInChrome(isRemoteSession ? EMPTY_MCP_CLIENTS : mcpClients, toolPermissionContext.mode);
@@ -1789,6 +1877,7 @@ export function REPL({
   // densable sXg / kdy / Bgp — DialogStore host (236 #11); see DialogHost
   const dialogMailboxRef = React.useRef(createDialogMailbox());
   useDialogMailboxBridge(dialogMailboxRef.current);
+  usePermissionMirrorSink();
   const requestDialog = React.useMemo(() => createRequestDialog(dialogMailboxRef.current), []);
   const [sandboxAsker] = useState(
     () =>
@@ -1820,14 +1909,15 @@ export function REPL({
         requestDialog,
         dialogStore,
         messages: msgs,
-        estimateTokens: estimateMsgs => tokenCountWithEstimation(estimateMsgs as MessageType[]),
+        estimateTokens: estimateMsgs => tokenCountFromLastAPIResponse(estimateMsgs as MessageType[]),
         runCompact: () => resumeReturnCompactRef.current(),
       });
     },
     [requestDialog, dialogStore],
   );
   // densable #13: CCR bridge initialize stashes restored.internal — apply y_u
-  // when stash arrives (and any pending stash at mount).
+  // when stash arrives (and any pending stash at mount). Jqy continue skip
+  // hard-gates hydrate even if initialize arrives after mount.
   useEffect(() => {
     const { takeRestoredWorkerForPlanResume, subscribeRestoredWorkerForPlanResume, hydratePlanModeFromRestoredWorker } =
       require('../utils/permissions/planModeResume.js') as typeof import('../utils/permissions/planModeResume.js');
@@ -1869,10 +1959,21 @@ export function REPL({
   // user custom title → AI title cache → agent name → Haiku one-shot → product.
   // Empty string must not win over fallbacks (?? only skips null/undefined) —
   // otherwise title becomes "◐ " / "✳ " (prefix + blank), the "小黑点+后面空白".
+  // densable BQi: subscribeSessionTitleChanged so /rename + ai-title cache
+  // updates re-render the tab (plain getCurrentSessionTitle is not reactive).
   const terminalTitleFromRename = useAppState(s => s.settings.terminalTitleFromRename) !== false;
-  const sessionTitleRaw = terminalTitleFromRename ? getCurrentSessionTitle(getSessionId()) : undefined;
-  const sessionTitle = sessionTitleRaw && sessionTitleRaw.trim() !== '' ? sessionTitleRaw : undefined;
-  const sessionAiTitleRaw = getCurrentSessionAiTitle(getSessionId());
+  const sessionTitleRaw = useSyncExternalStore(
+    subscribeSessionTitleChanged,
+    () => getCurrentSessionTitle(getSessionId()),
+    () => getCurrentSessionTitle(getSessionId()),
+  );
+  const sessionTitle =
+    terminalTitleFromRename && sessionTitleRaw && sessionTitleRaw.trim() !== '' ? sessionTitleRaw : undefined;
+  const sessionAiTitleRaw = useSyncExternalStore(
+    subscribeSessionTitleChanged,
+    () => getCurrentSessionAiTitle(getSessionId()),
+    () => getCurrentSessionAiTitle(getSessionId()),
+  );
   const sessionAiTitle = sessionAiTitleRaw && sessionAiTitleRaw.trim() !== '' ? sessionAiTitleRaw : undefined;
   const [haikuTitle, setHaikuTitle] = useState<string>();
   // Gates the one-shot Haiku call that generates the tab title. Seeded true
@@ -1881,12 +1982,17 @@ export function REPL({
   const haikuTitleAttemptedRef = useRef((initialMessages?.length ?? 0) > 0);
   const agentTitle = mainThreadAgentDefinition?.agentType;
   const terminalTitle = sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
+  // densable waiting surfaces that pause the busy title glyph. Soft NMS
+  // dialogs (cost/resume nudge/…) stay open.length>0 but must not freeze the
+  // tab on idle ✳ while the spinner still runs — match showSpinner's
+  // hasBlockingOpenDialogs gate, not raw hasOpenDialogs.
   const isWaitingForApproval =
-    toolUseConfirmQueue.length > 0 ||
+    hasBlockingOpenDialogs ||
     promptQueue.length > 0 ||
     pendingWorkerRequest ||
     pendingSandboxRequest ||
-    hasOpenDialogs;
+    elicitation.queue.length > 0 ||
+    workerSandboxPermissions.queue.length > 0;
   // Local-jsx commands (like /plugin, /config) show user-facing dialogs that
   // wait for input. Require jsx != null — if the flag is stuck true but jsx
   // is null, treat as not-showing so TextInput focus and queue processor
@@ -1911,20 +2017,24 @@ export function REPL({
   const sessionStatus: TabStatusKind =
     isWaitingForApproval || isShowingLocalJSXCommand ? 'waiting' : isLoading ? 'busy' : 'idle';
 
+  // densable waitingFor / y2A — Host open-stack; tip Fe/Be / hook-prompt overlays.
+  const hostWaiting = resolveHostWaitingFor(topDialogKind, topDialog?.payload);
   const waitingFor =
     sessionStatus !== 'waiting'
       ? undefined
-      : toolUseConfirmQueue.length > 0
-        ? `approve ${toolUseConfirmQueue[0]!.tool.name}`
-        : pendingWorkerRequest
+      : pendingSandboxRequest || topDialogKind === SANDBOX_NETWORK_ACCESS_KIND
+        ? 'sandbox request'
+        : pendingWorkerRequest || workerSandboxPermissions.queue[0]
           ? 'worker request'
-          : pendingSandboxRequest || topDialogKind === SANDBOX_NETWORK_ACCESS_KIND
-            ? 'sandbox request'
-            : isManagedSettingsSecurityDialog(topDialogKind) ||
-                isSoftNmsDialogKind(topDialogKind) ||
-                isShowingLocalJSXCommand
-              ? 'dialog open'
-              : 'input needed';
+          : elicitation.queue[0]
+            ? 'input needed'
+            : hostWaiting
+              ? hostWaiting
+              : promptQueue.length > 0 || isShowingLocalJSXCommand
+                ? promptQueue.length > 0
+                  ? 'input needed'
+                  : 'dialog open'
+                : 'input needed';
 
   // Push status to the PID file for `claude ps`. Fire-and-forget; ps falls
   // back to transcript-tail derivation when this is missing/stale.
@@ -1944,8 +2054,13 @@ export function REPL({
   // densable Gm(qSn,{currentMode},{queueBehind:!0})
   useEffect(() => {
     if (getIsRemoteMode()) return;
-    void maybeRequestAutoDefaultNudge(requestDialog, store.getState().toolPermissionContext);
-  }, [requestDialog, store]);
+    void maybeRequestAutoDefaultNudge(
+      requestDialog,
+      () => store.getState().toolPermissionContext,
+      store.setState,
+      addNotification,
+    );
+  }, [requestDialog, store, addNotification]);
 
   // densable msf / Vce — bg job needs-input producers (agents --json "Needs input")
   // Priority: sandbox > worker-sandbox > elicitation > managed-settings > permission > dialog
@@ -1999,33 +2114,7 @@ export function REPL({
     });
   }, [elicitation.queue]);
 
-  useEffect(() => {
-    if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
-      return;
-    }
-    void import('../utils/bgNeedsInputBridge.js').then(m => {
-      if (!m.isBgJobSession()) return;
-      const confirm = toolUseConfirmQueue[0];
-      if (!confirm) {
-        m.emitBgNeedsInput(null, 'permission');
-        return;
-      }
-      let userFacingName: string | undefined;
-      try {
-        userFacingName = confirm.tool.userFacingName?.(confirm.input as never);
-      } catch {
-        userFacingName = undefined;
-      }
-      m.emitBgNeedsInput(
-        m.formatPermissionNeeds({
-          toolName: confirm.tool.name,
-          userFacingName,
-          input: (confirm.input ?? null) as Record<string, unknown> | null,
-        }),
-        'permission',
-      );
-    });
-  }, [toolUseConfirmQueue]);
+  // densable P1u permission needs emit lives on DialogHost (not tip queue).
 
   // 3P default: off — OSC 21337 is ant-only while the spec stabilizes.
   // Gated so we can roll back if the sidebar indicator conflicts with
@@ -2051,6 +2140,8 @@ export function REPL({
     const last = msgs[msgs.length - 1] as { uuid?: string } | undefined;
     turnStartRef.current = last ? { length: msgs.length, uuid: last.uuid } : null;
   }, []);
+  // densable Ue/G — same body as markTurnStart (ce = turnStartRef)
+  const markIdleForkMidTurn = markTurnStart;
   const setAbortControllerForQuery = useCallback(
     (ac: AbortController | null) => {
       if (ac) markTurnStart();
@@ -2058,11 +2149,8 @@ export function REPL({
     },
     [markTurnStart],
   );
-  // Stores the willowMode variant that was shown (or false if no hint shown).
-  // Captured at hint_shown time so hint_converted telemetry reports the same
-  // variant — the GrowthBook value shouldn't change mid-session, but reading
-  // it once guarantees consistency between the paired events.
-  const idleHintShownRef = useRef<string | false>(false);
+  // densable Nc — idle-return hint shown this session (boolean, not hint_v2).
+  const idleHintShownRef = useRef(false);
   // Wrap setMessages so messagesRef is always current the instant the
   // call returns — not when React later processes the batch.  Apply the
   // updater eagerly against the ref, then hand React the computed value
@@ -2184,6 +2272,26 @@ export function REPL({
                 ) => void,
               );
               adoptedWorkflowEntries = wfResult.adoptedEntries;
+            } catch {
+              // best-effort
+            }
+          }
+
+          // densable CNy portable — seed unattended + re-arm carried frameLive monitors
+          if (payload.frameLive?.length && !cancelled) {
+            try {
+              const ar = await import('../services/artifactAutoReact/index.js');
+              const { ADOPT_STALE_MS } = await import('../utils/bgCheckpoint.js');
+              const entries = ar.markStaleFrameLive(payload.frameLive, Date.now(), ADOPT_STALE_MS);
+              await ar.rearmCarriedFrameLiveViaAgi(entries, {
+                setAppState,
+                autoReactEnabled: ar.mI(),
+                jobDir,
+                owner: process.pid.toString(),
+                armedVia: 'session_resume',
+                publishContext: 'bg_session',
+                forceLocalArmWithoutSocket: true,
+              });
             } catch {
               // best-effort
             }
@@ -2958,8 +3066,10 @@ export function REPL({
 
   const showSpinner =
     (!toolJSX || toolJSX.showSpinner === true) &&
-    toolUseConfirmQueue.length === 0 &&
+    !hasBlockingOpenDialogs &&
     promptQueue.length === 0 &&
+    elicitation.queue.length === 0 &&
+    workerSandboxPermissions.queue.length === 0 &&
     // Show spinner during input processing, API call, while teammates are running,
     // or while pending main-thread queue items remain (densable Xwt — not full
     // queue length). Full getCommandQueueLength() includes subagent-addressed
@@ -2981,10 +3091,9 @@ export function REPL({
     // isBriefOnly (Je) suppresses preview paint so spinner stays.
     (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly);
 
-  // Check if any permission or ask question prompt is currently visible
-  // This is used to prevent the survey from opening while prompts are active
+  // Host / gold _Zt overlays waiting for user — suppress surveys
   const hasActivePrompt =
-    toolUseConfirmQueue.length > 0 ||
+    hasBlockingOpenDialogs ||
     promptQueue.length > 0 ||
     topDialogKind === SANDBOX_NETWORK_ACCESS_KIND ||
     elicitation.queue.length > 0 ||
@@ -3136,11 +3245,14 @@ export function REPL({
         setMainThreadAgentDefinition(restoredAgent);
         setAppState(prev => ({ ...prev, agent: restoredAgent?.agentType }));
 
-        // Restore standalone agent context from the resumed conversation
-        // Always reset to the new session's values (or clear if none)
+        // densable LMo + g8: name/color from the log, keep prev prideGradient
         setAppState(prev => ({
           ...prev,
-          standaloneAgentContext: computeStandaloneAgentContext(log.agentName, log.agentColor),
+          standaloneAgentContext: computeStandaloneAgentContext(
+            log.agentName,
+            log.agentColor,
+            prev.standaloneAgentContext?.prideGradient,
+          ),
         }));
         void updateSessionName(log.agentName);
 
@@ -3166,7 +3278,11 @@ export function REPL({
         // Switch session (id + project dir atomically). fullPath may point to
         // a different project (cross-worktree, /branch); null derives from
         // current originalCwd.
-        switchSession(asSessionId(sessionId), log.fullPath ? dirname(log.fullPath) : null);
+        switchSession(
+          asSessionId(sessionId),
+          log.fullPath ? dirname(log.fullPath) : null,
+          entrypoint === 'fork' ? 'fork' : 'resume',
+        );
         // Rename asciicast recording to match the resumed session ID
         const { renameRecordingForSession } = await import('../utils/asciicast.js');
         await renameRecordingForSession();
@@ -3299,12 +3415,6 @@ export function REPL({
             });
           }
         }
-        // Restart idle clock after in-session /resume. Stale lastQueryCompletionTime
-        // from the previous conversation would trip willow dialog on the first
-        // submit (user reports full message swallow after /resume). densable has
-        // no dialog so does not need this; fork dialog product does.
-        setLastQueryCompletionTime(Date.now());
-
         // Official wvr(messages, Je) on in-session /resume — orphan scan after
         // messages restored (skip fork: new session id, no prior orphans).
         if (entrypoint !== 'fork') {
@@ -3522,57 +3632,77 @@ export function REPL({
   // autoRunIssueReason is cleared.
   const didAutoRunIssueRef = useRef(false);
 
-  // State for exit feedback flow
-  const [exitFlow, setExitFlow] = useState<React.ReactNode>(null);
-  const [isExiting, setIsExiting] = useState(false);
+  // densable pke — exit overlay host ({none}|{dialog,node}|{shutting-down})
+  type PkeState = { kind: 'none' } | { kind: 'dialog'; node: React.ReactNode } | { kind: 'shutting-down' };
+  const [pke, setPke] = useState<PkeState>({ kind: 'none' });
+  // densable Tt — left-arrow inflight confirm (LAc)
+  const [leftArrowConfirm, setLeftArrowConfirm] = useState<LeftArrowConfirmState | null>(null);
+  // densable Ki — defer-then-fork arm (tengu_defer_cap_ms)
+  type LeftArrowDeferArm = {
+    confirmedInterstitial: boolean;
+    armedAtMs: number;
+    lastPressMs: number;
+    clearCapTimer: () => void;
+    carriedAtPress: Set<string>;
+    proceed: () => Promise<string>;
+  };
+  const leftArrowDeferRef = useRef<LeftArrowDeferArm | null>(null);
+  // densable jpt — leftArrowToAgentsFired (qpe in flight / post-query latch)
+  const leftArrowToAgentsFired = useRef(false);
+  // densable _r — LAc confirm open (iHt/HUo). Gold syncs via useEffect on Tt.
+  const leftArrowConfirmOpenRef = useRef(false);
+  leftArrowConfirmOpenRef.current = leftArrowConfirm != null;
+  const LEFT_ARROW_DEFER_REPRESS_MS = 1000;
+  // densable TurnController finally: clearCapTimer on unmount
+  useEffect(() => {
+    return () => {
+      const arm = leftArrowDeferRef.current;
+      if (arm) {
+        arm.clearCapTimer();
+        leftArrowDeferRef.current = null;
+      }
+    };
+  }, []);
 
   // Calculate if cost dialog should be shown
   // Determine which dialog should have focus (if any)
   // Permission and interactive dialogs can show even when toolJSX is set,
   // as long as shouldContinueAnimation is true. This prevents deadlocks when
   // agents set background hints while waiting for user interaction.
+  // densable _Zt — gold focused overlays ONLY (239 SEA).
+  // Tip SUPERSET (hook prompt / ant callouts / effort / desktop) is NOT _Zt —
+  // see tipOverlay below. Host-owned kinds paint via DialogHost only.
   function getFocusedInputDialog():
     | 'message-selector'
-    | 'managed-settings'
-    | 'tool-permission'
-    | 'prompt'
+    | 'left-arrow-confirm'
     | 'worker-sandbox-permission'
     | 'elicitation'
-    | 'init-onboarding'
-    | 'model-switch'
-    | 'undercover-callout'
-    | 'effort-callout'
     | 'remote-callout'
     | 'lsp-recommendation'
     | 'plugin-hint'
-    | 'search-extra-tools-hint'
-    | 'desktop-upsell'
     | 'fullscreen-upsell'
     | 'ultraplan-choice'
     | 'ultraplan-launch'
     | undefined {
-    // Exit states always take precedence
-    if (isExiting || exitFlow) return undefined;
+    // densable _Zt: if(pke.kind!=="none")return
+    if (pke.kind !== 'none') return undefined;
 
     // High priority dialogs (always show regardless of typing)
     if (isMessageSelectorVisible) return 'message-selector';
 
-    // Suppress interrupt dialogs while user is actively typing
-    if (isPromptInputActive) return undefined;
+    // densable _Zt: if(Tt)return"left-arrow-confirm"
+    if (leftArrowConfirm) return 'left-arrow-confirm';
 
-    // densable DialogStore top — GSn / bEt via NMs (not tip-local queue peek)
-    // Tip sandbox network uses FRr via K8c.ask (requestDialog), not _Zt.
-    if (isManagedSettingsSecurityDialog(topDialogKind)) return 'managed-settings';
-    if (isPermissionPromptDialog(topDialogKind)) return 'tool-permission';
+    // Suppress interrupt dialogs while user is actively typing (gold To)
+    if (isPromptInputActive) return undefined;
 
     // Permission/interactive dialogs (show unless blocked by toolJSX)
     const allowDialogsWithAnimation = !toolJSX || toolJSX.shouldContinueAnimation;
 
-    // Queue may still hold items under DialogStore top; only use when store empty
-    if (allowDialogsWithAnimation && !hasOpenDialogs && toolUseConfirmQueue[0]) return 'tool-permission';
-    if (allowDialogsWithAnimation && promptQueue[0]) return 'prompt';
-    // densable _Zt still returns worker-sandbox-permission (gold Fe.queue[0]).
+    // densable _Zt — gold Fe.queue[0]
     if (allowDialogsWithAnimation && workerSandboxPermissions.queue[0]) return 'worker-sandbox-permission';
+    // densable _Zt elicitation — gold Be.queue overlay (eDo), not NMs Host.
+    // Gbt mcp_url_elicitation is a separate print/SDK mailbox kind.
     if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation';
 
     if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice)
@@ -3581,48 +3711,61 @@ export function REPL({
     if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanLaunchPending)
       return 'ultraplan-launch';
 
-    // Model switch callout (ant-only, eliminated from external builds)
-    if (process.env.USER_TYPE === 'ant' && allowDialogsWithAnimation && showModelSwitchCallout) return 'model-switch';
-
-    // Undercover auto-enable explainer (ant-only, eliminated from external builds)
-    if (process.env.USER_TYPE === 'ant' && allowDialogsWithAnimation && showUndercoverCallout)
-      return 'undercover-callout';
-
-    // Effort callout (shown once for Opus 4.6 users when effort is enabled)
-    if (allowDialogsWithAnimation && showEffortCallout) return 'effort-callout';
-
-    // Remote callout (shown once before first bridge enable)
-    if (allowDialogsWithAnimation && showRemoteCallout) return 'remote-callout';
-
-    // LSP plugin recommendation (lowest priority - non-blocking suggestion)
-    if (allowDialogsWithAnimation && lspRecommendation) return 'lsp-recommendation';
-
-    // Plugin hint from CLI/SDK stderr (same priority band as LSP rec)
-    if (allowDialogsWithAnimation && hintRecommendation) return 'plugin-hint';
-
-    // Tool search hint (discovered tools relevant to current query)
-    if (allowDialogsWithAnimation && searchExtraToolsHint.visible) return 'search-extra-tools-hint';
-
-    // Desktop app upsell (max 3 launches, lowest priority)
-    if (allowDialogsWithAnimation && showDesktopUpsellStartup) return 'desktop-upsell';
-
-    // Official Npf densable — fullscreen TUI upsell (after desktop)
+    // densable _Zt remaining gold ids (after ultraplan):
+    //   if(As()){if(nr&&vr)return"remote-callout";return}
+    //   if(nr&&Ur)return"fullscreen-upsell"
+    //   if(nr&&vr)return"remote-callout"
+    //   if(nr&&Xn&&!ly)return"lsp-recommendation"
+    //   if(nr&&Kr&&!ly)return"plugin-hint"
+    // As() = isBgSession (KWe()==="bg"). ly = viewingAgentTaskId.
+    const viewingAgent = viewingAgentTaskId != null;
+    if (isBgSession()) {
+      if (allowDialogsWithAnimation && showRemoteCallout) return 'remote-callout';
+      return undefined;
+    }
     if (allowDialogsWithAnimation && showFullscreenUpsell) return 'fullscreen-upsell';
+    if (allowDialogsWithAnimation && showRemoteCallout) return 'remote-callout';
+    if (allowDialogsWithAnimation && lspRecommendation && !viewingAgent) return 'lsp-recommendation';
+    if (allowDialogsWithAnimation && hintRecommendation && !viewingAgent) return 'plugin-hint';
 
     return undefined;
   }
 
   const focusedInputDialog = getFocusedInputDialog();
 
+  // Tip product overlays — paint without claiming densable _Zt / uQc.
+  // Gold _Zt returns after plugin-hint; these stay tip-only.
+  function getTipNonGoldOverlay():
+    | 'prompt'
+    | 'model-switch'
+    | 'undercover-callout'
+    | 'effort-callout'
+    | 'search-extra-tools-hint'
+    | 'desktop-upsell'
+    | undefined {
+    if (focusedInputDialog != null) return undefined;
+    // Host open stack is not a _Zt focus id — suppress tip overlays for any
+    // open Host dialog (blocking or soft i_y) so cost/resume/ide/etc. do not
+    // stack under effort/prompt callouts after tip left uQc.
+    if (hasOpenDialogs || hasBlockingOpenDialogs) return undefined;
+    if (pke.kind !== 'none' || isPromptInputActive) return undefined;
+    const allowDialogsWithAnimation = !toolJSX || toolJSX.shouldContinueAnimation;
+    if (!allowDialogsWithAnimation) return undefined;
+    if (promptQueue[0]) return 'prompt';
+    if (isBgSession()) return undefined;
+    if (process.env.USER_TYPE === 'ant' && showModelSwitchCallout) return 'model-switch';
+    if (process.env.USER_TYPE === 'ant' && showUndercoverCallout) return 'undercover-callout';
+    if (showEffortCallout) return 'effort-callout';
+    if (searchExtraToolsHint.visible) return 'search-extra-tools-hint';
+    if (showDesktopUpsellStartup) return 'desktop-upsell';
+    return undefined;
+  }
+  const tipOverlay = getTipNonGoldOverlay();
+  const anyInputOverlay = focusedInputDialog ?? tipOverlay;
+
   // densable yMe = To && (nHt || Fe.queue[0] || Be.queue[0]).
-  // Leftover tip queues (toolUseConfirm / prompt) + worker sandbox / elicitation.
   const hasSuppressedDialogs =
-    isPromptInputActive &&
-    (hasBlockingOpenDialogs ||
-      workerSandboxPermissions.queue[0] ||
-      elicitation.queue[0] ||
-      toolUseConfirmQueue[0] ||
-      promptQueue[0]);
+    isPromptInputActive && (hasBlockingOpenDialogs || workerSandboxPermissions.queue[0] || elicitation.queue[0]);
 
   // densable zIr same-render (no suppress-reason hook — keystroke tear).
   const dialogSuppressReason =
@@ -3653,13 +3796,11 @@ export function REPL({
   // Keep ref in sync so timer callbacks can read the current value
   focusedInputDialogRef.current = focusedInputDialog;
 
-  // Immediately capture pause/resume when focusedInputDialog changes
-  // This ensures accurate timing even under high system load, rather than
-  // relying on the 100ms polling interval to detect state changes
+  // densable Er.setPaused(ly) — ly = viewingAgentTaskId (not Host permission).
   useEffect(() => {
     if (!isLoading) return;
 
-    const isPaused = focusedInputDialog === 'tool-permission';
+    const isPaused = viewingAgentTaskId != null;
     // densable #18: same monotonic clock as loadingStartTimeRef
     const now = performance.now();
 
@@ -3671,24 +3812,20 @@ export function REPL({
       totalPausedMsRef.current += now - pauseStartTimeRef.current;
       pauseStartTimeRef.current = null;
     }
-  }, [focusedInputDialog, isLoading]);
+  }, [viewingAgentTaskId, isLoading]);
 
-  // Re-pin scroll to bottom whenever the permission overlay appears or
-  // dismisses. Overlay now renders below messages inside the same
-  // ScrollBox (no remount), so we need an explicit scrollToBottom for:
-  //  - appear: user may have been scrolled up (sticky broken) — the
-  //    dialog is blocking and must be visible
-  //  - dismiss: user may have scrolled up to read context during the
-  //    overlay, and onScroll was suppressed so the pill state is stale
-  // useLayoutEffect so the re-pin commits before the Ink frame renders —
-  // no 1-frame flash of the wrong scroll position.
-  const prevDialogRef = useRef(focusedInputDialog);
+  // Re-pin scroll when Host permission appears/dismisses (single-host — not
+  // focusedInputDialog peek). Same ScrollBox as messages; need explicit
+  // scrollToBottom for appear (sticky may be broken) and dismiss (onScroll
+  // was suppressed). useLayoutEffect: re-pin before Ink frame.
+  const hostPermissionOpen = isPermissionPromptDialog(topDialogKind);
+  const prevHostPermissionRef = useRef(hostPermissionOpen);
   useLayoutEffect(() => {
-    const was = prevDialogRef.current === 'tool-permission';
-    const now = focusedInputDialog === 'tool-permission';
-    if (was !== now) repinScroll(true, 'overlay');
-    prevDialogRef.current = focusedInputDialog;
-  }, [focusedInputDialog, repinScroll]);
+    if (prevHostPermissionRef.current !== hostPermissionOpen) {
+      repinScroll(true, 'overlay');
+    }
+    prevHostPermissionRef.current = hostPermissionOpen;
+  }, [hostPermissionOpen, repinScroll]);
 
   // Transcript swap (enter/exit agent view): ScrollBox is shared — leftover
   // scrollTop / scrollHeightHwm from the leader (or previous agent) can pin
@@ -3725,6 +3862,13 @@ export function REPL({
       return;
     }
     localJSXClosedAtRef.current = 0;
+
+    // densable onCancel: clearCapTimer + Ki.current=null before forceEnd
+    const deferArm = leftArrowDeferRef.current;
+    if (deferArm) {
+      deferArm.clearCapTimer();
+      leftArrowDeferRef.current = null;
+    }
 
     logForDebugging(`[onCancel] focusedInputDialog=${focusedInputDialog} streamMode=${streamMode}`);
 
@@ -3782,12 +3926,17 @@ export function REPL({
       snapshotOutputTokensForTurn(null);
     }
 
-    if (focusedInputDialog === 'tool-permission') {
-      // Tool use confirm handles the abort signal itself
+    // Host-owned permission — deny via queue abort when cancel still reaches
+    // here (chrome usually owns Esc while RPs visible).
+    if (isPermissionPromptDialog(topDialogKind)) {
       toolUseConfirmQueue[0]?.onAbort();
+      if (!abortController?.signal.aborted) {
+        abortController?.abort('user-cancel');
+      }
       clearPermissionConfirmQueue(setToolUseConfirmQueue, dialogStore);
-    } else if (focusedInputDialog === 'prompt') {
-      // Reject all pending prompts and clear the queue
+    } else if (tipOverlay === 'prompt' || promptQueue.length > 0) {
+      // tipOverlay is undefined while typing (isPromptInputActive); still
+      // reject queued prompts so Esc does not leave them hanging.
       for (const item of promptQueue) {
         item.reject(new Error('Prompt cancelled by user'));
       }
@@ -3852,6 +4001,11 @@ export function REPL({
     }
   }, [setInputValue, setInputMode, inputValue, setPastedContents, setAppState]);
 
+  useEffect(() => {
+    setPermissionDenyQueuePop(handleQueuedCommandOnCancel);
+    return () => setPermissionDenyQueuePop(null);
+  }, [handleQueuedCommandOnCancel]);
+
   // CancelRequestHandler props - rendered inside KeybindingSetup
   const cancelRequestProps = {
     setToolUseConfirmQueue,
@@ -3892,8 +4046,8 @@ export function REPL({
     async (hostPattern: NetworkHostPattern) => {
       // densable OVt / wkr — mode decides allow/deny/classify before UI ask
       const appStateNow = store.getState();
-      const { mode, isBypassPermissionsModeAvailable } = appStateNow.toolPermissionContext;
-      switch (resolveSandboxNetworkAskDecision(mode, isBypassPermissionsModeAvailable)) {
+      const { mode, isBypassPermissionsModeAvailable, prePlanMode } = appStateNow.toolPermissionContext;
+      switch (resolveSandboxNetworkAskDecision(mode, isBypassPermissionsModeAvailable, prePlanMode)) {
         case 'allow':
           return true;
         case 'deny':
@@ -4100,6 +4254,8 @@ export function REPL({
 
       return {
         abortController,
+        // densable: shouldStopBeforeNextApiCall: () => Ki.current !== null
+        shouldStopBeforeNextApiCall: () => leftArrowDeferRef.current !== null,
         options: {
           commands,
           tools: computeTools(),
@@ -4802,8 +4958,11 @@ export function REPL({
           haikuTitleAttemptedRef.current = true;
           void generateSessionTitle(text, new AbortController().signal).then(
             title => {
-              if (title) setHaikuTitle(title);
-              else haikuTitleAttemptedRef.current = false;
+              if (title) {
+                setHaikuTitle(title);
+                // densable: persist ai-title so resume + BQi subscribers see it
+                saveAiGeneratedTitle(getSessionId() as UUID, title);
+              } else haikuTitleAttemptedRef.current = false;
             },
             () => {
               haikuTitleAttemptedRef.current = false;
@@ -4993,6 +5152,61 @@ export function REPL({
         abortController.signal.removeEventListener('abort', onAbort);
       }
 
+      // densable _runImpl post-query: if Ki still armed → refuse or proceed
+      {
+        const arm = leftArrowDeferRef.current;
+        if (arm) {
+          arm.clearCapTimer();
+          leftArrowDeferRef.current = null;
+          if (!abortController.signal.aborted) {
+            const liveTasks = (store.getState().tasks ?? {}) as Record<string, TaskState>;
+            const abandon = countAbandonableLeftArrow(liveTasks);
+            const newMonitors = countNewMonitorsSincePress(liveTasks, arm.carriedAtPress);
+            const queued = countLeftArrowBlockingQueuedCommands(getCommandQueue());
+            const hasUnsent = inputValueRef.current.trim() !== '';
+            if (queued > 0 || hasUnsent || (!arm.confirmedInterstitial && abandon > 0) || newMonitors > 0) {
+              const [why, hint] =
+                queued > 0
+                  ? [
+                      `${queued} queued ${queued === 1 ? 'command' : 'commands'} would be lost`,
+                      'Press ← again once the queue clears.',
+                    ]
+                  : hasUnsent
+                    ? ['you have unsent text in the input', 'Send it or clear it, then press ← again.']
+                    : newMonitors > 0
+                      ? [
+                          `${newMonitors} Artifact comment ${newMonitors === 1 ? 'monitor' : 'monitors'} started after you pressed ←`,
+                          'Press ← again to review and confirm.',
+                        ]
+                      : [
+                          `${abandon} background ${abandon === 1 ? 'task' : 'tasks'} would be abandoned`,
+                          'Press ← again to confirm.',
+                        ];
+              // densable post-query refuse: K({append, Ss(...,"warning")}) — not yi
+              setMessages(prev => [
+                ...prev,
+                createSystemMessage(`Backgrounding cancelled — ${why}. ${hint}`, 'warning'),
+              ]);
+              markIdleForkMidTurn();
+            } else {
+              // densable: q.current=!0; await K9(W.getSnapshot(),…); $e=await he.proceed();
+              // append Ss($e,"warning"); G()
+              // tip: recordTranscript (storageV5 5th arg invent-ban)
+              leftArrowToAgentsFired.current = true;
+              try {
+                const { recordTranscript } = await import('../utils/sessionStorage.js');
+                await recordTranscript(messagesRef.current as never);
+              } catch {
+                /* best-effort persist before handoff */
+              }
+              const $e = await arm.proceed();
+              setMessages(prev => [...prev, createSystemMessage($e, 'warning')]);
+              markIdleForkMidTurn();
+            }
+          }
+        }
+      }
+
       if (buddyEnabled && typeof (globalThis as Record<string, unknown>).fireCompanionObserver === 'function') {
         const _fireCompanionObserver = (globalThis as Record<string, unknown>).fireCompanionObserver as (
           msgs: unknown,
@@ -5084,6 +5298,7 @@ export function REPL({
       titleDisabled,
       hostEngine,
       addNotification,
+      markIdleForkMidTurn,
     ],
   );
 
@@ -5674,10 +5889,9 @@ export function REPL({
         if (matchingCommand?.name === 'clear' && idleHintShownRef.current) {
           logEvent('tengu_idle_return_action', {
             action: 'hint_converted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            variant: idleHintShownRef.current as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             idleMinutes: Math.round((Date.now() - lastQueryCompletionTimeRef.current) / 60_000),
             messageCount: messagesRef.current.length,
-            totalInputTokens: getTotalInputTokens(),
+            contextTokens: idleReturnContextTokens(messagesRef.current),
           });
           idleHintShownRef.current = false;
         }
@@ -5687,6 +5901,16 @@ export function REPL({
           queryGuard.isActive && (isCommandImmediate(matchingCommand, commandArgs) || options?.fromKeybinding);
 
         if (matchingCommand && shouldTreatAsImmediate && matchingCommand.type === 'local-jsx') {
+          // densable aQr(cmd, endedByModel) — toast + return, do not run the command.
+          if (isEndedByModelCommandBlocked(matchingCommand, store.getState().endedByModel)) {
+            addNotification({
+              key: 'immediate-ended-by-model',
+              kind: 'feedback',
+              text: 'Claude ended this conversation. Start a new session (or /clear) to continue.',
+              priority: 'immediate',
+            });
+            return;
+          }
           // Only clear input if the submitted text matches what's in the prompt.
           // When a command keybinding fires, input is "/<command>" but the actual
           // input value is the user's existing text - don't clear it in that case.
@@ -5906,7 +6130,7 @@ export function REPL({
 
       // Remote mode: send input via stream-json instead of local query.
       // Permission requests from the remote are bridged into toolUseConfirmQueue
-      // and rendered using the standard PermissionRequest component.
+      // + DialogHost (doo / mirror); Host paints — no PermissionRequest overlay.
       //
       // local-jsx slash commands (e.g. /agents, /config) render UI in THIS
       // process — they have no remote equivalent. Let those fall through to
@@ -6118,6 +6342,20 @@ export function REPL({
   deferredResumeRefs.current.resumeAgentBackground =
     resumeAgentBackground as DeferredAdoptResumeRefs['resumeAgentBackground'];
 
+  // densable nzt host — tip runToolUse ring for Artifact autoReact Ttn
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ar =
+      require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js');
+    ar.setNztHost({
+      getToolUseContext: () =>
+        getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel) as never,
+      canUseTool: canUseTool as never,
+    });
+  } catch {
+    /* product optional */
+  }
+
   // Handlers for auto-run /issue or /good-claude (defined after onSubmit)
   const handleAutoRunIssue = useCallback(() => {
     const command = autoRunIssueReason ? getAutoRunCommand(autoRunIssueReason) : '/issue';
@@ -6189,7 +6427,7 @@ export function REPL({
   }, []);
 
   const handleExit = useCallback(async () => {
-    setIsExiting(true);
+    // densable wZt — bg detach, else pke dialog ($To) or shutting-down + exit.
     // In bg sessions, always detach instead of kill — even when a worktree is
     // active. Without this guard, the worktree branch below short-circuits into
     // ExitFlow (which calls gracefulShutdown) before exit.tsx is ever loaded.
@@ -6218,36 +6456,42 @@ export function REPL({
       }
       // Send detach sequence via stdout — daemon relays to attacher
       process.stdout.write('\x1B_cc-detach-msg;Session stopped.\x1B\\\x1B_cc-daemon-detach\x1B\\');
-      setIsExiting(false);
+      setPke({ kind: 'none' });
       return;
     }
     const showWorktree = getCurrentWorktreeSession() !== null;
-    if (showWorktree) {
-      setExitFlow(
-        <ExitFlow
-          showWorktree
-          onDone={() => {}}
-          onCancel={() => {
-            setExitFlow(null);
-            setIsExiting(false);
-          }}
-        />,
-      );
+    // densable wZt: Jeh(tasks) — not Zeh (that is /exit wO0 only).
+    const backgroundItems = listExitBackgroundItems((store.getState().tasks ?? {}) as Record<string, TaskState>);
+    if (showWorktree || backgroundItems.length > 0) {
+      // densable wZt: Qn=()=>{Npt({kind:"none"})}; no onBeforeExit (iwg only from wO0/TTc).
+      const clearPke = () => setPke({ kind: 'none' });
+      setPke({
+        kind: 'dialog',
+        node: (
+          <ExitFlow
+            showWorktree={showWorktree}
+            backgroundItems={backgroundItems}
+            messages={messagesRef.current as never}
+            getMessages={() => messagesRef.current as never}
+            getIsMidTurn={() => queryGuard.isActive}
+            getIsResponseStreaming={() => queryGuard.isRunning}
+            isMidTurn={queryGuard.isActive}
+            // densable wZt: onDone:()=>{} — Pkr still runs nst inside $To
+            onDone={() => {}}
+            onCancel={clearPke}
+            getTasks={() => store.getState().tasks as Record<string, unknown> | undefined}
+          />
+        ),
+      });
       return;
     }
-    const exitMod = await exit.load();
-    // Pass conversation messages so BackgroundAndExit (official tsn) can seed.
-    const exitFlowResult = await exitMod.call(() => {}, {
+    setPke({ kind: 'shutting-down' });
+    // densable wZt: no worktree/items → nst(lo, {responseStreaming: Si.isRunning}, Q)
+    await exitPromptShutdown({
       messages: messagesRef.current,
-    } as Parameters<typeof exitMod.call>[1]);
-    setExitFlow(exitFlowResult);
-    // If call() returned without killing the process (bg session detach),
-    // clear isExiting so the UI is usable on reattach. No-op on the normal
-    // path — gracefulShutdown's process.exit() means we never get here.
-    if (exitFlowResult === null) {
-      setIsExiting(false);
-    }
-  }, []);
+      responseStreaming: queryGuard.isRunning,
+    });
+  }, [store, queryGuard]);
 
   const handleShowMessageSelector = useCallback(() => {
     setIsMessageSelectorVisible(prev => !prev);
@@ -6603,7 +6847,7 @@ export function REPL({
     if (isLoading) return;
 
     const tokenThreshold = resolveIdleTokenThreshold();
-    if (getTotalInputTokens() < tokenThreshold) return;
+    if (idleReturnContextTokens(messagesRef.current) < tokenThreshold) return;
 
     const idleThresholdMs = resolveIdleThresholdMs();
     const elapsed = Date.now() - lastQueryCompletionTime;
@@ -6612,23 +6856,22 @@ export function REPL({
     const timer = setTimeout(
       (lqct, addNotif, msgsRef, hintRef) => {
         if (msgsRef.current.length === 0) return;
-        const totalTokens = getTotalInputTokens();
+        const totalTokens = idleReturnContextTokens(msgsRef.current);
         const formattedTokens = formatTokens(totalTokens);
         const idleMinutes = (Date.now() - lqct) / 60_000;
         addNotif({
           key: 'idle-return-hint',
-          jsx: (
-            <>
-              <Text dimColor>new task? </Text>
-              <Text color="suggestion">/clear</Text>
-              <Text dimColor> to save </Text>
-              <Text color="suggestion">{formattedTokens} tokens</Text>
-            </>
-          ),
+          kind: 'contextual',
+          segments: [
+            { text: 'new task? ', dim: true },
+            { text: '/clear', color: 'suggestion' },
+            { text: ' to save ', dim: true },
+            { text: `${formattedTokens} tokens`, color: 'suggestion' },
+          ],
           priority: 'medium',
           timeoutMs: 0x7fffffff,
         });
-        hintRef.current = 'hint_v2';
+        hintRef.current = true;
         logEvent('tengu_idle_return_action', {
           action: 'hint_shown' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           idleMinutes: Math.round(idleMinutes),
@@ -7342,7 +7585,6 @@ export function REPL({
         commands={commands}
         verbose={true}
         toolJSX={null}
-        toolUseConfirmQueue={[]}
         inProgressToolUseIDs={inProgressToolUseIDs}
         isMessageSelectorVisible={false}
         conversationId={conversationId}
@@ -7495,9 +7737,8 @@ export function REPL({
     // stays entered across toggle. The 30-cap dump branch stays
     // unwrapped — it wants native terminal scrollback.
     if (transcriptScrollRef) {
-      if (isAxcStickyMainEnabled()) {
-        return <MainScreenShell mouseTracking={mouseTrackingProp()}>{transcriptReturn}</MainScreenShell>;
-      }
+      // transcriptScrollRef is only set under fullscreen virtual-scroll —
+      // gold Vs() / AlternateScreen. Qvt cannot apply (Axc suspends on alt).
       return <AlternateScreen mouseTracking={mouseTrackingProp()}>{transcriptReturn}</AlternateScreen>;
     }
     return transcriptReturn;
@@ -7520,9 +7761,9 @@ export function REPL({
       ? userInputOnProcessing
       : undefined;
 
-  // densable NMs owns permission UI (jsu → Iiu). Tip overlay retired —
-  // queue-only pushers must mirror into DialogStore (createPermissionQueueOps).
-  const toolPermissionOverlay = null;
+  // densable NMs owns permission UI (jsu → Iiu). Gold Tyn has no overlay
+  // slot — queue-only pushers must mirror into DialogStore
+  // (createPermissionQueueOps).
 
   // Narrow terminals: companion collapses to a one-liner that REPL stacks
   // on its own row (above input in fullscreen, below in scrollback) instead
@@ -7535,7 +7776,7 @@ export function REPL({
   // check footerSelection: pill FOCUS (arrow-down to tasks pill) must keep
   // the sprite visible so arrow-right can navigate to it.
   const companionVisible =
-    !toolJSX?.shouldHidePromptInput && !focusedInputDialog && !showBashesDialog && !hidePromptForHardNms;
+    !toolJSX?.shouldHidePromptInput && !anyInputOverlay && !showBashesDialog && !hidePromptForHardNms;
 
   // In fullscreen, ALL local-jsx slash commands float in the modal slot —
   // FullscreenLayout wraps them in an absolute-positioned bottom-anchored
@@ -7567,19 +7808,14 @@ export function REPL({
       getToolUseContext: () =>
         getToolUseContext(messages, messages, abortController ?? createAbortController(), mainLoopModel),
       onReject: handleQueuedCommandOnCancel,
+      // densable Host does not dequeue; tip chrome → leader bridge (same as
+      // pipe/doo opener callbacks).
       dequeue: (toolUseID: string) => {
-        setToolUseConfirmQueue(queue => queue.filter(item => item.toolUseID !== toolUseID));
-        void import('../dialog/permissionConfirmRegistry.js').then(m => {
-          m.unregisterPermissionConfirm(toolUseID);
-        });
-        const id = permissionPromptDialogId(toolUseID);
-        if (dialogStore.getState().open.some(d => d.id === id)) {
-          dialogStore.dismiss(id);
-        }
+        removeLeaderToolUseConfirm(toolUseID);
       },
       setStickyFooter: isFullscreenEnvEnabled() ? setPermissionStickyFooter : undefined,
     }),
-    [verbose, getToolUseContext, messages, abortController, mainLoopModel, handleQueuedCommandOnCancel, dialogStore],
+    [verbose, getToolUseContext, messages, abortController, mainLoopModel, handleQueuedCommandOnCancel],
   );
   // densable BUo — willow crate sidebar width (0 when GB off / not main / no git)
   const replDiffSidebarWidth = computeDiffSidebarWidth({
@@ -7625,7 +7861,7 @@ export function REPL({
           stamp divider/pill state. */}
       <ScrollKeybindingHandler
         scrollRef={scrollRef}
-        isActive={isFullscreenEnvEnabled() && (kZt || !focusedInputDialog || focusedInputDialog === 'tool-permission')}
+        isActive={isFullscreenEnvEnabled() && (kZt || !anyInputOverlay || hostPermissionOpen)}
         onScroll={kZt || !!viewedAgentTask ? undefined : composedOnScroll}
       />
       {feature('MESSAGE_ACTIONS') && isFullscreenEnvEnabled() && !disableMessageActions ? (
@@ -7636,7 +7872,6 @@ export function REPL({
         <PermissionDialogHostProvider value={permissionDialogHostValue}>
           <FullscreenLayout
             scrollRef={scrollRef}
-            overlay={toolPermissionOverlay}
             bottomFloat={buddyEnabled && companionVisible && !companionNarrow ? <CompanionFloatingBubble /> : undefined}
             modal={ozs}
             modalScrollRef={modalScrollRef}
@@ -7661,7 +7896,14 @@ export function REPL({
                   commands={commands}
                   verbose={verbose}
                   toolJSX={toolJSX}
-                  toolUseConfirmQueue={toolUseConfirmQueue}
+                  suppressMessageAnimation={
+                    hasBlockingOpenDialogs ||
+                    tipOverlay != null ||
+                    leftArrowConfirm != null ||
+                    pke.kind === 'dialog' ||
+                    elicitation.queue.length > 0 ||
+                    workerSandboxPermissions.queue.length > 0
+                  }
                   inProgressToolUseIDs={
                     viewedTeammateTask ? (viewedTeammateTask.inProgressToolUseIDs ?? new Set()) : inProgressToolUseIDs
                   }
@@ -7765,7 +8007,7 @@ export function REPL({
                     )}
                   {/* densable NMs inline — GSn + bEt (permission_prompt); tip sandbox is FRr */}
                   <DialogHost variant="inline" suppressReason={dialogSuppressReason} />
-                  {focusedInputDialog === 'prompt' && (
+                  {tipOverlay === 'prompt' && (
                     <PromptDialog
                       key={promptQueue[0]!.request.prompt}
                       title={promptQueue[0]!.title}
@@ -7898,26 +8140,24 @@ export function REPL({
                       }}
                     />
                   )}
-                  {process.env.USER_TYPE === 'ant' &&
-                    focusedInputDialog === 'model-switch' &&
-                    AntModelSwitchCallout && (
-                      <AntModelSwitchCallout
-                        onDone={(selection: string, modelAlias?: string) => {
-                          setShowModelSwitchCallout(false);
-                          if (selection === 'switch' && modelAlias) {
-                            setAppState(prev => ({
-                              ...prev,
-                              mainLoopModel: modelAlias,
-                              mainLoopModelForSession: null,
-                            }));
-                          }
-                        }}
-                      />
-                    )}
-                  {process.env.USER_TYPE === 'ant' &&
-                    focusedInputDialog === 'undercover-callout' &&
-                    UndercoverAutoCallout && <UndercoverAutoCallout onDone={() => setShowUndercoverCallout(false)} />}
-                  {focusedInputDialog === 'effort-callout' && (
+                  {process.env.USER_TYPE === 'ant' && tipOverlay === 'model-switch' && AntModelSwitchCallout && (
+                    <AntModelSwitchCallout
+                      onDone={(selection: string, modelAlias?: string) => {
+                        setShowModelSwitchCallout(false);
+                        if (selection === 'switch' && modelAlias) {
+                          setAppState(prev => ({
+                            ...prev,
+                            mainLoopModel: modelAlias,
+                            mainLoopModelForSession: null,
+                          }));
+                        }
+                      }}
+                    />
+                  )}
+                  {process.env.USER_TYPE === 'ant' && tipOverlay === 'undercover-callout' && UndercoverAutoCallout && (
+                    <UndercoverAutoCallout onDone={() => setShowUndercoverCallout(false)} />
+                  )}
+                  {tipOverlay === 'effort-callout' && (
                     <EffortCallout
                       model={mainLoopModel}
                       onDone={selection => {
@@ -7950,7 +8190,35 @@ export function REPL({
                     />
                   )}
 
-                  {exitFlow}
+                  {pke.kind === 'dialog' ? pke.node : null}
+
+                  {focusedInputDialog === 'left-arrow-confirm' && leftArrowConfirm && (
+                    <LeftArrowConfirmDialog
+                      summary={leftArrowConfirm.summary}
+                      carryOverCount={leftArrowConfirm.carryOverCount}
+                      monitorParkCount={leftArrowConfirm.monitorParkCount}
+                      onConfirm={() => {
+                        const cur = leftArrowConfirm;
+                        logEvent('tengu_left_arrow_confirm', {
+                          accepted: true,
+                          count: cur.inFlight.count,
+                          kinds: [...cur.inFlight.kinds].sort().join(',') as never,
+                          carryover_count: cur.carryOverCount,
+                        });
+                        setLeftArrowConfirm(null);
+                        cur.proceed();
+                      }}
+                      onCancel={() => {
+                        logEvent('tengu_left_arrow_confirm', {
+                          accepted: false,
+                          count: leftArrowConfirm.inFlight.count,
+                          kinds: [...leftArrowConfirm.inFlight.kinds].sort().join(',') as never,
+                          carryover_count: leftArrowConfirm.carryOverCount,
+                        });
+                        setLeftArrowConfirm(null);
+                      }}
+                    />
+                  )}
 
                   {focusedInputDialog === 'plugin-hint' && hintRecommendation && (
                     <PluginHintMenu
@@ -7962,7 +8230,7 @@ export function REPL({
                     />
                   )}
 
-                  {focusedInputDialog === 'search-extra-tools-hint' && searchExtraToolsHint.visible && (
+                  {tipOverlay === 'search-extra-tools-hint' && searchExtraToolsHint.visible && (
                     <SearchExtraToolsHint
                       tools={searchExtraToolsHint.tools}
                       onSelect={searchExtraToolsHint.handleSelect}
@@ -7979,7 +8247,7 @@ export function REPL({
                     />
                   )}
 
-                  {focusedInputDialog === 'desktop-upsell' && (
+                  {tipOverlay === 'desktop-upsell' && (
                     <DesktopUpsellStartup onDone={() => setShowDesktopUpsellStartup(false)} />
                   )}
 
@@ -8063,9 +8331,12 @@ export function REPL({
                   {mrRender()}
 
                   {!toolJSX?.shouldHidePromptInput &&
-                    !focusedInputDialog &&
+                    !anyInputOverlay &&
                     !hidePromptForHardNms &&
-                    !isExiting &&
+                    // densable HUo: jpt || Ki !== null || _r
+                    !leftArrowToAgentsFired.current &&
+                    leftArrowDeferRef.current === null &&
+                    pke.kind === 'none' &&
                     !disabled &&
                     !cursor && (
                       <>
@@ -8178,107 +8449,455 @@ export function REPL({
                           onLeftArrowOnEmpty={
                             onOpenAgents
                               ? () => {
-                                  // Official Fco/MVr/CAo portable: mid-turn partial from
-                                  // transcript + live stream, boundary uuid, task checkpoint.
-                                  const snap = messagesRef.current as Array<{
-                                    type: string;
-                                    uuid?: string;
-                                    isMeta?: boolean;
-                                    message?: {
-                                      content?: unknown;
-                                      stop_reason?: string | null;
-                                    };
-                                  }>;
-                                  // Lazy import to keep REPL cold path light.
-                                  // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                  const { buildInFlightPartialText, findForkBoundaryUuid, collectPortableCheckpoint } =
-                                    require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
-                                  // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                  const { getSessionCronTasks } =
-                                    require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
-                                  const partialFromMsgs = buildInFlightPartialText(
-                                    snap,
-                                    isLoading ? getStreamingTextRaw() : null,
-                                  );
-                                  const boundaryUuid = findForkBoundaryUuid(snap);
-                                  // Official CAo/fDs: detach shells + snapshot; disown after handoff.
-                                  const collected = collectPortableCheckpoint({
-                                    tasks: tasks as unknown as Record<
-                                      string,
-                                      import('../utils/bgCheckpoint.js').PortableTaskLike
-                                    >,
-                                    cron: getSessionCronTasks(),
-                                  });
-                                  const checkpoint = collected?.payload;
-                                  // Official aAf: session allow/deny + memoryToggledOff into hcn.
-                                  const allow = toolPermissionContext?.alwaysAllowRules?.session ?? [];
-                                  const deny = toolPermissionContext?.alwaysDenyRules?.session ?? [];
-                                  const sessionPermissionRules =
-                                    allow.length > 0 || deny.length > 0
-                                      ? {
-                                          allow: [...allow],
-                                          deny: [...deny],
-                                        }
-                                      : undefined;
-                                  let memoryToggledOff: boolean | undefined;
-                                  try {
-                                    // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                    const { isAutoMemoryEnabled } =
-                                      require('../memdir/paths.js') as typeof import('../memdir/paths.js');
-                                    memoryToggledOff = !isAutoMemoryEnabled() ? true : undefined;
-                                  } catch {
-                                    memoryToggledOff = undefined;
+                                  const openAgents = onOpenAgents;
+                                  const taskSnap = (tasks ?? {}) as Record<string, TaskState>;
+                                  const carriedAtPress = collectFrameLiveMonitorSlugs(taskSnap);
+
+                                  // densable iHt: if (jpt.current || _r.current) return
+                                  if (leftArrowToAgentsFired.current || leftArrowConfirmOpenRef.current) {
+                                    return;
                                   }
-                                  // Official aAf: CAo stays live across Jlr write, then
-                                  // checkpointAgents + disown. Local unmounts REPL first —
-                                  // stash live handle for openAgentsViaLeftArrow post-write.
-                                  // densable: do NOT removeSessionCronTasks here — pre-detach
-                                  // is irreversible if adopt/spawn fails. Cron is disowned
-                                  // in runLeftArrowPostAdoptCheckpoint after adopt write ok.
-                                  if (collected) {
+
+                                  // densable yi — append Ss(text,"warning") with last-informational dedupe
+                                  const yi = (text: string) => {
+                                    if (!text) return;
+                                    setMessages(prev => {
+                                      const last = prev.at(-1);
+                                      if (
+                                        last?.type === 'system' &&
+                                        last.subtype === 'informational' &&
+                                        last.content === text
+                                      ) {
+                                        return prev;
+                                      }
+                                      return [...prev, createSystemMessage(text, 'warning')];
+                                    });
+                                  };
+                                  // densable Sl: jpt.current=false; yi(Ja)
+                                  const Sl = (text: string) => {
+                                    leftArrowToAgentsFired.current = false;
+                                    yi(text);
+                                  };
+
+                                  // densable iHt four gates before Ki
+                                  {
+                                    const Xr = countActiveInFlight(taskSnap);
+                                    const iht = evaluateLeftArrowIhtGates({
+                                      persistenceDisabled: isPersistenceSuppressed(),
+                                      endedByModel: store.getState().endedByModel === true,
+                                      queuedCount: countLeftArrowBlockingQueuedCommands(getCommandQueue()),
+                                      draft: inputValueRef.current,
+                                      inFlight: Xr,
+                                    });
+                                    if (iht.blocked) {
+                                      if (iht.emitBlockedEvent) {
+                                        logEvent('tengu_left_arrow_blocked', {
+                                          reason: iht.reason as never,
+                                          inflight_count: iht.inflightCount,
+                                          inflight_kinds: [...Xr.kinds].sort().join(',') as never,
+                                        });
+                                      }
+                                      yi(iht.toast);
+                                      return;
+                                    }
+                                  }
+
+                                  // densable: if Ki.current → second-press while defer-armed
+                                  const deferArm = leftArrowDeferRef.current;
+                                  if (deferArm) {
+                                    const sinceLast = Date.now() - deferArm.lastPressMs;
+                                    deferArm.lastPressMs = Date.now();
+                                    if (sinceLast < LEFT_ARROW_DEFER_REPRESS_MS) return;
+                                    const liveTasks = (store.getState().tasks ?? {}) as Record<string, TaskState>;
+                                    const abandon = countAbandonableLeftArrow(liveTasks);
+                                    if (!deferArm.confirmedInterstitial && abandon > 0) {
+                                      addNotification({
+                                        key: 'left-arrow-defer',
+                                        text: formatDeferSkipAbandonToast(abandon),
+                                        color: 'warning',
+                                        priority: 'immediate',
+                                      });
+                                      return;
+                                    }
+                                    const newMonitors = countNewMonitorsSincePress(liveTasks, deferArm.carriedAtPress);
+                                    if (newMonitors > 0) {
+                                      deferArm.clearCapTimer();
+                                      leftArrowDeferRef.current = null;
+                                      addNotification({
+                                        key: 'left-arrow-defer',
+                                        text: formatDeferMonitorCancelToast(newMonitors),
+                                        color: 'warning',
+                                        priority: 'immediate',
+                                      });
+                                      return;
+                                    }
+                                    const ac = abortControllerRef.current;
+                                    if (ac && !ac.signal.aborted && queryGuard.isActive) {
+                                      deferArm.clearCapTimer();
+                                      leftArrowDeferRef.current = null;
+                                      void fireLeftArrowOpenAgents(deferArm.confirmedInterstitial, {
+                                        forceVia: 'abort-then-fork',
+                                        abortAfterFlush: ac,
+                                        deferWaitMs: Date.now() - deferArm.armedAtMs,
+                                        carriedAtPress: deferArm.carriedAtPress,
+                                      }).then(Sl);
+                                    } else if (!queryGuard.isActive) {
+                                      deferArm.clearCapTimer();
+                                      leftArrowDeferRef.current = null;
+                                      void deferArm.proceed().then(yi);
+                                    }
+                                    return;
+                                  }
+
+                                  // densable: nh=dtn(...) before Swh/LAc — fail closed, no toast
+                                  {
+                                    const streamPeek = getStreamingTextRaw();
+                                    const nh = resolveLeftArrowVia({
+                                      isBg: false,
+                                      isLoading: queryGuard.isActive,
+                                      isExternalLoading,
+                                      betweenCalls: isLeftArrowBetweenCalls(
+                                        messagesRef.current as Array<{
+                                          type: string;
+                                          message?: { stop_reason?: string | null };
+                                        }>,
+                                        isLeftArrowStreamOpen(streamPeek),
+                                      ),
+                                      inFlight: countActiveInFlight(taskSnap),
+                                    });
+                                    if (!nh.ok) {
+                                      logEvent('tengu_left_arrow_blocked', {
+                                        reason: nh.reason as never,
+                                        inflight_count: nh.inFlight.count,
+                                        inflight_kinds: [...nh.inFlight.kinds].sort().join(',') as never,
+                                      });
+                                      return;
+                                    }
+                                  }
+
+                                  // densable: if Swh → Ot(Tt) LAc confirm; else Mu(false).
+                                  const confirm = buildLeftArrowConfirmState(taskSnap, hasSummary => {
+                                    void fireLeftArrowOpenAgents(hasSummary, { carriedAtPress }).then(Sl);
+                                  });
+                                  if (confirm) {
+                                    setLeftArrowConfirm(confirm);
+                                    return;
+                                  }
+                                  void fireLeftArrowOpenAgents(false, { carriedAtPress }).then(Sl);
+
+                                  // densable qpe — jpt=true; return vHy string
+                                  async function fireLeftArrowOpenAgents(
+                                    confirmedInterstitial: boolean,
+                                    opts?: {
+                                      forceVia?: 'abort-then-fork' | 'idle-fork' | 'defer-then-fork';
+                                      abortAfterFlush?: AbortController;
+                                      deferWaitMs?: number;
+                                      deferCapFired?: boolean;
+                                      carriedAtPress?: Set<string>;
+                                    },
+                                  ): Promise<string> {
+                                    const monitorsAtPress =
+                                      opts?.carriedAtPress ?? collectFrameLiveMonitorSlugs(taskSnap);
+                                    // Ban cancel if monitors appeared after press (Mu gate).
+                                    const ban = countNewMonitorsSincePress(
+                                      (store.getState().tasks ?? {}) as Record<string, TaskState>,
+                                      monitorsAtPress,
+                                    );
+                                    if (ban > 0 && !opts?.forceVia) {
+                                      addNotification({
+                                        key: 'left-arrow-defer',
+                                        text: formatDeferMonitorCancelToast(ban),
+                                        color: 'warning',
+                                        priority: 'immediate',
+                                      });
+                                      return '';
+                                    }
+                                    // Official Fco/MVr/CAo portable: mid-turn partial from
+                                    // transcript + live stream, boundary uuid, task checkpoint.
+                                    const snap = messagesRef.current as Array<{
+                                      type: string;
+                                      uuid?: string;
+                                      isMeta?: boolean;
+                                      message?: {
+                                        content?: unknown;
+                                        stop_reason?: string | null;
+                                      };
+                                    }>;
+                                    // Lazy import to keep REPL cold path light.
                                     // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                    const { stashLeftArrowCheckpointLive } =
+                                    const {
+                                      buildInFlightPartialText,
+                                      findForkBoundaryUuid,
+                                      collectPortableCheckpoint,
+                                    } =
                                       require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
-                                    stashLeftArrowCheckpointLive(collected);
-                                  }
-                                  // densable aAf Cl payload:
-                                  //   abort-then-fork → replyOnResume:true + abortAfterFlush:fn
-                                  //   idle-fork → replyOnResume:nzu(je,tl)
-                                  // eslint-disable-next-line @typescript-eslint/no-require-imports
-                                  const { shouldReplyOnIdleFork } =
-                                    require('../cli/bg/leftArrowAgents.js') as typeof import('../cli/bg/leftArrowAgents.js');
-                                  const via = isLoading ? 'abort-then-fork' : 'idle-fork';
-                                  const replyOnResume =
-                                    via === 'abort-then-fork'
-                                      ? true
-                                      : shouldReplyOnIdleFork(turnStartRef.current, snap);
-                                  const abortAfterFlush =
-                                    via === 'abort-then-fork' &&
-                                    abortControllerRef.current &&
-                                    !abortControllerRef.current.signal.aborted
-                                      ? abortControllerRef.current
-                                      : undefined;
-                                  onOpenAgents({
-                                    // Snapshot for official Sj4 / Vy6 seed (main → A8q).
-                                    messages: snap,
-                                    // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
-                                    via,
-                                    partialText: isLoading ? partialFromMsgs || getStreamingTextRaw() : null,
-                                    boundaryUuid,
-                                    agentsCount: checkpoint?.agents?.length ?? 0,
-                                    checkpoint: checkpoint
-                                      ? {
-                                          shells: checkpoint.shells,
-                                          cron: checkpoint.cron,
-                                          agents: checkpoint.agents,
-                                          workflows: checkpoint.workflows,
+                                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                    const { getSessionCronTasks } =
+                                      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
+                                    const partialFromMsgs = buildInFlightPartialText(
+                                      snap,
+                                      isLoading ? getStreamingTextRaw() : null,
+                                    );
+                                    const boundaryUuid = findForkBoundaryUuid(snap);
+                                    // Official CAo/fDs: detach shells + snapshot; disown after handoff.
+                                    const collected = collectPortableCheckpoint({
+                                      tasks: tasks as unknown as Record<
+                                        string,
+                                        import('../utils/bgCheckpoint.js').PortableTaskLike
+                                      >,
+                                      cron: getSessionCronTasks(),
+                                    });
+                                    const checkpoint = collected?.payload;
+                                    // Official aAf: session allow/deny + memoryToggledOff into hcn.
+                                    const allow = toolPermissionContext?.alwaysAllowRules?.session ?? [];
+                                    const deny = toolPermissionContext?.alwaysDenyRules?.session ?? [];
+                                    const sessionPermissionRules =
+                                      allow.length > 0 || deny.length > 0
+                                        ? {
+                                            allow: [...allow],
+                                            deny: [...deny],
+                                          }
+                                        : undefined;
+                                    let memoryToggledOff: boolean | undefined;
+                                    try {
+                                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                      const { isAutoMemoryEnabled } =
+                                        require('../memdir/paths.js') as typeof import('../memdir/paths.js');
+                                      memoryToggledOff = !isAutoMemoryEnabled() ? true : undefined;
+                                    } catch {
+                                      memoryToggledOff = undefined;
+                                    }
+                                    // densable: do NOT removeSessionCronTasks here — pre-detach
+                                    // is irreversible if adopt/spawn fails. Cron is disowned
+                                    // in runLeftArrowPostAdoptCheckpoint after adopt write ok.
+                                    if (collected) {
+                                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                      const { stashLeftArrowCheckpointLive } =
+                                        require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
+                                      stashLeftArrowCheckpointLive(collected);
+                                    }
+                                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                    const { shouldReplyOnIdleFork } =
+                                      require('../cli/bg/leftArrowAgents.js') as typeof import('../cli/bg/leftArrowAgents.js');
+                                    // densable Mu: FE=dtn({isBg:false,isLoading:Si.isActive,...})
+                                    // densable Ig = Er.abortController — YA uses strict nullish (!Ig),
+                                    // not .signal.aborted. abortAfterFlush still prefers a live AC.
+                                    const ig = abortControllerRef.current;
+                                    const liveAc = ig && !ig.signal.aborted ? ig : undefined;
+                                    const streamPeek = getStreamingTextRaw();
+                                    // densable BWi(..., peekStreamingText() !== null)
+                                    const hasStreamText = isLeftArrowStreamOpen(streamPeek);
+                                    let via: LeftArrowVia;
+                                    if (opts?.forceVia) {
+                                      via = opts.forceVia;
+                                    } else {
+                                      const fe = resolveLeftArrowVia({
+                                        isBg: false,
+                                        isLoading: queryGuard.isActive,
+                                        isExternalLoading,
+                                        betweenCalls: isLeftArrowBetweenCalls(snap, hasStreamText),
+                                        inFlight: countActiveInFlight(
+                                          (store.getState().tasks ?? {}) as Record<string, TaskState>,
+                                        ),
+                                      });
+                                      if (!fe.ok) {
+                                        logEvent('tengu_left_arrow_blocked', {
+                                          reason: fe.reason as never,
+                                          inflight_count: fe.inFlight.count,
+                                          inflight_kinds: [...fe.inFlight.kinds].sort().join(',') as never,
+                                        });
+                                        addNotification({
+                                          key: 'left-arrow-blocked',
+                                          text: LEFT_ARROW_VIA_BLOCKED_TOAST,
+                                          color: 'warning',
+                                          priority: 'immediate',
+                                        });
+                                        return '';
+                                      }
+                                      // densable YA = FE.via==="abort-then-fork"&&!Ig ? "defer-then-fork" : FE.via
+                                      via = rewriteLeftArrowViaForAbortController(fe.via, ig);
+                                    }
+
+                                    if (via === 'defer-then-fork' && !opts?.forceVia) {
+                                      const armedAtMs = Date.now();
+                                      const deferCapMs =
+                                        getFeatureValue_CACHED_MAY_BE_STALE('tengu_defer_cap_ms', 10_000) ?? 10_000;
+                                      const timer = setTimeout(() => {
+                                        const arm = leftArrowDeferRef.current;
+                                        if (!arm || arm.armedAtMs !== armedAtMs) return;
+                                        const hy = (store.getState().tasks ?? {}) as Record<string, TaskState>;
+                                        const fre = getCommandQueue().filter(
+                                          c => !isLeftArrowDeferStickyQueueCmd(c),
+                                        ).length;
+                                        if (
+                                          fre > 0 ||
+                                          (!arm.confirmedInterstitial && countAbandonableLeftArrow(hy) > 0) ||
+                                          countNewMonitorsSincePress(hy, arm.carriedAtPress) > 0
+                                        ) {
+                                          if (fre > 0) {
+                                            logEvent('tengu_defer_cap_refused_queued', {
+                                              queue_len: fre,
+                                              wait_ms: Date.now() - armedAtMs,
+                                            });
+                                          }
+                                          return;
                                         }
-                                      : undefined,
-                                    sessionPermissionRules,
-                                    memoryToggledOff,
-                                    replyOnResume,
-                                    abortAfterFlush,
-                                  });
+                                        const inflight = countActiveInFlight(hy);
+                                        const restartable = inflight.restartableCount ?? 0;
+                                        if (restartable > 0) {
+                                          logEvent('tengu_defer_cap_refused_restartable', {
+                                            restartable_count: restartable,
+                                            wait_ms: Date.now() - armedAtMs,
+                                          });
+                                          addNotification({
+                                            key: 'left-arrow-defer',
+                                            text: formatDeferCapRestartableToast(restartable),
+                                            color: 'warning',
+                                            priority: 'immediate',
+                                          });
+                                          return;
+                                        }
+                                        const mre = abortControllerRef.current;
+                                        if (mre && !mre.signal.aborted && queryGuard.isActive) {
+                                          leftArrowDeferRef.current = null;
+                                          void fireLeftArrowOpenAgents(arm.confirmedInterstitial, {
+                                            forceVia: 'abort-then-fork',
+                                            abortAfterFlush: mre,
+                                            deferWaitMs: Date.now() - armedAtMs,
+                                            deferCapFired: true,
+                                            carriedAtPress: arm.carriedAtPress,
+                                          }).then(Sl);
+                                        }
+                                      }, deferCapMs);
+                                      leftArrowDeferRef.current = {
+                                        confirmedInterstitial,
+                                        armedAtMs,
+                                        lastPressMs: armedAtMs,
+                                        clearCapTimer: () => clearTimeout(timer),
+                                        carriedAtPress: monitorsAtPress,
+                                        proceed: () =>
+                                          fireLeftArrowOpenAgents(confirmedInterstitial, {
+                                            // densable Ki.proceed: qpe({...g8, replyOnResume:true})
+                                            // g8.via is YA (= defer-then-fork while armed)
+                                            forceVia: 'defer-then-fork',
+                                            deferWaitMs: Date.now() - armedAtMs,
+                                            carriedAtPress: monitorsAtPress,
+                                          }).then(IY => {
+                                            leftArrowToAgentsFired.current = false;
+                                            return IY;
+                                          }),
+                                      };
+                                      addNotification({
+                                        key: 'left-arrow-defer',
+                                        text: 'Backgrounding after the current tool finishes…',
+                                        color: 'suggestion',
+                                        priority: 'immediate',
+                                      });
+                                      return '';
+                                    }
+
+                                    const replyOnResume =
+                                      via === 'abort-then-fork' || via === 'defer-then-fork'
+                                        ? true
+                                        : shouldReplyOnIdleFork(turnStartRef.current, snap);
+                                    const abortAfterFlush =
+                                      opts?.abortAfterFlush ?? (via === 'abort-then-fork' ? liveAc : undefined);
+                                    // densable Mu g8 inflight/partialChars for tengu_open_agents_via_left
+                                    const handoffInFlight = countActiveInFlight(
+                                      (store.getState().tasks ?? {}) as Record<string, TaskState>,
+                                    );
+                                    const partialForHandoff = isLoading
+                                      ? partialFromMsgs || getStreamingTextRaw()
+                                      : null;
+                                    const agentsPayload = {
+                                      // Snapshot for official Sj4 / Vy6 seed (main → A8q).
+                                      messages: snap,
+                                      // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
+                                      via,
+                                      confirmedInterstitial,
+                                      deferWaitMs: opts?.deferWaitMs,
+                                      deferCapFired: opts?.deferCapFired,
+                                      inflightCount: handoffInFlight.count,
+                                      inflightKinds: handoffInFlight.kinds,
+                                      restartableCount: handoffInFlight.restartableCount,
+                                      partialChars: (partialForHandoff ?? '').length,
+                                      partialText: partialForHandoff,
+                                      boundaryUuid,
+                                      agentsCount: checkpoint?.agents?.length ?? 0,
+                                      checkpoint: checkpoint
+                                        ? {
+                                            shells: checkpoint.shells,
+                                            cron: checkpoint.cron,
+                                            agents: checkpoint.agents,
+                                            workflows: checkpoint.workflows,
+                                            frameLive: checkpoint.frameLive,
+                                          }
+                                        : undefined,
+                                      liveMonitorSlugs: [...monitorsAtPress],
+                                      sessionPermissionRules,
+                                      memoryToggledOff,
+                                      replyOnResume,
+                                      abortAfterFlush,
+                                    };
+                                    // densable qpe: jpt.current=!0; return vHy(...)
+                                    leftArrowToAgentsFired.current = true;
+                                    const { isLeftArrowDaemonDetachOnly, openAgentsViaLeftArrow } = await import(
+                                      '../cli/bg/leftArrowAgents.js'
+                                    );
+                                    // daemon bg session: detach-only. Do not run vHy
+                                    // (would fork a nested left-arrow job). Stamp
+                                    // alreadyOpened so main skips the second fork.
+                                    if (isLeftArrowDaemonDetachOnly()) {
+                                      const sessionId = getSessionId();
+                                      openAgents({
+                                        ...agentsPayload,
+                                        alreadyOpened: {
+                                          ok: true,
+                                          short: sessionId.slice(0, 8),
+                                          sessionId,
+                                        },
+                                      });
+                                      return 'Detached — use `claude agents` to see background sessions.';
+                                    }
+                                    if (feature('BG_SESSIONS')) {
+                                      let opened: import('../cli/bg/leftArrowAgents.js').LeftArrowOpenResult;
+                                      try {
+                                        opened = await openAgentsViaLeftArrow(snap, {
+                                          via,
+                                          confirmedInterstitial,
+                                          deferWaitMs: opts?.deferWaitMs,
+                                          deferCapFired: opts?.deferCapFired,
+                                          inflightCount: handoffInFlight.count,
+                                          inflightKinds: handoffInFlight.kinds,
+                                          restartableCount: handoffInFlight.restartableCount,
+                                          partialChars: (partialForHandoff ?? '').length,
+                                          partialText: partialForHandoff,
+                                          boundaryUuid,
+                                          agentsCount: checkpoint?.agents?.length ?? 0,
+                                          checkpoint: agentsPayload.checkpoint,
+                                          liveMonitorSlugs: [...monitorsAtPress],
+                                          sessionPermissionRules,
+                                          memoryToggledOff,
+                                          replyOnResume,
+                                          abortAfterFlush,
+                                        });
+                                      } catch {
+                                        // densable vHy catch → p("Couldn't background…")
+                                        return "Couldn't background this session (an internal error was logged)";
+                                      }
+                                      if (!opened.ok) {
+                                        return opened.error;
+                                      }
+                                      // densable yHy analog — existing onOpenAgents unmounts into FleetView.
+                                      // Do not invent a remount. Success string does not settle (process.exit / unmount).
+                                      openAgents({ ...agentsPayload, alreadyOpened: opened });
+                                    } else {
+                                      openAgents(agentsPayload);
+                                    }
+                                    return await new Promise<string>(() => {
+                                      /* densable yHy: in-process fleet never returns to REPL */
+                                    });
+                                  }
                                 }
                               : undefined
                           }
@@ -8434,13 +9053,13 @@ export function REPL({
     </KeybindingSetup>
   );
   if (isFullscreenEnvEnabled()) {
-    // MainScreenShell supplies height={rows} + mouse (AlternateScreen would
-    // suspend Axc). AxcFrameSinkBridge installs frameSink from FullscreenLayout
-    // when this gate is on.
-    if (isAxcStickyMainEnabled()) {
-      return <MainScreenShell mouseTracking={mouseTrackingProp()}>{mainReturn}</MainScreenShell>;
-    }
+    // Gold Tyn Vs() first — alt fullscreen. Qvt/xxc is the non-Vs sibling.
     return <AlternateScreen mouseTracking={mouseTrackingProp()}>{mainReturn}</AlternateScreen>;
+  }
+  if (isAxcStickyMainEnabled()) {
+    // MainScreenShell supplies height={rows} + mouse (AlternateScreen would
+    // suspend Axc). FullscreenLayout Qvt arm mounts AxcStickyHost (gold xxc).
+    return <MainScreenShell mouseTracking={mouseTrackingProp()}>{mainReturn}</MainScreenShell>;
   }
   return mainReturn;
 }

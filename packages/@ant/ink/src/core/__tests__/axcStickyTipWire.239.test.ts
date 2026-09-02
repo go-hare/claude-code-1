@@ -1,6 +1,6 @@
 /**
- * Tip Project C wire: sticky main uses MainScreenShell + AxcFrameSinkBridge
- * refs (not bare skip of AlternateScreen).
+ * Tip Project C wire: sticky main uses MainScreenShell + AxcStickyHost
+ * (gold xxc). Gold Tyn: Vs() alt first; Qvt is the sibling AFTER.
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
@@ -37,28 +37,49 @@ describe('Axc sticky tip wire (Project C)', () => {
     expect(repl).toContain(
       '<MainScreenShell mouseTracking={mouseTrackingProp()}>',
     )
+    // Gold Tyn: Vs() alt first; Qvt/MainScreenShell is the non-Vs sibling.
+    const altWrap = repl.indexOf(
+      'return <AlternateScreen mouseTracking={mouseTrackingProp()}>{mainReturn}</AlternateScreen>',
+    )
+    const axcWrap = repl.indexOf('if (isAxcStickyMainEnabled())', altWrap)
+    expect(altWrap).toBeGreaterThan(-1)
+    expect(axcWrap).toBeGreaterThan(altWrap)
     // Must not bare-return mainReturn without height shell
     expect(repl).not.toMatch(
       /if \(isAxcStickyMainEnabled\(\)\) \{\s*return mainReturn;\s*\}/,
     )
   })
 
-  test('FullscreenLayout passes bottomRef + overlayRef to bridge', () => {
-    expect(layout).toContain('bottomRef={axcBottomRef}')
-    expect(layout).toContain('overlayRef={axcOverlayRef}')
-    expect(layout).toContain('ref={axcBottomRef}')
-    expect(layout).toContain('ref={axcOverlayRef}')
+  test('FullscreenLayout Qvt arm mounts AxcStickyHost (gold xxc)', () => {
+    expect(layout).toContain('<AxcStickyHost')
+    expect(layout).toContain('scrollRef={scrollRef}')
+    expect(layout).toContain('overlay={overlayNode}')
+    // RPs suppressed (modal.visible false) must not mount opaque cover
+    expect(layout).toContain('modal != null && modal.visible')
+    expect(layout).not.toContain('AxcFrameSinkBridge')
+    expect(layout).not.toContain('axcOverlayRef')
+    expect(layout).not.toContain('axcBottomRef')
   })
 
-  test('Axc path: densable xxc slots — ScrollBox + pushUp pill + kxc anchor', () => {
+  test('Axc path: densable xxc slots — AxcStickyHost + kxc anchor, no Tyn Wrn', () => {
     expect(layout).toContain('AxcScrollAnchor')
-    expect(layout).toContain('NATIVE_HISTORY_BOTTOM_CHROME')
-    expect(layout).toContain('axcSticky && pillNode')
-    expect(layout).toContain('showWrnStickyHeader')
-    // Wrn top sticky stays alt-only (outside DECSTBM); not invent top band in Axc
-    expect(layout).toContain(
-      'showWrnStickyHeader = !axcSticky && headerPrompt != null',
+    expect(layout).toContain('AxcStickyHost')
+    expect(host).toContain('NATIVE_HISTORY_BOTTOM_CHROME')
+    expect(layout).not.toContain('showWrnStickyHeader')
+    expect(layout).not.toContain('axcSticky && pillNode')
+    const qvt = layout.slice(
+      layout.indexOf('if (axcSticky)'),
+      layout.indexOf('// Gold else:'),
     )
+    expect(qvt).toContain('<AxcScrollAnchor />')
+    expect(qvt).not.toContain('{overlay}')
+    const tynStart = layout.indexOf('{/* $xc — scroll + sidebar row */}')
+    const tynSticky = layout.indexOf('const sticky = hideSticky')
+    const tynEnd = layout.indexOf('</PromptOverlayProvider>', tynStart)
+    const tyn = layout.slice(tynSticky, tynEnd)
+    expect(tyn).toContain('<AxcScrollAnchor />')
+    expect(tyn).not.toContain('{overlay}')
+    expect(tyn).not.toContain('&& overlay == null')
   })
 
   test('xxc viewport uses cachedLayout (nodeCache) not Yoga-sum first', () => {

@@ -432,6 +432,57 @@ function isSyntheticApiErrorMessage(
   )
 }
 
+/**
+ * densable jpo — last assistant texts for external-editor context.
+ * Walks backward, stops at a real user turn, caps 8 messages / 64KiB.
+ */
+export function collectLastAssistantTextsForEditor(
+  messages: readonly Message[],
+  maxMessages = 8,
+  maxBytes = 65536,
+  { noStatusAfterApiError = false }: { noStatusAfterApiError?: boolean } = {},
+): { messages: string[]; capped: boolean } {
+  const out: string[] = []
+  let bytes = 0
+  let capped = false
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+    if (msg.type === 'assistant') {
+      if (noStatusAfterApiError && isSyntheticApiErrorMessage(msg)) {
+        if (out.length === 0) return { messages: [], capped: false }
+        break
+      }
+      const text = getAssistantMessageText(msg)
+      if (!text) continue
+      const size = Buffer.byteLength(text, 'utf8')
+      if (
+        out.length >= maxMessages ||
+        (out.length > 0 && bytes + size > maxBytes)
+      ) {
+        capped = true
+        break
+      }
+      out.push(text)
+      bytes += size
+      continue
+    }
+    if (msg.type === 'user') {
+      const content = msg.message?.content
+      if (
+        typeof content !== 'string' &&
+        content?.some(b => b.type === 'tool_result')
+      ) {
+        continue
+      }
+      if ('isMeta' in msg && msg.isMeta) continue
+      break
+    }
+  }
+  out.reverse()
+  return { messages: out, capped }
+}
+
 export function getLastAssistantMessage(
   messages: Message[],
 ): AssistantMessage | undefined {

@@ -1,17 +1,26 @@
-import { isExperimentalAgentTeamsDisabled } from './residualFinalEnvGates.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 
 /**
- * Centralized runtime check for agent teams/teammate features.
- * This is the single gate that should be checked everywhere teammates
- * are referenced (prompts, code, tools isEnabled, UI, etc.).
+ * densable `xd` / isAgentSwarmsEnabled.
  *
- * Fork build: enabled by default. Can be disabled via
- * CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0 if needed.
+ * Official is opt-in: env `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` or
+ * `--agent-teams`, then GrowthBook `tengu_amber_flint` (default ON kill switch).
+ * Do not default-on — that stamps `teamName` on leader transcripts and
+ * `/resume` drops them (official `if (u.teamName) return null`).
  */
+function hasAgentTeamsCliFlag(): boolean {
+  return process.argv.includes('--agent-teams')
+}
+
 export function isAgentSwarmsEnabled(): boolean {
-  if (isExperimentalAgentTeamsDisabled()) {
+  if (
+    !process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS &&
+    !hasAgentTeamsCliFlag()
+  ) {
     return false
   }
-
+  if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_flint', true)) {
+    return false
+  }
   return true
 }

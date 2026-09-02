@@ -44,10 +44,13 @@ import {
 } from '../../bridge/replBridgeHandle.js'
 import {
   abandonCheckpointShells,
+  adoptTelemetry,
   buildAdoptWritePayload,
   buildMidTurnPrefill,
+  countUndisclosedFrameLive,
   emptyCheckpointPayload,
   enrichShellsWithProcStart,
+  PREFILL_MAX_CHARS,
   runLeftArrowPostAdoptCheckpoint,
   takeLeftArrowCheckpointLive,
   type BgCheckpointPayload,
@@ -60,10 +63,29 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js'
+import { getFleetNeedsInputNudgeSnapshot } from '../../utils/fleetNeedsInputNudge.js'
 
 export type LeftArrowOpenResult =
   | { ok: true; short: string; sessionId: string }
   | { ok: false; error: string }
+
+/** densable: bg session ← is detach-only; qpe must not run vHy. */
+export function isLeftArrowDaemonDetachOnly(
+  backend: string | undefined = process.env.CLAUDE_BG_BACKEND,
+): boolean {
+  return backend === 'daemon'
+}
+
+/**
+ * densable kEo after qpe already ran vHy. Unmount cleanup may have rewritten
+ * wXr; re-clear before FleetView so the parent cannot reattach the child's
+ * rit session (228 #5).
+ */
+export function clearBridgeSessionMetaAfterQpeHandoff(
+  alreadyOpened: LeftArrowOpenResult | undefined | null,
+): void {
+  if (alreadyOpened) clearBridgeSessionMeta()
+}
 
 export type LeftArrowOpenOptions = {
   /** Official Sj4 `z` — haiku/AI title when seed has no name. */
@@ -71,10 +93,27 @@ export type LeftArrowOpenOptions = {
   sessionTitle?: string | null
   agentColor?: string
   /**
-   * Official aAf via — idle-fork | abort-then-fork.
+   * Official aAf via — idle-fork | abort-then-fork | defer-then-fork.
    * Prefill only when abort-then-fork + partial text (portable gate).
    */
   via?: string
+  /**
+   * densable Mu `confirmedInterstitial` — LAc abandon summary was non-empty
+   * when the user confirmed backgrounding (or false when no LAc).
+   */
+  confirmedInterstitial?: boolean
+  /** densable Mu deferWaitMs — ms spent waiting in defer-then-fork before handoff. */
+  deferWaitMs?: number
+  /** densable Mu deferCapFired — true when tengu_defer_cap_ms timer upgraded path. */
+  deferCapFired?: boolean
+  /** densable Mu g8.inflightCount — tte(tasks).count at handoff. */
+  inflightCount?: number
+  /** densable Mu g8.inflightKinds — tte kinds (analytics via l4 join). */
+  inflightKinds?: string[]
+  /** densable Mu g8.restartableCount */
+  restartableCount?: number
+  /** densable Mu g8.partialChars — open-assistant + stream char count. */
+  partialChars?: number
   /** Streaming partial assistant text for mid-turn prefill. */
   partialText?: string | null
   boundaryUuid?: string
@@ -94,7 +133,14 @@ export type LeftArrowOpenOptions = {
     }>
     agents?: unknown[]
     workflows?: unknown[]
+    /** densable Prs payload.frameLive */
+    frameLive?: Array<{ slug: string; writtenAtMs: number; title?: string }>
   }
+  /**
+   * densable vHy T = h8e(S) — live monitor slugs at handoff for
+   * undisclosed_frame_live. Tip: collectFrameLiveMonitorSlugs at REPL press.
+   */
+  liveMonitorSlugs?: string[]
   /** Official aAf → hcn sessionPermissionRules. */
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official aAf → hcn memoryToggledOff. */
@@ -679,16 +725,17 @@ export async function openAgentsViaLeftArrow(
   // skips abort so agents keep running (catch sets y=null).
   let writtenCheckpoint: BgCheckpointPayload | undefined
   let adoptWriteOk = false
+  // densable B / W — mid-turn prefill object (has_prefill = B !== undefined)
+  const prefill = buildMidTurnPrefill({
+    via: options?.via,
+    partialText: options?.partialText,
+    boundaryUuid: options?.boundaryUuid,
+    // Handle may be null after unmount; process-meta / stashed id still means
+    // RC is live and mid-turn prefill must stay off (same as densable bridge gate).
+    bridgeActive: Boolean(bridgeSessionId),
+    agentsCount: options?.agentsCount ?? options?.checkpoint?.agents?.length,
+  })
   try {
-    const prefill = buildMidTurnPrefill({
-      via: options?.via,
-      partialText: options?.partialText,
-      boundaryUuid: options?.boundaryUuid,
-      // Handle may be null after unmount; process-meta / stashed id still means
-      // RC is live and mid-turn prefill must stay off (same as densable bridge gate).
-      bridgeActive: Boolean(bridgeSessionId),
-      agentsCount: options?.agentsCount ?? options?.checkpoint?.agents?.length,
-    })
     const base = emptyCheckpointPayload()
     if (options?.checkpoint) {
       // Official fDs: attach procStart (Ex/lstart) identity before adopt write.
@@ -702,6 +749,9 @@ export async function openAgentsViaLeftArrow(
       if (options.checkpoint.workflows?.length) {
         base.workflows = options.checkpoint.workflows
       }
+      if (options.checkpoint.frameLive?.length) {
+        base.frameLive = options.checkpoint.frameLive
+      }
     }
     const payload = buildAdoptWritePayload({ base, prefill })
     // Always write baseline adopt.json so job dir has a checkpoint surface
@@ -712,7 +762,8 @@ export async function openAgentsViaLeftArrow(
         ((options.checkpoint.shells?.length ?? 0) > 0 ||
           (options.checkpoint.cron?.length ?? 0) > 0 ||
           (options.checkpoint.agents?.length ?? 0) > 0 ||
-          (options.checkpoint.workflows?.length ?? 0) > 0))
+          (options.checkpoint.workflows?.length ?? 0) > 0 ||
+          (options.checkpoint.frameLive?.length ?? 0) > 0))
     ) {
       writtenCheckpoint = await writeAdoptJson(jobDir, payload)
     } else {
@@ -730,6 +781,7 @@ export async function openAgentsViaLeftArrow(
         cron: options.checkpoint.cron ?? [],
         agents: options.checkpoint.agents,
         workflows: options.checkpoint.workflows,
+        frameLive: options.checkpoint.frameLive,
       }
     }
     adoptWriteOk = false
@@ -746,6 +798,59 @@ export async function openAgentsViaLeftArrow(
   } else {
     // Drop stashed CAo without abort — official catch leaves y=null.
     takeLeftArrowCheckpointLive()
+  }
+
+  // densable vHy @ 326172369 — tengu_open_agents_via_left after adopt attempt.
+  // Lrs ≈ adoptTelemetry (incl. adopted_frame_live). On adopt fail gold sets
+  // Y then wipes to 0 → adopted_frame_live/undisclosed_frame_live both 0.
+  {
+    const wasEmpty =
+      deriveBackgroundSeed(messages, '', {
+        sessionTitle,
+        sessionAiTitle: options?.haikuTitle,
+        agentColor: options?.agentColor,
+      }) === null
+    const partialRaw = (options?.partialText ?? '').trimEnd()
+    const hasPrefill = prefill !== undefined
+    const nudge = getFleetNeedsInputNudgeSnapshot()
+    const liveSlugs = options?.liveMonitorSlugs
+      ? new Set(options.liveMonitorSlugs)
+      : undefined
+    let adoptedFrameLive = adoptTelemetry(writtenCheckpoint).adopted_frame_live
+    let undisclosedFrameLive = countUndisclosedFrameLive(
+      writtenCheckpoint?.frameLive,
+      liveSlugs,
+    )
+    if (!adoptWriteOk) {
+      // densable catch: Y=frameLive.length; if Y>0&&!Q → Y=0; then
+      // adopted_frame_live:Y, undisclosed: Y===0?0:I → both 0.
+      adoptedFrameLive = 0
+      undisclosedFrameLive = 0
+    }
+    const adopted = adoptTelemetry(writtenCheckpoint)
+    logEvent('tengu_open_agents_via_left', {
+      was_empty: wasEmpty,
+      nudge_active: nudge !== undefined && nudge.needsInput > 0,
+      nudge_needs_input_count: nudge?.needsInput ?? 0,
+      via: (options?.via ?? 'idle-fork') as never,
+      confirmed_interstitial: options?.confirmedInterstitial ?? false,
+      inflight_count: options?.inflightCount ?? 0,
+      inflight_kinds: ([...(options?.inflightKinds ?? [])].sort().join(',') ||
+        undefined) as never,
+      restartable_count: options?.restartableCount ?? 0,
+      partial_chars: options?.partialChars ?? 0,
+      has_prefill: hasPrefill,
+      has_boundary_uuid: hasPrefill && options?.boundaryUuid !== undefined,
+      prefill_truncated: partialRaw.length > PREFILL_MAX_CHARS,
+      defer_wait_ms: options?.deferWaitMs ?? 0,
+      defer_cap_fired: options?.deferCapFired ?? false,
+      adopted_shells: adopted.adopted_shells,
+      adopted_agents: adopted.adopted_agents,
+      adopted_workflows: adopted.adopted_workflows,
+      adopted_cron: adopted.adopted_cron,
+      adopted_frame_live: adoptedFrameLive,
+      undisclosed_frame_live: undisclosedFrameLive,
+    })
   }
 
   // Official aAf: bridge flush (capped; 5s when replyOnResume) +

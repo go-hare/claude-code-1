@@ -383,6 +383,7 @@ describe('formatPeersListing teammates compose', () => {
     })
     expect(listing).toBe('Teammates (1):\n  researcher [abcdef]')
     expect(listing).not.toContain('No agents found.')
+    expect(listing).not.toContain('No reachable agents.')
   })
 
   test('teammates + peers join with a blank line', () => {
@@ -391,8 +392,8 @@ describe('formatPeersListing teammates compose', () => {
       { teammatesSection: 'Teammates (1):\n  researcher [abcdef]' },
     )
     expect(listing).toContain('Teammates (1):')
-    expect(listing).toContain('Found 1 agent(s):')
-    expect(listing).toContain('\n\nFound 1 agent(s):')
+    expect(listing).toContain('Peer sessions (1):')
+    expect(listing).toContain('\n\nPeer sessions (1):')
   })
 
   test('teammates + truncated notes keep official note, not No agents found.', () => {

@@ -21,15 +21,26 @@ export type LeftArrowAgentsHandoff = {
 } & Pick<
   LeftArrowOpenOptions,
   | 'via'
+  | 'confirmedInterstitial'
+  | 'deferWaitMs'
+  | 'deferCapFired'
+  | 'inflightCount'
+  | 'inflightKinds'
+  | 'restartableCount'
+  | 'partialChars'
   | 'partialText'
   | 'boundaryUuid'
   | 'agentsCount'
   | 'checkpoint'
+  | 'liveMonitorSlugs'
   | 'sessionPermissionRules'
   | 'memoryToggledOff'
   | 'replyOnResume'
   | 'abortAfterFlush'
->;
+> & {
+    /** densable qpe already ran vHy — main mounts fleet only (yHy analog). */
+    alreadyOpened?: import('./cli/bg/leftArrowAgents.js').LeftArrowOpenResult;
+  };
 
 export type LaunchReplResult =
   | { type: 'exit' }
@@ -65,15 +76,24 @@ export async function launchRepl(
           agentsHandoff = {
             messages: payload?.messages ?? [],
             via: payload?.via,
+            confirmedInterstitial: payload?.confirmedInterstitial,
+            deferWaitMs: payload?.deferWaitMs,
+            deferCapFired: payload?.deferCapFired,
+            inflightCount: payload?.inflightCount,
+            inflightKinds: payload?.inflightKinds,
+            restartableCount: payload?.restartableCount,
+            partialChars: payload?.partialChars,
             partialText: payload?.partialText,
             boundaryUuid: payload?.boundaryUuid,
             agentsCount: payload?.agentsCount,
             checkpoint: payload?.checkpoint,
+            liveMonitorSlugs: payload?.liveMonitorSlugs,
             sessionPermissionRules: payload?.sessionPermissionRules,
             memoryToggledOff: payload?.memoryToggledOff,
             // densable aAf: replyOnResume + abortAfterFlush (query AC)
             replyOnResume: payload?.replyOnResume,
             abortAfterFlush: payload?.abortAfterFlush,
+            alreadyOpened: payload?.alreadyOpened,
           };
           // densable left-arrow RC handoff: unmount runs useReplBridge cleanup
           // which nulls the global handle and starts host_exit teardown *before*

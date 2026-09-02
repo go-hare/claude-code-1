@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import {
   NOTIFICATION_CHANNELS,
   EDITOR_MODES,
@@ -66,5 +68,12 @@ describe('TEAMMATE_MODES', () => {
 
   test('is ordered: auto, tmux, in-process', () => {
     expect(TEAMMATE_MODES).toEqual(['auto', 'tmux', 'in-process'])
+  })
+})
+
+describe('GlobalConfig leftover keys (densable 2.1.234 #47)', () => {
+  test('teammateDefaultModel typed dead key is gone', () => {
+    const src = readFileSync(join(import.meta.dir, '../config.ts'), 'utf8')
+    expect(src).not.toContain('teammateDefaultModel')
   })
 })

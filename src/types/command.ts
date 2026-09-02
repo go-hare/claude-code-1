@@ -117,6 +117,11 @@ export type LocalJSXCommandContext = ToolUseContext & {
    * mid-turn immediate path (`ARt` / REPL / handlePromptSubmit).
    */
   dispatchedAsImmediate?: boolean
+  /**
+   * densable `submissionOrigin` / WGw `t.submissionOrigin` (`bve` =
+   * `kind==="human"`). Threaded from processUserInput.origin.
+   */
+  submissionOrigin?: { kind?: string }
 }
 
 export type ResumeEntrypoint =

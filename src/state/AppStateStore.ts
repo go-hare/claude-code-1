@@ -289,12 +289,17 @@ export type AppState = DeepImmutable<{
   notifications: {
     current: Notification | null
     queue: Notification[]
+    pinned: Notification[]
   }
   elicitation: {
     queue: ElicitationRequestEvent[]
   }
   thinkingEnabled: boolean | undefined
   promptSuggestionEnabled: boolean
+  /** densable bvr `awaySummaryEnabled` — Session recap. Absent/true = on. */
+  awaySummaryEnabled?: boolean
+  /** densable bvr `timestamps` / showMessageTimestamps. Default false. */
+  showMessageTimestamps?: boolean
   sessionHooks: SessionHooksState
   activeGoal?: {
     condition: string
@@ -424,8 +429,10 @@ export type AppState = DeepImmutable<{
   }
   // Standalone agent context for non-swarm sessions with custom name/color
   standaloneAgentContext?: {
-    name: string
+    name?: string
     color?: AgentColorName
+    /** densable prideGradient — raw color list; 239 `tZg` is undefined so $Ir uses this as-is. */
+    prideGradient?: string[]
   }
   inbox: {
     messages: Array<{
@@ -667,12 +674,15 @@ export function getDefaultAppState(): AppState {
     notifications: {
       current: null,
       queue: [],
+      pinned: [],
     },
     elicitation: {
       queue: [],
     },
     thinkingEnabled: shouldEnableThinkingByDefault(),
     promptSuggestionEnabled: shouldEnablePromptSuggestion(),
+    awaySummaryEnabled: getInitialSettings().awaySummaryEnabled !== false,
+    showMessageTimestamps: getInitialSettings().showMessageTimestamps === true,
     sessionHooks: new Map(),
     inbox: {
       messages: [],

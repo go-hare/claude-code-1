@@ -1,18 +1,21 @@
 import type { StructuredPatchHunk } from 'diff'
-import { access, readFile } from 'fs/promises'
+import { access, lstat, readFile } from 'fs/promises'
 import { dirname, join, relative, sep } from 'path'
+import { getOriginalCwd, getSessionStartTime } from '../bootstrap/state.js'
 import { getCwd } from './cwd.js'
 import { getCachedRepository } from './detectRepository.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { isFileWithinReadSizeLimit } from './file.js'
 import {
   findGitRoot,
+  getBranch,
   getDefaultBranch,
   getGitDir,
   getIsGit,
   gitExe,
   RAW_GIT_DIFF_FLAGS,
 } from './git.js'
+import type { DiffBaseMode } from './replDiffTab.js'
 
 export type GitDiffStats = {
   filesCount: number
@@ -25,117 +28,498 @@ export type PerFileStats = {
   removed: number
   isBinary: boolean
   isUntracked?: boolean
+  /** densable `_zS` / `AzS` — mtime/ctime older than `GZt`. */
+  preSession?: boolean
 }
+
+/** densable PPi `source` — working tree vs merge-base branch. */
+export type DiffSource =
+  | { kind: 'working-tree' }
+  | { kind: 'branch'; baseBranch: string; baseRef: string }
 
 export type GitDiffResult = {
   stats: GitDiffStats
   perFileStats: Map<string, PerFileStats>
   hunks: Map<string, StructuredPatchHunk[]>
+  source: DiffSource
+  noCommits?: boolean
 }
+
+export type DiffFetchMode = DiffBaseMode | 'auto'
+
+/** densable VFf / vzS / r_g — hunks plus official skippedLarge. */
+export type DiffHunksBundle = {
+  hunks: Map<string, StructuredPatchHunk[]>
+  skippedLarge: Set<string>
+}
+
+/** densable `r_g` — empty VFf payload. */
+export function emptyDiffHunks(): DiffHunksBundle {
+  return { hunks: new Map(), skippedLarge: new Set() }
+}
+
+type BranchBaseResolve =
+  | { kind: 'none' }
+  | { kind: 'head-is-base'; baseBranch: string }
+  | { kind: 'merge-base'; mergeBase: string; baseBranch: string }
+  | { kind: 'error'; reason: string }
 
 const GIT_TIMEOUT_MS = 5000
 const MAX_FILES = 50
 const MAX_DIFF_SIZE_BYTES = 1_000_000 // 1 MB - skip files larger than this
 const MAX_LINES_PER_FILE = 400 // GitHub's auto-load limit
 const MAX_FILES_FOR_DETAILS = 500 // Skip per-file details if more files than this
+/** densable `yzS` — lstat cap before AzS filter. */
+const UNTRACKED_LSTAT_CAP = 200
+
+function gitOpts(abort?: AbortSignal) {
+  return {
+    timeout: GIT_TIMEOUT_MS,
+    preserveOutputOnError: false,
+    abortSignal: abort,
+  }
+}
+
+/** densable `_zS` / `AzS` clock compare. */
+export function isPreSessionStat(
+  mtimeMs: number,
+  ctimeMs: number,
+  sessionStart: number,
+): boolean {
+  return Math.max(mtimeMs, ctimeMs) < sessionStart
+}
+
+function diffRoot(): string {
+  try {
+    return getCwd()
+  } catch {
+    return getOriginalCwd()
+  }
+}
 
 /**
- * Fetch git diff stats and hunks comparing working tree to HEAD.
- * Returns null if not in a git repo or if git commands fail.
- *
- * Returns null during merge/rebase/cherry-pick/revert operations since the
- * working tree contains incoming changes that weren't intentionally
- * made by the user.
+ * densable `_zS` — mark tracked files older than `GZt`.
  */
-export async function fetchGitDiff(): Promise<GitDiffResult | null> {
-  const isGit = await getIsGit()
-  if (!isGit) return null
+export async function markPreSessionFiles(
+  result: Pick<GitDiffResult, 'perFileStats'>,
+): Promise<void> {
+  if (result.perFileStats.size === 0) return
+  const root = diffRoot()
+  const sessionStart = getSessionStartTime()
+  await Promise.all(
+    Array.from(result.perFileStats, async ([filePath, stats]) => {
+      try {
+        const st = await lstat(join(root, filePath))
+        if (isPreSessionStat(st.mtimeMs, st.ctimeMs, sessionStart)) {
+          stats.preSession = true
+        }
+      } catch {
+        /* densable: skip */
+      }
+    }),
+  )
+}
 
-  // Skip diff calculation during transient git states since the
-  // working tree contains incoming changes, not user-intentional edits
-  if (await isInTransientGitState()) {
-    return null
+/**
+ * densable `CJn` — hunk/stat ref for a PPi result.
+ */
+export function hunkRefForDiff(result: GitDiffResult): string {
+  if (result.noCommits) return '--cached'
+  return result.source.kind === 'branch' ? result.source.baseRef : 'HEAD'
+}
+
+/**
+ * densable H_s `b??(S!==null&&CJn(S.result)===_?S.hunks:r_g)`.
+ * VFf null keeps prior hunks when the CJn ref is unchanged.
+ */
+export function nextHunksOnVFf(
+  fetched: DiffHunksBundle | null,
+  prev: {
+    result: GitDiffResult
+    hunks: DiffHunksBundle
+  } | null,
+  nextRef: string,
+): DiffHunksBundle {
+  if (fetched !== null) return fetched
+  if (prev !== null && hunkRefForDiff(prev.result) === nextRef) {
+    return prev.hunks
   }
+  return emptyDiffHunks()
+}
 
-  // Quick probe: use --shortstat to get totals without loading all content.
-  // This is O(1) memory and lets us detect massive diffs (e.g., jj workspaces)
-  // before committing to expensive operations.
-  // densable URo shortstat probe: ["--no-optional-locks","diff",t,"--shortstat"]
-  // (no gnr — size probe only; full content path below uses RAW_GIT_DIFF_FLAGS)
+/**
+ * densable `IPi` — shortstat probe then numstat vs `ref`.
+ */
+async function fetchDiffAgainstRef(
+  ref: string,
+  abort?: AbortSignal,
+): Promise<Omit<GitDiffResult, 'source' | 'hunks'> | null> {
   const { stdout: shortstatOut, code: shortstatCode } = await execFileNoThrow(
     gitExe(),
-    ['--no-optional-locks', 'diff', 'HEAD', '--shortstat'],
-    { timeout: GIT_TIMEOUT_MS, preserveOutputOnError: false },
+    [
+      '--no-optional-locks',
+      '-c',
+      'diff.relative=false',
+      'diff',
+      ref,
+      '--shortstat',
+    ],
+    gitOpts(abort),
   )
 
   if (shortstatCode === 0) {
     const quickStats = parseShortstat(shortstatOut)
     if (quickStats && quickStats.filesCount > MAX_FILES_FOR_DETAILS) {
-      // Too many files - return accurate totals but skip per-file details
-      // to avoid loading hundreds of MB into memory
-      return {
-        stats: quickStats,
-        perFileStats: new Map(),
-        hunks: new Map(),
-      }
+      return { stats: quickStats, perFileStats: new Map() }
     }
   }
 
-  // Get stats via --numstat (all uncommitted changes vs HEAD)
   const { stdout: numstatOut, code: numstatCode } = await execFileNoThrow(
     gitExe(),
-    ['--no-optional-locks', 'diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD', '--numstat'],
-    { timeout: GIT_TIMEOUT_MS, preserveOutputOnError: false },
+    [
+      '--no-optional-locks',
+      '-c',
+      'diff.relative=false',
+      'diff',
+      ...RAW_GIT_DIFF_FLAGS,
+      ref,
+      '--numstat',
+    ],
+    gitOpts(abort),
   )
 
   if (numstatCode !== 0) return null
+  return parseGitNumstat(numstatOut)
+}
 
-  const { stats, perFileStats } = parseGitNumstat(numstatOut)
-
-  // Include untracked files (new files not yet staged)
-  // Just filenames - no content reading for performance
-  const remainingSlots = MAX_FILES - perFileStats.size
-  if (remainingSlots > 0) {
-    const untrackedStats = await fetchUntrackedFiles(remainingSlots)
-    if (untrackedStats) {
-      stats.filesCount += untrackedStats.size
-      for (const [path, fileStats] of untrackedStats) {
-        perFileStats.set(path, fileStats)
-      }
-    }
+function attachUntracked(
+  result: Omit<GitDiffResult, 'hunks'> & {
+    hunks?: Map<string, StructuredPatchHunk[]>
+  },
+  untracked: Map<string, PerFileStats> | null,
+): void {
+  if (!untracked) return
+  for (const [path, fileStats] of untracked) {
+    if (result.perFileStats.has(path)) continue
+    result.perFileStats.set(path, fileStats)
+    result.stats.filesCount += 1
   }
-
-  // Return stats only - hunks are fetched on-demand via fetchGitDiffHunks()
-  // to avoid expensive git diff HEAD call on every poll
-  return { stats, perFileStats, hunks: new Map() }
 }
 
 /**
- * Fetch git diff hunks on-demand (for DiffDialog).
- * Separated from fetchGitDiff() to avoid expensive calls during polling.
+ * densable `YFf` — merge-base of HEAD vs `origin/<base>` then `<base>`.
  */
-export async function fetchGitDiffHunks(): Promise<
-  Map<string, StructuredPatchHunk[]>
+async function resolveMergeBase(
+  baseBranch: string,
+  abort?: AbortSignal,
+): Promise<string | null> {
+  const hits: string[] = []
+  for (const spec of [`origin/${baseBranch}`, baseBranch]) {
+    const { stdout, code } = await execFileNoThrow(
+      gitExe(),
+      ['--no-optional-locks', 'merge-base', 'HEAD', spec],
+      gitOpts(abort),
+    )
+    if (code === 0 && stdout.trim()) hits.push(stdout.trim())
+  }
+  const [first, second] = hits
+  if (!first) return null
+  if (!second || first === second) return first
+  const { code: ancestorCode } = await execFileNoThrow(
+    gitExe(),
+    ['--no-optional-locks', 'merge-base', '--is-ancestor', first, second],
+    gitOpts(abort),
+  )
+  return ancestorCode === 0 ? second : first
+}
+
+/**
+ * densable `EzS` — current branch vs default branch.
+ */
+export async function resolveBranchDiffBase(
+  abort?: AbortSignal,
+): Promise<
+  | Exclude<BranchBaseResolve, { kind: 'error' }>
+  | { kind: 'error'; reason: string }
 > {
+  const [branch, defaultBranch] = await Promise.all([
+    getBranch(),
+    getDefaultBranch(),
+  ])
+  if (!branch || branch === 'HEAD') return { kind: 'none' }
+  if (defaultBranch.startsWith('-')) return { kind: 'none' }
+  if (branch === defaultBranch) {
+    return { kind: 'head-is-base', baseBranch: defaultBranch }
+  }
+  const mergeBase = await resolveMergeBase(defaultBranch, abort)
+  if (!mergeBase) return { kind: 'none' }
+  const { stdout, code } = await execFileNoThrow(
+    gitExe(),
+    ['--no-optional-locks', 'rev-parse', 'HEAD'],
+    gitOpts(abort),
+  )
+  if (code !== 0) return { kind: 'error', reason: 'head_rev_parse_failed' }
+  if (stdout.trim() === mergeBase) {
+    return { kind: 'head-is-base', baseBranch: defaultBranch }
+  }
+  return { kind: 'merge-base', mergeBase, baseBranch: defaultBranch }
+}
+
+/**
+ * densable `GFf` — working tree vs index (`git diff --numstat`, no ref).
+ * Official does not spread `gnr` here.
+ */
+async function fetchWorkingTreeNumstat(
+  abort?: AbortSignal,
+): Promise<NumstatResult | null> {
+  const { stdout, code } = await execFileNoThrow(
+    gitExe(),
+    ['--no-optional-locks', '-c', 'diff.relative=false', 'diff', '--numstat'],
+    gitOpts(abort),
+  )
+  if (code !== 0) return null
+  return parseGitNumstat(stdout)
+}
+
+/**
+ * densable `bzS` — fold unstaged numstat into Sil's `--cached` rows.
+ * Same-path only; binary → added 0; `removed` cleared on the file.
+ */
+export function foldEmptyRepoWorkingTreeStats(
+  staged: Pick<GitDiffResult, 'stats' | 'perFileStats'>,
+  workingTree: Pick<NumstatResult, 'perFileStats'>,
+): void {
+  for (const [path, wt] of workingTree.perFileStats) {
+    const cached = staged.perFileStats.get(path)
+    if (cached === undefined) continue
+    const isBinary = cached.isBinary || wt.isBinary
+    const added = isBinary
+      ? 0
+      : Math.max(0, cached.added + wt.added - wt.removed)
+    staged.stats.linesAdded += added - cached.added
+    staged.perFileStats.set(path, {
+      added,
+      removed: 0,
+      isBinary,
+      isUntracked: false,
+    })
+  }
+}
+
+/**
+ * densable `Sil` — empty-repo / no-HEAD working tree.
+ * `--cached` then `bzS` (when 0 < files ≤ kJn) then `RPi`.
+ */
+async function emptyRepoDiff(
+  abort?: AbortSignal,
+): Promise<GitDiffResult | null> {
+  const { code } = await execFileNoThrow(
+    gitExe(),
+    ['--no-optional-locks', 'rev-parse', '--verify', '--quiet', 'HEAD'],
+    gitOpts(abort),
+  )
+  if (code !== 1) return null
+  const result: GitDiffResult = {
+    stats: { filesCount: 0, linesAdded: 0, linesRemoved: 0 },
+    perFileStats: new Map(),
+    hunks: new Map(),
+    source: { kind: 'working-tree' },
+    noCommits: true,
+  }
+  const cached = await fetchDiffAgainstRef('--cached', abort)
+  if (cached) {
+    result.stats = cached.stats
+    result.perFileStats = cached.perFileStats
+    if (cached.stats.filesCount > MAX_FILES_FOR_DETAILS) return result
+    if (cached.stats.filesCount > 0) {
+      const working = await fetchWorkingTreeNumstat(abort)
+      if (working) foldEmptyRepoWorkingTreeStats(result, working)
+    }
+  }
+  if (result.stats.filesCount <= MAX_FILES_FOR_DETAILS) {
+    const remaining = MAX_FILES - result.perFileStats.size
+    attachUntracked(
+      result,
+      remaining > 0 ? await fetchUntrackedFiles(remaining, abort) : null,
+    )
+  }
+  return result
+}
+
+/**
+ * densable `WFf` — branch merge-base (or HEAD when already on the base).
+ */
+async function fetchBranchDiff(
+  abort: AbortSignal | undefined,
+  required: boolean,
+  untracked?: Map<string, PerFileStats> | null,
+): Promise<GitDiffResult | null> {
+  const resolved = await resolveBranchDiffBase(abort)
+  if (resolved.kind === 'error') {
+    return required ? emptyRepoDiff(abort) : null
+  }
+  let against: Omit<GitDiffResult, 'source' | 'hunks'> | null
+  let source: DiffSource
+  if (resolved.kind !== 'merge-base') {
+    if (!required) return null
+    against = await fetchDiffAgainstRef('HEAD', abort)
+    source =
+      resolved.kind === 'head-is-base'
+        ? { kind: 'branch', baseBranch: resolved.baseBranch, baseRef: 'HEAD' }
+        : { kind: 'working-tree' }
+  } else {
+    against = await fetchDiffAgainstRef(resolved.mergeBase, abort)
+    source = {
+      kind: 'branch',
+      baseBranch: resolved.baseBranch,
+      baseRef: resolved.mergeBase,
+    }
+  }
+  if (against === null) {
+    return resolved.kind === 'merge-base' ? null : emptyRepoDiff(abort)
+  }
+  const result: GitDiffResult = {
+    ...against,
+    hunks: new Map(),
+    source,
+  }
+  if (result.stats.filesCount <= MAX_FILES_FOR_DETAILS) {
+    const remaining = MAX_FILES - result.perFileStats.size
+    attachUntracked(
+      result,
+      untracked !== undefined
+        ? untracked
+        : remaining > 0
+          ? await fetchUntrackedFiles(remaining, abort)
+          : null,
+    )
+  }
+  return result
+}
+
+/**
+ * densable `PPi` — session / uncommitted / branch / auto.
+ * Session runs `_zS` + `RPi(..., includePreSession)` in parallel.
+ */
+export async function fetchGitDiff(
+  mode: DiffFetchMode = 'uncommitted',
+  abort?: AbortSignal,
+): Promise<GitDiffResult | null> {
   const isGit = await getIsGit()
-  if (!isGit) return new Map()
+  if (!isGit) return null
 
   if (await isInTransientGitState()) {
-    return new Map()
+    return null
   }
 
-  // densable URo: ["--no-optional-locks","diff",...gnr,t]
+  if (mode === 'branch') {
+    return fetchBranchDiff(abort, true)
+  }
+
+  const head = await fetchDiffAgainstRef('HEAD', abort)
+  if (head === null) return emptyRepoDiff(abort)
+
+  if (head.stats.filesCount > MAX_FILES_FOR_DETAILS) {
+    return { ...head, hunks: new Map(), source: { kind: 'working-tree' } }
+  }
+
+  if (mode === 'session') {
+    const working: GitDiffResult = {
+      ...head,
+      hunks: new Map(),
+      source: { kind: 'working-tree' },
+    }
+    const remaining = MAX_FILES - working.perFileStats.size
+    await Promise.all([
+      markPreSessionFiles(working),
+      remaining > 0
+        ? fetchUntrackedFiles(remaining, abort, true).then(u =>
+            attachUntracked(working, u),
+          )
+        : Promise.resolve(),
+    ])
+    return working
+  }
+
+  const remaining = MAX_FILES - head.perFileStats.size
+  const untracked =
+    remaining > 0 ? await fetchUntrackedFiles(remaining, abort, false) : null
+  const working: GitDiffResult = {
+    ...head,
+    hunks: new Map(),
+    source: { kind: 'working-tree' },
+  }
+  attachUntracked(working, untracked)
+
+  if (mode === 'uncommitted' || working.stats.filesCount > 0) {
+    return working
+  }
+
+  const branch = await fetchBranchDiff(abort, false, untracked)
+  if (branch === null || branch.stats.filesCount === 0) return working
+  return branch
+}
+
+/**
+ * densable `VFf` / `CJn` — ref is HEAD, merge-base, or `--cached`.
+ * null on fail so H_s can keep prior hunks. `> kJn` shortstat → empty r_g.
+ */
+export async function fetchGitDiffHunks(
+  ref = 'HEAD',
+  abort?: AbortSignal,
+): Promise<DiffHunksBundle | null> {
+  const isGit = await getIsGit()
+  if (!isGit) return null
+
+  if (await isInTransientGitState()) {
+    return null
+  }
+
+  const { stdout: shortstatOut, code: shortstatCode } = await execFileNoThrow(
+    gitExe(),
+    [
+      '--no-optional-locks',
+      '-c',
+      'diff.relative=false',
+      'diff',
+      ref,
+      '--shortstat',
+    ],
+    gitOpts(abort),
+  )
+  if (shortstatCode === 0) {
+    const quick = parseShortstat(shortstatOut)
+    if (quick && quick.filesCount > MAX_FILES_FOR_DETAILS) {
+      return emptyDiffHunks()
+    }
+  }
+
   const { stdout: diffOut, code: diffCode } = await execFileNoThrow(
     gitExe(),
-    ['--no-optional-locks', 'diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD'],
-    { timeout: GIT_TIMEOUT_MS, preserveOutputOnError: false },
+    [
+      '--no-optional-locks',
+      '-c',
+      'diff.relative=false',
+      'diff',
+      ...RAW_GIT_DIFF_FLAGS,
+      ref,
+    ],
+    gitOpts(abort),
   )
 
   if (diffCode !== 0) {
-    return new Map()
+    return null
   }
 
-  return parseGitDiff(diffOut)
+  const parsed = parseGitDiff(diffOut)
+  if (ref === '--cached' && parsed.hunks.size > 0) {
+    const working = await fetchWorkingTreeNumstat(abort)
+    if (working === null) return null
+    for (const path of working.perFileStats.keys()) {
+      parsed.hunks.delete(path)
+    }
+  }
+  return parsed
 }
 
 export type NumstatResult = {
@@ -193,38 +577,31 @@ export function parseGitNumstat(stdout: string): NumstatResult {
 }
 
 /**
- * Parse unified diff output into per-file hunks.
- * Splits by "diff --git" and parses each file's hunks.
- *
- * Applies limits:
- * - MAX_FILES: stop after this many files
- * - Files >1MB: skipped entirely (not in result map)
- * - Files ≤1MB: parsed but limited to MAX_LINES_PER_FILE lines
+ * densable `vzS` — unified diff → hunks + skippedLarge.
+ * Cap is hunks+skippedLarge >= Eil. Oversized file is named in skippedLarge.
  */
-export function parseGitDiff(
-  stdout: string,
-): Map<string, StructuredPatchHunk[]> {
-  const result = new Map<string, StructuredPatchHunk[]>()
-  if (!stdout.trim()) return result
+export function parseGitDiff(stdout: string): DiffHunksBundle {
+  const hunks = new Map<string, StructuredPatchHunk[]>()
+  const skippedLarge = new Set<string>()
+  if (!stdout.trim()) return { hunks, skippedLarge }
 
-  // Split by file diffs
   const fileDiffs = stdout.split(/^diff --git /m).filter(Boolean)
 
   for (const fileDiff of fileDiffs) {
-    // Stop after MAX_FILES
-    if (result.size >= MAX_FILES) break
+    if (hunks.size + skippedLarge.size >= MAX_FILES) break
 
-    // Skip files larger than 1MB
+    const newline = fileDiff.indexOf('\n')
+    const header = newline === -1 ? fileDiff : fileDiff.slice(0, newline)
+    const headerMatch = header.match(/^a\/(.+?) b\/(.+)$/)
+    if (!headerMatch) continue
+    const filePath = headerMatch[2] ?? headerMatch[1] ?? ''
+
     if (fileDiff.length > MAX_DIFF_SIZE_BYTES) {
+      skippedLarge.add(filePath)
       continue
     }
 
     const lines = fileDiff.split('\n')
-
-    // Extract filename from first line: "a/path/to/file b/path/to/file"
-    const headerMatch = lines[0]?.match(/^a\/(.+?) b\/(.+)$/)
-    if (!headerMatch) continue
-    const filePath = headerMatch[2] ?? headerMatch[1] ?? ''
 
     // Find and parse hunks
     const fileHunks: StructuredPatchHunk[] = []
@@ -294,11 +671,11 @@ export function parseGitDiff(
     }
 
     if (fileHunks.length > 0) {
-      result.set(filePath, fileHunks)
+      hunks.set(filePath, fileHunks)
     }
   }
 
-  return result
+  return { hunks, skippedLarge }
 }
 
 /**
@@ -334,15 +711,24 @@ async function isInTransientGitState(): Promise<boolean> {
  * Returns file paths only - they'll be displayed with a note to stage them.
  *
  * @param maxFiles Maximum number of untracked files to include
+ * @param includePreSession densable AzS `r` — session mode keeps pre-session files
  */
 async function fetchUntrackedFiles(
   maxFiles: number,
+  abort?: AbortSignal,
+  includePreSession = false,
 ): Promise<Map<string, PerFileStats> | null> {
   // Get list of untracked files (excludes gitignored)
   const { stdout, code } = await execFileNoThrow(
     gitExe(),
-    ['--no-optional-locks', 'ls-files', '--others', '--exclude-standard'],
-    { timeout: GIT_TIMEOUT_MS, preserveOutputOnError: false },
+    [
+      '--no-optional-locks',
+      'ls-files',
+      '--others',
+      '--exclude-standard',
+      '--full-name',
+    ],
+    gitOpts(abort),
   )
 
   if (code !== 0 || !stdout.trim()) return null
@@ -350,15 +736,35 @@ async function fetchUntrackedFiles(
   const untrackedPaths = stdout.trim().split('\n').filter(Boolean)
   if (untrackedPaths.length === 0) return null
 
-  const perFileStats = new Map<string, PerFileStats>()
+  const root = diffRoot()
+  const sessionStart = getSessionStartTime()
+  const probed = await Promise.all(
+    untrackedPaths.slice(0, UNTRACKED_LSTAT_CAP).map(async filePath => {
+      try {
+        const st = await lstat(join(root, filePath))
+        return {
+          filePath,
+          preSession: isPreSessionStat(st.mtimeMs, st.ctimeMs, sessionStart),
+        }
+      } catch {
+        return { filePath, preSession: false }
+      }
+    }),
+  )
+  const kept = probed.filter(row => !row.preSession)
+  if (includePreSession) {
+    kept.push(...probed.filter(row => row.preSession))
+  }
+  if (kept.length === 0) return null
 
-  // Just record filenames, no content reading
-  for (const filePath of untrackedPaths.slice(0, maxFiles)) {
+  const perFileStats = new Map<string, PerFileStats>()
+  for (const { filePath, preSession } of kept.slice(0, maxFiles)) {
     perFileStats.set(filePath, {
       added: 0,
       removed: 0,
       isBinary: false,
       isUntracked: true,
+      ...(preSession ? { preSession: true } : {}),
     })
   }
 

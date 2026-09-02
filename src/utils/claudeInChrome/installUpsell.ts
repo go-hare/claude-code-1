@@ -179,11 +179,10 @@ function isChromeMcpDenied(): boolean {
 
 /** densable `jMs`. */
 function isBypassOrPlanBypass(ctx: ToolUseContext): boolean {
-  const { mode, isBypassPermissionsModeAvailable } =
-    ctx.getAppState().toolPermissionContext
+  const { mode, prePlanMode } = ctx.getAppState().toolPermissionContext
   return (
     mode === 'bypassPermissions' ||
-    (mode === 'plan' && isBypassPermissionsModeAvailable)
+    (mode === 'plan' && prePlanMode === 'bypassPermissions')
   )
 }
 

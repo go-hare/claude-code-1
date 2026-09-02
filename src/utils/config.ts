@@ -255,6 +255,14 @@ export type GlobalConfig = {
   autoCompactEnabled: boolean // Controls whether auto-compact is enabled
   autoScrollEnabled: boolean // Auto-scroll the conversation view to bottom (fullscreen mode only)
   showTurnDuration: boolean // Controls whether to show turn duration message (e.g., "Cooked for 1m 6s")
+  /** densable bvr `externalEditorContext` — last response in $EDITOR / IDE. */
+  externalEditorContext?: boolean
+  /** densable bvr `timestamps` persist. Default false. */
+  showMessageTimestamps?: boolean
+  /** densable bvr `defaultToAgentsView`. Default false. */
+  defaultToAgentsView?: boolean
+  /** densable bvr `leftArrowOpensAgents`. Default true when the row is shown. */
+  leftArrowOpensAgents?: boolean
   /**
    * @deprecated Use settings.env instead.
    */
@@ -635,9 +643,6 @@ export type GlobalConfig = {
 
   // Teammate spawn mode: 'auto' | 'tmux' | 'windows-terminal' | 'in-process'
   teammateMode?: 'auto' | 'tmux' | 'windows-terminal' | 'in-process' // How to spawn teammates (default: 'auto')
-  // densable 2.1.234 #47: removed from /config. Legacy values may still exist
-  // on disk but are unread — teammates follow the leader unless spawn names a model.
-  teammateDefaultModel?: string | null
 
   // PR status footer configuration (feature-flagged via GrowthBook)
   prStatusFooterEnabled?: boolean // Show PR review status in footer (default: true)
@@ -751,6 +756,13 @@ export type GlobalConfig = {
   /** Last-seen org_model_default.updated_at (suppresses repeat clear/notice). */
   lastSeenOrgDefaultUpdatedAt?: string
 
+  /**
+   * densable ICy / UCy / `cr().agentLastUsed` — Fleet template last-used
+   * timestamps (ms). Persisted via saveGlobalConfig (St analog). Not a
+   * settings UI key.
+   */
+  agentLastUsed?: Record<string, number>
+
   // Disk cache for /api/claude_code/organizations/metrics_enabled.
   // Org-level settings change rarely; persisting across processes avoids a
   // cold API call on every `claude -p` invocation.
@@ -782,6 +794,10 @@ function createDefaultGlobalConfig(): GlobalConfig {
     autoCompactEnabled: true,
     autoScrollEnabled: true,
     showTurnDuration: true,
+    externalEditorContext: false,
+    showMessageTimestamps: false,
+    defaultToAgentsView: false,
+    leftArrowOpensAgents: true,
     hasSeenTasksHint: false,
     hasUsedStash: false,
     hasUsedBackgroundTask: false,
@@ -834,6 +850,8 @@ export const GLOBAL_CONFIG_KEYS = [
   'autoCompactEnabled',
   'autoScrollEnabled',
   'showTurnDuration',
+  'externalEditorContext',
+  'showMessageTimestamps',
   'diffTool',
   'env',
   'tipsHistory',
@@ -856,6 +874,8 @@ export const GLOBAL_CONFIG_KEYS = [
   'lspRecommendationIgnoredCount',
   'copyFullResponse',
   'copyOnSelect',
+  'leftArrowOpensAgents',
+  'defaultToAgentsView',
   'permissionExplainerEnabled',
   'prStatusFooterEnabled',
   'remoteControlAtStartup',
@@ -1049,7 +1069,13 @@ function wouldLoseAuthState(fresh: {
 
 export function saveGlobalConfig(
   updater: (currentConfig: GlobalConfig) => GlobalConfig,
+  /**
+   * densable ln(K, D) — official persist handle when `$t()`. Unused locally;
+   * disk write stays the path when this arg is omitted.
+   */
+  _storageV5?: unknown,
 ): void {
+  void _storageV5
   if (process.env.NODE_ENV === 'test') {
     const config = updater(TEST_GLOBAL_CONFIG_FOR_TESTING)
     // Skip if no changes (same reference returned)

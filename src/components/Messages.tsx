@@ -36,6 +36,7 @@ import { isEnvTruthy } from '../utils/envUtils.js';
 import { type BriefToolStats, collapseFocusTranscript, type FocusTranscriptMessage } from '../utils/focusTranscript.js';
 import { isFullscreenFeatureGateEnabled } from '../utils/fullscreen.js';
 import { applyGrouping } from '../utils/groupToolUses.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import { useAppState, useAppStateStore } from '../state/AppState.js';
 import {
   buildMessageLookups,
@@ -72,7 +73,6 @@ import {
 import { AssistantThinkingMessage } from './messages/AssistantThinkingMessage.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
-import type { ToolUseConfirm } from './permissions/PermissionRequest.js';
 import { StatusNotices } from './StatusNotices.js';
 import type { JumpHandle } from './VirtualMessageList.js';
 
@@ -278,7 +278,8 @@ type Props = {
     shouldHidePromptInput: boolean;
     shouldContinueAnimation?: true;
   } | null;
-  toolUseConfirmQueue: ToolUseConfirm[];
+  /** densable single-host: Host / _Zt overlays pause message animation. */
+  suppressMessageAnimation?: boolean;
   inProgressToolUseIDs: Set<string>;
   isMessageSelectorVisible: boolean;
   conversationId: string;
@@ -420,7 +421,7 @@ const MessagesImpl = ({
   commands,
   verbose,
   toolJSX,
-  toolUseConfirmQueue,
+  suppressMessageAnimation = false,
   inProgressToolUseIDs,
   isMessageSelectorVisible,
   conversationId,
@@ -453,6 +454,10 @@ const MessagesImpl = ({
   const { columns } = useTerminalSize();
   const toggleShowAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'Ctrl+E');
   const briefTranscript = useAppState(s => s.briefTranscript);
+  // densable W = showMessageTimestamps && tengu_silk_hinge
+  const showMessageTimestamps =
+    Boolean(useAppState(s => s.showMessageTimestamps)) &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_silk_hinge', false);
   // focus vs /brief: isBriefOnly wins when both on (stricter SendUserMessage-only path).
   const focusTranscriptActive = Boolean(briefTranscript) && isFullscreenFeatureGateEnabled() && !isBriefOnly;
   // async agent toolStats for focus transcript summary
@@ -834,13 +839,13 @@ const MessagesImpl = ({
       if (b?.type !== 'tool_result' || b.is_error || !msg.toolUseResult) return false;
       const name = lookupsRef.current.toolUseByToolUseID.get(b.tool_use_id ?? '')?.name;
       const tool = name ? findToolByName(tools, name) : undefined;
-      return tool?.isResultTruncated?.(msg.toolUseResult as never) ?? false;
+      return tool?.isResultTruncated?.(msg.toolUseResult as never, { columns }) ?? false;
     },
-    [tools],
+    [columns, tools],
   );
 
   const canAnimate =
-    (!toolJSX || !!toolJSX.shouldContinueAnimation) && !toolUseConfirmQueue.length && !isMessageSelectorVisible;
+    (!toolJSX || !!toolJSX.shouldContinueAnimation) && !suppressMessageAnimation && !isMessageSelectorVisible;
 
   const hasToolsInProgress = inProgressToolUseIDs.size > 0;
 
@@ -899,6 +904,7 @@ const MessagesImpl = ({
         columns={columns}
         isLoading={isLoading}
         lookups={lookups}
+        showMessageTimestamps={showMessageTimestamps}
       />
     );
 

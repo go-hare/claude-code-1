@@ -30,6 +30,7 @@ import {
 } from './PermissionMode.js'
 import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
 import { applyPermissionRulesToPermissionContext } from './permissions.js'
+import { emitPermissionRecheck } from './permissionRecheck.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -583,8 +584,39 @@ export function restoreDangerousPermissions(
   return { ...result, strippedDangerousRules: undefined }
 }
 
+/** densable kick-out qLe trigger (inAuto only; plan+auto has no qLe) */
+export const AUTO_GATE_DENIED_TRIGGER = 'auto_gate_denied'
+
+/** densable ExitPlanMode / teu qLe trigger */
+export const EXIT_PLAN_MODE_TRIGGER = 'exit_plan_mode'
+
 /**
- * Handles all state transitions when switching permission modes.
+ * densable qLe — Kd("permission_mode_changed", {from_mode, to_mode, trigger?}).
+ * xge 4th arg is the trigger (m0n "workflow_permission_prompt", Veu
+ * "auto_default_nudge"). Kick-out / teu / ExitPlanMode call qLe directly.
+ */
+export function logPermissionModeChanged(
+  fromMode: string,
+  toMode: string,
+  trigger?: string,
+): void {
+  if (fromMode === toMode) return
+  logEvent('permission_mode_changed', {
+    from_mode:
+      fromMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    to_mode:
+      toMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    ...(trigger
+      ? {
+          trigger:
+            trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }
+      : {}),
+  })
+}
+
+/**
+ * densable oHe — mode transition side-effects + qLe(trigger).
  * Centralises side-effects so that every activation path (CLI Shift+Tab,
  * SDK control messages, etc.) behaves identically.
  *
@@ -598,15 +630,18 @@ export function restoreDangerousPermissions(
  * @param fromMode The current permission mode
  * @param toMode The target permission mode
  * @param context The current tool permission context
+ * @param trigger densable qLe trigger (xge 4th arg)
  */
 export function transitionPermissionMode(
   fromMode: string,
   toMode: string,
   context: ToolPermissionContext,
+  trigger?: string,
 ): ToolPermissionContext {
   // plan→plan (SDK set_permission_mode) would wrongly hit the leave branch below
   if (fromMode === toMode) return context
 
+  logPermissionModeChanged(fromMode, toMode, trigger)
   handlePlanModeTransition(fromMode, toMode)
   handleAutoModeTransition(fromMode, toMode)
 
@@ -614,11 +649,17 @@ export function transitionPermissionMode(
     setHasExitedPlanMode(true)
   }
 
-  if (feature('TRANSCRIPT_CLASSIFIER')) {
-    if (toMode === 'plan' && fromMode !== 'plan') {
+  if (toMode === 'plan' && fromMode !== 'plan') {
+    if (feature('TRANSCRIPT_CLASSIFIER')) {
       return prepareContextForPlanMode(context)
     }
+    return {
+      ...context,
+      prePlanMode: fromMode as PermissionMode,
+    }
+  }
 
+  if (feature('TRANSCRIPT_CLASSIFIER')) {
     // Plan with auto active counts as using the classifier (for the leaving side).
     // isAutoModeActive() is the authoritative signal — prePlanMode/strippedDangerousRules
     // are unreliable proxies because auto can be deactivated mid-plan (non-opt-in
@@ -1306,6 +1347,7 @@ export async function verifyAutoModeGateAccess(
     if (inAuto) {
       autoModeStateModule?.setAutoModeActive(false)
       setNeedsAutoModeExitAttachment(true)
+      logPermissionModeChanged('auto', 'default', AUTO_GATE_DENIED_TRIGGER)
       return {
         ...applyPermissionUpdate(restoreDangerousPermissions(ctx), {
           type: 'setMode',
@@ -1384,7 +1426,19 @@ function isAutoModeDisabledBySettings(): boolean {
  * Order: circuit-breaker → settings disable → modelSupportsAutoMode (u3e).
  * Synchronous. Classifier feature off → closed (fork DCE).
  */
+let autoModeGateEnabledOverride: boolean | undefined
+
+/** Unit-test only. Classifier is off in bun:test, so sR cannot open otherwise. */
+export function _setAutoModeGateEnabledForTesting(
+  value: boolean | undefined,
+): void {
+  autoModeGateEnabledOverride = value
+}
+
 export function isAutoModeGateEnabled(): boolean {
+  if (autoModeGateEnabledOverride !== undefined) {
+    return autoModeGateEnabledOverride
+  }
   if (autoModeStateModule?.isAutoModeCircuitBroken() ?? false) return false
   if (isAutoModeDisabledBySettings()) return false
   // Avoid getMainLoopModel when classifier is off (no auth / no model resolve).
@@ -1675,9 +1729,10 @@ export type SetPermissionModeResult =
   | { ok: false; error: string }
 
 /**
- * densable Sce — apply a permission mode with policy guards (bypass settings /
- * session availability, auto gate). Caller supplies `apply` to write the
- * transitioned context (session AppState or equivalent).
+ * densable xge / Sce — apply a permission mode with policy guards (bypass
+ * settings / session availability, auto gate). Caller supplies `apply` to
+ * write the transitioned context (session AppState or equivalent).
+ * `trigger` is gold xge 4th arg → oHe → qLe.
  */
 export function setPermissionModeWithGuards(
   mode: PermissionMode,
@@ -1685,6 +1740,7 @@ export function setPermissionModeWithGuards(
   apply: (
     updater: (ctx: ToolPermissionContext) => ToolPermissionContext,
   ) => void,
+  trigger?: string,
 ): SetPermissionModeResult {
   if (mode === 'bypassPermissions') {
     if (isBypassPermissionsModeDisabled()) {
@@ -1715,9 +1771,13 @@ export function setPermissionModeWithGuards(
   apply(ctx => {
     if (ctx.mode === mode) return ctx
     return {
-      ...transitionPermissionMode(ctx.mode, mode, ctx),
+      ...transitionPermissionMode(ctx.mode, mode, ctx, trigger),
       mode,
     }
+  })
+  // densable Gqe.emit after successful xge (permissionRecheck).
+  setImmediate(() => {
+    emitPermissionRecheck()
   })
   return { ok: true, mode }
 }

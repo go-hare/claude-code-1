@@ -9,7 +9,6 @@ import {
   findCommand,
   getCommand,
   getCommandName,
-  hasCommand,
   isCommandEnabled,
   type PromptCommand,
 } from 'src/commands.js';
@@ -76,6 +75,8 @@ import { parseToolListFromCLI } from '../permissions/permissionSetup.js';
 import { hasPermissionsToUseTool } from '../permissions/permissions.js';
 import { isOfficialMarketplaceName, parsePluginIdentifier } from '../plugins/pluginIdentifier.js';
 import { isRestrictedToPluginOnly, isSourceAdminTrusted } from '../settings/pluginOnlyPolicy.js';
+import { isSkillFullyDisabledByOverride, resolveSkillOverrideMode } from '../residualFinalEnvGates.js';
+import { getInitialSettings } from '../settings/settings.js';
 import { parseSlashCommand } from '../slashCommandParsing.js';
 import { slashCommandEditDistance, suggestSlashCommand } from '../slashCommandSuggest.js';
 import { sleep } from '../sleep.js';
@@ -545,6 +546,29 @@ export function looksLikeCommand(commandName: string): boolean {
   return !/[^a-zA-Z0-9:\-_]/.test(commandName);
 }
 
+/** densable `cie` — skillOverrides "off" hides from Did-you-mean. */
+function isSlashCommandOff(cmd: Command): boolean {
+  try {
+    const settings = getInitialSettings();
+    return isSkillFullyDisabledByOverride(
+      resolveSkillOverrideMode(cmd, {
+        skillOverrides: settings.skillOverrides,
+        settingsDisableBundledSkills: settings.disableBundledSkills,
+      }),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** densable `pe("cmd_dispatch", errorCode)` → tengu_feature_bad. */
+function logCmdDispatch(errorCode: 'cmd_parse_failed' | 'cmd_unknown' | 'cmd_unavailable_headless'): void {
+  logEvent('tengu_feature_bad', {
+    feature_name: 'cmd_dispatch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    error_code: errorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  });
+}
+
 export async function processSlashCommand(
   inputString: string,
   precedingInputBlocks: ContentBlockParam[],
@@ -558,10 +582,15 @@ export async function processSlashCommand(
   autonomy?: QueuedCommand['autonomy'],
   /** densable modelScheduledOrigin — threaded into prompt skill context. */
   modelScheduledOrigin?: boolean,
+  /** densable `g` — WGw `submissionOrigin`. */
+  submissionOrigin?: { kind?: string },
 ): Promise<ProcessUserInputBaseResult> {
   const parsed = parseSlashCommand(inputString);
   if (!parsed) {
     logEvent('tengu_input_slash_missing', {});
+    if (!context.options.isNonInteractiveSession) {
+      logCmdDispatch('cmd_parse_failed');
+    }
     const errorMessage = 'Commands are in the form `/command [args]`';
     return {
       messages: [
@@ -583,8 +612,10 @@ export async function processSlashCommand(
 
   const sanitizedCommandName = isMcp ? 'mcp' : !builtInCommandNames().has(commandName) ? 'custom' : commandName;
 
-  // Check if it's a real command before processing
-  if (!hasCommand(commandName, context.options.commands)) {
+  // densable: `if(C&&!UD(C))C=void 0` — disabled command is missing.
+  const foundCommand = findCommand(commandName, context.options.commands);
+  const resolvedCommand = foundCommand && isCommandEnabled(foundCommand) ? foundCommand : undefined;
+  if (!resolvedCommand) {
     // Check if this looks like a command name vs a file path or other input
     // Also check if it's an actual file path that exists
     let isFilePath = false;
@@ -594,36 +625,61 @@ export async function processSlashCommand(
     } catch {
       // Not a file path — treat as command name
     }
-    if (looksLikeCommand(commandName) && !isFilePath) {
+    const isMcpTemplateUnmatched = commandName.includes('://');
+    if ((looksLikeCommand(commandName) || isMcpTemplateUnmatched) && !isFilePath) {
+      // densable print + shipped builtin name: report unavailable, do not fuzzy-run.
+      if (context.options.isNonInteractiveSession && builtInCommandNames().has(commandName)) {
+        const unavailable = `/${commandName} isn't available in this environment.`;
+        logEvent('tengu_input_slash_invalid', {
+          input_length: commandName.length,
+          had_suggestion: false,
+        });
+        logCmdDispatch('cmd_unavailable_headless');
+        const echoArgs = !parsedArgs ? '' : foundCommand?.isSensitive ? ' ***' : ` ${parsedArgs}`;
+        return {
+          messages: [
+            ...attachmentMessages,
+            createCommandInputMessage(`/${commandName}${echoArgs}`),
+            createCommandInputMessage(`<local-command-stdout>${unavailable}</local-command-stdout>`),
+          ],
+          shouldQuery: false,
+          resultText: unavailable,
+        };
+      }
       const suggestion = suggestSlashCommand(
         commandName,
         context.options.commands
-          .filter(cmd => !cmd.isHidden && isCommandEnabled(cmd))
+          .filter(cmd => !cmd.isHidden && !isSlashCommandOff(cmd) && isCommandEnabled(cmd))
           .map(cmd => ({ name: getCommandName(cmd), aliases: cmd.aliases })),
         { maxEditDistance: 2 },
       );
       logEvent('tengu_input_slash_invalid', {
-        input: commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         input_length: commandName.length,
+        is_mcp_template_unmatched: isMcpTemplateUnmatched,
         had_suggestion: Boolean(suggestion),
         suggestion_distance: suggestion ? slashCommandEditDistance(commandName, suggestion) : undefined,
       });
+      logCmdDispatch('cmd_unknown');
 
       const unknownMessage = suggestion
         ? `Unknown command: /${commandName}. Did you mean /${suggestion}?`
         : `Unknown command: /${commandName}`;
+      // densable: print echoes /cmd + local-command-stdout; interactive is warning.
+      if (context.options.isNonInteractiveSession) {
+        return {
+          messages: [
+            ...attachmentMessages,
+            createCommandInputMessage(`/${commandName}${parsedArgs ? ` ${parsedArgs}` : ''}`),
+            createCommandInputMessage(`<local-command-stdout>${unknownMessage}</local-command-stdout>`),
+          ],
+          shouldQuery: false,
+          resultText: unknownMessage,
+        };
+      }
       return {
         messages: [
-          createSyntheticUserCaveatMessage(),
           ...attachmentMessages,
-          createUserMessage({
-            content: prepareUserContent({
-              inputString: unknownMessage,
-              precedingInputBlocks,
-            }),
-          }),
-          // gh-32591: preserve args so the user can copy/resubmit without
-          // retyping. System warning is UI-only (filtered before API).
+          createSystemMessage(unknownMessage, 'warning'),
           ...(parsedArgs ? [createSystemMessage(`Args from unknown skill: ${parsedArgs}`, 'warning')] : []),
         ],
         shouldQuery: false,
@@ -677,6 +733,7 @@ export async function processSlashCommand(
     uuid,
     autonomy,
     modelScheduledOrigin,
+    submissionOrigin,
   );
 
   // Local slash commands that skip messages
@@ -749,8 +806,10 @@ export async function processSlashCommand(
 
     if (!looksLikeFilePath) {
       logEvent('tengu_input_slash_invalid', {
-        input: commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        input_length: commandName.length,
+        had_suggestion: false,
       });
+      logCmdDispatch('cmd_unknown');
     }
 
     return {
@@ -856,6 +915,8 @@ async function getMessagesForSlashCommand(
   autonomy?: QueuedCommand['autonomy'],
   /** densable modelScheduledOrigin — threaded into prompt skill context. */
   modelScheduledOrigin?: boolean,
+  /** densable `g` — WGw `submissionOrigin`. */
+  submissionOrigin?: { kind?: string },
 ): Promise<SlashCommandResult> {
   let resolvedName = commandName;
   let resolvedArgs = args;
@@ -1031,6 +1092,7 @@ async function getMessagesForSlashCommand(
                   canUseTool,
                   // densable dispatchedAsImmediate: E$t(cmd, args)
                   dispatchedAsImmediate: isCommandImmediate(command, argsForDispatch),
+                  submissionOrigin,
                 },
                 argsForDispatch,
               ),
@@ -1090,7 +1152,10 @@ async function getMessagesForSlashCommand(
         try {
           const syntheticCaveatMessage = createSyntheticUserCaveatMessage();
           const mod = await command.load();
-          const result = await mod.call(argsForDispatch, context);
+          const result = await mod.call(argsForDispatch, {
+            ...context,
+            submissionOrigin,
+          });
 
           if (result.type === 'skip') {
             return {

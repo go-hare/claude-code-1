@@ -13,6 +13,7 @@
  */
 
 import { isEnvTruthy } from './envUtils.js'
+import { getInitialSettings } from './settings/settings.js'
 import {
   REFUSAL_FALLBACK_DIALOG_KIND,
   type RefusalFallbackResult,
@@ -23,6 +24,11 @@ export function isRefusalFallbackEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return !isEnvTruthy(env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK)
+}
+
+/** Official `$c("switchModelsOnFlag", true).value` — userSettings, default true. */
+export function getSwitchModelsOnFlag(): boolean {
+  return getInitialSettings().switchModelsOnFlag ?? true
 }
 
 export function isRefusalFallbackCatchAllEnabled(
@@ -623,7 +629,7 @@ export function isServerRefusalFallbackLaneEnabled(input?: {
   const enabled =
     input?.refusalFallbackEnabled ??
     isRefusalFallbackEnabled(input?.env ?? process.env)
-  const switchOn = input?.switchModelsOnFlag ?? true
+  const switchOn = input?.switchModelsOnFlag ?? getSwitchModelsOnFlag()
   const firstParty =
     input?.firstPartyCapable ??
     isFirstPartyAnthropicApiCapable({ env: input?.env })

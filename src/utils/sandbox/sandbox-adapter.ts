@@ -126,6 +126,9 @@ export const DENY_READ_SOCKET_PATHS = [
   '/run/user',
 ] as const
 
+// Local 236 wildcard read-deny (gold QOi lists these; CXq table did not).
+export const DENY_READ_ENV_GLOBS = ['**/.env', '**/.env*'] as const
+
 /**
  * densable 2.1.239 G — on linux/wsl, create a missing `.git/config.worktree`
  * (`openSync(..., "wx")`) so denyWrite binds a real empty file. A missing
@@ -1005,6 +1008,7 @@ export function convertToSandboxRuntimeConfig(
   // Deny read access to container runtime sockets — these allow escaping
   // the sandbox by spawning privileged containers on the host
   denyRead.push(...DENY_READ_SOCKET_PATHS)
+  denyRead.push(...DENY_READ_ENV_GLOBS)
 
   // If we detected a git worktree during initialize(), the main repo path is
   // cached in worktreeMainRepoPath. Git operations in a worktree need write

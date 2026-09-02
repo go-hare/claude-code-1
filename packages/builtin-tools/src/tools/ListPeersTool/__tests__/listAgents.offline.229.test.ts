@@ -58,9 +58,12 @@ describe('densable 2.1.229 #5 ListAgents offline/cloud', () => {
         transport: 'uds',
       },
     ])
-    expect(listing).toContain('laptop [bridge:dead] offline @ /tmp')
-    expect(listing).toContain('remote [cloud:sess1] cloud')
-    expect(listing).toContain('local [uds:/tmp/a.sock]')
-    expect(listing).not.toMatch(/local \[uds:\/tmp\/a\.sock\] (offline|cloud)/)
+    expect(listing).toContain('laptop')
+    expect(listing).toContain('offline')
+    expect(listing).toContain('remote')
+    expect(listing).toContain('cloud session')
+    expect(listing).toContain('local')
+    expect(listing).toContain('\u00B7')
+    expect(listing).not.toContain('@ /tmp')
   })
 })

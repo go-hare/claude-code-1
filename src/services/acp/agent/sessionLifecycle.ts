@@ -215,11 +215,15 @@ function applySessionMode(
     }
 
     session.modes = { ...session.modes, currentModeId: modeId }
-    // Sync mode to appState so the permission pipeline sees the correct mode
-    session.appState.toolPermissionContext = {
-      ...session.appState.toolPermissionContext,
-      mode: modeId as PermissionMode,
+    const prev = session.appState.toolPermissionContext
+    const nextMode = modeId as PermissionMode
+    let next = { ...prev, mode: nextMode }
+    if (prev.mode !== 'plan' && nextMode === 'plan') {
+      next = { ...next, prePlanMode: prev.mode }
+    } else if (prev.mode === 'plan' && nextMode !== 'plan') {
+      next = { ...next, prePlanMode: undefined }
     }
+    session.appState.toolPermissionContext = next
   }
 }
 

@@ -82,12 +82,18 @@ export function usePipePermissionForward({
             }
 
             const assistantMessage = createAssistantMessage({ content: '' })
-            const toolUseContext = getToolUseContext(
-              [],
-              [],
-              new AbortController(),
-              mainLoopModel,
-            )
+            // Strip requestDialog — REPL context carries doo mailbox, and
+            // mirrorOpen skips when it is set. Pipe settles via confirm
+            // callbacks, not startPermissionDoo.
+            const toolUseContext = {
+              ...getToolUseContext(
+                [],
+                [],
+                new AbortController(),
+                mainLoopModel,
+              ),
+              requestDialog: undefined,
+            }
             const toolUseID = `pipe:${payload.requestId}`
             enqueuePermissionConfirm(setToolUseConfirmQueue, dialogStore, {
               assistantMessage,

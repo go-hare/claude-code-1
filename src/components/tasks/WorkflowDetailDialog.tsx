@@ -14,6 +14,7 @@ import {
   Box,
   Text,
   type KeyboardEvent,
+  stringWidth,
   useAnimationFrame,
   useIsInsideModal,
   useModalOrTerminalSize,
@@ -22,6 +23,7 @@ import {
 import type { Theme } from '@anthropic/ink';
 import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js';
 import type { SdkWorkflowAgentProgress } from '../../types/workflowProgress.js';
+import { truncateToWidthNoEllipsis } from '../../utils/truncate.js';
 import { agentDisplayStatus, foldWorkflowPhases, isAgentLive, type FoldedPhase } from '../../workflow/foldProgress.js';
 import { Byline } from '../design-system/Byline.js';
 import { Dialog } from '../design-system/Dialog.js';
@@ -106,35 +108,55 @@ function formatTokens(n: number | undefined): string | null {
   return String(n);
 }
 
-function phaseMark(status: FoldedPhase['status']): {
+/** densable _fs status glyph: tick / cross / 1-based index (never ● — that reads as a cursor). */
+function phaseMark(
+  status: FoldedPhase['status'],
+  index: number,
+): {
   mark: string;
   color: keyof Theme | undefined;
 } {
   switch (status) {
     case 'done':
-      return { mark: '✓', color: 'success' };
+      return { mark: figures.tick, color: 'success' };
     case 'failed':
-      return { mark: '✗', color: 'error' };
+      return { mark: figures.cross, color: 'error' };
     case 'running':
-      return { mark: '●', color: 'claude' };
+      return { mark: String(index + 1), color: 'claude' };
     default:
-      return { mark: '○', color: 'subtle' };
+      return { mark: String(index + 1), color: 'subtle' };
   }
 }
 
 function agentMeta(agent: SdkWorkflowAgentProgress, running: boolean): string {
+  // densable puA stats: model is separate; tokens + status flags. toolCalls stay in totals.
   const st = agentDisplayStatus(agent, running);
   const parts: string[] = [];
   if (agent.model) parts.push(agent.model);
   const tok = formatTokens(agent.tokens);
   if (tok) parts.push(`${tok} tok`);
-  if (agent.toolCalls != null && agent.toolCalls > 0) {
-    parts.push(`${agent.toolCalls} tool`);
-  }
   if (st === 'skipped') parts.push('skipped');
   if (st === 'failed' && agent.error) parts.push(agent.error.slice(0, 40));
   if (st === 'interrupted') parts.push('stopped');
   return parts.join(' · ');
+}
+
+/** densable jGc: keep meta intact when possible; shrink label into the remaining width. */
+export function fitAgentColumns(label: string, meta: string, width: number): { label: string; meta: string } {
+  if (width <= 0) return { label: '', meta: '' };
+  const metaW = stringWidth(meta);
+  if (!meta) {
+    return { label: truncateToWidthNoEllipsis(label, width), meta: '' };
+  }
+  if (metaW >= width) {
+    return { label: '', meta: truncateToWidthNoEllipsis(meta, width) };
+  }
+  const gap = 1;
+  const labelBudget = Math.max(0, width - metaW - gap);
+  return {
+    label: truncateToWidthNoEllipsis(label, labelBudget),
+    meta,
+  };
 }
 
 function agentMark(
@@ -145,9 +167,9 @@ function agentMark(
   const st = agentDisplayStatus(agent, running);
   switch (st) {
     case 'done':
-      return { mark: '✓', color: 'success' };
+      return { mark: figures.tick, color: 'success' };
     case 'failed':
-      return { mark: '✗', color: 'error' };
+      return { mark: figures.cross, color: 'error' };
     case 'skipped':
       return { mark: '–', color: 'subtle' };
     case 'running':
@@ -183,7 +205,14 @@ export function WorkflowDetailDialog({
     : promptVisibleBelow
       ? Math.max(12, modalSize.rows - 9)
       : modalSize.rows;
-  const panelWidth = Math.max(24, terminalSize.columns - 6);
+  // densable gfs.width — used for column fit, NOT as a fixed outer Box width
+  // (fixed width made Pane Divider overshoot the frame and clip agent meta).
+  // Pane paddingX: modal=1 each side, else=2 — subtract so fitted rows stay inside.
+  const gfsWidth = Math.max(24, terminalSize.columns - 6);
+  const contentWidth = Math.max(12, gfsWidth - (insideModal ? 2 : 4));
+  const phasesColWidth = Math.max(10, Math.floor(contentWidth * 0.3));
+  // pipe (1) + gaps (~2) between phases | agents
+  const agentColWidth = Math.max(16, contentWidth - phasesColWidth - 3);
   const { phases, finishedAgents, totalAgents } = useMemo(
     () =>
       foldWorkflowPhases(
@@ -303,15 +332,16 @@ export function WorkflowDetailDialog({
 
   const title = task.workflowName || task.description || 'workflow';
 
+  // densable DreamDetailDialog / Pane: fill parent; Divider uses terminal width.
   return (
     <Box
       ref={clockRef}
       flexDirection="column"
       tabIndex={0}
       autoFocus
-      borderStyle="round"
       onKeyDown={handleKeyDown}
-      width={panelWidth}
+      width="100%"
+      minWidth={0}
       minHeight={minHeight}
       maxHeight={maxHeight}
       overflowY="hidden"
@@ -349,23 +379,24 @@ export function WorkflowDetailDialog({
             {running ? 'Waiting for phase/agent progress…' : 'No progress recorded for this workflow.'}
           </Text>
         ) : (
-          <Box flexDirection="row" gap={1}>
-            <Box width="30%" flexDirection="column">
+          <Box flexDirection="row" gap={1} width="100%" minWidth={0}>
+            <Box width={phasesColWidth} flexShrink={0} flexDirection="column" minWidth={0}>
               <Text bold color={focus === 'phases' ? 'claude' : 'subtle'}>
                 Phases
               </Text>
               {phases.slice(phaseWin.from, phaseWin.to).map((p, visibleIdx) => {
                 const i = phaseWin.from + visibleIdx;
                 const selected = i === safePhase && focus === 'phases';
-                const { mark, color } = phaseMark(p.status);
+                const { mark, color } = phaseMark(p.status, i);
+                // densable _fs: selection = rt.pointer + permission; status = tick/cross/index.
+                const phaseLabel = `${p.title}${p.totalCount > 0 ? ` ${p.doneCount}/${p.totalCount}` : ''}`;
+                const prefixW = stringWidth(`${selected ? figures.pointer : ' '} ${mark} `);
+                const titleFit = truncateToWidthNoEllipsis(phaseLabel, Math.max(1, phasesColWidth - prefixW));
                 return (
                   <Box key={`${p.phaseIndex}:${p.title}`} backgroundColor={selected ? 'selectionBg' : undefined}>
-                    <Text color={color as keyof Theme}>{mark}</Text>
-                    <Text>
-                      {' '}
-                      {p.title}
-                      {p.totalCount > 0 ? ` ${p.doneCount}/${p.totalCount}` : ''}
-                    </Text>
+                    <Text color={selected ? 'permission' : undefined}>{selected ? figures.pointer : ' '}</Text>
+                    <Text color={(selected ? 'permission' : color) as keyof Theme}> {mark}</Text>
+                    <Text color={selected ? 'permission' : undefined}> {titleFit}</Text>
                   </Box>
                 );
               })}
@@ -377,8 +408,8 @@ export function WorkflowDetailDialog({
               ) : null}
             </Box>
             <Text color="subtle">│</Text>
-            <Box flexGrow={1} flexDirection="column">
-              <Text bold color={focus === 'agents' ? 'claude' : 'subtle'}>
+            <Box flexGrow={1} flexShrink={1} flexDirection="column" minWidth={0} width={agentColWidth}>
+              <Text bold color={focus === 'agents' ? 'claude' : 'subtle'} wrap="truncate-end">
                 {phase?.title ?? 'Agents'} · {agents.length}
               </Text>
               {agents.length === 0 ? (
@@ -389,18 +420,27 @@ export function WorkflowDetailDialog({
                     const i = agentWin.from + visibleIdx;
                     const selected = i === safeAgent && focus === 'agents';
                     const { mark, color } = agentMark(a, running, spinner);
-                    const label = (a.label ?? `agent-${a.index}`).slice(0, 28);
+                    const prefix = `${selected ? figures.pointer : ' '} ${mark} `;
+                    const prefixW = stringWidth(prefix);
+                    const rawLabel = a.label ?? `agent-${a.index}`;
+                    const rawMeta = agentMeta(a, running);
+                    const fitted = fitAgentColumns(rawLabel, rawMeta, Math.max(0, agentColWidth - prefixW));
                     return (
                       <Box
                         key={a.index}
                         backgroundColor={selected ? 'selectionBg' : undefined}
                         justifyContent="space-between"
+                        width={agentColWidth}
+                        minWidth={0}
                       >
                         <Box>
-                          <Text color={color as keyof Theme}>{mark}</Text>
-                          <Text> {label}</Text>
+                          <Text color={selected ? 'permission' : undefined}>{selected ? figures.pointer : ' '}</Text>
+                          <Text color={(selected ? 'permission' : color) as keyof Theme}> {mark}</Text>
+                          {fitted.label ? (
+                            <Text color={selected ? 'permission' : undefined}> {fitted.label}</Text>
+                          ) : null}
                         </Box>
-                        <Text color="subtle">{agentMeta(a, running)}</Text>
+                        {fitted.meta ? <Text color="subtle">{fitted.meta}</Text> : null}
                       </Box>
                     );
                   })}

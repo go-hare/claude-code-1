@@ -393,6 +393,9 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       cronIds: [],
       detachedPids: [],
       handoffTaskIds: ['task-live-agent-1'],
+      frameLiveTaskIds: [],
+      carriedMonitorTaskIds: [],
+      stopCarriedWatches: () => {},
       disown: () => {
         disownCalls++
       },
@@ -534,6 +537,8 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     const mod = await import('../leftArrowAgents.js')
     expect(typeof mod.bridgeFlushCapMs).toBe('function')
     expect(typeof mod.shouldReplyOnIdleFork).toBe('function')
+    expect(typeof mod.isLeftArrowDaemonDetachOnly).toBe('function')
+    expect(typeof mod.clearBridgeSessionMetaAfterQpeHandoff).toBe('function')
     expect(mod.BRIDGE_FLUSH_CAP_MS).toBe(2000)
     expect(mod.BRIDGE_FLUSH_CAP_REPLY_ON_RESUME_MS).toBe(5000)
     expect(mod.SESSION_FLUSH_CAP_MS).toBe(2000)

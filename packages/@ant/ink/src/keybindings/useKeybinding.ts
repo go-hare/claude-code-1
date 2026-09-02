@@ -10,6 +10,12 @@ type Options = {
   context?: KeybindingContextName
   /** Only handle when active (like useInput's isActive) */
   isActive?: boolean
+  /**
+   * Consume before earlier useInput listeners (DualInk analog of uSt
+   * consume). Used when a dialog must steal a Global action such as
+   * app:toggleTranscript.
+   */
+  prepend?: boolean
 }
 
 /**
@@ -36,7 +42,7 @@ export function useKeybinding(
   handler: () => void | false | Promise<void>,
   options: Options = {},
 ): void {
-  const { context = 'Global', isActive = true } = options
+  const { context = 'Global', isActive = true, prepend = false } = options
   const keybindingContext = useOptionalKeybindingContext()
 
   // Register handler with the context for ChordInterceptor to invoke
@@ -94,7 +100,7 @@ export function useKeybinding(
     [action, context, handler, keybindingContext],
   )
 
-  useInput(handleInput, { isActive })
+  useInput(handleInput, { isActive, prepend })
 }
 
 /**
@@ -122,7 +128,7 @@ export function useKeybindings(
   handlers: Record<string, () => void | false | Promise<void>>,
   options: Options = {},
 ): void {
-  const { context = 'Global', isActive = true } = options
+  const { context = 'Global', isActive = true, prepend = false } = options
   const keybindingContext = useOptionalKeybindingContext()
 
   // Register all handlers with the context for ChordInterceptor to invoke
@@ -193,5 +199,5 @@ export function useKeybindings(
     [context, handlers, keybindingContext],
   )
 
-  useInput(handleInput, { isActive })
+  useInput(handleInput, { isActive, prepend })
 }

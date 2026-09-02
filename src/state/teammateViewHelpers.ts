@@ -50,6 +50,9 @@ export function enterTeammateView(
   logEvent('tengu_transcript_view_enter', {})
   setAppState(prev => {
     const task = prev.tasks[taskId]
+    // Unknown id: do not set viewingAgentTaskId — auto-exit would bounce
+    // (flash) back to the leader on the next effect.
+    if (task === undefined) return prev
     const prevId = prev.viewingAgentTaskId
     const prevTask = prevId !== undefined ? prev.tasks[prevId] : undefined
     const switching =

@@ -5,6 +5,7 @@
  */
 
 import type { PermissionMode } from '../../types/permissions.js'
+import { isSessionBypassClass } from './planBypass.js'
 
 /** Official jDu: preview/browser server display names. */
 const PREVIEW_BROWSER_SERVERS = new Set(['Claude Preview', 'Claude Browser'])
@@ -19,6 +20,8 @@ const CHROME_CLASSIFIER_FLOOR_SERVERS = new Set([
 export type McpPermissionModeContext = {
   mode: PermissionMode
   isBypassPermissionsModeAvailable?: boolean
+  /** Plan inherited from bypass — densable plan+bypass, not merely listable. */
+  prePlanMode?: PermissionMode
   /** Per MCP serverName → forced mode when session is elevated. */
   mcpPermissionModeOverrides?: Readonly<
     Record<string, PermissionMode | undefined>
@@ -37,9 +40,8 @@ export type McpPermissionModeContext = {
  */
 function isElevatedMode(ctx: McpPermissionModeContext): boolean {
   return (
-    ctx.mode === 'bypassPermissions' ||
     ctx.mode === 'auto' ||
-    (ctx.mode === 'plan' && ctx.isBypassPermissionsModeAvailable === true)
+    isSessionBypassClass({ mode: ctx.mode, prePlanMode: ctx.prePlanMode })
   )
 }
 

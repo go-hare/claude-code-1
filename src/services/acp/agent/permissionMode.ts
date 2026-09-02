@@ -81,14 +81,13 @@ export function hasOwnField(
 /**
  * Whether bypassPermissions is selectable by ACP clients.
  *
- * The previous implementation required a local opt-in (ACP_PERMISSION_MODE env var,
- * CLAUDE_CODE_ACP_ALLOW_BYPASS_PERMISSIONS env var, or settings.permissions.defaultMode).
- * That gate made the mode invisible to standard clients unless the operator already
- * pre-configured it — defeating the point of exposing it through the ACP mode list.
+ * densable: list when the process itself allows bypass — non-root (geteuid/getuid)
+ * or IS_SANDBOX. Tip previously added an extra opt-in env/settings gate that made
+ * the mode invisible to standard clients; that was removed to match gold listing.
  *
- * The only remaining guard is the process-level one: bypass must not silently run
- * as root (where every skipped permission check is a privilege boundary crossed),
- * unless explicitly marked as a sandbox.
+ * Platforms without uid semantics (Windows): densable also falls through when
+ * geteuid/getuid are absent — fail-open listable. Do not invent a Windows-only
+ * fail-closed gate here.
  */
 export function isAcpBypassPermissionModeAvailable(): boolean {
   return isProcessBypassPermissionModeAvailable()
@@ -98,5 +97,6 @@ function isProcessBypassPermissionModeAvailable(): boolean {
   if (process.env.IS_SANDBOX) return true
   if (typeof process.geteuid === 'function') return process.geteuid() !== 0
   if (typeof process.getuid === 'function') return process.getuid() !== 0
+  // densable / Node on win32: no uid APIs → available (fail-open)
   return true
 }

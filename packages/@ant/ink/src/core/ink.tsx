@@ -98,6 +98,7 @@ import {
 } from './terminal.js';
 import type { TerminalQuerier } from './terminal-querier.js';
 import { cursorPosition as cursorPositionQuery } from './terminal-querier.js';
+import { MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS, readStdoutSize, sanitizeTerminalDimension } from './terminalSize.js';
 import {
   CURSOR_HOME,
   cursorMove,
@@ -298,6 +299,8 @@ export default class Ink {
   private hasRendered = false;
   private terminalColumns: number;
   private terminalRows: number;
+  /** densable loggedGarbageWinsize — warnGarbageWinsizeOnce fires once. */
+  private loggedGarbageWinsize = false;
   private currentNode: ReactNode = null;
   private frontFrame: Frame;
   private backFrame: Frame;
@@ -461,8 +464,10 @@ export default class Ink {
       stderr: options.stderr,
     };
 
-    this.terminalColumns = options.stdout.columns || 80;
-    this.terminalRows = options.stdout.rows || 24;
+    // densable pCi(stdout, warnGarbageWinsizeOnce) — clamp, not || 80/24
+    const ctorSize = readStdoutSize(options.stdout, this.warnGarbageWinsizeOnce);
+    this.terminalColumns = ctorSize.cols;
+    this.terminalRows = ctorSize.rows;
     this.altScreenParkPatch = makeAltScreenParkPatch(this.terminalRows);
     this.stylePool = new StylePool();
     this.charPool = new CharPool();
@@ -521,8 +526,18 @@ export default class Ink {
     this.rootNode.onComputeLayout = () => {
       // densable 2.1.228 #1: runLayoutPass with try/recover instead of bare
       // calculateLayout — yoga faults clear caches and re-layout once.
+      // densable 2.1.239: TTY + stale winsize → syncTerminalSize then
+      // queueMicrotask render (after this layout pass).
       if (this.isUnmounted) {
         return;
+      }
+      if (this.options.stdout.isTTY && this.syncTerminalSize()) {
+        const node = this.currentNode;
+        if (node !== null) {
+          queueMicrotask(() => {
+            if (!this.isUnmounted) this.render(node);
+          });
+        }
       }
       const yoga = this.rootNode.yogaNode;
       if (yoga) {
@@ -591,8 +606,9 @@ export default class Ink {
     // Official: this.nativeCursorVisible=this.accessibilityMode; reset SR diff
     this.resetScreenReaderDiffState();
     // handleSuspend disabled mouse. Alt path re-enters via reenterAltScreen;
-    // sticky-main (MainScreenShell / setMouseTracking) must re-assert here —
-    // resize already does, but SIGCONT is not a resize.
+    // sticky-main (MainScreenShell / setMouseTracking) must re-assert here.
+    // Gold syncTerminalSize only re-asserts mouse on alt resize; SIGCONT is
+    // not a resize.
     if (this.altScreenMouseTracking !== 'off') {
       this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
     }
@@ -606,57 +622,40 @@ export default class Ink {
     this.prevScreenReaderAnchor = 'clean';
   }
 
+  // densable handleResize = () => { if (!syncTerminalSize()) return; render }
   // NOT debounced. A debounce opens a window where stdout.columns is NEW
   // but this.terminalColumns/Yoga are OLD — any scheduleRender during that
   // window (spinner, clock) makes log-update detect a width change and
   // clear the screen, then the debounce fires and clears again (double
-  // blank→paint flicker). useVirtualScroll's height scaling already bounds
-  // the per-resize cost; synchronous handling keeps dimensions consistent.
+  // blank→paint flicker).
   private handleResize = () => {
-    const cols = this.options.stdout.columns || 80;
-    const rows = this.options.stdout.rows || 24;
-    // Terminals often emit 2+ resize events for one user action (window
-    // settling). Same-dimension events are no-ops; skip to avoid redundant
-    // frame resets and renders.
-    if (cols === this.terminalColumns && rows === this.terminalRows) return;
-    this.terminalColumns = cols;
-    this.terminalRows = rows;
-    this.altScreenParkPatch = makeAltScreenParkPatch(this.terminalRows);
-    // Official syncTerminalSize: resetScreenReaderDiffState on resize
-    this.resetScreenReaderDiffState();
-
-    // Alt screen: reset frame buffers so the next render repaints from
-    // scratch (prevFrameContaminated → every cell written, wrapped in
-    // BSU/ESU — old content stays visible until the new frame swaps
-    // atomically). Re-assert mouse tracking (some emulators reset it on
-    // resize). Do NOT write ENTER_ALT_SCREEN: iTerm2 treats ?1049h as a
-    // buffer clear even when already in alt — that's the blank flicker.
-    // Self-healing re-entry (if something kicked us out of alt) is handled
-    // by handleResume (SIGCONT) and the sleep-wake detector; resize itself
-    // doesn't exit alt-screen. Do NOT write ERASE_SCREEN: render() below
-    // can take ~80ms; erasing first leaves the screen blank that whole time.
-    if (!this.isPaused && this.options.stdout.isTTY) {
-      // Re-assert mouse for alt-screen OR main-screen sticky shell
-      // (MainScreenShell / setMouseTracking). Some emulators reset modes
-      // on resize.
-      if (this.altScreenMouseTracking !== 'off') {
-        this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
-      }
-      if (this.altScreenActive) {
-        this.resetFramesForAltScreen();
-        this.needsEraseBeforePaint = true;
-      }
-    }
-
-    // Re-render the React tree with updated props so the context value changes.
-    // React's commit phase will call onComputeLayout() to recalculate yoga layout
-    // with the new dimensions, then call onRender() to render the updated frame.
-    // We don't call scheduleRender() here because that would render before the
-    // layout is updated, causing a mismatch between viewport and content dimensions.
+    if (!this.syncTerminalSize()) return;
     if (this.currentNode !== null) {
       this.render(this.currentNode);
     }
   };
+
+  /**
+   * densable syncTerminalSize — false if winsize unchanged.
+   * Alt + !paused + TTY: re-assert mouse, resetFrames, needsEraseBeforePaint.
+   * Do NOT write ENTER_ALT_SCREEN or ERASE_SCREEN here (iTerm ?1049h flicker).
+   */
+  private syncTerminalSize(): boolean {
+    if (!this.hasStaleTerminalSize()) return false;
+    const { columns, rows } = this.stdoutSize();
+    this.terminalColumns = columns;
+    this.terminalRows = rows;
+    this.altScreenParkPatch = makeAltScreenParkPatch(this.terminalRows);
+    this.resetScreenReaderDiffState();
+    if (this.altScreenActive && !this.isPaused && this.options.stdout.isTTY) {
+      if (this.altScreenMouseTracking !== 'off') {
+        this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
+      }
+      this.resetFramesForAltScreen();
+      this.needsEraseBeforePaint = true;
+    }
+    return true;
+  }
 
   resolveExitPromise: () => void = () => {};
   rejectExitPromise: (reason?: Error) => void = () => {};
@@ -779,9 +778,9 @@ export default class Ink {
     } else {
       yogaNode.setWidthAuto();
       yogaNode.calculateLayout();
-      if (yogaNode.getComputedWidth() > 8192) {
-        yogaNode.setWidth(8192);
-        yogaNode.calculateLayout(8192);
+      if (yogaNode.getComputedWidth() > MAX_TERMINAL_COLUMNS) {
+        yogaNode.setWidth(MAX_TERMINAL_COLUMNS);
+        yogaNode.calculateLayout(MAX_TERMINAL_COLUMNS);
       }
     }
     const ms = performance.now() - t0;
@@ -940,8 +939,7 @@ export default class Ink {
     }
 
     const renderStart = performance.now();
-    const terminalWidth = this.options.stdout.columns || 80;
-    const terminalRows = this.options.stdout.rows || 24;
+    const { columns: terminalWidth, rows: terminalRows } = this.stdoutSize();
 
     const frame = this.renderer({
       frontFrame: this.frontFrame,
@@ -954,15 +952,11 @@ export default class Ink {
     });
     const rendererMs = performance.now() - renderStart;
 
-    // densable Z2t.onRender frameSink (xxc / AxcStickyHost). Truthy → swap
-    // frames, skip cell-diff; "tick" keeps pump draining via drainTimer.
-    // Local `frame.scrollDrainPending` is NOT a gold field — gold xxc returns
-    // `w||R?"tick":!0` (pump/prime only) and never sees Ink pendingScrollDelta.
-    // Sticky wheel drain lives on that local flag; gold's truthy early-return
-    // would starve it. OR the local flag here; do not fold it into xxc's
-    // `'tick'` return (that would invent gold). consumeFollowScroll stays
-    // after this early-return — gold never reaches it on the sink path;
-    // oSf / resetRenderFrameContext clears followScroll each frame.
+    // densable Z2t.onRender frameSink (xxc / AxcStickyHost). Gold:
+    //   if(W){ swap; if(W==="tick") drainTimer; onFrame; return }
+    // Truthy → swap frames, skip cell-diff; only `"tick"` re-arms drainTimer.
+    // `frame.scrollDrainPending` is NOT a gold field — cell-diff path below
+    // still honours it. Do not OR it into the sink arm (that invents gold).
     if (this.frameSink) {
       const sinkResult = this.frameSink(frame, this.stylePool);
       if (sinkResult) {
@@ -970,7 +964,7 @@ export default class Ink {
         this.frontFrame = frame;
         this.prevFrameContaminated = false;
         this.maybeResetPools(renderStart);
-        if (sinkResult === 'tick' || frame.scrollDrainPending) {
+        if (sinkResult === 'tick') {
           this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
         }
         this.options.onFrame?.({
@@ -1411,8 +1405,7 @@ export default class Ink {
     const extracted = extractScreenReaderOutput(this.rootNode as ScreenReaderDOMNode);
     let fullText = extracted.text;
     const preserveRanges = extracted.preserveRanges;
-    const columns = this.options.stdout.columns || this.terminalColumns || 80;
-    const terminalRows = this.options.stdout.rows || this.terminalRows || 24;
+    const { columns, rows: terminalRows } = this.stdoutSize();
 
     // densable GJc: append ephemeral kill announcements after frame text
     const announcements = drainScreenReaderAnnouncements();
@@ -1673,13 +1666,34 @@ export default class Ink {
     recordAtlasReset('focus');
   }
 
-  /** densable `stdoutSize()` — live TTY rows/cols with constructor fallback. */
+  /**
+   * densable `stdoutSize()` — `dCi(..., "fallback", warnGarbageWinsizeOnce)`.
+   */
   stdoutSize(): { columns: number; rows: number } {
     return {
-      columns: this.options.stdout.columns || this.terminalColumns || 80,
-      rows: this.options.stdout.rows || this.terminalRows || 24,
+      columns: sanitizeTerminalDimension(
+        this.options.stdout.columns,
+        this.terminalColumns,
+        MAX_TERMINAL_COLUMNS,
+        'fallback',
+        this.warnGarbageWinsizeOnce,
+      ),
+      rows: sanitizeTerminalDimension(
+        this.options.stdout.rows,
+        this.terminalRows,
+        MAX_TERMINAL_ROWS,
+        'fallback',
+        this.warnGarbageWinsizeOnce,
+      ),
     };
   }
+
+  /** densable warnGarbageWinsizeOnce — first garbage/absurd winsize only. */
+  warnGarbageWinsizeOnce = (message: string): void => {
+    if (this.loggedGarbageWinsize) return;
+    this.loggedGarbageWinsize = true;
+    this.logger.debug(message, { level: 'warn' });
+  };
 
   /**
    * densable probeExternalClear(querier) — iTerm.app / Apple_Terminal only
@@ -1706,10 +1720,8 @@ export default class Ink {
   }
 
   private hasStaleTerminalSize(): boolean {
-    return (
-      (this.options.stdout.columns || 80) !== this.terminalColumns ||
-      (this.options.stdout.rows || 24) !== this.terminalRows
-    );
+    const { columns, rows } = this.stdoutSize();
+    return columns !== this.terminalColumns || rows !== this.terminalRows;
   }
 
   /**
@@ -2186,10 +2198,8 @@ export default class Ink {
   shiftSelectionForScroll(dRow: number, minRow: number, maxRow: number): void {
     const hadSel = hasSelection(this.selection);
     shiftSelection(this.selection, dRow, minRow, maxRow, this.frontFrame.screen.width);
-    // shiftSelection clears when both endpoints overshoot the same edge
-    // (Home/g/End/G page-jump past the selection). Notify subscribers so
-    // useHasSelection updates. Safe to call notifySelectionChange here —
-    // this runs from keyboard handlers, not inside onRender().
+    // Official ybf keeps the selection when both ends leave the viewport
+    // (accumulator swap). Notify only if some other path cleared.
     if (hadSel && !hasSelection(this.selection)) {
       this.notifySelectionChange();
     }

@@ -129,12 +129,13 @@ describe('isPermissionContextAutoMode (densable ctn)', () => {
     const planNoBypass = isPermissionContextAutoMode({
       ...getEmptyToolPermissionContext(),
       mode: 'plan',
-      isBypassPermissionsModeAvailable: false,
+      isBypassPermissionsModeAvailable: true,
     })
     const planWithBypass = isPermissionContextAutoMode({
       ...getEmptyToolPermissionContext(),
       mode: 'plan',
       isBypassPermissionsModeAvailable: true,
+      prePlanMode: 'bypassPermissions',
     })
 
     if (!planNoBypass && !planWithBypass) {

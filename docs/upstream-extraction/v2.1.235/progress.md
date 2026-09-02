@@ -1,6 +1,6 @@
 # densable 2.1.235 alignment progress
 
-Updated: 2026-08-20
+Updated: 2026-08-31
 
 ## Status
 
@@ -8,8 +8,8 @@ Updated: 2026-08-20
 | ----- | ----- |
 | Changelog / GitHub body | **done** |
 | densable SEA npm pack | **done** — `/tmp/official-235/plat/package/claude` · 2.1.235 · sha256 `83b8f806…` |
-| Checklist HAVE/GAP | **done** — HAVE **18** / PARTIAL **0** / GAP **0** / N/A **1** / UNKNOWN **0** |
-| Implement 1:1 | **landed** CLI product **#1–#18**（#13 **HAVE**；packaging residual 仅笔记）; **#19** N/A; **extra** CLI IDE bridge `uSm`/vscodeSdkMcp **HAVE**（非 #19） |
+| Checklist HAVE/GAP | **done** — HAVE **15** + analog **3**（#11/#12/#13）/ PARTIAL **0** / GAP **0** / N/A **1** / UNKNOWN **0** |
+| Implement 1:1 | **landed** CLI product **#1–#18**；**#11/#12/#13 HAVE (analog)**，不再 silent 1:1; **#19** N/A; **extra** CLI IDE bridge `uSm`/vscodeSdkMcp **HAVE**（非 #19） |
 
 ## Landed (HAVE) — verified + residual
 
@@ -28,7 +28,7 @@ Updated: 2026-08-20
 13. **#1** spellcheck — densable `settings.spellcheck` + `src/utils/spellcheck/*`（protocol/tokenize/color/checker/settings/mhg）+ PromptInput underline merge。`spellcheckProtocol.235` / `spellcheckSettings.235`
 14. **#13** embedded grep — **HAVE**：sidecar microsoft/ripgrep-prebuilt **v15.0.1**（`15.0.0 rev 3a612f88b8`，**新于** SEA embed `14.1.1`）`-m/-A/-C` + patho 行为 1:1；densable `rejectOnInputError`/`RipgrepUsageError`(YTm/iaT) 已接线 Grep+Glob。**禁止**降级 15→14 / **禁止** invent JS regex engine。打包 sidecar≠SEA argv0 embed / 不移植 `N4Grep*` 仅为 **non-blocking residual 笔记**。`embeddedRipgrep.235.test.ts` + `ripgrepUsageError.235.test.ts`
 
-Also HAVE from dig/map (not this patch set): **#4** highlight-shift · **#10** tasklist expand · **#11** cloud CPU · **#18** rc gateway.
+Also HAVE from dig/map (not this patch set): **#4** highlight-shift · **#10** tasklist expand · **#18** rc gateway. **#11** cloud CPU is **HAVE (analog)** (changelog ≠ SEA). **#12** analog 注脚（2026-09-01）：235 无独立 SEA producer；239 leftover Artifact `permissions.ts` **生产** `suppressAlwaysAllowRule:true`（不再写「生产零」）。
 
 ## Extra land (not checklist #1–#19 row)
 
@@ -41,7 +41,9 @@ Also HAVE from dig/map (not this patch set): **#4** highlight-shift · **#10** t
 - **#6**: throw remains plain `Error` (message 1:1), not densable `Vyt` class.
 - **#17**: local wire.length check (in-meta auth) vs densable always-budget `Ddd` auth preamble; keep separate `MAX_UDS_FRAME_BYTES=64KiB` for non-messaging frames.
 - **#7**: UI path passes `remoteWorkspace=false` (no invent remote gateway). Network-path gate uses `containsVulnerableUncPath(path, true)` (Windows-only; densable Qh/_u may also cover other network mounts).
-- **#12**: SDK wire `suppress_always_allow_rule` schema + densable artifact/MCP producers that SET ask.suppressAlwaysAllowRule remain sparse (consumer/UI/accept strip landed). SandboxPermissionRequest still uses its own always-allow path.
+- **#11 analog**: changelog 非 SEA 字面；RemoteAgentTask same-ref skip 是产品优化，不是剥出的 235 金标函数。
+- **#12 analog**: consumer/UI/accept strip landed；`builtin-tools` 生产零 `suppressAlwaysAllowRule:true` / `suppressesAlwaysAllowRule`。SDK wire + remote ingress 可透传。SandboxPermissionRequest 仍走自己的 always-allow。不 invent 本地假 producer。
+- **#13 analog**: fail-fast 行为 1:1；sidecar 15.0.x ≠ SEA argv0 `rg 14.1.1`。不挡产品 HAVE，也不当无注脚 1:1。
 - **#16**: no VSCode #19 invent; render still uses React snapshot `focusedValue` (onFocus/UI), accept uses live getter.
 - **#8**: no mass write-side escape in processSlashCommand; artifact-only decodeHtmlEntities/TDr remains separate surface.
 - **#2**: process-lifetime sticky latch (no SEA reset); test-only `resetLspManagerForTests`/`setLspManagerForTests` are harness-only.
@@ -50,7 +52,7 @@ Also HAVE from dig/map (not this patch set): **#4** highlight-shift · **#10** t
 - **#9**: autoUpdaterResult stays REPL useState (not AppState); footer/hint behavior 1:1.
 - **#15**: local `VimMode` is INSERT|NORMAL only; RgE keeps VISUAL* string collapse for SEA parity; hideVimModeIndicator / VISUAL LINE depth not invented.
 - **#1**: spawn env uses `subprocessEnv()` (not densable full `tM` scrub); exit cleanup ≈ `process.once('exit')` not Ba。`fhg` overlap 已按 densable 对 **pre-merge base** 判定（互叠 spell ranges 可同留）；warn 字符串断言已锁。host 仍用 hook-local `{}`（非 PromptInput 注入 Ar.host）记 residual。
-- **#13 (HAVE；packaging 笔记)**: 本地 vendor **15.0.x 新于** SEA **14.1.1**（故意不降级）。go-hare Mach-O 不 argv0-embed rg（sidecar）；SEA-only `N4Grep*Handler` 为 Bun embed/link 符号 — **不是**产品 GAP。`RipgrepUsageError` 是 densable input-reject 路径（非 patho-engine invent）。用户确认打包差异「不是问题」→ 升 **HAVE**。
+- **#13 (HAVE analog；packaging)**: 本地 vendor **15.0.x 新于** SEA **14.1.1**（故意不降级）。go-hare Mach-O 不 argv0-embed rg（sidecar）；SEA-only `N4Grep*Handler` 为 Bun embed/link 符号 — **不是**产品 GAP。`RipgrepUsageError` 是 densable input-reject 路径（非 patho-engine invent）。包装差已记账，不再写成无注脚 1:1。
 - **CLI IDE bridge / SDK host**: `HIn` = harbor_willow \|\| `clientDataCache.meadow_lantern===true`；`vNh` = GB announcements top+SNh → JSON\|false；SEA 外发 ABSENT `file_updated` → 本地 ant-only；禁止把 `feedback_survey` / `sdk_stream_ended` 塞进 gates keys。
 - **Quota rearm**: 不 invent `seven_day_overage_included` / storageV5 / Desktop·cloud handoff clients（仅 cancel reason）；本地 xxi family 用 `includes('opus'|'sonnet')` 近似 SEA `Wjo(entry.family)`（极性已 1:1）。
 

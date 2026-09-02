@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import type { Dirent } from 'fs'
+import { createSignal } from './signal.js'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
 // imports above. Named (not wildcard) per CLAUDE.md style; no collisions
 // with the async-suffixed names.
@@ -820,7 +821,7 @@ export const getProjectDir = memoize(
 let project: Project | null = null
 let cleanupRegistered = false
 
-function getProject(): Project {
+export function getProject(): Project {
   if (!project) {
     project = new Project()
 
@@ -1624,6 +1625,7 @@ class Project {
         // re-append below skips it (instead of resurrecting a stale title).
         if (tailTitle !== undefined) {
           this.currentSessionTitle = tailTitle || undefined
+          notifySessionTitleChanged()
         }
       }
     }
@@ -2167,6 +2169,9 @@ class Project {
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'observer-ref') {
       // Official xZi — always append (last-wins on IZi scan).
+      void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'artifact-autoreact-ledger') {
+      // densable ykl — always append (autoreact ledger snapshot).
       void this.enqueueWrite(sessionFile, entry)
     } else {
       const messageSet = await getSessionMessages(sessionId)
@@ -2781,7 +2786,7 @@ export async function hydrateRemoteSession(
   sessionId: string,
   ingressUrl: string,
 ): Promise<boolean> {
-  switchSession(asSessionId(sessionId))
+  switchSession(asSessionId(sessionId), null, 'remote_attach')
 
   const project = getProject()
 
@@ -2836,7 +2841,7 @@ export async function hydrateFromCCRv2InternalEvents(
   ),
 ): Promise<boolean> {
   const startMs = Date.now()
-  switchSession(asSessionId(sessionId))
+  switchSession(asSessionId(sessionId), null, 'remote_attach')
 
   const project = getProject()
   const reader = project.getInternalEventReader()
@@ -4065,6 +4070,7 @@ export async function saveCustomTitle(
   // title chain `??` cannot produce "prefix + blank" in the terminal tab.
   if (sessionId === getSessionId()) {
     getProject().currentSessionTitle = customTitle || undefined
+    notifySessionTitleChanged()
   }
   logEvent('tengu_session_renamed', {
     source:
@@ -4103,7 +4109,10 @@ export function saveAiGeneratedTitle(sessionId: UUID, aiTitle: string): void {
   // densable JCe: cache aiTitle for v$e() / M9e seed (user title still wins)
   if (sessionId === getSessionId()) {
     const project = getProject()
-    project.currentSessionAiTitle ??= aiTitle
+    if (project.currentSessionAiTitle === undefined) {
+      project.currentSessionAiTitle = aiTitle
+      notifySessionTitleChanged()
+    }
   }
   appendEntryToFile(getTranscriptPathForSession(sessionId), {
     type: 'ai-title',
@@ -4252,6 +4261,23 @@ export function getCurrentSessionTitle(
 }
 
 /**
+ * densable `subscribeSessionTitleChanged` / REPL `BQi` — notify when
+ * currentSessionTitle / currentSessionAiTitle cache mutates so terminal
+ * tab title can useSyncExternalStore instead of a one-shot render read.
+ */
+const sessionTitleChanged = createSignal()
+
+export function subscribeSessionTitleChanged(
+  onStoreChange: () => void,
+): () => void {
+  return sessionTitleChanged.subscribe(onStoreChange)
+}
+
+function notifySessionTitleChanged(): void {
+  sessionTitleChanged.emit()
+}
+
+/**
  * densable `v$e(sessionId)` — process-level AI title cache for M9e seed.
  * User custom title still wins via getCurrentSessionTitle / nameSource.
  */
@@ -4355,9 +4381,17 @@ export function restoreSessionMetadata(meta: {
   const project = getProject()
   // ??= so --name (cacheSessionTitle) wins over the resumed
   // session's title. REPL.tsx clears before calling, so /resume is unaffected.
+  const beforeTitle = project.currentSessionTitle
+  const beforeAiTitle = project.currentSessionAiTitle
   if (meta.customTitle) project.currentSessionTitle ??= meta.customTitle
   // densable JCe: e.aiTitle → currentSessionAiTitle ??=
   if (meta.aiTitle) project.currentSessionAiTitle ??= meta.aiTitle
+  if (
+    project.currentSessionTitle !== beforeTitle ||
+    project.currentSessionAiTitle !== beforeAiTitle
+  ) {
+    notifySessionTitleChanged()
+  }
   if (meta.tag !== undefined) project.currentSessionTag = meta.tag || undefined
   // densable MMe: e.relocatedCwd → currentSessionRelocatedCwd ??=
   if (meta.relocatedCwd)
@@ -4416,6 +4450,7 @@ export function clearSessionMetadata(): void {
   project.currentSessionBridgeDialogKinds = undefined
   project.currentSessionBridgeGroupingId = undefined
   project.currentSessionBridgeNoBackfill = undefined
+  notifySessionTitleChanged()
 }
 
 /**
@@ -4580,6 +4615,7 @@ export function saveAgentSetting(agentSetting: string): void {
 export function cacheSessionTitle(customTitle: string): void {
   // densable SQt: empty clears so REPL title falls through to AI/product name.
   getProject().currentSessionTitle = customTitle || undefined
+  notifySessionTitleChanged()
 }
 
 /**

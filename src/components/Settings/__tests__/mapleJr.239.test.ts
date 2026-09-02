@@ -3,7 +3,7 @@
  *   Jr = Pe && managedEnum && id==="showExternalIncludesDialog" && w
  *   toggle Jr → phn(false, "config_toggle") + T(false)
  *   pointer: Pe && (enum+pickToCommit || managedEnum && !Jr && autoUpdates exception)
- * Does not invent U_c catalog reorder.
+ * U_c catalog sort is `sortConfigCatalog` on settingsItems.
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
@@ -40,5 +40,15 @@ describe('densable 2.1.239 maple-sundial Jr', () => {
     expect(source).toContain("setting.id !== 'autoUpdatesChannel'")
     expect(source).toContain('autoUpdaterDisabledReason !== null')
     expect(source).toContain("autoUpdatesChannel ?? 'latest') === 'latest'")
+  })
+
+  test('U_c sorts the existing settingsItems list', () => {
+    expect(source).toContain('sortConfigCatalog')
+    expect(source).toContain(
+      'const settingsItems: Setting[] = sortConfigCatalog([',
+    )
+    expect(source).toContain('function F(patch: SettingsJson)')
+    expect(source).toContain('function B<K extends keyof SettingsJson>')
+    expect(source).toContain('function W(updater: (current: GlobalConfig)')
   })
 })

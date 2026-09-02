@@ -10,6 +10,7 @@ export type TaskType =
   | 'in_process_teammate'
   | 'local_workflow'
   | 'monitor_mcp'
+  | 'monitor_ws'
   | 'dream'
   | 'auto_mode_scan'
 
@@ -95,6 +96,8 @@ const TASK_ID_PREFIXES: Record<string, string> = {
   in_process_teammate: 't',
   local_workflow: 'w',
   monitor_mcp: 'm',
+  // densable MonitorWsTask / Kam — Artifact comment monitor
+  monitor_ws: 'c',
   dream: 'd',
   // densable oyg auto_mode_scan:"e"
   auto_mode_scan: 'e',

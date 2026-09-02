@@ -6,4 +6,5 @@
 | 2 | concise-output-style | **HAVE** | SEA Concise + `$AT`/`BAT`/`turnReminder` 1:1；不 invent Proactive |
 | 3 | isOutputLineTruncated-r7 | **HAVE** | SEA `r7`/`t7` 1:1；MessagesBoundary `content.indexOf` crash 已修 |
 
-**Scope gate：** Changelog + checklist ✅ · #1/#2/#3 全 HAVE ✅ · no auto commit（等 explicit「提交」）
+**Scope gate：** Changelog + checklist ✅ · #1/#2/#3 全 HAVE ✅ · no auto commit（等 explicit「提交」）  
+**Invent-ban：** 不 invent `$t()`/`tn()` 云后端（本地 storageV5 `Rc` = `getProject()` 已接）。

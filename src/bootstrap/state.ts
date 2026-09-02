@@ -197,6 +197,8 @@ type State = {
   inlinePlugins: Array<string>
   // densable inlinePluginsNoMcp — --plugin-dir-no-mcp (load plugin, skip .mcp.json)
   inlinePluginsNoMcp: Array<string>
+  // densable inlinePluginUrls / gft / Z3s — --plugin-url session zips
+  inlinePluginUrls: Array<string>
   // densable syncedPluginDirs / lQt / qMr — claude.ai-synced plugin directories.
   // Who downloads into these dirs is cloud-side; CLI only consumes the list.
   syncedPluginDirs: Array<string>
@@ -508,6 +510,8 @@ function getInitialState(): State {
     inlinePlugins: [],
     // densable --plugin-dir-no-mcp
     inlinePluginsNoMcp: [],
+    // densable --plugin-url
+    inlinePluginUrls: [],
     // densable syncedPluginDirs
     syncedPluginDirs: [],
     // Explicit --chrome / --no-chrome flag value (undefined = not set on CLI)
@@ -662,6 +666,17 @@ export function isMainThreadQueuedCommand(cmd: {
   return cmd.agentId === getMainThreadAgentId()
 }
 
+/** leftover 239 oU / RDl session-switch reason. */
+export type SessionSwitchReason =
+  | 'clear'
+  | 'resume'
+  | 'remote_attach'
+  | 'fork'
+  | 'cd'
+  | 'spare_claim'
+  | 'hydrate'
+  | 'startup_custom_id'
+
 export function regenerateSessionId(
   options: { setCurrentAsParent?: boolean } = {},
 ): SessionId {
@@ -698,6 +713,8 @@ export function regenerateSessionId(
       // densable optional
     }
   }
+  // leftover 239 oU('clear') — /clear uses regenerate, not switchSession.
+  sessionSwitched.emit(STATE.sessionId, 'clear')
   return STATE.sessionId
 }
 
@@ -720,6 +737,7 @@ export function getParentSessionId(): SessionId | undefined {
 export function switchSession(
   sessionId: SessionId,
   projectDir: string | null = null,
+  reason?: SessionSwitchReason,
 ): void {
   // Drop the outgoing session's plan-slug entry so the Map stays bounded
   // across repeated /resume. Only the current session's slug is ever read
@@ -736,10 +754,11 @@ export function switchSession(
   }
   STATE.sessionId = sessionId
   STATE.sessionProjectDir = projectDir
-  sessionSwitched.emit(sessionId)
+  sessionSwitched.emit(sessionId, reason)
 }
 
-const sessionSwitched = createSignal<[id: SessionId]>()
+const sessionSwitched =
+  createSignal<[id: SessionId, reason?: SessionSwitchReason]>()
 
 /**
  * Register a callback that fires when switchSession changes the active
@@ -834,6 +853,11 @@ export function getTotalAPIDuration(): number {
 
 export function getTotalDuration(): number {
   return Date.now() - STATE.startTime
+}
+
+/** densable `GZt` — costLedger.sessionStartTime(). */
+export function getSessionStartTime(): number {
+  return STATE.startTime
 }
 
 export function getTotalAPIDurationWithoutRetries(): number {
@@ -1060,10 +1084,23 @@ export function getMainLoopBusy(): boolean {
   return STATE.mainLoopBusy ?? false
 }
 
+const mainLoopBusyListeners = new Set<() => void>()
+
+/** useSyncExternalStore subscribe for densable vou() live busy. */
+export function subscribeMainLoopBusy(listener: () => void): () => void {
+  mainLoopBusyListeners.add(listener)
+  return () => {
+    mainLoopBusyListeners.delete(listener)
+  }
+}
+
 /** Official jGo — set while REPL onQuery owns the queryGuard. */
 export function setMainLoopBusy(value: boolean): void {
   if (STATE.mainLoopBusy === value) return
   STATE.mainLoopBusy = value
+  for (const listener of mainLoopBusyListeners) {
+    listener()
+  }
 }
 
 // Scroll drain suspension — background intervals check this before doing work
@@ -1755,6 +1792,16 @@ export function setInlinePluginsNoMcp(plugins: Array<string>): void {
 /** densable `Hfe` — paths from `--plugin-dir-no-mcp`. */
 export function getInlinePluginsNoMcp(): Array<string> {
   return STATE.inlinePluginsNoMcp
+}
+
+/** densable `Z3s` — session plugin zip URLs from `--plugin-url`. */
+export function setInlinePluginUrls(urls: Array<string>): void {
+  STATE.inlinePluginUrls = urls
+}
+
+/** densable `gft` — `--plugin-url` values. */
+export function getInlinePluginUrls(): Array<string> {
+  return STATE.inlinePluginUrls
 }
 
 /** densable `qMr` — replace the claude.ai-synced plugin directory list. */

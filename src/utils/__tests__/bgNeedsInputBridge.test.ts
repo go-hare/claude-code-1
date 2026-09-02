@@ -89,9 +89,23 @@ describe('bgNeedsInputBridge densable Vce', () => {
     expect(DIALOG_NEEDS_BY_KIND.mcp_url_elicitation).toBe(
       MCP_URL_ELICITATION_NEEDS,
     )
+    expect(DIALOG_NEEDS_BY_KIND.cost_threshold).toBe(
+      'acknowledge: $5 session cost notice',
+    )
+    expect(DIALOG_NEEDS_BY_KIND.resume_return).toBe(
+      'choose: resume from summary or full session',
+    )
+    expect(DIALOG_NEEDS_BY_KIND.auto_default_nudge).toBe(
+      'choose: make auto mode the default permission mode',
+    )
+    expect(DIALOG_NEEDS_BY_KIND.ide_onboarding).toBe('dismiss: IDE welcome')
     emitBgNeedsFromDialogKind('refusal_fallback_prompt')
     expect(getBgNeedsInputSnapshot()?.text).toBe(
       'choose: retry on fallback model or edit prompt',
+    )
+    emitBgNeedsFromDialogKind('cost_threshold')
+    expect(getBgNeedsInputSnapshot()?.text).toBe(
+      'acknowledge: $5 session cost notice',
     )
     emitBgNeedsFromDialogKind(null)
     expect(getBgNeedsInputSnapshot()).toBeNull()

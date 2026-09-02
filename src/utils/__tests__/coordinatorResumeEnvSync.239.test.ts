@@ -46,6 +46,19 @@ describe('coordinator resume env sync when module null', () => {
     )
   })
 
+  test('ResumeConversation saveMode uses result.mode ?? env, not isCoordinatorMode()', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../../screens/ResumeConversation.tsx'),
+      'utf8',
+    )
+    expect(src).toContain('saveMode')
+    expect(src).toContain('isCoordinatorModeEnvEnabled')
+    expect(src).toMatch(
+      /saveMode\(\s*result\.mode\s*\?\?\s*\(isCoordinatorModeEnvEnabled\(\)/,
+    )
+    expect(src).not.toMatch(/saveMode\(\s*isCoordinatorMode\(\)/)
+  })
+
   test('matchSessionMode delegates env flip to residualFinalEnvGates', () => {
     const src = readFileSync(
       join(import.meta.dir, '../../coordinator/coordinatorMode.ts'),

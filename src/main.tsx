@@ -350,6 +350,7 @@ import {
   setFlagSettingsPath,
   setInitialMainLoopModel,
   setInlinePlugins,
+  setInlinePluginUrls,
   setInlinePluginsNoMcp,
   setIsInteractive,
   setKairosActive,
@@ -1261,6 +1262,7 @@ async function run(): Promise<CommanderCommand> {
       // residual helpers optional
     }
     if (!terminalTitleDisabled) {
+      // densable: process.title="claude" (win32 SetConsoleTitle; no OSC invent).
       process.title = 'claude';
     }
 
@@ -1295,6 +1297,11 @@ async function run(): Promise<CommanderCommand> {
     ) {
       setInlinePluginsNoMcp(pluginDirNoMcp as string[]);
       clearPluginCache('preAction: --plugin-dir-no-mcp inline plugins');
+    }
+    const pluginUrl = thisCommand.getOptionValue('pluginUrl');
+    if (Array.isArray(pluginUrl) && pluginUrl.length > 0 && pluginUrl.every((p: unknown) => typeof p === 'string')) {
+      setInlinePluginUrls(pluginUrl as string[]);
+      clearPluginCache('preAction: --plugin-url inline plugins');
     }
 
     runMigrations();
@@ -1626,6 +1633,12 @@ async function run(): Promise<CommanderCommand> {
       '--plugin-dir-no-mcp <path>',
       "Like --plugin-dir but the engine will not read this plugin's .mcp.json (caller owns its MCP connections)",
       (val: string, prev: string[]) => [...prev, val],
+      [] as string[],
+    )
+    .option(
+      '--plugin-url <url>',
+      'Fetch a plugin .zip from a URL for this session only (repeatable: --plugin-url A --plugin-url B)',
+      (val: string, prev: string[]) => [...prev, ...val.split(/\s+/).filter(Boolean)],
       [] as string[],
     )
     .option('--disable-slash-commands', 'Disable all skills', () => true)
@@ -4053,6 +4066,7 @@ async function run(): Promise<CommanderCommand> {
         notifications: {
           current: null,
           queue: initialNotifications,
+          pinned: [],
         },
         elicitation: {
           queue: [],
@@ -4257,6 +4271,7 @@ async function run(): Promise<CommanderCommand> {
               includeAttribution: true,
               transcriptPath: result.fullPath,
               replyOnResume: !!options.replyOnResume,
+              continueRequested: true,
             },
             resumeContext,
           );
@@ -4658,7 +4673,7 @@ async function run(): Promise<CommanderCommand> {
           // New behavior: start local TUI with CCR engine
           // Mark that we're in remote mode for command visibility
           setIsRemoteMode(true);
-          switchSession(asSessionId(createdSession.id));
+          switchSession(asSessionId(createdSession.id), null, 'remote_attach');
 
           // Get OAuth credentials for remote session
           let apiCreds: { accessToken: string; orgUUID: string };
@@ -5043,20 +5058,37 @@ async function run(): Promise<CommanderCommand> {
             process.stdin.setRawMode(true);
             process.stdin.ref();
           }
-          const { openAgentsViaLeftArrow } = await import('./cli/bg/leftArrowAgents.js');
+          const { openAgentsViaLeftArrow, clearBridgeSessionMetaAfterQpeHandoff } = await import(
+            './cli/bg/leftArrowAgents.js'
+          );
           // Official aAf: forward full left-arrow payload
           // (via/partial/boundary/checkpoint/replyOnResume/abortAfterFlush).
-          const handoff = await openAgentsViaLeftArrow(replResult.messages, {
-            via: replResult.via,
-            partialText: replResult.partialText,
-            boundaryUuid: replResult.boundaryUuid,
-            agentsCount: replResult.agentsCount,
-            checkpoint: replResult.checkpoint,
-            sessionPermissionRules: replResult.sessionPermissionRules,
-            memoryToggledOff: replResult.memoryToggledOff,
-            replyOnResume: replResult.replyOnResume,
-            abortAfterFlush: replResult.abortAfterFlush,
-          });
+          // densable qpe already ran vHy → skip second fork; yHy analog mounts fleet.
+          const handoff =
+            replResult.alreadyOpened ??
+            (await openAgentsViaLeftArrow(replResult.messages, {
+              via: replResult.via,
+              confirmedInterstitial: replResult.confirmedInterstitial,
+              deferWaitMs: replResult.deferWaitMs,
+              deferCapFired: replResult.deferCapFired,
+              inflightCount: replResult.inflightCount,
+              inflightKinds: replResult.inflightKinds,
+              restartableCount: replResult.restartableCount,
+              partialChars: replResult.partialChars,
+              partialText: replResult.partialText,
+              boundaryUuid: replResult.boundaryUuid,
+              agentsCount: replResult.agentsCount,
+              checkpoint: replResult.checkpoint,
+              liveMonitorSlugs: replResult.liveMonitorSlugs,
+              sessionPermissionRules: replResult.sessionPermissionRules,
+              memoryToggledOff: replResult.memoryToggledOff,
+              replyOnResume: replResult.replyOnResume,
+              abortAfterFlush: replResult.abortAfterFlush,
+            }));
+          // densable kEo: qpe vHy already cleared wXr; unmount cleanup may
+          // have rewritten it. Re-clear before FleetView so the parent cannot
+          // reattach the child's rit session (228 #5).
+          clearBridgeSessionMetaAfterQpeHandoff(replResult.alreadyOpened);
           const { renderAgentView } = await import('./screens/AgentView.js');
           const { formatLeftArrowResumeHint } = await import('./screens/fleetView/helpers.js');
           let fleetResult: { resumeHintRequested?: boolean; forkSessionId?: string } = {};

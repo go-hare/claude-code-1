@@ -1,21 +1,34 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js'
 import { SendMessageTool } from '../SendMessageTool.js'
 import { getPrompt } from '../prompt.js'
 
-const TEAMS_DISABLED_ENV = 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED'
+const TEAMS_ENV = 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'
+const previousTeams = process.env[TEAMS_ENV]
 
-function restoreTeamsEnv(prev: string | undefined): void {
-  if (prev === undefined) {
-    delete process.env[TEAMS_DISABLED_ENV]
+function setTeamsEnabled(on: boolean): void {
+  if (on) {
+    process.env[TEAMS_ENV] = '1'
   } else {
-    process.env[TEAMS_DISABLED_ENV] = prev
+    delete process.env[TEAMS_ENV]
+  }
+}
+
+function restoreTeamsEnv(): void {
+  if (previousTeams === undefined) {
+    delete process.env[TEAMS_ENV]
+  } else {
+    process.env[TEAMS_ENV] = previousTeams
   }
 }
 
 describe('densable 2.1.239 SendMessage E0m/FTl/BEm', () => {
+  beforeEach(() => {
+    setTeamsEnabled(true)
+  })
+
   afterEach(() => {
-    restoreTeamsEnv(undefined)
+    restoreTeamsEnv()
   })
 
   test('summary describe defaults from first line (not required-when-string)', () => {
@@ -37,7 +50,7 @@ describe('densable 2.1.239 SendMessage E0m/FTl/BEm', () => {
   })
 
   test('teams on: structured shutdown_request still parses', () => {
-    restoreTeamsEnv(undefined)
+    setTeamsEnabled(true)
     const parsed = SendMessageTool.inputSchema.safeParse({
       to: 'researcher',
       message: { type: 'shutdown_request' },
@@ -46,26 +59,20 @@ describe('densable 2.1.239 SendMessage E0m/FTl/BEm', () => {
   })
 
   test('teams off: message is string-only (FTl XRw/YRw)', () => {
-    const prev = process.env[TEAMS_DISABLED_ENV]
-    process.env[TEAMS_DISABLED_ENV] = '1'
-    try {
-      const parsed = SendMessageTool.inputSchema.safeParse({
-        to: 'researcher',
-        message: { type: 'shutdown_request' },
-      })
-      expect(parsed.success).toBe(false)
-      const plain = SendMessageTool.inputSchema.safeParse({
-        to: 'researcher',
-        message: 'hello over there',
-      })
-      expect(plain.success).toBe(true)
-    } finally {
-      restoreTeamsEnv(prev)
-    }
+    setTeamsEnabled(false)
+    const parsed = SendMessageTool.inputSchema.safeParse({
+      to: 'researcher',
+      message: { type: 'shutdown_request' },
+    })
+    expect(parsed.success).toBe(false)
+    const plain = SendMessageTool.inputSchema.safeParse({
+      to: 'researcher',
+      message: 'hello over there',
+    })
+    expect(plain.success).toBe(true)
   })
 
   test('request_id min(1) + single-line (KRw)', () => {
-    restoreTeamsEnv(undefined)
     expect(
       SendMessageTool.inputSchema.safeParse({
         to: TEAM_LEAD_NAME,
@@ -163,24 +170,19 @@ describe('densable 2.1.239 SendMessage E0m/FTl/BEm', () => {
   })
 
   test('validateInput: teams off refuses structured objects', async () => {
-    const prev = process.env[TEAMS_DISABLED_ENV]
-    process.env[TEAMS_DISABLED_ENV] = '1'
-    try {
-      const result = await SendMessageTool.validateInput!(
-        {
-          to: 'worker',
-          message: { type: 'shutdown_request' },
-        } as never,
-        {} as never,
-      )
-      expect(result.result).toBe(false)
-      if (result.result) throw new Error('expected teams-off structured reject')
-      expect(result.message).toContain(
-        'Structured team-protocol messages are only available with agent teams enabled.',
-      )
-    } finally {
-      restoreTeamsEnv(prev)
-    }
+    setTeamsEnabled(false)
+    const result = await SendMessageTool.validateInput!(
+      {
+        to: 'worker',
+        message: { type: 'shutdown_request' },
+      } as never,
+      {} as never,
+    )
+    expect(result.result).toBe(false)
+    if (result.result) throw new Error('expected teams-off structured reject')
+    expect(result.message).toContain(
+      'Structured team-protocol messages are only available with agent teams enabled.',
+    )
   })
 
   test('validateInput: plain string no longer requires summary', async () => {

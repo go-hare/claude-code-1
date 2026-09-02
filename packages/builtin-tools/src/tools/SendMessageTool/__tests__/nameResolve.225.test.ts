@@ -6,10 +6,12 @@ import {
   buildPeerCandidates,
   classifySendMessagePin,
   formatAmbiguousMessage,
+  listingRefMatchesCandidate,
   localClaimedRemoteBodies,
   nextSendMessagePins,
   normalizeAgentName,
   parseNameRef,
+  pinDigest,
   resolvePeerByName,
   shortPinRef,
   stripSessionPrefix,
@@ -149,6 +151,69 @@ describe('densable 2.1.225 SendMessage name resolve', () => {
     if (r.kind === 'refused') {
       expect(r.message).toContain('NOT on this machine')
       expect(r.message).toContain('claims that identity')
+    }
+  })
+
+  test('name [ref] accepts a longer ListAgents listing prefix of the digest', () => {
+    const candidates = buildPeerCandidates({
+      udsPeers: [{ name: 'worker', messagingSocketPath: '/tmp/a.sock' }],
+      bridgePeers: [],
+    })
+    const target = candidates[0]!
+    const digest = pinDigest('session', target.id)
+    const longer = digest.slice(
+      0,
+      Math.min(digest.length, target.ref.length + 2),
+    )
+    expect(listingRefMatchesCandidate(target, longer)).toBe(true)
+    const r = resolvePeerByName({
+      to: `worker [${longer}]`,
+      pins: {},
+      candidates,
+      localClaimed: new Set(),
+    })
+    expect(r.kind).toBe('ok')
+    if (r.kind === 'ok') {
+      expect(r.candidate.id).toBe(target.id)
+    }
+  })
+
+  test('name [ref] does not steal a different-name peer via prefix', () => {
+    const bob = buildPeerCandidates({
+      udsPeers: [{ name: 'bob', messagingSocketPath: '/tmp/bob.sock' }],
+      bridgePeers: [],
+    })[0]!
+    // ListAgents may print a longer hex than SendMessage's 6-char ref.
+    // Bidirectional startsWith used to deliver to bob; densable v_a does not.
+    const stolen = resolvePeerByName({
+      to: `alice [${bob.ref}aa]`,
+      pins: {},
+      candidates: [bob],
+      localClaimed: new Set(),
+    })
+    expect(stolen.kind).toBe('not-found')
+  })
+
+  test('listingUniqueness lengthens send refs against teammate/cloud collisions', () => {
+    const sock = '/tmp/unique-extra.sock'
+    const sessionDigest = pinDigest('session', sock)
+    const teammateId = 'mate-collision'
+    // Force a colliding extra by using an id whose digest shares the 6-prefix
+    // when possible; uniqueness extras still must be passed through.
+    const without = buildPeerCandidates({
+      udsPeers: [{ name: 'worker', messagingSocketPath: sock }],
+      bridgePeers: [],
+    })
+    const withExtra = buildPeerCandidates({
+      udsPeers: [{ name: 'worker', messagingSocketPath: sock }],
+      bridgePeers: [],
+      listingUniqueness: [{ kind: 'teammate', id: teammateId }],
+    })
+    expect(without[0]!.id).toBe(sock)
+    expect(withExtra[0]!.id).toBe(sock)
+    const extraDigest = pinDigest('teammate', teammateId)
+    if (extraDigest.slice(0, 6) === sessionDigest.slice(0, 6)) {
+      expect(withExtra[0]!.ref.length).toBeGreaterThan(without[0]!.ref.length)
     }
   })
 

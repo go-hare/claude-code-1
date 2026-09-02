@@ -142,7 +142,12 @@ export type {
 export type { Key } from './core/events/input-event.js'
 export type { FlickerReason, FrameEvent } from './core/frame.js'
 export type { MatchPosition } from './core/render-to-screen.js'
-export type { SelectionState, FocusMove } from './core/selection.js'
+export type {
+  SelectionState,
+  SelectionScope,
+  FocusMove,
+} from './core/selection.js'
+export { selectionOwnsScroll } from './core/selection.js'
 export type { Progress } from './core/terminal.js'
 
 // ============================================================
@@ -338,7 +343,11 @@ export {
 } from './hooks/useDoublePress.js'
 export { useTabStatus, type TabStatusKind } from './hooks/use-tab-status.js'
 export { useTerminalFocus } from './hooks/use-terminal-focus.js'
-export { useTerminalTitle } from './hooks/use-terminal-title.js'
+export {
+  useTerminalTitle,
+  applyTerminalTitle,
+  clearTerminalTitle,
+} from './hooks/use-terminal-title.js'
 export { useTerminalViewport } from './hooks/use-terminal-viewport.js'
 export { useSearchHighlight } from './hooks/use-search-highlight.js'
 export { useDeclaredCursor } from './hooks/use-declared-cursor.js'

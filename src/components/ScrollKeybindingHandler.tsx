@@ -13,6 +13,7 @@ import {
   isJediTermBugConfirmed,
   consumeJediTermArrowBurstCount,
   useStdin,
+  selectionOwnsScroll,
 } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { getSessionsSinceLastShown, recordTipShown } from '../services/tips/tipHistory.js';
@@ -350,9 +351,12 @@ type ExtendSelectionApi = {
 };
 
 /**
- * densable S() — `selection:extend*` handler.
- * Official OEc (scope.node vs scroll DOM) is always true here: tip
- * SelectionState has no scope, matching official `!r`.
+ * densable S() — `selection:extend*` handler. Official `Mi` is Scroll
+ * `EAo` only — do not register these on FleetView. FleetView `selection`
+ * is the row-focus store (`navigateTo` / `focusedIdx`), not this machine.
+ * Official OEc (`scope.node` vs scroll DOM) lives on `selectionOwnsScroll`.
+ * Column `scope` (`{x1,x2}`) unset matches official `!r` full-width clamp.
+ * Do not invent FleetView `scope.node` wiring.
  */
 export function extendSelectionByKey(
   move: FocusMove,
@@ -377,6 +381,7 @@ export function extendSelectionByKey(
         lastCopiedRef.current = null;
         state.focus = { col: state.focus.col, row: atTopEdge ? top : bottom };
         state.virtualFocusRow = atTopEdge ? top - 1 : bottom + 1;
+        state.virtualFocusCol = undefined;
         scroll.scrollBy(atTopEdge ? -1 : 1);
         onScroll?.(false, scroll);
       }
@@ -775,6 +780,7 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
       logForDebugging('tengu_jediterm_scroll_bug_detected');
       addNotification({
         key: 'jediterm-scroll-bug',
+        kind: 'contextual',
         text: 'Scroll support in JetBrains IDE 2025.2 terminals is experimental · upgrade to 2025.3+ for the best experience',
         color: 'suggestion',
         priority: 'immediate',
@@ -1251,9 +1257,15 @@ function useDragToScroll(
         stop();
         return;
       }
+      const sel = selection.getState();
+      // Official OEc: if scope.node is set and ≠ this ScrollBox DOM, stop.
+      if (!selectionOwnsScroll(sel, s)) {
+        lastScrolledDirRef.current = 0;
+        stop();
+        return;
+      }
       const top = s.getViewportTop();
       const bottom = top + s.getViewportHeight() - 1;
-      const sel = selection.getState();
       // Pass the LAST-scrolled direction (not dirRef) so the anchor guard is
       // bypassed after shiftAnchor has clamped anchor toward row 0. Using
       // lastScrolledDirRef (survives stop()) lets autoscroll resume after a

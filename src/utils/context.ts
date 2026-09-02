@@ -8,7 +8,11 @@ import { resolveAntModel } from './model/antModels.js'
 import {
   CHATGPT_CODEX_MAX_OUTPUT_TOKENS,
   getChatGPTModelContextWindow,
+  isGpt56FamilyModel,
 } from './model/chatgptModels.js'
+import { getDeepSeekModelContextWindow } from './model/deepseekModels.js'
+import { getGrokModelContextWindow } from './model/grokModels.js'
+import { getKimiModelContextWindow } from './model/kimiModels.js'
 import { getModelCapability } from './model/modelCapabilities.js'
 
 // Model context window size (200k tokens for all models right now)
@@ -101,6 +105,12 @@ export function isRecognizedModelForWindowEnforcement(model: string): boolean {
   if (/\[1m\]/i.test(raw)) return true
   // ChatGPT/Codex family has its own window table
   if (getChatGPTModelContextWindow(raw) !== undefined) return true
+  // Current-spec Grok ids have their own window table
+  if (getGrokModelContextWindow(raw) !== undefined) return true
+  // Current-spec Kimi ids (effortCatalog: kimi-k3 / kimi-k2.7)
+  if (getKimiModelContextWindow(raw) !== undefined) return true
+  // Current-spec DeepSeek V4 ids (effortCatalog: deepseek-v4*)
+  if (getDeepSeekModelContextWindow(raw) !== undefined) return true
   // Capability cache hit = /v1/models recognized this id
   if (getModelCapability(raw)) return true
   // densable gateway filter + Anthropic family markers
@@ -244,12 +254,31 @@ export function getContextWindowForModel(
     return applyDisable1mClamp(1_000_000)
   }
 
-  // GPT-5.6 family: OAuth/Codex ≈ 272k; API key path ≈ 1.05M (model card).
+  // GPT-5.6 / GPT-5.5 / GPT-5.4: see getChatGPTModelContextWindow.
   // Used for UI %, auto-compact thresholds, and local budgeting — not sent
   // as a request field (Codex Responses does not take max_input_tokens).
   const chatgptContextWindow = getChatGPTModelContextWindow(model)
   if (chatgptContextWindow !== undefined) {
     return applyDisable1mClamp(chatgptContextWindow)
+  }
+
+  // Current-spec Grok: 4.6/4.5 = 500k; 4.20 family / 4.3 = 1M.
+  // Used for UI % and auto-compact — not sent as a request field.
+  const grokContextWindow = getGrokModelContextWindow(model)
+  if (grokContextWindow !== undefined) {
+    return applyDisable1mClamp(grokContextWindow)
+  }
+
+  // Current-spec Kimi: k3 = 1M; k2.7 family = 262,144.
+  const kimiContextWindow = getKimiModelContextWindow(model)
+  if (kimiContextWindow !== undefined) {
+    return applyDisable1mClamp(kimiContextWindow)
+  }
+
+  // Current-spec DeepSeek V4: 1M (pricing table CONTEXT LENGTH).
+  const deepseekContextWindow = getDeepSeekModelContextWindow(model)
+  if (deepseekContextWindow !== undefined) {
+    return applyDisable1mClamp(deepseekContextWindow)
   }
 
   const cap = getModelCapability(model)
@@ -371,7 +400,9 @@ export function getModelMaxOutputTokens(model: string): {
   const m = getCanonicalName(model)
 
   // GPT-5.6 family: official 128k max output (OpenAI model card).
-  if (getChatGPTModelContextWindow(model) !== undefined) {
+  // Do not reuse getChatGPTModelContextWindow here — that now also
+  // covers GPT-5.5 / GPT-5.4 windows, whose max-output is not pinned.
+  if (isGpt56FamilyModel(model)) {
     defaultTokens = 32_000
     upperLimit = CHATGPT_CODEX_MAX_OUTPUT_TOKENS
   } else if (m.includes('opus-4-8') || m.includes('opus-4-7')) {

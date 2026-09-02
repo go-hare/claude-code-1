@@ -4,6 +4,8 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { EventEmitter } from 'events'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { PassThrough } from 'stream'
 import React from 'react'
 import Ink from '../ink.js'
@@ -116,7 +118,7 @@ describe('Ink.frameSink', () => {
     }
   })
 
-  test('truthy + frame.scrollDrainPending re-arms drainTimer', async () => {
+  test('truthy + frame.scrollDrainPending does not re-arm drainTimer', async () => {
     const ink = new Ink({
       stdout: makeTtyStdout() as never,
       stdin: makeTtyStdin() as never,
@@ -129,8 +131,8 @@ describe('Ink.frameSink', () => {
       let n = 0
       ink.frameSink = frame => {
         n++
-        // Gold xxc steady-state returns true (not 'tick'). Local drain flag
-        // must still arm the timer — mutate the renderer frame the sink sees.
+        // Gold Z2t.onRender: only W==="tick" re-arms. scrollDrainPending is
+        // not a gold field — mutating it on a truthy sink must not tick.
         if (n === 1) {
           ;(frame as { scrollDrainPending?: boolean }).scrollDrainPending = true
           return true
@@ -140,7 +142,7 @@ describe('Ink.frameSink', () => {
       ink.onRender()
       expect(n).toBe(1)
       await new Promise(r => setTimeout(r, 20))
-      expect(n).toBeGreaterThanOrEqual(2)
+      expect(n).toBe(1)
     } finally {
       ink.frameSink = null
       ink.unmount()
@@ -170,6 +172,16 @@ describe('Ink.frameSink', () => {
       ink.frameSink = null
       ink.unmount()
     }
+  })
+
+  test('gold Z2t.onRender sink arm re-arms only on "tick"', () => {
+    const src = readFileSync(join(import.meta.dir, '../ink.tsx'), 'utf8')
+    const start = src.indexOf('if (this.frameSink)')
+    const end = src.indexOf('// Sticky/auto-follow')
+    const arm = src.slice(start, end)
+    expect(arm).toContain("if (sinkResult === 'tick')")
+    expect(arm).not.toContain('scrollDrainPending')
+    expect(arm).not.toContain('|| frame.scrollDrainPending')
   })
 
   test('"tick" re-arms drainTimer', async () => {

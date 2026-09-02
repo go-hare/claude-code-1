@@ -27,13 +27,13 @@ type TaskLike = {
   type?: string
   abortController?: unknown
   ambient?: boolean
-  /** Forward-compat densable `autoReactArmed` (absent locally ⇒ not NOe). */
+  /** densable `autoReactArmed` — NOe when running. */
   autoReactArmed?: boolean
 }
 
 /**
  * densable gGS — task that blocks a renderer restart.
- * Local type map: densable `mcp_task` ≈ `monitor_mcp`; `monitor_ws` absent.
+ * Local type map: densable `mcp_task` ≈ `monitor_mcp`.
  */
 export function isTuiBlockingTask(task: TaskLike | TaskState): boolean {
   if (task.status !== 'running' && task.status !== 'pending') return false
@@ -51,9 +51,7 @@ export function isTuiBlockingTask(task: TaskLike | TaskState): boolean {
 }
 
 /**
- * densable NOe / tfi fragment — autoReact-armed comment monitor.
- * Without local autoReact product this stays false unless a task carries
- * `autoReactArmed === true` (forward-compat with densable fields).
+ * densable NOe — autoReact-armed comment monitor.
  */
 export function isCommentMonitorTask(task: TaskLike | TaskState): boolean {
   if (typeof task !== 'object' || task === null) return false
@@ -62,22 +60,39 @@ export function isCommentMonitorTask(task: TaskLike | TaskState): boolean {
 }
 
 /**
- * densable fam / rfi socket liveness for ambient monitor_ws.
- * No monitorSockets registry locally — treat armed ambient as live when present.
+ * densable fam / rfi — ambient monitor_ws socket liveness.
+ * Tip: no live socket ⇒ still treat armed ambient as live (matches gGS tests).
  */
-export function isAmbientMonitorLive(_task: TaskLike | TaskState): boolean {
+export function isAmbientMonitorLive(task: TaskLike | TaskState): boolean {
+  const id = (task as { id?: string }).id
+  if (typeof id === 'string' && id.length > 0) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { monitorSocketRegistry } =
+        require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+      if (monitorSocketRegistry.get(id)) return true
+    } catch {
+      /* store not loaded */
+    }
+  }
   return true
 }
 
 /**
- * densable g3a — Jo().autoReact.enabledMemo && reconnecting gate.
- * No autoReact store in this tree ⇒ always false (do not invent cloud product).
+ * densable g3a — Jo().autoReact.enabledMemo && reconnecting gate (OAm).
  */
 export function isGlobalCommentMonitorActive(
   deps: { isEnabled?: () => boolean } = {},
 ): boolean {
   if (deps.isEnabled) return deps.isEnabled()
-  return false
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { OAm } =
+      require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+    return OAm()
+  } catch {
+    return false
+  }
 }
 
 /**

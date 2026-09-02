@@ -263,6 +263,7 @@ function createInProcessCanUseTool(
             decisionMade = true
             abortController.signal.removeEventListener('abort', onAbortListener)
             reportPermissionWait()
+            removeLeaderToolUseConfirm(toolUseID)
             resolve({ behavior: 'ask', message: SUBAGENT_REJECT_MESSAGE })
           },
           async onAllow(
@@ -275,6 +276,7 @@ function createInProcessCanUseTool(
             decisionMade = true
             abortController.signal.removeEventListener('abort', onAbortListener)
             reportPermissionWait()
+            removeLeaderToolUseConfirm(toolUseID)
             persistPermissionUpdates(permissionUpdates)
             // densable m4n override path: s(Bie(Ina(un(r)), d)) with preserveMode
             if (permissionUpdates.length > 0) {
@@ -311,6 +313,7 @@ function createInProcessCanUseTool(
             decisionMade = true
             abortController.signal.removeEventListener('abort', onAbortListener)
             reportPermissionWait()
+            removeLeaderToolUseConfirm(toolUseID)
             const message = feedback
               ? `${SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX}${feedback}`
               : SUBAGENT_REJECT_MESSAGE

@@ -144,7 +144,15 @@ async function createSession(
       () =>
         this.sessions.get(sessionId)?.appState.toolPermissionContext
           .isBypassPermissionsModeAvailable ?? false,
-      undefined,
+      // densable: cancelled permission → session.cancelled + interrupt so
+      // session/prompt resolves StopReason::Cancelled (not plain deny).
+      () => {
+        const session = this.sessions.get(sessionId)
+        if (!session) return
+        session.cancelled = true
+        session.cancelGeneration += 1
+        session.queryEngine.interrupt()
+      },
       () =>
         this.sessions
           .get(sessionId)

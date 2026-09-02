@@ -114,6 +114,7 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
         await adapter.sendMessage(text, message.images);
       } catch (err) {
         console.error('Send failed:', err);
+        setIsLoading(false);
       }
     },
     [adapter, closed],

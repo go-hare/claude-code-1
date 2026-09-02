@@ -5,13 +5,13 @@
 > 基线：本地 tip densable **2.1.229**（HAVE 27 / N/A 5）+ npm **2.7.39**。**本 pack 只对齐 2.1.231**（npm **无 2.1.230**）。  
 > 状态：**HAVE 1 / PARTIAL 0 / GAP 0**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。  
-> 更新：2026-08-14 — FLv OAuth 预注册 redirect 1:1 + cup/r8o residual。
+> 更新：2026-09-02 — 钉：本 pack **覆盖 229 #12** redirect 主机名（229 SEA `eBr`=`127.0.0.1` → tip `JFr`=`localhost`；listen 仍 `127.0.0.1`）。勿按 229 清单把 tip 改回。此前 08-14 — FLv 1:1 + cup/r8o residual。
 
 ## 邻版关系
 
 | 版 | 性质 | go-hare |
 | -- | ---- | ------- |
-| **2.1.229** | 32 条大包 | tip 已收口 |
+| **2.1.229** | 32 条大包 | tip 已收口；**#12 redirect 主机名被本 pack 覆盖** |
 | **2.1.230** | npm **不存在** | — |
 | **2.1.231** | MCP OAuth redirect URI mismatch（pre-registered client / Slack） | **本 pack HAVE** |
 | **2.1.232** | 多条（fork 默认 / @mention / GitLab / 权限…） | **勿折入** |

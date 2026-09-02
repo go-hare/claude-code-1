@@ -70,6 +70,7 @@ export const KEYBINDING_ACTIONS = [
   'app:toggleBrief',
   // densable 2.1.239 tengu_willow_crate — official default chord is unset
   'app:toggleReplTab',
+  'app:cycleDiffBase',
   'app:toggleTeammatePreview',
   'app:toggleTerminal',
   'app:redraw',

@@ -5,7 +5,7 @@
 > 基线：本地 tip densable **2.1.228**（HAVE 17 + PARTIAL 1 #12）。**本 pack 只对齐 2.1.229**。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN** · **NOOP**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。不 invent cloud/VSCode-only。  
-> 更新：2026-08-13 — 落地 **#12 OAuth 127.0.0.1**、**#10 Hzo forceAttributionHeader**、**#29 Windows base-dir**、**#28 commit-push-pr deny**、**#26 IPv6 doctor**、**#24 PREFIX_STAGGER**、**#5 ListAgents offline/cloud**。
+> 更新：2026-09-02 — 钉：#12 本 pack 曾落 127.0.0.1 主机名；**tip 以 231 localhost 为准**（listen 仍 127.0.0.1）。此前 08-13 落地 #12/#10/#29/#28/#26/#24/#5。
 
 ## 邻版关系
 
@@ -19,7 +19,7 @@
 
 | 符号 / 字符串 | 含义 | 本地 |
 | --- | --- | --- |
-| `function eBr` → `http://127.0.0.1:${e}/callback` | MCP OAuth redirect 用 127.0.0.1 | **HAVE** `oauthPort.ts` buildRedirectUri |
+| `function eBr` → `http://127.0.0.1:${port}/callback` | MCP OAuth redirect（**229 SEA**） | **HAVE（被 231 覆盖）** tip `buildRedirectUri` = **localhost**（231 `JFr`）；listen 仍 `127.0.0.1` |
 | `function Hzo` + `ignoreEnvOptOut` | attribution 可忽略 env opt-out | **HAVE** `getAttributionHeader({ignoreEnvOptOut})` |
 | sideQuery `forceAttributionHeader` + `p&&!j5t()?{ignoreEnvOptOut:!0}` | auto-mode classifier 强制 billing header | **HAVE** sideQuery + yoloClassifier + autoMode |
 | `function j5t(){return cfe()===null&&b1()}` | 无 API key 的 Claude.ai subscriber 不 force | **HAVE** `isApiKeyAbsentClaudeAISubscriber` |
@@ -66,7 +66,7 @@
 | 9 | Windows crash on `\\?\` / UNC path in tool/message | **HAVE** | densable Rwr/Xpr/UOo；`path.ts` strip + expandPath Windows branch | 本轮落地 + tests |
 | 10 | Auto mode fails when attribution header env disabled | **HAVE** | Hzo `ignoreEnvOptOut` + sideQuery `forceAttributionHeader` + auto_mode call sites | 本轮落地 + tests |
 | 11 | `/model` rejects Sonnet/Opus 1M for claude.ai + custom BASE_URL | **HAVE** | densable RAu/Hte/ufe；`check1mAccess.ts` `isFirstPartySubscriberFor1mAccess` + tests | 本轮落地；snippets/check1m-rau-11.txt |
-| 12 | MCP OAuth redirect `127.0.0.1` not `localhost` | **HAVE** | densable `eBr`；`buildRedirectUri` → `http://127.0.0.1:${port}/callback` | 本轮落地 + tests |
+| 12 | MCP OAuth redirect 127.0.0.1 not localhost | **HAVE（历史）** | 229 SEA `eBr` 曾用 `127.0.0.1` 主机名。**tip 现码 = 231 `JFr` localhost**（`oauthPort.ts`）。勿按本行把 tip 改回 `127.0.0.1` | 被 231 覆盖；listen 仍 `127.0.0.1` |
 | 13 | RC clients stuck working spinner after laptop slash command | **HAVE** | densable `Un`/`fCo`/`TSt`/`k0s`/`r_h`；本地 `shouldReportRunningForMessages`（滤 local-command-caveat）+ `shouldDeferBridgeResult` + `reportState('idle')` | 本地 **beyond** densable fCo；勿 regress；见 snippets/rc-spinner-13.txt |
 | 14 | GitHub Code Review workflow completes without posting review | **HAVE** | densable tKm `--comment` + `claude_args` inline MCP；`github-app.ts` CODE_REVIEW_PLUGIN_WORKFLOW_CONTENT | 本轮落地 + tests |
 | 15 | Multi-second UI stalls after large IDE diagnostics edit | **HAVE** | densable `Gjo`/`V2o`/`sQ_` + baseline early-return；`diagnosticTracking.ts` | 本轮落地 + tests |
@@ -104,7 +104,7 @@
 
 ## 本轮落地
 
-1. **#12** `src/services/mcp/oauthPort.ts` — `buildRedirectUri` → `http://127.0.0.1:${port}/callback`（densable `eBr`）
+1. **#12**（历史落地）`buildRedirectUri` 曾 → `http://127.0.0.1:${port}/callback`（229 `eBr`）。**tip 现码被 231 `JFr` 覆盖为 `localhost`**；listen 仍 `127.0.0.1`。勿回写。
 2. **#10** `getAttributionHeader({ignoreEnvOptOut})` + `sideQuery.forceAttributionHeader` + auto-mode call sites（yoloClassifier ×3 + autoMode critique）
 3. **#29** `baseDirSource` + `assertWindowsBaseDirSource`（densable `n_g` 文案 1:1）+ main 接线
 4. **#28** `commit-push-pr.ts` densable aPp allow + Vjb deny；`disallowedTools` 经 slash → handlePromptSubmit → REPL/QueryEngine 并入 `alwaysDenyRules.command`（**sticky deny**：densable xai 仅 `length>0` 时 union、**不清空**；与 allow 的「下一次非 skill turn 传 [] 清空」不对称——会话级 harden，非 skill 作用域）

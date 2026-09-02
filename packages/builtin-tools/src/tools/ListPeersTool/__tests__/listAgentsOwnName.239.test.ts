@@ -13,7 +13,7 @@ describe('densable 2.1.239 #50 ListAgents G1w header', () => {
       },
     )
     expect(listing.startsWith('This session is alpha [abcdef]')).toBe(true)
-    expect(listing).toContain('Found 1 agent(s):')
+    expect(listing).toContain('Peer sessions (1):')
   })
 
   test('SRl passes g5(t) into DHm (not hardcoded false)', () => {
@@ -28,11 +28,18 @@ describe('densable 2.1.239 #50 ListAgents G1w header', () => {
     )
   })
 
+  test('empty list without self is No reachable agents.', () => {
+    expect(__test.formatPeersListing([])).toBe('No reachable agents.')
+  })
+
   test('empty list still keeps the own-session header', () => {
     const listing = __test.formatPeersListing([], {
       selfHeader: 'This session is alpha [abcdef] — listed.',
     })
     expect(listing).toContain('This session is alpha [abcdef]')
-    expect(listing).toContain('No agents found.')
+    expect(listing).toContain('No reachable agents')
+    expect(listing).toContain(
+      'no other Claude session is running on this machine right now',
+    )
   })
 })

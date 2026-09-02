@@ -2,7 +2,8 @@
  * densable 2.1.235 #13 — embedded/vendor ripgrep behavioral parity.
  *
  * SEA embeds ripgrep 14.1.1 (rev fdb5e06cce) via argv0='rg'.
- * Local ships sidecar vendor ripgrep 15.0.0 (rev 3a612f88b8).
+ * Local prefers system 14.1.x when already installed; otherwise ships
+ * sidecar vendor ripgrep 15.0.0 (rev 3a612f88b8). No remote 14.1.1 fetch.
  * Changelog claims: pathological fail-fast + `-m N` with `-A/-C` correct context.
  * This file locks the product-visible `-m`/`-A`/`-C` behavior against the
  * vendored binary (no JS invent). Skip when the platform binary is absent.

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import type { PastedContent } from 'src/utils/config.js'
 import {
   maybeTruncateInput,
@@ -131,18 +133,21 @@ describe('resolveSubmitInputFromLive', () => {
 
   // Structural: shared live refs must bridge paste insert → useTextInput so the
   // next keystroke does not rebuild from a stale empty liveValueRef and wipe the pill.
-  test('source: PromptInput passes liveInputRef/cursorOffsetRef into TextInput', async () => {
-    const src = await Bun.file(
-      new URL('../PromptInput.tsx', import.meta.url).pathname,
-    ).text()
+  // Windows: Bun.file(import.meta.url).pathname prefixes a leading `/`.
+  test('source: PromptInput passes liveInputRef/cursorOffsetRef into TextInput', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../PromptInput.tsx'),
+      'utf8',
+    )
     expect(src).toMatch(/liveValueRef:\s*liveInputRef/)
     expect(src).toMatch(/liveOffsetRef:\s*cursorOffsetRef/)
   })
 
-  test('source: useTextInput accepts shared liveValueRef', async () => {
-    const src = await Bun.file(
-      new URL('../../../hooks/useTextInput.ts', import.meta.url).pathname,
-    ).text()
+  test('source: useTextInput accepts shared liveValueRef', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../../../hooks/useTextInput.ts'),
+      'utf8',
+    )
     expect(src).toMatch(/liveValueRef:\s*externalLiveValueRef/)
     expect(src).toMatch(/externalLiveValueRef\s*\?\?\s*ownedLiveValueRef/)
   })
@@ -151,31 +156,46 @@ describe('resolveSubmitInputFromLive', () => {
   // without onChange, so footerSelection stayed set and Enter opened bashes
   // instead of submitting [Image #N]. Insert must clear footer, and
   // footer:openSelected must prefer a live draft.
-  test('source: insertTextAtCursor clears footerSelection on paste', async () => {
-    const src = await Bun.file(
-      new URL('../PromptInput.tsx', import.meta.url).pathname,
-    ).text()
+  test('source: insertTextAtCursor clears footerSelection on paste', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../PromptInput.tsx'),
+      'utf8',
+    )
     expect(src).toMatch(/function insertTextAtCursor/)
     expect(src).toMatch(
       /footerSelection === null[\s\S]*?footerSelection: null[\s\S]*?trackAndSetInput\(newInput\)/,
     )
   })
 
-  test('source: footer:openSelected prefers live draft over bashes panel', async () => {
-    const src = await Bun.file(
-      new URL('../PromptInput.tsx', import.meta.url).pathname,
-    ).text()
+  test('source: footer:openSelected prefers live draft over bashes panel', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../PromptInput.tsx'),
+      'utf8',
+    )
     expect(src).toMatch(/'footer:openSelected':\s*\(\)\s*=>\s*\{/)
     expect(src).toMatch(/draftHasImages/)
     expect(src).toMatch(/void onSubmit\(draft\)/)
   })
 
+  test('source: leftover \\n does not type-to-exit the footer pill', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../PromptInput.tsx'),
+      'utf8',
+    )
+    expect(src).toMatch(/char !== '\\n'/)
+    expect(src).toMatch(
+      /viewSelectionMode === 'selecting-agent'[\s\S]*?return false/,
+    )
+    expect(src).toMatch(/enterTeammateView\(picked\.id/)
+  })
+
   // Defense in depth: even if openSelected still races into onSubmit with
   // footerSelection set, do not early-return when the box has a live draft.
-  test('source: onSubmit does not swallow Enter when footer selected with draft', async () => {
-    const src = await Bun.file(
-      new URL('../PromptInput.tsx', import.meta.url).pathname,
-    ).text()
+  test('source: onSubmit does not swallow Enter when footer selected with draft', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../PromptInput.tsx'),
+      'utf8',
+    )
     expect(src).toMatch(
       /const hasDraft = inputParam\.trim\(\) !== '' \|\| hasImages/,
     )

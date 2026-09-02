@@ -11,6 +11,7 @@ import { feature } from 'bun:bundle'
 import type { Tool, ToolPermissionContext, Tools } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
 import type { PermissionMode } from '../../types/permissions.js'
+import { isSessionBypassClass } from '../permissions/planBypass.js'
 import { count } from '../array.js'
 import { logForDebugging } from '../debug.js'
 import { SANDBOX_NETWORK_ACCESS_TOOL_NAME } from '../../cli/structuredIO.js'
@@ -21,16 +22,14 @@ import {
 
 export type SandboxNetworkAskDecision = 'allow' | 'deny' | 'classify' | 'ask'
 
-/** densable `wkr` */
+/** densable `wkr` — plan inherits bypass only when entered from bypass. */
 export function resolveSandboxNetworkAskDecision(
   mode: PermissionMode,
-  isBypassPermissionsModeAvailable: boolean,
+  _isBypassPermissionsModeAvailable: boolean,
+  prePlanMode?: PermissionMode,
 ): SandboxNetworkAskDecision {
   if (mode === 'auto') return 'classify'
-  if (
-    mode === 'bypassPermissions' ||
-    (mode === 'plan' && isBypassPermissionsModeAvailable)
-  ) {
+  if (isSessionBypassClass({ mode, prePlanMode })) {
     return 'allow'
   }
   if (mode === 'dontAsk') return 'deny'
@@ -143,6 +142,7 @@ export function wrapSandboxAskCallbackWithPermissionMode(params: {
       resolveSandboxNetworkAskDecision(
         ctx.mode,
         ctx.isBypassPermissionsModeAvailable,
+        ctx.prePlanMode,
       )
     ) {
       case 'allow':

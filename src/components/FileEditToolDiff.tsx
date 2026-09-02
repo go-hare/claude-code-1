@@ -14,6 +14,10 @@ import { StructuredDiffList } from './StructuredDiffList.js';
 type Props = {
   file_path: string;
   edits: FileEdit[];
+  /** densable Znu/phy remoteOldContent — when set, diff against this instead of disk. */
+  remoteOldContent?: string;
+  /** densable Znu/phy skipLocalRead — DualInk analog remote workspace. */
+  skipLocalRead?: boolean;
 };
 
 type DiffData = {
@@ -26,7 +30,9 @@ export function FileEditToolDiff(props: Props): React.ReactNode {
   // Snapshot on mount — the diff must stay consistent even if the file changes
   // while the dialog is open. useMemo on props.edits would re-read the file on
   // every render because callers pass fresh array literals.
-  const [dataPromise] = useState(() => loadDiffData(props.file_path, props.edits));
+  const [dataPromise] = useState(() =>
+    loadDiffData(props.file_path, props.edits, props.remoteOldContent, props.skipLocalRead ?? false),
+  );
   return (
     <Suspense fallback={<DiffFrame placeholder />}>
       <DiffBody promise={dataPromise} file_path={props.file_path} />
@@ -61,18 +67,41 @@ function DiffFrame({ children, placeholder }: { children?: React.ReactNode; plac
   );
 }
 
-async function loadDiffData(file_path: string, edits: FileEdit[]): Promise<DiffData> {
+async function loadDiffData(
+  file_path: string,
+  edits: FileEdit[],
+  remoteOldContent?: string,
+  skipLocalRead = false,
+): Promise<DiffData> {
   const valid = edits.filter(e => e.old_string != null && e.new_string != null);
   const single = valid.length === 1 ? valid[0]! : undefined;
 
+  // densable phy: CHUNK_SIZE early-out only when no remote payload.
   // SedEditPermissionRequest passes the entire file as old_string. Scanning for
   // a needle ≥ CHUNK_SIZE allocates O(needle) for the overlap buffer — skip the
   // file read entirely and diff the inputs we already have.
-  if (single && single.old_string.length >= CHUNK_SIZE) {
-    return diffToolInputsOnly(file_path, [single]);
+  if (remoteOldContent === undefined && !skipLocalRead) {
+    if (single && single.old_string.length >= CHUNK_SIZE) {
+      return diffToolInputsOnly(file_path, [single]);
+    }
   }
 
   try {
+    if (remoteOldContent !== undefined) {
+      const normalized = valid.map(e => normalizeEdit(remoteOldContent, e));
+      return {
+        patch: getPatchForDisplay({
+          filePath: file_path,
+          fileContents: remoteOldContent,
+          edits: normalized,
+        }),
+        firstLine: firstLineOf(remoteOldContent),
+        fileContent: remoteOldContent,
+      };
+    }
+    if (skipLocalRead) {
+      return diffToolInputsOnly(file_path, valid);
+    }
     const handle = await openForScan(file_path);
     if (handle === null) return diffToolInputsOnly(file_path, valid);
     try {

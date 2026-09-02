@@ -44,10 +44,11 @@ import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
 import { submitDispatch } from '../daemon/bgManager.js';
-import { listAllJobs, patchBgJobState, type BgJobState } from '../daemon/jobState.js';
+import { listAllJobs, patchBgJobState, getJobDirPath, type BgJobState } from '../daemon/jobState.js';
 import { deleteJob, formatKeptWorktreeReason, type DeleteJobResult } from '../daemon/deleteJob.js';
 import { killJobConfirmed } from '../daemon/xyrRespawn.js';
 import { getPlatform } from '../utils/platform.js';
+import { getImageFromClipboard } from '../utils/imagePaste.js';
 import {
   deriveBand,
   deriveActivity,
@@ -63,6 +64,7 @@ import {
   parseDispatch,
   parsePrRef,
   buildStateModeFlatRows,
+  buildSimpleModeFlatRows,
   buildDirectoryModeFlatRows,
   buildCustomGroupModeFlatRows,
   buildFleetFooterHints,
@@ -75,10 +77,39 @@ import {
   partitionArchivedSessions,
   buildCwdBasenameMap,
   expandPastedTextRefs,
+  parseFleetPasteRefs,
+  formatFleetImagePlaceholder,
+  type FleetImagePaste,
+  isFleetImagePasteKey,
+  materializeFleetPastedImages,
+  planFleetReorder,
+  shouldFleetViewReorder,
+  FLEET_CLIPBOARD_IMAGE_NOT_FOUND,
+  FLEET_CLIPBOARD_IMAGE_READ_FAILED,
   shouldFleetViewVimHandleEscape,
+  hasComposedDispatch,
+  shouldFleetViewArrowDelegateToEditor,
+  shouldFleetViewTabToggleAllAgents,
+  shouldFleetViewRightOpenFocusedRow,
+  shouldFleetViewSimpleViewSkipLeftover,
+  shouldFleetViewCycleGroupMode,
+  shouldFleetViewEnterBashFromBang,
+  shouldFleetViewToggleHelp,
+  isFleetComposerActive,
+  buildFleetComposerSuggestions,
+  fleetSuggestionDisplayText,
+  navigateFleetViewByArrow,
+  fleetViewPageJump,
   formatPastedTextPlaceholder,
   countNewlines,
+  formatFleetNewSessionThrow,
+  isFleetNewSessionSpawnBusy,
+  migrateAgentLastUsedFromJobs,
+  waitForFleetJobByShort,
+  FLEET_DEFAULT_TEMPLATE_NAME,
   FLEET_MIN_INTENT_LEN,
+  FLEET_NEW_SESSION_PENDING_MSG,
+  FLEET_NEW_SESSION_WAIT_MS,
   FLEET_PASTE_CHAR_THRESHOLD,
   FLEET_EXIT_ARM_MS,
   FLEET_DELETE_ARM_MS,
@@ -88,9 +119,11 @@ import {
   type FleetFlatRow,
   type FleetStateGroup,
   type StatusBand,
+  fleetHomeIdx,
 } from './fleetView/helpers.js';
 import { PrBadge } from '../components/PrBadge.js';
 import { isFleetPastSessionsEnabled } from '../utils/permissions/autoModeFlags.js';
+import { isFleetSimpleViewEnabled } from '../utils/residualUiEnvGates.js';
 
 // Conditional voice import (dead code eliminated when VOICE_MODE is off)
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -107,12 +140,14 @@ import { generateCommandSuggestions } from '../utils/suggestions/commandSuggesti
 import type { Command } from '../types/command.js';
 import type { SuggestionItem } from '../components/PromptInput/PromptInputFooterSuggestions.js';
 import { isVimModeEnabled } from '../components/PromptInput/utils.js';
+import { useVimInput } from '../hooks/useVimInput.js';
 import type { VimMode } from '../types/textInputTypes.js';
 import { LineView } from '../components/LineView.js';
 import { SuggestionList } from '../components/SuggestionList.js';
 import { Clawd } from '../components/LogoV2/Clawd.js';
 import { getMainLoopModel, renderModelName } from '../utils/model/model.js';
 import { getCwd } from '../utils/cwd.js';
+import { getAuthTokenSource } from '../utils/auth.js';
 import { truncatePathMiddle } from '../utils/truncate.js';
 import { stringWidth } from '@anthropic/ink';
 import { formatRelativeTimeAgo } from '../utils/format.js';
@@ -433,9 +468,11 @@ function SessionRow({
       <Box width={cols.label + 2} flexShrink={0}>
         <Text wrap={'truncate' as never}>
           <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected}>
+            {isSelected ? '\u276F' : ' '}
             {icon}
-          </Text>{' '}
-          <Text bold={isSelected} dimColor={!isSelected && dim}>
+            {'  '}
+          </Text>
+          <Text bold={!!isOrigin} dimColor={!isSelected && !isOrigin}>
             {name}
           </Text>
         </Text>
@@ -517,7 +554,8 @@ function AgentViewApp({
   onAction?: (
     action:
       | { type: 'open'; sessionId: string; short: string; logPath?: string }
-      | { type: 'done'; resumeHintRequested?: boolean },
+      | { type: 'done'; resumeHintRequested?: boolean }
+      | { type: 'login' },
   ) => void;
 }): React.ReactElement {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -537,14 +575,19 @@ function AgentViewApp({
   }, [initialError]);
   const [dispatchInput, setDispatchInput] = useState('');
   const [cursorOffset, setCursorOffset] = useState(0);
+  const cursorOffsetRef = useRef(0);
+  cursorOffsetRef.current = cursorOffset;
   /** densable /resume past-session overlay (Tt). */
   const [resumePicker, setResumePicker] = useState<ResumePickerState | null>(null);
   /** Official Ld / yp — prompt vs bash (`!`) composer mode. */
   const [dispatchMode, setDispatchMode] = useState<'prompt' | 'bash'>('prompt');
   /** Official JIy `vimMode:d` — undefined when vim is off (Esc still clears). */
   const [vimMode, setVimMode] = useState<VimMode>('INSERT');
+  const dispatchVimSetModeRef = useRef<(mode: VimMode) => void>(() => {});
   /** Official paste map for `[Pasted text #N]` expand on submit. */
   const pastesRef = useRef<Record<number, string>>({});
+  /** Official gOs image pastes — not in pastesRef (Eet would dump base64 into intent). */
+  const imagePastesRef = useRef<Record<number, FleetImagePaste>>({});
   const pasteIdRef = useRef(1);
   const [focusArea, setFocusArea] = useState<FocusArea>('list');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -560,6 +603,10 @@ function AgentViewApp({
     const m = getGlobalConfig().fleetViewGroupMode;
     return m === 'directory' || m === 'group' || m === 'state' ? m : 'state';
   });
+  /** densable cr().agentLastUsed — ICy sort + UCy backfill. */
+  const [agentLastUsed, setAgentLastUsed] = useState<Record<string, number>>(
+    () => getGlobalConfig().agentLastUsed ?? {},
+  );
   const [replyInput, setReplyInput] = useState('');
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
   /**
@@ -590,6 +637,24 @@ function AgentViewApp({
   const exitArmedRef = useRef(false);
   const exitArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  /** densable $Iy.previewOpen — space-on-empty peek; Esc closes first. */
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const peekTapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPeekTap = useCallback(() => {
+    if (peekTapRef.current === null) return;
+    clearTimeout(peekTapRef.current);
+    peekTapRef.current = null;
+  }, []);
+  const schedulePeekTap = useCallback(
+    (arm: (cb: () => void) => ReturnType<typeof setTimeout>, run: () => void) => {
+      cancelPeekTap();
+      peekTapRef.current = arm(() => {
+        peekTapRef.current = null;
+        run();
+      });
+    },
+    [cancelPeekTap],
+  );
 
   // densable Tt — leave FleetView immediately (defined early: handleDispatch + useInput).
   const forceExit = useCallback(
@@ -688,6 +753,11 @@ function AgentViewApp({
   }, []);
 
   const dispatchingRef = useRef(false);
+  /** densable attach.newSessionOpening / beginNewSession generation. */
+  const newSessionOpeningRef = useRef(false);
+  const newSessionAttemptRef = useRef(0);
+  /** densable attach.attachingJobId. */
+  const attachingJobIdRef = useRef<string | null>(null);
   const lastRelaunchRef = useRef(0);
   /** Monotonic refresh generation — stale async passes must not clobber newer results. */
   const refreshGenerationRef = useRef(0);
@@ -729,6 +799,10 @@ function AgentViewApp({
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [hoveredSuggestion, setHoveredSuggestion] = useState<string | null>(null);
+  /** densable vo / Ki — tab toggles all-template browse when query is empty. */
+  const [showAllAgents, setShowAllAgents] = useState(false);
+  /** densable Id = Yk().hasToken — snapshot once at mount. */
+  const hasCredentials = useMemo(() => getAuthTokenSource().hasToken, []);
 
   // Auto-focus dispatch when no sessions (skip if we're restoring position)
   useEffect(() => {
@@ -763,77 +837,63 @@ function AgentViewApp({
     } catch {
       setFleetRoutines([]);
     }
+    // densable UCy — backfill agentLastUsed from job createdAt (rK analog).
+    void listAllJobs()
+      .catch(() => [])
+      .then(jobs => {
+        const rows = jobs.map(j => ({
+          template: j.state.template,
+          createdAt: j.state.createdAt,
+        }));
+        saveGlobalConfig(c => {
+          const { next, changed } = migrateAgentLastUsedFromJobs(c.agentLastUsed ?? {}, rows);
+          return changed ? { ...c, agentLastUsed: next } : c;
+        });
+        const persisted = getGlobalConfig().agentLastUsed ?? {};
+        setAgentLastUsed(persisted);
+      });
   }, []);
 
-  // Compute suggestions when dispatch input changes
-  // (slash commands + @ templates/cwd + leading template token)
+  // densable: if(_t) Ki(!1) — typing closes all-agent browse.
   useEffect(() => {
-    if (focusArea !== 'dispatch' || dispatchMode === 'bash') {
+    if (dispatchInput) setShowAllAgents(false);
+  }, [dispatchInput]);
+
+  // Slash stays generateCommandSuggestions. Else densable FCy.
+  useEffect(() => {
+    if (dispatchMode === 'bash') {
       setSuggestions([]);
       return;
     }
     if (dispatchInput.startsWith('/')) {
+      // Official leftover always u(t) — FCy has no focusArea gate.
       const items = generateCommandSuggestions(dispatchInput, commands);
       setSuggestions(items.slice(0, 8));
       setSelectedSuggestion(0);
       return;
     }
-    // @mention candidates: templates first, then cwd basenames
-    const at = dispatchInput.lastIndexOf('@');
-    if (at >= 0 && (at === 0 || /\s/.test(dispatchInput[at - 1] ?? ' '))) {
-      const partial = dispatchInput.slice(at + 1);
-      if (!/\s/.test(partial)) {
-        const map = buildCwdBasenameMap(sessions);
-        const q = partial.toLowerCase();
-        const items: SuggestionItem[] = [];
-        for (const t of fleetTemplates) {
-          if (q && !t.name.toLowerCase().startsWith(q)) continue;
-          items.push({
-            id: `tpl:${t.name}`,
-            displayText: `@${t.name}`,
-            description: t.description || 'template',
-          });
-        }
-        for (const r of fleetRoutines) {
-          if (q && !r.name.toLowerCase().startsWith(q)) continue;
-          if (items.some(i => i.displayText === `@${r.name}`)) continue;
-          items.push({
-            id: `rtn:${r.name}`,
-            displayText: `@${r.name}`,
-            description: r.description || 'routine',
-          });
-        }
-        for (const name of Object.keys(map)) {
-          if (q && !name.toLowerCase().startsWith(q)) continue;
-          if (items.some(i => i.displayText === `@${name}`)) continue;
-          items.push({
-            id: `cwd:${name}`,
-            displayText: `@${name}`,
-            description: map[name] ?? '',
-          });
-        }
-        setSuggestions(items.slice(0, 8));
-        setSelectedSuggestion(0);
-        return;
-      }
-    }
-    // Leading token template suggestions (no @) while typing first word
-    if (!/\s/.test(dispatchInput) && dispatchInput.length > 0 && !dispatchInput.startsWith('!')) {
-      const q = dispatchInput.toLowerCase();
-      const items = fleetTemplates
-        .filter(t => t.name.toLowerCase().startsWith(q))
-        .slice(0, 8)
-        .map(t => ({
-          id: `tpl-lead:${t.name}`,
-          displayText: t.name,
-          description: t.description || 'template',
-        }));
-      setSuggestions(items);
-      setSelectedSuggestion(0);
-      return;
-    }
-    setSuggestions([]);
-  }, [dispatchInput, commands, focusArea, dispatchMode, sessions, fleetTemplates, fleetRoutines]);
+    const cwdMap = buildCwdBasenameMap(sessions);
+    const parsed = parseDispatch(
+      dispatchInput,
+      fleetTemplates.map(t => ({ name: t.name })),
+      cwdMap,
+      fleetRoutines.map(r => ({ name: r.name })),
+    );
+    const items = buildFleetComposerSuggestions(dispatchInput, {
+      templates: fleetTemplates,
+      routines: fleetRoutines,
+      repos: cwdMap,
+      dispatch: parsed,
+      showAllAgents,
+      lastUsed: agentLastUsed,
+    }).map(s => ({
+      id: `${s.kind}:${s.name}`,
+      displayText: fleetSuggestionDisplayText(s),
+      description: s.description || s.kind,
+    }));
+    setSuggestions(items);
+    setSelectedSuggestion(0);
+  }, [dispatchInput, commands, dispatchMode, sessions, fleetTemplates, fleetRoutines, showAllAgents, agentLastUsed]);
 
   const voiceEnabled = feature('VOICE_MODE') ? viewMode === 'reply' : false;
   const handleVoiceTranscript = useCallback(
@@ -904,6 +964,13 @@ function AgentViewApp({
           group: job.group,
           archived: job.archived,
           sortOrder: job.sortOrder,
+          stateSortOrder: job.stateSortOrder,
+          firstTerminalAt: (() => {
+            if (!job.firstTerminalAt) return undefined;
+            const ms = Date.parse(job.firstTerminalAt);
+            return Number.isFinite(ms) ? ms : undefined;
+          })(),
+          backend: job.backend,
         };
       });
 
@@ -1172,6 +1239,8 @@ function AgentViewApp({
   const active = unpinned.filter(s => deriveBand(s) === 'active');
   const done = unpinned.filter(s => deriveBand(s) === 'completed');
   const termRows = process.stdout.rows || 54;
+  // densable cHy `h` — oxy vs zky. Default OFF (grouped). Do not invent always-on.
+  const simpleView = isFleetSimpleViewEnabled();
   const runningCount = mainSessions.filter(s => {
     const band = deriveBand(s);
     return band === 'active' || band === 'blocked' || band === 'review';
@@ -1231,8 +1300,22 @@ function AgentViewApp({
     });
   }, [mainSessions, groupMode]);
 
+  // densable oxy — computed before XFa so simple compactHeader can use needs+live.
+  const simpleBuilt = React.useMemo(() => {
+    if (!simpleView) return null;
+    return buildSimpleModeFlatRows({
+      sessions: mainSessions,
+      now: Date.now(),
+      terminalRows: termRows,
+      showFinishedEarlier: doneCapExpanded,
+    });
+  }, [simpleView, mainSessions, termRows, doneCapExpanded]);
+
   // densable XFa(rows, t) → doneCap + wpe(compactHeader). t matches densable call sites.
   const { doneCap: xfaDoneCap, compactHeader } = React.useMemo(() => {
+    if (simpleBuilt) {
+      return fleetHeaderBudget(termRows, 1 + simpleBuilt.needsCount + simpleBuilt.liveCount);
+    }
     if (groupMode === 'directory' && cwdGroups) {
       const t = fleetXfaListEstimate({
         mode: 'other',
@@ -1282,6 +1365,7 @@ function AgentViewApp({
     done.length,
     earlierSessions.length,
     foldedGroups,
+    simpleBuilt,
   ]);
 
   // densable zwf: only fold when done+earlier >= doneCap+JFa(3); else Infinity.
@@ -1299,13 +1383,19 @@ function AgentViewApp({
       rows.push({ kind: 'header', group: 'earlier' });
       if (!foldedGroups.has('earlier')) {
         if (earlierExpanded) {
-          for (const session of earlierSessions) rows.push({ kind: 'job', session });
+          // densable zky: past sessions are kind:"earlier", not jobs
+          for (const session of earlierSessions) {
+            rows.push({ kind: 'earlier', session });
+          }
         } else {
           rows.push({ kind: 'fold', group: 'earlier', hidden: earlierSessions.length });
         }
       }
       return rows;
     };
+
+    // densable We ?? zky — simple oxy has no headers and no earlier kind.
+    if (simpleBuilt) return simpleBuilt.rows;
 
     if (groupMode === 'directory' && cwdGroups) {
       return appendEarlier(buildDirectoryModeFlatRows({ groups: cwdGroups, foldedGroups }));
@@ -1344,16 +1434,19 @@ function AgentViewApp({
     doneCapExpanded,
     earlierSessions,
     earlierExpanded,
+    simpleBuilt,
   ]);
 
   const currentRow = flatRows[selectedIndex] as FleetFlatRow | undefined;
-  const selectedSession = currentRow?.kind === 'job' ? currentRow.session : undefined;
+  const selectedSession = currentRow?.kind === 'job' || currentRow?.kind === 'earlier' ? currentRow.session : undefined;
   // densable LUt: hxe(path, max(Ys-11-(model?width+3:0), 10))
   const rawCwd = selectedSession?.cwd || getCwd();
   const modelWidth = stringWidth(modelDisplay);
   const pathBudget = Math.max(termWidth - 11 - (modelWidth > 0 ? modelWidth + 3 : 0), 10);
   const cwdDisplay = truncatePathMiddle(rawCwd, pathBudget);
-  const openableJobs = flatRows.filter(r => r.kind === 'job').map(r => r.session);
+  const openableJobs = flatRows
+    .filter((r): r is Extract<FleetFlatRow, { kind: 'job' | 'earlier' }> => r.kind === 'job' || r.kind === 'earlier')
+    .map(r => r.session);
   const footerHints = buildFleetFooterHints({
     focusArea,
     viewMode,
@@ -1417,11 +1510,12 @@ function AgentViewApp({
 
   // Restore selection after returning from an attached session
   const restoredRef = useRef(false);
+  const homeIdxAppliedRef = useRef(false);
   useEffect(() => {
     if (restoredRef.current || !restoreSessionId || flatRows.length === 0) return;
     const idx = flatRows.findIndex(
       r =>
-        r.kind === 'job' &&
+        (r.kind === 'job' || r.kind === 'earlier') &&
         (r.session.sessionId === restoreSessionId ||
           r.session.short === restoreSessionId ||
           r.session.sessionId?.startsWith(restoreSessionId) ||
@@ -1432,8 +1526,30 @@ function AgentViewApp({
       setSelectedIndex(idx);
       setFocusArea('list');
       restoredRef.current = true;
+      homeIdxAppliedRef.current = true;
     }
   }, [flatRows, restoreSessionId]);
+
+  // densable Wky homeIdx — grouped view lands on the first same-cwd job, not the header.
+  useEffect(() => {
+    if (homeIdxAppliedRef.current || restoredRef.current) return;
+    if (flatRows.length === 0) return;
+    if (restoreSessionId && !restoredRef.current) {
+      const pending = flatRows.some(
+        r =>
+          (r.kind === 'job' || r.kind === 'earlier') &&
+          (r.session.sessionId === restoreSessionId ||
+            r.session.short === restoreSessionId ||
+            r.session.sessionId?.startsWith(restoreSessionId) ||
+            r.session.short?.startsWith(restoreSessionId)),
+      );
+      if (pending) return;
+    }
+    homeIdxAppliedRef.current = true;
+    setMouseSelectedIndex(null);
+    // densable ot = k ? 0 : Wky — simple homes on + new session.
+    setSelectedIndex(simpleView ? 0 : fleetHomeIdx(flatRows, getCwd()));
+  }, [flatRows, restoreSessionId, simpleView]);
 
   // Clamp selection
   useEffect(() => {
@@ -1551,7 +1667,7 @@ function AgentViewApp({
     const parsed = parseDispatch(rawForParse, templateTargets, cwdMap, routineTargets);
     // Expand paste placeholders before submit (official jye).
     // Use !== undefined so empty bash (`!` / `!   `) is not collapsed to free-form.
-    const expandedIntent = expandPastedTextRefs(parsed.intent, pastesRef.current);
+    let expandedIntent = expandPastedTextRefs(parsed.intent, pastesRef.current);
     const expandedExec = parsed.exec !== undefined ? expandPastedTextRefs(parsed.exec, pastesRef.current) : undefined;
 
     // Bash path: empty / whitespace-only command
@@ -1574,6 +1690,21 @@ function AgentViewApp({
     try {
       // densable: n?.exec → launch.mode exec via $F_; template → agent;
       // routine is a separate dispatch field (not agent).
+      const templateName = expandedExec ? undefined : parsed.templateName;
+      // Official wbs: mint sessionId, write pasted-N.ext, replace [Image #N] with path.
+      // Exec skips wbs. Do not put base64 on DispatchRequest.
+      let dispatchSessionId: string | undefined;
+      if (expandedExec === undefined) {
+        const hasImages = parseFleetPasteRefs(expandedIntent).some(r => imagePastesRef.current[r.id]?.type === 'image');
+        if (hasImages) {
+          dispatchSessionId = randomUUID();
+          expandedIntent = await materializeFleetPastedImages(
+            expandedIntent,
+            imagePastesRef.current,
+            getJobDirPath(dispatchSessionId.slice(0, 8)),
+          );
+        }
+      }
       await submitDispatch({
         intent: expandedExec ? expandedExec : expandedIntent,
         name: expandedExec ? expandedExec.slice(0, 40) : (parsed.templateName ?? parsed.routine),
@@ -1583,12 +1714,23 @@ function AgentViewApp({
         cwd: parsed.cwd ?? getCwd(),
         extraArgs: dispatchExtraArgs,
         source: 'fleet',
+        sessionId: dispatchSessionId,
       });
+      if (templateName && templateName !== FLEET_DEFAULT_TEMPLATE_NAME) {
+        const now = Date.now();
+        saveGlobalConfig(c => ({
+          ...c,
+          agentLastUsed: { ...(c.agentLastUsed ?? {}), [templateName]: now },
+        }));
+        setAgentLastUsed(u => ({ ...u, [templateName]: now }));
+      }
       setDispatchInput('');
       setCursorOffset(0);
       setDispatchMode('prompt');
+      dispatchVimSetModeRef.current('INSERT');
       setVimMode('INSERT');
       pastesRef.current = {};
+      imagePastesRef.current = {};
       pasteIdRef.current = 1;
       setError(null);
       await refresh();
@@ -1607,10 +1749,27 @@ function AgentViewApp({
     openResumePicker,
   ]);
 
+  const applySelectedSuggestion = useCallback(() => {
+    const selected = suggestions[selectedSuggestion];
+    if (!selected) return;
+    const at = dispatchInput.lastIndexOf('@');
+    if (selected.displayText.startsWith('@') && at >= 0) {
+      const next = dispatchInput.slice(0, at) + selected.displayText + ' ';
+      setDispatchInput(next);
+      setCursorOffset(next.length);
+    } else {
+      const text = selected.displayText + ' ';
+      setDispatchInput(text);
+      setCursorOffset(text.length);
+    }
+    setSuggestions([]);
+    setShowAllAgents(false);
+  }, [suggestions, selectedSuggestion, dispatchInput]);
+
   /** Resolve the currently selected job from flatRows at call time (not a stale closure). */
   const getSelectedSession = useCallback((): SessionEntry | undefined => {
     const row = flatRows[selectedIndex];
-    return row?.kind === 'job' ? row.session : undefined;
+    return row?.kind === 'job' || row?.kind === 'earlier' ? row.session : undefined;
   }, [flatRows, selectedIndex]);
 
   const handlePin = useCallback(async () => {
@@ -1872,55 +2031,21 @@ function AgentViewApp({
 
   const handleReorder = useCallback(
     async (direction: -1 | 1) => {
-      const session = getSelectedSession();
-      if (!session || currentRow?.kind !== 'job') return;
-      // Find neighbor job in flatRows before crossing a header boundary.
-      let neighborIdx = selectedIndex + direction;
-      while (neighborIdx >= 0 && neighborIdx < flatRows.length) {
-        const row = flatRows[neighborIdx];
-        if (row?.kind === 'job') break;
-        if (row?.kind === 'header') return; // crossed group boundary
-        neighborIdx += direction;
-      }
-      const neighbor = flatRows[neighborIdx];
-      if (!neighbor || neighbor.kind !== 'job') return;
-
-      // Official CE: assign dense sortOrder within the visible sibling group so
-      // swaps always move even when both sortOrder fields were previously unset.
-      const siblings: Array<{ short: string; idx: number }> = [];
-      // Walk left to group start
-      let start = selectedIndex;
-      while (start > 0) {
-        const prev = flatRows[start - 1];
-        if (prev?.kind === 'header') break;
-        if (prev?.kind === 'job') start -= 1;
-        else start -= 1;
-      }
-      for (let i = start; i < flatRows.length; i++) {
-        const row = flatRows[i];
-        if (row?.kind === 'header' && i !== start) break;
-        if (row?.kind !== 'job') continue;
-        const short = row.session.short ?? row.session.sessionId?.slice(0, 8) ?? '';
-        if (!short) continue;
-        siblings.push({ short, idx: i });
-      }
-      if (siblings.length < 2) return;
-      const orders = siblings.map((_, i) => i);
-      const from = siblings.findIndex(s => s.idx === selectedIndex);
-      const to = siblings.findIndex(s => s.idx === neighborIdx);
-      if (from < 0 || to < 0) return;
-      const tmp = orders[from]!;
-      orders[from] = orders[to]!;
-      orders[to] = tmp;
-
+      // Official RqA — do not invent reorderIssued.
+      const planned = planFleetReorder(flatRows, selectedIndex, direction, {
+        simpleView,
+        groupMode,
+      });
+      if (!planned) return;
+      setError(null);
       const { patchBgJobState } = await import('../daemon/jobState.js');
-      for (let i = 0; i < siblings.length; i++) {
-        patchBgJobState(siblings[i]!.short, { sortOrder: orders[i]! });
+      for (const patch of planned.patches) {
+        patchBgJobState(patch.short, { [patch.field]: patch.value });
       }
-      setSelectedIndex(neighborIdx);
+      setSelectedIndex(planned.nextFocusedIdx);
       await refresh();
     },
-    [getSelectedSession, currentRow, selectedIndex, flatRows, refresh],
+    [flatRows, selectedIndex, simpleView, groupMode, refresh],
   );
 
   const cycleGroupMode = useCallback(() => {
@@ -1958,6 +2083,86 @@ function AgentViewApp({
       }
     },
     [],
+  );
+
+  /**
+   * densable VIy — empty-shell spawn from + new session (Enter / empty-right).
+   * xAe([], undefined, "shell", origin) analog: idle submitDispatch, no H5b.
+   * Does not invent launch.mode='shell'.
+   */
+  const openNewSessionRow = useCallback(
+    async (origin?: string) => {
+      if (isFleetNewSessionSpawnBusy(newSessionOpeningRef.current, attachingJobIdRef.current)) {
+        return;
+      }
+      const attempt = ++newSessionAttemptRef.current;
+      newSessionOpeningRef.current = true;
+      dispatchingRef.current = true;
+      setError(null);
+      const isCurrent = () => attempt === newSessionAttemptRef.current;
+      const cwd = origin || getCwd();
+      try {
+        let result: { short: string; sessionId: string };
+        try {
+          result = await submitDispatch({
+            intent: '',
+            cwd,
+            extraArgs: dispatchExtraArgs,
+            source: 'shell',
+          });
+        } catch (e) {
+          if (!isCurrent()) return;
+          setError(formatFleetNewSessionThrow(e));
+          return;
+        }
+        if (!isCurrent()) return;
+        await refresh();
+        const job = await waitForFleetJobByShort(
+          async () => {
+            const jobs = await listAllJobs();
+            return jobs.map(j => ({
+              short: j.short,
+              sessionId: j.state.sessionId,
+            }));
+          },
+          result.short,
+          { deadlineAt: Date.now() + FLEET_NEW_SESSION_WAIT_MS, isCurrent },
+        );
+        if (!isCurrent()) return;
+        newSessionOpeningRef.current = false;
+        if (!job) {
+          setError(FLEET_NEW_SESSION_PENDING_MSG);
+          return;
+        }
+        attachingJobIdRef.current = result.short;
+        try {
+          await checkAndAttach(
+            result.short,
+            {
+              pid: 0,
+              sessionId: result.sessionId,
+              cwd,
+              startedAt: Date.now(),
+              kind: 'bg',
+              short: result.short,
+            },
+            onAction,
+            setError,
+          );
+        } finally {
+          attachingJobIdRef.current = null;
+        }
+      } catch (e) {
+        if (!isCurrent()) return;
+        setError(formatFleetNewSessionThrow(e));
+      } finally {
+        if (isCurrent()) {
+          dispatchingRef.current = false;
+          newSessionOpeningRef.current = false;
+        }
+      }
+    },
+    [dispatchExtraArgs, refresh, checkAndAttach, onAction],
   );
 
   /**
@@ -2011,6 +2216,22 @@ function AgentViewApp({
     setMouseSelectedIndex(null);
     setSelectedIndex(idx);
   }, []);
+
+  // densable JIy leftover `u(t)` → GP({honorEditorMode:!0}).
+  const dispatchVim = useVimInput({
+    value: dispatchInput,
+    onChange: setDispatchInput,
+    externalOffset: cursorOffset,
+    onOffsetChange: setCursorOffset,
+    focus: false,
+    multiline: true,
+    cursorChar: ' ',
+    invert: (text: string) => text,
+    themeText: (text: string) => text,
+    columns: termWidth,
+    onModeChange: setVimMode,
+  });
+  dispatchVimSetModeRef.current = dispatchVim.setMode;
 
   // -------------------------------------------------------------------------
   // Input handling
@@ -2067,6 +2288,17 @@ function AgentViewApp({
       return;
     }
 
+    // Official JIy: non-space cancels a pending peek arm.
+    if (input !== ' ') {
+      cancelPeekTap();
+    }
+
+    // Official JIy Esc: preview first (`if(F) i.setPreviewOpen(!1)`).
+    if (key.escape && previewOpen) {
+      setPreviewOpen(false);
+      return;
+    }
+
     // densable: Ctrl+C cancels transient modes / clears dispatch, else ur() double-exit.
     // Esc never arms — only Ctrl+C uses double-press (Mt footer: Press Ctrl-C again).
     // Match both parsed form (input='c'+ctrl) and raw ETX (\x03) for robustness.
@@ -2109,6 +2341,23 @@ function AgentViewApp({
     if (helpOpen) {
       if (key.escape || input === '?' || input === 'q') {
         setHelpOpen(false);
+      }
+      return;
+    }
+
+    // Official Tuu peek: onAttach / onReply close preview.
+    if (previewOpen) {
+      if (key.return && selectedSession) {
+        setPreviewOpen(false);
+        const short = selectedSession.short ?? selectedSession.sessionId?.slice(0, 8) ?? '';
+        void checkAndAttach(short, selectedSession, onAction, setError);
+        return;
+      }
+      if (input === ' ' && selectedSession && deriveBand(selectedSession) === 'blocked') {
+        setPreviewOpen(false);
+        setViewMode('reply');
+        setReplyInput('');
+        return;
       }
       return;
     }
@@ -2197,8 +2446,9 @@ function AgentViewApp({
       return;
     }
 
-    // Shift+↑/↓ reorder (list or empty dispatch — official CE)
-    if (key.shift && (key.upArrow || key.downArrow) && focusArea === 'list') {
+    // Official JIy: shift+↑/↓ → RqA when no suggestions and !preview.
+    // Not selection extend. No focusArea check.
+    if (key.shift && (key.upArrow || key.downArrow) && shouldFleetViewReorder(suggestions.length, previewOpen)) {
       clearPending();
       void handleReorder(key.upArrow ? -1 : 1);
       return;
@@ -2211,6 +2461,7 @@ function AgentViewApp({
       return;
     }
     if (input === 's' && key.ctrl) {
+      if (!shouldFleetViewCycleGroupMode(simpleView)) return;
       clearPending();
       cycleGroupMode();
       return;
@@ -2231,9 +2482,94 @@ function AgentViewApp({
       openJobBySlot(Number(input));
       return;
     }
-    if (input === '?' && focusArea === 'list' && !key.ctrl && !key.meta) {
+    if (input === '?' && !key.ctrl && !key.meta && shouldFleetViewToggleHelp(dispatchInput, dispatchMode)) {
       clearPending();
-      setHelpOpen(true);
+      setHelpOpen(open => !open);
+      return;
+    }
+
+    // Official JIy up/ctrl+p, home/end/page, down/ctrl+n — before leftover u(t).
+    const rawForNav = dispatchMode === 'bash' ? `!${dispatchInput}` : dispatchInput;
+    const parsedNav = parseDispatch(
+      rawForNav,
+      fleetTemplates.map(t => ({ name: t.name })),
+      buildCwdBasenameMap(sessions),
+      fleetRoutines.map(r => ({ name: r.name })),
+    );
+    const composedNav = hasComposedDispatch(parsedNav);
+    const navByArrow = (delta: -1 | 1) => {
+      selectRowByKeyboard(
+        navigateFleetViewByArrow(flatRows, selectedIndex, delta, {
+          hasComposedDispatch: composedNav,
+          byState: groupMode === 'state',
+          dispatchRepoCwd: parsedNav.cwd,
+          previewOpen,
+        }),
+      );
+      clearPending();
+    };
+    if (!key.shift && (key.upArrow || (key.ctrl && input === 'p'))) {
+      if (key.upArrow && shouldFleetViewArrowDelegateToEditor(false, dispatchInput)) {
+        dispatchVim.onInput(input, key);
+        return;
+      }
+      if (suggestions.length > 0) {
+        setSelectedSuggestion(i => Math.max(0, i - 1));
+        return;
+      }
+      navByArrow(-1);
+      return;
+    }
+    if (key.home || key.end || key.pageUp || key.pageDown) {
+      if (suggestions.length === 0 && !composedNav) {
+        const pageKey = key.home ? 'home' : key.end ? 'end' : key.pageUp ? 'pageup' : 'pagedown';
+        selectRowByKeyboard(fleetViewPageJump(pageKey, selectedIndex, flatRows.length, termRows));
+        clearPending();
+        return;
+      }
+      dispatchVim.onInput(input, key);
+      return;
+    }
+    if (!key.shift && (key.downArrow || (key.ctrl && input === 'n'))) {
+      if (key.downArrow && shouldFleetViewArrowDelegateToEditor(false, dispatchInput)) {
+        dispatchVim.onInput(input, key);
+        return;
+      }
+      if (suggestions.length > 0) {
+        setSelectedSuggestion(i => Math.min(suggestions.length - 1, i + 1));
+        return;
+      }
+      navByArrow(1);
+      return;
+    }
+
+    // Official JIy tab — before leftover. simpleView no-op; empty prompt toggles
+    // showAllAgents; else apply suggestion. No list↔dispatch focus swap.
+    if (key.tab) {
+      if (simpleView) return;
+      if (shouldFleetViewTabToggleAllAgents(simpleView, dispatchInput, dispatchMode, fleetTemplates.length)) {
+        setShowAllAgents(v => !v);
+      } else if (suggestions.length > 0) {
+        applySelectedSuggestion();
+      }
+      return;
+    }
+
+    // Official JIy empty-right: earlier / newsession / openOrRespawn.
+    // newsession → VIy (idle shell spawn + attach).
+    if (key.rightArrow && shouldFleetViewRightOpenFocusedRow(!!key.shift, dispatchInput, dispatchMode, false)) {
+      if (currentRow?.kind === 'earlier') {
+        const past = currentRow.session;
+        void resumePastAsBackground(past.sessionId ?? '', past.name || past.sessionId?.slice(0, 8) || 'resume');
+      } else if (currentRow?.kind === 'newsession') {
+        void openNewSessionRow();
+      } else {
+        const session = getSelectedSession();
+        if (session) {
+          const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
+          void checkAndAttach(short, session, onAction, setError);
+        }
+      }
       return;
     }
 
@@ -2248,44 +2584,42 @@ function AgentViewApp({
       }
       if (key.return) {
         if (suggestions.length > 0) {
-          const selected = suggestions[selectedSuggestion];
-          if (selected) {
-            // Replace trailing @partial or whole query with suggestion
-            const at = dispatchInput.lastIndexOf('@');
-            if (selected.displayText.startsWith('@') && at >= 0) {
-              const next = dispatchInput.slice(0, at) + selected.displayText + ' ';
-              setDispatchInput(next);
-              setCursorOffset(next.length);
-            } else {
-              const text = selected.displayText + ' ';
-              setDispatchInput(text);
-              setCursorOffset(text.length);
-            }
-            setSuggestions([]);
-            return;
-          }
+          applySelectedSuggestion();
+          return;
         }
         if (dispatchInput.trim() || dispatchMode === 'bash') {
           void handleDispatch();
         }
         return;
       }
+      // Official GP onSpaceOnEmpty → nt() = setPreviewOpen(!preview).
+      if (input === ' ' && !key.ctrl && !key.meta && !dispatchInput && dispatchMode === 'prompt') {
+        schedulePeekTap(
+          cb => setTimeout(cb, 0),
+          () => setPreviewOpen(open => !open),
+        );
+        return;
+      }
       // Official JIy Esc: vim INSERT/nonempty → NORMAL and keep text.
       if (key.escape) {
+        // Official JIy Esc: preview/help/debug then showAllAgents before vim.
+        if (showAllAgents) {
+          setShowAllAgents(false);
+          return;
+        }
         const fleetVim = isVimModeEnabled() ? vimMode : undefined;
         if (shouldFleetViewVimHandleEscape(fleetVim, true, dispatchInput)) {
           if (deleteConfirmSessionId || ungroupConfirmSessionId) {
             clearPending();
           }
-          if (vimMode === 'INSERT') {
-            setVimMode('NORMAL');
-          }
+          dispatchVim.onInput(input, key);
           return;
         }
         if (dispatchInput || dispatchMode === 'bash') {
           setDispatchInput('');
           setCursorOffset(0);
           setDispatchMode('prompt');
+          dispatchVim.setMode('INSERT');
           setVimMode('INSERT');
         } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
           // densable MD.current → NO(null): cancel delete/ungroup arm first.
@@ -2295,128 +2629,24 @@ function AgentViewApp({
         }
         return;
       }
-      // Official JIy `u(t)`: NORMAL does not insert. `i` returns to INSERT.
-      if (isVimModeEnabled() && vimMode === 'NORMAL') {
-        if (input === 'i' && !key.ctrl && !key.meta) {
-          setVimMode('INSERT');
-          return;
-        }
-        if (input && !key.ctrl && !key.meta && !key.return && !key.tab && !key.escape) {
-          return;
-        }
-      }
-      // Official: empty bash + backspace → exit bash mode
+      // Official: empty bash + backspace → exit bash mode (JIy before leftover)
       if (key.backspace && !dispatchInput && dispatchMode === 'bash') {
         setDispatchMode('prompt');
-        return;
-      }
-      if (key.backspace && cursorOffset > 0) {
-        setDispatchInput(v => v.slice(0, cursorOffset - 1) + v.slice(cursorOffset));
-        setCursorOffset(o => o - 1);
-        return;
-      }
-      if (key.leftArrow) {
-        setCursorOffset(o => Math.max(0, o - 1));
-        return;
-      }
-      if (key.rightArrow) {
-        setCursorOffset(o => Math.min(dispatchInput.length, o + 1));
-        return;
-      }
-      if (key.upArrow) {
-        if (suggestions.length > 0) {
-          setSelectedSuggestion(i => Math.max(0, i - 1));
-        } else if (sessions.length > 0) {
-          setFocusArea('list');
-          selectRowByKeyboard(Math.max(0, flatRows.length - 1));
-        }
-        return;
-      }
-      if (key.downArrow && suggestions.length > 0) {
-        setSelectedSuggestion(i => Math.min(suggestions.length - 1, i + 1));
-        return;
-      }
-      if (key.tab) {
-        if (suggestions.length > 0) {
-          const selected = suggestions[selectedSuggestion];
-          if (selected) {
-            const at = dispatchInput.lastIndexOf('@');
-            if (selected.displayText.startsWith('@') && at >= 0) {
-              const next = dispatchInput.slice(0, at) + selected.displayText + ' ';
-              setDispatchInput(next);
-              setCursorOffset(next.length);
-            } else {
-              const text = selected.displayText + ' ';
-              setDispatchInput(text);
-              setCursorOffset(text.length);
-            }
-            setSuggestions([]);
-          }
-        } else if (sessions.length > 0) {
-          setFocusArea('list');
-        }
         return;
       }
       if (input === 'x' && key.ctrl && done.length > 0) {
         void handleDeleteAll();
         return;
       }
-      if (input === '?' && !key.ctrl && !key.meta && !dispatchInput) {
-        setHelpOpen(true);
-        return;
-      }
-      // Official dcn: empty prompt + "!" → bash mode
-      if (input === '!' && !key.ctrl && !key.meta && !dispatchInput && dispatchMode === 'prompt') {
+      // Official dcn: empty prompt + "!" → bash mode (`vgn()&&!simpleView`)
+      if (
+        input === '!' &&
+        !key.ctrl &&
+        !key.meta &&
+        shouldFleetViewEnterBashFromBang(simpleView, dispatchInput, dispatchMode)
+      ) {
         setDispatchMode('bash');
         return;
-      }
-      // Large / multi-line paste → placeholder (official paste map)
-      if (input && !key.ctrl && !key.meta && input.length > 1) {
-        const normalized = input.replace(/\r\n|\r/g, '\n');
-        const nl = countNewlines(normalized);
-        if (normalized.length > FLEET_PASTE_CHAR_THRESHOLD || nl > 2) {
-          const id = pasteIdRef.current++;
-          pastesRef.current[id] = normalized;
-          const ph = formatPastedTextPlaceholder(id, nl);
-          setDispatchInput(v => v.slice(0, cursorOffset) + ph + v.slice(cursorOffset));
-          setCursorOffset(o => o + ph.length);
-          return;
-        }
-        setDispatchInput(v => v.slice(0, cursorOffset) + normalized + v.slice(cursorOffset));
-        setCursorOffset(o => o + normalized.length);
-        return;
-      }
-      if (input && !key.ctrl && !key.meta) {
-        setDispatchInput(v => v.slice(0, cursorOffset) + input + v.slice(cursorOffset));
-        setCursorOffset(o => o + input.length);
-        return;
-      }
-      return;
-    }
-
-    // List navigation
-    const maxVisibleIndex = flatRows.length - 1;
-    if (key.upArrow) {
-      selectRowByKeyboard(i => Math.max(0, i - 1));
-      clearPending();
-    } else if (key.downArrow) {
-      if (selectedIndex >= maxVisibleIndex) {
-        setFocusArea('dispatch');
-        setMouseSelectedIndex(null);
-      } else {
-        selectRowByKeyboard(i => Math.min(maxVisibleIndex, i + 1));
-      }
-      clearPending();
-    } else if (key.tab) {
-      setFocusArea('dispatch');
-      setMouseSelectedIndex(null);
-      clearPending();
-    } else if (key.rightArrow && sessions.length > 0) {
-      // Right arrow: attach/resume the selected session
-      const session = getSelectedSession();
-      if (session) {
-        const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
-        void checkAndAttach(short, session, onAction, setError);
       }
     } else if (key.return && flatRows.length > 0) {
       if (currentRow?.kind === 'fold') {
@@ -2452,11 +2682,16 @@ function AgentViewApp({
         });
         return;
       }
+      if (currentRow?.kind === 'newsession') {
+        void openNewSessionRow();
+        return;
+      }
       const session = getSelectedSession();
       if (session) {
         const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
         void checkAndAttach(short, session, onAction, setError);
       }
+      return;
     } else if (input === ' ' && sessions.length > 0) {
       // Space to reply (for blocked sessions)
       const session = getSelectedSession();
@@ -2465,6 +2700,7 @@ function AgentViewApp({
         setViewMode('reply');
         setReplyInput('');
       }
+      return;
     } else if (input === 'x' && key.ctrl) {
       // densable R4e("x"): active/blocked first X = stop+arm justKilled; second X = delete.
       // completed first X = arm delete; second X = delete. Grouped jobs: ungroup arm first.
@@ -2517,6 +2753,7 @@ function AgentViewApp({
           armDeleteConfirm(session.sessionId);
         }
       }
+      return;
     } else if (input === 'a' && !key.ctrl && !key.meta && sessions.length > 0) {
       // Soft-archive / unarchive (local product surface for official archive)
       const session = getSelectedSession();
@@ -2524,6 +2761,7 @@ function AgentViewApp({
       clearPending();
       if (session.archived) void handleUnarchive();
       else void handleArchive();
+      return;
     } else if (input === 'f') {
       setFoldedGroups(s => {
         const n = new Set(s);
@@ -2533,34 +2771,113 @@ function AgentViewApp({
       });
       // Collapsing done resets doneCap expand so re-open still folds.
       setDoneCapExpanded(false);
+      return;
     } else if (key.escape) {
-      // densable list-focus Esc cascade: draft/bash → pending delete → Gnm/Tt.
-      // Draft can remain after ↑ from dispatch without clearing.
+      // Official JIy Esc is unified (no list/dispatch split). p = editor active.
+      if (showAllAgents) {
+        setShowAllAgents(false);
+        return;
+      }
+      const fleetVim = isVimModeEnabled() ? vimMode : undefined;
+      if (shouldFleetViewVimHandleEscape(fleetVim, true, dispatchInput)) {
+        if (deleteConfirmSessionId || ungroupConfirmSessionId) {
+          clearPending();
+        }
+        dispatchVim.onInput(input, key);
+        return;
+      }
       if (dispatchInput || dispatchMode === 'bash') {
         setDispatchInput('');
         setCursorOffset(0);
         setDispatchMode('prompt');
+        dispatchVimSetModeRef.current('INSERT');
         setVimMode('INSERT');
       } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
         clearPending();
       } else {
         handleEscExit();
       }
-    } else if (input === '!' && !key.ctrl && !key.meta) {
-      // Official: "!" from list enters bash dispatch mode
+      return;
+    } else if (
+      input === '!' &&
+      !key.ctrl &&
+      !key.meta &&
+      shouldFleetViewEnterBashFromBang(simpleView, dispatchInput, dispatchMode)
+    ) {
+      // Official: "!" from list enters bash — not in simpleView
       clearPending();
       setFocusArea('dispatch');
       setDispatchMode('bash');
       setDispatchInput('');
       setCursorOffset(0);
-    } else if (input && !key.ctrl && !key.meta && input !== 'f' && input !== '?' && input !== 'a') {
-      // Auto-switch to dispatch on any printable char (incl. q — densable types into composer)
-      clearPending();
-      setFocusArea('dispatch');
-      setDispatchMode('prompt');
-      setDispatchInput(input);
-      setCursorOffset(input.length);
+      return;
     }
+
+    // Official JIy: simpleView && !preview && renaming==null → q/l then skip leftover.
+    // Rename/reply/group already returned — Y===null analog is false here.
+    if (shouldFleetViewSimpleViewSkipLeftover(simpleView, false, false)) {
+      if (input === 'q' && !key.ctrl && !key.meta) {
+        handleCtrlCDoublePress();
+      }
+      if (input === 'l' && !key.ctrl && !key.meta && !hasCredentials) {
+        onAction?.({ type: 'login' });
+      }
+      return;
+    }
+
+    // Official leftover OOs: !simpleView → LOs → gOs `[Image #N] `.
+    if (isFleetImagePasteKey(input, key, getPlatform()) && !simpleView) {
+      clearPending();
+      void getImageFromClipboard()
+        .then(img => {
+          if (!img) {
+            setError(FLEET_CLIPBOARD_IMAGE_NOT_FOUND);
+            return;
+          }
+          const id = pasteIdRef.current++;
+          imagePastesRef.current[id] = {
+            type: 'image',
+            content: img.base64,
+            mediaType: img.mediaType,
+          };
+          const ph = `${formatFleetImagePlaceholder(id)} `;
+          const at = cursorOffsetRef.current;
+          setDispatchInput(v => v.slice(0, at) + ph + v.slice(at));
+          setCursorOffset(at + ph.length);
+          setError(null);
+        })
+        .catch(() => {
+          setError(FLEET_CLIPBOARD_IMAGE_READ_FAILED);
+        });
+      return;
+    }
+
+    // Official leftover: empty bash + backspace → prompt (before u(t)).
+    if (key.backspace && !dispatchInput && dispatchMode === 'bash') {
+      setDispatchMode('prompt');
+      return;
+    }
+
+    // Official paste map — leftover, not dispatch-focus only.
+    if (input && !key.ctrl && !key.meta && input.length > 1) {
+      const normalized = input.replace(/\r\n|\r/g, '\n');
+      const nl = countNewlines(normalized);
+      const at = cursorOffsetRef.current;
+      if (normalized.length > FLEET_PASTE_CHAR_THRESHOLD || nl > 2) {
+        const id = pasteIdRef.current++;
+        pastesRef.current[id] = normalized;
+        const ph = formatPastedTextPlaceholder(id, nl);
+        setDispatchInput(v => v.slice(0, at) + ph + v.slice(at));
+        setCursorOffset(at + ph.length);
+        return;
+      }
+      setDispatchInput(v => v.slice(0, at) + normalized + v.slice(at));
+      setCursorOffset(at + normalized.length);
+      return;
+    }
+
+    // Official leftover u(t) — always GP. No focusArea gate.
+    dispatchVim.onInput(input, key);
   });
 
   // -------------------------------------------------------------------------
@@ -2571,6 +2888,16 @@ function AgentViewApp({
     () => createSelectionClearKeyDownCapture(selectionForClear, copyOnSelect),
     [selectionForClear, copyOnSelect],
   );
+
+  // densable GP isActive: Ct — leftover always u(t); cursor not gated on focusArea.
+  const composerActive = isFleetComposerActive({
+    simpleView,
+    previewOpen,
+    renaming: viewMode === 'rename',
+    groupEdit: viewMode === 'group',
+    attaching: viewMode === 'reply',
+    resumePicker: resumePicker !== null,
+  });
 
   // Render
   // -------------------------------------------------------------------------
@@ -2622,7 +2949,7 @@ function AgentViewApp({
           </Box>
 
           {/* Empty state (official P9H when Bj empty / every-origin) */}
-          {sessions.length === 0 && !error && (
+          {sessions.length === 0 && !error && !simpleView && (
             <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
               <Text dimColor>
                 {originSessionPresent
@@ -2643,7 +2970,7 @@ function AgentViewApp({
           {/* Session list — flat rows (state: pinned/review/blocked/working/done; directory: cwd headers) */}
           <Box flexDirection="column" paddingLeft={1}>
             {flatRows.map((row, idx) => {
-              const isRowSelected = focusArea === 'list' && idx === selectedIndex;
+              const isRowSelected = idx === selectedIndex;
               // Official pq: skip bg when selection came from mouse hover (jH === index).
               const showSelectionBg = isRowSelected && mouseSelectedIndex !== idx;
               if (row.kind === 'header') {
@@ -2718,6 +3045,30 @@ function AgentViewApp({
                   </Box>
                 );
               }
+              if (row.kind === 'newsession') {
+                return (
+                  <Box
+                    key="newsession"
+                    backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
+                    onMouseEnter={() => {
+                      selectRowByMouse(idx);
+                    }}
+                    onClick={() => {
+                      selectRowByMouse(idx);
+                      setFocusArea('dispatch');
+                    }}
+                  >
+                    <Text
+                      color={'suggestion' as never}
+                      aria-label={isRowSelected ? 'selected, new session:' : undefined}
+                    >
+                      {isRowSelected ? '\u276F' : ' '}
+                      {'+  '}
+                      <Text underline={isRowSelected}>new session</Text>
+                    </Text>
+                  </Box>
+                );
+              }
               if (row.kind === 'fold') {
                 return (
                   <Box
@@ -2747,7 +3098,8 @@ function AgentViewApp({
                   </Box>
                 );
               }
-              const session = row.session;
+              const session = row.kind === 'job' || row.kind === 'earlier' ? row.session : undefined;
+              if (!session) return null;
               return (
                 <SessionRow
                   key={`${session.sessionId}-${session.pid}`}
@@ -2819,6 +3171,24 @@ function AgentViewApp({
             </Box>
           )}
 
+          {/* Official Tuu peek — previewOpen shows focused job + attach/reply. */}
+          {previewOpen && !resumePicker && !helpOpen && (
+            <Box flexDirection="column" borderStyle="round" paddingX={1} marginX={1} marginBottom={1}>
+              <Text bold>
+                {selectedSession
+                  ? selectedSession.name || selectedSession.short || selectedSession.sessionId?.slice(0, 8) || 'agent'
+                  : 'No agent selected'}
+              </Text>
+              {selectedSession && (
+                <Text dimColor>
+                  {deriveBand(selectedSession)}
+                  {selectedSession.cwd ? ` · ${selectedSession.cwd}` : ''}
+                </Text>
+              )}
+              <Text dimColor>enter attach · space reply · esc close</Text>
+            </Box>
+          )}
+
           {/* Help overlay (official ? shortcuts) */}
           {helpOpen && !resumePicker && (
             <Box paddingLeft={2} flexDirection="column" marginBottom={1}>
@@ -2853,9 +3223,9 @@ function AgentViewApp({
           )}
 
           {/* Dispatch input */}
-          {viewMode === 'list' && !helpOpen && !resumePicker && (
+          {viewMode === 'list' && !helpOpen && !resumePicker && !previewOpen && (
             <Box flexDirection="column">
-              {suggestions.length > 0 && focusArea === 'dispatch' && (
+              {suggestions.length > 0 && (
                 <SuggestionList
                   suggestions={suggestions.map(item => ({
                     id: item.id,
@@ -2898,9 +3268,9 @@ function AgentViewApp({
                 cursorOffset={cursorOffset}
                 placeholder={dispatchMode === 'bash' ? 'run a bash command in a new session' : DISPATCH_PLACEHOLDER}
                 prefix={dispatchMode === 'bash' ? '!' : '\u276f'}
-                prefixDim={focusArea !== 'dispatch'}
+                prefixDim={!composerActive}
                 prefixColor={dispatchMode === 'bash' ? 'bashBorder' : undefined}
-                isFocused={focusArea === 'dispatch'}
+                isFocused={composerActive}
                 width="100%"
                 borderless
               />
@@ -3173,6 +3543,7 @@ export async function renderAgentView(options?: {
     const action = await new Promise<
       | { type: 'open'; sessionId: string; short: string; logPath?: string }
       | { type: 'done'; resumeHintRequested?: boolean }
+      | { type: 'login' }
     >(resolve => {
       // ThemeProvider required: without it useTheme() defaults to 'dark', so
       // selection userMessageBackground paints as rgb(55,55,55) on light terminals.
@@ -3216,6 +3587,37 @@ export async function renderAgentView(options?: {
     if (action.type === 'done') {
       resumeHintRequested = !!action.resumeHintRequested;
       break;
+    }
+
+    // Official fleet host: type==="login" → Tfr + Login, remount fleet.
+    // No invent: skip runOrgMemoryAuthBoundary / storageV5 Abs / hint (not in tip).
+    if (action.type === 'login') {
+      const { Login } = await import('../commands/login/login.js');
+      const { getOauthTokenEnvStartingMessage } = await import('../commands/login/oauthTokenEnvWarning.js');
+      const { getClientType } = await import('../bootstrap/state.js');
+      root = await createRoot({ exitOnCtrlC: false });
+      const loginResult = await Promise.race([
+        new Promise<boolean>(resolve => {
+          root.render(
+            <ThemeProvider
+              initialState={getGlobalConfig().theme}
+              onThemeSave={setting => saveGlobalConfig(current => ({ ...current, theme: setting }))}
+            >
+              <AppStateProvider>
+                <KeybindingSetup>
+                  <Login onDone={success => resolve(success)} startingMessage={getOauthTokenEnvStartingMessage()} />
+                </KeybindingSetup>
+              </AppStateProvider>
+            </ThemeProvider>,
+          );
+        }),
+        root.waitUntilExit().then(() => 'exited' as const),
+      ]);
+      root.unmount();
+      if (loginResult === 'exited') break;
+      if (loginResult && getClientType() === 'gateway') break;
+      root = await createRoot({ exitOnCtrlC: false });
+      continue;
     }
 
     if (action.type === 'open') {

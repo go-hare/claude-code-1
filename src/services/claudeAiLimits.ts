@@ -124,6 +124,11 @@ export type ClaudeAILimits = {
   overageResetsAt?: number
   overageDisabledReason?: OverageDisabledReason
   isUsingOverage?: boolean
+  /**
+   * densable hvr / Vqn consumer-only. Local header parse does not produce
+   * this field — do not invent a mapping.
+   */
+  overageInUse?: boolean
   surpassedThreshold?: number
 }
 

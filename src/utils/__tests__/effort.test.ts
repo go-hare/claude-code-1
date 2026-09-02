@@ -840,6 +840,16 @@ describe('densable effort catalog matrix', () => {
     ])
   })
 
+  test('deepseek-v4-flash-vision-exp: same ladder as flash', () => {
+    expect(getSupportedEffortLevels('deepseek-v4-flash-vision-exp')).toEqual([
+      'high',
+      'max',
+    ])
+    expect(getDefaultEffortForModel('deepseek-v4-flash-vision-exp')).toBe(
+      'high',
+    )
+  })
+
   test('getUltracodeEffortForModel: prefer xhigh when present', () => {
     expect(getUltracodeEffortForModel('claude-opus-4-7')).toBe('xhigh')
     expect(getUltracodeEffortForModel('gpt-5.6-sol')).toBe('xhigh')

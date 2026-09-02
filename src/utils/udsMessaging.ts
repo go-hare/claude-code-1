@@ -45,10 +45,14 @@ export type UdsMessageType =
   | 'pong'
   /** densable 2.1.236 — control plane (notify_when_idle / peer_idle_notice). */
   | 'control'
+  /** densable 2.1.239 H_a / TWd — first-line auth frame, never inbox'd. */
+  | 'auth'
 
 export type UdsMessage = {
   /** Discriminator */
   type: UdsMessageType
+  /** densable H_a auth frame token (type=auth only). */
+  token?: string
   /** densable control action (type=control only) */
   action?: string
   /** Payload text / JSON content */
@@ -93,6 +97,8 @@ const inbox: UdsInboxEntry[] = []
 let nextId = 1
 let defaultSocketPath: string | null = null
 let authToken: string | null = null
+/** densable kWd.childToken — env inject / DWd "child". */
+let childToken: string | null = null
 /** densable ykh.authRequired — `requireAuth ?? mti()` (Windows-only default). */
 let authRequired = false
 /** densable lastStartDegradedCause — Unix key publish fail continues. */
@@ -149,6 +155,70 @@ export function isUdsMessageTooLargeError(
     error instanceof UdsMessageTooLargeError &&
     error.errorClass === UDS_MESSAGE_TOO_LARGE_ERROR_CLASS
   )
+}
+
+/** densable TWd / R_a — 16 bytes → 32 hex. */
+const UDS_AUTH_TYPE = 'auth' as const
+const UDS_PEER_TOKEN_BYTES = 16
+
+/**
+ * densable H_a — NDJSON auth preamble: `He({type:"auth",token})+"\n"`.
+ * Official cmp prefixes the payload with this line when IWd found a token.
+ */
+export function serializeUdsAuthFrame(token: string): string {
+  return jsonStringify({ type: UDS_AUTH_TYPE, token }) + '\n'
+}
+
+/** densable PWd */
+export function isUdsAuthFrame(
+  value: unknown,
+): value is { type: 'auth'; token: unknown } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    (value as { type: unknown }).type === UDS_AUTH_TYPE
+  )
+}
+
+function timingSafeTokenEqual(
+  provided: string,
+  expected: string | null | undefined,
+): boolean {
+  if (!expected) return false
+  const a = Buffer.from(provided, 'utf8')
+  const b = Buffer.from(expected, 'utf8')
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
+/**
+ * densable DWd — classify an auth-frame token against active peer/child.
+ */
+export function classifyUdsAuthToken(
+  token: unknown,
+  tokens?: { peerToken?: string | null; childToken?: string | null },
+): 'peer' | 'child' | undefined {
+  if (tokens === undefined || typeof token !== 'string') return undefined
+  if (timingSafeTokenEqual(token, tokens.peerToken)) return 'peer'
+  if (timingSafeTokenEqual(token, tokens.childToken)) return 'child'
+  return undefined
+}
+
+/** densable HWd — `H_a("0".repeat(R_a*2)).length` */
+export const UDS_AUTH_FRAME_SIZE = serializeUdsAuthFrame(
+  '0'.repeat(UDS_PEER_TOKEN_BYTES * 2),
+).length
+
+/**
+ * densable lmp — refuse when auth-frame reserve + JSON + newline exceeds X1r.
+ * Official always counts HWd even when the send omits the auth line.
+ */
+export function assertUdsPayloadUnderLineCap(serializedJson: string): void {
+  const chars = UDS_AUTH_FRAME_SIZE + serializedJson.length + 1
+  if (chars > MAX_UDS_LINE_CHARS) {
+    throw new UdsMessageTooLargeError(chars, MAX_UDS_LINE_CHARS)
+  }
 }
 
 /** macOS/BSD AF_UNIX `sun_path` limit (bytes, excluding NUL). */
@@ -920,12 +990,19 @@ function enqueueInboxEntry(entry: UdsInboxEntry): boolean {
   return true
 }
 
-function ensureAuthToken(): string {
+function ensureAuthTokens(): { peerToken: string; childToken: string } {
   if (!authToken) {
-    // densable 2.1.239 R_a=16 → xYb 32 hex.
-    authToken = randomBytes(16).toString('hex')
+    // densable 2.1.239 R_a=16 → xYb 32 hex. kWd: peer + child.
+    authToken = randomBytes(UDS_PEER_TOKEN_BYTES).toString('hex')
   }
-  return authToken
+  if (!childToken) {
+    childToken = randomBytes(UDS_PEER_TOKEN_BYTES).toString('hex')
+  }
+  return { peerToken: authToken, childToken }
+}
+
+function ensureAuthToken(): string {
+  return ensureAuthTokens().peerToken
 }
 
 function getMessageAuthToken(message: UdsMessage): string | undefined {
@@ -1046,7 +1123,8 @@ export async function startUdsMessaging(
     }
   }
 
-  const token = ensureAuthToken()
+  const tokens = ensureAuthTokens()
+  const token = tokens.peerToken
   // Official Ckh: authRequired = t.requireAuth ?? mti()
   authRequired = opts?.requireAuth ?? isMessagingLiveOwnerRequired()
   lastStartDegradedCause = undefined
@@ -1067,6 +1145,9 @@ export async function startUdsMessaging(
           `[udsMessaging] client connected (total: ${clients.size})`,
         )
         let authenticated = !authRequired
+        /** densable F$E `a` — DWd role after first-line H_a. */
+        let authRole: 'peer' | 'child' | undefined
+        let sawFirstLine = false
         let closing = false
         const closeWithError = (data: string): void => {
           if (closing || socket.destroyed) return
@@ -1092,12 +1173,35 @@ export async function startUdsMessaging(
         attachNdjsonFramer<UdsMessage>(
           socket,
           msg => {
-            if (!isAuthorizedMessage(msg)) {
-              logForDebugging(
-                `[udsMessaging] rejected unauthenticated message type=${msg.type}`,
-              )
-              closeWithError('unauthorized')
+            const first = !sawFirstLine
+            sawFirstLine = true
+            // densable F$E: first PWd frame is DWd; never inbox'd.
+            if (isUdsAuthFrame(msg)) {
+              if (first) {
+                authRole = classifyUdsAuthToken(msg.token, {
+                  peerToken: authToken,
+                  childToken,
+                })
+                if (authRole !== undefined) {
+                  authenticated = true
+                  if (authTimer !== undefined) clearTimeout(authTimer)
+                } else if (authRequired) {
+                  logForDebugging('[udsMessaging] rejected a bad auth frame')
+                  closeWithError('unauthorized')
+                }
+              }
               return
+            }
+            if (authRequired && authRole === undefined) {
+              // Official: no successful auth frame → drop the line.
+              // Local leftover: still accept meta.authToken (pre-H_a inject).
+              if (!isAuthorizedMessage(msg)) {
+                logForDebugging(
+                  `[udsMessaging] rejected unauthenticated message type=${msg.type}`,
+                )
+                closeWithError('unauthorized')
+                return
+              }
             }
             if (!authenticated) {
               authenticated = true
@@ -1335,10 +1439,9 @@ export async function startUdsMessaging(
     // capability file exists and the listener is ready.
     process.env.CLAUDE_CODE_MESSAGING_SOCKET = path
     exportedSocketEnv = true
-    // densable also exports CLAUDE_CODE_MESSAGING_TOKEN for inject/socat.
-    // Tradeoff (SEA-aligned): child processes inherit this env; token is also
-    // on-disk in the capability file. Do not invent a non-env soft-auth path.
-    process.env.CLAUDE_CODE_MESSAGING_TOKEN = token
+    // densable Ckh: CLAUDE_CODE_MESSAGING_TOKEN is kWd.childToken (DWd "child").
+    // peerToken stays in the capability file / IWd. Do not invent a non-env path.
+    process.env.CLAUDE_CODE_MESSAGING_TOKEN = tokens.childToken
     // densable kla — stamp messagingSocketPath + features:["notify_idle"] voucher.
     try {
       const { updateSessionMessagingSocket } =
@@ -1418,6 +1521,7 @@ export async function startUdsMessaging(
     socketPath = null
     defaultSocketPath = null
     authToken = null
+    childToken = null
     authRequired = false
     throw error
   }
@@ -1490,6 +1594,7 @@ export async function stopUdsMessaging(): Promise<void> {
     )
     socketPath = null
     authToken = null
+    childToken = null
     authRequired = false
     lastStartDegradedCause = undefined
   }
@@ -1513,18 +1618,25 @@ export async function sendUdsMessage(
   opts: { authToken?: string } = {},
 ): Promise<void> {
   const { createConnection } = await import('net')
-  const token = opts.authToken ?? authToken
+  // densable cmp: IWd(target) peerToken, then H_a prefix. Own token is fallback
+  // for same-process sends before the key file is visible.
+  const cap = await resolveMessagingCapability(targetSocketPath)
+  const token =
+    opts.authToken ??
+    (cap.kind === 'token' ? cap.token : undefined) ??
+    authToken
   if (!token) {
     throw new Error('Cannot send UDS message without auth token')
   }
-  const outbound = withRequestAuthToken(
-    {
-      ...message,
-      from: message.from ?? socketPath ?? undefined,
-      ts: message.ts ?? new Date().toISOString(),
-    },
-    token,
-  )
+  const outbound: UdsMessage = {
+    ...message,
+    from: message.from ?? socketPath ?? undefined,
+    ts: message.ts ?? new Date().toISOString(),
+  }
+  const payload = jsonStringify(outbound)
+  assertUdsPayloadUnderLineCap(payload)
+  // densable cmp: `c+i+\n` — auth frame then message JSON.
+  const wire = serializeUdsAuthFrame(token) + payload + '\n'
 
   return new Promise<void>((resolve, reject) => {
     let settled = false
@@ -1542,7 +1654,7 @@ export async function sendUdsMessage(
     }
 
     conn = createConnection(targetSocketPath, () => {
-      conn.write(jsonStringify(outbound) + '\n', err => {
+      conn.write(wire, err => {
         if (err) finish(err)
       })
     })

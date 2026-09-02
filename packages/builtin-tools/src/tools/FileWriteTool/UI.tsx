@@ -12,7 +12,7 @@ import { FileEditToolUseRejectedMessage } from 'src/components/FileEditToolUseRe
 
 import { HighlightedCode } from 'src/components/HighlightedCode.js';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, stringWidth } from '@anthropic/ink';
 import { FilePathLink } from 'src/components/FilePathLink.js';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
@@ -20,10 +20,11 @@ import { getCwd } from 'src/utils/cwd.js';
 import { getPatchForDisplay } from 'src/utils/diff.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { logError } from 'src/utils/log.js';
+import { isAutoMemPath } from 'src/memdir/paths.js';
 import { isScratchpadFile } from 'src/utils/permissions/filesystem.js';
 import { getPlansDirectory } from 'src/utils/plans.js';
 import { openForScan, readCapped } from 'src/utils/readEditContext.js';
-import { firstLineOf } from 'src/utils/stringUtils.js';
+import { firstLineOf, plural } from 'src/utils/stringUtils.js';
 import type { Output } from './FileWriteTool.js';
 
 const MAX_LINES_TO_RENDER = 10;
@@ -40,6 +41,28 @@ export function countLines(content: string): number {
   return content.endsWith(EOL) ? parts.length - 1 : parts.length;
 }
 
+/** densable Uo0 — wrap units including a trailing empty from a final NL. */
+export function wrapCount(content: string, width: number): number {
+  const w = Math.max(1, width);
+  let n = 0;
+  for (const line of content.split(EOL)) {
+    const vis = stringWidth(line);
+    n += vis === 0 ? 1 : Math.ceil(vis / w);
+  }
+  return n;
+}
+
+/** densable MYh — visible wrap rows (trailing NL is a terminator). */
+export function wrapVisibleLines(content: string, width: number): number {
+  const height = wrapCount(content, width);
+  return content.endsWith(EOL) ? height - 1 : height;
+}
+
+/** densable f3r || m3r — collapse scratchpad and auto-memory writes. */
+function isCollapsedWritePath(filePath: string): boolean {
+  return isScratchpadFile(filePath) || isAutoMemPath(filePath);
+}
+
 function FileWriteToolCreatedMessage({
   filePath,
   content,
@@ -51,28 +74,34 @@ function FileWriteToolCreatedMessage({
 }): React.ReactNode {
   const { columns } = useTerminalSize();
   const contentWithFallback = content || '(No content)';
+  const codeWidth = Math.max(1, columns - 12);
   const numLines = countLines(content);
-  const plusLines = numLines - MAX_LINES_TO_RENDER;
+  const plusLines = verbose ? 0 : wrapVisibleLines(contentWithFallback, codeWidth) - MAX_LINES_TO_RENDER;
+  const preview = verbose
+    ? contentWithFallback
+    : contentWithFallback
+        .split(EOL)
+        .slice(0, MAX_LINES_TO_RENDER)
+        .join(EOL)
+        .slice(0, MAX_LINES_TO_RENDER * (codeWidth + 1));
 
   return (
     <MessageResponse>
       <Box flexDirection="column">
         <Text>
-          Wrote <Text bold>{numLines}</Text> lines to{' '}
+          Wrote <Text bold>{numLines}</Text> {plural(numLines, 'line')} to{' '}
           <Text bold>{verbose ? filePath : relative(getCwd(), filePath)}</Text>
         </Text>
-        <Box flexDirection="column">
-          <HighlightedCode
-            code={
-              verbose ? contentWithFallback : contentWithFallback.split('\n').slice(0, MAX_LINES_TO_RENDER).join('\n')
-            }
-            filePath={filePath}
-            width={columns - 12}
-          />
+        <Box
+          flexDirection="column"
+          overflowY={verbose ? undefined : 'hidden'}
+          maxHeight={verbose ? undefined : MAX_LINES_TO_RENDER}
+        >
+          <HighlightedCode code={preview} filePath={filePath} width={codeWidth} />
         </Box>
         {!verbose && plusLines > 0 && (
           <Text dimColor>
-            … +{plusLines} {plusLines === 1 ? 'line' : 'lines'} {numLines > 0 && <CtrlOToExpand />}
+            … +{plusLines} {plural(plusLines, 'line')} {numLines > 0 && <CtrlOToExpand />}
           </Text>
         )}
       </Box>
@@ -87,20 +116,23 @@ export function userFacingName(input: Partial<{ file_path: string; content: stri
   return 'Write';
 }
 
-/** Gates fullscreen click-to-expand. Only `create` truncates (to
- *  MAX_LINES_TO_RENDER); `update` renders the full diff regardless of verbose.
- *  Called per visible message on hover/scroll, so early-exit after finding the
- *  (MAX+1)th line instead of splitting the whole (possibly huge) content. */
-export function isResultTruncated({ type, content }: Output): boolean {
+/** densable Yo0 — wrap-aware create truncation. `update` is never truncated. */
+export function isResultTruncated({ type, content }: Output, options?: { columns?: number }): boolean {
   if (type !== 'create') return false;
-  let pos = 0;
-  for (let i = 0; i < MAX_LINES_TO_RENDER; i++) {
-    pos = content.indexOf(EOL, pos);
-    if (pos === -1) return false;
-    pos++;
+  if (typeof content !== 'string') return false;
+  const columns = options?.columns;
+  if (columns === undefined) {
+    let pos = 0;
+    for (let i = 0; i < MAX_LINES_TO_RENDER; i++) {
+      pos = content.indexOf(EOL, pos);
+      if (pos === -1) return false;
+      pos++;
+    }
+    return pos < content.length;
   }
-  // countLines treats a trailing EOL as a terminator, not a new line
-  return pos < content.length;
+  const width = Math.max(1, columns - 12);
+  const budget = content.endsWith(EOL) ? MAX_LINES_TO_RENDER + 1 : MAX_LINES_TO_RENDER;
+  return wrapCount(content, width) > budget;
 }
 
 export function getToolUseSummary(input: Partial<{ file_path: string; content: string }> | undefined): string | null {
@@ -287,13 +319,13 @@ export function renderToolResultMessage(
             <Text bold>{relative(getCwd(), filePath)}</Text>
           </Text>
         );
-      } else if (!verbose && isScratchpadFile(filePath)) {
-        // Official densable: scratchpad creates keep line count + expand hint (no path).
+      } else if (!verbose && isCollapsedWritePath(filePath)) {
+        // Official densable: scratchpad / auto-mem creates keep line count + expand (no path).
         const numLines = countLines(content);
         return (
           <MessageResponse>
             <Text>
-              Wrote <Text bold>{numLines}</Text> {numLines === 1 ? 'line' : 'lines'} <CtrlOToExpand />
+              Wrote <Text bold>{numLines}</Text> {plural(numLines, 'line')} <CtrlOToExpand />
             </Text>
           </MessageResponse>
         );
@@ -313,8 +345,8 @@ export function renderToolResultMessage(
           style={style}
           verbose={verbose}
           previewHint={isPlanFile ? '/plan to preview' : undefined}
-          // Official densable: collapse full diff only for scratchpad files (Zsr).
-          collapsed={!isPlanFile && isScratchpadFile(filePath)}
+          // Official densable: collapse scratchpad / auto-mem (f3r || m3r).
+          collapsed={!isPlanFile && isCollapsedWritePath(filePath)}
         />
       );
     }

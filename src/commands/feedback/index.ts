@@ -9,6 +9,8 @@ const feedback = {
   name: 'feedback',
   description: `Submit feedback about Claude Code`,
   argumentHint: '[report]',
+  // densable 2.1.232 #35: open mid-turn while Claude is responding
+  immediate: true,
   isEnabled: () => {
     // Official USE_* densables — feedback disabled on 3P cloud providers.
     let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)

@@ -11,6 +11,7 @@ import { hasExactErrorMessage } from '../../utils/errors.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
 import { logError } from '../../utils/log.js'
 import { getEnabledSettingSources } from '../../utils/settings/constants.js'
+import { getInitialSettings } from '../../utils/settings/settings.js'
 import { tokenCountWithEstimation } from '../../utils/tokens.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { getMaxOutputTokensForModel } from '../api/claude.js'
@@ -225,6 +226,37 @@ export function isAutoCompactEnabled(): boolean {
   // Check if user has disabled auto-compact in their settings
   const userConfig = getGlobalConfig()
   return userConfig.autoCompactEnabled
+}
+
+/** densable LJr — precompute setting default is off. */
+export function getPrecomputeCompactionDefault(): boolean {
+  return false
+}
+
+/**
+ * densable UJr — auto-compact + zSe/Rhe + tengu_sepia_moth + setting.
+ * Does not invent kpw/$t() sidecar swap; this is the official gate only.
+ * zSe inlined (same as isReactiveCompactRemoteAllowed) to avoid autoCompact↔reactiveCompact cycle.
+ */
+export function isPrecomputeCompactionEnabled(): boolean {
+  if (!isAutoCompactEnabled()) return false
+  if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    if (
+      getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_reactive_compact_remote',
+        false as boolean,
+      ) !== true
+    ) {
+      return false
+    }
+  }
+  if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_sepia_moth', false)) {
+    return false
+  }
+  return (
+    getInitialSettings().precomputeCompactionEnabled ??
+    getPrecomputeCompactionDefault()
+  )
 }
 
 /**

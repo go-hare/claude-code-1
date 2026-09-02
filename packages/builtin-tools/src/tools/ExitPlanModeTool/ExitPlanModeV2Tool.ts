@@ -9,6 +9,10 @@ import {
   setNeedsPlanModeExitAttachment,
 } from 'src/bootstrap/state.js'
 import { logEvent } from 'src/services/analytics/index.js'
+import {
+  EXIT_PLAN_MODE_TRIGGER,
+  logPermissionModeChanged,
+} from 'src/utils/permissions/permissionSetup.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/metadata.js'
 import {
   buildTool,
@@ -413,6 +417,8 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
           permissionSetupModule?.restoreDangerousPermissions(baseContext) ??
           baseContext
       }
+      // densable qLe({from:"plan",to:m,trigger:"exit_plan_mode"}) before set
+      logPermissionModeChanged('plan', restoreMode, EXIT_PLAN_MODE_TRIGGER)
       return {
         ...prev,
         toolPermissionContext: {

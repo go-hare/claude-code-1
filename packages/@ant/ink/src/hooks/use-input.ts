@@ -13,6 +13,13 @@ type Options = {
    * @default true
    */
   isActive?: boolean
+  /**
+   * Register before earlier listeners so this hook can consume first.
+   * DualInk analog of densable uSt consume() (Iiu ctrl+o vs Global transcript).
+   *
+   * @default false
+   */
+  prepend?: boolean
 }
 
 /**
@@ -81,12 +88,16 @@ const useInput = (inputHandler: Handler, options: Options = {}) => {
   })
 
   useEffect(() => {
-    internal_eventEmitter?.on('input', handleData)
+    if (options.prepend) {
+      internal_eventEmitter?.prependListener('input', handleData)
+    } else {
+      internal_eventEmitter?.on('input', handleData)
+    }
 
     return () => {
       internal_eventEmitter?.removeListener('input', handleData)
     }
-  }, [internal_eventEmitter, handleData])
+  }, [internal_eventEmitter, handleData, options.prepend])
 }
 
 export default useInput

@@ -3,12 +3,13 @@ import { spawnSync } from 'child_process';
 import sample from 'lodash-es/sample.js';
 import * as React from 'react';
 import { getMainLoopBusy } from '../../bootstrap/state.js';
-import { BackgroundAndExit, canOfferBackgroundAndExit } from '../../components/BackgroundAndExit.js';
 import { ExitFlow } from '../../components/ExitFlow.js';
+import type { TaskState } from '../../tasks/types.js';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
 import { isBgSession } from '../../utils/concurrentSessions.js';
-import { isEnvTruthy } from '../../utils/envUtils.js';
-import { gracefulShutdown } from '../../utils/gracefulShutdown.js';
+import { listExitInFlightItems } from '../../utils/exitBackgroundItems.js';
+import { exitPromptShutdown } from '../../utils/exitPromptShutdown.js';
+import type { TodoItem } from '../../utils/todo/types.js';
 import { getCurrentWorktreeSession } from '../../utils/worktree.js';
 
 const GOODBYE_MESSAGES = ['Goodbye!', 'See ya!', 'Bye!', 'Catch you later!'];
@@ -17,6 +18,15 @@ function getRandomGoodbyeMessage(): string {
   return sample(GOODBYE_MESSAGES) ?? 'Goodbye!';
 }
 
+/**
+ * densable wO0 — /exit · /quit product path:
+ *   bg session → detach
+ *   worktree || Zeh() items → $To (ExitFlow → Ubs/Lbs/xTo)
+ *   else → goodbye + nst (no bare BackgroundAndExit; that is only via Lbs
+ *   "Move to background and exit")
+ *
+ * Gold TTc unsent feedback-draft nudge is invent-ban (no storageV5 draft host).
+ */
 export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXCommandContext): Promise<React.ReactNode> {
   // Inside a `claude --bg` tmux session: detach instead of kill. The REPL
   // keeps running; `claude attach` can reconnect. Covers /exit, /quit,
@@ -27,46 +37,54 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
     return null;
   }
 
-  // Official tsn / BackgroundAndExit: offer process-level bg handoff on exit
-  // when BG_SESSIONS is on and the conversation has a backgroundable seed.
-  // feature() must stay in if/ternary condition position (bun:bundle).
-  if (feature('BG_SESSIONS')) {
-    let bgExitHandoffDisabled = isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF);
-    try {
-      const { isBgExitHandoffDisabled } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js');
-      bgExitHandoffDisabled = isBgExitHandoffDisabled();
-    } catch {
-      // residual helpers optional
-    }
-    if (!bgExitHandoffDisabled && canOfferBackgroundAndExit(context.messages ?? [])) {
-      // Official fOo replyOnResume: isMidTurn — query loop busy (mainLoopBusy).
-      // getTasks feeds u4d exit handoff adopt.json (shells/agents/workflows).
-      return (
-        <BackgroundAndExit
-          messages={context.messages ?? []}
-          isMidTurn={getMainLoopBusy()}
-          onDone={msg => onDone(msg)}
-          getTasks={() => {
-            try {
-              return context.getAppState()?.tasks as Record<string, unknown> | undefined;
-            } catch {
-              return null;
-            }
-          }}
-        />
-      );
-    }
-  }
-
   const showWorktree = getCurrentWorktreeSession() !== null;
-
-  if (showWorktree) {
-    return <ExitFlow showWorktree={showWorktree} onDone={onDone} onCancel={() => onDone()} />;
+  let tasks: Record<string, TaskState> | undefined;
+  let todos: TodoItem[] | null | undefined;
+  try {
+    const app = context.getAppState();
+    tasks = app?.tasks as Record<string, TaskState> | undefined;
+    const todosMap = app?.todos as Record<string, TodoItem[] | undefined> | undefined;
+    if (todosMap) {
+      try {
+        const { getSessionId } = await import('../../bootstrap/state.js');
+        todos = todosMap[getSessionId()] ?? null;
+      } catch {
+        todos = null;
+      }
+    }
+  } catch {
+    tasks = undefined;
+    todos = undefined;
+  }
+  // densable wO0: n=Zeh() — GJr fan items, not Jeh(tasks).
+  const backgroundItems = listExitInFlightItems({
+    tasks: tasks ?? {},
+    todos: todos ?? null,
+  });
+  if (showWorktree || backgroundItems.length > 0) {
+    return (
+      <ExitFlow
+        showWorktree={showWorktree}
+        backgroundItems={backgroundItems}
+        messages={context.messages ?? []}
+        isMidTurn={getMainLoopBusy()}
+        onDone={onDone}
+        onCancel={() => onDone()}
+        getTasks={() => {
+          try {
+            return context.getAppState()?.tasks as Record<string, unknown> | undefined;
+          } catch {
+            return null;
+          }
+        }}
+      />
+    );
   }
 
   onDone(getRandomGoodbyeMessage());
-  await gracefulShutdown(0, 'prompt_input_exit');
+  await exitPromptShutdown({
+    messages: context.messages ?? [],
+    responseStreaming: false,
+  });
   return null;
 }

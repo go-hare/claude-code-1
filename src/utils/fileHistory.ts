@@ -54,8 +54,8 @@ export type FileHistoryState = {
   snapshots: FileHistorySnapshot[]
   trackedFiles: Set<string>
   // Monotonically-increasing counter incremented on every snapshot, even when
-  // old snapshots are evicted.  Used by useGitDiffStats as an activity signal
-  // (snapshots.length plateaus once the cap is reached).
+  // old snapshots are evicted. Used by useDiffData as the H_s `e` activity
+  // signal (snapshots.length plateaus once the cap is reached).
   snapshotSequence: number
 }
 

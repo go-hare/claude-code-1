@@ -6,7 +6,7 @@
 
 | HAVE | PARTIAL | GAP | UNKNOWN | N/A |
 | ---- | ------- | --- | ------- | --- |
-| **18** | **0** | **0** | **0** | **1** |
+| **15 + analog 3** | **0** | **0** | **0** | **1** |
 
 ## Landed (HAVE)
 
@@ -22,14 +22,20 @@
 | 8 | slash/local-command `oX` unescape | unescapeXmlEntities + UserLocal/Bash/Command · `unescapeXmlEntities.235.test.ts` |
 | 9 | update-footer failureHint | classifyNpmInstallFailure + mergeAutoUpdaterResult + footer/Notifications · `autoUpdaterFailureHint.235.test.ts` |
 | 10 | tasklist expand persist | GlobalConfig.showExpandedTodos |
-| 11 | cloud CPU delta/same-ref | RemoteAgentTask polling |
-| 12 | suppressAlwaysAllowRule | showAlwaysAllow + stripWholeToolGrantsForAsk · `*235*` |
-| 13 | embedded/vendor ripgrep | sidecar vendor **15.0.x**（**新于** SEA embed **14.1.1**）行为 1:1（`-m/-A/-C` + patho）+ densable `rejectOnInputError`/`RipgrepUsageError` · `embeddedRipgrep.235` / `ripgrepUsageError.235` · 打包 sidecar≠argv0 embed 为 **non-blocking residual** |
+| 11 | cloud CPU delta/same-ref | **HAVE (analog)** — RemoteAgentTask same-ref skip；changelog ≠ SEA 金标函数 |
+| 12 | suppressAlwaysAllowRule | **HAVE (analog)** — consumer/strip 在；235 无独立 SEA producer。239 leftover Artifact **生产**赋值 |
+| 13 | embedded/vendor ripgrep | **HAVE (analog)** — fail-fast 1:1；sidecar **15.0.x** ≠ SEA argv0 `rg 14.1.1` |
 | 14 | compact-off `/config` | RPa + ZOl PTL · `*235*` |
 | 15 | vim `savedCursorOffset` | promptInputCursorStore acf/Oyr/RgE + PromptInput remount · `promptInputCursorStore.235.test.ts` |
 | 16 | dialog `getFocusedValue` | C4i sync bag + accept live read · `getFocusedValue.235.test.tsx` |
 | 17 | SendMessage `message_too_large` | X1r + UdsMessageTooLargeError |
 | 18 | `claude rc` enterprise-gateway | getBridgeDisabledReason parity |
+
+## Analog residual（仍计 HAVE，不是 silent 1:1）
+
+- **#11** changelog 非 SEA 字面
+- **#12** 235 无独立 SEA producer；239 leftover Artifact 已生产赋值
+- **#13** sidecar ≠ SEA argv0 embed
 
 ## PARTIAL
 

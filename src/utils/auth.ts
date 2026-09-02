@@ -246,6 +246,24 @@ export function getAuthTokenSource() {
   }
 
   const oauthTokens = getClaudeAIOAuthTokens()
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isProfileAuthActive, readProfileUserOauthAccessToken } =
+    require('./anthropicProfile.js') as typeof import('./anthropicProfile.js')
+  if (
+    isProfileAuthActive({
+      storedClaudeAiLogin: Boolean(oauthTokens?.accessToken),
+    })
+  ) {
+    try {
+      const profile = readProfileUserOauthAccessToken()
+      if (profile?.token) {
+        return { source: 'anthropic-profile' as const, hasToken: true }
+      }
+    } catch {
+      // oRr/DUr is handled on the API client path, not status/source probes
+    }
+  }
+
   if (shouldUseClaudeAIAuth(oauthTokens?.scopes) && oauthTokens?.accessToken) {
     return { source: 'claude.ai' as const, hasToken: true }
   }
@@ -1461,6 +1479,72 @@ export function saveOAuthTokensIfNeeded(tokens: OAuthTokens): {
   }
 }
 
+/**
+ * leftover 239 uD + credentials/<profile>.json — not ua()/keychain.
+ * Throws AnthropicProfileOauthError when expired with no refresh (oRr).
+ */
+export function getActiveProfileAccessToken(): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isProfileAuthActive, readProfileUserOauthAccessToken } =
+    require('./anthropicProfile.js') as typeof import('./anthropicProfile.js')
+  if (
+    !isProfileAuthActive({
+      storedClaudeAiLogin: Boolean(getClaudeAIOAuthTokens()?.accessToken),
+    })
+  ) {
+    return null
+  }
+  return readProfileUserOauthAccessToken()?.token ?? null
+}
+
+/** leftover 239 zqt — refresh + workspace header + profile base_url. */
+export async function getActiveProfileWire(): Promise<{
+  token: string
+  extraHeaders: Record<string, string>
+  baseURL?: string
+} | null> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const {
+    getAnthropicProfileAuthKind,
+    getAnthropicProfileWireOptions,
+    isProfileAuthActive,
+    resolveProfileUserOauthAccessToken,
+  } = require('./anthropicProfile.js') as typeof import('./anthropicProfile.js')
+  if (
+    !isProfileAuthActive({
+      storedClaudeAiLogin: Boolean(getClaudeAIOAuthTokens()?.accessToken),
+    })
+  ) {
+    return null
+  }
+  if (getAnthropicProfileAuthKind() === 'oidc_federation') {
+    const {
+      getOidcFederationWireOptions,
+      loadOidcFederationConfig,
+      resolveOidcFederationAccessToken,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./anthropicOidc.js') as typeof import('./anthropicOidc.js')
+    const token = await resolveOidcFederationAccessToken()
+    if (!token?.token) return null
+    const config = await loadOidcFederationConfig()
+    const wire = getOidcFederationWireOptions(config)
+    return {
+      token: token.token,
+      extraHeaders: wire.extraHeaders,
+      ...(wire.baseURL ? { baseURL: wire.baseURL } : {}),
+    }
+  }
+  const token = await resolveProfileUserOauthAccessToken()
+  if (!token?.token) return null
+  const wire = getAnthropicProfileWireOptions()
+  return {
+    token: token.token,
+    extraHeaders: wire?.extraHeaders ?? {},
+    ...(wire?.baseURL ? { baseURL: wire.baseURL } : {}),
+  }
+}
+
 export const getClaudeAIOAuthTokens = memoize((): OAuthTokens | null => {
   // --bare: API-key-only. No OAuth env tokens, no keychain, no credentials file.
   if (isBareMode()) return null
@@ -1517,6 +1601,11 @@ export const getClaudeAIOAuthTokens = memoize((): OAuthTokens | null => {
 export function clearOAuthTokenCache(): void {
   getClaudeAIOAuthTokens.cache?.clear?.()
   clearKeychainCache()
+  // leftover 239 o4b/DJo — login-fail / 401 cache drop includes profile A5/uzs
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { clearAnthropicProfileCaches } =
+    require('./anthropicProfile.js') as typeof import('./anthropicProfile.js')
+  clearAnthropicProfileCaches()
 }
 
 let lastCredentialsMtimeMs = 0

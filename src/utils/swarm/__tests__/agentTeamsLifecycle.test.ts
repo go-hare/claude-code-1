@@ -124,9 +124,8 @@ afterEach(() => {
 
 describe('Agent Teams lifecycle', () => {
   test('TeamCreate and TeamDelete are hidden when agent swarms are disabled', async () => {
-    const previousDisabled =
-      process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED
-    process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED = '1'
+    const previousTeams = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+    delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
     try {
       const { TeamCreateTool } = await import(
         '@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
@@ -138,105 +137,114 @@ describe('Agent Teams lifecycle', () => {
       expect(TeamCreateTool.isEnabled()).toBe(false)
       expect(TeamDeleteTool.isEnabled()).toBe(false)
     } finally {
-      if (previousDisabled === undefined) {
-        delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED
+      if (previousTeams === undefined) {
+        delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
       } else {
-        process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED =
-          previousDisabled
+        process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = previousTeams
       }
     }
   })
 
   test('runs TeamCreate -> spawn -> TaskUpdate -> SendMessage -> TeamDelete', async () => {
-    const { TeamCreateTool } = await import(
-      '@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
-    )
-    const { spawnTeammate } = await import(
-      '@claude-code/builtin-tools/tools/shared/spawnMultiAgent.js'
-    )
-    const { TaskCreateTool } = await import(
-      '@claude-code/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
-    )
-    const { TaskUpdateTool } = await import(
-      '@claude-code/builtin-tools/tools/TaskUpdateTool/TaskUpdateTool.js'
-    )
-    const { SendMessageTool } = await import(
-      '@claude-code/builtin-tools/tools/SendMessageTool/SendMessageTool.js'
-    )
-    const { TeamDeleteTool } = await import(
-      '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
-    )
+    const previousTeams = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+    process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'
+    try {
+      const { TeamCreateTool } = await import(
+        '@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
+      )
+      const { spawnTeammate } = await import(
+        '@claude-code/builtin-tools/tools/shared/spawnMultiAgent.js'
+      )
+      const { TaskCreateTool } = await import(
+        '@claude-code/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
+      )
+      const { TaskUpdateTool } = await import(
+        '@claude-code/builtin-tools/tools/TaskUpdateTool/TaskUpdateTool.js'
+      )
+      const { SendMessageTool } = await import(
+        '@claude-code/builtin-tools/tools/SendMessageTool/SendMessageTool.js'
+      )
+      const { TeamDeleteTool } = await import(
+        '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
+      )
 
-    const context = {
-      getAppState: () => state,
-      setAppState: setState,
-      options: {
-        agentDefinitions: { activeAgents: [] },
-      },
-      abortController: new AbortController(),
-    } as any
+      const context = {
+        getAppState: () => state,
+        setAppState: setState,
+        options: {
+          agentDefinitions: { activeAgents: [] },
+        },
+        abortController: new AbortController(),
+      } as any
 
-    const created = await TeamCreateTool.call(
-      { team_name: 'alpha', description: 'test team' },
-      context,
-      undefined as any,
-      undefined as any,
-    )
-    expect(created.data.team_name).toBe('alpha')
+      const created = await TeamCreateTool.call(
+        { team_name: 'alpha', description: 'test team' },
+        context,
+        undefined as any,
+        undefined as any,
+      )
+      expect(created.data.team_name).toBe('alpha')
 
-    const spawned = await spawnTeammate(
-      {
-        name: 'worker',
-        prompt: 'handle assigned tasks',
-        team_name: 'alpha',
-      },
-      context,
-    )
-    expect(spawned.data.agent_id).toBe('worker@alpha')
+      const spawned = await spawnTeammate(
+        {
+          name: 'worker',
+          prompt: 'handle assigned tasks',
+          team_name: 'alpha',
+        },
+        context,
+      )
+      expect(spawned.data.agent_id).toBe('worker@alpha')
 
-    const task = await TaskCreateTool.call(
-      { subject: 'Check lifecycle', description: 'Verify team task flow' },
-      context,
-    )
-    await TaskUpdateTool.call(
-      { taskId: task.data.task.id, owner: 'worker' },
-      context,
-    )
+      const task = await TaskCreateTool.call(
+        { subject: 'Check lifecycle', description: 'Verify team task flow' },
+        context,
+      )
+      await TaskUpdateTool.call(
+        { taskId: task.data.task.id, owner: 'worker' },
+        context,
+      )
 
-    const message = await SendMessageTool.call(
-      {
-        to: 'worker',
-        summary: 'Status request',
-        message: 'Please report status.',
-      },
-      context,
-      async () => ({ behavior: 'allow' as const }),
-      undefined as any,
-    )
-    expect(message.data.success).toBe(true)
+      const message = await SendMessageTool.call(
+        {
+          to: 'worker',
+          summary: 'Status request',
+          message: 'Please report status.',
+        },
+        context,
+        async () => ({ behavior: 'allow' as const }),
+        undefined as any,
+      )
+      expect(message.data.success).toBe(true)
 
-    const blockedDelete = await TeamDeleteTool.call(
-      {},
-      context,
-      undefined as any,
-      undefined as any,
-    )
-    expect(blockedDelete.data.success).toBe(false)
-    expect(terminateCalls).toEqual(['worker@alpha'])
+      const blockedDelete = await TeamDeleteTool.call(
+        {},
+        context,
+        undefined as any,
+        undefined as any,
+      )
+      expect(blockedDelete.data.success).toBe(false)
+      expect(terminateCalls).toEqual(['worker@alpha'])
 
-    const config = readTeamConfig('alpha')
-    config.members = config.members.map((member: any) =>
-      member.name === 'worker' ? { ...member, isActive: false } : member,
-    )
-    writeTeamConfig('alpha', config)
+      const config = readTeamConfig('alpha')
+      config.members = config.members.map((member: any) =>
+        member.name === 'worker' ? { ...member, isActive: false } : member,
+      )
+      writeTeamConfig('alpha', config)
 
-    const deleted = await TeamDeleteTool.call(
-      {},
-      context,
-      undefined as any,
-      undefined as any,
-    )
-    expect(deleted.data.success).toBe(true)
+      const deleted = await TeamDeleteTool.call(
+        {},
+        context,
+        undefined as any,
+        undefined as any,
+      )
+      expect(deleted.data.success).toBe(true)
+    } finally {
+      if (previousTeams === undefined) {
+        delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+      } else {
+        process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = previousTeams
+      }
+    }
   })
 
   test('TeamDelete waits for active teammates to become inactive before cleanup', async () => {

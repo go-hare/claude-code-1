@@ -84,7 +84,6 @@ export async function streamRenderedMessages(
             commands={[]}
             verbose={verbose}
             toolJSX={null}
-            toolUseConfirmQueue={[]}
             inProgressToolUseIDs={new Set()}
             isMessageSelectorVisible={false}
             conversationId="export"

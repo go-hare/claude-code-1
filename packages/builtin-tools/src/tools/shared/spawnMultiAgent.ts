@@ -1,11 +1,10 @@
-import React from 'react'
-
 /**
  * Shared spawn module for teammate creation.
  * Extracted from TeammateTool to allow reuse by AgentTool.
  */
 
 import { getSessionId } from 'src/bootstrap/state.js'
+import { it2SetupSpec } from 'src/dialog/specs/jsuKinds.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { formatAgentId } from 'src/utils/agentId.js'
@@ -23,7 +22,6 @@ import {
   SWARM_SESSION_NAME,
   TEAM_LEAD_NAME,
 } from 'src/utils/swarm/constants.js'
-import { It2SetupPrompt } from 'src/utils/swarm/It2SetupPrompt.js'
 import {
   getTeamFilePath,
   readTeamFileAsync,
@@ -414,20 +412,11 @@ async function handleSpawn(
 ): Promise<{ data: SpawnOutput }> {
   const spawn = await resolveSpawn(input, context)
   const executor = await getTeammateExecutor(true, {
-    onNeedsIt2Setup: context.setToolJSX
-      ? tmuxAvailable =>
-          new Promise(resolve => {
-            context.setToolJSX!({
-              jsx: React.createElement(It2SetupPrompt, {
-                onDone: result => {
-                  context.setToolJSX!(null)
-                  resolve(result)
-                },
-                tmuxAvailable,
-              }),
-              shouldHidePromptInput: true,
-            })
-          })
+    onNeedsIt2Setup: context.requestDialog
+      ? async tmuxAvailable =>
+          (await context.requestDialog!(it2SetupSpec, {
+            tmuxAvailable,
+          })) as 'installed' | 'use-tmux' | 'cancelled'
       : undefined,
   })
   executor.setContext?.(context)
