@@ -4,16 +4,23 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  ADOPT_FRAME_LIVE_SPAWN_FAILED_MESSAGE,
+  abandonCheckpointShells,
   adoptTelemetry,
   buildAdoptWritePayload,
   buildHandoffEligibilityMap,
   buildMidTurnPrefill,
+  collectH8eMonitorSlugs,
+  collectIrsFrameLive,
   collectPortableCheckpoint,
+  countUndisclosedFrameLive,
   emptyCheckpointPayload,
   isMcpClientsSettled,
   mergeCheckpointPayloads,
+  notifyAbandonFrameLiveSpawnFailed,
   PREFILL_MAX_CHARS,
   readAdoptPrefill,
+  reapNonHandoffTasks,
   resumeAdoptedWorkflow,
   scheduleDeferredAdoptResume,
   stashDeferredAdoptResume,
@@ -24,12 +31,45 @@ import {
   type AdoptedWorkflowEntry,
   type PortableTaskLike,
 } from '../bgCheckpoint.js'
+import { resetCommandQueue } from '../messageQueueManager.js'
+import {
+  mI,
+  registerAutoReactAvailability,
+  registerSupervisor,
+  resetArtifactAutoReactStoreForTests,
+  setBootingWiredArm,
+  Stn,
+  un,
+  wtn,
+} from '../../services/artifactAutoReact/index.js'
+
+function armAutoReactForTests(): void {
+  resetArtifactAutoReactStoreForTests()
+  process.env.CLAUDE_CODE_ARTIFACT_COMMENTS_AUTOREACT = '1'
+  registerAutoReactAvailability(() => true)
+  mI()
+}
+
+function armSupervisedMonitor(slug: string, title?: string): void {
+  armAutoReactForTests()
+  registerSupervisor({
+    slug,
+    autoReactWiring: { title: title ?? slug },
+  })
+}
 
 const tmpDirs: string[] = []
 afterEach(async () => {
   for (const d of tmpDirs.splice(0)) {
     await rm(d, { recursive: true, force: true }).catch(() => {})
   }
+  try {
+    resetCommandQueue()
+  } catch {
+    /* optional */
+  }
+  resetArtifactAutoReactStoreForTests()
+  delete process.env.CLAUDE_CODE_ARTIFACT_COMMENTS_AUTOREACT
 })
 
 describe('truncatePartialTextForPrefill', () => {
@@ -108,13 +148,27 @@ describe('mergeCheckpointPayloads / densable uKy', () => {
         cron: [{ id: 'c', cron: '*', prompt: 'p' }],
         agents: [1],
         workflows: [],
+        frameLive: [{ slug: 'a', writtenAtMs: 1 }],
       }),
     ).toEqual({
       adopted_shells: 2,
       adopted_agents: 1,
       adopted_workflows: 0,
       adopted_cron: 1,
+      adopted_frame_live: 1,
     })
+  })
+
+  test('countUndisclosedFrameLive mirrors densable I', () => {
+    const live = new Set(['a', 'b'])
+    expect(
+      countUndisclosedFrameLive(
+        [{ slug: 'a' }, { slug: 'c' }, { slug: 'd' }],
+        live,
+      ),
+    ).toBe(2)
+    expect(countUndisclosedFrameLive([{ slug: 'a' }], live)).toBe(0)
+    expect(countUndisclosedFrameLive([{ slug: 'a' }], undefined)).toBe(0)
   })
 })
 
@@ -371,6 +425,217 @@ describe('buildHandoffEligibilityMap densable H_e', () => {
     const cp = collectPortableCheckpoint({ tasks, detachShells: false })
     expect(cp).not.toBeNull()
     expect(cp!.agentIds).toEqual(['good'])
+  })
+
+  test('Irs: monitor_ws + autoReactArmed + frameLive enters payload', () => {
+    armSupervisedMonitor('art-1', 'Hello')
+    const tasks: Record<string, PortableTaskLike> = {
+      mon: {
+        id: 'mon',
+        type: 'monitor_ws',
+        status: 'running',
+        autoReactArmed: true,
+        autoReactSlug: 'art-1',
+        frameLive: { slug: 'art-1', title: 'Hello' },
+      },
+    }
+    const cp = collectPortableCheckpoint({
+      tasks,
+      detachShells: false,
+      nowMs: 42,
+    })
+    expect(cp?.payload.frameLive).toEqual([
+      { slug: 'art-1', writtenAtMs: 42, title: 'Hello' },
+    ])
+    expect(cp?.frameLiveTaskIds).toEqual(['mon'])
+    expect(cp?.carriedMonitorTaskIds).toEqual(['mon'])
+    // densable Hen handoff = shells/agents/workflows only — not Irs monitors
+    expect(cp?.handoffTaskIds).not.toContain('mon')
+  })
+
+  test('Irs: qHe without supervisors.get stays out (1:1 gate)', () => {
+    armAutoReactForTests()
+    // armed task but no supervisors Map entry → Irs skips
+    const tasks: Record<string, PortableTaskLike> = {
+      mon: {
+        id: 'mon',
+        type: 'monitor_ws',
+        status: 'running',
+        autoReactArmed: true,
+        autoReactSlug: 'art-1',
+        frameLive: { slug: 'art-1' },
+      },
+    }
+    expect(collectH8eMonitorSlugs(tasks).has('art-1')).toBe(true)
+    expect(collectIrsFrameLive(tasks, 1)).toEqual([])
+  })
+
+  test('Irs/h8e: Stn injects supervisor slug; bare frameLive stays out', () => {
+    armSupervisedMonitor('parked-only')
+    expect(Stn().has('parked-only')).toBe(true)
+    expect(collectH8eMonitorSlugs({}).has('parked-only')).toBe(true)
+    // Irs keeps Stn slug via supervisors.get
+    expect(collectIrsFrameLive({}, 1)).toEqual([
+      { slug: 'parked-only', writtenAtMs: 1, title: 'parked-only' },
+    ])
+
+    const tasks: Record<string, PortableTaskLike> = {
+      orphan: {
+        id: 'orphan',
+        type: 'local_bash',
+        status: 'running',
+        frameLive: { slug: 'art-x' },
+      },
+      cold: {
+        id: 'cold',
+        type: 'monitor_ws',
+        status: 'running',
+        frameLive: { slug: 'cold-slug' },
+      },
+    }
+    expect(collectH8eMonitorSlugs(tasks).has('art-x')).toBe(false)
+    expect(collectH8eMonitorSlugs(tasks).has('cold-slug')).toBe(false)
+  })
+
+  test('Irs: wtn ∩ bootingWiredArms carries without supervisor', () => {
+    armAutoReactForTests()
+    un().wakes.scanGeneration = 7
+    setBootingWiredArm('boot-1', {
+      scanGeneration: 7,
+      title: 'Booting',
+    })
+    expect(wtn().has('boot-1')).toBe(true)
+    expect(collectIrsFrameLive({}, 5)).toEqual([
+      { slug: 'boot-1', writtenAtMs: 5, title: 'Booting' },
+    ])
+  })
+
+  test('Irs: disown quiet-removes carried monitors; Hen reaps if remove no-op', () => {
+    armSupervisedMonitor('art-1')
+    const tasks: Record<string, PortableTaskLike> = {
+      mon: {
+        id: 'mon',
+        type: 'monitor_ws',
+        status: 'running',
+        autoReactArmed: true,
+        autoReactSlug: 'art-1',
+        frameLive: { slug: 'art-1' },
+      },
+      other: {
+        id: 'other',
+        type: 'local_agent',
+        status: 'running',
+        description: 'noise',
+        isBackgrounded: true,
+        abortController: { abort: () => {} },
+      },
+    }
+    const cp = collectPortableCheckpoint({ tasks, detachShells: false })
+    expect(cp).not.toBeNull()
+    expect(cp!.handoffTaskIds).not.toContain('mon')
+
+    const removed: string[] = []
+    cp!.disown({ removeTaskIds: ids => removed.push(...ids) })
+    expect(removed).toContain('mon')
+    // second stopCarriedWatches is idempotent
+    const removed2: string[] = []
+    cp!.stopCarriedWatches({ removeTaskIds: ids => removed2.push(...ids) })
+    expect(removed2).toEqual([])
+    // Dso cleared supervisor
+    expect(un().live.supervisors.has('art-1')).toBe(false)
+
+    // Exit-path stand-in: removeTaskIds no-op → Hen still reaps residual monitors
+    armSupervisedMonitor('art-1')
+    const cp2 = collectPortableCheckpoint({ tasks, detachShells: false })
+    expect(cp2).not.toBeNull()
+    cp2!.disown({ removeTaskIds: () => {} })
+    const reaped = reapNonHandoffTasks({
+      tasks,
+      handoffTaskIds: cp2!.handoffTaskIds,
+      removeTaskIds: () => {},
+      emitStopped: () => {},
+    })
+    expect(reaped.reapedIds).toContain('mon')
+  })
+
+  test('Irs: abandon after disown notifies frameLive spawn-fail copy', () => {
+    armSupervisedMonitor('art-1')
+    const tasks: Record<string, PortableTaskLike> = {
+      mon: {
+        id: 'mon',
+        type: 'monitor_ws',
+        status: 'running',
+        autoReactArmed: true,
+        autoReactSlug: 'art-1',
+        frameLive: { slug: 'art-1' },
+      },
+    }
+    const cp = collectPortableCheckpoint({ tasks, detachShells: false })
+    expect(cp).not.toBeNull()
+    cp!.disown({})
+    cp!.abandon()
+    expect(ADOPT_FRAME_LIVE_SPAWN_FAILED_MESSAGE).toContain(
+      'automatic replies to Artifact comments stopped',
+    )
+    const { getCommandQueue } = require('../messageQueueManager.js') as {
+      getCommandQueue: () => Array<{ value?: string }>
+    }
+    const hit = getCommandQueue().find(
+      c =>
+        typeof c.value === 'string' &&
+        c.value.includes('mon') &&
+        c.value.includes('automatic replies to Artifact comments stopped'),
+    )
+    expect(hit).toBeTruthy()
+    expect(notifyAbandonFrameLiveSpawnFailed([])).toBe(0)
+  })
+
+  test('Irs: abandon without prior stopCarriedWatches skips frameLive notify', () => {
+    armSupervisedMonitor('art-1')
+    const tasks: Record<string, PortableTaskLike> = {
+      mon: {
+        id: 'mon',
+        type: 'monitor_ws',
+        status: 'running',
+        autoReactArmed: true,
+        autoReactSlug: 'art-1',
+        frameLive: { slug: 'art-1' },
+      },
+    }
+    const cp = collectPortableCheckpoint({ tasks, detachShells: false })
+    expect(cp).not.toBeNull()
+    // densable: if (!m) skip Dmo(p) — abandon alone does not set m
+    cp!.abandon()
+    expect(cp!.frameLiveTaskIds).toEqual(['mon'])
+    const { getCommandQueue } = require('../messageQueueManager.js') as {
+      getCommandQueue: () => Array<{ value?: string }>
+    }
+    const hit = getCommandQueue().find(
+      c =>
+        typeof c.value === 'string' &&
+        c.value.includes('mon') &&
+        c.value.includes('automatic replies to Artifact comments stopped'),
+    )
+    expect(hit).toBeFalsy()
+  })
+
+  test('payload-only abandonCheckpointShells notifies frameLive slugs', () => {
+    abandonCheckpointShells({
+      writtenAtMs: Date.now(),
+      shells: [],
+      cron: [],
+      frameLive: [{ slug: 'art-payload', writtenAtMs: Date.now() }],
+    })
+    const { getCommandQueue } = require('../messageQueueManager.js') as {
+      getCommandQueue: () => Array<{ value?: string }>
+    }
+    const hit = getCommandQueue().find(
+      c =>
+        typeof c.value === 'string' &&
+        c.value.includes('art-payload') &&
+        c.value.includes('automatic replies to Artifact comments stopped'),
+    )
+    expect(hit).toBeTruthy()
   })
 })
 

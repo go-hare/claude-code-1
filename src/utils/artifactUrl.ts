@@ -1,15 +1,19 @@
 /**
- * Official `El` / `Mht` / `Gp` / `RJr` / `_pr` fail arm (densable 2.1.239).
+ * Official `El` / `Mht` / `Gp` / `RJr` / `_pr` / `ASe` fail arm (densable 2.1.239).
  *
  * Official Artifact tool name is `Artifact` (capital A). Tip's upload tool is
  * `artifact` — RJr / registered gates stay on the official name so they do
  * not lie about claude.ai read.
  *
- * `mFn()` is official empty (`return`). `S$()` stub dir is not hosted here.
- * `ASe` / `UQ` / `fxv` / `J4n` cobalt hosts are not present → registered and
- * read-enabled stay false. The `_pr` fail copy still runs when a parsed
- * artifact URL meets a registered official tool.
+ * densable `ASe` chain is ported: X4n disable → S$ stub → opi (Xwp) → eEp
+ * (tengu_cobalt_plinth) → enableArtifact. Tip has no cobalt host / plinth
+ * default ON, so eEp stays false and registration remains false unless GB
+ * `tengu_cobalt_plinth` is explicitly opened (still requires firstParty Xwp).
  */
+
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { getAPIProvider } from './model/providers.js'
+import { isEnvTruthy } from './envUtils.js'
 
 /** Official `bv`. */
 export const OFFICIAL_ARTIFACT_TOOL_NAME = 'Artifact'
@@ -36,20 +40,135 @@ export function getArtifactPublishStubDir(): string | null {
   return null
 }
 
-/**
- * Official `ASe` without cobalt hosts: disable/stub short-circuit, then
- * `opi`/`eEp` are false so registration is false.
- */
-export function isArtifactToolRegistered(): boolean {
-  return false
+/** Official `X4n` — env or settings disable. */
+function isArtifactHardDisabled(): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ARTIFACT)) return true
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    return getInitialSettings().disableArtifact === true
+  } catch {
+    return false
+  }
 }
 
-/** Official `UQ` / `fxv` / `J4n` — no cobalt host. */
+/**
+ * Official `Xwp` — firstParty surface eligible for Artifact registration.
+ * Not a cobalt CDN host check; entrypoint/env short-circuits apply.
+ */
+function isArtifactFirstPartySurfaceOpen(): boolean {
+  try {
+    if (getAPIProvider() !== 'firstParty') return false
+  } catch {
+    return false
+  }
+  // densable fa() / jp(CLAUDE_CODE_ARTIFACT) — tip: explicit falsy force-off
+  const art = process.env.CLAUDE_CODE_ARTIFACT
+  if (art !== undefined && !isEnvTruthy(art) && art !== '') {
+    // densable jp = defined-falsy style
+    if (
+      art === '0' ||
+      art.toLowerCase() === 'false' ||
+      art.toLowerCase() === 'off'
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+/** Official `Ywp` — local-agent / coworker entrypoints exclude opi. */
+function isArtifactEntrypointExcluded(): boolean {
+  const e = process.env.CLAUDE_CODE_ENTRYPOINT
+  return e === 'local-agent' || e?.startsWith('claude-coworker') === true
+}
+
+/** Official `opi` — !Ywp && Xwp. */
+function isArtifactOpiOpen(): boolean {
+  return !isArtifactEntrypointExcluded() && isArtifactFirstPartySurfaceOpen()
+}
+
+/**
+ * Official `Zwp` / `tengu_cobalt_plinth`.
+ * densable default is pxv() (prosumer/no_auth); tip defaults false so ASe
+ * stays closed without an explicit GrowthBook open (no invent cobalt).
+ */
+function isCobaltPlinthOpen(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_cobalt_plinth', false)
+}
+
+/** Official `eEp` — cobalt plinth gate (ipi/K4n collapsed to Zwp for tip). */
+function isArtifactEepOpen(): boolean {
+  return isCobaltPlinthOpen()
+}
+
+/** Official `zNt` — first enableArtifact across settings sources. */
+function resolveEnableArtifactSetting(): boolean | undefined {
+  try {
+    const { getSettingsForSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const { SETTING_SOURCES } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/constants.js') as typeof import('./settings/constants.js')
+    for (const source of SETTING_SOURCES) {
+      const v = getSettingsForSource(source)?.enableArtifact
+      if (v !== undefined) return v
+    }
+  } catch {
+    /* densable optional */
+  }
+  return undefined
+}
+
+/**
+ * Official `ASe` — Artifact tool registration.
+ * densable: X4n → S$ stub → opi → eEp(tengu_cobalt_plinth) → zNt??true.
+ * Without cobalt plinth this stays false — do not invent cobalt ON.
+ */
+export function isArtifactToolRegistered(): boolean {
+  if (isArtifactHardDisabled()) return false
+  if (getArtifactPublishStubDir() !== null) {
+    return resolveEnableArtifactSetting() ?? true
+  }
+  if (!isArtifactOpiOpen()) return false
+  if (!isArtifactEepOpen()) return false
+  return resolveEnableArtifactSetting() ?? true
+}
+
+/** densable `ASe` alias. */
+export const ASe = isArtifactToolRegistered
+
+/**
+ * densable `nDa` — once-per-session log when Artifact is disabled.
+ * Tip: no GrowthBook event bus required; marks evaluated on the autoReact store.
+ */
+export function maybeLogArtifactDisabledSession(): void {
+  try {
+    const { un } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/artifactAutoReact/store.js') as typeof import('../services/artifactAutoReact/store.js')
+    const s = un() as { artifactDisabledSessionEvaluated?: boolean }
+    if (s.artifactDisabledSessionEvaluated) return
+    s.artifactDisabledSessionEvaluated = true
+    if (isArtifactToolRegistered()) return
+    // densable N("tengu_artifact_disabled_session", …) — tip: debug only
+  } catch {
+    /* densable optional when store not loaded */
+  }
+}
+
+/**
+ * Official `UQ` — enabled for model when registered + (stub or cobalt allow).
+ * Tip: collapses to ASe (no separate Jsr/ipi host).
+ */
 export function isOfficialArtifactToolEnabled(): boolean {
-  return false
+  return isArtifactToolRegistered()
 }
 
 export function isArtifactReadEnabled(): boolean {
+  // densable oDa / gable — tip keeps closed without cobalt
   return false
 }
 
@@ -126,9 +245,6 @@ function toolsListHas(
 
 /**
  * Official `RJr(tools, permissionContext, opts)`.
- * `permissionContext === null` (WebFetch `prompt`) makes the deny-rule probe
- * false. Without official Artifact + UQ, the first admit arm is false; without
- * read-only+read-enabled the second arm is false.
  */
 export async function isWebFetchArtifactExceptionEnabled(
   tools: readonly { name: string }[] | undefined,
@@ -171,7 +287,6 @@ export type ArtifactWebFetchFail = {
 
 /**
  * Official `spw` when `ipw` is null: `_pr` + parse + registered → fail copy.
- * The cobalt `readArtifactForModel` arm is not hosted.
  */
 export async function tryArtifactWebFetchFail(
   url: string,

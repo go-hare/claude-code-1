@@ -162,3 +162,29 @@ describe('ArtifactTool.call', () => {
     expect((result.data as { error?: string }).error).toContain('.md')
   })
 })
+
+describe('ArtifactTool.mapToolResultToToolResultBlockParam', () => {
+  test('page_data is JSON, not the upload fallback', () => {
+    const mapped = ArtifactTool.mapToolResultToToolResultBlockParam(
+      { id: '', url: '', expiresAt: '', page_data: { k: 1 } },
+      'tu-1',
+    )
+    expect(mapped.content).toContain('page_data')
+    expect(String(mapped.content)).not.toContain('Artifact uploaded')
+  })
+
+  test('thread_resolved false is JSON, not the upload fallback', () => {
+    const mapped = ArtifactTool.mapToolResultToToolResultBlockParam(
+      {
+        id: '',
+        url: '',
+        expiresAt: '',
+        thread_resolved: false,
+        not_authorized: true,
+      },
+      'tu-2',
+    )
+    expect(mapped.content).toContain('not_authorized')
+    expect(String(mapped.content)).not.toContain('Artifact uploaded')
+  })
+})

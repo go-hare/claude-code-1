@@ -38,12 +38,26 @@ export type BgCheckpointCron = {
   kind?: string
 }
 
+export type BgCheckpointFrameLive = {
+  slug: string
+  writtenAtMs: number
+  title?: string
+  stale?: boolean
+  unattendedReplies?: number
+  holder?: string
+}
+
 export type BgCheckpointPayload = {
   writtenAtMs: number
   shells: unknown[]
   cron: BgCheckpointCron[]
   agents?: unknown[]
   workflows?: unknown[]
+  /**
+   * densable Prs payload.frameLive — Artifact comment monitors from Irs.
+   * densable Irs — supervisors.get ∪ (wtn ∩ bootingWiredArms).
+   */
+  frameLive?: BgCheckpointFrameLive[]
   prefill?: BgPrefill
   /**
    * Official exit-handoff marker. Stale age gate is skipped when origin is
@@ -66,9 +80,11 @@ export type AdoptTelemetry = {
   adopted_agents: number
   adopted_workflows: number
   adopted_cron: number
+  /** densable Lrs adopted_frame_live */
+  adopted_frame_live: number
 }
 
-/** Official Nro — telemetry counts from a checkpoint payload (or null). */
+/** Official Nro / Lrs — telemetry counts from a checkpoint payload (or null). */
 export function adoptTelemetry(
   payload: BgCheckpointPayload | null | undefined,
 ): AdoptTelemetry {
@@ -77,7 +93,24 @@ export function adoptTelemetry(
     adopted_agents: payload?.agents?.length ?? 0,
     adopted_workflows: payload?.workflows?.length ?? 0,
     adopted_cron: payload?.cron?.length ?? 0,
+    adopted_frame_live: payload?.frameLive?.length ?? 0,
   }
+}
+
+/**
+ * densable vHy undisclosed_frame_live — frameLive entries whose slug is not
+ * in the live h8e set (T). When T is omitted, returns 0.
+ */
+export function countUndisclosedFrameLive(
+  frameLive: ReadonlyArray<{ slug?: string }> | null | undefined,
+  liveMonitorSlugs: ReadonlySet<string> | null | undefined,
+): number {
+  if (!frameLive?.length || !liveMonitorSlugs) return 0
+  let n = 0
+  for (const entry of frameLive) {
+    if (entry.slug && !liveMonitorSlugs.has(entry.slug)) n++
+  }
+  return n
 }
 
 /**
@@ -175,13 +208,47 @@ export function mergeCheckpointPayloads(
     w => asRec(w).taskId as string | undefined,
   )
 
-  // densable uKy: writtenAtMs from incoming (t), origin t??e, prefill t??e
+  // densable uKy / FPE: writtenAtMs from incoming (t), origin t??e, prefill t??e
+  // densable xGl for frameLive when either side has entries
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { mergeFrameLiveEntries } =
+    require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+  const existingFl = existing.frameLive ?? []
+  const incomingFl = incoming.frameLive ?? []
+  const mergedFl =
+    existingFl.length > 0 || incomingFl.length > 0
+      ? mergeFrameLiveEntries([
+          {
+            entries: existingFl,
+            fallbackBasis: existing.writtenAtMs ?? 0,
+          },
+          {
+            entries: incomingFl,
+            fallbackBasis: incoming.writtenAtMs ?? 0,
+          },
+        ])
+      : undefined
+  const fallbackMs = incoming.writtenAtMs ?? existing.writtenAtMs ?? 0
+  const frameLive = mergedFl?.map(
+    (e): BgCheckpointFrameLive => ({
+      slug: e.slug,
+      writtenAtMs: e.writtenAtMs ?? fallbackMs,
+      ...(e.title !== undefined ? { title: e.title } : {}),
+      ...(e.stale !== undefined ? { stale: e.stale } : {}),
+      ...(e.unattendedReplies !== undefined
+        ? { unattendedReplies: e.unattendedReplies }
+        : {}),
+      ...(e.holder !== undefined ? { holder: e.holder } : {}),
+    }),
+  )
+
   return {
     writtenAtMs: incoming.writtenAtMs ?? existing.writtenAtMs ?? 0,
     shells,
     cron,
     ...(agents.length ? { agents } : {}),
     ...(workflows.length ? { workflows } : {}),
+    ...(frameLive !== undefined && frameLive.length > 0 ? { frameLive } : {}),
     prefill: incoming.prefill ?? existing.prefill,
     // Prefer incoming origin (exit handoff supersedes left-arrow).
     ...(incoming.origin !== undefined || existing.origin !== undefined
@@ -643,6 +710,14 @@ export type PortableTaskLike = {
   parentAgentId?: string
   spawnDepth?: number
   abortController?: { abort?: (reason?: unknown) => void } | null
+  /** densable task.frameLive — Artifact comment monitor slug on the task. */
+  frameLive?: { slug?: string; title?: string }
+  /** densable NOe / h2i — autoReact-armed comment monitor.
+   * Absent ⇒ not qHe / not Irs.
+   */
+  autoReactArmed?: boolean
+  /** densable autoReactSlug — SN latch key. */
+  autoReactSlug?: string
 }
 
 export type PortableCronLike = {
@@ -674,18 +749,36 @@ export type PortableCheckpointResult = {
   detachedPids: number[]
   /**
    * Official Hen handoff set — task `id`s of shells/agents/workflows included
-   * in the portable checkpoint (NOT agentId). Used to spare handoff work when
-   * reaping residual running tasks after exit handoff.
+   * in the portable checkpoint (NOT agentId). Irs monitor_ws ids are NOT in
+   * this set (densable: stopCarriedWatches quiet-removes them on disown; Hen
+   * then reaps any residual). Used to spare handoff work when reaping.
    */
   handoffTaskIds: string[]
   /**
-   * Official disown(u) portable: remove checkpointed shell/agent/workflow/cron
-   * ids via the provided removers. Safe to call after snapshot.
+   * densable Prs `p` — qHe monitor task ids carried via Irs (abandon notify).
+   */
+  frameLiveTaskIds: string[]
+  /**
+   * densable Prs stopCarriedWatches `y` snapshot — quiet-remove on disown.
+   * Not part of Hen handoffTaskIds.
+   */
+  carriedMonitorTaskIds: string[]
+  /**
+   * Official disown(u) portable: stopCarriedWatches (quiet remove monitors) then
+   * remove checkpointed shell/agent/workflow/cron ids. Safe after snapshot.
+   * densable: $so + Dso + oF quiet removeTaskIds.
    */
   disown: (removers: {
     removeTaskIds?: (ids: readonly string[]) => void
     removeAgentIds?: (ids: readonly string[]) => void
     removeCronIds?: (ids: readonly string[]) => void
+  }) => void
+  /**
+   * densable Prs stopCarriedWatches — quiet-remove carried monitor tasks.
+   * Idempotent; also invoked from disown.
+   */
+  stopCarriedWatches: (removers?: {
+    removeTaskIds?: (ids: readonly string[]) => void
   }) => void
   /**
    * Official CAo.checkpointAgents portable — after adopt.json write, abort
@@ -717,7 +810,7 @@ export type PortableCheckpointResult = {
 }
 
 /**
- * densable vAo — adopt/handoff enabled unless CLAUDE_DISABLE_ADOPT is truthy.
+ * densable vAo / ost — adopt/handoff enabled unless CLAUDE_DISABLE_ADOPT is truthy.
  */
 export function isAdoptEnabled(): boolean {
   const v = process.env.CLAUDE_DISABLE_ADOPT
@@ -730,6 +823,161 @@ export function isAdoptEnabled(): boolean {
     lower === 'on'
   )
 }
+
+/** densable jee — Artifact comment monitor websocket task. */
+export function isMonitorWsTask(
+  task:
+    | {
+        type?: string
+      }
+    | null
+    | undefined,
+): boolean {
+  return task?.type === 'monitor_ws'
+}
+
+/**
+ * densable h2i / $Fe — running autoReact-armed monitor_ws + enabledMemo.
+ * Gold: h2i(e, () => un().autoReact.enabledMemo === true) + SN latch.
+ */
+export function isAutoReactArmedMonitorTask(
+  task:
+    | {
+        type?: string
+        status?: string
+        autoReactArmed?: boolean
+        autoReactSlug?: string
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!task) return false
+  if (
+    !isMonitorWsTask(task) ||
+    task.status !== 'running' ||
+    task.autoReactArmed !== true
+  ) {
+    return false
+  }
+  // Lazy import to avoid cycle with artifactAutoReact ↔ bgCheckpoint tests
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { mI, SN } =
+    require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+  if (!mI()) return false
+  if (task.autoReactSlug !== undefined && SN(task.autoReactSlug)) return false
+  return true
+}
+
+/**
+ * densable qHe — adopt-enabled + $Fe + frameLive present.
+ */
+export function isQHeFrameLiveTask(
+  task: PortableTaskLike | null | undefined,
+): boolean {
+  if (!task || !isAdoptEnabled()) return false
+  return isAutoReactArmedMonitorTask(task) && task.frameLive !== undefined
+}
+
+/**
+ * densable h8e — qHe frameLive.slugs ∪ Stn() ∪ wtn().
+ */
+export function collectH8eMonitorSlugs(
+  tasks: Record<string, PortableTaskLike> | null | undefined,
+): Set<string> {
+  const out = new Set<string>()
+  if (!isAdoptEnabled()) return out
+  for (const task of Object.values(tasks ?? {})) {
+    if (!isQHeFrameLiveTask(task)) continue
+    const slug = task.frameLive?.slug
+    if (typeof slug === 'string' && slug.length > 0) out.add(slug)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Stn, wtn } =
+    require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+  for (const slug of Stn()) out.add(slug)
+  for (const slug of wtn()) out.add(slug)
+  return out
+}
+
+/**
+ * densable Irs — portable frameLive entries for Prs payload.
+ * Keep slug if supervisors.get(slug) OR (wtn.has && bootingWiredArms.get).
+ */
+export function collectIrsFrameLive(
+  tasks: Record<string, PortableTaskLike> | null | undefined,
+  nowMs: number = Date.now(),
+): BgCheckpointFrameLive[] {
+  if (!isAdoptEnabled()) return []
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { un, wtn } =
+    require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+  const { supervisors, bootingWiredArms } = un().live
+  const n = wtn()
+  const o: BgCheckpointFrameLive[] = []
+  const i = nowMs
+  for (const s of collectH8eMonitorSlugs(tasks)) {
+    const a = supervisors.get(s)
+    const l = n.has(s) ? bootingWiredArms.get(s) : undefined
+    if (a === undefined && l === undefined) continue
+    const c = l?.title ?? a?.autoReactWiring?.title
+    const u =
+      c !== undefined &&
+      typeof c === 'string' &&
+      c.length >= 1 &&
+      c.length <= 256
+    o.push({ slug: s, writtenAtMs: i, ...(u ? { title: c } : {}) })
+  }
+  return o
+}
+
+/**
+ * densable Prs `p` — qHe task ids whose frameLive.slug is in Irs.
+ * Used for abandon spawn-fail notify (not Hen handoffTaskIds).
+ */
+export function collectIrsFrameLiveTaskIds(
+  tasks: Record<string, PortableTaskLike> | null | undefined,
+  irsSlugs: ReadonlySet<string>,
+): string[] {
+  if (irsSlugs.size === 0) return []
+  const ids: string[] = []
+  for (const task of Object.values(tasks ?? {})) {
+    if (!isQHeFrameLiveTask(task)) continue
+    const slug = task.frameLive?.slug
+    if (typeof slug === 'string' && irsSlugs.has(slug)) ids.push(task.id)
+  }
+  return ids
+}
+
+/**
+ * densable stopCarriedWatches `y` — `p` plus any running monitor_ws whose
+ * frameLive.slug is in Irs (gold second scan; no autoReactArmed required).
+ */
+export function collectIrsCarriedMonitorTaskIds(
+  tasks: Record<string, PortableTaskLike> | null | undefined,
+  irsSlugs: ReadonlySet<string>,
+  frameLiveTaskIds: readonly string[] = collectIrsFrameLiveTaskIds(
+    tasks,
+    irsSlugs,
+  ),
+): string[] {
+  const ids = new Set(frameLiveTaskIds)
+  if (irsSlugs.size === 0) return [...ids]
+  for (const task of Object.values(tasks ?? {})) {
+    if (
+      task.type === 'monitor_ws' &&
+      task.status === 'running' &&
+      typeof task.frameLive?.slug === 'string' &&
+      irsSlugs.has(task.frameLive.slug)
+    ) {
+      ids.add(task.id)
+    }
+  }
+  return [...ids]
+}
+
+/** densable Prs abandon Dmo copy when stopCarriedWatches already ran. */
+export const ADOPT_FRAME_LIVE_SPAWN_FAILED_MESSAGE =
+  "The background session didn't start, so automatic replies to Artifact comments stopped. Publish the Artifact again to turn them back on."
 
 /**
  * densable H_e — per-task-id handoff eligibility map.
@@ -1055,24 +1303,69 @@ export function collectPortableCheckpoint(input: {
     }))
   const cronIds = cron.map(c => c.id)
 
+  // densable Irs — h8e filtered by supervisors.get ∪ (wtn ∩ bootingWiredArms)
+  const nowMs = input.nowMs ?? Date.now()
+  let frameLive = collectIrsFrameLive(taskMap, nowMs)
+  // densable oDE — drain unattended counters into write payload
+  if (frameLive.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { stampUnattendedIntoFrameLive } =
+      require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+    frameLive = stampUnattendedIntoFrameLive(frameLive)
+  }
+  const irsSlugs = new Set(frameLive.map(e => e.slug))
+  // densable Prs `p` — abandon notify; NOT Hen handoff
+  const frameLiveTaskIds = collectIrsFrameLiveTaskIds(taskMap, irsSlugs)
+  // densable stopCarriedWatches `y` — disown quiet-remove; NOT Hen handoff
+  const carriedMonitorTaskIds = collectIrsCarriedMonitorTaskIds(
+    taskMap,
+    irsSlugs,
+    frameLiveTaskIds,
+  )
+
   if (
     shells.length === 0 &&
     agents.length === 0 &&
     workflows.length === 0 &&
-    cron.length === 0
+    cron.length === 0 &&
+    frameLive.length === 0
   ) {
     return null
   }
 
   const payload: BgCheckpointPayload = {
-    writtenAtMs: input.nowMs ?? Date.now(),
+    writtenAtMs: nowMs,
     shells,
     cron,
     ...(agents.length ? { agents } : {}),
     ...(workflows.length ? { workflows } : {}),
+    ...(frameLive.length ? { frameLive } : {}),
   }
 
   let abandoned = false
+  /** densable Prs `m` — stopCarriedWatches already ran. */
+  let carriedWatchesStopped = false
+  const stopCarriedWatches = (removers?: {
+    removeTaskIds?: (ids: readonly string[]) => void
+  }) => {
+    if (carriedWatchesStopped) return
+    carriedWatchesStopped = true
+    // densable: $so(d); Dso(d); then oF(id, reg, {quiet:true}) for y
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { dollarSo, Dso, oF } =
+      require('../services/artifactAutoReact/index.js') as typeof import('../services/artifactAutoReact/index.js')
+    dollarSo(irsSlugs)
+    Dso(irsSlugs)
+    const registry = {
+      all: () => taskMap as Record<string, PortableTaskLike>,
+      remove: (id: string) => {
+        removers?.removeTaskIds?.([id])
+      },
+    }
+    for (const id of carriedMonitorTaskIds) {
+      oF(id, registry, { quiet: true })
+    }
+  }
   return {
     payload,
     shellTaskIds,
@@ -1081,7 +1374,12 @@ export function collectPortableCheckpoint(input: {
     cronIds,
     detachedPids,
     handoffTaskIds,
+    frameLiveTaskIds,
+    carriedMonitorTaskIds,
+    stopCarriedWatches,
     disown(removers) {
+      // densable disown: h(g) then shell/agent/workflow/cron remove
+      stopCarriedWatches(removers)
       const taskIds = [...shellTaskIds, ...workflowTaskIds]
       if (taskIds.length) removers.removeTaskIds?.(taskIds)
       if (agentIds.length) removers.removeAgentIds?.(agentIds)
@@ -1168,6 +1466,10 @@ export function collectPortableCheckpoint(input: {
       }
       // Official: SAo agents/workflows when fork spawn fails (no resume).
       notifyAbandonSpawnFailed(agents, workflows)
+      // densable: if (m) { for p: Dmo(...); be artifact_live_subscribe }
+      if (carriedWatchesStopped) {
+        notifyAbandonFrameLiveSpawnFailed(frameLiveTaskIds)
+      }
     },
   }
 }
@@ -1177,9 +1479,9 @@ export function collectPortableCheckpoint(input: {
  *
  * After exit handoff c4d/u4d selects handoff shells/agents/workflows, every
  * other still-running task is killed/aborted, SDK-stopped (unless monitor),
- * and removed from the task map. Handoff ids are the task `id`s collected by
- * collectPortableCheckpoint (shells/agents/workflows), matching official
- * `new Set([...shells,...workflows,...agents].map(o=>o.id))`.
+ * and removed from the task map. Handoff ids are the task `id`s of portable
+ * shells/agents/workflows only (NOT Irs monitors — those are quiet-removed by
+ * stopCarriedWatches on disown; if removeTaskIds is no-op, Hen still reaps them).
  *
  * Returns the reaped task ids (in encounter order).
  */
@@ -1328,6 +1630,31 @@ export function notifyAbandonSpawnFailed(
 }
 
 /**
+ * densable Prs abandon frameLive path — Dmo(p, ...) after stopCarriedWatches.
+ * Gold also fires be("artifact_live_subscribe","adopt_spawn_failed"); tip
+ * analytics stub — notify only.
+ */
+export function notifyAbandonFrameLiveSpawnFailed(
+  taskIds: readonly string[] | null | undefined,
+): number {
+  if (!taskIds?.length) return 0
+  let n = 0
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { notifyAdoptTaskFailed } =
+      require('./adoptFailNotify.js') as typeof import('./adoptFailNotify.js')
+    for (const id of taskIds) {
+      if (typeof id !== 'string' || !id) continue
+      notifyAdoptTaskFailed(id, ADOPT_FRAME_LIVE_SPAWN_FAILED_MESSAGE)
+      n++
+    }
+  } catch {
+    /* best-effort */
+  }
+  return n
+}
+
+/**
  * Kill detached shell pids from an adopt checkpoint payload (spawn-fail path
  * when only the serializable payload is available — no live disown handle).
  * Also SAo-notifies agents/workflows (official CAo.abandon).
@@ -1366,6 +1693,12 @@ export function abandonCheckpointShells(
     }
   }
   notifyAbandonSpawnFailed(payload.agents, payload.workflows)
+  if (payload.frameLive && payload.frameLive.length > 0) {
+    const ids = payload.frameLive
+      .map(e => e.slug)
+      .filter((s): s is string => typeof s === 'string' && s.length > 0)
+    notifyAbandonFrameLiveSpawnFailed(ids)
+  }
   return n
 }
 
@@ -1578,6 +1911,9 @@ export async function rehydrateAdoptedShells(
     require('./ShellCommand.js') as typeof import('./ShellCommand.js')
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getCwd } = require('./cwd.js') as typeof import('./cwd.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { tryProcessCwd } =
+    require('./cachePaths.js') as typeof import('./cachePaths.js')
 
   for (const raw of shells) {
     const es = asAdoptedShellEntry(raw)
@@ -1625,7 +1961,7 @@ export async function rehydrateAdoptedShells(
           try {
             return getCwd()
           } catch {
-            return process.cwd()
+            return tryProcessCwd()
           }
         })(),
         completionStatusSentInAttachment: false,

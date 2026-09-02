@@ -9,6 +9,7 @@
         "@modelcontextprotocol/client": "2.0.0",
         "@modelcontextprotocol/server": "2.0.0",
         "highlight.js": "^11.11.1",
+        "parse5": "^8.0.1",
         "ws": "^8.20.0",
       },
       "devDependencies": {
@@ -68,6 +69,7 @@
         "@types/he": "^1.2.3",
         "@types/lodash-es": "^4.17.12",
         "@types/node": "^25.6.0",
+        "@types/parse5": "^7.0.0",
         "@types/picomatch": "^4.0.3",
         "@types/plist": "^3.0.5",
         "@types/proper-lockfile": "^4.1.4",
@@ -149,14 +151,14 @@
         "zod": "^4.3.6",
       },
       "optionalDependencies": {
-        "@go-hare/claude-code-darwin-arm64": ">=2.7.39",
-        "@go-hare/claude-code-darwin-x64": ">=2.7.39",
-        "@go-hare/claude-code-linux-arm64": ">=2.7.39",
-        "@go-hare/claude-code-linux-arm64-musl": ">=2.7.39",
-        "@go-hare/claude-code-linux-x64": ">=2.7.39",
-        "@go-hare/claude-code-linux-x64-musl": ">=2.7.39",
-        "@go-hare/claude-code-win32-arm64": ">=2.7.39",
-        "@go-hare/claude-code-win32-x64": ">=2.7.39",
+        "@go-hare/claude-code-darwin-arm64": ">=2.7.46",
+        "@go-hare/claude-code-darwin-x64": ">=2.7.46",
+        "@go-hare/claude-code-linux-arm64": ">=2.7.46",
+        "@go-hare/claude-code-linux-arm64-musl": ">=2.7.46",
+        "@go-hare/claude-code-linux-x64": ">=2.7.46",
+        "@go-hare/claude-code-linux-x64-musl": ">=2.7.46",
+        "@go-hare/claude-code-win32-arm64": ">=2.7.46",
+        "@go-hare/claude-code-win32-x64": ">=2.7.46",
         "doubaoime-asr": "^0.1.0",
       },
     },
@@ -209,35 +211,35 @@
     },
     "packages/@go-hare/claude-code-darwin-arm64": {
       "name": "@go-hare/claude-code-darwin-arm64",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/@go-hare/claude-code-darwin-x64": {
       "name": "@go-hare/claude-code-darwin-x64",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/@go-hare/claude-code-linux-arm64": {
       "name": "@go-hare/claude-code-linux-arm64",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/@go-hare/claude-code-linux-arm64-musl": {
       "name": "@go-hare/claude-code-linux-arm64-musl",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/@go-hare/claude-code-linux-x64": {
       "name": "@go-hare/claude-code-linux-x64",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/@go-hare/claude-code-linux-x64-musl": {
       "name": "@go-hare/claude-code-linux-x64-musl",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/@go-hare/claude-code-win32-arm64": {
       "name": "@go-hare/claude-code-win32-arm64",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/@go-hare/claude-code-win32-x64": {
       "name": "@go-hare/claude-code-win32-x64",
-      "version": "2.7.39",
+      "version": "2.7.46",
     },
     "packages/acp-link": {
       "name": "acp-link",
@@ -1585,6 +1587,8 @@
 
     "@types/offscreencanvas": ["@types/offscreencanvas@2019.7.3", "https://registry.npmmirror.com/@types/offscreencanvas/-/offscreencanvas-2019.7.3.tgz", {}, "sha512-ieXiYmgSRXUDeOntE1InxjWyvEelZGP63M+cGuquuRLuIKKT1osnkXjxev9B7d1nXSug5vpunx+gNlbVxMlC9A=="],
 
+    "@types/parse5": ["@types/parse5@7.0.0", "", { "dependencies": { "parse5": "*" } }, "sha512-f2SeAxumolBmhuR62vNGTsSAvdz/Oj0k682xNrcKJ4dmRnTPODB74j6CPoNPzBPTHsu7Y7W7u93Mgp8Ovo8vWw=="],
+
     "@types/pg": ["@types/pg@8.15.6", "https://registry.npmmirror.com/@types/pg/-/pg-8.15.6.tgz", { "dependencies": { "@types/node": "*", "pg-protocol": "*", "pg-types": "^2.2.0" } }, "sha512-NoaMtzhxOrubeL/7UZuNTrejB4MPAJ0RpxZqXQf2qXuVlTPuG6Y8p4u9dKRaue4yjmC7ZhzVO2/Yyyn25znrPQ=="],
 
     "@types/pg-pool": ["@types/pg-pool@2.0.7", "https://registry.npmmirror.com/@types/pg-pool/-/pg-pool-2.0.7.tgz", { "dependencies": { "@types/pg": "*" } }, "sha512-U4CwmGVQcbEuqpyju8/ptOKg6gEC+Tqsvj2xS9o1g71bUh8twxnC6ZL5rZKCsGN0iyH0CwgUyc9VR5owNQF9Ng=="],
@@ -1939,7 +1943,7 @@
 
     "enhanced-resolve": ["enhanced-resolve@5.20.1", "https://registry.npmmirror.com/enhanced-resolve/-/enhanced-resolve-5.20.1.tgz", { "dependencies": { "graceful-fs": "^4.2.4", "tapable": "^2.3.0" } }, "sha512-Qohcme7V1inbAfvjItgw0EaxVX5q2rdVEZHRBrEQdRZTssLDGsL8Lwrznl8oQ/6kuTJONLaDcGjkNP247XEhcA=="],
 
-    "entities": ["entities@6.0.1", "https://registry.npmmirror.com/entities/-/entities-6.0.1.tgz", {}, "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g=="],
+    "entities": ["entities@8.0.0", "", {}, "sha512-zwfzJecQ/Uej6tusMqwAqU/6KL2XaB2VZ2Jg54Je6ahNBGNH6Ek6g3jjNCF0fG9EWQKGZNddNjU5F1ZQn/sBnA=="],
 
     "env-paths": ["env-paths@4.0.0", "https://registry.npmmirror.com/env-paths/-/env-paths-4.0.0.tgz", { "dependencies": { "is-safe-filename": "^0.1.0" } }, "sha512-pxP8eL2SwwaTRi/KHYwLYXinDs7gL3jxFcBYmEdYfZmZXbaVDvdppd0XBU8qVz03rDfKZMXg1omHCbsJjZrMsw=="],
 
@@ -2511,7 +2515,7 @@
 
     "parse-ms": ["parse-ms@4.0.0", "https://registry.npmmirror.com/parse-ms/-/parse-ms-4.0.0.tgz", {}, "sha512-TXfryirbmq34y8QBwgqCVLi+8oA3oWx2eAnSn62ITyEhEYaWRlVZ2DvMM9eZbMs/RfxPu/PK/aBLyGj4IrqMHw=="],
 
-    "parse5": ["parse5@5.1.1", "https://registry.npmmirror.com/parse5/-/parse5-5.1.1.tgz", {}, "sha512-ugq4DFI0Ptb+WWjAdOK16+u/nHfiIrcE+sh8kZMaM0WllQKLI9rOUq6c2b7cwPkXdzfQESqvoqK6ug7U/Yyzug=="],
+    "parse5": ["parse5@8.0.1", "", { "dependencies": { "entities": "^8.0.0" } }, "sha512-z1e/HMG90obSGeidlli3hj7cbocou0/wa5HacvI3ASx34PecNjNQeaHNo5WIZpWofN9kgkqV1q5YvXe3F0FoPw=="],
 
     "parse5-htmlparser2-tree-adapter": ["parse5-htmlparser2-tree-adapter@6.0.1", "https://registry.npmmirror.com/parse5-htmlparser2-tree-adapter/-/parse5-htmlparser2-tree-adapter-6.0.1.tgz", { "dependencies": { "parse5": "^6.0.1" } }, "sha512-qPuWvbLgvDGilKc5BoicRovlT4MtYT6JfJyBOMDsKoiT+GiuP5qyrPCnR9HcPECIJJmZh5jRndyNThnhhb/vlA=="],
 
@@ -3401,6 +3405,8 @@
 
     "cli-highlight/highlight.js": ["highlight.js@10.7.3", "https://registry.npmmirror.com/highlight.js/-/highlight.js-10.7.3.tgz", {}, "sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A=="],
 
+    "cli-highlight/parse5": ["parse5@5.1.1", "https://registry.npmmirror.com/parse5/-/parse5-5.1.1.tgz", {}, "sha512-ugq4DFI0Ptb+WWjAdOK16+u/nHfiIrcE+sh8kZMaM0WllQKLI9rOUq6c2b7cwPkXdzfQESqvoqK6ug7U/Yyzug=="],
+
     "cliui/string-width": ["string-width@4.2.3", "https://registry.npmmirror.com/string-width/-/string-width-4.2.3.tgz", { "dependencies": { "emoji-regex": "^8.0.0", "is-fullwidth-code-point": "^3.0.0", "strip-ansi": "^6.0.1" } }, "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g=="],
 
     "cliui/strip-ansi": ["strip-ansi@6.0.1", "https://registry.npmmirror.com/strip-ansi/-/strip-ansi-6.0.1.tgz", { "dependencies": { "ansi-regex": "^5.0.1" } }, "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A=="],
@@ -3688,6 +3694,10 @@
     "gtoken/gaxios/is-stream": ["is-stream@2.0.1", "https://registry.npmmirror.com/is-stream/-/is-stream-2.0.1.tgz", {}, "sha512-hFoiJiTl63nn+kstHGBtewWSKnQLpyb155KHheA1l39uvtO9nWIop1p3udqPcUd/xbF1VLMO4n7OI6p7RbngDg=="],
 
     "gtoken/gaxios/node-fetch": ["node-fetch@2.7.0", "https://mirrors.cloud.tencent.com/npm/node-fetch/-/node-fetch-2.7.0.tgz", { "dependencies": { "whatwg-url": "^5.0.0" }, "peerDependencies": { "encoding": "^0.1.0" }, "optionalPeers": ["encoding"] }, "sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A=="],
+
+    "hast-util-from-html/parse5/entities": ["entities@6.0.1", "https://registry.npmmirror.com/entities/-/entities-6.0.1.tgz", {}, "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g=="],
+
+    "hast-util-raw/parse5/entities": ["entities@6.0.1", "https://registry.npmmirror.com/entities/-/entities-6.0.1.tgz", {}, "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g=="],
 
     "listr2/wrap-ansi/string-width": ["string-width@7.2.0", "https://mirrors.cloud.tencent.com/npm/string-width/-/string-width-7.2.0.tgz", { "dependencies": { "emoji-regex": "^10.3.0", "get-east-asian-width": "^1.0.0", "strip-ansi": "^7.1.0" } }, "sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ=="],
 

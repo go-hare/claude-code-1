@@ -56,6 +56,22 @@ describe('ArtifactTool UI.renderToolResultMessage', () => {
     expect(node).toBeNull();
   });
 
+  test('renders list and page_data without a top-level url', () => {
+    const listed = renderToolResultMessage(
+      {
+        id: '',
+        url: '',
+        expiresAt: '',
+        artifacts: [{ title: 'A', url: 'https://x' }],
+      },
+      NO_PROGRESS,
+      OPTIONS,
+    );
+    expect(extractText(listed)).toContain('Listed 1 artifact');
+    const page = renderToolResultMessage({ id: '', url: '', expiresAt: '', page_data: { n: 1 } }, NO_PROGRESS, OPTIONS);
+    expect(extractText(page)).toContain('page_data');
+  });
+
   test('omits the expiry line when expiresAt is empty', () => {
     const content: ArtifactOutput = {
       id: 'abc',

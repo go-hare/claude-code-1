@@ -1,25 +1,33 @@
-export const ARTIFACT_TOOL_NAME = 'artifact'
+export const ARTIFACT_TOOL_NAME = 'Artifact'
 
 export async function describeArtifactTool(): Promise<string> {
-  return 'Upload an HTML or Markdown file to the cloud-artifacts hosting service and get back a public URL. Markdown files are converted to styled HTML before upload. Pass `hash` to overwrite a previously-uploaded artifact (keeps URL stable).'
+  return 'Work with Claude artifacts: list/read/comments/reply/resolve/live-edit/watch/status/assets/files/verify/delete, or tip cloud-artifacts upload via file_path.'
 }
 
 export async function getArtifactToolPrompt(): Promise<string> {
-  return `Upload an HTML or Markdown file to a public hosting service and return a shareable URL plus an internal \`id\` (the "hash").
+  return `Official Artifact tool (densable name \`Artifact\`).
 
-## Inputs
-- \`file_path\` (required): absolute path to a local HTML (\`.html\`/\`.htm\`) or Markdown (\`.md\`/\`.markdown\`) file. Markdown is converted to a styled HTML document before upload — just author plain Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes) and the tool wraps it in a page with a neutral stylesheet.
-- \`hash\` (optional): if provided, overwrites the artifact with the same hash (URL stays the same). If omitted, a new random id is generated.
-- \`ttl\` (optional, default \`7\`): artifact lifetime in days. Must be \`7\` or \`30\`.
+## Tip cloud-artifacts upload (no action)
+- \`file_path\` (required): absolute HTML/Markdown path
+- \`hash\` / \`ttl\` optional
+Output: \`{ id, url, expiresAt }\`.
 
-## Output
-\`{ id, url, expiresAt }\` — \`id\` is the hash (save it for future overwrite calls), \`url\` is publicly accessible.
+## densable actions
+- \`list\` — list frames (\`limit\`, \`scope\`)
+- \`read\` — read published HTML at \`url\` (optional \`prompt\`)
+- \`comments\` — read comment threads at \`url\` (optional \`thread_id\`)
+- \`reply\` — post \`text\` on \`thread_id\` at \`url\`
+- \`resolve\` — resolve \`thread_id\` at \`url\`
+- \`live-edit\` — publish full \`html\` for \`url\` (vf-gated)
+- \`watch\` / \`unwatch\` / \`status\` — live comment subscribe control plane
+- \`list_assets\` / \`upload_asset\` / \`delete_asset\` — frame assets
+- \`list_files\` — list published files
+- \`read_file\` — save published \`path\` under \`out_dir\` (AWt → JCm → wx rename)
+- \`read_asset\` — save \`asset_id\` under \`out_dir\` as \`<id>.<ext>\` (EWt → TCm → wx rename)
+- \`verify\` — diagnostics (mao gate; tip default closed)
+- \`read_page_data\` — island schemas (unavailable without registry)
+- \`delete\` — permanent delete (confirm pin + schema gate)
+- \`room_send\` — live room broadcast (host often unbound)
 
-## Workflow
-1. Use the Write tool to create a local \`.html\` or \`.md\` file.
-2. Call this tool with its \`file_path\`.
-3. If iterating on the same artifact, pass back the \`id\` returned from the first call as \`hash\` so the URL stays stable.
-
-## Errors
-The tool surfaces backend error codes verbatim (e.g. \`payload_too_large\`, \`unauthorized\`, \`empty_body\`). If the file does not exist, is not a regular file, or has an unsupported extension, the tool returns an \`error\` field without making an HTTP request. Accepted extensions: \`.html\`, \`.htm\`, \`.md\`, \`.markdown\`.`
+Official registration (ASe / cobalt) gates model availability; tip upload also opens when tip hosting env or \`CLAUDE_CODE_ARTIFACT=1\`.`
 }

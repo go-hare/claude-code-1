@@ -29,7 +29,7 @@ export function extractArtifacts(messages: Message[]): ArtifactInfo[] {
       if (!('type' in block)) continue
       const b = block as unknown as Record<string, unknown>
       if (b.type !== 'tool_use') continue
-      if (b.name !== 'artifact') continue
+      if (b.name !== 'artifact' && b.name !== 'Artifact') continue
 
       const toolUseId = b.id as string
       const input = b.input as { file_path?: string } | undefined
