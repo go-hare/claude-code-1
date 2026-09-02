@@ -17,6 +17,7 @@ import {
   errorFromPluginFailureCode,
 } from '../../utils/plugins/pluginCommandRefusal.js'
 import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
+import { hydrateSyncedPluginDirsFromDisk } from '../../utils/plugins/syncedPluginHydrate.js'
 import type { PluginScope } from '../../utils/plugins/schemas.js'
 import { writeToStdout } from '../../utils/process.js'
 import {
@@ -220,6 +221,7 @@ export async function enablePlugin(
   scope?: InstallableScope,
 ): Promise<void> {
   try {
+    await hydrateSyncedPluginDirsFromDisk()
     const result = await enablePluginOp(plugin, scope)
 
     if (!result.success) {
@@ -260,6 +262,7 @@ export async function disablePlugin(
   scope?: InstallableScope,
 ): Promise<void> {
   try {
+    await hydrateSyncedPluginDirsFromDisk()
     const result = await disablePluginOp(plugin, scope)
 
     if (!result.success) {
@@ -295,6 +298,7 @@ export async function disablePlugin(
  */
 export async function disableAllPlugins(): Promise<void> {
   try {
+    await hydrateSyncedPluginDirsFromDisk()
     const result = await disableAllPluginsOp()
 
     if (!result.success) {

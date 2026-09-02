@@ -5,6 +5,8 @@
  * Local same-name wins. Do not invent the cloud dir downloader.
  */
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join, resolve } from 'path'
 import type { LoadedPlugin } from '../../../types/plugin.js'
 import { formatSyncedPluginShadowedMessage } from '../../../types/plugin.js'
 import {
@@ -16,8 +18,19 @@ import {
   parsePluginIdentifier,
   SYNCED_MARKETPLACE_NAME,
 } from '../pluginIdentifier.js'
-import { mergePluginSources } from '../pluginLoader.js'
+import { loadSyncedPlugins, mergePluginSources } from '../pluginLoader.js'
 import { PluginMarketplaceSchema } from '../schemas.js'
+import { mkdtemp, mkdir, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import {
+  auditSyncedExtractTree,
+  dirsFromSyncedManifest,
+  getSyncedPluginsManifestPath,
+  getSyncedPluginsRoot,
+  hydrateSyncedPluginDirsFromDisk,
+  SYNCED_PLUGINS_DIRNAME,
+  SYNCED_PLUGINS_MANIFEST,
+} from '../syncedPluginHydrate.js'
 
 function plugin(
   name: string,
@@ -72,6 +85,7 @@ describe('densable 2.1.239 #4 name@synced', () => {
   })
 
   test('f3a/AKp: absent row defaults on; false disables; true enables', () => {
+    // loadOneZpfPathPlugin passes manifest.defaultEnabled (official f3a)
     expect(isSyncedPluginEnabled('a@synced', undefined, undefined)).toBe(true)
     expect(isSyncedPluginEnabled('a@synced', false, undefined)).toBe(false)
     expect(
@@ -264,5 +278,181 @@ describe('densable 2.1.239 #4 name@synced', () => {
       builtin: [],
     })
     expect(plugins.map(p => p.source)).toEqual(['Demo@inline', 'demo@shop'])
+  })
+})
+
+describe('densable T0r / W1h disk hydrate', () => {
+  test('Usr / uGe paths', () => {
+    expect(SYNCED_PLUGINS_DIRNAME).toBe('synced')
+    expect(SYNCED_PLUGINS_MANIFEST).toBe('manifest.json')
+    expect(getSyncedPluginsRoot('/home/.claude/plugins')).toBe(
+      join('/home/.claude/plugins', 'synced'),
+    )
+    expect(getSyncedPluginsManifestPath('/home/.claude/plugins')).toBe(
+      join('/home/.claude/plugins', 'synced', 'manifest.json'),
+    )
+  })
+
+  test('W1h: unique dirs from manifest names; skip reserved', () => {
+    const root = join('/home/.claude/plugins', 'synced')
+    expect(
+      dirsFromSyncedManifest(
+        [{ name: 'demo' }, { name: 'demo' }, { name: 'other' }],
+        root,
+      ),
+    ).toEqual([join(root, 'demo'), join(root, 'other')])
+    expect(
+      dirsFromSyncedManifest(
+        [{ name: 'manifest.json' }, { name: '.staging' }, { name: '' }],
+        root,
+      ),
+    ).toEqual([])
+  })
+
+  test('W1h uniqueness is p9, not toLowerCase', () => {
+    const root = join('/home/.claude/plugins', 'synced')
+    expect(
+      dirsFromSyncedManifest([{ name: 'café' }, { name: 'CAFÉ' }], root),
+    ).toEqual([join(root, 'café')])
+  })
+
+  test('T0r: skip when lQt already set; hydrate from manifest', async () => {
+    let dirs: string[] = ['already']
+    await hydrateSyncedPluginDirsFromDisk({
+      getDirs: () => dirs,
+      setDirs: next => {
+        dirs = next
+      },
+      root: '/tmp/synced',
+      stat: async () => ({ isDirectory: () => true }),
+      readFile: async () =>
+        JSON.stringify({ plugins: [{ name: 'demo', pluginId: 'demo' }] }),
+    })
+    expect(dirs).toEqual(['already'])
+
+    dirs = []
+    await hydrateSyncedPluginDirsFromDisk({
+      getDirs: () => dirs,
+      setDirs: next => {
+        dirs = next
+      },
+      root: '/tmp/synced',
+      stat: async () => ({ isDirectory: () => true }),
+      readFile: async () =>
+        JSON.stringify({ plugins: [{ name: 'demo', pluginId: 'demo' }] }),
+    })
+    expect(dirs).toEqual([join('/tmp/synced', 'demo')])
+
+    dirs = []
+    await hydrateSyncedPluginDirsFromDisk({
+      getDirs: () => dirs,
+      setDirs: next => {
+        dirs = next
+      },
+      root: '/tmp/missing',
+      stat: async () => {
+        throw new Error('ENOENT')
+      },
+    })
+    expect(dirs).toEqual([])
+  })
+
+  test('W1h/T0r qMr missing leaves; Zpf reports path-not-found', async () => {
+    const root = join('/tmp', 'synced-ghost')
+    expect(dirsFromSyncedManifest([{ name: 'ghost' }], root)).toEqual([
+      join(root, 'ghost'),
+    ])
+
+    let dirs: string[] = []
+    await hydrateSyncedPluginDirsFromDisk({
+      getDirs: () => dirs,
+      setDirs: next => {
+        dirs = next
+      },
+      root,
+      stat: async () => ({ isDirectory: () => true }),
+      readFile: async () => JSON.stringify({ plugins: [{ name: 'ghost' }] }),
+    })
+    expect(dirs).toEqual([join(root, 'ghost')])
+
+    const missing = join(root, 'ghost')
+    const { plugins, errors } = await loadSyncedPlugins([missing])
+    expect(plugins).toEqual([])
+    expect(errors).toEqual([
+      {
+        type: 'path-not-found',
+        source: 'synced[0]',
+        path: resolve(missing),
+        component: 'commands',
+      },
+    ])
+  })
+
+  test('Zpf Promise.all flatMap keeps input order', async () => {
+    const { plugins, errors } = await loadSyncedPlugins([
+      join('/tmp', 'zpf-a-missing'),
+      join('/tmp', 'zpf-b-missing'),
+    ])
+    expect(plugins).toEqual([])
+    expect(errors.map(e => e.source)).toEqual(['synced[0]', 'synced[1]'])
+  })
+
+  test('T0r source does not invent zXl cloud download', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../syncedPluginHydrate.ts'),
+      'utf8',
+    )
+    expect(src).not.toContain('listEntries("plugins")')
+    expect(src).not.toMatch(/\bfetch\s*\(/)
+    expect(src).toContain('auditSyncedExtractTree')
+    expect(src).toContain('hydrateSyncedPluginDirsFromDisk')
+  })
+
+  test('jXl/T0r does not scan dirs when manifest is missing', async () => {
+    let dirs: string[] = []
+    await hydrateSyncedPluginDirsFromDisk({
+      getDirs: () => dirs,
+      setDirs: next => {
+        dirs = next
+      },
+      root: '/tmp/synced-no-manifest',
+      stat: async () => ({ isDirectory: () => true }),
+      readFile: async () => {
+        throw new Error('ENOENT')
+      },
+    })
+    expect(dirs).toEqual([])
+
+    dirs = []
+    await hydrateSyncedPluginDirsFromDisk({
+      getDirs: () => dirs,
+      setDirs: next => {
+        dirs = next
+      },
+      root: '/tmp/synced-empty-plugins',
+      stat: async () => ({ isDirectory: () => true }),
+      readFile: async () => JSON.stringify({ plugins: [] }),
+    })
+    expect(dirs).toEqual([])
+
+    const src = readFileSync(
+      join(import.meta.dir, '../syncedPluginHydrate.ts'),
+      'utf8',
+    )
+    expect(src).not.toContain('Local zXl analog')
+    expect(src).toContain('No readdir fallback')
+  })
+
+  test('iVE walk: ok / reserved / oversize', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ive-'))
+    await writeFile(join(root, 'ok.txt'), 'hi')
+    expect(await auditSyncedExtractTree(root)).toBe('ok')
+
+    await mkdir(join(root, '.git'))
+    expect(await auditSyncedExtractTree(root)).toBe('reserved')
+
+    const fat = await mkdtemp(join(tmpdir(), 'ive-fat-'))
+    await writeFile(join(fat, 'big.bin'), 'xxxx')
+    expect(await auditSyncedExtractTree(fat, 2)).toBe('oversize')
   })
 })

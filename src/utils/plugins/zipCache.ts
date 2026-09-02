@@ -331,6 +331,7 @@ async function collectFilesForZip(
 export async function extractZipToDirectory(
   zipPath: string,
   targetDir: string,
+  options?: { skipEntry?: (relPath: string) => boolean },
 ): Promise<void> {
   const zipBuf = await getFsImplementation().readFileBytes(zipPath)
   const files = await unzipFile(zipBuf)
@@ -341,6 +342,8 @@ export async function extractZipToDirectory(
   await getFsImplementation().mkdir(targetDir)
 
   for (const [relPath, data] of Object.entries(files)) {
+    // densable e2t / L8a: skipEntry before mkdir (x1h MHa `.git`)
+    if (options?.skipEntry?.(relPath)) continue
     // Skip directory entries (trailing slash)
     if (relPath.endsWith('/')) {
       await getFsImplementation().mkdir(join(targetDir, relPath))

@@ -111,6 +111,8 @@ export type PluginError =
       plugin?: string
       path: string
       component: PluginComponent
+      /** densable Zpf `S` — omitted for plain ENOENT */
+      errno?: string
     }
   | {
       type: 'git-auth-failed'
@@ -296,10 +298,23 @@ export type PluginError =
       orphan?: boolean
     }
 
+/** densable Zpf / JAi warning row (folder-shadowed, ineffective-disable, …). */
+export type PluginWarning = {
+  type: string
+  source?: string
+  warning?: string
+  plugin?: string
+  component?: string
+  folderPath?: string
+  manifestFields?: string[]
+}
+
 export type PluginLoadResult = {
   enabled: LoadedPlugin[]
   disabled: LoadedPlugin[]
   errors: PluginError[]
+  /** densable c2 `h` — Zpf / JAi warnings */
+  warnings?: PluginWarning[]
 }
 
 /**

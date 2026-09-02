@@ -93,6 +93,13 @@ import {
 import { deletePluginOptions } from '../../utils/plugins/pluginOptionsStorage.js'
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js'
 import { getPluginEditableScopes } from '../../utils/plugins/pluginStartupCheck.js'
+import {
+  readSyncedPluginName,
+  syncedIdsMissingFromSettings,
+} from '../../utils/plugins/zpfLoad.js'
+import { hydrateSyncedPluginDirsFromDisk } from '../../utils/plugins/syncedPluginHydrate.js'
+import { getSyncedPluginDirs } from '../../bootstrap/state.js'
+import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import { calculatePluginVersion } from '../../utils/plugins/pluginVersioning.js'
 import type {
   PluginMarketplaceEntry,
@@ -769,6 +776,7 @@ export async function setPluginEnabledOp(
   plugin: string,
   enabled: boolean,
   scope?: InstallableScope,
+  options?: { bypassDependentsBlock?: boolean },
 ): Promise<PluginOperationResult> {
   const operation = enabled ? 'enable' : 'disable'
 
@@ -916,7 +924,7 @@ export async function setPluginEnabledOp(
       const enabledRdeps = rdeps.filter(dep =>
         loadedEnabled.some(p => p.name === dep || p.source === dep),
       )
-      if (enabledRdeps.length > 0) {
+      if (enabledRdeps.length > 0 && !options?.bypassDependentsBlock) {
         const chain = enabledRdeps.join(', ')
         return {
           success: false,
@@ -1021,9 +1029,19 @@ export async function disablePluginOp(
  * @returns Result indicating success/failure with count of disabled plugins
  */
 export async function disableAllPluginsOp(): Promise<PluginOperationResult> {
+  // leftover 239 J1h: T0r only (L1h kicked at init; N1h at load)
+  await hydrateSyncedPluginDirsFromDisk()
   const enabledPlugins = getPluginEditableScopes()
 
-  if (enabledPlugins.size === 0) {
+  const syncedNames = await Promise.all(
+    getSyncedPluginDirs().map(dir => readSyncedPluginName(dir)),
+  )
+  const settingKeys = getEnabledSettingSources().flatMap(source =>
+    Object.keys(getSettingsForSource(source)?.enabledPlugins ?? {}),
+  )
+  const defaultOnSynced = syncedIdsMissingFromSettings(syncedNames, settingKeys)
+
+  if (enabledPlugins.size === 0 && defaultOnSynced.length === 0) {
     return { success: true, message: 'No enabled plugins to disable' }
   }
 
@@ -1031,12 +1049,31 @@ export async function disableAllPluginsOp(): Promise<PluginOperationResult> {
   const errors: string[] = []
 
   for (const [pluginId] of enabledPlugins) {
-    const result = await setPluginEnabledOp(pluginId, false)
+    const result = await setPluginEnabledOp(pluginId, false, undefined, {
+      bypassDependentsBlock: true,
+    })
     if (result.success) {
       disabled.push(pluginId)
     } else {
       errors.push(`${pluginId}: ${result.message}`)
     }
+  }
+
+  for (const id of defaultOnSynced) {
+    const { error } = updateSettingsForSource('userSettings', {
+      enabledPlugins: {
+        ...getSettingsForSource('userSettings')?.enabledPlugins,
+        [id]: false,
+      },
+    })
+    if (error) {
+      errors.push(`${id}: ${error.message}`)
+    } else {
+      disabled.push(id)
+    }
+  }
+  if (defaultOnSynced.length > 0) {
+    clearAllCaches()
   }
 
   if (errors.length > 0) {
