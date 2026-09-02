@@ -82,3 +82,7 @@ Peels: `_peel_35_oRr_def.txt`, `_peel_35_A5_def.txt`, `_peel_35_Swn_full.txt`, `
 - 不 invent 假 `Swn()` / 永不抛的 `oRr`。
 - 不把 Desktop/gateway/Mantle 路径折进来。
 - 不 commit（未要求）。
+
+## 2026-09-01 纠偏（不改上列 08-19 原文）
+
+**HAVE。** 现码已落复开条件：`src/utils/anthropicProfile.ts`（`M$o`/`A5`/`Swn`/`uD`/`oRr`/`z_` + refresh）+ `errors.ts` oRr → `Swn()?ubS:cbS`。测：`anthropicProfile.234.test.ts` / `profileOauthExpired.234.test.ts`。上列「Local / 全无栈」过期。`/login` = `ConsoleOAuthFlow`（claude.ai OAuth）即 changelog 产品面。

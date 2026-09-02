@@ -60,6 +60,10 @@ function makeStatus(overrides: Partial<AuthStatus> = {}): AuthStatus {
       keyPreview: null,
       source: null,
     },
+    profile: {
+      source: null,
+      label: 'inactive',
+    },
     ...overrides,
   };
 }

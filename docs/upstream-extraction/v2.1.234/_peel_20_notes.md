@@ -40,7 +40,7 @@ sticks after mid-turn submit.
 
 - `ke()` paste-id remap — 与 `popAllEditable` 同一 extract residual
 - 无 `queueOrigin` / `queueMode` 字段
-- #35 profile `/login` 仍 GAP
+- #35 profile `/login`：08-19 记 GAP；**2026-09-01 已 HAVE**（见 `_peel_35_notes.md`）
 
 ## Tests
 - `popAllEditable.234.test.ts` — Ne / LI / na / clamp

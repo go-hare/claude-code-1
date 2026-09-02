@@ -5,7 +5,7 @@
 > 基线：本地 tip densable **2.1.233** + npm **2.7.44**。**本 pack 只对齐 2.1.234**。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN** · **NOOP**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。不 invent cloud/gateway/Desktop-only。  
-> Binary beats changelog。更新：2026-08-19 — sticky React #185 1:1；P0 HAVE；**#3/#4/#5/#7/#9/#11/#12/#16/#18/#19/#20/#40/#21/#22/#36/#43/#6/#13/#14/#28/#29/#34/#37/#44/#51/#42/#15/#48 HAVE**；#35 GAP invent-ban；next remaining P2/UNKNOWN。
+> Binary beats changelog。更新：2026-09-01 — `#35` oRr/Swn/`~/.config/anthropic` 栈已接 → **HAVE**（HAVE **45** / GAP **0**）。`/login` **不**铸造 profile 文件（changelog 不是 mint UI）。此前：2026-08-31 — `#4` print 无等待是金标 `$Fm`/`kDl`。2026-08-19 sticky React #185 1:1；P0 HAVE。08-19 `#35` GAP 账本过期。
 
 ## 邻版关系
 
@@ -31,9 +31,9 @@
 
 | 状态 | 条数 | 说明 |
 | ---- | ---- | ---- |
-| **HAVE** | **43** | 51 − #35 GAP − 6 N/A − `#4` PARTIAL |
-| **PARTIAL** | **1** | `#4` quota：仅 REPL；print 无 |
-| **GAP** | **1** | #35 profile `/login` invent-ban |
+| **HAVE** | **45** | 51 − 6 N/A（含 `#35` oRr/Swn） |
+| **PARTIAL** | **0** | `#4` print 无等待是金标 `$Fm`/`kDl`，不是缺口 |
+| **GAP** | **0** | `#35` 2026-09-01 升 HAVE |
 | **N/A** | **6** | #25/#30–#33/#50 Desktop/cloud/Mantle |
 | **UNKNOWN** | **0** | |
 
@@ -46,7 +46,7 @@
 | 1 | `CLAUDE_CODE_PROJECT_DIR_NAME` | **HAVE** | SEA `T6c`/`XLe`/`bws`；`sessionStoragePortable` + memo `getProjectDir` | peel `_peel_project_dir_name.txt` |
 | 2 | `selection:clear` keybinding | **HAVE** | SEA `h8i`；`useSelectionClearKeybinding` + AgentView chrome | peel `_peel_selection_clear.txt` |
 | 3 | GitLab MR badge footer/statusline | **HAVE** | SEA `_pp`/`lpp`/`aWb`/`lWb`/`nWb=2500`；`fetchPrStatus` = gh `pWb` ?? glab；`PrBadge` `!N`；harbor_prism `yWb` 不移植 | `ghPrStatus.234.test.ts`；`_peel_3_notes.md` |
-| 4 | Continue at usage limit + `/config` | **PARTIAL** | SEA Wqn/BXa/…；`quotaAutoResume.ts` + Config + rate-limit + REPL `useQuotaAutoResume`。**print.ts 无** → HAVE 写成全表面是假账；REPL 面绿 | `quotaAutoResume.234.test.ts` |
+| 4 | Continue at usage limit + `/config` | **HAVE** | SEA Wqn/BXa/`$Fm`/`QOt`/`kDl`；`quotaAutoResume.ts` + Config + rate-limit + REPL `useQuotaAutoResume`。239 金标：`$Fm=fD()&&!As()`（交互且非 bg）；`kDl` 只在 REPL hook tick；`print.ts` 零调用是 1:1，不是缺口。`zFm` 另挡 `QOt`（replBridge/bg/teammate） | `quotaAutoResume.234.test.ts`；peel `gold-print-quota-239.txt` |
 | 5 | Account email only to identify you | **HAVE** | SEA `UPb`；`getUserContext` 注入 identify-only `userEmail`（`ANTHROPIC_UNIX_SOCKET` 跳过） | `userEmailContext.234.test.ts` |
 | 6 | `\??\` NT-namespace 更多预批准面 | **HAVE** | SEA `Jw`/`su`/`Yhe`/`yR`/`qh`/`s7t`/`lMp`/`k0c`/`dvr`/`gno`；path helpers + workflow scriptPath + Shell cwd + publish Artifact/SendUserFile + FileRead Jw + FileEdit skip + claudemd + sessionRestore | `ntNamespace.234.test.ts` + WorkflowTool s7t |
 | 7 | Auto mode 长会话 compact 后重复拒网络 | **HAVE** | SEA wkr/lVr/Jvr/zvb/KXt/LOr/W4g；sessionAllowedHosts + REPL/print/SDK/InboxPoller | `sandboxNetworkDecision.234.test.ts` + `sessionAllowedHosts.234.test.ts`；`_peel_7_notes.md` |
@@ -77,7 +77,7 @@
 | 32 | RC perm/model 同步手机 | **N/A** | | |
 | 33 | RC phone effort → 宿主 | **N/A** | | |
 | 34 | SendMessage/ListAgents 列表过长说明 | **HAVE** | SEA `Gff`/`wWr`/`iza`/`CSf` + `searchTruncated`（cloud\|\|bridge）；ListAgents notes；SendMessage success/ambiguous/not-found append；`qGv` page budget 5 | peel `_peel_34_*`；`*.234.test.ts` |
-| 35 | 过期 profile → `/login` 优先 | **GAP** | SEA `oRr`/`Swn`/`ubS`/`cbS`/`A5`/`uD`/`z_`；go-hare 无 `~/.config/anthropic` profile 栈，禁止 stub 死文案 | `_peel_35_notes.md` |
+| 35 | 过期 profile → `/login` 优先 | **HAVE** | `anthropicProfile.ts`：`M$o`/`A5`/`Swn`/`uD`/`oRr`/`z_` + refresh。`errors.ts`：oRr → `Swn()?ubS:cbS`（implicit 写 `Run /login`）。`/login` 是 `ConsoleOAuthFlow`（claude.ai OAuth）= changelog 产品面，不是另做 profile 铸造页。测：`anthropicProfile.234.test.ts` / `profileOauthExpired.234.test.ts`。 | `_peel_35_notes.md` |
 | 36 | 用户 prompt 渲染 markdown | **HAVE** | SEA `j3i`/`jh`/`promptMode`/`z6m`/`V3i`；`HighlightedThinkingText`→Markdown promptMode；truncate `{head,hiddenLines,tail}`；Divider `titleAlign:start` | `userPromptMarkdown.234.test.ts` |
 | 37 | 空/畸形 API 错误更详 | **HAVE** | SEA `Pai`/`Tbv`/`Sbv`/`tHa`/`OUf`；`unexpectedApiResponse.ts` + `executeNonStreamingRequest` `.withResponse()` gate + originating stall | `unexpectedApiResponse.234.test.ts` |
 | 38 | 自动 session 标题短名 | **HAVE** | `sessionTitle.ts` | |
@@ -98,6 +98,7 @@
 ## Explicit non-claims
 
 - 不 invent Desktop / phone / claude.ai cloud RC（#25/#30–#33）与 Mantle（#50）。  
+- **#35** 已落 oRr/Swn 错误分流 + 读/刷新已有 profile。**禁止** invent 官方 `/login` 铸造 `~/.config/anthropic` profile 文件。  
 - sticky React #185：**1:1 densable jpw/Wrn**，禁止再加本地 hysteresis。  
 - #47：磁盘上旧 `teammateDefaultModel` 可留，**禁止**再读入解析。  
 - 提交时 **勿 stage** SEA 二进制、`docs/upstream-extraction/v2.1.212/**` 大 peel、`nul`。
@@ -114,4 +115,6 @@
 - `src/utils/swarm/__tests__/teammateModel.test.ts`（#47）  
 - `src/components/__tests__/stickyClearHysteresis.test.ts`（idx dedup）  
 - `src/services/__tests__/quotaAutoResume.234.test.ts`（#4）  
+- `src/utils/__tests__/anthropicProfile.234.test.ts`（#35）  
+- `src/services/api/__tests__/profileOauthExpired.234.test.ts`（#35）  
 - `src/components/__tests__/shouldClearSelectionOnKey.234.test.ts`（#45/`vvh`）

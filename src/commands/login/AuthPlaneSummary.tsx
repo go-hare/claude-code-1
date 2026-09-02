@@ -127,6 +127,11 @@ export function AuthPlaneSummary({ status }: AuthPlaneSummaryProps): React.React
       <Box marginLeft={2} flexDirection="column">
         <SubscriptionRow subscription={status.subscription} />
         <WorkspaceKeyRow workspaceKey={status.workspaceKey} />
+        {status.profile.source !== null ? (
+          <Box>
+            <Text dimColor>{status.profile.label}</Text>
+          </Box>
+        ) : null}
         <WorkspaceKeyInstructions subscription={status.subscription} workspaceKey={status.workspaceKey} />
       </Box>
     </Box>

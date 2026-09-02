@@ -12,6 +12,11 @@
  */
 
 import type { SubscriptionType } from '../../services/oauth/types.js'
+import {
+  describeAnthropicProfile,
+  getAnthropicProfileSource,
+  type AnthropicProfileSource,
+} from '../../utils/anthropicProfile.js'
 import { getClaudeAIOAuthTokens } from '../../utils/auth.js'
 import { getGlobalConfig } from '../../utils/config.js'
 
@@ -48,6 +53,14 @@ export interface AuthStatus {
      *   null       — not set
      */
     source: 'env' | 'settings' | null
+  }
+  /**
+   * Local ~/.config/anthropic (or ANTHROPIC_CONFIG_DIR) stack.
+   * Gold M$o / A5 / Ewn — no remote profile fetch.
+   */
+  profile: {
+    source: AnthropicProfileSource
+    label: string
   }
 }
 
@@ -160,6 +173,10 @@ export function getAuthStatus(): AuthStatus {
       prefixValid,
       keyPreview,
       source: keySource,
+    },
+    profile: {
+      source: getAnthropicProfileSource(),
+      label: describeAnthropicProfile(),
     },
   }
 }

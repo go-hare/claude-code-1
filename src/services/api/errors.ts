@@ -244,6 +244,12 @@ export const ORG_DISABLED_ERROR_MESSAGE_ENV_KEY =
   'Your ANTHROPIC_API_KEY belongs to a disabled organization · Update or unset the environment variable'
 export const TOKEN_REVOKED_ERROR_MESSAGE =
   'OAuth token revoked · Please run /login'
+/** leftover 239 IbE / densable 2.1.234 cbS */
+export const PROFILE_LOGIN_EXPIRED_MESSAGE =
+  'Anthropic profile login expired · Re-authenticate your Anthropic profile'
+/** leftover 239 HbE / densable 2.1.234 ubS — implicit user_oauth (hNn/Swn) */
+export const PROFILE_LOGIN_EXPIRED_IMPLICIT_MESSAGE =
+  'Anthropic profile login expired · Run /login to use your claude.ai account instead, or re-authenticate the profile'
 export const CCR_AUTH_ERROR_MESSAGE =
   'Authentication error · This may be a temporary network issue, please try again'
 export const REPEATED_529_ERROR_MESSAGE = 'Repeated 529 Overloaded errors'
@@ -1203,6 +1209,27 @@ export function getAssistantMessageFromError(
         ? INVALID_API_KEY_ERROR_MESSAGE_EXTERNAL
         : INVALID_API_KEY_ERROR_MESSAGE,
     })
+  }
+
+  // leftover 239 DUr / densable oRr — expired profile credentials, no refresh.
+  // Gold: if(DUr(e)) return Xd({error:"invalid_request",content:hNn()?HbE:IbE})
+  {
+    const {
+      isAnthropicProfileOauthExpiredError,
+      isProfileImplicitUserOauth,
+      clearAnthropicProfileCaches,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/anthropicProfile.js') as typeof import('../../utils/anthropicProfile.js')
+    if (isAnthropicProfileOauthExpiredError(error)) {
+      clearAnthropicProfileCaches()
+      return createAssistantAPIErrorMessage({
+        error: 'invalid_request',
+        content: isProfileImplicitUserOauth()
+          ? PROFILE_LOGIN_EXPIRED_IMPLICIT_MESSAGE
+          : PROFILE_LOGIN_EXPIRED_MESSAGE,
+      })
+    }
   }
 
   // Check for OAuth token revocation error
