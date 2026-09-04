@@ -182,6 +182,8 @@ export { supportsTabStatus } from './core/termio/osc.js'
 export {
   setClipboard,
   getClipboardPath,
+  probeLinuxClipboardTool,
+  type ClipboardPath,
   CLEAR_ITERM2_PROGRESS,
   CLEAR_TAB_STATUS,
   CLEAR_TERMINAL_TITLE,
@@ -380,7 +382,12 @@ export { Divider } from './theme/Divider.js'
 export { FuzzyPicker } from './theme/FuzzyPicker.js'
 export { ListItem } from './theme/ListItem.js'
 export { LoadingState } from './theme/LoadingState.js'
-export { Pane } from './theme/Pane.js'
+export {
+  Pane,
+  PANE_PADDING_X_INLINE,
+  PANE_PADDING_X_MODAL,
+  MODAL_LAYOUT_PADDING_X,
+} from './theme/Pane.js'
 export { ProgressBar } from './theme/ProgressBar.js'
 export { Ratchet } from './theme/Ratchet.js'
 export { StatusIcon } from './theme/StatusIcon.js'

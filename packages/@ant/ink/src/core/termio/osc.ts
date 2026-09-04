@@ -216,7 +216,8 @@ export function wrapForMultiplexer(sequence: string): string {
  *
  * - 'native': densable L3u native utility will run (pbcopy / powershell /
  *   powershell.exe / wl-copy|xclip|xsel dual-write) — high-confidence system
- *   clipboard write. tmux buffer may also be loaded as a bonus.
+ *   clipboard write. tmux buffer may also be loaded as a bonus. linux is
+ *   native only after Xws probe stored a tool string (densable dt).
  * - 'tmux-buffer': tmux load-buffer will run, but no native tool — paste
  *   with prefix+] works. System clipboard depends on tmux's set-clipboard
  *   option + outer terminal OSC 52 support; can't know from here.
@@ -231,15 +232,14 @@ export function wrapForMultiplexer(sequence: string): string {
 export type ClipboardPath = 'native' | 'tmux-buffer' | 'osc52'
 
 export function getClipboardPath(): ClipboardPath {
-  // densable L3u runs when !SSH and Wt() ∈ {macos,windows,wsl,linux}
+  // densable dt / XZb — native only when !SSH and a host tool will run.
+  // linux waits for Xws probe (`linuxCopy` string); unprobed/none → tmux/osc52.
   if (!process.env['SSH_CONNECTION']) {
     const host = getClipboardHostPlatform()
-    if (
-      host === 'macos' ||
-      host === 'windows' ||
-      host === 'wsl' ||
-      host === 'linux'
-    ) {
+    if (host === 'macos' || host === 'windows' || host === 'wsl') {
+      return 'native'
+    }
+    if (host === 'linux' && typeof linuxCopy === 'string') {
       return 'native'
     }
   }
@@ -377,10 +377,11 @@ let linuxCopy: 'wl-copy' | 'xclip' | 'xsel' | null | undefined
 let waylandCopyGen = 0
 
 /**
- * densable Xws — probe once which Linux native clipboard tool is available.
- * Env-gated (not fire-and-write probe): WAYLAND_DISPLAY first, then DISPLAY.
+ * densable Xws / jt / YZb — probe once which Linux native clipboard tool
+ * is available. Env-gated (not fire-and-write): WAYLAND_DISPLAY first,
+ * then DISPLAY. Login calls this (Vo) while the URL is visible.
  */
-async function probeLinuxClipboardTool(): Promise<void> {
+export async function probeLinuxClipboardTool(): Promise<void> {
   // densable Xws: only on Wt()==="linux" (not wsl)
   if (getClipboardHostPlatform() !== 'linux' || typeof linuxCopy === 'string') {
     return
@@ -545,6 +546,11 @@ export function _resetLinuxCopyCache(): void {
 /** @internal test-only densable kDe snapshot */
 export function _getLinuxCopyTool(): typeof linuxCopy {
   return linuxCopy
+}
+
+/** @internal test-only — pin densable kDe so dt() linux native can be asserted. */
+export function _setLinuxCopyToolForTesting(tool: typeof linuxCopy): void {
+  linuxCopy = tool
 }
 
 /** @internal test-only densable D3u snapshot */

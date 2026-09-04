@@ -13,6 +13,14 @@ import { join } from 'path'
 import { getOauthConfig, OAUTH_BETA_HEADER } from 'src/constants/oauth.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { logForDebugging } from './debug.js'
+import {
+  type WifTokenProvider,
+  isWifFailedAccessToken,
+  recordWifFailedAccessToken,
+  wrapWifCredentialsLock,
+  wrapWifInvalidGrantRefreshCleanup,
+  wrapWifSiblingRotatedTokenAdoption,
+} from './wifCredentialRace.js'
 import { isBareMode, isEnvTruthy } from './envUtils.js'
 
 export type AnthropicProfileSource =
@@ -156,6 +164,9 @@ export const getAnthropicProfileAuthKind = memoize(
 
 /** densable I$o / leftover 239 DJo — drop A5/uzs/o1_ caches. */
 export function clearAnthropicProfileCaches(): void {
+  profileUserOauthForceRefresh = false
+  lastIssuedProfileUserOauthAccessToken = undefined
+  lastIssuedProfileUserOauthExpiresAt = undefined
   try {
     const { clearOidcFederationCaches } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -515,11 +526,83 @@ async function writeCredentialsAtomic(
 }
 
 let pendingProfileRefresh: Promise<ProfileUserOauthToken> | null = null
+/** densable lt → next user_oauth resolve must forceRefresh through H. */
+let profileUserOauthForceRefresh = false
+/**
+ * densable TokenCache.cached for user_oauth — last bearer handed to the API
+ * client. Must NOT re-read credentials disk on 401 (sibling may have rotated).
+ */
+let lastIssuedProfileUserOauthAccessToken: string | undefined
+let lastIssuedProfileUserOauthExpiresAt: number | null | undefined
+
+function rememberIssuedProfileUserOauthToken(
+  token: string,
+  expiresAt: number | null,
+): void {
+  lastIssuedProfileUserOauthAccessToken = token
+  lastIssuedProfileUserOauthExpiresAt = expiresAt
+}
+
+function lastIssuedMemoryNeedsRefresh(): boolean {
+  if (lastIssuedProfileUserOauthAccessToken === undefined) return true
+  if (lastIssuedProfileUserOauthExpiresAt === undefined) return true
+  if (lastIssuedProfileUserOauthExpiresAt === null) return false
+  return (
+    nowUnixSec() >=
+    lastIssuedProfileUserOauthExpiresAt - PROFILE_OAUTH_REFRESH_SKEW_SEC
+  )
+}
+
+/**
+ * Bearer that drove the last profile wire resolve: in-memory user_oauth issue
+ * or OIDC TokenCache.cached. Never falls back to disk (sibling race).
+ */
+export function getLastIssuedWifAccessToken(): string | undefined {
+  if (lastIssuedProfileUserOauthAccessToken) {
+    return lastIssuedProfileUserOauthAccessToken
+  }
+  try {
+    const { peekOidcCachedAccessToken } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./anthropicOidc.js') as typeof import('./anthropicOidc.js')
+    return peekOidcCachedAccessToken() ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * densable lt / invalidateWIFToken — record rejected access_token and force
+ * the next provider call so H(after-recorded-401) can adopt a sibling write.
+ * Prefer an explicit failed bearer; else last-issued / OIDC cache (not disk).
+ * Then clear user_oauth last-issued like TokenCache.invalidate (`cached=null`
+ * + `nextForce`): a failed force refresh must not serve the rejected bearer
+ * from memory on the next resolve.
+ */
+export async function invalidateWifToken(
+  failedAccessToken?: string,
+): Promise<void> {
+  const token = failedAccessToken || getLastIssuedWifAccessToken()
+  recordWifFailedAccessToken(token)
+  profileUserOauthForceRefresh = true
+  lastIssuedProfileUserOauthAccessToken = undefined
+  lastIssuedProfileUserOauthExpiresAt = undefined
+  try {
+    const { invalidateOidcTokenCache } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./anthropicOidc.js') as typeof import('./anthropicOidc.js')
+    // Peek already happened above via getLastIssuedWifAccessToken; invalidate
+    // clears cached so the next getToken forceRefresh goes through H.
+    invalidateOidcTokenCache()
+  } catch {
+    // oidc module optional during isolated tests
+  }
+}
 
 /**
  * leftover 239 userOAuthProvider refresh: POST `${baseURL}/v1/oauth/token`.
  */
-export async function refreshProfileUserOauthAccessToken(
+async function refreshProfileUserOauthAccessTokenImpl(
   env: NodeJS.ProcessEnv = process.env,
   fetchFn: typeof fetch = globalThis.fetch,
 ): Promise<ProfileUserOauthToken> {
@@ -643,20 +726,82 @@ export async function refreshProfileUserOauthAccessToken(
   return { token: accessToken, expiresAt, credentialsPath }
 }
 
+/** densable 243 #24 — WIF sibling adoption + invalid_grant cleanup wrappers. */
+export async function refreshProfileUserOauthAccessToken(
+  env: NodeJS.ProcessEnv = process.env,
+  fetchFn: typeof fetch = globalThis.fetch,
+): Promise<ProfileUserOauthToken> {
+  const loaded = loadProfileFileConfig(env)
+  if (loaded === null) {
+    throw new AnthropicProfileOauthError(
+      'No user_oauth profile credentials to refresh',
+    )
+  }
+  const { credentialsPath } = loaded
+  // Official: y(H(Ee(provider), after-recorded-401), fail-closed)
+  let provider: WifTokenProvider = async () => {
+    const tok = await refreshProfileUserOauthAccessTokenImpl(env, fetchFn)
+    return { token: tok.token, expiresAt: tok.expiresAt }
+  }
+  provider = wrapWifInvalidGrantRefreshCleanup(
+    provider,
+    credentialsPath,
+    writeCredentialsAtomic,
+  )
+  provider = wrapWifSiblingRotatedTokenAdoption(
+    provider,
+    credentialsPath,
+    'after-recorded-401',
+  )
+  provider = wrapWifCredentialsLock(provider, credentialsPath, 'fail-closed')
+  const result = await provider({ forceRefresh: true })
+  return { ...result, credentialsPath }
+}
+
 /** leftover 239 token cache: refresh when within GHt of expiry. */
 export async function resolveProfileUserOauthAccessToken(
   env: NodeJS.ProcessEnv = process.env,
   fetchFn: typeof fetch = globalThis.fetch,
 ): Promise<ProfileUserOauthToken | null> {
+  const force = profileUserOauthForceRefresh
+  if (force) profileUserOauthForceRefresh = false
+
+  // densable TokenCache hit: return memory bearer; never clobber from disk
+  // (sibling may have rotated credentials before lt records the failed bearer).
+  if (
+    !force &&
+    lastIssuedProfileUserOauthAccessToken &&
+    !lastIssuedMemoryNeedsRefresh()
+  ) {
+    const loaded = loadProfileFileConfig(env)
+    if (loaded === null) return null
+    return {
+      token: lastIssuedProfileUserOauthAccessToken,
+      expiresAt: lastIssuedProfileUserOauthExpiresAt ?? null,
+      credentialsPath: loaded.credentialsPath,
+    }
+  }
+
+  // Official: join in-flight refresh before a disk pin (cached==null path).
+  if (pendingProfileRefresh) return pendingProfileRefresh
+
   const read = readProfileUserOauthAccessToken(env)
   if (read === null) return null
-  if (!read.needsRefresh) return read
-  if (pendingProfileRefresh) return pendingProfileRefresh
-  pendingProfileRefresh = refreshProfileUserOauthAccessToken(
-    env,
-    fetchFn,
-  ).finally(() => {
-    pendingProfileRefresh = null
-  })
+
+  // First observe: pin a fresh disk token. After lt, skip a bearer already
+  // in failedAccessTokens (TokenCache cached==null → refresh, not re-pin).
+  if (!force && !read.needsRefresh && !isWifFailedAccessToken(read.token)) {
+    rememberIssuedProfileUserOauthToken(read.token, read.expiresAt)
+    return read
+  }
+
+  pendingProfileRefresh = refreshProfileUserOauthAccessToken(env, fetchFn)
+    .then(tok => {
+      rememberIssuedProfileUserOauthToken(tok.token, tok.expiresAt)
+      return tok
+    })
+    .finally(() => {
+      pendingProfileRefresh = null
+    })
   return pendingProfileRefresh
 }

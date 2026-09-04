@@ -1,6 +1,7 @@
 import figures from 'figures';
 import * as React from 'react';
 import { Box, color, Text, useTheme } from '@anthropic/ink';
+import { isEnterpriseManagedClaudeAiConnector } from '../../services/mcp/enterpriseManaged.js';
 import { plural } from '../../utils/stringUtils.js';
 import type { UnifiedInstalledItem } from './unifiedTypes.js';
 
@@ -84,6 +85,15 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
     );
   }
 
+  // densable 2.1.243 #7: org-managed claude.ai connector.
+  const managedMarker = isEnterpriseManagedClaudeAiConnector({
+    transport: item.client.config.type,
+    scope: item.scope,
+    enterpriseManaged: item.client.config.type === 'claudeai-proxy' ? item.client.config.enterpriseManaged : undefined,
+  }) ? (
+    <Text dimColor={!isSelected}> · managed</Text>
+  ) : null;
+
   // MCP server
   let statusIcon: string;
   let statusText: string;
@@ -112,6 +122,7 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
         <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
         <Text dimColor={!isSelected}>└ </Text>
         <Text color={isSelected ? 'suggestion' : undefined}>{item.name}</Text>
+        {managedMarker}
         <Text dimColor={!isSelected}>
           {' '}
           <Text backgroundColor="userMessageBackground">MCP</Text>
@@ -126,6 +137,7 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
     <Box>
       <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
       <Text color={isSelected ? 'suggestion' : undefined}>{item.name}</Text>
+      {managedMarker}
       <Text dimColor={!isSelected}>
         {' '}
         <Text backgroundColor="userMessageBackground">MCP</Text>

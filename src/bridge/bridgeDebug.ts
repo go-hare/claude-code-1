@@ -116,15 +116,15 @@ export function wrapApiForFaultInjection(
       if (f) throwFault(f, 'Poll')
       return api.pollForWork(envId, secret, signal, reclaimMs)
     },
-    async registerBridgeEnvironment(config) {
+    async registerBridgeEnvironment(config, signal) {
       const f = consume('registerBridgeEnvironment')
       if (f) throwFault(f, 'Registration')
-      return api.registerBridgeEnvironment(config)
+      return api.registerBridgeEnvironment(config, signal)
     },
-    async reconnectSession(envId, sessionId) {
+    async reconnectSession(envId, sessionId, signal) {
       const f = consume('reconnectSession')
       if (f) throwFault(f, 'ReconnectSession')
-      return api.reconnectSession(envId, sessionId)
+      return api.reconnectSession(envId, sessionId, signal)
     },
     async heartbeatWork(envId, workId, token) {
       const f = consume('heartbeatWork')

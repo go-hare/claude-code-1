@@ -691,6 +691,60 @@ export type GlobalConfig = {
   // undefined = no cache, null = extra usage enabled, string = disabled reason.
   cachedExtraUsageDisabledReason?: string | null
 
+  /**
+   * Official `cachedUsageUtilization` (`V0a` / `K0a` / `I`).
+   * Last-known `/api/oauth/usage` snapshot for `/usage` seed when headers
+   * are empty. Write debounce 5m; read TTL 1h; account mismatch clears.
+   */
+  cachedUsageUtilization?: {
+    fetchedAtMs: number
+    accountUuid?: string
+    utilization: {
+      five_hour?: {
+        utilization: number | null
+        resets_at: string | null
+      } | null
+      seven_day?: {
+        utilization: number | null
+        resets_at: string | null
+      } | null
+      seven_day_oauth_apps?: {
+        utilization: number | null
+        resets_at: string | null
+      } | null
+      seven_day_opus?: {
+        utilization: number | null
+        resets_at: string | null
+      } | null
+      seven_day_sonnet?: {
+        utilization: number | null
+        resets_at: string | null
+      } | null
+      cinder_cove?: {
+        utilization: number | null
+        resets_at: string | null
+      } | null
+      extra_usage?: {
+        is_enabled: boolean
+        monthly_limit: number | null
+        used_credits: number | null
+        utilization: number | null
+        currency?: string | null
+        disabled_reason?: string | null
+      } | null
+      limits?: Array<{
+        kind: string
+        group: string
+        percent: number
+        resets_at: string | null
+        scope?: {
+          model?: { display_name: string } | null
+          surface?: { display_name: string } | null
+        } | null
+      }> | null
+    }
+  }
+
   // Official Fable 5 overage consent (fableOverageConsentV2) keyed by
   // organizationUuid or `acct:${accountUuid}`.
   fableOverageConsentV2?: { [key: string]: boolean }

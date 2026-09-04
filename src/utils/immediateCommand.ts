@@ -1,4 +1,6 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { getAPIProvider } from './model/providers.js'
+import { isTelemetryDisabled } from './privacyLevel.js'
 import { isFullscreenFeatureGateEnabled } from './fullscreen.js'
 
 /**
@@ -6,12 +8,27 @@ import { isFullscreenFeatureGateEnabled } from './fullscreen.js'
  * should execute immediately (during a running query) rather than waiting for
  * the current turn to finish.
  *
- * Always enabled for ants; gated by experiment for external users.
+ * Always enabled for ants. densable 2.1.243 #54: also immediate on
+ * Bedrock/Vertex/Foundry or when telemetry is off (GB never loads).
  */
 export function shouldInferenceConfigCommandBeImmediate(): boolean {
-  return (
-    process.env.USER_TYPE === 'ant' ||
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_immediate_model_command', false)
+  if (process.env.USER_TYPE === 'ant') {
+    return true
+  }
+  const provider = getAPIProvider()
+  if (
+    provider === 'bedrock' ||
+    provider === 'vertex' ||
+    provider === 'foundry'
+  ) {
+    return true
+  }
+  if (isTelemetryDisabled()) {
+    return true
+  }
+  return getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_immediate_model_command',
+    false,
   )
 }
 

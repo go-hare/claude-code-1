@@ -288,6 +288,8 @@ import {
   fetchToolsForClient,
   areMcpConfigsEqual,
   reconnectMcpServerImpl,
+  cleanupConnectedMcpClients,
+  seedMcpIdentityCheck,
 } from 'src/services/mcp/client.js'
 import {
   doesEnterpriseMcpConfigExist,
@@ -323,6 +325,7 @@ import {
   commandBelongsToServer,
   filterToolsByServer,
 } from 'src/services/mcp/utils.js'
+import { attachHeadlessRemoteMcpReconnect } from 'src/services/mcp/headlessMcpReconnect.js'
 import { setupVscodeSdkMcp } from 'src/services/mcp/vscodeSdkMcp.js'
 import {
   getVscodeStartupAnnouncementGate,
@@ -2064,6 +2067,71 @@ function runHeadlessStreaming(
     configs: {},
   }
 
+  // densable 2.1.243 #11 `mS` — -p/SDK never mounted useManageMCPConnections,
+  // so remote MCP onclose never reconnected or marked failed.
+  // Official `$d` is session-end (not per-turn finally); `gt()` is shutdown.
+  const controlReconnectInFlight = new Set<string>()
+  let headlessMcpRunEnding = false
+  let attachHeadlessRemoteReconnect: (
+    clients: readonly MCPServerConnection[],
+  ) => void
+  const seedHeadlessMcpIdentity = (): void => {
+    if (
+      getAppState().mcp.clients.length === 0 &&
+      dynamicMcpState.clients.length === 0
+    ) {
+      return
+    }
+    seedMcpIdentityCheck()
+  }
+  attachHeadlessRemoteReconnect = attachHeadlessRemoteMcpReconnect({
+    getAppState,
+    setAppState: f => {
+      setAppState(f)
+      attachHeadlessRemoteReconnect([
+        ...getAppState().mcp.clients,
+        ...dynamicMcpState.clients,
+      ])
+    },
+    getDynamicMcpState: () => dynamicMcpState,
+    setDynamicMcpState: next => {
+      dynamicMcpState = {
+        ...dynamicMcpState,
+        clients: next.clients,
+        tools: next.tools,
+      }
+    },
+    isControlReconnectInFlight: name => controlReconnectInFlight.has(name),
+    isRunEnding: () => headlessMcpRunEnding || isShuttingDown(),
+    onReconnected: client => {
+      registerElicitationHandlers([client])
+      reregisterChannelHandlerAfterReconnect(client)
+    },
+  })
+  const withControlReconnect = async <T>(
+    name: string,
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    controlReconnectInFlight.add(name)
+    try {
+      return await run()
+    } finally {
+      controlReconnectInFlight.delete(name)
+    }
+  }
+  const appMcpClients = getAppState().mcp.clients
+  if (appMcpClients.length > 0 || dynamicMcpState.clients.length > 0) {
+    seedHeadlessMcpIdentity()
+  }
+  attachHeadlessRemoteReconnect([...appMcpClients, ...dynamicMcpState.clients])
+  registerCleanup(async () => {
+    headlessMcpRunEnding = true
+    const clients = [...getAppState().mcp.clients, ...dynamicMcpState.clients]
+    if (clients.some(c => c.type === 'connected')) {
+      await cleanupConnectedMcpClients(clients)
+    }
+  })
+
   // Shared tool assembly for ask() and the get_context_usage control request.
   // Closes over the mutable sdkTools/dynamicMcpState bindings so both call
   // sites see late-connecting servers.
@@ -2658,6 +2726,8 @@ function runHeadlessStreaming(
             ...sdkClients,
             ...dynamicMcpState.clients,
           ]
+          seedHeadlessMcpIdentity()
+          attachHeadlessRemoteReconnect(allMcpClients)
           registerElicitationHandlers(allMcpClients)
           // Channel handlers for servers allowlisted via --channels at
           // construction time (or enableChannel() mid-session). Runs every
@@ -4718,7 +4788,9 @@ function runHeadlessStreaming(
             if (!config) {
               sendControlResponseError(msg, `Server not found: ${serverName}`)
             } else {
-              const result = await reconnectMcpServerImpl(serverName, config)
+              const result = await withControlReconnect(serverName, () =>
+                reconnectMcpServerImpl(serverName, config),
+              )
               // Update appState.mcp with the new client, tools, commands, and resources
               const prefix = getMcpPrefix(serverName)
               setAppState(prev => ({
@@ -4829,7 +4901,9 @@ function runHeadlessStreaming(
             } else {
               // Enabling: persist + reconnect
               setMcpServerEnabled(serverName, true)
-              const result = await reconnectMcpServerImpl(serverName, config)
+              const result = await withControlReconnect(serverName, () =>
+                reconnectMcpServerImpl(serverName, config),
+              )
               // Update appState.mcp with the new client, tools, commands, and resources
               // This ensures the LLM sees updated tools after enabling the server
               const prefix = getMcpPrefix(serverName)
@@ -5024,9 +5098,10 @@ function runHeadlessStreaming(
                       return
                     }
                     // Reconnect the server after successful auth
-                    const result = await reconnectMcpServerImpl(
+                    const result = await withControlReconnect(
                       serverName as string,
-                      config,
+                      () =>
+                        reconnectMcpServerImpl(serverName as string, config),
                     )
                     const prefix = getMcpPrefix(serverName as string)
                     setAppState(prev => ({
@@ -5341,7 +5416,9 @@ function runHeadlessStreaming(
               )
             } else {
               await revokeServerTokens(serverName, config)
-              const result = await reconnectMcpServerImpl(serverName, config)
+              const result = await withControlReconnect(serverName, () =>
+                reconnectMcpServerImpl(serverName, config),
+              )
               const prefix = getMcpPrefix(serverName)
               setAppState(prev => ({
                 ...prev,

@@ -10,6 +10,7 @@ import {
   COST_HAIKU_45,
   COST_TIER_10_50,
   COST_TIER_15_75,
+  COST_TIER_2_10,
   COST_TIER_3_15,
   COST_TIER_30_150,
   COST_TIER_5_25,
@@ -169,7 +170,8 @@ describe('densable 2.1.219 pricing_tiers (NIc source, not guessed)', () => {
   })
 
   test('MODEL_COSTS list rows use catalog tier keys (via getModelCosts non-fast)', () => {
-    expect(getModelCosts('claude-sonnet-5', usage())).toEqual(COST_TIER_3_15)
+    // densable 2.1.243 #52: sonnet-5 list is tier_2_10 ($2/$10), not 3_15.
+    expect(getModelCosts('claude-sonnet-5', usage())).toEqual(COST_TIER_2_10)
     expect(getModelCosts('claude-haiku-4-5', usage())).toEqual(COST_HAIKU_45)
     expect(getModelCosts('claude-3-5-haiku', usage())).toEqual(COST_HAIKU_35)
     expect(getModelCosts('claude-opus-4-1', usage())).toEqual(COST_TIER_15_75)

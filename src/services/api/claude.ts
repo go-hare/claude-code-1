@@ -96,7 +96,16 @@ import {
   getSonnet1mExpTreatmentEnabled,
 } from '../../utils/context.js'
 import { resolveAppliedEffort } from '../../utils/effort.js'
+import {
+  formatEffortThinkingOffError,
+  isTopEffortWithThinkingOff,
+} from '../../utils/effortThinkingGuard.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
+import {
+  MAIN_PROMPT_CACHE_QUERY_SOURCES,
+  querySourceMatchesAllowlist,
+  resolvePromptCacheTtlOverride,
+} from '../../utils/promptCacheTtl.js'
 import { errorMessage } from '../../utils/errors.js'
 import { captureAPIRequest, logError } from '../../utils/log.js'
 import {
@@ -457,41 +466,28 @@ export function getCacheControl({
   querySource?: QuerySource
 } = {}): {
   type: 'ephemeral'
-  ttl?: '1h'
+  ttl?: '5m' | '1h'
   scope?: CacheScope
 } {
+  const resolved = resolvePromptCacheTtl(querySource)
   return {
     type: 'ephemeral',
-    ...(should1hCacheTTL(querySource) && { ttl: '1h' }),
+    ...(resolved.ttl && { ttl: resolved.ttl }),
     ...(scope === 'global' && { scope }),
   }
 }
 
 /**
- * Determines if 1h TTL should be used for prompt caching.
- *
- * Only applied when:
- * 1. User is eligible (ant or subscriber within rate limits)
- * 2. The query source matches a pattern in the GrowthBook allowlist
- *
- * GrowthBook config shape: { allowlist: string[] }
- * Patterns support trailing '*' for prefix matching.
- * Examples:
- * - { allowlist: ["repl_main_thread*", "sdk"] } — main thread + SDK only
- * - { allowlist: ["repl_main_thread*", "sdk", "agent:*"] } — also subagents
- * - { allowlist: ["*"] } — all sources
- *
- * The allowlist is cached in STATE for session stability — prevents mixed
- * TTLs when GrowthBook's disk cache updates mid-request.
+ * densable 2.1.243 `FUr` — env/settings override (`sFr`) then subscriber/GB.
+ * Default GB allowlist is `_zt` (main conversation sources), not empty.
  */
-function should1hCacheTTL(querySource?: QuerySource): boolean {
-  // 3P Bedrock users get 1h TTL when opted in via env var — they manage their own billing
-  // No GrowthBook gating needed since 3P users don't have GrowthBook configured
-  if (
-    getAPIProvider() === 'bedrock' &&
-    isEnvTruthy(process.env.ENABLE_PROMPT_CACHING_1H_BEDROCK)
-  ) {
-    return true
+function resolvePromptCacheTtl(querySource?: QuerySource): {
+  ttl: '5m' | '1h'
+  reason: string
+} {
+  const override = resolvePromptCacheTtlOverride(querySource)
+  if (override !== undefined) {
+    return override
   }
 
   // Latch eligibility in bootstrap state for session stability — prevents
@@ -504,27 +500,28 @@ function should1hCacheTTL(querySource?: QuerySource): boolean {
       (isClaudeAISubscriber() && !currentLimits.isUsingOverage)
     setPromptCache1hEligible(userEligible)
   }
-  if (!userEligible) return false
+  if (!userEligible) {
+    return { ttl: '5m', reason: 'default' }
+  }
 
-  // Cache allowlist in bootstrap state for session stability — prevents mixed
-  // TTLs when GrowthBook's disk cache updates mid-request
   let allowlist = getPromptCache1hAllowlist()
   if (allowlist === null) {
     const config = getFeatureValue_CACHED_MAY_BE_STALE<{
       allowlist?: string[]
-    }>('tengu_prompt_cache_1h_config', {})
-    allowlist = config.allowlist ?? []
+    }>('tengu_prompt_cache_1h_config', {
+      allowlist: [...MAIN_PROMPT_CACHE_QUERY_SOURCES],
+    })
+    allowlist = config.allowlist ?? [...MAIN_PROMPT_CACHE_QUERY_SOURCES]
     setPromptCache1hAllowlist(allowlist)
   }
 
-  return (
-    querySource !== undefined &&
-    allowlist.some(pattern =>
-      pattern.endsWith('*')
-        ? querySource.startsWith(pattern.slice(0, -1))
-        : querySource === pattern,
-    )
-  )
+  return querySourceMatchesAllowlist(querySource, allowlist)
+    ? { ttl: '1h', reason: 'subscriber' }
+    : { ttl: '5m', reason: 'default' }
+}
+
+function should1hCacheTTL(querySource?: QuerySource): boolean {
+  return resolvePromptCacheTtl(querySource).ttl === '1h'
 }
 
 /**
@@ -1994,6 +1991,14 @@ async function* queryModel(
     // densable Kn = r.type !== "disabled" && !bn
     // Local residual env DISABLE_THINKING still wins (even on HQt models).
     const hasThinking = thinkingConfig.type !== 'disabled' && !thinkingDisabled
+    if (
+      isTopEffortWithThinkingOff(
+        typeof effort === 'string' ? effort : undefined,
+        !hasThinking,
+      )
+    ) {
+      throw new Error(formatEffortThinkingOffError(effort))
+    }
     let thinking: BetaMessageStreamParams['thinking'] | undefined
 
     // IMPORTANT: Do not change the adaptive-vs-budget thinking selection below
@@ -2356,6 +2361,13 @@ async function* queryModel(
               isFirstPartyAnthropicBaseUrl()
                 ? randomUUID()
                 : undefined
+            // densable 2.1.243 #22 SEn — arm first-byte watchdog for this id.
+            if (clientRequestId) {
+              const { armStreamFirstByte } = await import(
+                'src/utils/firstByteWatchdog.js'
+              )
+              armStreamFirstByte(clientRequestId)
+            }
 
             // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
             // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need

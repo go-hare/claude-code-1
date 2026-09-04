@@ -410,8 +410,17 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
             'workflow:wf-done',
             'workflow:wf-live',
             'bash:b1',
+            'bash:b-live',
           ]),
         }),
+        b1: {
+          ...makeTask({ id: 'b1', status: 'completed', notified: true }),
+          type: 'local_bash',
+        },
+        'b-live': {
+          ...makeTask({ id: 'b-live', status: 'running', notified: false }),
+          type: 'local_bash',
+        },
         notified: makeTask({
           id: 'notified',
           status: 'completed',
@@ -440,8 +449,9 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
     expect(reasons.has('agent:live')).toBe(true)
     expect(reasons.has('workflow:wf-done')).toBe(false)
     expect(reasons.has('workflow:wf-live')).toBe(true)
-    // bash: not in official Jeo agent/workflow prefix set — left alone
-    expect(reasons.has('bash:b1')).toBe(true)
+    // densable 2.1.243 Lfe: notified+terminal local_bash detaches; running stays
+    expect(reasons.has('bash:b1')).toBe(false)
+    expect(reasons.has('bash:b-live')).toBe(true)
   })
 
   test('keeps child when task-notification still queued for owner', () => {
@@ -473,6 +483,35 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
     const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
     expect(reasons.has('agent:pending')).toBe(true)
     expect(reasons.has('agent:stale')).toBe(false)
+  })
+
+  test('243 Lfe keeps bash: when task-notification still queued', () => {
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        owner: makeTask({
+          id: 'owner',
+          keepaliveReasons: new Set(['bash:pending', 'bash:stale']),
+        }),
+        pending: {
+          ...makeTask({ id: 'pending', status: 'completed', notified: true }),
+          type: 'local_bash',
+        },
+        stale: {
+          ...makeTask({ id: 'stale', status: 'completed', notified: true }),
+          type: 'local_bash',
+        },
+      },
+    })
+    enqueuePendingNotification({
+      mode: 'task-notification',
+      agentId: 'owner',
+      taskId: 'pending',
+      value: 'x',
+    } as never)
+    sweepStaleKeepaliveReasons('owner', setAppState as any)
+    const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
+    expect(reasons.has('bash:pending')).toBe(true)
+    expect(reasons.has('bash:stale')).toBe(false)
   })
 
   test('no-op when owner missing or not local_agent', () => {

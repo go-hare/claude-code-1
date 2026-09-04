@@ -11,7 +11,9 @@ export type SpellcheckWordSpan = {
   end: number
 }
 
-const WORD_RE = /[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu
+// densable w8e (2.1.243 #20): first char must be \p{L} so a trailing
+// variation selector / mark on the preceding emoji is not glued onto the word.
+const WORD_RE = /\p{L}[\p{L}\p{M}]*(?:['\u2019][\p{L}\p{M}]+)*/gu
 const CODE_RE = /(``+)[\s\S]*?(?:\1|$)|`[^`\n]*(?:`|\n|$)/g
 const PUNCT_EDGE = String.raw`[\s.,;:!?"'‘’“”«»()[\]{}<>—–…*_~-]`
 const STRIP_EDGE = new RegExp(`^${PUNCT_EDGE}+|${PUNCT_EDGE}+$`, 'gu')

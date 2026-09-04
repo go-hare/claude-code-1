@@ -3,11 +3,16 @@ import { getIsRemoteMode } from '../../bootstrap/state.js'
 import { redownloadUserSettings } from '../../services/settingsSync/index.js'
 import type { LocalCommandCall } from '../../types/command.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import {
+  assessPluginReloadCacheImpact,
+  logPluginReloadCacheImpact,
+} from '../../utils/plugins/activateAfterInstall.js'
 import { refreshActivePlugins } from '../../utils/plugins/refresh.js'
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js'
 import { plural } from '../../utils/stringUtils.js'
 
-export const call: LocalCommandCall = async (_args, context) => {
+export const call: LocalCommandCall = async (args, context) => {
+  const force = args.includes('--force')
   // CCR: re-pull user settings before the cache sweep so enabledPlugins /
   // extraKnownMarketplaces pushed from the user's local CLI (settingsSync)
   // take effect. Non-CCR headless (e.g. vscode SDK subprocess) shares disk
@@ -40,6 +45,23 @@ export const call: LocalCommandCall = async (_args, context) => {
       settingsChangeDetector.notifyChange('userSettings')
     }
   }
+
+  const cacheImpact = await assessPluginReloadCacheImpact({
+    model: context.options.mainLoopModel,
+    mcpClients: context.options.mcpClients,
+  })
+  if (cacheImpact.wouldInvalidateCache && !force) {
+    logPluginReloadCacheImpact(cacheImpact, { warned: true, forced: false })
+    return {
+      type: 'text',
+      value:
+        'Reloading plugins would invalidate the prompt cache for this conversation (plugin MCP or LSP tool changes). Re-run with --force to proceed anyway.',
+    }
+  }
+  logPluginReloadCacheImpact(cacheImpact, {
+    warned: false,
+    forced: force && cacheImpact.wouldInvalidateCache,
+  })
 
   const r = await refreshActivePlugins(context.setAppState)
 

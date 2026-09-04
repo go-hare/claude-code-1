@@ -7,6 +7,8 @@ import type { ElicitationRequestEvent } from '../services/mcp/elicitationHandler
 import type {
   MCPServerConnection,
   ServerResource,
+  ServerResourceTemplate,
+  SuppressedPluginMcpServer,
 } from '../services/mcp/types.js'
 import { shouldEnablePromptSuggestion } from '../services/PromptSuggestion/promptSuggestion.js'
 import {
@@ -242,6 +244,17 @@ export type AppState = DeepImmutable<{
     tools: Tool[]
     commands: Command[]
     resources: Record<string, ServerResource[]>
+    /**
+     * densable `resourceTemplates` — per-server MCP resource templates.
+     * Official `rS` / `Hl` / `jn` read and clear this map.
+     */
+    resourceTemplates: Record<string, ServerResourceTemplate[]>
+    /**
+     * densable `suppressedPluginMcpServers` — plugin servers dropped as
+     * duplicates of a manual/earlier plugin server. Official headless
+     * connector mount reads this list.
+     */
+    suppressedPluginMcpServers: SuppressedPluginMcpServer[]
     /**
      * Incremented by /reload-plugins to trigger MCP effects to re-run
      * and pick up newly-enabled plugin MCP servers. Effects read this
@@ -656,6 +669,8 @@ export function getDefaultAppState(): AppState {
       tools: [],
       commands: [],
       resources: {},
+      resourceTemplates: {},
+      suppressedPluginMcpServers: [],
       pluginReconnectKey: 0,
     },
     plugins: {

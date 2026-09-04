@@ -25,7 +25,10 @@ import { join } from 'path'
 import { parse } from 'url'
 import xss from 'xss'
 import { MCP_CLIENT_METADATA_URL } from '../../constants/oauth.js'
-import { openBrowser } from '../../utils/browser.js'
+import {
+  isHeadlessBrowserEnvironment,
+  openBrowser,
+} from '../../utils/browser.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { errorMessage, getErrnoCode } from '../../utils/errors.js'
 import * as lockfile from '../../utils/lockfile.js'
@@ -2216,20 +2219,34 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       this.onAuthorizationUrlCallback(urlString)
     }
 
-    if (!this.skipBrowserOpen) {
-      logMCPDebug(this.serverName, `Opening authorization URL: ${redactedUrl}`)
-
-      const success = await openBrowser(urlString)
-      if (!success) {
-        logMCPDebug(
-          this.serverName,
-          `Browser didn't open automatically. URL is shown in UI.`,
-        )
-      }
-    } else {
+    if (this.skipBrowserOpen) {
       logMCPDebug(
         this.serverName,
         `Skipping browser open (skipBrowserOpen=true). URL: ${redactedUrl}`,
+      )
+      return
+    }
+    // densable K9e / XCb — skip the opener in a headless environment.
+    const headless = isHeadlessBrowserEnvironment()
+    if (headless) {
+      logMCPDebug(
+        this.serverName,
+        `Skipping browser open (headless environment). URL: ${redactedUrl}`,
+      )
+    } else {
+      logMCPDebug(this.serverName, `Opening authorization URL: ${redactedUrl}`)
+    }
+    const success = headless ? false : await openBrowser(urlString)
+    logEvent('tengu_mcp_oauth_browser_open', {
+      success,
+      headless,
+      platform:
+        getPlatform() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    if (!headless && !success) {
+      logMCPDebug(
+        this.serverName,
+        `Browser didn't open automatically. URL is shown in UI.`,
       )
     }
   }

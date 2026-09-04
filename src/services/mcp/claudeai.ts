@@ -35,6 +35,8 @@ type ClaudeAIMcpServer = {
   /** densable: whether the connector is connected/authorized in claude.ai */
   eligible?: boolean
   eligibility_reason?: string
+  /** densable 2.1.243 #7: org manages this connector's authentication */
+  enterprise_managed?: boolean
 }
 
 /**
@@ -215,6 +217,9 @@ export const fetchClaudeAIMcpConfigsIfEligible = memoize(
             : {}),
           ...(server.eligibility_reason !== undefined
             ? { ineligibleReason: server.eligibility_reason }
+            : {}),
+          ...(server.enterprise_managed !== undefined
+            ? { enterpriseManaged: server.enterprise_managed }
             : {}),
         }
       }

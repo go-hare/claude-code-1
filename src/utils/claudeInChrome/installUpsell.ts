@@ -238,8 +238,8 @@ function isChromeMcpCommand(
 }
 
 /**
- * densable `p8r` — merge mounted chrome MCP into AppState.
- * Tip `AppState.mcp` has no `resourceTemplates`; do not invent the field.
+ * densable `p8r` / `kGr` — merge mounted chrome MCP into AppState.mcp
+ * including official `resourceTemplates`.
  */
 function mergeChromeMcpIntoAppState(
   state: AppState,
@@ -275,6 +275,7 @@ function mergeChromeMcpIntoAppState(
       tools: nextTools,
       commands: nextCommands,
       resources: nextResources,
+      resourceTemplates: state.mcp.resourceTemplates,
     },
   } as AppState
 }

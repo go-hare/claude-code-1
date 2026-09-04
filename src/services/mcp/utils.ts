@@ -38,7 +38,40 @@ import {
  */
 export function filterToolsByServer(tools: Tool[], serverName: string): Tool[] {
   const prefix = `mcp__${normalizeNameForMCP(serverName)}__`
-  return tools.filter(tool => tool.name?.startsWith(prefix))
+  return tools.filter(tool => toolBelongsToServer(tool, serverName, prefix))
+}
+
+/**
+ * densable `GD` — tool belongs to this MCP server. Prefer `mcpInfo.serverName`
+ * when stamped; otherwise the `mcp__<server>__` prefix.
+ */
+export function toolBelongsToServer(
+  tool: Pick<Tool, 'name' | 'mcpInfo'>,
+  serverName: string,
+  prefix?: string,
+): boolean {
+  if (tool.mcpInfo?.serverName !== undefined) {
+    return tool.mcpInfo.serverName === serverName
+  }
+  return Boolean(tool.name?.startsWith(prefix ?? getMcpToolPrefix(serverName)))
+}
+
+function getMcpToolPrefix(serverName: string): string {
+  return `mcp__${normalizeNameForMCP(serverName)}__`
+}
+
+/**
+ * densable `jn` — drop one name or a list of names from an MCP per-server map
+ * (`resources` / `resourceTemplates`).
+ */
+export function omitMcpServerEntries<T>(
+  map: Record<string, T>,
+  names: string | readonly string[],
+): Record<string, T> {
+  const drop = new Set(typeof names === 'string' ? [names] : names)
+  const next = { ...map }
+  for (const name of drop) delete next[name]
+  return next
 }
 
 /**
@@ -117,7 +150,7 @@ export function excludeToolsByServer(
   serverName: string,
 ): Tool[] {
   const prefix = `mcp__${normalizeNameForMCP(serverName)}__`
-  return tools.filter(tool => !tool.name?.startsWith(prefix))
+  return tools.filter(tool => !toolBelongsToServer(tool, serverName, prefix))
 }
 
 /**

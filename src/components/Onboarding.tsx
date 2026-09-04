@@ -148,7 +148,9 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
       id: 'oauth',
       component: (
         <SkippableStep skip={skipOAuth} onSkip={goToNextStep}>
-          <ConsoleOAuthFlow onDone={goToNextStep} />
+          <Box flexDirection="column" gap={1} paddingLeft={1}>
+            <ConsoleOAuthFlow onDone={goToNextStep} urlOutdent={1} />
+          </Box>
         </SkippableStep>
       ),
     });

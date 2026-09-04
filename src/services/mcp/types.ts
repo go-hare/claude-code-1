@@ -248,6 +248,8 @@ export const McpClaudeAIProxyServerConfigSchema = lazySchema(() =>
     // from needs-auth startup count unless session-connected this process.
     eligible: z.boolean().optional(),
     ineligibleReason: z.string().optional(),
+    // densable 2.1.243 #7: org-managed claude.ai connector auth.
+    enterpriseManaged: z.boolean().optional(),
   }),
 )
 
@@ -416,6 +418,25 @@ export type MCPServerConnection =
 
 // Resource types
 export type ServerResource = Resource & { server: string }
+
+/**
+ * densable AppState.mcp.resourceTemplates entry — MCP ResourceTemplate +
+ * owning server name (same bag as ServerResource).
+ */
+export type ServerResourceTemplate = {
+  uriTemplate: string
+  name: string
+  title?: string
+  description?: string
+  mimeType?: string
+  server: string
+}
+
+/** densable AppState.mcp.suppressedPluginMcpServers row. */
+export type SuppressedPluginMcpServer = {
+  name: string
+  duplicateOf: string
+}
 
 // MCP CLI State types
 export interface SerializedTool {

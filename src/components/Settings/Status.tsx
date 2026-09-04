@@ -1,6 +1,6 @@
 import figures from 'figures';
 import * as React from 'react';
-import { Suspense, use } from 'react';
+import { Suspense, use, useEffect, useState } from 'react';
 import { getAttacherCaps, getIsInteractive, getSessionId } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
@@ -14,6 +14,7 @@ import {
   buildIDEProperties,
   buildInstallationDiagnostics,
   buildInstallationHealthDiagnostics,
+  loadGithubWebStatusProperty,
   buildMcpProperties,
   buildMemoryDiagnostics,
   buildProcessWrapperProperties,
@@ -69,16 +70,19 @@ function buildSecondarySection({
   mcp,
   theme,
   context,
+  githubWeb,
 }: {
   mainLoopModel: AppState['mainLoopModel'];
   mcp: AppState['mcp'];
   theme: ThemeName;
   context: LocalJSXCommandContext;
+  githubWeb: Property | null;
 }): Property[] {
   const modelLabel = getModelDisplayLabel(mainLoopModel);
 
   return [
     { label: 'Model', value: modelLabel },
+    ...(githubWeb ? [githubWeb] : []),
     ...buildIDEProperties(mcp.clients, context.options.ideInstallationStatus, theme),
     ...buildMcpProperties(mcp.clients, theme),
     ...buildSandboxProperties(),
@@ -122,14 +126,25 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mcp = useAppState(s => s.mcp);
   const [theme] = useTheme();
+  const [githubWeb, setGithubWeb] = useState<Property | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadGithubWebStatusProperty().then(row => {
+      if (!cancelled) setGithubWeb(row);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Sections are synchronous — compute in render so they're never empty.
   // diagnosticsPromise is created once in Settings.tsx so it resolves once
   // per pane invocation instead of re-fetching on every tab switch (Tab
   // unmounts children when not selected, which was causing the flash).
   const sections = React.useMemo(
-    () => [buildPrimarySection(), buildSecondarySection({ mainLoopModel, mcp, theme, context })],
-    [mainLoopModel, mcp, theme, context],
+    () => [buildPrimarySection(), buildSecondarySection({ mainLoopModel, mcp, theme, context, githubWeb })],
+    [mainLoopModel, mcp, theme, context, githubWeb],
   );
 
   // flexGrow so the "Esc to cancel" footer pins to the bottom of the

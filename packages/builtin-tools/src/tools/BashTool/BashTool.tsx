@@ -25,6 +25,7 @@ import {
 import type { AgentId } from 'src/types/ids.js';
 import type { AssistantMessage } from 'src/types/message.js';
 import { parseForSecurity } from 'src/utils/bash/ast.js';
+import { PARSE_ABORTED, parseCommandRaw } from 'src/utils/bash/parser.js';
 import { splitCommand_DEPRECATED, splitCommandWithOperators } from 'src/utils/bash/commands.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
 import { detectCodeIndexingFromCommand } from 'src/utils/codeIndexing.js';
@@ -61,19 +62,20 @@ import {
 } from 'src/utils/toolResultStorage.js';
 import { userFacingName as fileEditUserFacingName } from '../FileEditTool/UI.js';
 import { trackGitOperations } from '../shared/gitOperationTracking.js';
-import {
-  bashToolHasPermission,
-  commandHasAnyCd,
-  matchWildcardPattern,
-  permissionRuleExtractPrefix,
-} from './bashPermissions.js';
+import { bashToolHasPermission, commandHasAnyCd } from './bashPermissions.js';
 import { interpretCommandResult } from './commandSemantics.js';
 import { getDefaultTimeoutMs, getMaxTimeoutMs, getSimplePrompt } from './prompt.js';
 import { checkReadOnlyConstraints } from './readOnlyValidation.js';
 import { validateCoordinatorBashWriteAccess } from './coordinatorWriteValidation.js';
 import { parseSedEditCommand } from './sedEditParser.js';
+import { extractSandboxViolationSuffix, mergeBashStderr } from './sandboxViolationResult.js';
 import { shouldUseSandbox } from './shouldUseSandbox.js';
 import { BASH_TOOL_NAME } from './toolName.js';
+import {
+  extractHookIfFallbackCommands,
+  HOOK_IF_FALLBACK_NODE_TYPES,
+  matchBashHookIfPattern,
+} from './hookIfFallback.js';
 import {
   BackgroundHint,
   renderToolResultMessage,
@@ -609,22 +611,33 @@ export const BashTool = buildTool({
     // compound commands must fire the hook if ANY subcommand matches. Without
     // splitting, `ls && git push` would bypass a `Bash(git *)` security hook.
     const parsed = await parseForSecurity(command);
-    if (parsed.kind !== 'simple') {
-      // parse-unavailable / too-complex: fail safe by running the hook.
+    let subcommands: string[];
+    let fallback = false;
+    if (parsed.kind === 'simple') {
+      // Match on argv (strips leading VAR=val) so `FOO=bar git push` still
+      // matches `Bash(git *)`.
+      subcommands = parsed.commands.map(c => c.argv.join(' '));
+    } else if (
+      parsed.kind === 'too-complex' &&
+      !parsed.differential &&
+      HOOK_IF_FALLBACK_NODE_TYPES.has(parsed.nodeType ?? '')
+    ) {
+      // densable 2.1.243 #26 `P7r`: `$()` / backticks + extra args are
+      // too-complex for argv, but must not match every `if` (e.g. Bash(cat *)).
+      const root = await parseCommandRaw(command);
+      if (root === null || root === PARSE_ABORTED) {
+        return () => true;
+      }
+      const extracted = extractHookIfFallbackCommands(command, root);
+      if (extracted === null || extracted.length === 0) {
+        return () => true;
+      }
+      subcommands = extracted;
+      fallback = true;
+    } else {
       return () => true;
     }
-    // Match on argv (strips leading VAR=val) so `FOO=bar git push` still
-    // matches `Bash(git *)`.
-    const subcommands = parsed.commands.map(c => c.argv.join(' '));
-    return pattern => {
-      const prefix = permissionRuleExtractPrefix(pattern);
-      return subcommands.some(cmd => {
-        if (prefix !== null) {
-          return cmd === prefix || cmd.startsWith(`${prefix} `);
-        }
-        return matchWildcardPattern(pattern, cmd);
-      });
-    };
+    return pattern => matchBashHookIfPattern(pattern, subcommands, fallback);
   },
   isSearchOrReadCommand(input) {
     const parsed = inputSchema().safeParse(input);
@@ -793,6 +806,7 @@ export const BashTool = buildTool({
 
     const stdoutAccumulator = new EndTruncatingAccumulator();
     let stderrForShellReset = '';
+    let sandboxViolationSuffix = '';
     let interpretationResult: ReturnType<typeof interpretCommandResult> | undefined;
 
     let progressCounter = 0;
@@ -885,7 +899,11 @@ export const BashTool = buildTool({
       }
 
       // Annotate output with sandbox violations if any (stderr is in stdout)
-      const outputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(input.command, result.stdout || '');
+      const originalStdout = result.stdout || '';
+      const outputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(input.command, originalStdout);
+      // densable 2.1.243 #35: keep the appended <sandbox_violations> on
+      // success (exit 0) — error path already throws with the full annotate.
+      sandboxViolationSuffix = extractSandboxViolationSuffix(originalStdout, outputWithSbFailures);
 
       if (result.preSpawnError) {
         throw new Error(result.preSpawnError);
@@ -987,7 +1005,7 @@ export const BashTool = buildTool({
 
     const data: Out = {
       stdout: compressedStdout,
-      stderr: stderrForShellReset,
+      stderr: mergeBashStderr(stderrForShellReset, sandboxViolationSuffix, EOL),
       interrupted: wasInterrupted,
       isImage,
       returnCodeInterpretation: interpretationResult?.message,

@@ -141,6 +141,7 @@ declare module '*/sdk/coreTypes.generated.js' {
   }
   export type SDKAssistantMessageError =
     | 'authentication_failed'
+    | 'account_on_hold'
     | 'oauth_org_not_allowed'
     | 'billing_error'
     | 'rate_limit'

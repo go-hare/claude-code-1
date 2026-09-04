@@ -218,10 +218,10 @@ function getSimpleSandboxSection(): string {
     },
   }
 
+  // densable 2.1.243 #51: do not list allowedHosts in the model prompt so
+  // Claude tries the request and the user can approve a new host, instead of
+  // assuming unlisted hosts are blocked. deniedHosts / sockets stay visible.
   const networkConfig = {
-    ...(networkRestrictionConfig?.allowedHosts && {
-      allowedHosts: dedup(networkRestrictionConfig.allowedHosts),
-    }),
     ...(networkRestrictionConfig?.deniedHosts && {
       deniedHosts: dedup(networkRestrictionConfig.deniedHosts),
     }),

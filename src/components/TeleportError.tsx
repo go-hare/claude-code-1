@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { checkIsGitClean, checkNeedsClaudeAiLogin } from 'src/utils/background/remote/preconditions.js';
 import { gracefulShutdownSync } from 'src/utils/gracefulShutdown.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, PANE_PADDING_X_INLINE, PANE_PADDING_X_MODAL, Text, useIsInsideModal } from '@anthropic/ink';
 import { ConsoleOAuthFlow } from './ConsoleOAuthFlow.js';
 import { Select } from './CustomSelect/index.js';
 import { Dialog } from '@anthropic/ink';
@@ -26,6 +26,8 @@ export function TeleportError({
 }: TeleportErrorProps): React.ReactNode {
   const [currentError, setCurrentError] = useState<TeleportLocalErrorType | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  // densable z() / K / H — same Pane paddingX as /login
+  const urlOutdent = useIsInsideModal() ? PANE_PADDING_X_MODAL : PANE_PADDING_X_INLINE;
 
   // Check for errors on mount and when error resolution occurs
   const checkErrors = useCallback(async () => {
@@ -93,7 +95,14 @@ export function TeleportError({
 
     case 'needsLogin': {
       if (isLoggingIn) {
-        return <ConsoleOAuthFlow onDone={handleLoginComplete} mode="login" forceLoginMethod="claudeai" />;
+        return (
+          <ConsoleOAuthFlow
+            onDone={handleLoginComplete}
+            mode="login"
+            forceLoginMethod="claudeai"
+            urlOutdent={urlOutdent}
+          />
+        );
       }
 
       return (

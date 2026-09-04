@@ -1,4 +1,22 @@
 import { execFileNoThrow } from './execFileNoThrow.js'
+import { getPlatform } from './platform.js'
+
+/**
+ * densable D / XCb — headless / no-auto-browser environment.
+ * Login shows the sign-in URL immediately when this is true (no TTY, SSH,
+ * or linux without DISPLAY/WAYLAND_DISPLAY). A concrete BROWSER command
+ * (anything other than the literal "true") forces this off so the 3s
+ * delay still runs.
+ */
+export function isHeadlessBrowserEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  stdout: { isTTY?: boolean | undefined } = process.stdout,
+): boolean {
+  if (!stdout.isTTY) return true
+  if (env.BROWSER && env.BROWSER !== 'true') return false
+  if (env.SSH_CONNECTION) return true
+  return getPlatform() === 'linux' && !env.DISPLAY && !env.WAYLAND_DISPLAY
+}
 
 function validateUrl(url: string): void {
   let parsedUrl: URL

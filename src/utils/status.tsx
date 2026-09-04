@@ -3,7 +3,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { color, Text } from '@anthropic/ink';
 import type { MCPServerConnection } from '../services/mcp/types.js';
-import { getAccountInformation, isClaudeAISubscriber } from './auth.js';
+import { getAccountInformation, getSubscriptionType, isClaudeAISubscriber } from './auth.js';
 import { getLargeMemoryFiles, getMemoryFiles, MAX_MEMORY_CHARACTER_COUNT } from './claudemd.js';
 import { getDoctorDiagnostic } from './doctorDiagnostic.js';
 import { getAWSRegion, getDefaultVertexRegion, isEnvTruthy } from './envUtils.js';
@@ -222,12 +222,49 @@ export function buildSettingSourcesProperties(): Property[] {
     })
     .filter((name): name is string => name !== null);
 
+  const skipped = getSkippedManagedSettingSources();
+
   return [
     {
       label: 'Setting sources',
       value: sourceNames,
     },
+    ...(skipped.length > 0
+      ? [
+          {
+            label: 'Skipped sources',
+            value: skipped,
+          },
+        ]
+      : []),
   ];
+}
+
+/**
+ * densable 2.1.243 #6 — managed sources present but not applied because a
+ * higher-precedence managed source won first-source-wins.
+ */
+function getSkippedManagedSettingSources(): string[] {
+  const origin = getPolicySettingsOrigin();
+  if (origin === null) {
+    return [];
+  }
+
+  const skipped: string[] = [];
+  const { hasBase, hasDropIns } = getManagedFileSettingsPresence();
+  const filePresent = hasBase || hasDropIns;
+  const fileLabel =
+    hasBase && hasDropIns
+      ? 'managed-settings.json + drop-ins'
+      : hasDropIns
+        ? 'managed-settings.d'
+        : 'managed-settings.json';
+
+  if (origin === 'remote' || origin === 'plist' || origin === 'hklm') {
+    if (filePresent) skipped.push(fileLabel);
+  }
+
+  return skipped;
 }
 
 export async function buildInstallationDiagnostics(): Promise<Diagnostic[]> {
@@ -241,10 +278,15 @@ export async function buildInstallationHealthDiagnostics(): Promise<Diagnostic[]
 
   const { errors: validationErrors } = getSettingsWithAllErrors();
   if (validationErrors.length > 0) {
-    const invalidFiles = Array.from(new Set(validationErrors.map(error => error.file)));
-    const fileList = invalidFiles.join(', ');
-
-    items.push(`Found invalid settings files: ${fileList}. They will be ignored.`);
+    const invalidFiles = Array.from(
+      new Set(
+        validationErrors.map(error => error.file).filter((file): file is string => Boolean(file && file !== '.')),
+      ),
+    ).map(file => getDisplayPath(file));
+    if (invalidFiles.length > 0) {
+      // densable 2.1.243 #30 — SEA `Found invalid entries in: ${files}.`
+      items.push(`Found invalid entries in: ${invalidFiles.join(', ')}.`);
+    }
   }
 
   // Add warnings from doctor diagnostic (includes leftover installations, config mismatches, etc.)
@@ -303,6 +345,30 @@ export function buildAccountProperties(): Property[] {
   }
 
   return properties;
+}
+
+/**
+ * densable 2.1.243 #9 — `/status` GitHub-for-web line (Pro/Max).
+ * SEA: label `Claude Code on the web`, values connected / not set up.
+ */
+export async function loadGithubWebStatusProperty(): Promise<Property | null> {
+  if (!isClaudeAISubscriber()) {
+    return null;
+  }
+  const subscription = getSubscriptionType();
+  if (subscription !== 'pro' && subscription !== 'max') {
+    return null;
+  }
+
+  // Lazy: preconditions pulls oauth/axios; status is imported widely.
+  const { checkGithubTokenSynced } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./background/remote/preconditions.js') as typeof import('./background/remote/preconditions.js');
+  const synced = await checkGithubTokenSynced();
+  return {
+    label: 'Claude Code on the web',
+    value: synced ? 'GitHub connected' : 'Not set up · /web-setup to connect GitHub',
+  };
 }
 
 export function buildAPIProviderProperties(): Property[] {

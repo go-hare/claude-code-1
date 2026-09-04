@@ -93,6 +93,18 @@ export type SideQueryOptions = {
   maxRetries?: number
   /** Abort signal */
   signal?: AbortSignal
+  /**
+   * densable 2.1.243 `A$` `timeout` — forwarded to
+   * `messages.create(..., { timeout })`. Classifier `tBt` passes official
+   * `hon=60000`.
+   */
+  timeout?: number
+  /**
+   * densable 2.1.243 `A$` `onFetchAttempt` — called at the start of each
+   * client fetch (including SDK retries). `tBt` uses this to reset a
+   * `per_attempt` wall-clock so a Retry-After wait cannot burn a shared timer.
+   */
+  onFetchAttempt?: () => void
   /** Skip CLI system prompt prefix (keeps attribution header for OAuth). For internal classifiers that provide their own prompt. */
   skipSystemPromptPrefix?: boolean
   /**
@@ -115,6 +127,12 @@ export type SideQueryOptions = {
   /** When true, API failures are recorded as WARNING instead of ERROR in Langfuse.
    *  Use for optional/best-effort queries where failure is expected and handled gracefully. */
   optional?: boolean
+  /**
+   * densable 2.1.243 `extraBetas` / `g` — merged into the request beta list
+   * (`for (q of g??[]) if (!R.includes(q)) R.push(q)`). Classifier `bzr`
+   * attaches `auto-mode-classifier-2026-07-16`.
+   */
+  extraBetas?: string[]
 }
 
 /**
@@ -234,12 +252,15 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     output_format,
     max_tokens = 1024,
     maxRetries = 2,
+    timeout,
     signal,
+    onFetchAttempt,
     skipSystemPromptPrefix,
     forceAttributionHeader,
     temperature,
     thinking,
     stop_sequences,
+    extraBetas,
   } = opts
 
   const provider = getAPIProvider()
@@ -259,10 +280,20 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
       maxRetries,
       model,
       source: 'side_query',
+      // Official A$: `..._&&{fetchOverride:(q,Z)=>(_(),w$e(q,Z))}`
+      ...(onFetchAttempt && {
+        fetchOverride: (input, init) => {
+          onFetchAttempt()
+          return globalThis.fetch(input, init)
+        },
+      }),
     })
 
   let client = await buildClient()
   const betas = [...getModelBetas(model)]
+  for (const extra of extraBetas ?? []) {
+    if (!betas.includes(extra)) betas.push(extra)
+  }
   // Add structured-outputs beta if using output_format and provider supports it
   if (
     output_format &&
@@ -366,7 +397,10 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
   }
 
   const doCreate = (c: Anthropic): Promise<BetaMessage> =>
-    c.beta.messages.create(createParams, { signal }) as Promise<BetaMessage>
+    c.beta.messages.create(createParams, {
+      signal,
+      ...(timeout !== undefined && { timeout }),
+    }) as Promise<BetaMessage>
 
   let response: BetaMessage
   try {

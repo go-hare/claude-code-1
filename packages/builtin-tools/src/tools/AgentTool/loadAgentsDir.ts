@@ -568,15 +568,25 @@ export function parseAgentFromJson(
 /**
  * Parses multiple agents from a JSON object
  */
+export function parseAgentsFromJsonOrThrow(
+  agentsJson: unknown,
+  source: SettingSource = 'flagSettings',
+): AgentDefinition[] {
+  const parsed = AgentsJsonSchema().parse(agentsJson)
+  return Object.entries(parsed)
+    .map(([name, def]) => parseAgentFromJson(name, def, source))
+    .filter((agent): agent is CustomAgentDefinition => agent !== null)
+}
+
+/**
+ * Parses multiple agents from a JSON object
+ */
 export function parseAgentsFromJson(
   agentsJson: unknown,
   source: SettingSource = 'flagSettings',
 ): AgentDefinition[] {
   try {
-    const parsed = AgentsJsonSchema().parse(agentsJson)
-    return Object.entries(parsed)
-      .map(([name, def]) => parseAgentFromJson(name, def, source))
-      .filter((agent): agent is CustomAgentDefinition => agent !== null)
+    return parseAgentsFromJsonOrThrow(agentsJson, source)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     logForDebugging(`Error parsing agents from JSON: ${errorMessage}`)

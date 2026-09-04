@@ -4,6 +4,7 @@ import type { CommandResultDisplay } from '../../commands.js';
 import { Box, color, Link, Text, useTheme } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
+import { isEnterpriseManagedClaudeAiConnector } from '../../services/mcp/enterpriseManaged.js';
 import type { ConfigScope } from '../../services/mcp/types.js';
 import { describeMcpConfigFilePath } from '../../services/mcp/utils.js';
 import { isDebugMode } from '../../utils/debug.js';
@@ -190,10 +191,17 @@ export function MCPListPanel({
       statusText = issue ? `failed — ${issue}` : 'failed';
     }
 
+    const managed = isEnterpriseManagedClaudeAiConnector({
+      transport: server.transport,
+      scope: server.scope,
+      enterpriseManaged: server.transport === 'claudeai-proxy' ? server.config.enterpriseManaged : undefined,
+    });
+
     return (
       <Box key={`${server.name}-${index}`}>
         <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
         <Text color={isSelected ? 'suggestion' : undefined}>{server.name}</Text>
+        {managed && <Text dimColor={!isSelected}> · managed</Text>}
         <Text dimColor={!isSelected}> · {statusIcon} </Text>
         <Text dimColor={!isSelected}>{statusText}</Text>
       </Box>

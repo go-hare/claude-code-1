@@ -1190,7 +1190,7 @@ On Sonnet 4.6, a request with no `thinking` field runs **without** thinking. On 
 
 ### New tokenizer (~30% more tokens)
 
-{{SONNET_NEXT_NAME}} uses the same new tokenizer as Opus 4.7/4.8. The same input text produces approximately 30% more tokens than on Sonnet 4.6. No request/response shape changes and no code edits are required, but **everything measured or budgeted in tokens shifts**: `usage` fields and `count_tokens()` results for the same text are higher, the 1M context window holds less text, and a `max_tokens` limit tuned for Sonnet 4.6 may truncate equivalent output. Per-token pricing is unchanged at the $3/$15 sticker (introductory $2/$10 per MTok applies through 2026-08-31), so the cost of an equivalent request can differ. Re-run `count_tokens()` against `{{SONNET_NEXT_ID}}` rather than reusing counts measured against earlier models, and re-baseline cost dashboards before reacting to measured shifts.
+{{SONNET_NEXT_NAME}} uses the same new tokenizer as Opus 4.7/4.8. The same input text produces approximately 30% more tokens than on Sonnet 4.6. No request/response shape changes and no code edits are required, but **everything measured or budgeted in tokens shifts**: `usage` fields and `count_tokens()` results for the same text are higher, the 1M context window holds less text, and a `max_tokens` limit tuned for Sonnet 4.6 may truncate equivalent output. Per-token pricing is the $2/$10 standard list (no longer an introductory promo), so the cost of an equivalent request can differ. Re-run `count_tokens()` against `{{SONNET_NEXT_ID}}` rather than reusing counts measured against earlier models, and re-baseline cost dashboards before reacting to measured shifts.
 
 ### Choosing an effort level on {{SONNET_NEXT_NAME}}
 

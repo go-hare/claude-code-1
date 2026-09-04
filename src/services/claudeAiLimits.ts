@@ -154,8 +154,28 @@ type RawUtilization = {
 }
 let rawUtilization: RawUtilization = {}
 
+const RAW_UTILIZATION_KEYS = ['five_hour', 'seven_day'] as const
+
+/**
+ * densable 2.1.243 `Y0a` — drop windows whose `resets_at` has passed.
+ * Statusline `rate_limits` are "present only while … resets_at has not passed".
+ */
+export function selectOpenRawUtilization(
+  raw: RawUtilization,
+  nowSeconds = Date.now() / 1000,
+): RawUtilization {
+  const next: RawUtilization = {}
+  for (const key of RAW_UTILIZATION_KEYS) {
+    const window = raw[key]
+    if (window !== undefined && window.resets_at > nowSeconds) {
+      next[key] = window
+    }
+  }
+  return next
+}
+
 export function getRawUtilization(): RawUtilization {
-  return rawUtilization
+  return selectOpenRawUtilization(rawUtilization)
 }
 
 function extractRawUtilization(headers: globalThis.Headers): RawUtilization {

@@ -38,6 +38,15 @@ import {
 } from './residualMsEnvGates.js'
 import { getSdkOauthTokenRefreshCallback } from './sdkOauthTokenRefresh.js'
 import {
+  getOAuthRefreshAccountOnHoldUrl,
+  isOAuthRefreshAccountOnHoldError,
+  isOAuthRefreshDeadInvalidGrant,
+  isOAuthRefreshTokenKnownDead,
+  isOAuthRefreshTokenOnHold,
+  markDeadOAuthRefreshToken,
+  rememberOAuthAccountOnHold,
+} from './accountOnHold.js'
+import {
   maybeRemoveApiKeyFromMacOSKeychainThrows,
   normalizeApiKeyForConfig,
 } from './authPortable.js'
@@ -1915,6 +1924,16 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     return false
   }
 
+  // densable `if ($s.has(s.refreshToken)) return "known_dead_refresh_token"`
+  if (isOAuthRefreshTokenKnownDead(tokens.refreshToken)) {
+    return false
+  }
+
+  // densable `if (Hs.has(s.refreshToken)) return "account_on_hold"`
+  if (isOAuthRefreshTokenOnHold(tokens.refreshToken)) {
+    return false
+  }
+
   // Re-read tokens async to check if they're still expired
   // Another process might have refreshed them
   getClaudeAIOAuthTokens.cache?.clear?.()
@@ -1924,6 +1943,14 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     !freshTokens?.refreshToken ||
     !isOAuthTokenExpired(freshTokens.expiresAt)
   ) {
+    return false
+  }
+
+  if (isOAuthRefreshTokenKnownDead(freshTokens.refreshToken)) {
+    return false
+  }
+
+  if (isOAuthRefreshTokenOnHold(freshTokens.refreshToken)) {
     return false
   }
 
@@ -1960,6 +1987,7 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     })
     return false
   }
+  let refreshToken: string | undefined
   try {
     // Check one more time after acquiring lock
     getClaudeAIOAuthTokens.cache?.clear?.()
@@ -1973,8 +2001,20 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
       return false
     }
 
+    // densable `if ($s.has(y.refreshToken)) return "known_dead_refresh_token"`
+    if (isOAuthRefreshTokenKnownDead(lockedTokens.refreshToken)) {
+      return false
+    }
+
+    // densable `if (Hs.has(y.refreshToken)) return "account_on_hold"`
+    if (isOAuthRefreshTokenOnHold(lockedTokens.refreshToken)) {
+      return false
+    }
+
     logEvent('tengu_oauth_token_refresh_starting', {})
-    const refreshedTokens = await refreshOAuthToken(lockedTokens.refreshToken, {
+    const lockedRefreshToken = lockedTokens.refreshToken
+    refreshToken = lockedRefreshToken
+    const refreshedTokens = await refreshOAuthToken(lockedRefreshToken, {
       // For Claude.ai subscribers, omit scopes so the default
       // CLAUDE_AI_OAUTH_SCOPES applies — this allows scope expansion
       // (e.g. adding user:file_upload) on refresh without re-login.
@@ -1997,6 +2037,20 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     if (currentTokens && !isOAuthTokenExpired(currentTokens.expiresAt)) {
       logEvent('tengu_oauth_token_refresh_race_recovered', {})
       return true
+    }
+
+    // densable `if (Ms(m) && g) await Vk(g, r)`
+    if (isOAuthRefreshDeadInvalidGrant(error) && refreshToken) {
+      await markDeadOAuthRefreshToken(refreshToken)
+    }
+
+    // densable `if (Xl(m) && g) return Hs.set(g, uT(m)), E(...), "account_on_hold"`
+    if (isOAuthRefreshAccountOnHoldError(error) && refreshToken) {
+      rememberOAuthAccountOnHold(
+        refreshToken,
+        getOAuthRefreshAccountOnHoldUrl(error),
+      )
+      logEvent('tengu_oauth_refresh_token_account_on_hold', {})
     }
 
     return false

@@ -30,6 +30,8 @@ export type LSPServerManager = {
   ): Promise<T | undefined>
   /** Get all running server instances */
   getAllServers(): Map<string, LSPServerInstance>
+  /** True when the last initialize() hit config/plugin load failures (243 #28). */
+  didLastConfigLoadFail(): boolean
   /** Synchronize file open to LSP server (sends didOpen notification) */
   openFile(filePath: string, content: string): Promise<void>
   /** Synchronize file change to LSP server (sends didChange notification) */
@@ -64,6 +66,7 @@ export function createLSPServerManager(): LSPServerManager {
   const extensionMap: Map<string, string[]> = new Map()
   // Track which files have been opened on which servers (URI -> server name)
   const openedFiles: Map<string, string> = new Map()
+  let lastConfigLoadFailed = false
 
   /**
    * Initialize the manager by loading all configured LSP servers.
@@ -72,6 +75,7 @@ export function createLSPServerManager(): LSPServerManager {
    */
   async function initialize(): Promise<void> {
     let serverConfigs: Record<string, ScopedLspServerConfig>
+    lastConfigLoadFailed = false
 
     try {
       const result = await getAllLspServers()
@@ -80,12 +84,15 @@ export function createLSPServerManager(): LSPServerManager {
         `[LSP SERVER MANAGER] getAllLspServers returned ${Object.keys(serverConfigs).length} server(s)`,
       )
     } catch (error) {
+      lastConfigLoadFailed = true
       const err = error as Error
       logError(
         new Error(`Failed to load LSP server configuration: ${err.message}`),
       )
       throw error
     }
+
+    let hadInvalidServerConfig = false
 
     // Build extension → server mapping
     for (const [serverName, config] of Object.entries(serverConfigs)) {
@@ -136,6 +143,7 @@ export function createLSPServerManager(): LSPServerManager {
           },
         )
       } catch (error) {
+        hadInvalidServerConfig = true
         const err = error as Error
         logError(
           new Error(
@@ -144,6 +152,10 @@ export function createLSPServerManager(): LSPServerManager {
         )
         // Continue with other servers - don't fail entire initialization
       }
+    }
+
+    if (hadInvalidServerConfig) {
+      lastConfigLoadFailed = true
     }
 
     logForDebugging(`LSP manager initialized with ${servers.size} servers`)
@@ -427,6 +439,10 @@ export function createLSPServerManager(): LSPServerManager {
     }
   }
 
+  function didLastConfigLoadFail(): boolean {
+    return lastConfigLoadFailed
+  }
+
   return {
     initialize,
     shutdown,
@@ -434,6 +450,7 @@ export function createLSPServerManager(): LSPServerManager {
     ensureServerStarted,
     sendRequest,
     getAllServers,
+    didLastConfigLoadFail,
     openFile,
     changeFile,
     saveFile,

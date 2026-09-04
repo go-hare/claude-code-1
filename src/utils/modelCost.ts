@@ -79,7 +79,21 @@ function requireTier(key: string): ModelCosts {
   return t
 }
 
-/** densable tier_3_15 — Sonnet list */
+/**
+ * densable 2.1.243 #52 `tier_2_10` — Sonnet 5 standard list ($2/$10).
+ * Official-243 catalog bake (not in the 219 extract). Same NIc ratios as
+ * other tiers: write 5m = 1.25×, write 1h = 2×, read = 0.1×.
+ */
+export const COST_TIER_2_10 = {
+  inputTokens: 2,
+  outputTokens: 10,
+  promptCacheWriteTokens: 2.5,
+  promptCacheWrite1hTokens: 4,
+  promptCacheReadTokens: 0.2,
+  webSearchRequests: 0.01,
+} as const satisfies ModelCosts
+
+/** densable tier_3_15 — Sonnet 3.5/3.7/4/4.5/4.6 list */
 export const COST_TIER_3_15 = requireTier('tier_3_15')
 /** densable tier_15_75 — Opus 4 / 4.1 list */
 export const COST_TIER_15_75 = requireTier('tier_15_75')
@@ -166,7 +180,7 @@ export const MODEL_COSTS: Record<ModelShortName, ModelCosts> = {
     COST_HAIKU_35,
   [firstPartyNameToCanonical(CLAUDE_HAIKU_4_5_CONFIG.firstParty)]:
     COST_HAIKU_45,
-  // densable: sonnet 3.5/3.7/4/4.5/4.6/5 → "tier_3_15"
+  // densable: sonnet 3.5/3.7/4/4.5/4.6 → "tier_3_15"
   [firstPartyNameToCanonical(CLAUDE_3_5_V2_SONNET_CONFIG.firstParty)]:
     COST_TIER_3_15,
   [firstPartyNameToCanonical(CLAUDE_3_7_SONNET_CONFIG.firstParty)]:
@@ -177,9 +191,9 @@ export const MODEL_COSTS: Record<ModelShortName, ModelCosts> = {
     COST_TIER_3_15,
   [firstPartyNameToCanonical(CLAUDE_SONNET_4_6_CONFIG.firstParty)]:
     COST_TIER_3_15,
-  // Sonnet 5 list = tier_3_15; promotional $2/$10 is UI-only (not billing).
+  // densable 2.1.243 #52: sonnet-5 list = tier_2_10 ($2/$10 standard, not promo).
   [firstPartyNameToCanonical(CLAUDE_SONNET_5_CONFIG.firstParty)]:
-    COST_TIER_3_15,
+    COST_TIER_2_10,
   // densable: opus-4-0 / 4-1 → "tier_15_75"
   [firstPartyNameToCanonical(CLAUDE_OPUS_4_CONFIG.firstParty)]: COST_TIER_15_75,
   [firstPartyNameToCanonical(CLAUDE_OPUS_4_1_CONFIG.firstParty)]:
@@ -300,8 +314,19 @@ function trackUnknownModelCost(model: string, shortName: ModelShortName): void {
 // Calculate the cost of a query in US dollars.
 // If the model's costs are not found, use the default model's costs.
 export function calculateUSDCost(resolvedModel: string, usage: Usage): number {
-  const modelCosts = getModelCosts(resolvedModel, usage)
-  return tokensToUSDCost(modelCosts, usage)
+  // densable 2.1.243 `Px` — managed modelPricing * multiplier when trusted.
+  const { getCompiledOrgPricing, lookupOrgModelCosts } =
+    require('./modelPricing.js') as typeof import('./modelPricing.js')
+  const compiled = getCompiledOrgPricing()
+  if (!compiled) {
+    return tokensToUSDCost(getModelCosts(resolvedModel, usage), usage)
+  }
+  const override = lookupOrgModelCosts(compiled, resolvedModel)
+  const billedUsage = override
+    ? ({ ...usage, inference_geo: null } as Usage)
+    : usage
+  const costs = override ?? getModelCosts(resolvedModel, billedUsage)
+  return tokensToUSDCost(costs, billedUsage) * compiled.multiplier
 }
 
 /**

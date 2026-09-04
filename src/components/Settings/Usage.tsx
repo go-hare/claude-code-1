@@ -11,9 +11,18 @@ import {
   formatUsageCreditsAmount,
   type RateLimit,
   resolveExtraUsageUtilization,
+  seedUtilizationFromOpenHeaders,
   type Utilization,
 } from '../../services/api/usage.js';
-import { formatResetText } from '../../utils/format.js';
+import { useAppState } from '../../state/AppState.js';
+import { formatResetText, formatRelativeTimeAgo, formatTokens } from '../../utils/format.js';
+import {
+  collectLoopUsageRows,
+  formatLoopEvery,
+  LOOP_USAGE_COL,
+  LOOP_USAGE_VISIBLE_ROWS,
+  LOOP_USAGE_WIDE_MIN,
+} from '../../utils/loopUsage.js';
 import { logError } from '../../utils/log.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
@@ -113,10 +122,20 @@ export function Usage(): React.ReactNode {
   const loadUtilization = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    const seed = seedUtilizationFromOpenHeaders();
+    if (seed) {
+      setUtilization(seed.utilization);
+    }
     try {
       const data = await fetchUtilization();
       setUtilization(data);
     } catch (err) {
+      if (seed) {
+        setError(
+          seed.source === 'persisted' ? 'Showing last-known usage (could not refresh)' : 'Could not refresh usage data',
+        );
+        return;
+      }
       logError(err as Error);
       const axiosError = err as { response?: { data?: unknown } };
       const responseBody = axiosError.response?.data ? jsonStringify(axiosError.response.data) : undefined;
@@ -200,6 +219,8 @@ export function Usage(): React.ReactNode {
       {utilization.extra_usage && <ExtraUsageSection extraUsage={utilization.extra_usage} maxWidth={maxWidth} />}
 
       {isEligibleForOverageCreditGrant() && <OverageCreditUpsell maxWidth={maxWidth} />}
+
+      <LoopsUsageTable maxWidth={maxWidth} />
 
       <Text dimColor>
         <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
@@ -288,5 +309,79 @@ function ExtraUsageSection({ extraUsage, maxWidth }: ExtraUsageSectionProps): Re
       extraSubtext={`${formattedUsedCredits} / ${formattedMonthlyLimit} spent`}
       maxWidth={maxWidth}
     />
+  );
+}
+
+function LoopCol({ width, text }: { width: number; text: string }): React.ReactNode {
+  return (
+    <Box width={width} justifyContent="flex-end">
+      <Text dimColor wrap="truncate-end">
+        {text}
+      </Text>
+    </Box>
+  );
+}
+
+/** densable 2.1.243 #1 — SEA `Xu` Loops table on `/usage`. */
+function LoopsUsageTable({ maxWidth }: { maxWidth: number }): React.ReactNode {
+  const messages = useAppState(s => s.messages);
+  const rows = React.useMemo(() => collectLoopUsageRows(messages), [messages]);
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const showPerRun = maxWidth >= LOOP_USAGE_WIDE_MIN;
+  const fixed =
+    LOOP_USAGE_COL.every +
+    LOOP_USAGE_COL.runs +
+    LOOP_USAGE_COL.tokens +
+    (showPerRun ? LOOP_USAGE_COL.perRun : 0) +
+    LOOP_USAGE_COL.lastRun;
+  const promptWidth = Math.max(12, maxWidth - fixed);
+  const visible = rows.slice(0, LOOP_USAGE_VISIBLE_ROWS);
+  const more = rows.length - visible.length;
+  const now = new Date();
+
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Box width={promptWidth}>
+          <Text>Loops</Text>
+        </Box>
+        <LoopCol width={LOOP_USAGE_COL.every} text="every" />
+        <LoopCol width={LOOP_USAGE_COL.runs} text="runs" />
+        <LoopCol width={LOOP_USAGE_COL.tokens} text="tokens" />
+        {showPerRun && <LoopCol width={LOOP_USAGE_COL.perRun} text="per run" />}
+        <LoopCol width={LOOP_USAGE_COL.lastRun} text="last run" />
+      </Box>
+      {visible.map(row => (
+        <Box key={row.prompt}>
+          <Box width={promptWidth}>
+            <Text dimColor wrap="truncate-end">
+              {row.prompt}
+            </Text>
+          </Box>
+          <LoopCol width={LOOP_USAGE_COL.every} text={formatLoopEvery(row)} />
+          <LoopCol width={LOOP_USAGE_COL.runs} text={String(row.runs)} />
+          <LoopCol width={LOOP_USAGE_COL.tokens} text={formatTokens(row.tokens)} />
+          {showPerRun && (
+            <LoopCol
+              width={LOOP_USAGE_COL.perRun}
+              text={row.runs > 0 && row.tokens > 0 ? formatTokens(Math.round(row.tokens / row.runs)) : '\u2013'}
+            />
+          )}
+          <LoopCol
+            width={LOOP_USAGE_COL.lastRun}
+            text={row.lastRunMs > 0 ? formatRelativeTimeAgo(new Date(row.lastRunMs), { now }) : '\u2013'}
+          />
+        </Box>
+      ))}
+      {more > 0 && (
+        <Text dimColor>
+          {'\u2026 '}
+          {more} more
+        </Text>
+      )}
+    </Box>
   );
 }

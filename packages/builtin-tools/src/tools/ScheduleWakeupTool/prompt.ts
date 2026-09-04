@@ -32,9 +32,9 @@ export function isKairosLoopDynamicEnabled(): boolean {
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_loop_dynamic', false)
 }
 
-/** densable `Cfr` */
+/** densable `Cfr` — 243 default-on (same as `loopDynamic.isLoopNoopFoldEnabled`). */
 export function isLoopNoopFoldEnabled(): boolean {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_loop_noop_fold', false)
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_loop_noop_fold', true)
 }
 
 /**

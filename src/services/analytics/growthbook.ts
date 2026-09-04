@@ -29,12 +29,14 @@ import { logError } from '../../utils/log.js'
 import { resolveGbRefreshIntervalMsOrDefault } from '../../utils/residualFinalEnvGates.js'
 import { createSignal } from '../../utils/signal.js'
 import { withTimeout } from '../../utils/sleep.js'
+import { profileCheckpoint } from '../../utils/startupProfiler.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   type GitHubActionsMetadata,
   getUserForGrowthBook,
   resetUserCache,
 } from '../../utils/user.js'
+import { registerAccountOnHoldGateReader } from '../../utils/accountOnHold.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
 import {
@@ -607,6 +609,30 @@ export function getApiBaseUrlHost(): string | undefined {
 }
 
 /**
+ * Official `Qf` identity pin — oauth first, then env.
+ * AUTH_TOKEN sessions have no oauth account; enterprises set
+ * `CLAUDE_CODE_ORGANIZATION_UUID` / `CLAUDE_CODE_ACCOUNT_UUID` so usage
+ * telemetry and data-handling settings still attach to the org.
+ * Official also wrote `a?.organizationUuid || t?.organizationUuid` but both
+ * bindings are `void 0` in 2.1.243 (no JWT parse).
+ */
+export function resolveGrowthBookIdentityIds(user: {
+  organizationUuid?: string
+  accountUuid?: string
+}): { organizationUUID?: string; accountUUID?: string } {
+  const accountUUID =
+    user.accountUuid || process.env.CLAUDE_CODE_ACCOUNT_UUID || undefined
+  const organizationUUID =
+    user.organizationUuid ||
+    process.env.CLAUDE_CODE_ORGANIZATION_UUID ||
+    undefined
+  return {
+    ...(organizationUUID && { organizationUUID }),
+    ...(accountUUID && { accountUUID }),
+  }
+}
+
+/**
  * Get user attributes for GrowthBook from CoreUserData
  */
 function getUserAttributes(): GrowthBookUserAttributes {
@@ -620,6 +646,7 @@ function getUserAttributes(): GrowthBookUserAttributes {
   }
 
   const apiBaseUrlHost = getApiBaseUrlHost()
+  const identity = resolveGrowthBookIdentityIds(user)
 
   const attributes = {
     id: user.deviceId,
@@ -627,8 +654,7 @@ function getUserAttributes(): GrowthBookUserAttributes {
     deviceID: user.deviceId,
     platform: user.platform,
     ...(apiBaseUrlHost && { apiBaseUrlHost }),
-    ...(user.organizationUuid && { organizationUUID: user.organizationUuid }),
-    ...(user.accountUuid && { accountUUID: user.accountUuid }),
+    ...identity,
     ...(user.userType && { userType: user.userType }),
     ...(user.subscriptionType && { subscriptionType: user.subscriptionType }),
     ...(user.rateLimitTier && { rateLimitTier: user.rateLimitTier }),
@@ -937,6 +963,141 @@ export async function getFeatureValue_DEPRECATED<T>(
  * This is the preferred method for startup-critical paths and sync contexts.
  * The value may be stale if the cache was written by a previous process.
  */
+/**
+ * densable 2.1.243 `getFeatureValueWithSource` / `wd`.
+ * Official sources: override | disabled | payload | disk | fallback.
+ */
+export type FeatureValueSource =
+  | 'override'
+  | 'disabled'
+  | 'payload'
+  | 'disk'
+  | 'fallback'
+
+export type FeatureValueWithSource<T> = {
+  value: T
+  source: FeatureValueSource
+}
+
+/**
+ * densable `Rr` — env/config already supply flags, so startup must not wait
+ * on GrowthBook init before resolving permission mode.
+ */
+export function hasAnyGrowthBookOverrides(): boolean {
+  const overrides = getEnvOverrides()
+  if (overrides && Object.keys(overrides).length > 0) return true
+  const configOverrides = getConfigOverrides()
+  return (
+    configOverrides !== undefined && Object.keys(configOverrides).length > 0
+  )
+}
+
+/**
+ * Official `wd` / class `getFeatureValueWithSource`. Same priority as the
+ * cached getter, but the caller can tell disk-stale disable from a live
+ * payload (243 #13 killswitch recheck).
+ */
+export function getFeatureValueWithSource<T>(
+  feature: string,
+  defaultValue: T,
+): FeatureValueWithSource<T> {
+  const overrides = getEnvOverrides()
+  if (overrides && feature in overrides) {
+    return { value: overrides[feature] as T, source: 'override' }
+  }
+  const configOverrides = getConfigOverrides()
+  if (configOverrides && feature in configOverrides) {
+    return { value: configOverrides[feature] as T, source: 'override' }
+  }
+
+  if (!isGrowthBookEnabled()) {
+    return { value: defaultValue, source: 'disabled' }
+  }
+
+  if (experimentDataByFeature.has(feature)) {
+    logExposureForFeature(feature)
+  }
+
+  if (remoteEvalFeatureValues.has(feature)) {
+    return {
+      value: coalesceNullFeatureValue(
+        remoteEvalFeatureValues.get(feature),
+        defaultValue,
+      ),
+      source: 'payload',
+    }
+  }
+
+  try {
+    const cached = getGlobalConfig().cachedGrowthBookFeatures?.[feature]
+    if (cached !== undefined) {
+      pendingExposures.add(feature)
+      return {
+        value: coalesceNullFeatureValue(cached, defaultValue),
+        source: 'disk',
+      }
+    }
+  } catch {
+    // Config not yet initialized — fall through to fallback
+  }
+  return { value: defaultValue, source: 'fallback' }
+}
+
+/** Official `Un(Pd(), 1500, n)` budget before `qc` / permission-mode resolve. */
+export const GROWTHBOOK_PERMISSION_MODE_WAIT_MS = 1500
+
+/**
+ * Official `Vo` — wait up to 1500ms for GrowthBook init, swallow failure.
+ */
+export async function awaitGrowthBookInitForPermissionMode(
+  mark: string,
+  checkpoints: { before: string; after: string },
+): Promise<void> {
+  profileCheckpoint(checkpoints.before)
+  await withTimeout(
+    initializeGrowthBook(),
+    GROWTHBOOK_PERMISSION_MODE_WAIT_MS,
+    mark,
+  ).catch(() => {})
+  profileCheckpoint(checkpoints.after)
+}
+
+/**
+ * Official startup before `qc` / `initialPermissionModeFromCLI`:
+ * empty disk cache → `gb-before-mode`; disk-sourced
+ * `tengu_auto_mode_config.enabled === "disabled"` → `gb-killswitch-recheck`.
+ */
+export async function awaitGrowthBookBeforePermissionMode(): Promise<void> {
+  if (!isGrowthBookEnabled() || hasAnyGrowthBookOverrides()) {
+    return
+  }
+
+  let cachedFeatures: Record<string, unknown> = {}
+  try {
+    cachedFeatures = getGlobalConfig().cachedGrowthBookFeatures ?? {}
+  } catch {
+    cachedFeatures = {}
+  }
+
+  if (Object.keys(cachedFeatures).length === 0) {
+    await awaitGrowthBookInitForPermissionMode('gb-before-mode', {
+      before: 'before_growthbook_init',
+      after: 'after_growthbook_init',
+    })
+  }
+
+  const config = getFeatureValueWithSource<{ enabled?: string }>(
+    'tengu_auto_mode_config',
+    {},
+  )
+  if (config.value?.enabled === 'disabled' && config.source === 'disk') {
+    await awaitGrowthBookInitForPermissionMode('gb-killswitch-recheck', {
+      before: 'before_gb_killswitch_recheck',
+      after: 'after_gb_killswitch_recheck',
+    })
+  }
+}
+
 export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
   feature: string,
   defaultValue: T,
@@ -1463,3 +1624,8 @@ export function getDynamicConfig_CACHED_MAY_BE_STALE<T>(
 ): T {
   return getFeatureValue_CACHED_MAY_BE_STALE(configName, defaultValue)
 }
+
+// densable `de` — Gx `wx` / `he` reads `tengu_lively_beaver` through this slot.
+registerAccountOnHoldGateReader(gate =>
+  checkStatsigFeatureGate_CACHED_MAY_BE_STALE(gate),
+)

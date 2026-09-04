@@ -691,6 +691,13 @@ export function MCPRemoteServerMenu({
             </Box>
           )}
 
+          {server.transport === 'claudeai-proxy' && server.scope === 'claudeai' && server.config.enterpriseManaged && (
+            <Box>
+              <Text bold>Managed: </Text>
+              <Text dimColor>by your organization</Text>
+            </Box>
+          )}
+
           <Box>
             <Text bold>URL: </Text>
             <Text dimColor>{server.config.url}</Text>

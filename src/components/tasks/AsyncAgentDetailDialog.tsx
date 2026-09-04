@@ -88,6 +88,8 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onF
       )}
       <Text dimColor>
         {elapsedTime}
+        {agent.model && <> · {agent.model}</>}
+        {agent.effort && <> · {agent.effort}</>}
         {tokenCount !== undefined && tokenCount > 0 && <> · {formatNumber(tokenCount)} tokens</>}
         {toolUseCount !== undefined && toolUseCount > 0 && (
           <>

@@ -11,6 +11,11 @@ import { dirname, join } from 'path'
 import { OAUTH_BETA_HEADER } from 'src/constants/oauth.js'
 import { logForDebugging } from './debug.js'
 import {
+  recordWifFailedAccessToken,
+  wrapWifCredentialsLock,
+  wrapWifSiblingRotatedTokenAdoption,
+} from './wifCredentialRace.js'
+import {
   AnthropicProfileOauthError,
   getActiveAnthropicProfileName,
   getAnthropicConfigDir,
@@ -610,6 +615,24 @@ function wrapOidcCredentialsFileCache(
   }
 }
 
+function buildOidcCredentialsCachedProvider(
+  exchange: OidcTokenProvider,
+  credentialsPath: string,
+  env: NodeJS.ProcessEnv,
+): OidcTokenProvider {
+  let provider = wrapOidcCredentialsFileCache(exchange, credentialsPath)
+  // Official: only env-quad wraps y(H(provider, always), fail-open). No Ee.
+  if (getAnthropicProfileSource(env) === 'env-quad') {
+    provider = wrapWifSiblingRotatedTokenAdoption(
+      provider,
+      credentialsPath,
+      'always',
+    )
+    provider = wrapWifCredentialsLock(provider, credentialsPath, 'fail-open')
+  }
+  return provider
+}
+
 function oidcCacheFingerprint(
   env: NodeJS.ProcessEnv,
   fetchFn: FetchLike,
@@ -725,11 +748,21 @@ function getOidcTokenCache(
       exchangeOidcFederationToken(config, wrappedFetch)
     const credentialsPath = resolveOidcCredentialsPath(config, env)
     const provider = credentialsPath
-      ? wrapOidcCredentialsFileCache(exchange, credentialsPath)
+      ? buildOidcCredentialsCachedProvider(exchange, credentialsPath, env)
       : exchange
     return provider(opts)
   })
   return tokenCache
+}
+
+/** densable TokenCache.cached.token — for lt before invalidate. */
+export function peekOidcCachedAccessToken(): string | null {
+  return tokenCache?.cached?.token ?? null
+}
+
+/** densable TokenCache.invalidate — next getToken forceRefresh. */
+export function invalidateOidcTokenCache(): void {
+  if (tokenCache) tokenCache.invalidate()
 }
 
 /**
@@ -749,7 +782,10 @@ export async function invalidateOidcFederationCacheOnRetry(
       const config = await loadOidcFederationConfig()
       if (config === null) return false
     }
-    getOidcTokenCache(process.env, cacheFetch).invalidate()
+    if (tokenCache?.cached?.token) {
+      recordWifFailedAccessToken(tokenCache.cached.token)
+    }
+    invalidateOidcTokenCache()
     return true
   } catch {
     return false

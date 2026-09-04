@@ -25,6 +25,7 @@ const {
   invalidateOidcFederationCacheOnRetry,
   loadOidcFederationConfig,
   parseOidcAccountOnHold,
+  peekOidcCachedAccessToken,
   redactTokenErrorBody,
   resolveIdentityTokenProvider,
   resolveOidcCredentialsPath,
@@ -280,6 +281,46 @@ describe('leftover 239 i4b / VPu / By_ OIDC jwt-bearer', () => {
         }),
       ),
     ).toBe(false)
+  })
+
+  test('lt peeks OIDC cached bearer before invalidate', async () => {
+    pinEnv({
+      ANTHROPIC_PROFILE: undefined,
+      ANTHROPIC_CONFIG_DIR: join(
+        tmpdir(),
+        `cc-oidc-lt-${process.pid}-${Date.now()}`,
+      ),
+      ANTHROPIC_FEDERATION_RULE_ID: 'rule_lt',
+      ANTHROPIC_ORGANIZATION_ID: 'org_lt',
+      ANTHROPIC_IDENTITY_TOKEN: 'lt.jwt',
+      ANTHROPIC_BASE_URL: 'https://api.example.com',
+    })
+    const fetchFn = mock(async () => {
+      return new Response(
+        JSON.stringify({
+          access_token: 'oidc_cached',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        }),
+        { status: 200 },
+      )
+    })
+    await resolveOidcFederationAccessToken(process.env, fetchFn)
+    expect(peekOidcCachedAccessToken()).toBe('oidc_cached')
+
+    const { getLastIssuedWifAccessToken, invalidateWifToken } = await import(
+      '../anthropicProfile.js'
+    )
+    const {
+      getWifFailedAccessTokensForTests,
+      clearWifCredentialRaceStateForTests,
+    } = await import('../wifCredentialRace.js')
+    clearWifCredentialRaceStateForTests()
+
+    expect(getLastIssuedWifAccessToken()).toBe('oidc_cached')
+    await invalidateWifToken(getLastIssuedWifAccessToken())
+    expect(getWifFailedAccessTokensForTests().has('oidc_cached')).toBe(true)
+    expect(peekOidcCachedAccessToken()).toBeNull()
   })
 
   test('jy_ reuses profile credentials file unless forceRefresh', async () => {

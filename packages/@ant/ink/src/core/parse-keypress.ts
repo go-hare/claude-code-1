@@ -813,6 +813,34 @@ function decodeModifier(modifier: number): {
 }
 
 /**
+ * densable 2.1.243 `zb` — kitty / modifyOtherKeys report Ctrl+[ / Ctrl+M /
+ * Ctrl+I / Ctrl+H as `ctrl` + printable instead of the historical terminal
+ * equivalent (Escape / Return / Tab / Backspace). Remap only for bare Ctrl
+ * (no shift/meta/super) so vim INSERT can leave on Ctrl+[.
+ */
+export function traditionalCtrlAliasName(
+  mods: { ctrl: boolean; shift: boolean; meta: boolean; super: boolean },
+  keycode: number,
+): string | undefined {
+  if (!mods.ctrl || mods.shift || mods.meta || mods.super) return undefined
+  switch (keycode) {
+    case 91:
+      return 'escape'
+    case 109:
+    case 77:
+      return 'return'
+    case 105:
+    case 73:
+      return 'tab'
+    case 104:
+    case 72:
+      return 'backspace'
+    default:
+      return undefined
+  }
+}
+
+/**
  * True for printable Unicode codepoints that should become text input when
  * reported via Kitty CSI u / modifyOtherKeys (MO5-style recovery / name).
  *
@@ -1127,7 +1155,8 @@ function parseKeypress(s: string = ''): ParsedKey {
     // Name for keybindings uses primary codepoint (physical key). The text to
     // insert is recovered later in InputEvent via unicodeFromExtendedKeySequence
     // / key name when printable non-ASCII.
-    const mapped = keycodeToName(primary)
+    const remapped = traditionalCtrlAliasName(mods, primary)
+    const mapped = remapped ?? keycodeToName(primary)
     const textChar = isRelease ? undefined : characterFromCsiUMatch(match)
     // Functional names (return/escape/tab/space/backspace/numpad labels) are
     // multi-char and must win for keybindings. Otherwise prefer the recovered
@@ -1139,7 +1168,7 @@ function parseKeypress(s: string = ''): ParsedKey {
       kind: 'key',
       name: isRelease && !(mapped && mapped.length > 1) ? '' : name,
       fn: false,
-      ctrl: mods.ctrl,
+      ctrl: remapped === undefined && mods.ctrl,
       meta: mods.meta,
       shift: mods.shift,
       option: false,
@@ -1160,12 +1189,13 @@ function parseKeypress(s: string = ''): ParsedKey {
     if (shouldRewriteAltGrAsText(mods, codepoint)) {
       return altGrTextKey(s, codepoint, mods.shift)
     }
-    const name = keycodeToName(codepoint)
+    const remapped = traditionalCtrlAliasName(mods, codepoint)
+    const name = remapped ?? keycodeToName(codepoint)
     return {
       kind: 'key',
       name,
       fn: false,
-      ctrl: mods.ctrl,
+      ctrl: remapped === undefined && mods.ctrl,
       meta: mods.meta,
       shift: mods.shift,
       option: false,

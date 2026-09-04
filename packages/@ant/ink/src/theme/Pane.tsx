@@ -4,6 +4,16 @@ import { Box } from '../index.js';
 import type { Theme } from './theme-types.js';
 import { Divider } from './Divider.js';
 
+/** densable V / $6a — Pane paddingX when useIsInsideModal() */
+export const PANE_PADDING_X_MODAL = 1;
+/** densable U / _6a — Pane paddingX when inline (not modal) */
+export const PANE_PADDING_X_INLINE = 2;
+/**
+ * densable Io / a7a — extra urlOutdent when inside modal.
+ * Equals FullscreenLayout modal-slot paddingX.
+ */
+export const MODAL_LAYOUT_PADDING_X = 2;
+
 type PaneProps = {
   children: React.ReactNode;
   /**
@@ -44,7 +54,7 @@ export function Pane({ children, color }: PaneProps): React.ReactNode {
     // modal panel width (FullscreenLayout paddingX=2) instead of stretching
     // past the right-hand edge.
     return (
-      <Box flexDirection="column" paddingX={1} flexShrink={0} minWidth={0} width="100%">
+      <Box flexDirection="column" paddingX={PANE_PADDING_X_MODAL} flexShrink={0} minWidth={0} width="100%">
         {children}
       </Box>
     );
@@ -52,7 +62,7 @@ export function Pane({ children, color }: PaneProps): React.ReactNode {
   return (
     <Box flexDirection="column" paddingTop={1} minWidth={0} width="100%">
       <Divider color={color} />
-      <Box flexDirection="column" paddingX={2} minWidth={0} width="100%">
+      <Box flexDirection="column" paddingX={PANE_PADDING_X_INLINE} minWidth={0} width="100%">
         {children}
       </Box>
     </Box>

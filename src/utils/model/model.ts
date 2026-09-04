@@ -32,6 +32,7 @@ import {
 } from './providers.js'
 import { LIGHTNING_BOLT } from '../../constants/figures.js'
 import { isModelAllowed } from './modelAllowlist.js'
+import { getModelPickerLabel } from './modelPickerSetting.js'
 import { type ModelAlias, isModelAlias } from './aliases.js'
 import { capitalize } from '../stringUtils.js'
 import {
@@ -809,6 +810,12 @@ export function modelDisplayString(model: ModelSetting): string {
 
 // @[MODEL LAUNCH]: Add a marketing name mapping for the new model below.
 export function getMarketingNameForModel(modelId: string): string | undefined {
+  // densable 2.1.243 `gP` — curated modelPicker label wins over built-in names.
+  const curatedLabel = getModelPickerLabel(modelId)
+  if (curatedLabel !== undefined) {
+    return curatedLabel
+  }
+
   if (getAPIProvider() === 'foundry') {
     // deployment ID is user-defined in Foundry, so it may have no relation to the actual model
     return undefined

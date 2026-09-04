@@ -15,7 +15,12 @@ import {
 } from '../bridge/bridgePermissionCallbacks.js';
 import { handleRemoteInterrupt } from '../bridge/remoteInterruptHandling.js';
 import { isTranscriptResetResultReady, shouldDeferBridgeResult } from '../bridge/bridgeResultScheduling.js';
-import { buildBridgeConnectUrl } from '../bridge/bridgeStatusUtil.js';
+import {
+  buildBridgeConnectUrl,
+  formatRemoteControlOccupancyNotice,
+  REMOTE_CONTROL_NOT_STARTED_HERE,
+} from '../bridge/bridgeStatusUtil.js';
+import type { LocalBridgeSessionHolder } from '../bridge/initReplBridge.js';
 import {
   clearBridgeSessionMeta,
   getPersistedBridgeSession,
@@ -150,6 +155,8 @@ export function useReplBridge(
   const replBridgeOutboundOnly = feature('BRIDGE_MODE') ? replBridgeOutboundOnlyRaw : false;
   const replBridgeInitialNameRaw = useAppState(s => s.replBridgeInitialName);
   const replBridgeInitialName = feature('BRIDGE_MODE') ? replBridgeInitialNameRaw : undefined;
+  const replBridgeExplicitRaw = useAppState(s => s.replBridgeExplicit);
+  const replBridgeExplicit = feature('BRIDGE_MODE') ? replBridgeExplicitRaw : false;
 
   // densable: qE.useEffect(()=>Dkr(()=>{if(d.current)A.current=!0}),[])
   // Latch user activity while a bridge handle is live — suppress ready-push.
@@ -606,9 +613,19 @@ export function useReplBridge(
             handler(parsed);
           }
 
+          let declinedHolder: LocalBridgeSessionHolder | undefined;
           const rawHandle = await initReplBridge({
             outboundOnly,
             tags: outboundOnly ? ['ccr-mirror'] : undefined,
+            localHolderGuard:
+              !outboundOnly && !replBridgeExplicit
+                ? {
+                    mode: 'decline',
+                    onDeclined: holder => {
+                      declinedHolder = holder;
+                    },
+                  }
+                : { mode: 'observe' },
             onInboundMessage: handleInboundMessage,
             onPermissionResponse: handlePermissionResponse,
             onInterrupt() {
@@ -860,6 +877,30 @@ export function useReplBridge(
             if (handle) {
               void handle.teardown();
             }
+            return;
+          }
+          if (!handle && declinedHolder) {
+            logForDebugging(
+              `[bridge:repl] Init declined: session held by local pid ${declinedHolder.pid}; leaving Remote Control off`,
+            );
+            if (!outboundOnly) {
+              const notice = formatRemoteControlOccupancyNotice(declinedHolder, {
+                crossSessionMessaging: feature('UDS_INBOX') ? true : false,
+              });
+              setMessages(prev => {
+                const last = prev.at(-1);
+                if (
+                  last?.type === 'system' &&
+                  last.subtype === 'informational' &&
+                  typeof last.content === 'string' &&
+                  last.content.startsWith(REMOTE_CONTROL_NOT_STARTED_HERE)
+                ) {
+                  return prev;
+                }
+                return [...prev, createSystemMessage(notice, 'warning')];
+              });
+            }
+            setAppState(prev => (prev.replBridgeEnabled ? { ...prev, replBridgeEnabled: false } : prev));
             return;
           }
           if (!handle) {
@@ -1150,7 +1191,7 @@ export function useReplBridge(
         transcriptResetPendingRef.current = false;
       };
     }
-  }, [replBridgeEnabled, replBridgeOutboundOnly, setAppState, setMessages, addNotification]);
+  }, [replBridgeEnabled, replBridgeExplicit, replBridgeOutboundOnly, setAppState, setMessages, addNotification]);
 
   // Write new messages as they appear.
   // Also re-runs when replBridgeConnected changes (bridge finishes init),

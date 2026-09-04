@@ -23,11 +23,16 @@ describe('densable getClipboardPath ↔ L3u host', () => {
     else process.env.TMUX = prevTmux
   })
 
-  test('macos/windows/wsl/linux local → native (not darwin-only)', () => {
-    for (const host of ['macos', 'windows', 'wsl', 'linux'] as const) {
+  test('macos/windows/wsl local → native (not darwin-only)', () => {
+    for (const host of ['macos', 'windows', 'wsl'] as const) {
       process.env.__CLAUDE_INK_PLATFORM_TEST__ = host
       expect(getClipboardPath()).toBe('native')
     }
+  })
+
+  test('linux local unprobed → osc52 (densable dt waits for Xws)', () => {
+    process.env.__CLAUDE_INK_PLATFORM_TEST__ = 'linux'
+    expect(getClipboardPath()).toBe('osc52')
   })
 
   test('unknown host local without tmux → osc52', () => {
@@ -54,9 +59,9 @@ describe('densable getClipboardPath ↔ L3u host', () => {
     expect(getClipboardPath()).toBe('osc52')
   })
 
-  test('local linux under tmux still native (L3u fires first)', () => {
+  test('local linux under tmux unprobed → tmux-buffer (dt tool-gated)', () => {
     process.env.__CLAUDE_INK_PLATFORM_TEST__ = 'linux'
     process.env.TMUX = '/tmp/tmux-1000/default,1,0'
-    expect(getClipboardPath()).toBe('native')
+    expect(getClipboardPath()).toBe('tmux-buffer')
   })
 })

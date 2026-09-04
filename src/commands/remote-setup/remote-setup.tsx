@@ -9,7 +9,12 @@ import {
 } from '../../services/analytics/index.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { openBrowser } from '../../utils/browser.js';
-import { getGhAuthStatus } from '../../utils/github/ghAuthStatus.js';
+import { logForDebugging } from '../../utils/debug.js';
+import {
+  formatWebSetupGhCheckFailedMessage,
+  formatWebSetupGhTooOldMessage,
+  getGhAuthStatus,
+} from '../../utils/github/ghAuthStatus.js';
 import {
   createDefaultEnvironment,
   getCodeWebUrl,
@@ -23,23 +28,31 @@ type CheckResult =
   | { status: 'not_signed_in' }
   | { status: 'has_gh_token'; token: RedactedGithubToken }
   | { status: 'gh_not_installed' }
-  | { status: 'gh_not_authenticated' };
+  | { status: 'gh_not_authenticated' }
+  | { status: 'gh_too_old' }
+  | { status: 'gh_check_failed'; error: string };
 
 async function checkLoginState(): Promise<CheckResult> {
   if (!(await isSignedIn())) {
     return { status: 'not_signed_in' };
   }
 
-  const ghStatus = await getGhAuthStatus();
-  if (ghStatus === 'not_installed') {
+  // densable 2.1.243 #38 — old gh (no `auth token`) may use `auth status`.
+  const ghStatus = await getGhAuthStatus({ allowNetworkFallbackForOldGh: true });
+  if (ghStatus.status === 'not_installed') {
     return { status: 'gh_not_installed' };
   }
-  if (ghStatus === 'not_authenticated') {
+  if (ghStatus.status === 'not_authenticated') {
     return { status: 'gh_not_authenticated' };
   }
+  if (ghStatus.status === 'unknown') {
+    return { status: 'gh_check_failed', error: ghStatus.error };
+  }
+  if (!ghStatus.supportsAuthTokenCommand) {
+    return { status: 'gh_too_old' };
+  }
 
-  // ghStatus === 'authenticated'. getGhAuthStatus spawns with stdout:'ignore'
-  // (telemetry-safe); spawn once more with stdout:'pipe' to read the token.
+  // authenticated + supportsAuthTokenCommand. Re-spawn with stdout:'pipe' for the token.
   const { stdout } = await execa('gh', ['auth', 'token'], {
     stdout: 'pipe',
     stderr: 'ignore',
@@ -93,6 +106,25 @@ function Web({ onDone }: { onDone: LocalJSXCommandOnDone }) {
               ? `GitHub CLI not found. Install it via https://cli.github.com/, then run \`gh auth login\`, or connect GitHub on the web: ${url}`
               : `GitHub CLI not authenticated. Run \`gh auth login\` and try again, or connect GitHub on the web: ${url}`,
           );
+          return;
+        }
+        case 'gh_too_old': {
+          const url = `${getCodeWebUrl()}/onboarding?step=alt-auth`;
+          await openBrowser(url);
+          logEvent('tengu_remote_setup_result', {
+            result: 'gh_too_old' as SafeString,
+          });
+          onDone(formatWebSetupGhTooOldMessage(url));
+          return;
+        }
+        case 'gh_check_failed': {
+          logForDebugging(`/web-setup: couldn't check gh auth status: ${result.error}`, {
+            level: 'error',
+          });
+          logEvent('tengu_remote_setup_result', {
+            result: 'gh_check_failed' as SafeString,
+          });
+          onDone(formatWebSetupGhCheckFailedMessage(result.error, `${getCodeWebUrl()}/onboarding?step=alt-auth`));
           return;
         }
         case 'has_gh_token':

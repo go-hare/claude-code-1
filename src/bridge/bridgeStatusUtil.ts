@@ -1,7 +1,11 @@
 import { getClaudeAiBaseUrl } from '../constants/product.js'
 import { isSelfHostedBridge, getBridgeBaseUrl } from './bridgeConfig.js'
 import { stringWidth } from '@anthropic/ink'
-import { formatDuration, truncateToWidth } from '../utils/format.js'
+import {
+  formatDuration,
+  formatRelativeTime,
+  truncateToWidth,
+} from '../utils/format.js'
 import { getGraphemeSegmenter } from '../utils/intl.js'
 
 /** Bridge status state machine states. */
@@ -155,6 +159,32 @@ export function buildActiveFooterText(url: string): string {
  * densable `exa="Run /remote-control to retry"`.
  */
 export const FAILED_FOOTER_TEXT = 'Run /remote-control to retry'
+
+/** densable 2.1.243 #58 `_` — occupancy notice prefix (also the de-dupe key). */
+export const REMOTE_CONTROL_NOT_STARTED_HERE = 'Remote Control not started here'
+
+export type RemoteControlOccupancyHolder = {
+  pid?: number
+  startedAt?: number
+}
+
+/**
+ * densable 2.1.243 #58 `w` — resume notice when another local terminal already
+ * holds Remote Control for this conversation.
+ */
+export function formatRemoteControlOccupancyNotice(
+  holder: RemoteControlOccupancyHolder,
+  opts: { crossSessionMessaging: boolean },
+  now: Date = new Date(),
+): string {
+  const started =
+    holder.startedAt !== undefined &&
+    holder.startedAt > 0 &&
+    holder.startedAt <= now.getTime()
+      ? ` (started ${formatRelativeTime(new Date(holder.startedAt), { now })})`
+      : ''
+  return `${REMOTE_CONTROL_NOT_STARTED_HERE} · another Claude Code on this machine${started} already has Remote Control for this conversation${opts.crossSessionMessaging ? ", so this terminal can't see your sessions on other machines and they can't reach it" : ''} · run /remote-control to move it to this terminal`
+}
 
 /**
  * Wrap text in an OSC 8 terminal hyperlink. Zero visual width for layout purposes.

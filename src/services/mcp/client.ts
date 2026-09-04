@@ -186,6 +186,19 @@ import {
   getMcpServerUrlOrigin,
   isMcpServerDisabled,
 } from './config.js'
+import {
+  getMcpIdentityEpoch,
+  mcpConfigDependsOnAccountIdentity,
+  seedMcpIdentityCheck,
+  mcpIdentityChangedSinceLastCheck,
+} from './mcpIdentity.js'
+
+export {
+  getMcpIdentityEpoch,
+  mcpConfigDependsOnAccountIdentity,
+  mcpIdentityChangedSinceLastCheck,
+  seedMcpIdentityCheck,
+} from './mcpIdentity.js'
 import { getMcpServerHeaders } from './headersHelper.js'
 import { SdkControlClientTransport } from './SdkControlTransport.js'
 import type {
@@ -2176,13 +2189,7 @@ export async function clearServerCache(
 
   // Clear from cache (both connection and fetch caches so reconnect
   // fetches fresh tools/resources/commands instead of stale ones)
-  connectToServer.cache.delete(key)
-  fetchToolsForClient.cache.delete(name)
-  fetchResourcesForClient.cache.delete(name)
-  fetchCommandsForClient.cache.delete(name)
-  if (feature('MCP_SKILLS')) {
-    fetchMcpSkillsForClient!.cache.delete(name)
-  }
+  evictMcpMemoCaches(key, name)
   // densable xVa entry lifecycle — drop post-reopen list handlers with connection
   try {
     const { clearMcpListenPostReopenHandlers } =
@@ -2191,6 +2198,114 @@ export async function clearServerCache(
     clearMcpListenPostReopenHandlers(name)
   } catch {
     // optional
+  }
+}
+
+/** Official `l1` — settle a memoized connect promise; undefined on reject. */
+async function settleMemoizedConnection(
+  pending: Promise<MCPServerConnection>,
+): Promise<MCPServerConnection | undefined> {
+  return pending.catch(() => undefined)
+}
+
+/**
+ * Official `n2t` — drop the connect memo and per-server list caches for `key`.
+ */
+function evictMcpMemoCaches(key: string, name?: string): void {
+  connectToServer.cache.delete(key)
+  const serverName = name ?? key.slice(0, Math.max(0, key.lastIndexOf('-')))
+  fetchToolsForClient.cache.delete(serverName)
+  fetchResourcesForClient.cache.delete(serverName)
+  fetchCommandsForClient.cache.delete(serverName)
+  if (feature('MCP_SKILLS')) {
+    fetchMcpSkillsForClient!.cache.delete(serverName)
+  }
+}
+
+/**
+ * Official `t2t` / `peekSettledConnection` — the memoized settled client for
+ * `getServerCacheKey(name, config)`, or undefined if the memo is missing /
+ * rejected.
+ */
+export async function peekSettledConnection(
+  name: string,
+  config: ScopedMcpServerConfig,
+): Promise<MCPServerConnection | undefined> {
+  const pending = connectToServer.cache?.get?.(getServerCacheKey(name, config))
+  if (pending === undefined) return undefined
+  return settleMemoizedConnection(pending as Promise<MCPServerConnection>)
+}
+
+/**
+ * Official `XE` / `detachAndCloseConnection` — clear onclose, evict the memo
+ * when it still holds this connection, then cleanup.
+ */
+export function detachAndCloseConnection(
+  connection: ConnectedMCPServer,
+): Promise<void> {
+  connection.client.onclose = undefined
+  const key = getServerCacheKey(connection.name, connection.config)
+  const pending = connectToServer.cache?.get?.(key) as
+    | Promise<MCPServerConnection>
+    | undefined
+  if (pending !== undefined) {
+    void settleMemoizedConnection(pending).then(settled => {
+      if (
+        settled === connection &&
+        connectToServer.cache?.get?.(key) === pending
+      ) {
+        evictMcpMemoCaches(key, connection.name)
+      }
+    })
+  }
+  return connection.cleanup().catch(() => {})
+}
+
+/**
+ * Official `eke` / `dropDiscoveryEntry` — drop memoized discovery for this
+ * server so the next dial is a fresh connect.
+ */
+export async function dropDiscoveryEntry(
+  name: string,
+  config: ScopedMcpServerConfig,
+): Promise<void> {
+  evictMcpMemoCaches(getServerCacheKey(name, config), name)
+}
+
+/**
+ * Official `cleanupConnectedMcpClients` — detach every connected client at
+ * print/SDK session teardown (`$d=!0` then this).
+ */
+export async function cleanupConnectedMcpClients(
+  clients: readonly MCPServerConnection[],
+): Promise<void> {
+  await Promise.all(
+    clients
+      .filter((c): c is ConnectedMCPServer => c.type === 'connected')
+      .map(c => detachAndCloseConnection(c)),
+  )
+}
+
+/** Official `Fl` / `mcpClientModule`. */
+export function mcpClientModule(): {
+  reconnectMcpServerImpl: typeof reconnectMcpServerImpl
+  peekSettledConnection: typeof peekSettledConnection
+  detachAndCloseConnection: typeof detachAndCloseConnection
+  dropDiscoveryEntry: typeof dropDiscoveryEntry
+  seedMcpIdentityCheck: typeof seedMcpIdentityCheck
+  getMcpIdentityEpoch: typeof getMcpIdentityEpoch
+  mcpIdentityChangedSinceLastCheck: typeof mcpIdentityChangedSinceLastCheck
+  cleanupConnectedMcpClients: typeof cleanupConnectedMcpClients
+} {
+  return {
+    reconnectMcpServerImpl,
+    peekSettledConnection,
+    detachAndCloseConnection,
+    dropDiscoveryEntry,
+    seedMcpIdentityCheck,
+    getMcpIdentityEpoch,
+    mcpIdentityChangedSinceLastCheck,
+    cleanupConnectedMcpClients,
   }
 }
 
@@ -2980,15 +3095,45 @@ export async function callIdeRpc(
  * @param config Server configuration
  * @returns Object containing the client connection and its resources
  */
+/** Official `i2t` — reconnect aborted because account identity moved. */
+export function inertReconnectShape(
+  name: string,
+  config: ScopedMcpServerConfig,
+): {
+  client: MCPServerConnection
+  tools: Tool[]
+  commands: Command[]
+} {
+  logEvent('mcp_reconnect', { result: 'mcp_reconnect_identity_changed' })
+  return {
+    client: {
+      name,
+      type: 'failed',
+      config,
+      error:
+        'Reconnect cancelled: the account changed while connecting. Choose Reconnect again.',
+      errorCode: 'IDENTITY_CHANGED',
+    },
+    tools: [],
+    commands: [],
+  }
+}
+
 export async function reconnectMcpServerImpl(
   name: string,
   config: ScopedMcpServerConfig,
+  _storageV5?: unknown,
+  _credentials?: unknown,
 ): Promise<{
   client: MCPServerConnection
   tools: Tool[]
   commands: Command[]
   resources?: ServerResource[]
 }> {
+  const identityEpoch = getMcpIdentityEpoch()
+  const identitySensitive = mcpConfigDependsOnAccountIdentity(config)
+  const identityMoved = (): boolean =>
+    identitySensitive && getMcpIdentityEpoch() !== identityEpoch
   try {
     // Invalidate the keychain cache so we read fresh credentials from disk.
     // This is necessary when another process (e.g. the VS Code extension host)
@@ -2998,7 +3143,24 @@ export async function reconnectMcpServerImpl(
     clearKeychainCache()
 
     await clearServerCache(name, config)
-    const client = await connectToServer(name, config)
+    if (identityMoved()) return inertReconnectShape(name, config)
+    let client = await connectToServer(name, config)
+    // Official HWt: needs-auth → one cache-clear retry.
+    if (client.type === 'needs-auth') {
+      logMCPDebug(
+        name,
+        `Reconnect returned 'needs-auth'; retrying once after cache clear`,
+      )
+      if (identityMoved()) return inertReconnectShape(name, config)
+      connectToServer.cache.delete(getServerCacheKey(name, config))
+      client = await connectToServer(name, config)
+    }
+    if (identityMoved()) {
+      if (client.type === 'connected') {
+        await detachAndCloseConnection(client)
+      }
+      return inertReconnectShape(name, config)
+    }
 
     if (client.type !== 'connected') {
       return {
@@ -3032,6 +3194,10 @@ export async function reconnectMcpServerImpl(
         ? settleEmpty(fetchResourcesForClient(client), [])
         : Promise.resolve([]),
     ])
+    if (identityMoved()) {
+      await detachAndCloseConnection(client)
+      return inertReconnectShape(name, config)
+    }
 
     if (client.discoveryAuthFailure) {
       return {

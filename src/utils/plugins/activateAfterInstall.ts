@@ -15,6 +15,7 @@
  */
 
 import { getTotalOutputTokens } from '../../bootstrap/state.js'
+import { hasEverConnected } from '../../services/lsp/manager.js'
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -23,10 +24,12 @@ import type { MCPServerConnection } from '../../services/mcp/types.js'
 import type { AppState } from '../../state/AppState.js'
 import type { PluginError } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
+import { isEnvTruthy } from '../envUtils.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
 import { isToolSearchEnabledForModel } from '../searchExtraTools.js'
 import { extractMcpServersFromPlugins } from './mcpPluginIntegration.js'
+import { loadPluginLspServers } from './lspPluginIntegration.js'
 import { loadAllPlugins } from './pluginLoader.js'
 import { refreshActivePlugins } from './refresh.js'
 
@@ -37,10 +40,13 @@ export type PluginInstallAutoActivateOutcome =
   | 'load-failed'
   | 'reload-required'
 
+export type LspToolChange = 'adds' | 'may-add' | 'may-remove' | 'removes' | null
+
 export type PluginReloadCacheImpact = {
   mcpServersAdded: string[]
   mcpServersRemoved: string[]
   toolSearchEnabled: boolean
+  lspToolChange: LspToolChange
   wouldInvalidateCache: boolean
 }
 
@@ -82,6 +88,7 @@ export async function assessPluginReloadCacheImpact(
       mcpServersAdded: [],
       mcpServersRemoved: [],
       toolSearchEnabled,
+      lspToolChange: null,
       wouldInvalidateCache,
     }
   }
@@ -94,22 +101,111 @@ export async function assessPluginReloadCacheImpact(
     .sort()
   const mcpChanged = mcpServersAdded.length > 0 || mcpServersRemoved.length > 0
 
+  let lspToolChange: LspToolChange = null
+  if (
+    isEnvTruthy(process.env.ENABLE_LSP_TOOL) &&
+    !toolSearchEnabled &&
+    hasConversationTokens
+  ) {
+    const scan = await scanProjectedPluginLspState()
+    if (!hasEverConnected()) {
+      if (scan.hasServers) lspToolChange = 'adds'
+      else if (scan.loaderFailedApplyHealable) lspToolChange = 'may-add'
+    } else if (!scan.hasServers && !scan.derivationFailed) {
+      if (scan.loaderFailedApplyHealable) lspToolChange = 'may-remove'
+      else if (!scan.loaderFailed) lspToolChange = 'removes'
+    }
+  }
+
   const wouldInvalidateCache =
-    mcpChanged && !toolSearchEnabled && hasConversationTokens
+    (mcpChanged || lspToolChange !== null) &&
+    !toolSearchEnabled &&
+    hasConversationTokens
 
   return {
     mcpServersAdded,
     mcpServersRemoved,
     toolSearchEnabled,
+    lspToolChange,
     wouldInvalidateCache,
   }
 }
 
-/**
- * densable `hDs` — projected plugin MCP server names after disk load.
- * On load/extract failure: return `null` so assess can treat as
- * conservative cache_impact (do not hot-activate on unknown projection).
- */
+/** densable 243 $n / FI — analytics for reload cache-impact decisions. */
+export function logPluginReloadCacheImpact(
+  impact: PluginReloadCacheImpact,
+  opts: { warned: boolean; forced: boolean },
+): void {
+  logEvent('tengu_reload_plugins_cache_impact', {
+    mcp_changed:
+      impact.mcpServersAdded.length > 0 || impact.mcpServersRemoved.length > 0,
+    lsp_changed: impact.lspToolChange !== null,
+    tool_search_on: impact.toolSearchEnabled,
+    warned: opts.warned,
+    forced: opts.forced,
+  })
+}
+
+function isPluginLoaderErrorBlocking(error: PluginError): boolean {
+  switch (error.type) {
+    case 'plugin-not-found':
+    case 'marketplace-not-found':
+    case 'marketplace-load-failed':
+    case 'dependency-unsatisfied':
+      return true
+    default:
+      return false
+  }
+}
+
+function isPluginLoaderErrorHealable(error: PluginError): boolean {
+  if (!isPluginLoaderErrorBlocking(error)) return false
+  if (error.type === 'plugin-not-found') return true
+  if (error.type === 'marketplace-not-found') return true
+  if (error.type === 'dependency-unsatisfied') {
+    return error.reason === 'not-found'
+  }
+  return false
+}
+
+/** densable Me — projected plugin LSP availability after disk load. */
+async function scanProjectedPluginLspState(): Promise<{
+  hasServers: boolean
+  loaderFailed: boolean
+  loaderFailedApplyHealable: boolean
+  derivationFailed: boolean
+}> {
+  let hasServers = false
+  let loaderFailed = false
+  let loaderFailedApplyHealable = false
+  let derivationFailed = false
+  try {
+    const { enabled, errors } = await loadAllPlugins()
+    loaderFailed = errors.some(isPluginLoaderErrorBlocking)
+    loaderFailedApplyHealable = errors.some(isPluginLoaderErrorHealable)
+    for (const plugin of enabled) {
+      const pluginErrors: PluginError[] = []
+      try {
+        const servers = await loadPluginLspServers(plugin, pluginErrors)
+        if (servers !== undefined && Object.keys(servers).length > 0) {
+          hasServers = true
+        }
+      } catch {
+        derivationFailed = true
+      }
+      if (pluginErrors.length > 0) derivationFailed = true
+    }
+  } catch {
+    derivationFailed = true
+  }
+  return {
+    hasServers,
+    loaderFailed,
+    loaderFailedApplyHealable,
+    derivationFailed,
+  }
+}
+
 async function listProjectedPluginMcpServerNames(
   dynamicMcpConfig?: Record<string, { pluginSource?: string } | undefined>,
 ): Promise<Set<string> | null> {

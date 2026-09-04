@@ -10,13 +10,25 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, type Server, type Socket } from 'net'
-import { chmod, lstat, mkdir, readFile, readdir, unlink } from 'fs/promises'
-import { dirname, join, resolve } from 'path'
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  unlink,
+} from 'fs/promises'
+import { dirname, join, resolve, sep } from 'path'
 import { tmpdir } from 'os'
 import { od } from './atomicWriteOd.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
-import { errorMessage } from './errors.js'
+import { errorMessage, getErrnoCode } from './errors.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { attachNdjsonFramer } from './ndjsonFramer.js'
 import { attachUdsResponseReader } from './udsResponseReader.js'
@@ -121,7 +133,30 @@ export const MAX_UDS_LINE_BYTES = 3 * MAX_UDS_LINE_CHARS
 export const MAX_UDS_INBOX_BYTES = 2 * 1024 * 1024
 export const MAX_UDS_CLIENTS = 128
 export const UDS_AUTH_TIMEOUT_MS = 2_000
-export const UDS_IDLE_TIMEOUT_MS = 30_000
+/**
+ * Official `bn` / `firstLineDeadlineMs` default — changelog 2.1.243 #57:
+ * close a connection that sends no complete line within 30 seconds.
+ */
+export const UDS_FIRST_LINE_DEADLINE_MS = 30_000
+/** @deprecated Official It() is first-complete-line, not idle-on-any-data. */
+export const UDS_IDLE_TIMEOUT_MS = UDS_FIRST_LINE_DEADLINE_MS
+
+/**
+ * Official `In` — hint when the sockets path cannot be used.
+ */
+export const UDS_SOCKETS_PATH_HINT =
+  'Point XDG_RUNTIME_DIR or CLAUDE_CODE_TMPDIR at a private (0700) directory you own to use a different location.'
+
+/** Official `Vi`. */
+export const UDS_SOCKETS_PATH_NOT_A_DIRECTORY = `A component of the sockets path is not a directory (a regular file is in the way). ${UDS_SOCKETS_PATH_HINT}`
+
+/** Official `qi`. */
+export const UDS_SOCKETS_PATH_SYMLINK_LOOP = `The sockets path runs through a symlink loop. ${UDS_SOCKETS_PATH_HINT}`
+
+/** Official `s().firstLineDeadlineMs`. */
+let firstLineDeadlineMs = UDS_FIRST_LINE_DEADLINE_MS
+/** Official `s().silentDropReported` — one telemetry hit per process. */
+let silentDropReported = false
 
 /** densable eFd — typed refuse when serialized UDS wire exceeds X1r. */
 export const UDS_MESSAGE_TOO_LARGE_ERROR_CLASS = 'message_too_large' as const
@@ -233,9 +268,19 @@ export function assertValidUnixSocketPath(path: string): void {
   const byteLength = Buffer.byteLength(path, 'utf8')
   if (byteLength > MAX_UNIX_SOCKET_PATH_LENGTH) {
     throw new Error(
-      `[udsMessaging] socket path is ${byteLength} bytes (max ${MAX_UNIX_SOCKET_PATH_LENGTH}): ${path}`,
+      `[uds-messaging] Socket path too long (${byteLength} bytes, max ~${MAX_UNIX_SOCKET_PATH_LENGTH}): ${path}. Try a shorter --messaging-socket-path, or set CLAUDE_CODE_TMPDIR or $XDG_RUNTIME_DIR to a shorter directory.`,
     )
   }
+}
+
+/**
+ * Official runtime root for default Unix sockets: XDG_RUNTIME_DIR, then
+ * CLAUDE_CODE_TMPDIR, then os.tmpdir(). Userns/rootless own XDG_RUNTIME_DIR.
+ */
+export function getUdsRuntimeDir(): string {
+  return (
+    process.env.XDG_RUNTIME_DIR || process.env.CLAUDE_CODE_TMPDIR || tmpdir()
+  )
 }
 
 /**
@@ -255,7 +300,7 @@ export function getDefaultUdsSocketPath(): string {
   }
 
   defaultSocketPath = join(
-    tmpdir(),
+    getUdsRuntimeDir(),
     'cc-socks',
     `${process.pid}-${nonce}`,
     'messaging.sock',
@@ -690,11 +735,64 @@ async function sweepDeadMessagingKeyTmps(
   )
 }
 
+/**
+ * Official 243 sockets-path walk: a regular file in the way → Vi; ELOOP → qi.
+ * Missing components are created later at 0700.
+ */
+async function walkSocketsPathComponents(dir: string): Promise<void> {
+  const resolved = resolve(dir)
+  const parts = resolved.split(/[\\/]+/).filter(part => part.length > 0)
+  if (parts.length === 0) return
+
+  let acc = process.platform === 'win32' ? `${parts[0]}${sep}` : sep
+  const start = process.platform === 'win32' ? 1 : 0
+  for (let i = start; i < parts.length; i++) {
+    acc = join(acc, parts[i]!)
+    try {
+      const stat = await lstat(acc)
+      if (stat.isSymbolicLink()) {
+        try {
+          await realpath(acc)
+        } catch (error) {
+          if (getErrnoCode(error) === 'ELOOP') {
+            throw new Error(UDS_SOCKETS_PATH_SYMLINK_LOOP)
+          }
+          throw error
+        }
+      } else if (stat.isFile() || !stat.isDirectory()) {
+        throw new Error(UDS_SOCKETS_PATH_NOT_A_DIRECTORY)
+      }
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === UDS_SOCKETS_PATH_NOT_A_DIRECTORY
+      ) {
+        throw error
+      }
+      if (
+        error instanceof Error &&
+        error.message === UDS_SOCKETS_PATH_SYMLINK_LOOP
+      ) {
+        throw error
+      }
+      const code = getErrnoCode(error)
+      if (code === 'ENOENT') continue
+      if (code === 'ELOOP') throw new Error(UDS_SOCKETS_PATH_SYMLINK_LOOP)
+      if (code === 'ENOTDIR') throw new Error(UDS_SOCKETS_PATH_NOT_A_DIRECTORY)
+      throw error
+    }
+  }
+}
+
 async function ensureSocketParent(path: string): Promise<void> {
   const dir = dirname(path)
   try {
+    await walkSocketsPathComponents(dir)
     try {
       const stat = await lstat(dir)
+      if (stat.isFile() || (!stat.isDirectory() && !stat.isSymbolicLink())) {
+        throw new Error(UDS_SOCKETS_PATH_NOT_A_DIRECTORY)
+      }
       if (!stat.isDirectory() || stat.isSymbolicLink()) {
         throw new Error(
           `[udsMessaging] socket parent is not a directory: ${dir}`,
@@ -709,6 +807,13 @@ async function ensureSocketParent(path: string): Promise<void> {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await chmod(dir, 0o700)
   } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === UDS_SOCKETS_PATH_NOT_A_DIRECTORY ||
+        error.message === UDS_SOCKETS_PATH_SYMLINK_LOOP)
+    ) {
+      throw error
+    }
     const detail = error instanceof Error ? error.message : String(error)
     // densable SEA: sockets-dir setup failure uses this exact prefix.
     throw new Error(
@@ -1100,7 +1205,11 @@ export function getUdsStartDegradedCause(): string | undefined {
 
 export async function startUdsMessaging(
   path: string,
-  opts?: { isExplicit?: boolean; requireAuth?: boolean },
+  opts?: {
+    isExplicit?: boolean
+    requireAuth?: boolean
+    firstLineDeadlineMs?: number
+  },
 ): Promise<void> {
   if (server) {
     logForDebugging('[udsMessaging] server already running, skipping start')
@@ -1127,6 +1236,8 @@ export async function startUdsMessaging(
   const token = tokens.peerToken
   // Official Ckh: authRequired = t.requireAuth ?? mti()
   authRequired = opts?.requireAuth ?? isMessagingLiveOwnerRequired()
+  // Official `s().firstLineDeadlineMs = n.firstLineDeadlineMs ?? bn`
+  firstLineDeadlineMs = opts?.firstLineDeadlineMs ?? UDS_FIRST_LINE_DEADLINE_MS
   lastStartDegradedCause = undefined
   let startedServer: Server | null = null
   let exportedSocketEnv = false
@@ -1165,10 +1276,51 @@ export async function startUdsMessaging(
             }, UDS_AUTH_TIMEOUT_MS)
           : undefined
         if (authTimer !== undefined) unrefTimer(authTimer)
-        socket.setTimeout(UDS_IDLE_TIMEOUT_MS, () => {
-          logForDebugging('[udsMessaging] closing idle client')
-          closeWithError('idle timeout')
-        })
+        // Official It() — first complete line (including a blank line) clears
+        // the deadline. Not Node socket.setTimeout idle-on-any-data.
+        const deadlineMs = firstLineDeadlineMs
+        let firstLineTimer: ReturnType<typeof setTimeout> | undefined =
+          setTimeout(() => {
+            firstLineTimer = undefined
+            try {
+              logForDebugging(
+                `[uds-messaging] Closing a connection that sent no complete line within ${deadlineMs} ms`,
+              )
+              if (!silentDropReported) {
+                silentDropReported = true
+                logEvent('cross_session_inbox_auth', {
+                  reason:
+                    'silent_connection_deadline' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+              }
+              socket.destroy()
+            } catch (error) {
+              logForDebugging(
+                `[uds-messaging] Failed to close a silent connection: ${error}`,
+                { level: 'warn' },
+              )
+            }
+          }, deadlineMs)
+        unrefTimer(firstLineTimer)
+        const clearFirstLineDeadline = (): void => {
+          if (firstLineTimer !== undefined) {
+            clearTimeout(firstLineTimer)
+            firstLineTimer = undefined
+          }
+        }
+        socket.once('close', clearFirstLineDeadline)
+        socket.once('error', clearFirstLineDeadline)
+        const onDataForDeadline = (chunk: Buffer | string): void => {
+          const hasNewline =
+            typeof chunk === 'string'
+              ? chunk.includes('\n')
+              : chunk.includes(0x0a)
+          if (hasNewline) {
+            clearFirstLineDeadline()
+            socket.off('data', onDataForDeadline)
+          }
+        }
+        socket.on('data', onDataForDeadline)
 
         attachNdjsonFramer<UdsMessage>(
           socket,
@@ -1331,11 +1483,13 @@ export async function startUdsMessaging(
 
         socket.on('close', () => {
           if (authTimer !== undefined) clearTimeout(authTimer)
+          clearFirstLineDeadline()
           clients.delete(socket)
         })
 
         socket.on('error', err => {
           if (authTimer !== undefined) clearTimeout(authTimer)
+          clearFirstLineDeadline()
           clients.delete(socket)
           logForDebugging(`[udsMessaging] client error: ${errorMessage(err)}`)
         })
@@ -1497,6 +1651,10 @@ export async function startUdsMessaging(
     }
     logForDebugging(
       `[udsMessaging] Listening: ${path}${opts?.isExplicit ? ' (explicit)' : ''}`,
+    )
+    logForDebugging(
+      `[uds-messaging] Connect when the data is ready (run the command first, then connect and write its output as ONE line, as in the node recipe above): a connection that sends no complete line within ${firstLineDeadlineMs} ms is closed`,
+      { level: 'info' },
     )
   } catch (error) {
     if (capabilityFilePath) {

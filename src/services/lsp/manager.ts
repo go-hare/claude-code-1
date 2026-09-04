@@ -106,7 +106,8 @@ export function isLspConnected(): boolean {
 
 /**
  * Sticky ever-connected latch (densable SEA `hasEverConnected` / GUr).
- * Latches true the first time isLspConnected() is true; never clears.
+ * Latches true the first time isLspConnected() is true. Clears when init
+ * completes with zero servers and no config load failure (densable 243 #28).
  */
 export function hasEverConnected(): boolean {
   if (!everConnectedLatch && isLspConnected()) {
@@ -240,6 +241,16 @@ export function initializeLspServerManager(): void {
       if (currentGeneration === initializationGeneration) {
         initializationState = 'success'
         logForDebugging('LSP server manager initialized successfully')
+
+        // densable 243 #28: clear sticky latch when reinit finds zero servers
+        // without a config load failure (LSP tool may drop after last plugin off).
+        if (
+          lspManagerInstance &&
+          lspManagerInstance.getAllServers().size === 0 &&
+          !lspManagerInstance.didLastConfigLoadFail()
+        ) {
+          everConnectedLatch = false
+        }
 
         // Register passive notification handlers for diagnostics
         if (lspManagerInstance) {

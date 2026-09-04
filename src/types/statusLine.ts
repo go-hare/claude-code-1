@@ -45,6 +45,7 @@ export type StatusLineCommandInput = {
   }
   exceeds_200k_tokens: boolean // 是否超过 200k 输入警戒
   rate_limits?: {
+    // densable 2.1.243: present only while the API reports the window and resets_at has not passed
     five_hour?: { used_percentage: number; resets_at: number } // 5 小时窗口用量与重置时间戳
     seven_day?: { used_percentage: number; resets_at: number } // 7 天窗口
   }

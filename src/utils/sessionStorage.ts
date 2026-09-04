@@ -4428,9 +4428,14 @@ export function restoreSessionMetadata(meta: {
  * Called when /clear creates a new session so stale metadata
  * from the previous session does not leak into the new one.
  */
-export function clearSessionMetadata(): void {
+export function clearSessionMetadata(
+  options: { keepTitle?: boolean } = {},
+): void {
   const project = getProject()
-  project.currentSessionTitle = undefined
+  // densable 2.1.243 #31 — /clear keeps the /rename title for the new session.
+  if (!options.keepTitle) {
+    project.currentSessionTitle = undefined
+  }
   project.currentSessionAiTitle = undefined
   project.currentSessionTag = undefined
   project.currentSessionRelocatedCwd = undefined

@@ -264,6 +264,9 @@ export function formatAPIError(error: APIError): string {
     if (code === 'StreamSuspended') {
       return 'Connection lost while your computer was asleep'
     }
+    if (code === 'StreamNoResponse') {
+      return 'No response from API'
+    }
     if (code === 'BedrockUnexpectedContentType') {
       return connectionDetails.message
     }

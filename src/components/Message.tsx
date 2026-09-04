@@ -139,6 +139,7 @@ function MessageImpl({
               advisorModel={message.advisorModel as string | undefined}
               apiMessageId={apiMessageId}
               isFirstTextBlock={index === firstTextBlockIndex}
+              isApiError={message.isApiErrorMessage === true}
             />
           ))}
         </Box>
@@ -364,6 +365,7 @@ function AssistantMessageBlock({
   advisorModel,
   apiMessageId,
   isFirstTextBlock,
+  isApiError,
 }: {
   param:
     | BetaContentBlock
@@ -396,6 +398,8 @@ function AssistantMessageBlock({
   apiMessageId?: string;
   /** First text block only receives SFa transformed text (aligns densable Tth) */
   isFirstTextBlock?: boolean;
+  /** densable 2.1.243 #23 — pass through to AssistantTextMessage `Rle`. */
+  isApiError?: boolean;
 }): React.ReactNode {
   // densable SFa = Uy(phH => text && bFa ? phH.displayedMessageContent[bFa] : void 0)
   // Guard: restored/partial AppState may omit displayedMessageContent.
@@ -412,6 +416,7 @@ function AssistantMessageBlock({
           verbose={verbose}
           width={width}
           onOpenRateLimitOptions={onOpenRateLimitOptions}
+          isApiError={isApiError}
         />
       );
     }
@@ -449,6 +454,7 @@ function AssistantMessageBlock({
           verbose={verbose}
           width={width}
           onOpenRateLimitOptions={onOpenRateLimitOptions}
+          isApiError={isApiError}
         />
       );
     }

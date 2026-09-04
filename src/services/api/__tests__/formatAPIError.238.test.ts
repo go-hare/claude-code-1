@@ -114,6 +114,12 @@ describe('densable 2.1.238 #17 formatAPIError T9r', () => {
     ).toBe('Connection lost while your computer was asleep')
   })
 
+  test('densable 2.1.243 #22 StreamNoResponse display', () => {
+    expect(
+      formatAPIError(asAPIError('first-byte', { code: 'StreamNoResponse' })),
+    ).toBe('No response from API')
+  })
+
   test('BedrockUnexpectedContentType keeps inner message', () => {
     expect(
       formatAPIError(

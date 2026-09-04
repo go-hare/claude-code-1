@@ -42,6 +42,7 @@ import { processSessionStartHooks } from '../../utils/sessionStart.js'
 import {
   clearSessionMetadata,
   getAgentTranscriptPath,
+  getCurrentSessionTitle,
   resetSessionFilePointer,
   saveWorktreeState,
 } from '../../utils/sessionStorage.js'
@@ -225,10 +226,23 @@ export async function clearConversation({
         endedByModel: false,
         // densable session reset: clear MessageDisplay salvage map
         displayedMessageContent: {},
-        // densable session_clear: drop name/color, keep prideGradient if set
-        standaloneAgentContext: prev.standaloneAgentContext?.prideGradient
-          ? { prideGradient: prev.standaloneAgentContext.prideGradient }
-          : undefined,
+        // densable 2.1.243 #31: keep /rename name on the prompt bar when the
+        // session title is still set (F=!clearedSessionTitle && ct()!==void 0).
+        standaloneAgentContext: (() => {
+          const keepRename =
+            getCurrentSessionTitle(getSessionId()) !== undefined
+          const name = keepRename
+            ? prev.standaloneAgentContext?.name
+            : undefined
+          const prideGradient = prev.standaloneAgentContext?.prideGradient
+          if (name || prideGradient) {
+            return {
+              ...(name ? { name } : {}),
+              ...(prideGradient ? { prideGradient } : {}),
+            }
+          }
+          return undefined
+        })(),
         fileHistory: {
           snapshots: [],
           trackedFiles: new Set(),
@@ -244,6 +258,8 @@ export async function clearConversation({
           tools: [],
           commands: [],
           resources: {},
+          resourceTemplates: {},
+          suppressedPluginMcpServers: [],
           pluginReconnectKey: prev.mcp.pluginReconnectKey,
         },
       }
@@ -253,9 +269,9 @@ export async function clearConversation({
   // Clear plan slug cache so a new plan file is used after /clear
   clearAllPlanSlugs()
 
-  // Clear cached session metadata (title, tag, agent name/color)
-  // so the new session doesn't inherit the previous session's identity
-  clearSessionMetadata()
+  // densable 2.1.243 #31: keep /rename title for the new session; still wipe
+  // tag / agent / mode so they don't leak. Mode/worktree are re-saved below.
+  clearSessionMetadata({ keepTitle: true })
 
   // Generate new session ID to provide fresh state
   // Set the old session as parent for analytics lineage tracking

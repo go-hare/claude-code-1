@@ -590,7 +590,7 @@ describe('UDS inbox retention', () => {
   test('rejects socket paths longer than AF_UNIX limit', () => {
     if (process.platform === 'win32') return
     const longPath = `/tmp/${'x'.repeat(MAX_UNIX_SOCKET_PATH_LENGTH)}.sock`
-    expect(() => assertValidUnixSocketPath(longPath)).toThrow(/max 104/)
+    expect(() => assertValidUnixSocketPath(longPath)).toThrow(/max ~104/)
   })
 
   test('default socket path can bind on Node.js', async () => {

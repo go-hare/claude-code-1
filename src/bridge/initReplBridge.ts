@@ -128,6 +128,36 @@ export type InitBridgeOptions = {
    * Env CLAUDE_BRIDGE_REATTACH_GROUPING used when reattaching from env.
    */
   sessionGroupingId?: string
+  /**
+   * densable 2.1.243 #58 `localHolderGuard` — when a restored pointer is
+   * still served by another live local pid, decline (notice) or take over.
+   */
+  localHolderGuard?: {
+    mode: 'decline' | 'observe'
+    onDeclined?: (holder: LocalBridgeSessionHolder) => void
+  }
+}
+
+export type LocalBridgeSessionHolder = {
+  pid: number
+  startedAt?: number
+}
+
+/** densable 2.1.243 #58 `Ht` — live local pid advertising this bridge session. */
+export async function findLocalBridgeSessionHolder(
+  sessionId: string,
+): Promise<LocalBridgeSessionHolder | null> {
+  const { listAllLiveSessions } = await import('../utils/udsClient.js')
+  const { toCompatSessionId } = await import('./sessionIdCompat.js')
+  const want = toCompatSessionId(sessionId)
+  const sessions = await listAllLiveSessions()
+  for (const session of sessions) {
+    if (session.pid === process.pid || !session.bridgeSessionId) continue
+    if (session.alive === false) continue
+    if (toCompatSessionId(session.bridgeSessionId) !== want) continue
+    return { pid: session.pid, startedAt: session.startedAt }
+  }
+  return null
 }
 
 export async function initReplBridge(
@@ -153,6 +183,7 @@ export async function initReplBridge(
     reattachSessionId: reattachSessionIdOpt,
     reattachSequenceNum: reattachSequenceNumOpt,
     sessionGroupingId: sessionGroupingIdOpt,
+    localHolderGuard,
   } = options ?? {}
 
   // densable initReplBridge: consume CLAUDE_BRIDGE_REATTACH_* once at entry
@@ -296,6 +327,24 @@ export async function initReplBridge(
     )
     onStateChange?.('failed', "disabled by your organization's policy")
     return null
+  }
+
+  // densable 2.1.243 #58 — restored pointer still served by another local pid.
+  if (localHolderGuard && reattachSessionId) {
+    const holder = await findLocalBridgeSessionHolder(reattachSessionId)
+    if (holder) {
+      if (localHolderGuard.mode === 'decline') {
+        logBridgeSkip(
+          'restored_pointer_held_locally',
+          `[bridge:repl] Skipping: bridge session ${reattachSessionId} from the resumed transcript is still served by local pid ${holder.pid} — not taking it over (/remote-control here moves it)`,
+        )
+        localHolderGuard.onDeclined?.(holder)
+        return null
+      }
+      logForDebugging(
+        `[bridge:repl] Explicit enable is taking over bridge session ${reattachSessionId} from local pid ${holder.pid}`,
+      )
+    }
   }
 
   // When CLAUDE_BRIDGE_OAUTH_TOKEN is set (ant-only local dev), the bridge

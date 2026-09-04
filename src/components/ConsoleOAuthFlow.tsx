@@ -5,7 +5,19 @@ import {
 } from 'src/services/analytics/index.js';
 import { installOAuthTokens } from '../cli/handlers/auth.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { setClipboard, useTerminalNotification, Box, Link, Text, KeyboardShortcutHint } from '@anthropic/ink';
+import {
+  type ClipboardPath,
+  getClipboardPath,
+  probeLinuxClipboardTool,
+  setClipboard,
+  useTerminalNotification,
+  Box,
+  Link,
+  Text,
+  KeyboardShortcutHint,
+  useIsInsideModal,
+  MODAL_LAYOUT_PADDING_X,
+} from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { getSSLErrorHint } from '@ant/model-provider';
 import { sendNotification } from '../services/notifier.js';
@@ -18,7 +30,9 @@ import {
 import { clearOpenAIClientCache } from '../services/api/openai/client.js';
 import { OAuthService } from '../services/oauth/index.js';
 import { getOauthAccountInfo, validateForceLoginOrg } from '../utils/auth.js';
-import { openBrowser } from '../utils/browser.js';
+import { isHeadlessBrowserEnvironment, openBrowser } from '../utils/browser.js';
+import { isFullscreenActive, resolveMouseTrackingMode } from '../utils/fullscreen.js';
+import { getNativeSelectionHoldKey } from './ScrollKeybindingHandler.js';
 import { resolveInteractiveForceLoginMethod } from '../utils/forceLoginMethod.js';
 import { logError } from '../utils/log.js';
 import { getSettings_DEPRECATED, updateSettingsForSource } from '../utils/settings/settings.js';
@@ -34,6 +48,12 @@ type Props = {
   mode?: 'login' | 'setup-token';
   /** densable 2.1.212: includes gateway for Cloud gateway OIDC device flow */
   forceLoginMethod?: 'claudeai' | 'console' | 'gateway';
+  /**
+   * densable urlOutdent F (default 0). Stacked as
+   * q = (useIsInsideModal() ? Io : 0) + F so a long login URL can
+   * marginX:-q out of Pane / FullscreenLayout padding.
+   */
+  urlOutdent?: number;
 };
 
 type OAuthStatus =
@@ -75,6 +95,7 @@ type OAuthStatus =
   | { state: 'china_mode_select'; provider: ProviderPreset; activeIndex: number } // China LLM: pick access mode
   | { state: 'china_model_select'; provider: ProviderPreset; mode: 'api' | 'coding-plan'; activeIndex: number } // China LLM: pick model
   | { state: 'china_apikey'; provider: ProviderPreset; mode: 'api' | 'coding-plan'; modelId: string; apiKey: string } // China LLM: enter API key
+  | { state: 'console_method' } // densable 2.1.243 #5 — Console WIF vs API key
   | { state: 'ready_to_start' } // Flow started, waiting for browser to open
   | { state: 'waiting_for_login'; url: string } // Browser opened, waiting for user to login
   | { state: 'creating_api_key' } // Got access token, creating API key
@@ -96,7 +117,10 @@ export function ConsoleOAuthFlow({
   startingMessage,
   mode = 'login',
   forceLoginMethod: forceLoginMethodProp,
+  urlOutdent: urlOutdentProp = 0,
 }: Props): React.ReactNode {
+  // densable Zo / er / F — q = (useIsInsideModal() ? Io : 0) + urlOutdent
+  const urlOutdent = (useIsInsideModal() ? MODAL_LAYOUT_PADDING_X : 0) + urlOutdentProp;
   // densable n8e — A9t-style interactive forceLoginMethod + admin gateway URL
   const { forceLoginMethod, forceLoginGatewayUrl, gatewayForced } =
     resolveInteractiveForceLoginMethod(forceLoginMethodProp);
@@ -125,8 +149,11 @@ export function ConsoleOAuthFlow({
     if (mode === 'setup-token') {
       return { state: 'ready_to_start' };
     }
-    if (forceLoginMethod === 'claudeai' || forceLoginMethod === 'console') {
+    if (forceLoginMethod === 'claudeai') {
       return { state: 'ready_to_start' };
+    }
+    if (forceLoginMethod === 'console') {
+      return { state: 'console_method' };
     }
     // densable: g → gateway_setup (forceLoginMethod gateway or admin URL prefill)
     if (gatewayForced) {
@@ -142,11 +169,19 @@ export function ConsoleOAuthFlow({
     // Use Claude AI auth for setup-token mode to support user:inference scope
     return mode === 'setup-token' || forceLoginMethod === 'claudeai';
   });
+  // densable 2.1.243 #5 `oe` — Console WIF (keyless) vs create API key.
+  const [preferConsoleToken, setPreferConsoleToken] = useState(true);
   // After a few seconds we suggest the user to copy/paste url if the
   // browser did not open automatically. In this flow we expect the user to
   // copy the code from the browser and paste it in the terminal
   const [showPastePrompt, setShowPastePrompt] = useState(false);
-  const [urlCopied, setUrlCopied] = useState(false);
+  // densable he — copy result path, not a boolean. null until `c`.
+  const [copyPath, setCopyPath] = useState<ClipboardPath | null>(null);
+  // densable Tt — debounce so held/repeated `c` does not retrigger copy.
+  const [copyDebounced, setCopyDebounced] = useState(false);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // densable fr — fullscreen + mouse-on: tell the user how to native-select.
+  const [showFullscreenCopyHint] = useState(() => isFullscreenActive() && resolveMouseTrackingMode() !== 'off');
 
   const textInputColumns = useTerminalSize().columns - PASTE_HERE_MSG.length - 1;
 
@@ -214,18 +249,33 @@ export function ConsoleOAuthFlow({
     },
   );
 
+  // densable Vo / YZb — kick linux clipboard probe while the URL is visible.
   useEffect(() => {
-    if (pastedCode === 'c' && oauthStatus.state === 'waiting_for_login' && showPastePrompt && !urlCopied) {
-      void setClipboard(oauthStatus.url).then(raw => {
-        if (raw) process.stdout.write(raw);
-        setUrlCopied(true);
-        setTimeout(setUrlCopied, 2000, false);
-      });
-      setPastedCode('');
+    if (oauthStatus.state === 'waiting_for_login' && showPastePrompt) {
+      void probeLinuxClipboardTool();
     }
-  }, [pastedCode, oauthStatus, showPastePrompt, urlCopied]);
+  }, [oauthStatus, showPastePrompt]);
+
+  useEffect(() => {
+    if (/^c+$/.test(pastedCode) && oauthStatus.state === 'waiting_for_login' && showPastePrompt) {
+      setPastedCode('');
+      if (!copyDebounced) {
+        setCopyDebounced(true);
+        setTimeout(() => setCopyDebounced(false), 2000);
+        const path = getClipboardPath();
+        void setClipboard(oauthStatus.url).then(raw => {
+          if (raw) process.stdout.write(raw);
+          setCopyPath(path);
+          if (path === 'native') {
+            copyResetTimerRef.current = setTimeout(() => setCopyPath(null), 2000);
+          }
+        });
+      }
+    }
+  }, [pastedCode, oauthStatus, showPastePrompt, copyDebounced]);
 
   async function handleSubmitCode(value: string, url: string) {
+    if (!value.trim()) return;
     try {
       // Expecting format "authorizationCode#state" from the authorization callback URL
       const [authorizationCode, state] = value.split('#');
@@ -262,8 +312,19 @@ export function ConsoleOAuthFlow({
       const result = await oauthService
         .startOAuthFlow(
           async url => {
+            if (copyResetTimerRef.current !== null) {
+              clearTimeout(copyResetTimerRef.current);
+              copyResetTimerRef.current = null;
+            }
+            setCopyPath(null);
+            setShowPastePrompt(false);
             setOAuthStatus({ state: 'waiting_for_login', url });
-            setTimeout(setShowPastePrompt, 3000, true);
+            // densable Xo / D: headless (SSH / no TTY / linux no display) → immediate.
+            if (isHeadlessBrowserEnvironment()) {
+              setShowPastePrompt(true);
+            } else {
+              setTimeout(() => setShowPastePrompt(true), 3000);
+            }
           },
           {
             loginWithClaudeAi,
@@ -299,7 +360,9 @@ export function ConsoleOAuthFlow({
         // Don't save to keychain - the token is displayed for manual use with CLAUDE_CODE_OAUTH_TOKEN
         setOAuthStatus({ state: 'success', token: result.accessToken });
       } else {
-        await installOAuthTokens(result);
+        await installOAuthTokens(result, {
+          skipApiKey: !loginWithClaudeAi && preferConsoleToken,
+        });
 
         const orgResult = await validateForceLoginOrg();
         if (!orgResult.valid) {
@@ -344,7 +407,7 @@ export function ConsoleOAuthFlow({
         ssl_error: sslHint !== null,
       });
     }
-  }, [oauthService, setShowPastePrompt, loginWithClaudeAi, mode, orgUUID]);
+  }, [oauthService, setShowPastePrompt, loginWithClaudeAi, preferConsoleToken, mode, orgUUID]);
 
   const pendingOAuthStartRef = useRef(false);
 
@@ -386,20 +449,41 @@ export function ConsoleOAuthFlow({
   return (
     <Box flexDirection="column" gap={1}>
       {oauthStatus.state === 'waiting_for_login' && showPastePrompt && (
-        <Box flexDirection="column" key="urlToCopy" gap={1} paddingBottom={1}>
-          <Box paddingX={1}>
-            <Text dimColor>Browser didn&apos;t open? Use the url below to sign in </Text>
-            {urlCopied ? (
-              <Text color="success">(Copied!)</Text>
-            ) : (
-              <Text dimColor>
-                <KeyboardShortcutHint shortcut="c" action="copy" parens />
-              </Text>
+        <Box
+          flexDirection="column"
+          key="urlToCopy"
+          gap={1}
+          paddingBottom={1}
+          marginX={urlOutdent ? -urlOutdent : undefined}
+        >
+          <Box flexDirection="column" paddingX={urlOutdent}>
+            <Box>
+              <Text dimColor>Browser didn&apos;t open? Use the url below to sign in </Text>
+              {copyPath === 'native' ? (
+                <Text color="success">(Copied!)</Text>
+              ) : copyPath === null ? (
+                <Text dimColor>
+                  <KeyboardShortcutHint shortcut="c" action="copy" parens />
+                </Text>
+              ) : null}
+            </Box>
+            {copyPath === 'tmux-buffer' && (
+              <Text dimColor>(Copied to tmux buffer · select the URL manually if paste fails)</Text>
             )}
+            {copyPath === 'osc52' && <Text dimColor>(Sent via OSC 52 · select the URL manually if paste fails)</Text>}
           </Box>
-          <Link url={oauthStatus.url}>
-            <Text dimColor>{oauthStatus.url}</Text>
-          </Link>
+          <Box>
+            <Link url={oauthStatus.url} assumeSupport>
+              <Text dimColor>{oauthStatus.url}</Text>
+            </Link>
+          </Box>
+          {showFullscreenCopyHint && (
+            <Box paddingX={urlOutdent}>
+              <Text dimColor>
+                Hold {getNativeSelectionHoldKey()} while selecting to use your terminal&apos;s native copy
+              </Text>
+            </Box>
+          )}
         </Box>
       )}
       {mode === 'setup-token' && oauthStatus.state === 'success' && oauthStatus.token && (
@@ -431,6 +515,7 @@ export function ConsoleOAuthFlow({
           handleSubmitCode={handleSubmitCode}
           setOAuthStatus={setOAuthStatus}
           setLoginWithClaudeAi={setLoginWithClaudeAi}
+          setPreferConsoleToken={setPreferConsoleToken}
           onDone={onDone}
         />
       </Box>
@@ -457,6 +542,7 @@ type OAuthStatusMessageProps = {
   handleSubmitCode: (value: string, url: string) => void;
   setOAuthStatus: (status: OAuthStatus) => void;
   setLoginWithClaudeAi: (value: boolean) => void;
+  setPreferConsoleToken: (value: boolean) => void;
 };
 
 function OAuthStatusMessage({
@@ -476,6 +562,7 @@ function OAuthStatusMessage({
   handleSubmitCode,
   setOAuthStatus,
   setLoginWithClaudeAi,
+  setPreferConsoleToken,
   onDone,
 }: OAuthStatusMessageProps): React.ReactNode {
   switch (oauthStatus.state) {
@@ -498,6 +585,50 @@ function OAuthStatusMessage({
           <Text dimColor>
             Press <Text bold>Enter</Text> to continue.
           </Text>
+        </Box>
+      );
+    case 'console_method':
+      return (
+        <Box flexDirection="column" gap={1} marginTop={1}>
+          <Text bold>Anthropic Console account</Text>
+          <Text>How do you want to sign in?</Text>
+          <Select
+            options={[
+              {
+                label: (
+                  <Text>
+                    Sign in with your Console account <Text dimColor>(recommended)</Text>
+                  </Text>
+                ),
+                value: 'wif',
+              },
+              {
+                label: (
+                  <Text>
+                    Create an API key <Text dimColor>(legacy)</Text> ·{' '}
+                    <Text dimColor>adds a key to your Console workspace</Text>
+                  </Text>
+                ),
+                value: 'api-key',
+              },
+              { label: 'Go back', value: 'back' },
+            ]}
+            onChange={value => {
+              if (value === 'back') {
+                setOAuthStatus({ state: 'idle' });
+                return;
+              }
+              setLoginWithClaudeAi(false);
+              if (value === 'wif') {
+                logEvent('tengu_oauth_console_token_selected', {});
+                setPreferConsoleToken(true);
+              } else {
+                logEvent('tengu_oauth_console_api_key_selected', {});
+                setPreferConsoleToken(false);
+              }
+              setOAuthStatus({ state: 'ready_to_start' });
+            }}
+          />
         </Box>
       );
     case 'idle':
@@ -645,13 +776,14 @@ function OAuthStatusMessage({
                   logEvent('tengu_oauth_platform_selected', {});
                   setOAuthStatus({ state: 'platform_setup' });
                 } else {
-                  setOAuthStatus({ state: 'ready_to_start' });
                   if (value === 'claudeai') {
                     logEvent('tengu_oauth_claudeai_selected', {});
                     setLoginWithClaudeAi(true);
+                    setOAuthStatus({ state: 'ready_to_start' });
                   } else {
                     logEvent('tengu_oauth_console_selected', {});
                     setLoginWithClaudeAi(false);
+                    setOAuthStatus({ state: 'console_method' });
                   }
                 }
               }}

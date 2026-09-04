@@ -28,6 +28,14 @@ import {
   isSuppressible403,
   validateBridgeId,
 } from './bridgeApi.js'
+import {
+  drainPendingRequeues,
+  formatExpiredReconnectMessage,
+  formatOfflineCleanupMessages,
+  isEnvironmentGone,
+  MAX_ENV_REREGISTER_ATTEMPTS,
+  reregisterEnvironment,
+} from './envReregister.js'
 import { formatDuration } from './bridgeStatusUtil.js'
 import { createBridgeLogger } from './bridgeUI.js'
 import { createCapacityWake } from './capacityWake.js'
@@ -159,6 +167,15 @@ export async function runBridgeLoop(
     signal.addEventListener('abort', () => controller.abort(), { once: true })
   }
   const loopSignal = controller.signal
+  // Official `B` — poll secret is replaced in-place after a 404 remint.
+  let currentEnvironmentSecret = environmentSecret
+  // Official `A` / `ne` / `v` / `N` / `X` / `G` (densable 2.1.243 #55).
+  let reregisterAttempts = 0
+  let envJustReregistered = false
+  const pendingRequeues = new Map<string, number>()
+  let sessionCrashed = false
+  const crashedSessionIds = new Set<string>()
+  const keptOfflineWorktrees = new Set<string>()
 
   const activeSessions = new Map<string, SessionHandle>()
   const sessionStartTimes = new Map<string, number>()
@@ -260,6 +277,12 @@ export async function runBridgeLoop(
           `[bridge:heartbeat] Re-queued sessionId=${sessionId} via bridge/reconnect`,
         )
       } catch (err) {
+        if (isEnvironmentGone(err)) {
+          logForDebugging(
+            `[bridge:heartbeat] reconnectSession(${sessionId}) skipped — resource gone: ${errorMessage(err)}`,
+          )
+          continue
+        }
         logger.logError(
           `Failed to refresh session ${sessionId} token: ${errorMessage(err)}`,
         )
@@ -547,22 +570,39 @@ export async function runBridgeLoop(
         completedWorkIds.add(workId)
       }
 
-      // Clean up worktree if one was created for this session
+      // Official `f` / `X` / `N` / `G` — crash keeps the worktree so an
+      // offline env-gone fatal can tell the user where the files are.
+      const crashedOffline =
+        status === 'failed' && !loopSignal.aborted && !wasTimedOut
+      if (crashedOffline) {
+        crashedSessionIds.add(sessionId)
+        sessionCrashed = true
+      }
+
       const wt = sessionWorktrees.get(sessionId)
       if (wt) {
         sessionWorktrees.delete(sessionId)
-        trackCleanup(
-          removeAgentWorktree(
-            wt.worktreePath,
-            wt.worktreeBranch,
-            wt.gitRoot,
-            wt.hookBased,
-          ).catch((err: unknown) =>
-            logger.logVerbose(
-              `Failed to remove worktree ${wt.worktreePath}: ${errorMessage(err)}`,
+        if (crashedOffline) {
+          logger.logStatus(
+            `kept worktree ${wt.worktreePath} \u00b7 session crashed`,
+          )
+          if (failureMessage?.includes('transport closed')) {
+            keptOfflineWorktrees.add(wt.worktreePath)
+          }
+        } else {
+          trackCleanup(
+            removeAgentWorktree(
+              wt.worktreePath,
+              wt.worktreeBranch,
+              wt.gitRoot,
+              wt.hookBased,
+            ).catch((err: unknown) =>
+              logger.logVerbose(
+                `Failed to remove worktree ${wt.worktreePath}: ${errorMessage(err)}`,
+              ),
             ),
-          ),
-        )
+          )
+        }
       }
 
       // Lifecycle decision: in multi-session mode, keep the bridge running
@@ -624,7 +664,7 @@ export async function runBridgeLoop(
       )
       const work = await api.pollForWork(
         environmentId,
-        environmentSecret,
+        currentEnvironmentSecret,
         loopSignal,
         pollConfig.reclaim_older_than_ms,
       )
@@ -649,10 +689,30 @@ export async function runBridgeLoop(
       connErrorStart = null
       generalErrorStart = null
       lastPollErrorTime = null
+      sessionCrashed = false
+      if (envJustReregistered) {
+        envJustReregistered = false
+        logEvent('tengu_bridge_env_reregister', {
+          attempt: reregisterAttempts,
+          outcome:
+            'recovered' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        logForDiagnosticsNoPII('info', 'bridge_env_reregister')
+      }
+      reregisterAttempts = 0
 
       // Null response = no work available in the queue.
       // Add a minimum delay to avoid hammering the server.
       if (!work) {
+        if (pendingRequeues.size > 0) {
+          await drainPendingRequeues({
+            pendingRequeues,
+            activeSessions,
+            api,
+            environmentId,
+            signal: loopSignal,
+          })
+        }
         // Use live check (not a snapshot) since sessions can end during poll.
         const atCap = activeSessions.size >= config.maxSessions
         if (atCap) {
@@ -1268,16 +1328,91 @@ export async function runBridgeLoop(
         break
       }
 
-      // Fatal errors (401/403) — no point retrying, auth won't fix itself
+      // Fatal errors (401/403) — no point retrying, auth won't fix itself.
+      // Official 2.1.243 #55: mid-session poll 404 remints the same env
+      // (`pn`) unless the last session already crashed idle (`N && empty`)
+      // or the error is an expiry type. Official `An()` is an imported
+      // sync predicate with no in-module body / no gate string — 243
+      // product path is ON.
       if (err instanceof BridgeFatalError) {
+        if (
+          err.status === 404 &&
+          !isExpiredErrorType(err.errorType) &&
+          !(sessionCrashed && activeSessions.size === 0)
+        ) {
+          if (reregisterAttempts < MAX_ENV_REREGISTER_ATTEMPTS) {
+            reregisterAttempts++
+            logger.logVerbose(
+              `Server no longer has this environment \u2014 re-registering (attempt ${reregisterAttempts}/${MAX_ENV_REREGISTER_ATTEMPTS})`,
+            )
+            const remint = await reregisterEnvironment({
+              api,
+              config,
+              environmentId,
+              activeSessions,
+              attempt: reregisterAttempts,
+              signal: loopSignal,
+            })
+            if (loopSignal.aborted) {
+              break
+            }
+            if (remint.outcome !== 'fatal') {
+              if (remint.outcome === 'reregistered') {
+                currentEnvironmentSecret = remint.environmentSecret
+                envJustReregistered = true
+                const previous = new Map(pendingRequeues)
+                pendingRequeues.clear()
+                for (const sessionId of remint.pendingRequeues) {
+                  pendingRequeues.set(
+                    sessionId,
+                    (previous.get(sessionId) ?? 0) + 1,
+                  )
+                }
+              }
+              logger.logVerbose(
+                remint.outcome === 'reregistered'
+                  ? 'Environment re-registered; resuming poll.'
+                  : 'Re-registration failed; retrying after backoff.',
+              )
+              await sleep(
+                Math.max(
+                  addJitter(backoffConfig.connInitialMs * reregisterAttempts),
+                  Math.min(
+                    remint.outcome === 'transient'
+                      ? (remint.retryAfterMs ?? 0)
+                      : 0,
+                    backoffConfig.connCapMs,
+                  ),
+                ),
+                loopSignal,
+              )
+              continue
+            }
+          } else {
+            logEvent('tengu_bridge_env_reregister', {
+              attempt: reregisterAttempts,
+              outcome:
+                'gave_up' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            logForDiagnosticsNoPII('error', 'bridge_env_reregister', {
+              outcome: 'gave_up',
+            })
+          }
+        }
         fatalExit = true
-        // Server-enforced expiry gets a clean status message, not an error
-        if (isExpiredErrorType(err.errorType)) {
-          logger.logStatus(err.message)
+        if (err.status !== 401 && isExpiredErrorType(err.errorType)) {
+          logger.logStatus(formatExpiredReconnectMessage(err.message))
         } else if (isSuppressible403(err)) {
           // Cosmetic 403 errors (e.g., external_poll_sessions scope,
           // environments:manage permission) — don't show to user
           logForDebugging(`[bridge:work] Suppressed 403 error: ${err.message}`)
+        } else if (isEnvironmentGone(err) && crashedSessionIds.size > 0) {
+          for (const line of formatOfflineCleanupMessages({
+            crashedSessionCount: crashedSessionIds.size,
+            keptWorktreePaths: [...keptOfflineWorktrees],
+          })) {
+            logger.logStatus(line)
+          }
         } else {
           logger.logError(err.message)
           logError(err)
@@ -1529,13 +1664,22 @@ export async function runBridgeLoop(
     // Stop all active work items so the server knows they're done
     await Promise.allSettled(
       [...shutdownWorkIds.entries()].map(([sessionId, workId]) => {
-        return api
-          .stopWork(environmentId, workId, true)
-          .catch(err =>
-            logger.logVerbose(
-              `Failed to stop work ${workId} for session ${sessionId}: ${errorMessage(err)}`,
-            ),
+        return api.stopWork(environmentId, workId, true).catch(err => {
+          if (isEnvironmentGone(err)) {
+            logForDiagnosticsNoPII('warn', 'bridge_work_stop', {
+              outcome: 'env_gone',
+            })
+          } else {
+            const status =
+              err instanceof BridgeFatalError ? err.status : undefined
+            logForDiagnosticsNoPII('error', 'bridge_work_stop', {
+              outcome: status === 403 ? 'shutdown_403' : 'shutdown_failed',
+            })
+          }
+          logger.logVerbose(
+            `Failed to stop work ${workId} for session ${sessionId}: ${errorMessage(err)}`,
           )
+        })
       }),
     )
   }
@@ -1675,8 +1819,26 @@ async function stopWorkWithRetry(
           logForDebugging(
             `[bridge:work] Suppressed stopWork 403 for ${workId}: ${err.message}`,
           )
+          logForDiagnosticsNoPII('warn', 'bridge_work_stop', {
+            outcome: 'fatal_403',
+          })
+        } else if (isEnvironmentGone(err)) {
+          logForDebugging(
+            `[bridge:work] stopWork skipped for ${workId} \u2014 environment gone: ${err.message}`,
+          )
+          logForDiagnosticsNoPII('warn', 'bridge_work_stop', {
+            outcome: 'env_gone',
+          })
         } else {
           logger.logError(`Failed to stop work ${workId}: ${err.message}`)
+          logForDiagnosticsNoPII('error', 'bridge_work_stop', {
+            outcome:
+              err.status === 401
+                ? 'fatal_401'
+                : err.status === 403
+                  ? 'fatal_403'
+                  : 'fatal_other',
+          })
         }
         logForDiagnosticsNoPII('error', 'bridge_stop_work_failed', {
           attempts: attempt,

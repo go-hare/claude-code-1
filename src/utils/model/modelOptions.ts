@@ -8,11 +8,13 @@ import {
 import { getModelStrings } from './modelStrings.js'
 import { getAntModels } from './antModels.js'
 import {
+  COST_TIER_2_10,
   COST_TIER_3_15,
   COST_HAIKU_35,
   COST_HAIKU_45,
   formatModelPricing,
 } from '../modelCost.js'
+import { getModelPickerSetting } from './modelPickerSetting.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.js'
 import { getAPIProvider } from './providers.js'
@@ -179,7 +181,7 @@ function getSonnet5Option(): ModelOption {
         ? 'sonnet'
         : getModelStrings().sonnet5,
     label: 'Sonnet',
-    description: `Sonnet 5 · Efficient for routine tasks${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
+    description: `Sonnet 5 · Efficient for routine tasks${is3P ? '' : ` · ${formatModelPricing(COST_TIER_2_10)}`}`,
     descriptionForModel:
       'Sonnet 5 - efficient for routine tasks. Generally recommended for most coding tasks',
   }
@@ -283,7 +285,7 @@ export function getSonnet5_1MOption(): ModelOption {
   return {
     value: is3P ? getModelStrings().sonnet5 + '[1m]' : 'sonnet[1m]',
     label: 'Sonnet 5 (1M context)',
-    description: `Sonnet 5 for long sessions${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
+    description: `Sonnet 5 for long sessions${is3P ? '' : ` · ${formatModelPricing(COST_TIER_2_10)}`}`,
     descriptionForModel:
       'Sonnet 5 with 1M context window - for long sessions with large codebases',
   }
@@ -408,7 +410,7 @@ export function getMaxSonnet5_1MOption(): ModelOption {
   return {
     value: 'sonnet[1m]',
     label: 'Sonnet 5 (1M context)',
-    description: `Sonnet 5 with 1M context${billingInfo}${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
+    description: `Sonnet 5 with 1M context${billingInfo}${is3P ? '' : ` · ${formatModelPricing(COST_TIER_2_10)}`}`,
   }
 }
 
@@ -694,6 +696,32 @@ export function getKnownModelOption(model: string): ModelOption | null {
   }
 }
 
+function applyCuratedModelPickerOptions(options: ModelOption[]): ModelOption[] {
+  const picker = getModelPickerSetting()
+  if (!picker || picker.options.length === 0) {
+    return options
+  }
+
+  const curated: ModelOption[] = picker.options.map(row => ({
+    value: row.model,
+    label: row.label?.trim() || row.model,
+    description: row.description?.trim() || `Custom model (${row.model})`,
+  }))
+
+  // densable: replaceBuiltInOptions keeps only Default (value===null) + curated.
+  if (picker.replaceBuiltInOptions === true) {
+    return [...options.filter(opt => opt.value === null), ...curated]
+  }
+
+  const next = [...options]
+  for (const row of curated) {
+    if (!next.some(existing => existing.value === row.value)) {
+      next.push(row)
+    }
+  }
+  return next
+}
+
 export function getModelOptions(fastMode = false): ModelOption[] {
   const options = getModelOptionsBase(fastMode)
 
@@ -799,11 +827,14 @@ function readGatewayModelOptionsFromCache(): ModelOption[] {
  * Always preserves the "Default" option (value: null).
  */
 function filterModelOptionsByAllowlist(options: ModelOption[]): ModelOption[] {
+  // densable 2.1.243 #2 — apply after built-in / gateway / env custom so
+  // replaceBuiltInOptions can hide those rows.
+  const curated = applyCuratedModelPickerOptions(options)
   const settings = getSettings_DEPRECATED() || {}
   if (!settings.availableModels) {
-    return options // No restrictions
+    return curated
   }
-  return options.filter(
+  return curated.filter(
     opt =>
       opt.value === null || (opt.value !== null && isModelAllowed(opt.value)),
   )

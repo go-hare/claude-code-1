@@ -56,6 +56,7 @@ export async function setupTokenHandler(root: Root): Promise<void> {
               }}
               mode="setup-token"
               startingMessage="This will guide you through long-lived (1-year) auth token setup for your Claude account. Claude subscription required."
+              urlOutdent={1}
             />
           </Box>
         </KeybindingSetup>

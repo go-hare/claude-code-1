@@ -5,7 +5,7 @@ import { clearTrustedDeviceToken, enrollTrustedDevice } from '../../bridge/trust
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { ConsoleOAuthFlow } from '../../components/ConsoleOAuthFlow.js';
-import { Box, Dialog, useInput } from '@anthropic/ink';
+import { Box, Dialog, PANE_PADDING_X_INLINE, PANE_PADDING_X_MODAL, useInput, useIsInsideModal } from '@anthropic/ink';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { Text } from '@anthropic/ink';
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js';
@@ -123,6 +123,8 @@ export function Login(props: {
   authStatus?: import('./getAuthStatus.js').AuthStatus;
 }): React.ReactNode {
   const mainLoopModel = useMainLoopModel();
+  // densable I() / V / x — urlOutdent is Pane paddingX (modal 1, inline 2)
+  const urlOutdent = useIsInsideModal() ? PANE_PADDING_X_MODAL : PANE_PADDING_X_INLINE;
   const [showWorkspaceKeyInput, setShowWorkspaceKeyInput] = React.useState(false);
   // 'idle' | 'confirm-remove' | 'removing' | { error: string }
   const [removeState, setRemoveState] = React.useState<
@@ -233,6 +235,7 @@ export function Login(props: {
             <ConsoleOAuthFlow
               onDone={() => props.onDone(true, mainLoopModel)}
               startingMessage={props.startingMessage}
+              urlOutdent={urlOutdent}
             />
           </>
         )}

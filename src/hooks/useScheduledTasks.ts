@@ -268,16 +268,21 @@ export function useScheduledTasks({
           // densable UXm / Cfr: kind:loop + noop-fold → fold prior noop span when idle.
           // Always stamp cronKind:'loop' so later Cfr sessions keep fold anchors.
           if (task.kind === 'loop') {
+            const loop = {
+              prompt: task.prompt,
+              cron: task.cron,
+              isDynamic: true,
+            }
             if (isLoopNoopFoldEnabled()) {
               setMessages(prev =>
-                appendLoopWakeupMessages(prev, !isLoadingRef.current),
+                appendLoopWakeupMessages(prev, !isLoadingRef.current, loop),
               )
             } else {
               setMessages(prev => [
                 ...prev,
                 createLoopScheduledTaskFireMessage(
                   `Claude resuming /loop wakeup (${formatCronFireTime(new Date())})`,
-                  { cronKind: 'loop' },
+                  { cronKind: 'loop', loop },
                 ),
               ])
             }

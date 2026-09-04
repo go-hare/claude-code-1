@@ -80,7 +80,9 @@ export function isKairosLoopDynamicEnabled(): boolean {
  * densable `Cfr` — when true, ScheduleWakeup inputSchema includes required `noop`.
  */
 export function isLoopNoopFoldEnabled(): boolean {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_loop_noop_fold', false)
+  // densable 2.1.243 #50: SEA has loop_noop_fold on the product path and no
+  // tengu_loop_noop_fold GB. Default ON so idle /loop ticks fold to one row.
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_loop_noop_fold', true)
 }
 
 /**

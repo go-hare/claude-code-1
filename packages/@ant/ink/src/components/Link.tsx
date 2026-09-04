@@ -7,13 +7,15 @@ export type Props = {
   readonly children?: ReactNode;
   readonly url: string;
   readonly fallback?: ReactNode;
+  /** densable assumeSupport — force OSC 8 wrap even when autodetection is off */
+  readonly assumeSupport?: boolean;
 };
 
-export default function Link({ children, url, fallback }: Props): React.ReactNode {
+export default function Link({ children, url, fallback, assumeSupport = false }: Props): React.ReactNode {
   // Use children if provided, otherwise display the URL
   const content = children ?? url;
 
-  if (supportsHyperlinks()) {
+  if (assumeSupport || supportsHyperlinks()) {
     // Wrap in Text to ensure we're in a text context
     // (ink-link is a text element like ink-text)
     return (

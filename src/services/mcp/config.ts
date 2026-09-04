@@ -22,6 +22,7 @@ import {
 } from '../../utils/computerUse/common.js'
 import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { getGlobalClaudeFile } from '../../utils/env.js'
 import {
   getMcpPolicyDenyExpansionEnv,
   getMcpPolicyPrimaryEnv,
@@ -619,7 +620,7 @@ export function isMcpServerDenied(
  * @param config Optional server config for command/URL-based matching
  * @returns true if allowed, false if blocked by policy
  */
-function isMcpServerAllowedByPolicy(
+export function isMcpServerAllowedByPolicy(
   serverName: string,
   config?: McpServerConfig,
 ): boolean {
@@ -1192,6 +1193,8 @@ export function getMcpConfigsByScope(
         configObject: { mcpServers },
         expandVars,
         scope: 'user',
+        // densable 2.1.243 #30 — ~/.claude.json must be named on /status.
+        filePath: getGlobalClaudeFile(),
       })
 
       return {
@@ -1209,6 +1212,8 @@ export function getMcpConfigsByScope(
         configObject: { mcpServers },
         expandVars,
         scope: 'local',
+        // Local MCP lives in the same ~/.claude.json projects map.
+        filePath: getGlobalClaudeFile(),
       })
 
       return {

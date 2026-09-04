@@ -19,10 +19,12 @@
  *      TRUE (what the
  *      model sees IS what's at each pixel) and we are not keyboard-focused.
  *   b. Frontmost gate — branched by actionKind:
- *        mouse:    frontmost ∈ allowlist ∪ {hostBundleId, Finder} → pass.
- *                  hostBundleId passes because the executor's
- *                  `withClickThrough` bracket makes us click-through.
- *        keyboard: frontmost ∈ allowlist ∪ {Finder} → pass.
+ *        mouse:    frontmost ∈ allowlist ∪ {hostBundleId} → pass.
+ *                  Desktop/Dock/Finder require a Finder (or File Explorer)
+ *                  grant (densable 2.1.243 #53). hostBundleId passes because
+ *                  the executor's `withClickThrough` bracket makes us
+ *                  click-through.
+ *        keyboard: frontmost ∈ allowlist → pass.
  *                  hostBundleId → ERROR (safety net — defocus should have
  *                  moved us off; if it didn't, typing would go into our
  *                  own chat box).
@@ -94,10 +96,67 @@ import type {
 import { toLoggerDetail } from './types.js'
 
 /**
- * Finder is never hidden by the hide loop (hiding Finder kills the Desktop),
- * so it's always a valid frontmost.
+ * densable 2.1.243 #53 — desktop / Dock / Finder are not a free pass.
+ * Official `Ee` / `Tn` / `me` / `dn` / `ar`.
  */
 const FINDER_BUNDLE_ID = 'com.apple.finder'
+const SYSTEM_MENU_BAR_BUNDLE_ID = 'com.anthropic.cu.systemMenuBar'
+const WINDIR_PREFIX = process.env.WINDIR
+  ? `${process.env.WINDIR}\\`.toLowerCase()
+  : undefined
+const FILE_EXPLORER_PATH = WINDIR_PREFIX
+  ? `${WINDIR_PREFIX}explorer.exe`
+  : undefined
+const SYSTEMAPPS_PREFIX = WINDIR_PREFIX
+  ? `${WINDIR_PREFIX}systemapps\\`
+  : undefined
+const WINDOWS_SHELL_HOSTS = new Set([
+  'startmenuexperiencehost.exe',
+  'shellexperiencehost.exe',
+  'searchui.exe',
+  'searchapp.exe',
+  'searchhost.exe',
+])
+
+/** Official `Ue` — last path segment, lowercased. */
+function shellHostBasename(bundleId: string): string {
+  return bundleId.toLowerCase().split(/[\\/]/).pop() ?? ''
+}
+
+/** Official `At` — Finder, explorer.exe, or a Windows SystemApps shell host. */
+export function isDesktopShell(bundleId: string): boolean {
+  if (bundleId === FINDER_BUNDLE_ID) return true
+  if (!FILE_EXPLORER_PATH || !SYSTEMAPPS_PREFIX) return false
+  const n = bundleId.toLowerCase()
+  if (n === FILE_EXPLORER_PATH) return true
+  if (!WINDOWS_SHELL_HOSTS.has(shellHostBasename(bundleId))) return false
+  return n.startsWith(SYSTEMAPPS_PREFIX)
+}
+
+/** Official `lr` — the Finder / File Explorer grant that covers the desktop shell. */
+function finderOrExplorerGrant(
+  allowedApps: ComputerUseOverrides['allowedApps'],
+  platform: string,
+): ComputerUseOverrides['allowedApps'][number] | undefined {
+  if (platform === 'darwin') {
+    return allowedApps.find(t => t.bundleId === FINDER_BUNDLE_ID)
+  }
+  return allowedApps.find(t => t.bundleId.toLowerCase() === FILE_EXPLORER_PATH)
+}
+
+/** Official `Ze` — exact grant, else inherit Finder/Explorer when the target is the desktop shell. */
+export function lookupGrantedTier(
+  bundleId: string,
+  allowedApps: ComputerUseOverrides['allowedApps'],
+  platform: string,
+): ComputerUseOverrides['allowedApps'][number]['tier'] | undefined {
+  return (
+    allowedApps.find(o => o.bundleId === bundleId)?.tier ??
+    (isDesktopShell(bundleId)
+      ? finderOrExplorerGrant(allowedApps, platform)?.tier
+      : undefined)
+  )
+}
 
 /**
  * Categorical error classes for the cu_tool_call telemetry event. Never
@@ -121,6 +180,7 @@ export type CuErrorKind =
   | 'display_error' // display enumeration failed (platform)
   | 'launch_failed' // failed to launch an external process (e.g. terminal)
   | 'element_not_found' // UI element not found (e.g. window, automation element)
+  | 'hit_test_self_intercept' // overlay intercepted the hit-test (243 #53)
   | 'other'
 
 /**
@@ -478,15 +538,11 @@ async function runInputActionGates(
 
   // Frontmost gate. Check FRESH on every call.
   const frontmost = await adapter.executor.getFrontmostApp()
+  const platform = adapter.executor.capabilities.platform
 
-  const tierByBundleId = new Map(
-    overrides.allowedApps.map(a => [a.bundleId, a.tier] as const),
-  )
-
-  // After handleToolCall's tier backfill, every grant has a concrete tier —
-  // .get() returning undefined means the app is not in the allowlist at all.
+  // densable 2.1.243 #53 `Ze` — desktop-shell frontmost inherits Finder/Explorer.
   const frontmostTier = frontmost
-    ? tierByBundleId.get(frontmost.bundleId)
+    ? lookupGrantedTier(frontmost.bundleId, overrides.allowedApps, platform)
     : undefined
 
   // Clipboard guard. Per-action, not per-tool-call — runs for every sub-action
@@ -555,8 +611,19 @@ async function runInputActionGates(
       'tier_insufficient',
     )
   }
-  // Finder is never-hide, always allowed.
-  if (frontmost.bundleId === FINDER_BUNDLE_ID) return null
+  // densable 2.1.243 #53 `At` — desktop shell needs an explicit Finder / File Explorer grant.
+  if (isDesktopShell(frontmost.bundleId)) {
+    if (actionKind === 'mouse_position') return null
+    const shellName = platform === 'win32' ? 'File Explorer' : 'Finder'
+    const clickOnly =
+      platform === 'win32'
+        ? ' That grant is click-only: typing into the shell stays blocked.'
+        : ''
+    return errorResult(
+      `The desktop shell is frontmost. Double-click, right-click, and Enter on desktop items can launch applications outside the allowlist. To click on the desktop, taskbar, Start menu, Search, or file manager, call request_access with exactly "${shellName}" in the apps array — that single grant covers all of them.${clickOnly} To interact with a different app, use open_application to bring it forward.`,
+      'app_not_granted',
+    )
+  }
 
   if (frontmost.bundleId === hostBundleId) {
     if (actionKind !== 'keyboard') {
@@ -591,11 +658,11 @@ async function runInputActionGates(
  * click actually goes to the read-tier app.
  *
  * Runs AFTER `scaleCoord` (needs global coords) and BEFORE the executor call.
- * Returns null on pass (target is tier-"click"/"full", or desktop/Finder/us),
+ * Returns null on pass (target is tier-"click"/"full", or granted desktop shell),
  * error-result on block.
  *
- * When `appUnderPoint` returns null (desktop, or platform without hit-test),
- * falls through — the frontmost check in `runInputActionGates` already ran.
+ * densable 2.1.243 #53: a null hit-test (desktop) synthesizes Finder; the
+ * macOS menu-bar / Dock id remaps to Finder unless frontmost is already granted.
  */
 async function runHitTestGate(
   adapter: ComputerUseHostAdapter,
@@ -605,6 +672,7 @@ async function runHitTestGate(
   y: number,
   actionKind: CuActionKind,
 ): Promise<CuCallToolResult | null> {
+  const platform = adapter.executor.capabilities.platform
   // Non-macOS: HWND-bound mode — clicks go to the bound window via
   // SendMessage with window-relative coordinates. Hit-test against the
   // real screen is meaningless.
@@ -612,22 +680,53 @@ async function runHitTestGate(
     return null
   }
 
-  const target = await adapter.executor.appUnderPoint(x, y)
-  if (!target) return null // desktop / nothing under point / platform no-op
+  let target = await adapter.executor.appUnderPoint(x, y)
+  // Official: if(!d)d={bundleId:Ee,displayName:"Finder"}
+  if (!target) target = { bundleId: FINDER_BUNDLE_ID, displayName: 'Finder' }
 
-  // Finder (desktop, file dialogs) is always clickable — same exemption as
-  // runInputActionGates. Our own overlay is filtered by Swift (pid != self).
-  if (target.bundleId === FINDER_BUNDLE_ID) return null
+  // Official: darwin + systemMenuBar → pass if frontmost already granted, else Finder.
+  if (platform === 'darwin' && target.bundleId === SYSTEM_MENU_BAR_BUNDLE_ID) {
+    const frontmost = await adapter.executor.getFrontmostApp()
+    if (
+      frontmost !== null &&
+      lookupGrantedTier(frontmost.bundleId, overrides.allowedApps, platform) !==
+        undefined
+    ) {
+      return null
+    }
+    target = { bundleId: FINDER_BUNDLE_ID, displayName: 'Finder' }
+  }
 
-  const tierByBundleId = new Map(
-    overrides.allowedApps.map(a => [a.bundleId, a.tier] as const),
+  const hostBundleId = adapter.executor.capabilities.hostBundleId
+  if (target.bundleId === hostBundleId) {
+    return errorResult(
+      'Could not verify the click target — the Claude overlay intercepted ' +
+        'the hit test. This can happen under heavy GPU or RDP load. Retry.',
+      'hit_test_self_intercept',
+    )
+  }
+
+  const targetTier = lookupGrantedTier(
+    target.bundleId,
+    overrides.allowedApps,
+    platform,
   )
 
-  if (!tierByBundleId.has(target.bundleId)) {
-    // Not in the allowlist at all. The frontmost check would catch this if
-    // the target were frontmost, but here a different app is in front. This
-    // is the "something popped up" edge case — a new window appeared between
-    // screenshot and click, or a background app's window overlaps the target.
+  if (targetTier === undefined) {
+    if (isDesktopShell(target.bundleId)) {
+      const shellName = platform === 'win32' ? 'File Explorer' : 'Finder'
+      const frontmost = await adapter.executor.getFrontmostApp()
+      const noFocus = frontmost
+        ? ''
+        : ' (No app currently has focus — if this is a momentary focus ' +
+          'transition, take a fresh screenshot and retry instead.)'
+      return errorResult(
+        `The click would land on the desktop shell (Dock, Spotlight, desktop icons, or the taskbar/Start menu). These can launch applications outside the allowlist. To interact with any of them, call request_access with exactly "${shellName}" in the ` +
+          'apps array — that single grant covers all of them.' +
+          noFocus,
+        'app_not_granted',
+      )
+    }
     return errorResult(
       `Click at these coordinates would land on "${target.displayName}", ` +
         `which is not in the allowed applications. Take a fresh screenshot ` +
@@ -635,8 +734,6 @@ async function runHitTestGate(
       'app_not_granted',
     )
   }
-
-  const targetTier = tierByBundleId.get(target.bundleId)
 
   // Frontmost-based sync (runInputActionGates) misses the case where
   // the click lands on a NON-FRONTMOST click-tier window. Re-sync by
@@ -827,6 +924,7 @@ function resolveRequestedApps(
   requestedNames: string[],
   installed: InstalledApp[],
   alreadyGrantedBundleIds: ReadonlySet<string>,
+  platform: string = process.platform,
 ): ResolvedAppRequest[] {
   const byLowerDisplayName = new Map<string, InstalledApp>()
   const byBundleId = new Map<string, InstalledApp>()
@@ -841,11 +939,26 @@ function resolveRequestedApps(
 
   return requestedNames.map((requested): ResolvedAppRequest => {
     let resolved: InstalledApp | undefined
-    if (looksLikeBundleId(requested)) {
+    const requestedLower = requested.toLowerCase()
+    // densable 2.1.243 #53 — "Finder" / "File Explorer" resolve to the shell grant.
+    if (requestedLower === 'finder' && platform === 'darwin') {
+      resolved = {
+        bundleId: FINDER_BUNDLE_ID,
+        displayName: 'Finder',
+        path: '/System/Library/CoreServices/Finder.app',
+      }
+    } else if (requestedLower === 'file explorer' && FILE_EXPLORER_PATH) {
+      resolved = {
+        bundleId: FILE_EXPLORER_PATH,
+        displayName: 'File Explorer',
+        path: FILE_EXPLORER_PATH,
+      }
+    }
+    if (!resolved && looksLikeBundleId(requested)) {
       resolved = byBundleId.get(requested)
     }
     if (!resolved) {
-      resolved = byLowerDisplayName.get(requested.toLowerCase())
+      resolved = byLowerDisplayName.get(requestedLower)
     }
     // Windows fuzzy matching: strip .exe suffix, try substring match
     if (!resolved) {
@@ -1167,7 +1280,12 @@ async function buildAccessRequest(
 ): Promise<AccessRequestParts> {
   const alreadyGranted = new Set(allowedApps.map(g => g.bundleId))
   const installed = await adapter.executor.listInstalledApps()
-  const resolved = resolveRequestedApps(apps, installed, alreadyGranted)
+  const resolved = resolveRequestedApps(
+    apps,
+    installed,
+    alreadyGranted,
+    adapter.executor.capabilities.platform,
+  )
 
   // Policy-level auto-deny (baked-in, not user-configurable). Stripped
   // before userDenied — checks bundle ID AND display name (covers
@@ -4471,4 +4589,9 @@ export const _test = {
   buildMonitorNote,
   handleSwitchDisplay,
   uniqueDisplayLabels,
+  isDesktopShell,
+  lookupGrantedTier,
+  FINDER_BUNDLE_ID,
+  SYSTEM_MENU_BAR_BUNDLE_ID,
+  FILE_EXPLORER_PATH,
 }

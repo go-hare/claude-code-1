@@ -49,7 +49,9 @@ export function BackgroundTask({ task, maxActivityWidth }: Props): React.ReactNo
     case 'local_agent':
       return (
         <Text>
-          {truncate(task.description, activityLimit, true)}{' '}
+          {truncate(task.description, activityLimit, true)}
+          {task.model ? ` · ${task.model}` : ''}
+          {task.effort ? ` · ${task.effort}` : ''}{' '}
           <TaskStatusText
             status={task.status}
             label={task.status === 'completed' ? 'done' : undefined}

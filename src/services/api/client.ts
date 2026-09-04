@@ -4,7 +4,9 @@ import type { GoogleAuth } from 'google-auth-library'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getAnthropicApiKey,
+  getAnthropicApiKeyWithSource,
   getApiKeyFromApiKeyHelper,
+  getAuthTokenSource,
   getActiveProfileWire,
   getClaudeAIOAuthTokens,
   getDefaultAwsProviderChain,
@@ -14,6 +16,10 @@ import {
   refreshAndGetAwsCredentials,
   refreshGcpCredentialsIfNeeded,
 } from 'src/utils/auth.js'
+import {
+  getOAuthAccountOnHold,
+  OAuthAccountOnHoldError,
+} from 'src/utils/accountOnHold.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
 import {
@@ -22,6 +28,7 @@ import {
 } from 'src/utils/model/providers.js'
 import { wrapFetchWithBedrockContentTypeGuard } from './bedrockContentTypeGuard.js'
 import { wrapFetchWithBodyIdleWatchdog } from 'src/utils/bodyIdleWatchdog.js'
+import { wrapFetchWithFirstByteWatchdog } from 'src/utils/firstByteWatchdog.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import {
   resolveByteStreamIdleTimeoutMs,
@@ -48,6 +55,7 @@ import {
 } from '../../utils/gatewayEnv.js'
 import { extractAuthorizationHeader } from '../../utils/residualFinalEnvGates.js'
 import { shouldPropagateTraceparent } from '../../utils/propagateTraceparent.js'
+import { assertValidOutgoingHeaders } from './invalidRequestHeader.js'
 
 /**
  * Environment variables for different client types:
@@ -206,8 +214,13 @@ export async function getAnthropicClient({
   const requestProvider = getAPIProvider()
 
   // Skip apiKeyHelper headers when a gateway JWT session is active.
+  // densable `g` — GMo return value, used by FTn as authorizationSource.
+  let authorizationSource: string | null = null
   if (!isClaudeAISubscriber() && requestProvider !== 'gateway') {
-    await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
+    authorizationSource = await configureApiKeyHeaders(
+      defaultHeaders,
+      getIsNonInteractiveSession(),
+    )
   }
   const hasBodyIdleWatchdog = shouldEnableBodyIdleWatchdog({
     requestProvider,
@@ -246,6 +259,18 @@ export async function getAnthropicClient({
       }),
     ) as ClientOptions['fetch']
   }
+  // densable 2.1.243 #22 nOo — first-byte / StreamNoResponse (3 min + one retry).
+  resolvedFetch = wrapFetchWithFirstByteWatchdog(
+    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+    (resolvedFetch ?? globalThis.fetch) as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>,
+    () => ({
+      provider: requestProvider,
+      routedProvider: requestProvider,
+    }),
+  ) as ClientOptions['fetch']
 
   // densable J_: proxy / unix / mTLS fetchOptions only.
   // Enterprise TLS pin (densable uIc / B_c) is NOT on the Anthropic SDK path —
@@ -696,13 +721,51 @@ export async function getAnthropicClient({
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }
 
+  // densable 2.1.243 `FTn` — reject bad headers before `new Anthropic`.
+  const oauthSubscriber = isClaudeAISubscriber()
+  // densable `if (y) { const C = f$e(); if (C) throw new yz(C.url) }`
+  if (oauthSubscriber) {
+    const hold = getOAuthAccountOnHold()
+    if (hold) throw new OAuthAccountOnHoldError(hold.url)
+  }
+  assertValidOutgoingHeaders({
+    apiKey: oauthSubscriber ? null : apiKey || getAnthropicApiKey(),
+    getApiKeySource: () => {
+      const { source } = getAnthropicApiKeyWithSource({
+        skipRetrievingKeyFromApiKeyHelper: true,
+      })
+      return source === 'none' ? 'unknown' : source
+    },
+    authToken: oauthSubscriber
+      ? (getClaudeAIOAuthTokens()?.accessToken ?? null)
+      : null,
+    getAuthTokenSource: () => {
+      const { source } = getAuthTokenSource()
+      return source === 'CLAUDE_CODE_OAUTH_TOKEN' ||
+        source === 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR' ||
+        source === 'CCR_OAUTH_TOKEN_FILE'
+        ? source
+        : 'claude.ai'
+    },
+    defaultHeaders,
+    authorizationSource,
+    customHeaderNames: Object.keys(customHeaders),
+    envSuppliedHeaderNames: new Set(
+      [
+        containerId && 'x-claude-remote-container-id',
+        remoteSessionId && 'x-claude-remote-session-id',
+        clientApp && 'x-client-app',
+      ].filter((name): name is string => Boolean(name)),
+    ),
+  })
+
   return new Anthropic(clientConfig)
 }
 
 async function configureApiKeyHeaders(
   headers: Record<string, string>,
   isNonInteractiveSession: boolean,
-): Promise<void> {
+): Promise<string | null> {
   // Official HFI densable — trajectory runner injects bearer via env.
   try {
     const { getHfiBearerToken } =
@@ -711,17 +774,20 @@ async function configureApiKeyHeaders(
     const hfi = getHfiBearerToken()
     if (hfi) {
       headers['Authorization'] = `Bearer ${hfi}`
-      return
+      return null
     }
   } catch {
     // residual helpers optional
   }
+  // densable GMo: env AUTH_TOKEN wins; else apiKeyHelper. Return source for FTn.
+  const fromEnv = process.env.ANTHROPIC_AUTH_TOKEN
   const token =
-    process.env.ANTHROPIC_AUTH_TOKEN ||
-    (await getApiKeyFromApiKeyHelper(isNonInteractiveSession))
+    fromEnv || (await getApiKeyFromApiKeyHelper(isNonInteractiveSession))
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
+    return fromEnv ? 'ANTHROPIC_AUTH_TOKEN' : 'apiKeyHelper'
   }
+  return null
 }
 
 function getCustomHeaders(): Record<string, string> {

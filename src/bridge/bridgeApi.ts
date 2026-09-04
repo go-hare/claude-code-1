@@ -142,6 +142,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
   return {
     async registerBridgeEnvironment(
       config: BridgeConfig,
+      signal?: AbortSignal,
     ): Promise<{ environment_id: string; environment_secret: string }> {
       debug(
         `[bridge:api] POST /v1/environments/bridge bridgeId=${config.bridgeId}`,
@@ -181,6 +182,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
               headers: getHeaders(token),
               timeout: 15_000,
               validateStatus: status => status < 500,
+              signal,
             },
           ),
         'Registration',
@@ -362,6 +364,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
     async reconnectSession(
       environmentId: string,
       sessionId: string,
+      signal?: AbortSignal,
     ): Promise<void> {
       validateBridgeId(environmentId, 'environmentId')
       validateBridgeId(sessionId, 'sessionId')
@@ -379,6 +382,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
               headers: getHeaders(token),
               timeout: 10_000,
               validateStatus: s => s < 500,
+              signal,
             },
           ),
         'ReconnectSession',

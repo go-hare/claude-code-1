@@ -24,6 +24,39 @@ import type { PluginId } from './schemas.js'
  */
 const INLINE_MARKETPLACE = 'inline'
 
+function isInlinePluginId(pluginId: string): boolean {
+  return parsePluginIdentifier(pluginId).marketplace === INLINE_MARKETPLACE
+}
+
+/** @inline declaring plugins: deps match enabled plugins by name only (243 #27). */
+function isDependencySatisfied(
+  dep: string,
+  declaringPluginId: string,
+  enabled: ReadonlySet<string>,
+  enabledByName: ReadonlyMap<string, number>,
+): boolean {
+  if (isInlinePluginId(declaringPluginId)) {
+    const name = parsePluginIdentifier(dep).name
+    return (enabledByName.get(name) ?? 0) > 0
+  }
+  const isBare = !parsePluginIdentifier(dep).marketplace
+  if (isBare) return (enabledByName.get(dep) ?? 0) > 0
+  return enabled.has(dep)
+}
+
+function dependencyKnownButDisabled(
+  dep: string,
+  declaringPluginId: string,
+  known: ReadonlySet<string>,
+  knownByName: ReadonlySet<string>,
+): boolean {
+  if (isInlinePluginId(declaringPluginId)) {
+    return knownByName.has(parsePluginIdentifier(dep).name)
+  }
+  const isBare = !parsePluginIdentifier(dep).marketplace
+  return isBare ? knownByName.has(dep) : known.has(dep)
+}
+
 /**
  * Normalize a dependency reference to fully-qualified "name@marketplace" form.
  * Bare names (no @) inherit the marketplace of the plugin declaring them —
@@ -144,7 +177,20 @@ export async function resolveDependencyClosure(
     stack.push(id)
     for (const rawDep of entry.dependencies ?? []) {
       const dep = qualifyDependency(rawDep, id)
-      const err = await walk(dep, id)
+      let depId = dep
+      let entryForDep = await lookup(depId)
+      // densable 243 #27: `{ marketplace }` deps from @inline plugins resolve by name.
+      if (!entryForDep && isInlinePluginId(id)) {
+        const name = parsePluginIdentifier(dep).name
+        entryForDep =
+          (await lookup(`${name}@${INLINE_MARKETPLACE}`)) ??
+          (await lookup(name))
+        if (entryForDep) depId = `${name}@${INLINE_MARKETPLACE}`
+      }
+      if (!entryForDep) {
+        return { ok: false, reason: 'not-found', missing: dep, requiredBy: id }
+      }
+      const err = await walk(depId, id)
       if (err) return err
     }
     stack.pop()
@@ -201,11 +247,12 @@ export function verifyAndDemote(plugins: readonly LoadedPlugin[]): {
       if (!enabled.has(p.source)) continue
       for (const rawDep of p.manifest.dependencies ?? []) {
         const dep = qualifyDependency(rawDep, p.source)
-        // Bare dep ← @inline plugin: match by name only (see enabledByName)
-        const isBare = !parsePluginIdentifier(dep).marketplace
-        const satisfied = isBare
-          ? (enabledByName.get(dep) ?? 0) > 0
-          : enabled.has(dep)
+        const satisfied = isDependencySatisfied(
+          dep,
+          p.source,
+          enabled,
+          enabledByName,
+        )
         if (!satisfied) {
           enabled.delete(p.source)
           const count = enabledByName.get(p.name) ?? 0
@@ -216,7 +263,12 @@ export function verifyAndDemote(plugins: readonly LoadedPlugin[]): {
             source: p.source,
             plugin: p.name,
             dependency: dep,
-            reason: (isBare ? knownByName.has(dep) : known.has(dep))
+            reason: dependencyKnownButDisabled(
+              dep,
+              p.source,
+              known,
+              knownByName,
+            )
               ? 'not-enabled'
               : 'not-found',
           })
@@ -253,6 +305,9 @@ export function findReverseDependents(
         p.source !== pluginId &&
         (p.manifest.dependencies ?? []).some(d => {
           const qualified = qualifyDependency(d, p.source)
+          if (isInlinePluginId(p.source)) {
+            return parsePluginIdentifier(qualified).name === targetName
+          }
           // Bare dep (from @inline plugin): match by name only
           return parsePluginIdentifier(qualified).marketplace
             ? qualified === pluginId

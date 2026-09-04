@@ -172,7 +172,7 @@ Everything goes through `POST /v1/messages`. Tools and output constraints are fe
 | {{PREV_OPUS_NAME}} | `{{PREV_OPUS_ID}}`  | 1M             | $5.00      | $25.00      |
 | Claude Opus 4.7   | `claude-opus-4-7`   | 1M             | $5.00      | $25.00      |
 | Claude Opus 4.6   | `claude-opus-4-6`   | 1M             | $5.00      | $25.00      |
-| Claude Sonnet 5   | `claude-sonnet-5`   | 1M             | $3.00 ($2.00 intro through 2026-08-31) | $15.00 ($10.00 intro) |
+| Claude Sonnet 5   | `claude-sonnet-5`   | 1M             | $2.00 | $10.00 |
 | Claude Sonnet 4.6 | `claude-sonnet-4-6` | 1M             | $3.00      | $15.00      |
 | Claude Haiku 4.5  | `claude-haiku-4-5`  | 200K           | $1.00      | $5.00       |
 

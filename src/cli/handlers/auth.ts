@@ -47,7 +47,10 @@ import {
  * Shared post-token-acquisition logic. Saves tokens, fetches profile/roles,
  * and sets up the local auth state.
  */
-export async function installOAuthTokens(tokens: OAuthTokens): Promise<void> {
+export async function installOAuthTokens(
+  tokens: OAuthTokens,
+  options?: { skipApiKey?: boolean },
+): Promise<void> {
   // Clear old state before saving new credentials
   await performLogout({ clearOnboarding: false })
 
@@ -92,12 +95,13 @@ export async function installOAuthTokens(tokens: OAuthTokens): Promise<void> {
     logForDebugging(String(err), { level: 'error' }),
   )
 
-  if (shouldUseClaudeAIAuth(tokens.scopes)) {
+  if (shouldUseClaudeAIAuth(tokens.scopes) || options?.skipApiKey) {
     await fetchAndStoreClaudeCodeFirstTokenDate().catch(err =>
       logForDebugging(String(err), { level: 'error' }),
     )
   } else {
     // API key creation is critical for Console users — let it throw.
+    // densable 2.1.243 #5: skip when the user picked Console WIF (keyless).
     const apiKey = await createAndStoreApiKey(tokens.accessToken)
     if (!apiKey) {
       throw new Error(

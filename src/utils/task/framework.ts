@@ -525,13 +525,14 @@ export function isJrDeadBackgroundPromote(
 }
 
 /**
- * Official Jeo(ownerId, registry) — sweep stale keepalive holds on a local_agent.
+ * Official Lfe/Jeo(ownerId, registry) — sweep stale keepalive holds.
  *
- * For each `agent:` / `workflow:` reason on the owner:
+ * For each `agent:` / `workflow:` / `bash:` reason on the owner:
  * - if a task-notification is still queued for that child+owner → keep
- * - else if child missing OR child is local_agent/local_workflow and notified
- *   → tB detach
+ * - else if child missing OR local_agent/local_workflow notified
+ *   OR local_bash notified+terminal → tB detach
  *
+ * 2.1.243 #21: bash: is in the official prefix set (was leftover-omitted).
  * Called before DSu complete so a finishing parent drops children that already
  * notified (or vanished) and no longer need panel parking.
  */
@@ -581,6 +582,7 @@ export function sweepStaleKeepaliveReasons(
     if (reason.startsWith('agent:')) childId = reason.slice('agent:'.length)
     else if (reason.startsWith('workflow:'))
       childId = reason.slice('workflow:'.length)
+    else if (reason.startsWith('bash:')) childId = reason.slice('bash:'.length)
     else continue
 
     if (pendingChildIds.has(childId)) continue
@@ -589,7 +591,10 @@ export function sweepStaleKeepaliveReasons(
     const shouldDetach =
       !child ||
       (child.type === 'local_agent' && child.notified) ||
-      (child.type === 'local_workflow' && child.notified)
+      (child.type === 'local_workflow' && child.notified) ||
+      (child.type === 'local_bash' &&
+        child.notified &&
+        isTerminalTaskStatus(child.status))
     if (shouldDetach) {
       removeKeepaliveReason(ownerAgentId, reason, setAppState)
     }

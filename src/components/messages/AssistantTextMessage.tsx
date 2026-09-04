@@ -4,7 +4,7 @@ import { ERROR_MESSAGE_USER_ABORT } from 'src/services/compact/compact.js';
 import { shouldShowAutoCompactOffHint } from 'src/services/compact/autoCompact.js';
 import { isRateLimitErrorMessage } from 'src/services/rateLimitMessages.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
-import { Box, NoSelect, Text } from '@anthropic/ink';
+import { Box, NoSelect, Text, useTerminalSize } from '@anthropic/ink';
 import {
   API_ERROR_MESSAGE_PREFIX,
   API_TIMEOUT_ERROR_MESSAGE,
@@ -15,7 +15,8 @@ import {
   ORG_DISABLED_ERROR_MESSAGE_ENV_KEY,
   ORG_DISABLED_ERROR_MESSAGE_ENV_KEY_WITH_OAUTH,
   PROMPT_TOO_LONG_ERROR_MESSAGE,
-  startsWithApiErrorPrefix,
+  isInvalidExternalCredentialSuffix,
+  shouldRenderClientGeneratedErrorLine,
   TOKEN_REVOKED_ERROR_MESSAGE,
 } from '../../services/api/errors.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
@@ -39,7 +40,57 @@ type Props = {
   verbose: boolean;
   width?: number | string;
   onOpenRateLimitOptions?: () => void;
+  /** densable 2.1.243 #23 `Rle` — client-generated errors render as error lines. */
+  isApiError?: boolean;
 };
+
+/**
+ * densable 2.1.243 `Kx` display text: bare "API Error" gets the wait hint.
+ */
+export function formatClientApiErrorLine(text: string): string {
+  return text === API_ERROR_MESSAGE_PREFIX ? `${API_ERROR_MESSAGE_PREFIX}: Please wait a moment and try again.` : text;
+}
+
+function ClientGeneratedErrorLine({
+  text,
+  verbose,
+  addMargin,
+}: {
+  text: string;
+  verbose: boolean;
+  addMargin: boolean;
+}): React.ReactNode {
+  const nested = useIsMessageResponse();
+  const { columns } = useTerminalSize();
+  const display = formatClientApiErrorLine(text);
+  const trimmed = display.trim();
+  const truncated = !verbose && trimmed.length > MAX_API_ERROR_CHARS;
+  const shown = truncated ? `${trimmed.slice(0, MAX_API_ERROR_CHARS)}…` : trimmed;
+
+  if (nested) {
+    return (
+      <Box flexDirection="column">
+        <Text color="warning">{shown}</Text>
+        {truncated && <CtrlOToExpand />}
+      </Box>
+    );
+  }
+
+  // densable 2.1.243 `Kx`: non-nested text column is `columns - 10`.
+  return (
+    <Box flexDirection="row" marginTop={addMargin ? 1 : 0} width="100%">
+      <Box minWidth={2}>
+        <Text aria-label="error:" color="warning">
+          {BLACK_CIRCLE}
+        </Text>
+      </Box>
+      <Box flexDirection="column" width={columns - 10}>
+        <Text color="warning">{shown}</Text>
+        {truncated && <CtrlOToExpand />}
+      </Box>
+    </Box>
+  );
+}
 
 function InvalidApiKeyMessage(): React.ReactNode {
   const isKeychainLocked = isMacOsKeychainLocked();
@@ -101,6 +152,7 @@ export function AssistantTextMessage({
   shouldShowDot,
   verbose,
   onOpenRateLimitOptions,
+  isApiError = false,
 }: Props): React.ReactNode {
   const isSelected = useContext(MessageActionsSelectedContext);
   if (isEmptyMessageText(text)) {
@@ -188,22 +240,20 @@ export function AssistantTextMessage({
       );
 
     default:
-      if (startsWithApiErrorPrefix(text)) {
-        const truncated = !verbose && text.length > MAX_API_ERROR_CHARS;
+      // densable 2.1.243 Gx `Ox` = `J$a` — red error text, not Markdown / Kx.
+      if (isInvalidExternalCredentialSuffix(text)) {
         return (
           <MessageResponse>
             <Box flexDirection="column">
-              <Text color="error">
-                {text === API_ERROR_MESSAGE_PREFIX
-                  ? `${API_ERROR_MESSAGE_PREFIX}: Please wait a moment and try again.`
-                  : truncated
-                    ? text.slice(0, MAX_API_ERROR_CHARS) + '…'
-                    : text}
-              </Text>
-              {truncated && <CtrlOToExpand />}
+              <Text color="error">{text}</Text>
             </Box>
           </MessageResponse>
         );
+      }
+      // densable 2.1.243 Gx: `Rle || Lx(text) || wx(text)` → Kx.
+      // Import map: Lx=NR (`startsWithApiErrorPrefix`), wx=`he`.
+      if (shouldRenderClientGeneratedErrorLine(isApiError, text)) {
+        return <ClientGeneratedErrorLine text={text} verbose={verbose} addMargin={addMargin} />;
       }
       return (
         <Box

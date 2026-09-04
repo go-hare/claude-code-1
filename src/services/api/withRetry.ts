@@ -30,6 +30,11 @@ import {
   isClaudeAISubscriber,
   isEnterpriseSubscriber,
 } from '../../utils/auth.js'
+import {
+  getOAuthAccountOnHold,
+  getProfileAccountOnHold,
+  OAuthAccountOnHoldError,
+} from '../../utils/accountOnHold.js'
 import { getAWSRegion, isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import {
@@ -59,6 +64,7 @@ import {
 } from '../rateLimitMocking.js'
 import { REPEATED_529_ERROR_MESSAGE } from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
+import { STREAM_NO_RESPONSE_RETRY_CAP } from '../../utils/firstByteWatchdog.js'
 
 const abortError = () => new APIUserAbortError()
 
@@ -336,6 +342,8 @@ export async function* withRetry<T>(
   // densable 2.1.228 #14: cap GCP/AWS auth refresh retries (x6S/k6S = 2)
   let awsAuthRetryCount = 0
   let gcpAuthRetryCount = 0
+  // densable 2.1.243 #22 UYo — StreamNoResponse retries once then exhausts.
+  let streamNoResponseRetryCount = 0
   // densable y3b `h` — report mTLS material failure analytics at most once
   let mtlsReloadFailureReported = false
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -421,18 +429,57 @@ export async function* withRetry<T>(
           (lastError instanceof APIError && lastError.status === 401) ||
           isOAuthTokenRevokedError(lastError)
         ) {
-          const failedAccessToken = getClaudeAIOAuthTokens()?.accessToken
-          if (failedAccessToken) {
-            await handleOAuth401Error(failedAccessToken)
-          } else if (
-            lastError instanceof APIError &&
-            lastError.status === 401 &&
-            isHostAuthTokenRefreshAvailable()
-          ) {
-            // Official lfa / host_auth_401_recovery — desktop host-creds path.
-            const hostResult = await tryHostAuth401Recovery()
-            if (hostResult === 'failed' || hostResult === 'exhausted') {
-              throw lastError
+          // densable lt / invalidateWIFToken when profile WIF drives the request
+          let handledProfileWif = false
+          try {
+            const {
+              getLastIssuedWifAccessToken,
+              isProfileAuthActive,
+              invalidateWifToken,
+            } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../../utils/anthropicProfile.js') as typeof import('../../utils/anthropicProfile.js')
+            if (
+              isProfileAuthActive({
+                storedClaudeAiLogin: Boolean(
+                  getClaudeAIOAuthTokens()?.accessToken,
+                ),
+              })
+            ) {
+              // densable lt(e): e = bearer that failed, not a disk re-read
+              // (sibling may already have rotated credentials on disk).
+              await invalidateWifToken(getLastIssuedWifAccessToken())
+              handledProfileWif = true
+            }
+          } catch {
+            handledProfileWif = false
+          }
+          if (!handledProfileWif) {
+            const failedAccessToken = getClaudeAIOAuthTokens()?.accessToken
+            if (failedAccessToken) {
+              await handleOAuth401Error(failedAccessToken)
+              // densable `let z = f$e(); if (z) throw re(...), new nd(new yz(z.url), o)`
+              const hold = getOAuthAccountOnHold()
+              if (hold) {
+                logEvent('api_request', {
+                  status:
+                    'api_request_account_on_hold' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+                throw new CannotRetryError(
+                  new OAuthAccountOnHoldError(hold.url),
+                  retryContext,
+                )
+              }
+            } else if (
+              lastError instanceof APIError &&
+              lastError.status === 401 &&
+              isHostAuthTokenRefreshAvailable()
+            ) {
+              // Official lfa / host_auth_401_recovery — desktop host-creds path.
+              const hostResult = await tryHostAuth401Recovery()
+              if (hostResult === 'failed' || hostResult === 'exhausted') {
+                throw lastError
+              }
             }
           }
         }
@@ -441,6 +488,9 @@ export async function* withRetry<T>(
 
       return await operation(client, attempt, retryContext)
     } catch (error) {
+      // densable `if (x instanceof nd) throw x`
+      if (error instanceof CannotRetryError) throw error
+
       lastError = error
 
       // densable mid-conv sticky retry — already latched; re-enter immediately.
@@ -456,6 +506,18 @@ export async function* withRetry<T>(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
         { level: 'error' },
       )
+
+      // densable 2.1.243 #22: first-byte StreamNoResponse retries once (UYo=1).
+      if (
+        !isRetryWatchdogActive() &&
+        extractConnectionErrorDetails(error)?.code === 'StreamNoResponse'
+      ) {
+        if (streamNoResponseRetryCount >= STREAM_NO_RESPONSE_RETRY_CAP) {
+          throw new CannotRetryError(error, retryContext)
+        }
+        streamNoResponseRetryCount++
+        continue
+      }
 
       // densable xco/uns — learn Foundry unsupported capabilities from 400s and
       // retry after strip (tool_search / structured_outputs). Empty map → no-op.
@@ -639,6 +701,16 @@ export async function* withRetry<T>(
         !handledWifAuthError &&
         (!(error instanceof APIError) || !shouldRetry(error))
       ) {
+        // densable `re("api_request", x instanceof yz || Upe(x) !== null ? "api_request_account_on_hold" : "api_request_non_retryable")`
+        if (
+          error instanceof OAuthAccountOnHoldError ||
+          getProfileAccountOnHold(error) !== null
+        ) {
+          logEvent('api_request', {
+            status:
+              'api_request_account_on_hold' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        }
         throw new CannotRetryError(error, retryContext)
       }
 

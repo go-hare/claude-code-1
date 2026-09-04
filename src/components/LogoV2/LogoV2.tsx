@@ -18,9 +18,10 @@ import { FeedColumn } from './FeedColumn.js';
 import { createWhatsNewFeed, createProjectOnboardingFeed } from './feedConfigs.js';
 import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js';
 import { resolveThemeSetting } from 'src/utils/systemTheme.js';
-import { getInitialSettings } from 'src/utils/settings/settings.js';
+import { pickCompanyAnnouncement } from 'src/utils/companyAnnouncement.js';
+import { useSettings } from '../../hooks/useSettings.js';
 import { isDebugMode, isDebugToStdErr, getDebugLogPath } from 'src/utils/debug.js';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import {
   getSteps,
   shouldShowProjectOnboarding,
@@ -77,16 +78,10 @@ export function LogoV2(): React.ReactNode {
     changelog = [];
   }
 
-  // Get company announcements and select one:
-  // - First startup (numStartups === 1): show first announcement
-  // - All other startups: randomly select from announcements
-  const [announcement] = useState(() => {
-    const announcements = getInitialSettings().companyAnnouncements;
-    if (!announcements || announcements.length === 0) return undefined;
-    return config.numStartups === 1
-      ? announcements[0]
-      : announcements[Math.floor(Math.random() * announcements.length)];
-  });
+  // densable 2.1.243 #25 `Cc`/`si(true)`: re-read after remote settings land
+  // (login after /logout). useSettings() re-renders when policySettings notify.
+  useSettings();
+  const announcement = pickCompanyAnnouncement(true) ?? undefined;
   const { hasReleaseNotes } = checkForReleaseNotesSync(config.lastReleaseNotesSeen);
 
   useEffect(() => {

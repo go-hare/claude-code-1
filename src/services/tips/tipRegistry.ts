@@ -12,7 +12,11 @@ import { color } from '@anthropic/ink'
 import { shouldShowOverageCreditUpsell } from '../../components/LogoV2/OverageCreditUpsell.js'
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js'
 import { isKairosCronEnabled } from '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js'
-import { is1PApiCustomer } from '../../utils/auth.js'
+import {
+  getSubscriptionType,
+  is1PApiCustomer,
+  isClaudeAISubscriber,
+} from '../../utils/auth.js'
 import { countConcurrentSessions } from '../../utils/concurrentSessions.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import {
@@ -481,6 +485,31 @@ const externalTips: Tip[] = [
       'Run tasks in the cloud while you keep coding locally · clau.de/web',
     cooldownSessions: 15,
     isRelevant: async () => true,
+  },
+  {
+    // densable 2.1.243 #8 — SEA: `/web-setup to use Claude Code on the web
+    // with the GitHub account gh is signed in to`
+    id: 'web-setup-github',
+    content: async () =>
+      '/web-setup to use Claude Code on the web with the GitHub account gh is signed in to',
+    cooldownSessions: 15,
+    isRelevant: async () => {
+      if (!isClaudeAISubscriber()) return false
+      const subscription = getSubscriptionType()
+      if (subscription !== 'pro' && subscription !== 'max') return false
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getGhAuthStatus } =
+        require('../../utils/github/ghAuthStatus.js') as typeof import('../../utils/github/ghAuthStatus.js')
+      if (
+        (await getGhAuthStatus({ allowNetworkFallbackForOldGh: false }))
+          .status !== 'authenticated'
+      )
+        return false
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { checkGithubTokenSynced } =
+        require('../../utils/background/remote/preconditions.js') as typeof import('../../utils/background/remote/preconditions.js')
+      return !(await checkGithubTokenSynced())
+    },
   },
   {
     id: 'mobile-app',

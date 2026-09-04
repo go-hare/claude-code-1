@@ -13,11 +13,19 @@ import { logEvent } from '../services/analytics/index.js'
 import { createUserMessage } from './messages.js'
 import { plural } from './stringUtils.js'
 
+export type LoopFireStamp = {
+  prompt: string
+  cron?: string
+  isDynamic: boolean
+}
+
 export type LoopFireFoldMeta = {
   cronKind?: 'loop'
   noOpStreak?: number
   streakStartedAt?: string
   foldedUuids?: string[]
+  /** densable 2.1.243 #1 — transcript loop row key (SEA `loop:{prompt,cron,isDynamic}`). */
+  loop?: LoopFireStamp
 }
 
 type FoldNone = { kind: 'none' }
@@ -208,6 +216,7 @@ export function createLoopScheduledTaskFireMessage(
     uuid: randomUUID(),
   }
   if (meta?.cronKind) msg.cronKind = meta.cronKind
+  if (meta?.loop) msg.loop = meta.loop
   if (meta?.noOpStreak !== undefined && meta.noOpStreak > 0) {
     msg.noOpStreak = meta.noOpStreak
     msg.streakStartedAt = meta.streakStartedAt
@@ -233,6 +242,7 @@ export function createLoopHealthyMetaMessage(streak: number): Message {
 export function appendLoopWakeupMessages(
   messages: Message[],
   idleAtFire: boolean,
+  loop?: LoopFireStamp,
 ): Message[] {
   const baseLabel = `Claude resuming /loop wakeup (${formatCronFireTime(new Date())})`
   const decision = idleAtFire
@@ -253,7 +263,10 @@ export function appendLoopWakeupMessages(
     // act as fold anchors for the next idle tick (review #2).
     return [
       ...messages,
-      createLoopScheduledTaskFireMessage(baseLabel, { cronKind: 'loop' }),
+      createLoopScheduledTaskFireMessage(baseLabel, {
+        cronKind: 'loop',
+        loop,
+      }),
     ]
   }
 
@@ -276,6 +289,7 @@ export function appendLoopWakeupMessages(
       `${baseLabel} · ${streak} no-op ${plural(streak, 'tick')} since ${sinceLabel}`,
       {
         cronKind: 'loop',
+        loop,
         noOpStreak: streak,
         streakStartedAt: decision.since,
         foldedUuids,

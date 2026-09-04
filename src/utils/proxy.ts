@@ -74,12 +74,22 @@ export function getProxyUrl(env: EnvLike = process.env): string | undefined {
 }
 
 /**
- * Get the NO_PROXY environment variable value
- * Prefers lowercase over uppercase (no_proxy > NO_PROXY)
+ * densable 2.1.243 `Ne` — honor both casings when they differ.
+ * `NO_PROXY=localhost` + `no_proxy=corp.internal` must both bypass.
+ */
+function mergeNoProxyCasings(env: EnvLike): string | undefined {
+  const { no_proxy: lower, NO_PROXY: upper } = env
+  if (lower && upper && lower !== upper) return `${lower},${upper}`
+  return lower || upper
+}
+
+/**
+ * densable 2.1.243 `S` — either casing `*` wins; otherwise merge both lists.
  * @param env Environment variables to check (defaults to process.env for production use)
  */
 export function getNoProxy(env: EnvLike = process.env): string | undefined {
-  return env.no_proxy || env.NO_PROXY
+  if (env.no_proxy === '*' || env.NO_PROXY === '*') return '*'
+  return mergeNoProxyCasings(env)
 }
 
 /**
@@ -267,7 +277,7 @@ export const getProxyAgent = memoize((uri: string): undici.Dispatcher => {
     // Override both HTTP and HTTPS proxy with the provided URI
     httpProxy: uri,
     httpsProxy: uri,
-    noProxy: process.env.NO_PROXY || process.env.no_proxy,
+    noProxy: getNoProxy(),
   }
 
   // Set both connect and requestTls so TLS options apply to both paths:

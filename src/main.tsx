@@ -45,6 +45,7 @@ import {
 } from './cli/startupAssembly.js';
 import { launchRepl } from './replLauncher.js';
 import {
+  awaitGrowthBookBeforePermissionMode,
   hasGrowthBookEnvOverride,
   initializeGrowthBook,
   refreshGrowthBookAfterAuthChange,
@@ -211,7 +212,7 @@ import {
   getActiveAgentsFromList,
   isBuiltInAgent,
   isCustomAgent,
-  parseAgentsFromJson,
+  parseAgentsFromJsonOrThrow,
 } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import type { LogOption } from './types/logs.js';
 import type { Message as MessageType } from './types/message.js';
@@ -504,12 +505,16 @@ function getCertEnvVarTelemetry(): Record<string, boolean> {
 
 async function logStartupTelemetry(): Promise<void> {
   if (isAnalyticsDisabled()) return;
-  const [isGit, worktreeCount, ghAuthStatus] = await Promise.all([getIsGit(), getWorktreeCount(), getGhAuthStatus()]);
+  const [isGit, worktreeCount, ghAuthStatus] = await Promise.all([
+    getIsGit(),
+    getWorktreeCount(),
+    getGhAuthStatus({ allowNetworkFallbackForOldGh: false }),
+  ]);
 
   logEvent('tengu_startup_telemetry', {
     is_git: isGit,
     worktree_count: worktreeCount,
-    gh_auth_status: ghAuthStatus as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    gh_auth_status: ghAuthStatus.status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     sandbox_enabled: SandboxManager.isSandboxingEnabled(),
     are_unsandboxed_commands_allowed: SandboxManager.areUnsandboxedCommandsAllowed(),
     is_auto_bash_allowed_if_sandbox_enabled: SandboxManager.isAutoAllowBashIfSandboxedEnabled(),
@@ -2162,6 +2167,11 @@ async function run(): Promise<CommanderCommand> {
         appendSystemPrompt = appendSystemPrompt ? `${appendSystemPrompt}\n\n${addendum}` : addendum;
       }
 
+      // densable 2.1.243 #13 — official Vo/wd before qc: wait up to 1500ms
+      // when the auto-mode killswitch is only on disk (or the GB cache is empty)
+      // so a temporary server-side disable cannot stick after later fetches fail.
+      await awaitGrowthBookBeforePermissionMode();
+
       const { mode: permissionMode, notification: permissionModeNotification } = initialPermissionModeFromCLI({
         permissionModeCli,
         dangerouslySkipPermissions,
@@ -2938,16 +2948,21 @@ async function run(): Promise<CommanderCommand> {
       logForDebugging(`[STARTUP] Commands and agents loaded in ${Date.now() - commandsStart}ms`);
       profileCheckpoint('action_commands_loaded');
 
-      // Parse CLI agents if provided via --agents flag
+      // Parse CLI agents if provided via --agents flag.
+      // densable 2.1.243 #29: invalid JSON/definitions exit like --mcp-config.
       let cliAgents: typeof agentDefinitionsResult.activeAgents = [];
       if (agentsJson) {
+        const parsedAgents = safeParseJSON(agentsJson, false);
+        if (!parsedAgents || typeof parsedAgents !== 'object' || Array.isArray(parsedAgents)) {
+          process.stderr.write('Error: Invalid --agents configuration: expected a JSON object\n');
+          process.exit(1);
+        }
         try {
-          const parsedAgents = safeParseJSON(agentsJson);
-          if (parsedAgents) {
-            cliAgents = parseAgentsFromJson(parsedAgents, 'flagSettings');
-          }
+          cliAgents = parseAgentsFromJsonOrThrow(parsedAgents, 'flagSettings');
         } catch (error) {
-          logError(error);
+          const message = error instanceof Error ? error.message : String(error);
+          process.stderr.write(`Error: Invalid --agents configuration: ${message}\n`);
+          process.exit(1);
         }
       }
 
@@ -4031,6 +4046,8 @@ async function run(): Promise<CommanderCommand> {
           tools: [],
           commands: [],
           resources: {},
+          resourceTemplates: {},
+          suppressedPluginMcpServers: [],
           pluginReconnectKey: 0,
         },
         plugins: {

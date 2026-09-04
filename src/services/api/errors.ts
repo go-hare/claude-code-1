@@ -38,6 +38,13 @@ import {
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { formatFileSize } from '../../utils/format.js'
 import {
+  formatAccountOnHoldUseMessage,
+  getProfileAccountOnHold,
+  isAccountOnHoldAppealLine,
+  OAuthAccountOnHoldError,
+} from '../../utils/accountOnHold.js'
+import { InvalidRequestHeaderValueError } from './invalidRequestHeader.js'
+import {
   formatGenericRequestTooLargeMessage,
   formatStrippableMediaRequestTooLargeMessage,
   formatUnrecoverableRequestBodyErrorDetails,
@@ -238,6 +245,44 @@ export const CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE = 'Credit balance is too low'
 export const INVALID_API_KEY_ERROR_MESSAGE = 'Not logged in · Please run /login'
 export const INVALID_API_KEY_ERROR_MESSAGE_EXTERNAL =
   'Invalid API key · Fix external API key'
+/** densable `P0n` — official `lb` default when the bad header is an auth token. */
+export const INVALID_AUTH_TOKEN_ERROR_MESSAGE =
+  'Invalid auth token · Fix external auth token'
+/** densable `x0n` — official `lb` when `source==="ANTHROPIC_CUSTOM_HEADERS"`. */
+export const INVALID_CUSTOM_HEADERS_ERROR_MESSAGE =
+  'Invalid ANTHROPIC_CUSTOM_HEADERS · Fix the environment variable'
+/** densable `I0n` — official `lb` when `header==="other"`. */
+export const INVALID_REQUEST_HEADER_ERROR_MESSAGE =
+  'Invalid request header from the environment · Fix the environment variable'
+
+/**
+ * densable 2.1.243 `J$a` — Gx `Ox` (red line, before `Kx`).
+ * Official `lb` builds `${base} · ${error.message}`, so the match is
+ * `startsWith(`${base} · `)` (base already contains a middot).
+ */
+export function isInvalidExternalCredentialSuffix(text: string): boolean {
+  return [
+    INVALID_API_KEY_ERROR_MESSAGE_EXTERNAL,
+    INVALID_AUTH_TOKEN_ERROR_MESSAGE,
+    INVALID_CUSTOM_HEADERS_ERROR_MESSAGE,
+    INVALID_REQUEST_HEADER_ERROR_MESSAGE,
+  ].some(base => text.startsWith(`${base} · `))
+}
+
+/**
+ * densable 2.1.243 Gx: `Rle || Lx(text) || wx(text)` → `Kx`.
+ * Import map: `Ox=J$a`, `Lx=NR`, `wx=he`.
+ */
+export function shouldRenderClientGeneratedErrorLine(
+  isApiError: boolean,
+  text: string,
+): boolean {
+  return (
+    isApiError ||
+    startsWithApiErrorPrefix(text) ||
+    isAccountOnHoldAppealLine(text)
+  )
+}
 export const ORG_DISABLED_ERROR_MESSAGE_ENV_KEY_WITH_OAUTH =
   'Your ANTHROPIC_API_KEY belongs to a disabled organization · Unset the environment variable to use your subscription instead'
 export const ORG_DISABLED_ERROR_MESSAGE_ENV_KEY =
@@ -1186,6 +1231,30 @@ export function getAssistantMessageFromError(
     }
   }
 
+  // densable 2.1.243 `lb` — invalid header rejected before send.
+  if (error instanceof InvalidRequestHeaderValueError) {
+    if (error.source === '/login managed key' || error.source === 'claude.ai') {
+      return createAssistantAPIErrorMessage({
+        error: 'authentication_failed',
+        content: INVALID_API_KEY_ERROR_MESSAGE,
+      })
+    }
+    let base = INVALID_AUTH_TOKEN_ERROR_MESSAGE
+    if (error.source === 'ANTHROPIC_CUSTOM_HEADERS') {
+      base = INVALID_CUSTOM_HEADERS_ERROR_MESSAGE
+    } else if (!error.isUserSupplied) {
+      base = API_ERROR_MESSAGE_PREFIX
+    } else if (error.header === 'other') {
+      base = INVALID_REQUEST_HEADER_ERROR_MESSAGE
+    } else if (error.header === 'X-Api-Key') {
+      base = INVALID_API_KEY_ERROR_MESSAGE_EXTERNAL
+    }
+    return createAssistantAPIErrorMessage({
+      error: 'invalid_request',
+      content: `${base} · ${error.message}`,
+    })
+  }
+
   if (
     error instanceof Error &&
     error.message.toLowerCase().includes('x-api-key')
@@ -1209,6 +1278,20 @@ export function getAssistantMessageFromError(
         ? INVALID_API_KEY_ERROR_MESSAGE_EXTERNAL
         : INVALID_API_KEY_ERROR_MESSAGE,
     })
+  }
+
+  // densable `let r = e instanceof yz ? e : Upe(e); if (r) oo({error:"account_on_hold", content: YOn(r.url)})`
+  {
+    const hold =
+      error instanceof OAuthAccountOnHoldError
+        ? error
+        : getProfileAccountOnHold(error)
+    if (hold) {
+      return createAssistantAPIErrorMessage({
+        error: 'account_on_hold',
+        content: formatAccountOnHoldUseMessage(hold.url),
+      })
+    }
   }
 
   // leftover 239 DUr / densable oRr — expired profile credentials, no refresh.
@@ -1424,6 +1507,13 @@ export function classifyAPIError(error: unknown): string {
     return 'aborted'
   }
 
+  // densable 2.1.243 `zz`: user-supplied `lb` before timeout.
+  if (error instanceof InvalidRequestHeaderValueError && error.isUserSupplied) {
+    return error.header === 'other'
+      ? 'invalid_request_header'
+      : 'invalid_api_key'
+  }
+
   // Timeout errors — densable YLr/P5p:
   //   P5p(e) || Error.message.startsWith("Stream idle timeout") → api_timeout
   // P5p ≈ APIConnectionTimeoutError | APIConnectionError+timeout |
@@ -1584,6 +1674,11 @@ export function classifyAPIError(error: unknown): string {
     )
   ) {
     return 'oauth_org_not_allowed'
+  }
+
+  // densable `e instanceof N8 || e instanceof yz` → auth_error. N8 is not local.
+  if (error instanceof OAuthAccountOnHoldError) {
+    return 'auth_error'
   }
 
   // Generic auth errors

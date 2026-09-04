@@ -419,6 +419,52 @@ export const SettingsSchema = lazySchema(() =>
             'model ID (e.g. a Bedrock inference profile ARN). Typically set in managed settings by ' +
             'enterprise administrators.',
         ),
+      // densable 2.1.243 #2 — curated /model picker (managed / --settings / user).
+      modelPicker: z
+        .object({
+          options: z
+            .array(
+              z.object({
+                model: z.string(),
+                label: z.string().optional(),
+                description: z.string().optional(),
+              }),
+            )
+            .describe('Rows to show in the /model picker, in order.'),
+          replaceBuiltInOptions: z
+            .boolean()
+            .optional()
+            .describe(
+              'When true, the picker shows only the Default row and these options — the built-in ' +
+                'lineup, gateway-discovered models and ANTHROPIC_CUSTOM_MODEL_OPTION are hidden. When false or unset, these options are added after the built-in lineup.',
+            ),
+        })
+        .optional()
+        .describe(
+          'Curate the /model picker: an ordered list of models with your own labels, independent of the built-in lineup and of Claude Code releases. availableModels still applies to these rows. Honored from managed, --settings/SDK, and user settings only (not from a project checkout); the highest-precedence of those that defines modelPicker wins outright (no merging across sources). Typically set in managed settings by enterprise administrators.',
+        ),
+      // densable 2.1.243 #4 — managed contracted rates (compile is managed-trusted only).
+      modelPricing: z
+        .object({
+          multiplier: z.number().optional(),
+          overrides: z
+            .record(
+              z.string(),
+              z.object({
+                input: z.number(),
+                output: z.number(),
+                cacheRead: z.number().optional(),
+                cacheWrite: z.number().optional(),
+              }),
+            )
+            .optional(),
+        })
+        .optional()
+        .describe(
+          "Price usage at your organization's contracted rates instead of list price. " +
+            'Affects every spend figure Claude Code reports: /cost, the status line, and the SDK total_cost_usd. ' +
+            'Typically set in managed settings by enterprise administrators.',
+        ),
       // Whether to automatically approve all MCP servers in the project
       enableAllProjectMcpServers: z
         .boolean()
@@ -1098,6 +1144,21 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Whether /rename updates the terminal tab title (defaults to true). Set to false to keep auto-generated topic titles.',
+        ),
+      // densable 2.1.243 #3 — main vs subagent prompt-cache TTL.
+      promptCacheTtl: z
+        .enum(['5m', '1h'])
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Prompt cache TTL for the main conversation (interactive, -p and SDK turns, plus the helpers that run inline with it): "5m" or "1h". Unset = automatic: 1 hour on a Claude subscription within its usage limits, 5 minutes on an API key, Bedrock, Vertex or Foundry. 1-hour cache writes are billed at a higher rate; the cache stays warm across longer breaks. The CLAUDE_CODE_PROMPT_CACHE_TTL environment variable takes precedence.',
+        ),
+      subagentPromptCacheTtl: z
+        .enum(['5m', '1h'])
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Prompt cache TTL for subagents: "5m" or "1h". Unset = automatic (typically 5 minutes). The CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL environment variable takes precedence.',
         ),
       alwaysThinkingEnabled: z
         .boolean()

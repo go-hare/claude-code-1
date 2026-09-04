@@ -142,7 +142,10 @@ export type PermissionResponseEvent = {
 }
 
 export type BridgeApiClient = {
-  registerBridgeEnvironment(config: BridgeConfig): Promise<{
+  registerBridgeEnvironment(
+    config: BridgeConfig,
+    signal?: AbortSignal,
+  ): Promise<{
     environment_id: string
     environment_secret: string
   }>
@@ -173,7 +176,11 @@ export type BridgeApiClient = {
    * Force-stop stale worker instances and re-queue a session on an environment.
    * Used by `--session-id` to resume a session after the original bridge died.
    */
-  reconnectSession(environmentId: string, sessionId: string): Promise<void>
+  reconnectSession(
+    environmentId: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<void>
   /**
    * Send a lightweight heartbeat for an active work item, extending its lease.
    * Uses SessionIngressAuth (JWT, no DB hit) instead of EnvironmentSecretAuth.

@@ -26,6 +26,12 @@ export const AFK_MODE_BETA_HEADER = feature('TRANSCRIPT_CLASSIFIER')
 export const CLI_INTERNAL_BETA_HEADER =
   process.env.USER_TYPE === 'ant' ? 'cli-internal-2026-02-09' : ''
 export const ADVISOR_BETA_HEADER = 'advisor-tool-2026-03-01'
+/**
+ * Official `VO` / `Pzr` — H("auto_mode_classifier", …).
+ * `ASe`/`$O` is null in 2.1.243 (p$s latch off); `bzr` still sends this header.
+ */
+export const AUTO_MODE_CLASSIFIER_BETA_HEADER =
+  'auto-mode-classifier-2026-07-16'
 /** Official mid-conversation-system-2026-04-07 — mid_conversation_system beta. */
 export const MID_CONVERSATION_SYSTEM_BETA_HEADER =
   'mid-conversation-system-2026-04-07'
