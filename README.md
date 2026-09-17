@@ -43,11 +43,11 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.48**），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.49**），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.246 对齐说明（2.7.48）
+#### densable 2.1.246 对齐说明（2.7.49）
 
-对照文档：`docs/upstream-extraction/v2.1.246/official-246-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.243** 上。**2.7.48** 收 246 CLI 产品面；官方无 2.1.244 bullets，**勿折入 245 glibc / 247+**。
+对照文档：`docs/upstream-extraction/v2.1.246/official-246-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.243** 上。**2.7.48** 收 246 CLI 产品面，**2.7.49** 全平台重编；官方无 2.1.244 bullets，**勿折入 245 glibc / 247+**。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -61,7 +61,7 @@
 
 #### densable 2.1.243 对齐说明
 
-对照文档：`docs/upstream-extraction/v2.1.243/official-243-checklist.md`（**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**）、`cross-pack-residuals.md`。已入库，与 246 同发 **2.7.48**。官方无 2.1.240/241 bullets，**勿折入 245+**。
+对照文档：`docs/upstream-extraction/v2.1.243/official-243-checklist.md`（**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**）、`cross-pack-residuals.md`。已入库，与 246 同发 **2.7.49**。官方无 2.1.240/241 bullets，**勿折入 245+**。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -281,10 +281,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.48）
+### 近期更新（2.7.5 → 2.7.49）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.49** | 全平台二进制重编（8 个 `@go-hare/claude-code-*`）。产品面仍是 **2.7.48** 落地的 243+246；不折入 244/245/247+。 |
 | **2.7.48** | **densable 2.1.246**（叠在已入库 243 上）：HAVE **59** / N/A **2**。#1 wildcard allow warn、#4/#6 `rg` freeze abort、#16 worktree 不扫用户树、#22 skills 计数、#42 dangling `&&`/`\|\|`、#44 withhold、#52 `/cd` apply-now、#54 abort+maxTurns、storageV5 `qb` 空 pin。N/A：官方 installer。不折入 244/245/247+；不 invent `blu`←`Slu` / 自动 `qF` / JWT-org。243 HAVE 49 同发。 |
 | **2.7.47** | **densable 2.1.239 leftover 收口**（叠在 2.7.46 / 236–238 上）：`@synced` 磁盘 hydrate（`CLAUDE_CODE_SYNC_PLUGINS` 默认 OFF）；artifact auto-react（watch/reply/relay + parse5）；NMs permission Host 拆分；plan resume **continue 硬门**（resume 跑 `y_u`，print `--continue` 不跑）；CRI `createCriPolicyPrecheck` + NO_PROXY。**236** 删 invent `goalIdleArmGeneration`。**234 leftover** anthropic profile / OIDC / oRr「Run /login」。本机：Win32 标题 40ms 解粘；DeepSeek/Grok/Kimi 上下文窗口 + 国内 vision-exp。不 invent cowork / CCR E2E / VSCode banner / 240·241。 |
 | **2.7.46** | **densable 2.1.236–2.1.238**：236 HAVE **32** / N/A 1（`ANTHROPIC_DEFAULT_MODEL`、`notify_when_idle`、sandbox deny、fullscreen fallback、goal check-in、`/model` `LFh`/`sgM`）；237 HAVE 3（`canMarkApiSystem`、Concise、`r7` truncate）；238 HAVE **39**（`keybindingFlavor`、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation pin、RC Stop/sign-out/403、update check 10s）。并接回官方 238 仍保留的 **234 leftover**（stale Enter、SendMessage `to`/truncated、`GGc`、session persist、markdown `d0l`）。发版时曾写 PARTIAL，之后本机合同收口。不 invent leftover #3 / G0S / chrome UI。 |

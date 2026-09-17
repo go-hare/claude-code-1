@@ -1,9 +1,9 @@
 # Cross-pack residual inventory (go-hare vs densable)
 
-> 更新：**2026-09-16** — tip **densable 2.1.243** + npm **2.7.48**。246 金标 **HAVE 59 / GAP 0 / UNKNOWN 0 / N/A 2**；leftover 分类拿掉，#16 #18 #49 #55 升 HAVE；#42 计入。RC torn-pair / auth-revive 已接。  
+> 更新：**2026-09-17** — tip **densable 2.1.243** + npm **2.7.49**。246 金标 **HAVE 59 / GAP 0 / UNKNOWN 0 / N/A 2**；leftover 分类拿掉，#16 #18 #49 #55 升 HAVE；#42 计入。RC torn-pair / auth-revive 已接。  
 > 原则：densable-first 1:1；**不 invent** VSCode/cloud-only；**不 auto commit/push/bump**。  
 > **09-15：`src/utils/storageV5/` 已全面语义化** — 该模块 219 个 `leftover*` 符号全部改成描述性英文名，官方最小化名 + 偏移移入各符号的 doc comment（`densable leftover \`Ur\`=\`R6c\`=\`Wn\` @207286302` 这种形式，156 条）。**在该模块内按 `leftoverXx` grep 已经找不到东西，改按 doc comment 里的官方名搜。** 动因：`leftover` 前缀会把仅大小写不同的官方名（`ne` vs `Ne`）塌缩成同一个标识符，已经造成过一次 TS2440，另有 `Ke`/`Dt` 两对跨模块同名是同类隐患。模块外（`sessionNameJobSidecar.ts` 的 `leftoverRv`、`sessionPersistenceSync.ts` 的 `leftoverR`）仍是旧惯例。  
-> 分 pack 金标仍以各 `official-*-checklist.md` / board 为准。README / README_EN 计数已按本文件纠偏（229 `#12` tip=`localhost`；232 PARTIAL 2；236/238 本机 HAVE；239 leftover 已进 **2.7.47**；243+246 已进 **2.7.48**）。  
+> 分 pack 金标仍以各 `official-*-checklist.md` / board 为准。README / README_EN 计数已按本文件纠偏（229 `#12` tip=`localhost`；232 PARTIAL 2；236/238 本机 HAVE；239 leftover 已进 **2.7.47**；243+246 已进 **2.7.48**，全平台重编 **2.7.49**）。  
 > **口径（钉死）**：同缺 / 无函数体 / 官方 opt-in / tip=现行官方 → **已对齐**，**不是 tip 缺口**，**禁止**再写进「还差什么」。  
 > **过期勿再当 open**：08-27「#11/#27/#4/#13 → PARTIAL」、08-29「239 PARTIAL 2」、09-01「#25 保持 generation gate」、把 invent-ban 表当成待办。
 
@@ -25,7 +25,7 @@
 | **243** | SEA 已下 · HAVE **49** / PARTIAL **0** / N/A **11** / UNKNOWN **0**。见 `v2.1.243/`。 |
 | **246** | SEA 已下 · **以代码为准**。HAVE **59** / PARTIAL **0** / GAP **0** / UNKNOWN **0** / N/A **2**。#5 ColorDiff `V`/`U`/`fe=2000`；#7 `rPt="starting…"` wedge；#8 `lr` reinstall-wait；#35 Messages `$M`/`jM` mint-id；#36 Write `TB` omit-old；#37 `g$` 报错合同；#40/#51/#52 已按已锁 SEA 体搬完（交互 `iX` 空 stub 勿 invent；VSCode 同缺）。#55 GJn 09-16 升 HAVE。窄 HAVE #43/#44/#56/#57 以已锁函数体为准。#45 HAVE（09-15b；`na`=`decodeJwtExpiry`）。**勿 invent** `markStartupDialogBlocked` / JWT parse / stream 补 `toolu_` / 空 `{}` 当 corrupt。RC 内部（非 changelog）：occupancy / elevated_auth / takeover / bounce / torn-pair / auth-revive **已接**。见 `v2.1.246/`。**不**折入 244 空号、245 glibc、247+ |
 
-**交付面：** 243 + 246 已进仓（npm **2.7.48**）。246 HAVE **59** / UNKNOWN **0** / N/A **2**。2026-09-08 升 #5 / #7 / #8 / #35 / #36 / #37 HAVE；#45 HAVE（09-15b）。#7 勿 invent `markStartupDialogBlocked`。#55 勿 invent 全文 auto-continue。窄 HAVE 勿按 changelog 扩写。#35 勿在 stream/`Owe` 合成 `toolu_`（修在 Messages UI）。#45 勿 invent JWT parse。#37 勿把空 `{}` 当 corrupt。#30 勿镜像 bash-path Te()。#46 勿 invent 切片。#52 勿 invent 全局 Q3e skill key。#40 勿 invent 交互 `my` / 空 `iX`。RC persist / `scan_torn` 官方同形；勿 invent `sK` / `Qtt` / `L`·`te`·`_e`。Desktop `useRenderInput("ToolGroup")` 同缺。勿重开 212–243 invent 表。
+**交付面：** 243 + 246 已进仓（npm **2.7.49**）。246 HAVE **59** / UNKNOWN **0** / N/A **2**。2026-09-08 升 #5 / #7 / #8 / #35 / #36 / #37 HAVE；#45 HAVE（09-15b）。#7 勿 invent `markStartupDialogBlocked`。#55 勿 invent 全文 auto-continue。窄 HAVE 勿按 changelog 扩写。#35 勿在 stream/`Owe` 合成 `toolu_`（修在 Messages UI）。#45 勿 invent JWT parse。#37 勿把空 `{}` 当 corrupt。#30 勿镜像 bash-path Te()。#46 勿 invent 切片。#52 勿 invent 全局 Q3e skill key。#40 勿 invent 交互 `my` / 空 `iX`。RC persist / `scan_torn` 官方同形；勿 invent `sK` / `Qtt` / `L`·`te`·`_e`。Desktop `useRenderInput("ToolGroup")` 同缺。勿重开 212–243 invent 表。
 
 ---
 
