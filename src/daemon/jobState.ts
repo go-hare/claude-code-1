@@ -39,7 +39,7 @@ export interface BgJobState {
   tempo: BgSessionTempo
   intent: string
   name?: string
-  nameSource?: 'user' | 'auto'
+  nameSource?: 'user' | 'auto' | 'collision'
   initialPrompt?: string
   sessionId: string
   resumeSessionId?: string
@@ -422,7 +422,7 @@ export async function removeJob(short: string): Promise<void> {
 export function createInitialJobState(opts: {
   intent: string
   name?: string
-  nameSource?: 'user' | 'auto'
+  nameSource?: 'user' | 'auto' | 'collision'
   sessionId: string
   cwd: string
   template?: string
@@ -514,7 +514,7 @@ export function writeA8qJobState(opts: {
   cwd: string
   intent: string
   name?: string
-  nameSource?: 'user' | 'auto'
+  nameSource?: 'user' | 'auto' | 'collision'
   detail?: string
   color?: string
   resumeSessionId?: string

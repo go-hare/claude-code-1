@@ -5,9 +5,21 @@
  * exercises the actual loop: 401 under USE_VERTEX exhausts at
  * MAX_CLOUD_AUTH_RETRIES and throws CannotRetryError (not full maxRetries).
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { APIError } from '@anthropic-ai/sdk'
 import type Anthropic from '@anthropic-ai/sdk'
+import * as realSleep from 'src/utils/sleep.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const sleepSnap = snapshotModuleExports(realSleep)
 
 const sleepMock = mock(async (..._args: unknown[]) => {})
 
@@ -27,10 +39,12 @@ function withTimeoutPassthrough<T>(
 
 // Hoist before withRetry binds sleep — use both alias forms Bun may resolve.
 mock.module('src/utils/sleep.js', () => ({
+  ...sleepSnap,
   sleep: (...args: unknown[]) => sleepMock(...args),
   withTimeout: withTimeoutPassthrough,
 }))
 mock.module('src/utils/sleep.ts', () => ({
+  ...sleepSnap,
   sleep: (...args: unknown[]) => sleepMock(...args),
   withTimeout: withTimeoutPassthrough,
 }))
@@ -190,4 +204,9 @@ describe('densable 2.1.228 #14 withRetry Vertex auth cap (runtime)', () => {
     // maxRetries=1 → attempts 1 and 2 then throw (or similar) — not auth cap of 3
     expect(opCalls).toBeGreaterThanOrEqual(2)
   })
+})
+
+afterAll(() => {
+  mock.module('src/utils/sleep.js', () => ({ ...sleepSnap }))
+  mock.module('src/utils/sleep.ts', () => ({ ...sleepSnap }))
 })

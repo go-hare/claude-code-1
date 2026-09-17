@@ -300,7 +300,7 @@ describe('createCriPolicyPrecheck densable En_ factory', () => {
     )
     expect(client).toContain('criPolicyPrecheckFetchInput')
     expect(client.indexOf('criPolicyPrecheckFetchInput')).toBeLessThan(
-      client.indexOf('applyGzipRequestBodyInit(url, nextInit)'),
+      client.indexOf('applyGzipRequestBodyInit(url, nextInit, { storageV5 })'),
     )
     expect(retry).not.toContain('assertCriPolicyAllowsRequest')
   })

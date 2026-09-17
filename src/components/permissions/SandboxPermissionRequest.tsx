@@ -8,6 +8,7 @@ import {
 import { Select } from '../CustomSelect/select.js';
 import { PermissionDialog } from './PermissionDialog.js';
 import type { SandboxNetworkAccessResult } from '../../dialog/sandboxNetworkAccess.js';
+import { useNotifyAfterTimeout } from '../../hooks/useNotifyAfterTimeout.js';
 
 export type SandboxPermissionRequestProps = {
   hostPattern: NetworkHostPattern;
@@ -18,6 +19,9 @@ export function SandboxPermissionRequest({
   hostPattern: { host },
   onUserResponse,
 }: SandboxPermissionRequestProps): React.ReactNode {
+  // densable m_ td("Claude needs your permission","permission_prompt")
+  useNotifyAfterTimeout('Claude needs your permission', 'permission_prompt');
+
   function onSelect(value: string) {
     // We may want to better unify this dialog with other permission dialogs
     // and use their logging, but this is slightly different and we don't have

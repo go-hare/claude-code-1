@@ -260,6 +260,7 @@ export function logAPIError({
   llmSpan,
   fastMode,
   previousRequestId,
+  promptTooLongIsHandled,
 }: {
   error: unknown
   model: string
@@ -280,6 +281,11 @@ export function logAPIError({
   llmSpan?: Span
   fastMode?: boolean
   previousRequestId?: string | null
+  /**
+   * densable promptTooLongIsHandled — skip tengu_api_error / logError when
+   * classifyAPIError is prompt_too_long (official O = S && x==="prompt_too_long").
+   */
+  promptTooLongIsHandled?: boolean
 }): void {
   const gateway = detectGateway({
     headers:
@@ -301,13 +307,19 @@ export function logAPIError({
     )
   }
 
-  const invocation = consumeInvokingRequestId()
+  const skipPromptTooLong =
+    promptTooLongIsHandled === true && errorType === 'prompt_too_long'
+  const invocation = skipPromptTooLong ? undefined : consumeInvokingRequestId()
 
   if (clientRequestId) {
     logForDebugging(
       `API error x-client-request-id=${clientRequestId} (give this to the API team for server-log lookup)`,
       { level: 'error' },
     )
+  }
+
+  if (skipPromptTooLong) {
+    return
   }
 
   logError(error as Error)

@@ -17,37 +17,44 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { authMock } from '../../../../tests/mocks/auth.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
+import {
+  cronMock,
+  oauthClientMock,
+  oauthConfigMock,
+  teleportApiMock,
+} from '../../../../tests/mocks/oauthSurface.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 // ── Analytics mock ──────────────────────────────────────────────────────────
-const logEventMock = mock(() => {})
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: logEventMock,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // ── Cron utility mock ───────────────────────────────────────────────────────
-mock.module('src/utils/cron.js', () => ({
-  parseCronExpression: (cron: string) => {
-    const fields = cron.trim().split(/\s+/)
-    if (fields.length !== 5) return null
-    // Reject if any field contains a letter (invalid cron field)
-    const hasWord = fields.some(f => /[a-zA-Z]/.test(f))
-    if (hasWord) return null
-    return {
-      minute: [0],
-      hour: [9],
-      dayOfMonth: [1],
-      month: [1],
-      dayOfWeek: [1],
-    }
-  },
-  cronToHuman: (cron: string) => `human(${cron})`,
-}))
+mock.module('src/utils/cron.js', () =>
+  cronMock({
+    parseCronExpression: (cron: string) => {
+      const fields = cron.trim().split(/\s+/)
+      if (fields.length !== 5) return null
+      // Reject if any field contains a letter (invalid cron field)
+      const hasWord = fields.some(f => /[a-zA-Z]/.test(f))
+      if (hasWord) return null
+      return {
+        minute: [0],
+        hour: [9],
+        dayOfMonth: [1],
+        month: [1],
+        dayOfWeek: [1],
+      }
+    },
+    cronToHuman: (cron: string) => `human(${cron})`,
+  }),
+)
 
 // ── ScheduleView mock ───────────────────────────────────────────────────────
 const scheduleViewMock = mock((_props: unknown) => null)
@@ -57,27 +64,30 @@ mock.module('src/commands/schedule/ScheduleView.js', () => ({
 
 // ── Auth / OAuth mocks ──────────────────────────────────────────────────────
 mock.module('src/utils/auth.js', () => ({
+  ...authMock(),
   getClaudeAIOAuthTokens: () => ({ accessToken: 'test-token-schedule' }),
 }))
-mock.module('src/services/oauth/client.js', () => ({
-  getOrganizationUUID: async () => 'org-uuid-schedule',
-}))
-mock.module('src/constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-}))
-mock.module('src/utils/teleport/api.js', () => ({
-  getOAuthHeaders: (token: string) => ({
-    Authorization: `Bearer ${token}`,
-    'anthropic-version': '2023-06-01',
+mock.module('src/services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => 'org-uuid-schedule',
   }),
-  prepareApiRequest: async () => ({
-    accessToken: 'test-token-schedule',
-    orgUUID: 'org-uuid-schedule',
+)
+mock.module('src/constants/oauth.js', oauthConfigMock)
+mock.module('src/utils/teleport/api.js', () =>
+  teleportApiMock({
+    getOAuthHeaders: (token: string) => ({
+      Authorization: `Bearer ${token}`,
+      'anthropic-version': '2023-06-01',
+    }),
+    prepareApiRequest: async () => ({
+      accessToken: 'test-token-schedule',
+      orgUUID: 'org-uuid-schedule',
+    }),
+    prepareWorkspaceApiRequest: async () => ({
+      apiKey: 'test-workspace-key',
+    }),
   }),
-  prepareWorkspaceApiRequest: async () => ({
-    apiKey: 'test-workspace-key',
-  }),
-}))
+)
 mock.module('src/services/auth/hostGuard.ts', () => ({
   assertSubscriptionBaseUrl: () => {},
   assertWorkspaceHost: () => {},
@@ -121,7 +131,6 @@ function makeOnDone() {
 }
 
 beforeEach(() => {
-  logEventMock.mockClear()
   axiosGetMock.mockClear()
   axiosPostMock.mockClear()
   axiosDeleteMock.mockClear()

@@ -78,6 +78,11 @@ import { errorMessage } from '../errors.js'
 import { readHostProxyPorts } from '../hostProxyPorts.js'
 import { getClaudeTempDir } from '../permissions/filesystem.js'
 import type { PermissionRuleValue } from '../permissions/PermissionRule.js'
+import {
+  collectUngatedAdditionalDirectories,
+  collectUngatedAllowRuleStrings,
+  isSourceGrantsGated,
+} from '../permissions/projectGrantsGate.js'
 import { ripgrepCommand } from '../ripgrep.js'
 
 // ============================================================================
@@ -723,7 +728,9 @@ export function convertToSandboxRuntimeConfig(
     for (const domain of settings.sandbox?.network?.allowedDomains || []) {
       allowedDomains.push(domain)
     }
-    for (const ruleString of permissions.allow || []) {
+    // Ungated sources only: an untrusted project must not add to the sandbox
+    // network allowlist via WebFetch(domain:...).
+    for (const ruleString of collectUngatedAllowRuleStrings()) {
       const rule = permissionRuleValueFromString(ruleString)
       if (
         rule.toolName === WEB_FETCH_TOOL_NAME &&
@@ -1023,8 +1030,12 @@ export function convertToSandboxRuntimeConfig(
   // sandbox) can access them — not just file tools, which check permissions
   // at the app level via pathInAllowedWorkingPath().
   // Two sources: persisted in settings, and session-only in bootstrap state.
+  // collectUngatedAdditionalDirectories rather than the merged settings: when
+  // autoAllowBashIfSandboxed is on Bash runs unprompted, so this list is the
+  // only boundary left, and an untrusted project's additionalDirectories must
+  // not widen it just because the app-level gate dropped them elsewhere.
   const additionalDirs = new Set([
-    ...(settings.permissions?.additionalDirectories || []),
+    ...collectUngatedAdditionalDirectories(),
     ...getAdditionalDirectoriesForClaudeMd(),
   ])
   allowWrite.push(...additionalDirs)
@@ -1034,10 +1045,25 @@ export function convertToSandboxRuntimeConfig(
   // so we need to know which source each rule came from
   for (const source of SETTING_SOURCES) {
     const sourceSettings = getSettingsForSource(source)
+    // densable 2.1.246 #61 — `--setting-sources` must skip disabled sources
+    // (network already did; filesystem/permission rules did not).
+    if (!isSettingSourceEnabled(source)) {
+      if (sourceSettings?.permissions || sourceSettings?.sandbox?.filesystem) {
+        logForDebugging(
+          `Sandbox: ignoring permission rules and sandbox.filesystem entries from disabled setting source ${source}`,
+          { level: 'info' },
+        )
+      }
+      continue
+    }
 
     // Extract filesystem paths from permission rules
     if (sourceSettings?.permissions) {
-      for (const ruleString of sourceSettings.permissions.allow || []) {
+      // Allow only — deny is never gated.
+      const gatedGrants = isSourceGrantsGated(source)
+      for (const ruleString of gatedGrants
+        ? []
+        : sourceSettings.permissions.allow || []) {
         const rule = permissionRuleValueFromString(ruleString)
         if (rule.toolName === FILE_EDIT_TOOL_NAME && rule.ruleContent) {
           allowWrite.push(

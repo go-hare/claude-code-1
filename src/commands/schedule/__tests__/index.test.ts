@@ -1,11 +1,13 @@
 /**
  * Tests for schedule/index.ts — command metadata only.
  */
-import { beforeAll, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 let cmd: {
   load?: () => Promise<{ call: unknown }>
@@ -63,4 +65,12 @@ describe('scheduleCommand metadata', () => {
     const loaded = await cmd.load!()
     expect(typeof (loaded as { call?: unknown }).call).toBe('function')
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

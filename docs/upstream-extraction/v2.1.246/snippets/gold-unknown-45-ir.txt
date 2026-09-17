@@ -1,0 +1,55 @@
+# Official 2.1.246 SEA — UNKNOWN #45 helper JWT idle
+# HAVE 2026-09-15b — IR/QK/Hs/dr/DR/na/ie 1:1.
+
+# DR @207117578 = TTL
+function DR(){
+  let e=c.CLAUDE_CODE_API_KEY_HELPER_TTL_MS
+  if(e!==void 0){if(e>=0)return e; p(`Found CLAUDE_CODE_API_KEY_HELPER_TTL_MS env var, but it was not a valid number. Got ${e}`)}
+  return UK
+}
+UK=300000
+bR=30000
+
+# Hs @207113934 — source is apiKeyHelper without executing it
+function Hs(){
+  return !uo() && _a({skipRetrievingKeyFromApiKeyHelper:!0}).source==="apiKeyHelper"
+}
+
+# dr @207113039
+function dr(){return ga()?void 0:c.ANTHROPIC_AUTH_TOKEN}
+
+# QK @207117866 — needs na(e.value)
+function QK(e){
+  let t=na(e.value)
+  if(t===null)return!0
+  let n=t*1000-bR
+  if(e.timestamp>=n)return!0
+  return Date.now()<n
+}
+function ZK(e){let t=na(e);return t===null||Date.now()<t*1000-bR}
+
+# IR @207118128
+async function IR(e){
+  if(!nt())return null
+  let t=DR(), n=lo.of(A().host)
+  let r=()=>(n.inflight={promise:Yw(n,e,!0,n.epoch),startedAt:Date.now()},n.inflight.promise)
+  if(n.cache){
+    if(!QK(n.cache)&&ie()&&Hs()&&!dr()){
+      # force refresh (JWT near expiry)
+      ...
+      return r()
+    }
+    if(Date.now()-n.cache.timestamp<t)return n.cache.value
+    # SWR background
+    if(!n.inflight)n.inflight={promise:Yw(n,e,!1,n.epoch),startedAt:null}
+    return n.cache.value
+  }
+  if(n.inflight)return n.inflight.promise
+  return r()
+}
+
+# Bodies locked via export twin (see gold-bytecode-na-ie-he-bln.txt):
+#   na = W as cwc @205293986 — decodeJwtExpiry (sk-ant-si- + 3-part + exp)
+#   ie = X as eCc @206041396 — d()==="firstParty"
+# Local jwtExpiry.decodeJwtExpiry is 1:1 with W. gatewayEnv.decodeJwtExpSeconds is NOT.
+# Wired into getApiKeyFromApiKeyHelper / IR. HAVE.

@@ -65,6 +65,7 @@ import {
   type RecoveryBudgetCounters,
   REMINT_EXHAUSTED_DETAIL,
   remintBackoffMs,
+  PREVIOUS_SESSION_UNAVAILABLE_DETAIL,
   SESSION_TELEPORTED_DETAIL,
 } from './remintRecovery.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
@@ -73,7 +74,12 @@ import {
   isTeleportedSessionId,
   setReplBridgeSessionId,
 } from '../bootstrap/state.js'
-import { getTrustedDeviceToken } from './trustedDevice.js'
+import {
+  enrollTrustedDevice,
+  clearTrustedDeviceTokenCache,
+  getTrustedDeviceToken,
+  isTrustedDeviceActiveForOrg,
+} from './trustedDevice.js'
 import {
   getEnvLessBridgeConfig,
   type EnvLessBridgeConfig,
@@ -196,6 +202,7 @@ export type EnvLessBridgeParams = {
   onStopTask?: (taskId: string) => Promise<unknown>
   onSetModel?: (
     model: string | undefined,
+    // biome-ignore lint/suspicious/noConfusingVoidType: load-bearing, see bridgeMessaging.ts
   ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   onSetPermissionMode?: (
@@ -205,6 +212,13 @@ export type EnvLessBridgeParams = {
     serverName: string,
     mode: string | null,
   ) => { ok: true; warning?: string } | { ok: false; error: string }
+  /**
+   * Official leftover Pi / MCc onRenameSession. Control subtype
+   * rename_session. `{ok:false}` → error control_response.
+   */
+  onRenameSession?: (
+    title: string,
+  ) => { ok: true } | { ok: false; error: string }
   onStateChange?: (state: BridgeState, detail?: string) => void
   /**
    * When true, skip opening the SSE read stream — only the CCRClient write
@@ -237,6 +251,17 @@ export type EnvLessBridgeParams = {
    */
   noHistoryBackfill?: boolean
   /**
+   * densable reattachOrFail (o / ae) — gone / teleported / missing pointer
+   * fail terminally instead of minting fresh.
+   */
+  reattachOrFail?: boolean
+  /** densable reattachOrigin (s / de) — analytics on gone mint / fail. */
+  reattachOrigin?: string
+  /** densable onReattachGoneBounce (u). */
+  onReattachGoneBounce?: () => void
+  /** densable onReattachPointerDead (p) — tombstone the gone pointer. */
+  onReattachPointerDead?: () => void
+  /**
    * densable mOp `neutralFallbackTitle:c` — when unarchive is `gone` and we mint
    * a fresh server session, createCodeSession title is reset to this (or a new
    * slug) so the resumed conversation title is not stamped onto the new remote
@@ -244,6 +269,27 @@ export type EnvLessBridgeParams = {
    * init keeps the caller-supplied title (same as densable).
    */
   neutralFallbackTitle?: string
+  /**
+   * densable leftover `Ne` / `onTransportPersistenceReady`.
+   * Official @215484192: `$t=qt.getInternalEventWriter?.()`,
+   * `en=qt.getInternalEventReaders?.()`, `if($t&&en)Ne($t,en)` after
+   * `ws_connected`, before `flushHistory`.
+   */
+  onTransportPersistenceReady?: (
+    writer: (
+      eventType: string,
+      payload: Record<string, unknown>,
+      options?: Record<string, unknown>,
+    ) => Promise<void>,
+    readers: {
+      readMain: () => Promise<{
+        events?: Array<{ payload?: { uuid?: string } }>
+      } | null>
+      readSubagents: () => Promise<{
+        events?: Array<{ payload?: { uuid?: string } }>
+      } | null>
+    },
+  ) => void
 }
 
 /**
@@ -274,6 +320,7 @@ export async function initEnvLessBridgeCore(
     onSetMaxThinkingTokens,
     onSetPermissionMode,
     onSetMcpPermissionModeOverride,
+    onRenameSession,
     onStateChange,
     outboundOnly,
     tags,
@@ -281,7 +328,12 @@ export async function initEnvLessBridgeCore(
     reattachSessionId,
     reattachSequenceNum,
     noHistoryBackfill: noHistoryBackfillOpt,
+    reattachOrFail,
+    reattachOrigin,
+    onReattachGoneBounce,
+    onReattachPointerDead,
     neutralFallbackTitle,
+    onTransportPersistenceReady,
   } = params
 
   const cfg = await getEnvLessBridgeConfig()
@@ -369,7 +421,35 @@ export async function initEnvLessBridgeCore(
     logBridgeSkip('v2_session_create_failed', undefined, true)
   }
 
-  if (reattachSessionId) {
+  if (reattachSessionId && isTeleportedSessionId(reattachSessionId)) {
+    if (reattachOrFail) {
+      logForDebugging(
+        `[remote-bridge] Reattach-or-fail: ${reattachSessionId} is teleported; failing terminally instead of minting fresh`,
+      )
+      logForDiagnosticsNoPII(
+        'info',
+        'bridge_repl_v2_revive_reattach_teleported',
+      )
+      onReattachPointerDead?.()
+      onStateChange?.('failed', PREVIOUS_SESSION_UNAVAILABLE_DETAIL)
+      logBridgeSkip('v2_revive_reattach_teleported', undefined, true)
+      logEvent('tengu_bridge_connect', {
+        event:
+          'bridge_connect_reattach_teleported' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return null
+    }
+    logForDebugging(
+      `[remote-bridge] Reattach suppressed for teleported session ${reattachSessionId} — minting fresh`,
+    )
+    const minted = await mintFreshSession()
+    if (typeof minted !== 'string') {
+      reportSessionCreateFailure(minted)
+      return null
+    }
+    sessionId = minted
+    isReattaching = false
+  } else if (reattachSessionId) {
     sessionId = reattachSessionId
     logForDebugging(`[remote-bridge] Reattaching to session ${sessionId}`)
     logForDiagnosticsNoPII('info', 'bridge_repl_v2_session_reattached')
@@ -385,6 +465,48 @@ export async function initEnvLessBridgeCore(
       'unarchiveSession',
       cfg,
     )
+    if (unarchiveResult?.outcome === 'elevated_auth') {
+      logForDebugging(
+        `[remote-bridge] Reattach ${sessionId}: unarchive elevated-auth (${unarchiveResult.reason}) — surfacing auth failure, pointer preserved`,
+      )
+      logForDiagnosticsNoPII('info', 'bridge_repl_v2_reattach_elevated_auth')
+      const fail =
+        unarchiveResult.reason === 'untrusted_device' &&
+        !isTrustedDeviceActiveForOrg()
+          ? {
+              terminal: true as const,
+              reason: 'request_rejected' as const,
+              status: 403,
+            }
+          : {
+              terminal: true as const,
+              reason: unarchiveResult.reason,
+            }
+      onStateChange?.('failed', formatBridgeCredentialFailure(fail))
+      logBridgeSkip('v2_reattach_elevated_auth', undefined, true)
+      logEvent('tengu_bridge_connect', {
+        event:
+          'bridge_connect_reattach_elevated_auth' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return null
+    }
+    if (unarchiveResult?.outcome === 'gone' && reattachOrFail) {
+      logForDebugging(
+        `[remote-bridge] Reattach-or-fail: ${sessionId} gone (unarchive ${String(unarchiveResult.status)}); failing terminally instead of minting fresh`,
+      )
+      logForDiagnosticsNoPII('info', 'bridge_repl_v2_revive_reattach_gone')
+      onReattachGoneBounce?.()
+      onReattachPointerDead?.()
+      onStateChange?.('failed', PREVIOUS_SESSION_UNAVAILABLE_DETAIL)
+      logBridgeSkip('v2_revive_reattach_gone', undefined, true)
+      logEvent('tengu_bridge_connect', {
+        event:
+          'bridge_connect_reattach_gone' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        reattach_origin:
+          reattachOrigin as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return null
+    }
     if (unarchiveResult?.outcome === 'gone') {
       logForDebugging(
         `[remote-bridge] Reattach ${sessionId} gone (unarchive ${String(unarchiveResult.status)}); minting fresh session`,
@@ -393,10 +515,13 @@ export async function initEnvLessBridgeCore(
       logEvent('tengu_bridge_repl_env_expired_fresh_session', {
         v2: true,
         via: 'unarchive' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        reattach_origin:
+          reattachOrigin as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
       // densable Ge=!0 *before* mint: new server session must not receive
       // prior local history via initialMessages flush (#19).
       skipInitialHistoryFlush = true
+      onReattachGoneBounce?.()
       // densable Pe=c??`${xAt()}-${Aet()}` — drop resumed-derived title when
       // the remote session is gone and we mint a new cse_* (#5 title path).
       sessionTitle =
@@ -411,6 +536,19 @@ export async function initEnvLessBridgeCore(
     }
     // unarchiveResult null = transient failure after retries; still try
     // /bridge — server may accept without unarchive (409 already-active).
+  } else if (reattachOrFail) {
+    logForDebugging(
+      '[remote-bridge] Reattach-or-fail: no reattach pointer for this init; failing terminally instead of minting fresh',
+    )
+    logForDiagnosticsNoPII('info', 'bridge_repl_v2_revive_fresh_refused')
+    onReattachGoneBounce?.()
+    onStateChange?.('failed', PREVIOUS_SESSION_UNAVAILABLE_DETAIL)
+    logBridgeSkip('v2_revive_fresh_refused', undefined, true)
+    logEvent('tengu_bridge_connect', {
+      event:
+        'bridge_connect_revive_fresh_refused' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return null
   } else {
     const minted = await mintFreshSession()
     if (typeof minted !== 'string') {
@@ -762,6 +900,31 @@ export async function initEnvLessBridgeCore(
         cause:
           connectCause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
+      // densable leftover `if($t&&en)Ne($t,en)` before flushHistory.
+      const persistHost = transport as {
+        getInternalEventWriter?: () =>
+          | ((
+              eventType: string,
+              payload: Record<string, unknown>,
+              options?: Record<string, unknown>,
+            ) => Promise<void>)
+          | undefined
+        getInternalEventReaders?: () =>
+          | {
+              readMain: () => Promise<{
+                events?: Array<{ payload?: { uuid?: string } }>
+              } | null>
+              readSubagents: () => Promise<{
+                events?: Array<{ payload?: { uuid?: string } }>
+              } | null>
+            }
+          | undefined
+      }
+      const persistWriter = persistHost.getInternalEventWriter?.()
+      const persistReaders = persistHost.getInternalEventReaders?.()
+      if (persistWriter && persistReaders) {
+        onTransportPersistenceReady?.(persistWriter, persistReaders)
+      }
       // densable th(): _o=0; densable ul() via onRequestAuthOk: Ws=0 + noteHealthyBeat.
       // Local transport has no separate auth-ok hook — onConnect is the live signal.
       onHealthyTransport()
@@ -828,6 +991,7 @@ export async function initEnvLessBridgeCore(
             onSetMaxThinkingTokens,
             onSetPermissionMode,
             onSetMcpPermissionModeOverride,
+            onRenameSession,
             outboundOnly,
           }),
       )
@@ -1944,6 +2108,7 @@ export {
 import {
   createCodeSession,
   fetchRemoteCredentials as fetchRemoteCredentialsRaw,
+  formatBridgeCredentialFailure,
   formatCodeSessionCreateFailure,
   isNonTerminalBridgeFailure,
   isRemoteCredentials,
@@ -1992,14 +2157,19 @@ type ArchiveTelemetryStatus =
   | 'skipped_teleport'
 
 /**
- * densable $Xg unarchive outcome for reattach.
+ * densable $Xg / vfs unarchive outcome for reattach.
  * - ok: 2xx or 409 (already active)
- * - gone: invalid id / 400 / 403 / 404 — mint fresh session
+ * - elevated_auth: 403 untrusted_device / session_stale_relogin — fail, keep pointer
+ * - gone: invalid id / 400 / generic 403 / 404 — mint fresh session
  * - null: transient failure — still try /bridge
  */
 type UnarchiveOutcome =
   | { outcome: 'ok' }
   | { outcome: 'gone'; status: number | 'invalid' }
+  | {
+      outcome: 'elevated_auth'
+      reason: 'untrusted_device' | 'session_stale_relogin'
+    }
   | null
 
 async function unarchiveSession(
@@ -2022,6 +2192,30 @@ async function unarchiveSession(
   if (status === 'invalid') {
     logForDiagnosticsNoPII('info', 'bridge_repl_v2_unarchive_invalid_id')
     return { outcome: 'gone', status: 'invalid' }
+  }
+  if (status === 'untrusted_device' || status === 'session_stale_relogin') {
+    // densable vfs nLt: untrusted_device retries once after enroll.
+    if (status === 'untrusted_device') {
+      clearTrustedDeviceTokenCache()
+      await enrollTrustedDevice()
+      const next = getTrustedDeviceToken()
+      if (next) {
+        const retried = await unarchiveCodeSession(
+          sessionId,
+          baseUrl,
+          accessToken,
+          orgUUID,
+          timeoutMs,
+          next,
+        )
+        if (typeof retried === 'number' && (retried < 300 || retried === 409)) {
+          logForDiagnosticsNoPII('info', 'bridge_repl_v2_unarchive_ok')
+          return { outcome: 'ok' }
+        }
+      }
+    }
+    logForDiagnosticsNoPII('info', 'bridge_repl_v2_unarchive_elevated_auth')
+    return { outcome: 'elevated_auth', reason: status }
   }
   if (typeof status !== 'number') {
     logForDiagnosticsNoPII('info', 'bridge_repl_v2_unarchive_failed')

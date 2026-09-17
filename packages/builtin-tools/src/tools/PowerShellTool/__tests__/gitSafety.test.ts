@@ -1,11 +1,13 @@
 import { afterAll, mock, describe, expect, test } from 'bun:test'
 import * as realCwd from 'src/utils/cwd.js'
+import * as realParser from 'src/utils/powershell/parser.js'
 import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
 // Mock dependencies before import
 const mockCwd = '/Users/test/project'
 // Snapshot BEFORE mock — incomplete cwd stub poisons pathGlob/cd co-suites.
 const cwdSnap = snapshotModuleExports(realCwd)
+const parserSnap = snapshotModuleExports(realParser)
 
 mock.module('src/utils/cwd.js', () => ({
   ...cwdSnap,
@@ -17,6 +19,7 @@ afterAll(() => {
 
 // Defensive: agent.test.ts can corrupt Bun's src/* path alias at runtime.
 mock.module('src/utils/powershell/parser.js', () => ({
+  ...parserSnap,
   PS_TOKENIZER_DASH_CHARS: new Set(['-', '\u2013', '\u2014', '\u2015']),
   COMMON_ALIASES: {},
   commandHasArgAbbreviation: () => false,

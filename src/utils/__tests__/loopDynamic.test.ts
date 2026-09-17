@@ -1,22 +1,37 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+import { debugMock } from '../../../tests/mocks/debug.js'
+import {
+  growthbookMock,
+  pushGrowthbookFeatureGetter,
+} from '../../../tests/mocks/growthbook.js'
 /** Controllable GrowthBook stub — tests opt into jKe/YKu/Cfr via setGate. */
 const growthbookGates = new Map<string, boolean>()
 
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: (key: string, defaultValue: unknown) =>
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+let popGrowthbook: (() => void) | undefined
+beforeAll(() => {
+  popGrowthbook = pushGrowthbookFeatureGetter((key, defaultValue) =>
     growthbookGates.has(key) ? growthbookGates.get(key) : defaultValue,
-  getFeatureValue_CACHED_WITH_REFRESH: (key: string, defaultValue: unknown) =>
-    growthbookGates.has(key) ? growthbookGates.get(key) : defaultValue,
-}))
+  )
+})
+afterAll(() => {
+  popGrowthbook?.()
+})
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
-mock.module('src/utils/debug.js', () => ({
-  logForDebugging: () => {},
-}))
+mock.module('src/utils/debug.js', debugMock)
 
 import {
   getLoopConsecutiveKeepalives,

@@ -1,0 +1,33 @@
+# Official 2.1.246 SEA — #54 abort + max_turns_reached
+# Locked 2026-09-16. Local runAgent / query already 1:1. Do not invent a
+# second yield path that ignores abort.
+
+# runAgent @214524275 — comma-if. Always debug-log; event+yield only if
+# !at.signal.aborted; always break.
+if(vt.attachment.type==="max_turns_reached"){
+  if(
+    b(`[Agent: ${e.agentType}] Reached max turns limit (${vt.attachment.maxTurns})`),
+    !at.signal.aborted
+  )
+    L("tengu_agent_max_turns_reached",{
+      query_source:Up(a),
+      is_built_in_agent:dl(e),
+      max_turns:vt.attachment.maxTurns,
+      turn_count:vt.attachment.turnCount,
+      is_async:o
+    }),
+    yield vt;
+  break
+}
+
+# query @214424458 — abort_tools still yields the attachment when over limit.
+# runAgent then drops event+yield if the agent abort signal is already set.
+if(u&&tt>u)
+  yield or({type:"max_turns_reached",maxTurns:u,turnCount:tt},m);
+return wI(z,l),{reason:"aborted_tools"}
+
+# query also yields on the normal max_turns return @214429763
+# (not abort-specific; already local).
+if(wc!==void 0)
+  return yield or({type:"max_turns_reached",maxTurns:wc,turnCount:da},m),
+    wI(z,l),{reason:"max_turns",turnCount:da};

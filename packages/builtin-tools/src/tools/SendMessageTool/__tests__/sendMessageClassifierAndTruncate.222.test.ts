@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import * as realAutoModeState from 'src/utils/permissions/autoModeState.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
 const autoMode = { active: false }
+const autoModeStateSnap = snapshotModuleExports(realAutoModeState)
 
 mock.module('src/utils/permissions/autoModeState.js', () => ({
+  ...autoModeStateSnap,
   isAutoModeActive: () => autoMode.active,
   setAutoModeActive: (v: boolean) => {
     autoMode.active = v

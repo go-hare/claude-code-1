@@ -20,12 +20,43 @@ import {
   mock,
   test,
 } from 'bun:test'
+
+// getUserAgent() reads MACRO.VERSION (build define); absent in bun test.
+;(globalThis as { MACRO?: { VERSION: string } }).MACRO = {
+  VERSION: '2.1.246-test',
+}
+import * as realSettings from 'src/utils/settings/settings.js'
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
-import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
+
+// Pin OpenAI routing: modelType=anthropic (OAuth login residue) beats
+// CLAUDE_CODE_USE_OPENAI per getAPIProvider() — see providers.ts.
+const settingsSnap = snapshotModuleExports(realSettings)
+const realGetInitialSettings =
+  settingsSnap.getInitialSettings as typeof realSettings.getInitialSettings
+const settingsMock = createSettingsMock(settingsSnap, {
+  getInitialSettings: () => ({
+    ...realGetInitialSettings(),
+    modelType: 'openai' as const,
+  }),
+  getSettings_DEPRECATED: () => ({
+    ...realGetInitialSettings(),
+    modelType: 'openai' as const,
+  }),
+})
+mock.module('src/utils/settings/settings.ts', settingsMock)
+mock.module('src/utils/settings/settings.js', settingsMock)
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap)
+})
 
 // mock.module is process-global (last-write-wins). Spread the real module and
 // restore it afterwards — a no-op attachAnalyticsSink stub leaks out of this

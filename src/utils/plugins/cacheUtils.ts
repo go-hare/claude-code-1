@@ -18,6 +18,7 @@ import {
 import { clearPluginOutputStyleCache } from './loadPluginOutputStyles.js'
 import { clearPluginCache, getPluginCachePath } from './pluginLoader.js'
 import { clearPluginOptionsCache } from './pluginOptionsStorage.js'
+import { isPluginCacheStagingName } from './pluginCacheStaging.js'
 import { isPluginZipCacheEnabled } from './zipCache.js'
 
 const ORPHANED_AT_FILENAME = '.orphaned_at'
@@ -240,7 +241,11 @@ export async function listPluginCacheSubdirs(
   try {
     const entries = await readdir(dirPath, { withFileTypes: true })
     return entries
-      .filter(d => d.isDirectory() || d.isSymbolicLink())
+      .filter(
+        d =>
+          (d.isDirectory() || d.isSymbolicLink()) &&
+          !isPluginCacheStagingName(d.name),
+      )
       .map(d => d.name)
   } catch {
     return []

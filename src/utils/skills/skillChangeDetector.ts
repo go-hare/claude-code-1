@@ -17,6 +17,7 @@ import {
   clearSkillCaches,
   getSkillsPath,
   onDynamicSkillsLoaded,
+  refreshMovedDirectorySkills,
 } from '../../skills/loadSkillsDir.js'
 import { clearAgentDefinitionsCache } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { forgetSentSkillNames, resetSentSkillNames } from '../attachments.js'
@@ -27,6 +28,7 @@ import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { executeConfigChangeHooks, hasBlockingResult } from '../hooks.js'
 import { createSignal } from '../signal.js'
+import { sleep } from '../sleep.js'
 
 /**
  * Time in milliseconds to wait for file writes to stabilize before processing.
@@ -101,6 +103,8 @@ let disposed = false
 let isIdle = false
 let lastFingerprint: Fingerprint | null = null
 let watchedPaths: string[] = []
+/** densable XoS `_` — generation so a stale rehome cannot replace a newer watch. */
+let watchGeneration = 0
 let dynamicSkillsCallbackRegistered = false
 let unregisterCleanup: (() => void) | null = null
 let unregisterDynamicSkills: (() => void) | null = null
@@ -130,6 +134,7 @@ async function defaultGetFingerprint(): Promise<Fingerprint> {
 export async function initialize(): Promise<void> {
   if (initialized || disposed) return
   initialized = true
+  watchGeneration++
 
   // densable: if (!E) E = Tmd(() => { wZ(); l.emit() })
   if (!dynamicSkillsCallbackRegistered) {
@@ -237,6 +242,52 @@ function checkIdleTransition(): void {
   // densable: if (!P) H(bGa)
   if (!nextIdle) {
     scheduleReload(SKILL_WATCHER_IDLE_WAKE)
+  }
+}
+
+/**
+ * densable XoS `he` — unique paths, first-seen order.
+ */
+function uniqueWatchPaths(paths: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const path of paths) {
+    if (seen.has(path)) continue
+    seen.add(path)
+    out.push(path)
+  }
+  return out
+}
+
+/**
+ * densable XoS `Pe` — after `/cd`, union old + new skill/command/agent dirs
+ * and retarget the watcher. No-ops when the new cwd's dirs are already
+ * watched (union length unchanged). Does not drop previously watched paths.
+ */
+export async function rehome(): Promise<void> {
+  if (!initialized || disposed) return
+  const next = await getWatchablePaths()
+  if (disposed) return
+  const merged = uniqueWatchPaths([...watchedPaths, ...next])
+  if (merged.length === watchedPaths.length) return
+  const generation = ++watchGeneration
+  watchedPaths = merged
+  logForDebugging(
+    `[skills] session moved — watching skill/command directories: ${watchedPaths.join(', ')}`,
+  )
+  if (watcher) void watcher.close()
+  watcher = createWatcher(
+    isIdle ? IDLE_POLLING_INTERVAL_MS : POLLING_INTERVAL_MS,
+  )
+  const attached = watcher
+  const ready = new Promise<void>(resolve => {
+    attached.once('ready', () => resolve())
+  })
+  await Promise.race([ready, sleep(2000, undefined, { unref: true })])
+  if (disposed || generation !== watchGeneration) return
+  if (USE_POLLING && idleCheckTimer === null) {
+    idleCheckTimer = setInterval(checkIdleTransition, IDLE_CHECK_INTERVAL_MS)
+    idleCheckTimer.unref?.()
   }
 }
 
@@ -388,9 +439,15 @@ function scheduleReload(changedPath: string): void {
       return
     }
 
-    // densable always $2() + poe() here, then maybe skip re-announce log
+    // densable always $2() + poe() + hZc/`ke` here, then maybe skip re-announce
     clearCommandsCache()
     clearAgentDefinitionsCache()
+    await refreshMovedDirectorySkills().catch(e => {
+      logForDebugging(
+        `[skills] re-reading the moved directory's skills failed: ${errorMessage(e)}`,
+        { level: 'warn' },
+      )
+    })
 
     if (unchanged) {
       logForDebugging(
@@ -445,6 +502,7 @@ export async function resetForTesting(
   skillsChanged.clear()
   lastFingerprint = null
   watchedPaths = []
+  watchGeneration = 0
   isIdle = false
   initialized = false
   disposed = false
@@ -454,6 +512,7 @@ export async function resetForTesting(
 export const skillChangeDetector = {
   initialize,
   dispose,
+  rehome,
   subscribe,
   resetForTesting,
   _checkIdleTransitionForTest,

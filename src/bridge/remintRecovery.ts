@@ -258,6 +258,10 @@ export const OAUTH_TOKEN_UNAVAILABLE_RESTORE_DETAIL =
  */
 export const SESSION_TELEPORTED_DETAIL = 'Session teleported to cloud'
 
+/** densable jKe — reattach-or-fail terminal copy (gone / teleported / no pointer). */
+export const PREVIOUS_SESSION_UNAVAILABLE_DETAIL =
+  'Previous session is unavailable — run /remote-control to start a new one'
+
 /**
  * densable gzp — request-path condition → close code for Ls recovery.
  * Used when causeTypedCloseCodes is on (env-less v2).

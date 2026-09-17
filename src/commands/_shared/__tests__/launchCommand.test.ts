@@ -6,7 +6,7 @@ import { describe, test, expect, mock } from 'bun:test'
 import { logMock } from '../../../../tests/mocks/log.js'
 
 mock.module('src/utils/log.ts', logMock)
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 
 import React from 'react'
 import type {
@@ -14,6 +14,7 @@ import type {
   LocalJSXCommandOnDone,
 } from '../../../types/command.js'
 import type { LaunchCommandOptions } from '../launchCommand.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 let launchCommand: typeof import('../launchCommand.js').launchCommand
 

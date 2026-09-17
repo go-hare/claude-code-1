@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import * as realTeamHelpers from 'src/utils/swarm/teamHelpers.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+const teamHelpersSnap = snapshotModuleExports(realTeamHelpers)
 import type { AppState } from 'src/state/AppState.js'
 import type { InProcessTeammateTaskState } from 'src/tasks/InProcessTeammateTask/types.js'
 import {
@@ -11,6 +15,7 @@ const setMemberModeMock = mock(
   (_team: string, _name: string, _mode: string) => true,
 )
 mock.module('src/utils/swarm/teamHelpers.js', () => ({
+  ...teamHelpersSnap,
   setMemberMode: setMemberModeMock,
 }))
 

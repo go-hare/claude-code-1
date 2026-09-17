@@ -1,12 +1,27 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import * as realSettings from 'src/utils/settings/settings.js'
+import * as realWorkflowDisableGate from 'src/utils/workflowDisableGate.js'
 import {
   createSettingsMock,
   restoreSettingsMockWith,
   snapshotModuleExports,
 } from '../../../../tests/mocks/settings.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+import {
+  growthbookMock,
+  pushGrowthbookFeatureGetter,
+} from '../../../../tests/mocks/growthbook.js'
 const settingsSnap = snapshotModuleExports(realSettings)
+const workflowDisableGateSnap = snapshotModuleExports(realWorkflowDisableGate)
 
 mock.module(
   'src/utils/settings/settings.js',
@@ -19,32 +34,31 @@ mock.module(
   }),
 )
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, defaultValue: unknown) =>
-    defaultValue ?? {},
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
-  getFeatureValue_CACHED_WITH_REFRESH: (_key: string, defaultValue: unknown) =>
-    defaultValue ?? {},
-  getDynamicConfig_CACHED_MAY_BE_STALE: (_key: string, defaultValue: unknown) =>
-    defaultValue ?? {},
-  getFeatureValue_CACHED_MAY_BE_STALE_WITH_DEFAULTS: (
-    _key: string,
-    defaultValue: unknown,
-  ) => defaultValue ?? {},
-}))
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+let popGrowthbook: (() => void) | undefined
+beforeAll(() => {
+  popGrowthbook = pushGrowthbookFeatureGetter(
+    (_key, defaultValue) => defaultValue ?? {},
+  )
+})
+afterAll(() => {
+  popGrowthbook?.()
+})
 
 // FE on so ultracode is offerable for opus-4-7 (matches isUltracodeOfferable).
 mock.module('src/utils/workflowDisableGate.js', () => ({
+  ...workflowDisableGateSnap,
   isWorkflowsAvailable: () => true,
   isWorkflowFeatureEnabled: () => true,
 }))
 
 afterAll(() => {
   restoreSettingsMockWith(mock.module, settingsSnap)
+  mock.module('src/utils/workflowDisableGate.js', () => ({
+    ...workflowDisableGateSnap,
+  }))
 })
 
 const { setUltracodeEffort, executeEffort } = await import('../effort.js')

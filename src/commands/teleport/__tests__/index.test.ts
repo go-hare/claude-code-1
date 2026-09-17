@@ -5,10 +5,9 @@
  * load() is tested by verifying it resolves to an object with a call function.
  */
 import { beforeAll, describe, expect, mock, test } from 'bun:test'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 let cmd: {
   load?: () => Promise<{ call: unknown }>

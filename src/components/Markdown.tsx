@@ -58,12 +58,12 @@ type Props = {
 // retaining full content strings (turn50→turn99 RSS regression, #24180).
 const tokenCache = new LRUCache<string, Token[]>({ max: 500 });
 
-// Official 2.1.207 MD syntax probe (Huy): includes ordered lists + bare URLs.
-const MD_SYNTAX_RE = /[#*`|[>\-_~]|\n\n|(?:^|\n) {0,3}\d+\. |https?:\/\/|www\./;
+// densable 2.1.246 Tr: CRLF blank lines, `N)` / `+` lists, setext `=`.
+const MD_SYNTAX_RE =
+  /[#*`|[>\-_~]|\n[\r\n]|\r\r|\r\n[\r\n]|(?:^|[\r\n]) {0,3}(?:\d+[.)]|\+) |(?:^|[\r\n]) {0,3}=+ *(?:[\r\n]|$)|https?:\/\/|www\./;
 
-function hasMarkdownSyntax(s: string): boolean {
-  // Sample first 500 chars — if markdown exists it's usually early (headers,
-  // code fence, list). Long tool outputs are mostly plain text tails.
+/** densable 2.1.246 xr=500 — probe only the first 500 chars. */
+export function hasMarkdownSyntax(s: string): boolean {
   return MD_SYNTAX_RE.test(s.length > 500 ? s.slice(0, 500) : s);
 }
 

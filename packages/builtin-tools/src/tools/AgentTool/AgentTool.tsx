@@ -72,7 +72,7 @@ import { permissionModeSchema } from 'src/utils/permissions/PermissionMode.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
 import { filterDeniedAgents, getDenyRuleForAgent } from 'src/utils/permissions/permissions.js';
 import { emitTaskTerminatedSdk } from 'src/utils/sdkEventQueue.js';
-import { writeAgentMetadata } from 'src/utils/sessionStorage.js';
+import { writeAgentMetadata } from 'src/utils/sessionPaths.js';
 import { sleep } from 'src/utils/sleep.js';
 import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
 import { asSystemPrompt } from 'src/utils/systemPromptType.js';
@@ -98,6 +98,7 @@ import {
   extractPartialResult,
   finalizeAgentTool,
   getLastToolUseName,
+  readMaxTurnsReached,
   parkAgentOnKeepaliveDeferNotify,
   runAsyncAgentLifecycle,
   sweepAndDetectLiveAgentChildren,
@@ -1127,7 +1128,7 @@ export const AgentTool = buildTool({
       if (headCommit) {
         const changed = await hasWorktreeChanges(worktreePath, headCommit);
         if (!changed) {
-          await removeAgentWorktree(worktreePath, worktreeBranch, gitRoot);
+          await removeAgentWorktree(worktreePath, worktreeBranch, gitRoot, false, 'agent_tool');
           // Clear worktreePath from metadata so resume doesn't try to use
           // a deleted directory. Fire-and-forget to match runAgent's
           // writeAgentMetadata handling.
@@ -1670,6 +1671,7 @@ export const AgentTool = buildTool({
                           taskId: backgroundedTaskId,
                           description,
                           status: 'completed',
+                          maxTurnsReached: readMaxTurnsReached(agentMessages),
                           setAppState: rootSetAppState,
                           finalMessage,
                           usage: {

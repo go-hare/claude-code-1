@@ -1,11 +1,18 @@
-import { mock, describe, expect, test } from 'bun:test'
+import { afterAll, mock, describe, expect, test } from 'bun:test'
+import * as realGrowthbook from '../../analytics/growthbook.js'
 import { growthbookMock } from '../../../../tests/mocks/growthbook'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
-// Spread shared mock — incomplete growthbook mocks poison co-running suites.
-mock.module('src/services/analytics/growthbook.js', () => ({
-  ...growthbookMock(),
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-}))
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+
+// Shared mock only — blanket getFeatureValue→false poisoned tabGroupCleanup.239.
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+
+afterAll(() => {
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 const {
   filterPermissionRelayClients,

@@ -17,31 +17,40 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { authMock } from '../../../../tests/mocks/auth.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
+import {
+  oauthClientMock,
+  oauthConfigMock,
+  teleportApiMock,
+} from '../../../../tests/mocks/oauthSurface.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 // ── Auth / OAuth mocks ──────────────────────────────────────────────────────
 mock.module('src/utils/auth.js', () => ({
+  ...authMock(),
   getClaudeAIOAuthTokens: () => ({ accessToken: 'test-token' }),
 }))
-mock.module('src/services/oauth/client.js', () => ({
-  getOrganizationUUID: async () => 'org-uuid-test',
-}))
-mock.module('src/constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-}))
-mock.module('src/utils/teleport/api.js', () => ({
-  getOAuthHeaders: (token: string) => ({
-    Authorization: `Bearer ${token}`,
+mock.module('src/services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => 'org-uuid-test',
   }),
-  prepareWorkspaceApiRequest: async () => ({
-    apiKey: 'test-workspace-key',
+)
+mock.module('src/constants/oauth.js', oauthConfigMock)
+mock.module('src/utils/teleport/api.js', () =>
+  teleportApiMock({
+    getOAuthHeaders: (token: string) => ({
+      Authorization: `Bearer ${token}`,
+    }),
+    prepareWorkspaceApiRequest: async () => ({
+      apiKey: 'test-workspace-key',
+    }),
   }),
-}))
+)
 
 // ── Axios mock ──────────────────────────────────────────────────────────────
 const axiosGetMock = mock(async () => ({}))

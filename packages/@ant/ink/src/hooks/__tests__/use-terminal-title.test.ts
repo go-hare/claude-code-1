@@ -109,7 +109,7 @@ describe('applyTerminalTitle (densable)', () => {
       configurable: true,
     })
     const before = process.title
-    const writeRaw = mock(() => {})
+    const writeRaw = mock((_s: string) => {})
     applyTerminalTitle('✳ Claude Code', writeRaw)
     expect(process.title).toBe(before)
     expect(writeRaw).toHaveBeenCalledTimes(1)
@@ -156,7 +156,7 @@ describe('clearTerminalTitle (densable)', () => {
       value: 'linux',
       configurable: true,
     })
-    const writeRaw = mock(() => {})
+    const writeRaw = mock((_s: string) => {})
     clearTerminalTitle(writeRaw)
     expect(writeRaw).toHaveBeenCalledTimes(1)
     expect(writeRaw.mock.calls[0]?.[0]).toBe('\x1b]0;\x07')

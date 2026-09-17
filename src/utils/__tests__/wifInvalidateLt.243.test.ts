@@ -6,12 +6,14 @@ import { join } from 'path'
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
 
-mock.module('../../services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: <T>(v: T) => v,
-}))
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+mock.module('../../services/analytics/index.js', analyticsMock)
 mock.module('../log.ts', logMock)
 mock.module('../debug.ts', debugMock)
+
+function asFetch(fn: ReturnType<typeof mock>): typeof fetch {
+  return fn as unknown as typeof fetch
+}
 
 const {
   clearAnthropicProfileCaches,
@@ -98,7 +100,10 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
     const fetchFn = mock(async () => {
       throw new Error('refresh must not run when sibling adopt wins')
     })
-    const tok = await resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const tok = await resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     expect(tok?.token).toBe('sibling_tok')
     expect(fetchFn).not.toHaveBeenCalled()
   })
@@ -144,7 +149,10 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
     const fetchFn = mock(async () => {
       throw new Error('refresh must not run when sibling adopt wins')
     })
-    const tok = await resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const tok = await resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     expect(tok?.token).toBe('sibling_tok')
     expect(fetchFn).not.toHaveBeenCalled()
   })
@@ -184,7 +192,10 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
     const fetchFn = mock(async () => {
       throw new Error('refresh must not run when sibling adopt wins')
     })
-    const tok = await resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const tok = await resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     expect(tok?.token).toBe('sibling_tok')
     expect(fetchFn).not.toHaveBeenCalled()
   })
@@ -236,7 +247,10 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
     const fetchFn = mock(async () => {
       throw new Error('refresh must not run when sibling adopt wins')
     })
-    const tok = await resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const tok = await resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     expect(tok?.token).toBe('sibling_tok')
     expect(getLastIssuedWifAccessToken()).toBe('sibling_tok')
     expect(fetchFn).not.toHaveBeenCalled()
@@ -291,7 +305,10 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
     const fetchFn = mock(async () => {
       throw new Error('refresh must not run when sibling is on disk')
     })
-    const tok = await resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const tok = await resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     expect(tok?.token).toBe('sibling_tok')
     expect(getLastIssuedWifAccessToken()).toBe('sibling_tok')
     expect(fetchFn).not.toHaveBeenCalled()
@@ -338,7 +355,7 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
       throw new Error('refresh attempted after rejected disk pin skipped')
     })
     await expect(
-      resolveProfileUserOauthAccessToken(process.env, fetchFn),
+      resolveProfileUserOauthAccessToken(process.env, asFetch(fetchFn)),
     ).rejects.toThrow()
     expect(fetchFn).toHaveBeenCalled()
     expect(getLastIssuedWifAccessToken()).toBeUndefined()
@@ -371,13 +388,19 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
           release = resolve
         }),
     )
-    const first = resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const first = resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     const waitUntil = Date.now() + 2000
     while (fetchFn.mock.calls.length === 0 && Date.now() < waitUntil) {
       await Bun.sleep(10)
     }
     expect(fetchFn).toHaveBeenCalledTimes(1)
-    const second = resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const second = resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     expect(fetchFn).toHaveBeenCalledTimes(1)
     release(
       new Response(
@@ -408,7 +431,10 @@ describe('densable 2.1.243 #24 invalidateWifToken (lt)', () => {
     const fetchFn = mock(async () => {
       throw new Error('should not refresh')
     })
-    const tok = await resolveProfileUserOauthAccessToken(process.env, fetchFn)
+    const tok = await resolveProfileUserOauthAccessToken(
+      process.env,
+      asFetch(fetchFn),
+    )
     expect(tok?.token).toBe('still_good')
     expect(fetchFn).not.toHaveBeenCalled()
   })

@@ -9,6 +9,7 @@ import {
   test,
 } from 'bun:test'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
 // After this suite finishes, switch our getSecret override off so localVault's
 // own store.test.ts (running in the same process) sees the real impl. Also
@@ -18,6 +19,7 @@ afterAll(() => {
   useMockForGetSecret = false
   getSecretShouldThrow = false
   axiosHandle.useStubs = false
+  mock.module('src/services/localVault/store.js', () => ({ ...storeSnap }))
 })
 
 beforeAll(() => {
@@ -56,14 +58,16 @@ let useMockForGetSecret = true
 // to real setSecret / deleteSecret / listKeys / maskSecret / error classes
 // for delegation.
 const realStore = await import('src/services/localVault/store.js')
+const storeSnap = snapshotModuleExports(realStore)
+const realGetSecret = storeSnap.getSecret as typeof realStore.getSecret
 mock.module('src/services/localVault/store.js', () => ({
-  ...realStore,
+  ...storeSnap,
   getSecret: async (key: string) => {
     if (getSecretShouldThrow) {
       throw new Error('vault unlock failed (mocked)')
     }
     if (useMockForGetSecret) return mockedSecret
-    return realStore.getSecret(key)
+    return realGetSecret(key)
   },
 }))
 

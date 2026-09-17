@@ -1,11 +1,13 @@
 /**
  * Tests for memory-stores/index.ts — command metadata only.
  */
-import { beforeAll, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 let cmd: {
   load?: () => Promise<{ call: unknown }>
@@ -66,4 +68,12 @@ describe('memoryStoresCommand metadata', () => {
     // isHidden = !process.env['ANTHROPIC_API_KEY']
     expect(typeof (cmd as { isHidden?: unknown }).isHidden).toBe('boolean')
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

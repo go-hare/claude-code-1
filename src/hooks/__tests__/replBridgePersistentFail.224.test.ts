@@ -23,14 +23,15 @@ describe('densable 2.1.224 #22 persistent RC fail indicator', () => {
   })
 
   test('scheduleBridgeAutoDisable keeps replBridgeError (does not clear)', () => {
+    expect(hook).toContain('function leftoverGi')
     expect(hook).toContain('function scheduleBridgeAutoDisable')
-    const start = hook.indexOf('function scheduleBridgeAutoDisable')
+    const start = hook.indexOf('function leftoverGi')
     expect(start).toBeGreaterThan(-1)
-    const body = hook.slice(start, start + 700)
+    const body = hook.slice(start, start + 4000)
     expect(body).toContain('replBridgeEnabled: false')
-    // densable pin: must not wipe error on the dismiss timer
+    expect(body).toContain('const s_e = 1e4')
     expect(body).not.toMatch(/replBridgeError:\s*undefined/)
-    expect(body).toContain('do NOT clear replBridgeError')
+    expect(hook).toContain('leftoverGi()')
   })
 
   test('surfaceBridgeFailure sets error + kind and schedules auto-disable', () => {

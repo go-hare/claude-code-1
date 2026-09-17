@@ -1,9 +1,14 @@
 import { afterAll, describe, expect, mock, test } from 'bun:test'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import * as realMessageQueue from 'src/utils/messageQueueManager.js'
+import * as realObserverAgents from 'src/utils/observerAgents.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import {
+  cleanupRegistryMock,
+  speculationMock,
+} from '../../../../tests/mocks/taskSurface.js'
 
 const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
@@ -35,7 +40,9 @@ mock.module('src/utils/sessionStorage.js', () => ({
 }))
 
 const observerStops: Array<{ id: string; opts?: unknown }> = []
+const observerSnap = snapshotModuleExports(realObserverAgents)
 mock.module('src/utils/observerAgents.js', () => ({
+  ...observerSnap,
   stopObserverPairing: async (id: string, opts?: unknown) => {
     observerStops.push({ id, opts })
     return undefined
@@ -43,9 +50,10 @@ mock.module('src/utils/observerAgents.js', () => ({
   writeObserverStoppedTombstone: async () => {},
 }))
 
+const diskOutputSnap = snapshotModuleExports(realDiskOutput)
 function diskOutputMock() {
   return {
-    ...realDiskOutput,
+    ...diskOutputSnap,
     evictTaskOutput: noop,
     getTaskOutputPath: (id: string) => `/tmp/o/${id}`,
     initTaskOutput: async () => {},
@@ -59,18 +67,18 @@ mock.module('../../../utils/task/diskOutput.js', diskOutputMock)
 // Capture notifications but keep the real queue store so SleepTool /
 // hasCommandsInQueue / enqueue stay consistent under process-global mock.module.
 const enqueued: Array<Record<string, unknown>> = []
+const mqmSnap = snapshotModuleExports(realMessageQueue)
 const realEnqueuePendingNotification =
-  realMessageQueue.enqueuePendingNotification
+  mqmSnap.enqueuePendingNotification as typeof realMessageQueue.enqueuePendingNotification
 function messageQueueMock() {
   return {
-    ...realMessageQueue,
+    ...mqmSnap,
     enqueuePendingNotification: (opts: Record<string, unknown>) => {
       enqueued.push(opts)
       realEnqueuePendingNotification(opts as never)
     },
   }
 }
-const mqmSnap = snapshotModuleExports(realMessageQueue)
 mock.module('src/utils/messageQueueManager.js', messageQueueMock)
 mock.module('../../../utils/messageQueueManager.js', messageQueueMock)
 afterAll(() => {
@@ -79,6 +87,11 @@ afterAll(() => {
   mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
   mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
   mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/utils/observerAgents.js', () => ({ ...observerSnap }))
+  mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+  mock.module('../../../utils/task/diskOutput.js', () => ({
+    ...diskOutputSnap,
+  }))
 })
 
 const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
@@ -89,13 +102,9 @@ mock.module('src/utils/sdkEventQueue.js', () => ({
   emitTaskTerminatedSdk: () => {},
 }))
 
-mock.module('src/utils/cleanupRegistry.js', () => ({
-  registerCleanup: () => () => {},
-}))
+mock.module('src/utils/cleanupRegistry.js', cleanupRegistryMock)
 
-mock.module('src/services/PromptSuggestion/speculation.js', () => ({
-  abortSpeculation: () => {},
-}))
+mock.module('src/services/PromptSuggestion/speculation.js', speculationMock)
 
 // LocalAgentTask pull path may load analytics; keep export surface complete
 // under process-global mock pollution from sibling suites.
@@ -108,8 +117,8 @@ mock.module('src/services/analytics/index.js', () => ({
 }))
 
 // densable residual probes need local_bash kill without full shell runtime.
-// Do NOT import src/tasks.js (huge graph / circular mock hang). Stub both
-// types used by stopTask; local_agent kill delegates to killAsyncAgent after
+// Do NOT import src/tasks.js (huge graph / circular mock hang). Hand-list both
+// real exports; local_agent kill delegates to killAsyncAgent after
 // LocalAgentTask is loaded.
 function killTaskState(
   taskId: string,
@@ -144,40 +153,37 @@ let killAsyncAgentRef:
     ) => void)
   | undefined
 
-mock.module('src/tasks.js', () => ({
-  getTaskByType: (type: string) => {
-    if (type === 'local_bash') {
-      return {
-        name: 'LocalShellTask',
-        type: 'local_bash',
-        async kill(
-          taskId: string,
-          setAppState: (f: (prev: any) => any) => void,
-          killedBy?: string,
-        ) {
-          killTaskState(taskId, setAppState, killedBy)
-        },
-      }
-    }
-    if (type === 'local_agent') {
-      return {
-        name: 'LocalAgentTask',
-        type: 'local_agent',
-        async kill(
-          taskId: string,
-          setAppState: (f: (prev: any) => any) => void,
-          killedBy?: string,
-        ) {
-          if (killAsyncAgentRef) {
-            killAsyncAgentRef(taskId, setAppState, killedBy)
-          } else {
-            killTaskState(taskId, setAppState, killedBy)
-          }
-        },
-      }
-    }
-    return null
+const stubTasks = [
+  {
+    name: 'LocalShellTask',
+    type: 'local_bash',
+    async kill(
+      taskId: string,
+      setAppState: (f: (prev: any) => any) => void,
+      killedBy?: string,
+    ) {
+      killTaskState(taskId, setAppState, killedBy)
+    },
   },
+  {
+    name: 'LocalAgentTask',
+    type: 'local_agent',
+    async kill(
+      taskId: string,
+      setAppState: (f: (prev: any) => any) => void,
+      killedBy?: string,
+    ) {
+      if (killAsyncAgentRef) {
+        killAsyncAgentRef(taskId, setAppState, killedBy)
+      } else {
+        killTaskState(taskId, setAppState, killedBy)
+      }
+    },
+  },
+]
+mock.module('src/tasks.js', () => ({
+  getAllTasks: () => stubTasks,
+  getTaskByType: (type: string) => stubTasks.find(task => task.type === type),
 }))
 
 const {

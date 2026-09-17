@@ -6,7 +6,10 @@ import {
   setProjectRoot,
 } from 'src/bootstrap/state.js'
 import { clearSystemPromptSections } from 'src/constants/systemPromptSections.js'
-import { logEvent } from 'src/services/analytics/index.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import type { Tool } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { count } from 'src/utils/array.js'
@@ -238,7 +241,7 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
   },
   renderToolUseMessage,
   renderToolResultMessage,
-  async call(input) {
+  async call(input, context) {
     const session = getCurrentWorktreeSession()
     if (!session) {
       // validateInput guards this, but the session is module-level mutable
@@ -301,10 +304,29 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
     if (tmuxSessionName) {
       await killTmuxSession(tmuxSessionName)
     }
-    await cleanupWorktree()
+    const removed = await cleanupWorktree({
+      storageV5: context.storageV5,
+      credentials: context.credentials,
+    })
     await restoreSessionToOriginalCwd(originalCwd, projectRootIsWorktree)
 
+    if (!removed) {
+      return {
+        data: {
+          action: 'remove' as const,
+          originalCwd,
+          worktreePath,
+          worktreeBranch,
+          discardedFiles: 0,
+          discardedCommits: 0,
+          message: `Exited worktree but could not remove it — kept at ${worktreePath}. Session is now back in ${originalCwd}.`,
+        },
+      }
+    }
+
     logEvent('tengu_worktree_removed', {
+      source:
+        'exit_tool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       mid_session: true,
       commits,
       changed_files: changedFiles,

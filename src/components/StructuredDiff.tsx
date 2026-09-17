@@ -5,6 +5,7 @@ import { useSettings } from '../hooks/useSettings.js';
 import { Box, NoSelect, RawAnsi, useTheme } from '@anthropic/ink';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import sliceAnsi from '../utils/sliceAnsi.js';
+import { getTheme, type ThemeName } from '../utils/theme.js';
 import { expectColorDiff } from './StructuredDiff/colorDiff.js';
 import { StructuredDiffFallback } from './StructuredDiff/Fallback.js';
 
@@ -60,6 +61,7 @@ function renderColorDiff(
 ): CachedRender | null {
   const ColorDiff = expectColorDiff();
   if (!ColorDiff) return null;
+  const palette = getTheme(theme as ThemeName);
 
   // Defensive: if the gutter would eat the whole render width (narrow
   // terminal), skip the split. Rust already wraps to `width` so the
@@ -69,13 +71,13 @@ function renderColorDiff(
   const rawGutterWidth = splitGutter ? computeGutterWidth(patch) : 0;
   const gutterWidth = rawGutterWidth > 0 && rawGutterWidth < width ? rawGutterWidth : 0;
 
-  const key = `${theme}|${width}|${dim ? 1 : 0}|${gutterWidth}|${firstLine ?? ''}|${filePath}`;
+  const key = `${theme}|${width}|${dim ? 1 : 0}|${gutterWidth}|${firstLine ?? ''}|${filePath}|${palette.diffAdded}|${palette.diffRemoved}|${palette.diffAddedDimmed}|${palette.diffRemovedDimmed}|${palette.diffAddedWord}|${palette.diffRemovedWord}`;
 
   let perHunk = RENDER_CACHE.get(patch);
   const hit = perHunk?.get(key);
   if (hit) return hit;
 
-  const lines = new ColorDiff(patch, firstLine, filePath, fileContent).render(theme, width, dim);
+  const lines = new ColorDiff(patch, firstLine, filePath, fileContent).render(theme, width, dim, palette);
   if (lines === null) return null;
 
   // Pre-split the gutter column once (cold-cache). sliceAnsi preserves

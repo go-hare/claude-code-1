@@ -19,6 +19,7 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvTruthy } from './envUtils.js'
 import { firstPartyNameToCanonical, getMainLoopModel } from './model/model.js'
+import { getBgJobTakeover } from './sessionNameJobSidecar.js'
 
 /** densable O_v — family → version floor parts where tools are off by default */
 const TODO_TOOLS_DISABLED_FAMILIES: ReadonlyArray<[string, readonly number[]]> =
@@ -73,7 +74,11 @@ function isTodoToolsBgForceOn(): boolean {
   if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') {
     return true
   }
-  // densable MB() — bg takeover module state; env residual used by engines
+  // densable MB() = getBgJobTakeover() !== null. Official setBgTakeover has no JS caller.
+  if (getBgJobTakeover() !== null) {
+    return true
+  }
+  // leftover residual — official SEA has no CLAUDE_CODE_BG_TAKEOVER string
   if (isEnvTruthy(process.env.CLAUDE_CODE_BG_TAKEOVER)) {
     return true
   }

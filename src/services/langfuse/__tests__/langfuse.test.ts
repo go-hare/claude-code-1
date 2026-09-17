@@ -1,5 +1,9 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import * as realUser from 'src/utils/user.js'
+
+const userSnap = snapshotModuleExports(realUser)
 
 // Mock @langfuse/otel before any imports
 const mockForceFlush = mock(() => Promise.resolve())
@@ -80,6 +84,7 @@ mock.module('src/utils/debug.ts', debugMock)
 
 // Mock user data — resolveLangfuseUserId uses getCoreUserData().email and .deviceId
 mock.module('src/utils/user.js', () => ({
+  ...userSnap,
   getCoreUserData: mock(() => ({
     email: 'test-device-id',
     deviceId: 'test-device-id',

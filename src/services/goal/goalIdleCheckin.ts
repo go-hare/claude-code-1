@@ -28,11 +28,50 @@ import {
   getGoalCheckinIntervalMs,
   getGoalIdleCheckinDelayMs,
   GOAL_CHECKIN_TIMER_MIN_MS,
+  isGoalIdleCheckinCapped,
   listGoalDeferringTasks,
   planGoalDeferralRun,
   type GoalCheckinActiveGoal,
   type GoalDeferringTask,
 } from './goalCheckin.js'
+
+/** densable 2.1.246 h9o / y9o — appended when the idle burst hits m9o. */
+export const GOAL_IDLE_CHECKIN_PAUSED_SUMMARY_SUFFIX =
+  ' · idle check-ins paused until your next message'
+export const GOAL_IDLE_CHECKIN_PAUSED_BODY_SUFFIX =
+  " Claude Code won't wake this session for another check-in until the user sends a message, so say clearly where things stand."
+
+/** densable 2.1.246 b9o */
+export function appendGoalIdleCheckinCapCopy(formatted: {
+  summary: string
+  body: string
+}): { summary: string; body: string } {
+  return {
+    summary: formatted.summary + GOAL_IDLE_CHECKIN_PAUSED_SUMMARY_SUFFIX,
+    body: formatted.body + GOAL_IDLE_CHECKIN_PAUSED_BODY_SUFFIX,
+  }
+}
+
+/**
+ * densable 2.1.246 d9n — strip idleCheckinCount on the next human prompt
+ * absorbed mid-turn (main thread).
+ */
+export function clearGoalIdleCheckinCount(
+  setAppState: (f: (prev: AppState) => AppState) => void,
+): void {
+  try {
+    setAppState(prev => {
+      if (prev.activeGoal?.idleCheckinCount === undefined) return prev
+      const { idleCheckinCount: _idleCheckinCount, ...rest } = prev.activeGoal
+      return { ...prev, activeGoal: rest }
+    })
+  } catch (err) {
+    logForDebugging(
+      `[goal] clear idle check-in count failed: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+  }
+}
 
 export const GOAL_CHECKIN_ORIGIN = {
   kind: 'task-notification',
@@ -148,6 +187,7 @@ export function armGoalIdleCheckin(ctx: GoalIdleCheckinContext): void {
   const delayMs = getGoalIdleCheckinDelayMs({
     baseMs,
     checkinCount: ctx.goal.checkinCount,
+    idleCheckinCount: ctx.goal.idleCheckinCount,
     deferredSince: ctx.goal.deferredSince,
     now: ctx.now,
   })
@@ -174,6 +214,12 @@ export function fireGoalIdleCheckin(ctx: GoalIdleCheckinContext): void {
     }
     const baseMs = (ctx.getIntervalMs ?? getGoalCheckinIntervalMs)()
     if (baseMs === 0) return
+
+    if (isGoalIdleCheckinCapped(current)) {
+      logForDebugging('[goal] idle check-in cap reached — tick re-armed only')
+      armGoalIdleCheckin({ ...ctx, goal: current, now: Date.now() })
+      return
+    }
 
     const busy = ctx.isMainLoopBusy ?? getMainLoopBusy
     const hasQueued = ctx.hasQueued ?? defaultHasQueued
@@ -224,12 +270,16 @@ export function fireGoalIdleCheckin(ctx: GoalIdleCheckinContext): void {
       deferredSince: now,
       checkinCount,
       lastDeferralPassAt: now,
+      idleCheckinCount: (current.idleCheckinCount ?? 0) + 1,
     }
     ctx.setAppState(prev =>
       prev.activeGoal !== current ? prev : { ...prev, activeGoal: next },
     )
     armed = next
-    ;(ctx.deliver ?? defaultDeliver)(formatted)
+    const delivered = isGoalIdleCheckinCapped(next)
+      ? appendGoalIdleCheckinCapCopy(formatted)
+      : formatted
+    ;(ctx.deliver ?? defaultDeliver)(delivered)
     const shells = deferring.filter(
       t => t.type === 'local_bash' || t.type === 'local_shell',
     ).length
@@ -238,6 +288,7 @@ export function fireGoalIdleCheckin(ctx: GoalIdleCheckinContext): void {
       activeShells: shells,
       activeAgents: deferring.length - shells,
       checkinCount,
+      idleCheckinCount: next.idleCheckinCount ?? 0,
     })
     logForDebugging(
       `[goal] check-in injected (idle_timer) after ${Math.round(deferredMs / 1000)}s deferred`,

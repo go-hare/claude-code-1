@@ -9,12 +9,10 @@ import { getEmptyToolPermissionContext } from '../../../Tool.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: <T>(v: T) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 const {
   resolveCdTarget,
@@ -58,7 +56,9 @@ const { writeBgJobState, readBgJobState } = await import(
 const { isFilePatternTool } = await import(
   '../../../utils/settings/toolValidationConfig.js'
 )
-const { isPathTrusted } = await import('../../../utils/config.js')
+const { isPathTrusted, getProjectPathForConfig } = await import(
+  '../../../utils/config.js'
+)
 
 const temps: string[] = []
 /** Repo root at load time — chdir tests must restore or `src/*` alias breaks. */
@@ -87,6 +87,7 @@ afterEach(() => {
     setProjectRoot(suiteCwd)
     // densable: sessionProjectDir is only cleared via switchSession (no setter).
     switchSession(suiteSessionId, suiteSessionProjectDir)
+    getProjectPathForConfig.cache?.clear?.()
   } catch {
     // ignore
   }

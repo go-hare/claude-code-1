@@ -471,6 +471,11 @@ export function isQuotaAutoResumeArmedOrPending(): boolean {
   return hasPendingQuotaContinuationInQueue()
 }
 
+/** densable Zt — F$ `hasArmedQuotaAutoResume` (`rP` as `Qze`). */
+export function isQuotaAutoResumeArmed(): boolean {
+  return episode.state.phase === 'armed'
+}
+
 /** densable P4f / waiting UI — armed/stale phase (for Esc cancel) */
 export function isQuotaAutoResumeWaiting(
   state: QuotaAutoResumeState = episode.state,

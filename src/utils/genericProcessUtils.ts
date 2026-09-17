@@ -3,6 +3,7 @@ import {
   execSyncWithDefaults_DEPRECATED,
 } from './execFileNoThrow.js'
 import { logForDebugging } from './debug.js'
+import { getErrnoCode } from './errors.js'
 
 // This file contains platform-agnostic implementations of common `ps` type commands.
 // When adding new code to this file, make sure to handle:
@@ -214,6 +215,29 @@ export function isProcessRunning(pid: number): boolean {
     return true
   } catch {
     return false
+  }
+}
+
+/** densable `Z` — Windows/POSIX pid_t upper bound used by `$ee`. */
+const MAX_PROCESS_PID = 2147483647
+
+/** densable `X` / `$Ac` — pid is a real integer in (1, Z]. */
+function isCountableProcessPid(pid: number): boolean {
+  return Number.isInteger(pid) && pid > 1 && pid <= MAX_PROCESS_PID
+}
+
+/**
+ * densable `$ee` / `Se` @206014160.
+ * Gone only on ESRCH. Invalid pid / alive / EPERM → false (not gone).
+ * Not `!isProcessRunning`: that treats EPERM and pid≤1 as gone.
+ */
+export function isProcessGone(pid: number): boolean {
+  if (!isCountableProcessPid(pid)) return false
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return getErrnoCode(error) === 'ESRCH'
   }
 }
 

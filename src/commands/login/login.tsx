@@ -18,6 +18,8 @@ import {
   checkAndDisableAutoModeIfNeeded,
   resetAutoModeGateCheck,
 } from '../../utils/permissions/bypassPermissionsKillswitch.js';
+import { getOauthAccountInfoFromDisk } from '../../utils/auth.js';
+import { logForDebugging } from '../../utils/debug.js';
 import { resetUserCache } from '../../utils/user.js';
 import { AuthPlaneSummary } from './AuthPlaneSummary.js';
 import { getAuthStatus } from './getAuthStatus.js';
@@ -40,6 +42,8 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
   const envTokenWasSet = isOauthTokenEnvSetAtStart();
   const startingMessage = getOauthTokenEnvStartingMessage();
   const envWarningOnce = { delivered: false };
+  // densable `t.previousAccount` — snapshot before the flow mutates disk.
+  const previousAccount = getOauthAccountInfoFromDisk();
 
   return (
     <Login
@@ -72,9 +76,39 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
           resetAutoModeGateCheck();
           const appState = context.getAppState();
           void checkAndDisableAutoModeIfNeeded(appState.toolPermissionContext, context.setAppState, appState.fastMode);
-          // Increment authVersion to trigger re-fetching of auth-dependent data in hooks (e.g., MCP servers)
+          const currentAccount = getOauthAccountInfoFromDisk();
+          const sameAccount =
+            previousAccount?.accountUuid === currentAccount?.accountUuid &&
+            previousAccount?.organizationUuid === currentAccount?.organizationUuid;
+          const accountSwitched = previousAccount?.accountUuid !== undefined && !sameAccount;
+          // densable: disconnect updater is gated on live RC; s() / authVersion
+          // always run. Do not fold +1 into the early-return arm.
+          if (accountSwitched) {
+            context.setAppState(prev => {
+              if (!(prev.replBridgeEnabled || prev.replBridgeError !== undefined)) {
+                return prev;
+              }
+              logForDebugging('[bridge:repl] Account changed via /login — disconnecting Remote Control session');
+              return {
+                ...prev,
+                replBridgeEnabled: false,
+                replBridgeExplicit: false,
+                replBridgeOutboundOnly: false,
+                replBridgeError: undefined,
+                replBridgeErrorKind: undefined,
+              };
+            });
+            context.setAppState(prev => ({
+              ...prev,
+              replBridgeSessionGroupingId: undefined,
+              replBridgeInitialName: undefined,
+              showRemoteCallout: false,
+              ultrareviewOverageConfirmed: false,
+            }));
+          }
           context.setAppState(prev => ({
             ...prev,
+            authChangeGeneration: prev.authChangeGeneration + 1,
             authVersion: prev.authVersion + 1,
           }));
         }

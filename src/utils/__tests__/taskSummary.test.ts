@@ -7,26 +7,31 @@
  * trivially mocked at test time. We test maybeGenerateTaskSummary (which
  * is called unconditionally) and the rate-limit behavior indirectly.
  */
-import { describe, expect, test, mock, beforeEach } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { bunBundleMock } from '../../../tests/mocks/bunBundle.js'
+import { debugMock } from '../../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realConcurrent from '../concurrentSessions.js'
+
+const concurrentSnap = snapshotModuleExports(realConcurrent)
 
 // ─── mocks ──────────────────────────────────────────────────────────────────
 
 let _updateCalls: any[] = []
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
-
+mock.module('bun:bundle', bunBundleMock)
+mock.module('../debug.js', debugMock)
 mock.module('../concurrentSessions.js', () => ({
+  ...concurrentSnap,
   isBgSession: () => false,
   updateSessionActivity: async (data: any) => {
     _updateCalls.push(data)
   },
 }))
 
-mock.module('../debug.js', () => ({
-  logForDebugging: () => {},
-}))
+afterAll(() => {
+  mock.module('../concurrentSessions.js', () => ({ ...concurrentSnap }))
+})
 
 // ─── import after mocks ─────────────────────────────────────────────────────
 

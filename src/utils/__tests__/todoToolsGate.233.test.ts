@@ -115,6 +115,19 @@ describe('isTodoToolsEnabledForModel densable uX', () => {
     expect(isTodoToolsEnabledForModel('claude-opus-4-8')).toBe(true)
   })
 
+  test('getBgJobTakeover MB() force-on; setBgTakeover has no product caller', async () => {
+    const { resetBgJobTakeoverForTests, setBgJobTakeover } = await import(
+      '../sessionNameJobSidecar.js'
+    )
+    resetBgJobTakeoverForTests()
+    setBgJobTakeover({ jobDir: 'C:\\jobs\\deadbeef' })
+    try {
+      expect(isTodoToolsEnabledForModel('claude-opus-4-8')).toBe(true)
+    } finally {
+      resetBgJobTakeoverForTests()
+    }
+  })
+
   // densable QR() — bg session force-on
   test('CLAUDE_CODE_SESSION_KIND=bg force-on (QR)', () => {
     process.env.CLAUDE_CODE_SESSION_KIND = 'bg'

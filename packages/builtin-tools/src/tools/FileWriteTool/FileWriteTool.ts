@@ -87,12 +87,14 @@ const outputSchema = lazySchema(() =>
     content: z.string().describe('The content that was written to the file'),
     structuredPatch: z
       .array(hunkSchema())
-      .describe('Diff patch showing the changes'),
+      .describe(
+        'Diff patch showing the changes (empty when nothing changed, the diff timed out, or — with originalFile null on an update — the previous content was too large to diff)',
+      ),
     originalFile: z
       .string()
       .nullable()
       .describe(
-        'The original file content before the write (null for new files)',
+        'The original file content before the write (null for new files, or when the previous content was too large to include)',
       ),
     gitDiff: gitDiffSchema().optional(),
     userModified: z
@@ -118,6 +120,14 @@ const USER_MODIFIED_NOTE =
 /** densable mNr — Perforce unopened read-only copy. */
 const PERFORCE_UNOPENED_READONLY =
   'File is read-only — it has not been opened for edit in Perforce. Run `p4 edit <file>` to check it out, then retry. Do not chmod the file writable; that bypasses Perforce tracking.'
+
+/**
+ * densable SEA `TB=10485760` — shared with remote read-handle cap.
+ * Write still full-reads for staleness; when prior content exceeds this length,
+ * omit structuredPatch/originalFile (and VSCode/gitDiff side channels) so the
+ * post-write result build cannot OOM. Not a skip-read / invent 10MB write gate.
+ */
+const WRITE_OMIT_OLD_CONTENT_CHARS = 10_485_760
 
 /** densable hNr(mode) — CLAUDE_CODE_PERFORCE_MODE && (mode & 128) === 0 */
 function isPerforceUnopenedReadOnly(mode: number): boolean {
@@ -187,6 +197,14 @@ export const FileWriteTool = buildTool({
     if (typeof output !== 'object' || output === null) return output
     if (output.type !== 'update') return output
     if (output.content === '' && (output.originalFile ?? '') === '') {
+      return output
+    }
+    // densable SEA: already-omitted large update (empty patch + null original)
+    if (
+      Array.isArray(output.structuredPatch) &&
+      output.structuredPatch.length === 0 &&
+      output.originalFile === null
+    ) {
       return output
     }
     return { ...output, content: '', originalFile: null }
@@ -515,7 +533,14 @@ export const FileWriteTool = buildTool({
     }
 
     // Notify VSCode about the file change for diff view
-    notifyVscodeFileUpdated(fullFilePath, oldContent, contentToWrite)
+    // densable EU(d, _?null:h, t): omit old when oversize
+    const omitLargeOld =
+      oldContent !== null && oldContent.length > WRITE_OMIT_OLD_CONTENT_CHARS
+    notifyVscodeFileUpdated(
+      fullFilePath,
+      omitLargeOld ? null : oldContent,
+      contentToWrite,
+    )
 
     // Update read timestamp, to invalidate stale writes
     readFileState.set(fullFilePath, {
@@ -541,8 +566,10 @@ export const FileWriteTool = buildTool({
     } catch {
       // keep raw env fallback
     }
+    // densable: skip remote gitDiff when omit-large (`!_`)
     if (
       isRemote &&
+      !omitLargeOld &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
     ) {
       const startTime = Date.now()
@@ -556,30 +583,37 @@ export const FileWriteTool = buildTool({
     }
 
     if (oldContent) {
-      const patch = getPatchForDisplay({
-        filePath: file_path,
-        fileContents: oldContent,
-        edits: [
-          {
-            old_string: oldContent,
-            new_string: contentToWrite,
-            replace_all: false,
-          },
-        ],
-      })
+      // densable `_`: length>TB → empty patch + null originalFile (still wrote)
+      const patch = omitLargeOld
+        ? []
+        : getPatchForDisplay({
+            filePath: file_path,
+            fileContents: oldContent,
+            edits: [
+              {
+                old_string: oldContent,
+                new_string: contentToWrite,
+                replace_all: false,
+              },
+            ],
+          })
 
       const data = {
         type: 'update' as const,
         filePath: file_path,
         content: contentToWrite,
         structuredPatch: patch,
-        originalFile: oldContent,
+        originalFile: omitLargeOld ? null : oldContent,
         userModified: userModified ?? false,
         memdirStamped,
         ...(gitDiff && { gitDiff }),
       }
-      // Track lines added and removed for file updates, right before yielding result
-      countLinesChanged(patch)
+      // densable wme(v, model, _?t, _?h)
+      if (omitLargeOld) {
+        countLinesChanged([], contentToWrite, oldContent)
+      } else {
+        countLinesChanged(patch)
+      }
 
       logFileOperation({
         operation: 'write',

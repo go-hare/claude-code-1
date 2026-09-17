@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
 // Avoid bootstrap/state side effects from analytics + fastMode chains where possible.
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 import {
   COST_HAIKU_35,

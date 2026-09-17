@@ -1,8 +1,10 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import * as realUdsClient from '../../utils/udsClient.js'
+import * as realControlSocket from '../controlSocket.js'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 const udsClientSnap = snapshotModuleExports(realUdsClient)
+const controlSocketSnap = snapshotModuleExports(realControlSocket)
 
 type CtrlResp = {
   ok: boolean
@@ -20,6 +22,7 @@ const sendControlRequest = mock(
   },
 )
 mock.module('../controlSocket.js', () => ({
+  ...controlSocketSnap,
   sendControlRequest,
 }))
 
@@ -43,6 +46,7 @@ const {
 
 afterAll(() => {
   mock.module('../../utils/udsClient.js', () => ({ ...udsClientSnap }))
+  mock.module('../controlSocket.js', () => ({ ...controlSocketSnap }))
 })
 
 describe('xyrRespawn densable hLp/D9e/Zxe', () => {
@@ -164,5 +168,28 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
     listAllLiveSessions.mockImplementation(async () => [])
     const y = await killJobYiaFallback('abc')
     expect(y).toEqual({ confirmed: true, anyMatch: false })
+  })
+
+  test('246: present && !alive without force does not kill', async () => {
+    let killCalled = false
+    sendControlRequest.mockImplementation(
+      async (req: { op: string }): Promise<CtrlResp> => {
+        if (req.op === 'has') {
+          return { ok: true, op: 'has', alive: false, present: true }
+        }
+        if (req.op === 'kill') {
+          killCalled = true
+          return { ok: true }
+        }
+        return { ok: true }
+      },
+    )
+    const err = await xyrPreflightBeforeRespawn({
+      short: 'abc',
+      resumeSessionId: 'sess-1',
+      hasMessages: false,
+    })
+    expect(err).toBeNull()
+    expect(killCalled).toBe(false)
   })
 })

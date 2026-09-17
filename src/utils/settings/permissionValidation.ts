@@ -1,7 +1,10 @@
 import { z } from 'zod/v4'
 import { mcpInfoFromString } from '../../services/mcp/mcpStringUtils.js'
 import { lazySchema } from '../lazySchema.js'
-import { permissionRuleValueFromString } from '../permissions/permissionRuleParser.js'
+import {
+  permissionRuleValueFromString,
+  permissionRuleValueToString,
+} from '../permissions/permissionRuleParser.js'
 import { capitalize } from '../stringUtils.js'
 import {
   getCustomValidation,
@@ -52,6 +55,40 @@ function hasUnescapedEmptyParens(str: string): boolean {
   return false
 }
 
+/** densable 2.1.246 ln — unescaped `*` in a Bash rule token. */
+function hasUnescapedWildcard(token: string): boolean {
+  for (let i = 0; i < token.length; i++) {
+    if (token[i] === '*' && !isEscaped(token, i)) return true
+  }
+  return false
+}
+
+/** densable 2.1.246 ns / os — shell metachar or fd redirect token. */
+const BASH_RULE_SHELL_META_RE = /^(?:[|&;<>]|\d+[<>])/
+
+/**
+ * densable 2.1.246 ss — allow-rule token with a wildcard before the rest of
+ * the command. Returns the argv0 when that pattern is present.
+ */
+function wildcardBeforeSubcommand(content: string): string | undefined {
+  if (content.endsWith(':*')) return
+  const tokens = content.trim().split(/\s+/).filter(Boolean)
+  const argv0 = tokens[0]
+  if (tokens.length < 3 || argv0 === undefined || hasUnescapedWildcard(argv0)) {
+    return
+  }
+  let sawWildcard = false
+  for (const token of tokens.slice(1)) {
+    if (BASH_RULE_SHELL_META_RE.test(token)) return
+    if (hasUnescapedWildcard(token)) {
+      sawWildcard = true
+      continue
+    }
+    if (token.startsWith('-')) continue
+    return sawWildcard ? argv0 : undefined
+  }
+}
+
 /**
  * Tool names where a "whole-tool" allow rule (no parentheses, no ruleContent)
  * is forbidden. These tools serve user secrets to the model and require
@@ -89,6 +126,7 @@ export function validatePermissionRule(
   error?: string
   suggestion?: string
   examples?: string[]
+  warning?: string
 } {
   // Empty rule check
   if (!rule || rule.trim() === '') {
@@ -223,6 +261,22 @@ export function validatePermissionRule(
     //
     // Legacy :* syntax continues to work for backwards compatibility:
     // - "npm:*" matches "npm" or "npm <anything>" (prefix matching with word boundary)
+
+    // densable 2.1.246 #1 — allow-only startup warning (valid:true + warning).
+    if (behavior === 'allow') {
+      const argv0 = wildcardBeforeSubcommand(content)
+      if (argv0 !== undefined) {
+        const isGit = argv0 === 'git'
+        const gitExtra = isGit
+          ? ' For git, options such as -c and --exec-path can run arbitrary commands.'
+          : ''
+        const gitExample = isGit ? ' (for example Bash(git status *))' : ''
+        return {
+          valid: true,
+          warning: `${permissionRuleValueToString(parsed)} has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt.${gitExtra} Replace that * with the exact value you mean, or only use * after the subcommand${gitExample}.`,
+        }
+      }
+    }
   }
 
   // File tool validation

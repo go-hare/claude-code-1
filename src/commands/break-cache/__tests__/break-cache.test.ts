@@ -1,4 +1,5 @@
 import {
+  beforeAll,
   afterAll,
   afterEach,
   beforeEach,
@@ -18,10 +19,12 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 const realAnalytics = await import('../../../services/analytics/index.js')
 const analyticsSnap = snapshotModuleExports(realAnalytics)
@@ -346,4 +349,12 @@ describe('break-cache command', () => {
     ).load()
     expect(typeof loaded.call).toBe('function')
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

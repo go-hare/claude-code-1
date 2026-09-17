@@ -83,6 +83,32 @@ export const loadPluginOptions = memoize(
   },
 )
 
+/**
+ * densable Nw(pluginId, credentials) @212276680 / nyo.
+ * Settings options + `eo().readAsync(credentials)` pluginSecrets.
+ * densable Nw: eo().readAsync(credentials) via getSecureStorage().
+ */
+export async function loadPluginOptionsNw(
+  pluginId: string,
+  credentials?: unknown,
+): Promise<PluginOptionValues> {
+  if (credentials === undefined) {
+    return loadPluginOptions(pluginId)
+  }
+  const nonSensitive =
+    loadPluginConfigFromAllowedSources(pluginId).options ??
+    ({} as PluginOptionValues)
+  const storage = getSecureStorage()
+  const data =
+    typeof storage.readAsync === 'function'
+      ? await storage.readAsync(credentials)
+      : storage.read()
+  return {
+    ...nonSensitive,
+    ...((data?.pluginSecrets?.[pluginId] ?? {}) as PluginOptionValues),
+  }
+}
+
 export function clearPluginOptionsCache(): void {
   loadPluginOptions.cache?.clear?.()
 }

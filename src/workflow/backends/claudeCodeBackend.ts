@@ -16,6 +16,7 @@ import {
   type BuiltInAgentDefinition,
 } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { createUserMessage, extractTextContent } from '../../utils/messages.js'
+import { applyWorkflowHarnessPrompt } from '../../utils/workflowHarness.js'
 import { getTokenCountFromUsage } from '../../utils/tokens.js'
 import { createHash } from 'node:crypto'
 import { createAgentId } from '../../utils/uuid.js'
@@ -191,6 +192,8 @@ async function cleanupWorkflowWorktree(
         info.worktreePath,
         info.worktreeBranch,
         info.gitRoot,
+        false,
+        'workflow_tool',
       )
     } catch (e) {
       logForDebugging(
@@ -291,7 +294,13 @@ export const claudeCodeBackend: AgentAdapter = {
         ].join('\n')
       : params.prompt
 
-    const promptMessages = [createUserMessage({ content: promptText })]
+    // densable leftover #55 sMt host @214773110 — Ae? harness : raw me
+    const harnessed = applyWorkflowHarnessPrompt(
+      toolUseContext.messages ?? [],
+      promptText,
+      toolUseContext.agentId,
+    )
+    const promptMessages = [createUserMessage({ content: harnessed })]
     const messages: Message[] = []
     const startTime = Date.now()
     // Accumulate running progress (onProgress push -> agent_progress event -> panel refreshes token/tool in real time).

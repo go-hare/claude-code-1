@@ -3,9 +3,16 @@ import type {
   ParsedCommandElement,
   ParsedPowerShellCommand,
 } from 'src/utils/powershell/parser.js'
+import * as realDangerousCmdlets from 'src/utils/powershell/dangerousCmdlets.js'
+import * as realParser from 'src/utils/powershell/parser.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+
+const dangerousCmdletsSnap = snapshotModuleExports(realDangerousCmdlets)
+const parserSnap = snapshotModuleExports(realParser)
 
 // Mock clmTypes to avoid heavy dependency chain
 mock.module('src/utils/powershell/dangerousCmdlets.js', () => ({
+  ...dangerousCmdletsSnap,
   DANGEROUS_SCRIPT_BLOCK_CMDLETS: new Set([
     'invoke-command',
     'icm',
@@ -50,6 +57,7 @@ const MOCK_COMMON_ALIASES: Record<string, string> = {
 }
 
 mock.module('src/utils/powershell/parser.js', () => ({
+  ...parserSnap,
   COMMON_ALIASES: MOCK_COMMON_ALIASES,
   commandHasArgAbbreviation: (
     cmd: any,

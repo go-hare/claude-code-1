@@ -18,6 +18,7 @@ import {
   dequeuePermissionConfirm,
   enqueuePermissionConfirm,
 } from '../PermissionContext.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 import {
   pushLeaderToolUseConfirm,
   registerLeaderToolUseConfirmQueue,
@@ -25,9 +26,7 @@ import {
   unregisterLeaderToolUseConfirmQueue,
 } from '../../../utils/swarm/leaderPermissionBridge.js'
 
-mock.module('bun:bundle', () => ({
-  feature: () => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 function makeConfirm(
   toolUseID: string,

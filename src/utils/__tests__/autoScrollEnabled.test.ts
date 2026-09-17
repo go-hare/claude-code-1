@@ -45,8 +45,12 @@ describe('autoScrollEnabled (densable sp default true)', () => {
     expect(idx).toBeGreaterThan(0)
     const slice = src.slice(idx, idx + 1200)
     expect(slice).toMatch(/label: 'Auto-scroll'/)
-    expect(slice).toMatch(/updateSettingsForSource\('userSettings'/)
-    expect(slice).toMatch(/saveGlobalConfig/)
+    // densable bvr aliases: B('autoScrollEnabled', …) → updateSettingsForSource('userSettings', …)
+    expect(slice).toMatch(/B\('autoScrollEnabled'/)
+    // densable W(updater) alias wraps saveGlobalConfig for global dual-write.
+    expect(slice).toMatch(
+      /setGlobalConfig\(\{ \.\.\.getGlobalConfig\(\), autoScrollEnabled \}\)/,
+    )
     expect(slice).toMatch(/autoScrollEnabled/)
   })
 

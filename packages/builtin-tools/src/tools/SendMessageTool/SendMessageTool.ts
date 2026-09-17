@@ -30,7 +30,7 @@ import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { isObserverTaskId } from 'src/utils/observerAgents.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { logForDebugging } from 'src/utils/debug.js'
-import { readAgentMetadata } from 'src/utils/sessionStorage.js'
+import { readAgentMetadata } from 'src/utils/sessionPaths.js'
 import { errorMessage } from 'src/utils/errors.js'
 import {
   isDefinitelyOwnMessagingSocket,
@@ -86,7 +86,7 @@ import {
 import {
   buildPeerCandidates,
   formatAmbiguousMessage,
-  leftoverClosestPeers,
+  findClosestPeerCandidates,
   listingRefMatchesCandidate,
   localClaimedRemoteBodies,
   parseNameRef,
@@ -105,8 +105,8 @@ import {
   formatSelfSendMessage,
   isImpersonatingOwnSession,
   isOwnNameSearchComplete,
-  leftoverAmbiguousIsSelfSend,
-  leftoverNotFoundIsSelfSend,
+  shouldTreatPrefixAmbiguousAsSelfSend,
+  shouldTreatNotFoundAsSelfSend,
   SELF_SEND_ERROR_CLASS,
 } from './ownSession.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
@@ -139,7 +139,7 @@ function formatDeeMessage(to: string, context?: { agentId?: string }): string {
 }
 
 /** leftover Qen/Zen/Jen on not-found. Local: no mailbox fake-send. */
-function leftoverOwnNameMiss(
+function buildOwnNameMissOutcome(
   to: string,
   message: unknown,
   opts: {
@@ -172,7 +172,7 @@ function leftoverOwnNameMiss(
     searchTruncated: opts.searchTruncated,
     pinnedIdentityClaimedLocally: opts.pinnedIdentityClaimedLocally,
   })
-  if (leftoverNotFoundIsSelfSend(qen, to, opts.closest, zen)) {
+  if (shouldTreatNotFoundAsSelfSend(qen, to, opts.closest, zen)) {
     return {
       kind: 'dee',
       data: {
@@ -213,7 +213,7 @@ function leftoverOwnNameMiss(
 }
 
 /** leftover Qen/Zen on yRw prefix-ambiguous. Official DEe only when matchedBy prefix. */
-function leftoverOwnNameAmbiguous(
+function buildOwnNameAmbiguousOutcome(
   to: string,
   message: unknown,
   opts: {
@@ -238,7 +238,7 @@ function leftoverOwnNameAmbiguous(
     searchTruncated: opts.searchTruncated,
     pinnedIdentityClaimedLocally: opts.pinnedIdentityClaimedLocally,
   })
-  if (leftoverAmbiguousIsSelfSend(qen, opts.matchedBy, zen)) {
+  if (shouldTreatPrefixAmbiguousAsSelfSend(qen, opts.matchedBy, zen)) {
     return {
       kind: 'dee',
       data: {
@@ -2341,7 +2341,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             return { data: { success: false, message: resolved.message } }
           }
           if (resolved.kind === 'ambiguous') {
-            const prefixDee = leftoverOwnNameAmbiguous(
+            const prefixDee = buildOwnNameAmbiguousOutcome(
               input.to,
               input.message,
               {
@@ -2415,11 +2415,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
           }
           if (resolved.kind === 'not-found') {
-            const miss = leftoverOwnNameMiss(
+            const miss = buildOwnNameMissOutcome(
               input.to,
               input.message,
               {
-                closest: leftoverClosestPeers(input.to, candidates),
+                closest: findClosestPeerCandidates(input.to, candidates),
                 searchTruncated: resolved.searchTruncated,
               },
               context,
@@ -2852,7 +2852,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           return { data: { success: false, message: resolved.message } }
         }
         if (resolved.kind === 'ambiguous') {
-          const prefixDee = leftoverOwnNameAmbiguous(
+          const prefixDee = buildOwnNameAmbiguousOutcome(
             input.to,
             input.message,
             {
@@ -3080,11 +3080,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           }
         }
         if (resolved.kind === 'not-found') {
-          const miss = leftoverOwnNameMiss(
+          const miss = buildOwnNameMissOutcome(
             input.to,
             input.message,
             {
-              closest: leftoverClosestPeers(input.to, candidates),
+              closest: findClosestPeerCandidates(input.to, candidates),
               searchTruncated,
               pinnedIdentityClaimedLocally: undefined,
             },

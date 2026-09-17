@@ -26,7 +26,6 @@ const bridgeSrc = readFileSync(
 
 describe('densable 2.1.218 B8a Remote Control server detail', () => {
   test('detail options Restart / Remove / Back present', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: assert densable source template
     expect(detailSrc).toContain('Restart ${service}')
     expect(detailSrc).toContain("label: 'Remove'")
     expect(detailSrc).toContain("label: 'Back'")
@@ -52,7 +51,6 @@ describe('densable 2.1.218 B8a Remote Control server detail', () => {
   })
 
   test('remove subtitle densable Stop serving copy', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: assert densable source template
     expect(detailSrc).toContain('Stop serving ${dir} to claude.ai')
     expect(detailSrc).toContain('will stop the worker on its next reconcile')
   })

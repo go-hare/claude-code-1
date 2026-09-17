@@ -11,6 +11,7 @@ import {
 } from 'path'
 import {
   getAdditionalDirectoriesForClaudeMd,
+  getOriginalCwd,
   getSessionId,
 } from '../bootstrap/state.js'
 import {
@@ -30,6 +31,7 @@ import {
   type EffortValue,
   parseEffortValue,
 } from '../utils/effort.js'
+import { getCwd } from '../utils/cwd.js'
 import {
   getClaudeConfigHomeDir,
   isBareMode,
@@ -882,12 +884,16 @@ export const getSkillDirCommands = memoize(
     const unconditionalSkills: Command[] = []
     const newConditionalSkills: Command[] = []
     for (const skill of deduplicatedSkills) {
-      if (
-        skill.type === 'prompt' &&
-        skill.paths &&
-        skill.paths.length > 0 &&
-        !activatedConditionalSkillNames.has(skill.name)
-      ) {
+      const isConditional =
+        skill.type === 'prompt' && !!skill.paths && skill.paths.length > 0
+      // densable iXe update-existing: `if (P) { x=Q3e(R); if (has(x)) set(x,R) }`
+      if (isConditional) {
+        const x = skillMapKey(skill)
+        if (dynamicSkills.has(x)) {
+          dynamicSkills.set(x, skill)
+        }
+      }
+      if (isConditional && !activatedConditionalSkillNames.has(skill.name)) {
         newConditionalSkills.push(skill)
       } else {
         unconditionalSkills.push(skill)
@@ -1025,12 +1031,38 @@ export async function discoverSkillDirsForPaths(
 }
 
 /**
+ * densable `Q3e` — dynamic-skill map key.
+ * `${type==="prompt" ? skillRoot ?? "" : ""}\0${name}`
+ */
+export function skillMapKey(skill: Command): string {
+  return `${skill.type === 'prompt' ? (skill.skillRoot ?? '') : ''}\0${skill.name}`
+}
+
+/**
+ * densable iXe/`Q3e` replace: a dynamic skill belongs to the scanned dirs
+ * when its skillRoot is the dir or a descendant (`relative` empty / not `..`
+ * / not absolute).
+ */
+function skillBelongsToSkillDirs(skill: Command, dirs: string[]): boolean {
+  const skillRoot = skill.type === 'prompt' ? (skill.skillRoot ?? '') : ''
+  return dirs.some(dir => {
+    const rel = relative(dir, skillRoot)
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+  })
+}
+
+/**
  * Loads skills from the given directories and merges them into the dynamic skills map.
  * Skills from directories closer to the file (deeper paths) take precedence.
  *
  * @param dirs Array of skill directories to load from (should be sorted deepest first)
+ * @param opts.replace densable iXe `{replace:true}` — drop skills that belong
+ *   to these dirs but are no longer on disk. `/cd` `ft` does not pass this.
  */
-export async function addSkillDirectories(dirs: string[]): Promise<void> {
+export async function addSkillDirectories(
+  dirs: string[],
+  opts: { replace?: boolean } = {},
+): Promise<void> {
   if (
     !isSettingSourceEnabled('projectSettings') ||
     isRestrictedToPluginOnly('skills')
@@ -1051,11 +1083,22 @@ export async function addSkillDirectories(dirs: string[]): Promise<void> {
     dirs.map(dir => loadSkillsFromSkillsDir(dir, 'projectSettings')),
   )
 
+  if (opts.replace) {
+    const incoming = new Set(
+      loadedSkills.flat().map(({ skill }) => skillMapKey(skill)),
+    )
+    for (const [key, skill] of dynamicSkills) {
+      if (skillBelongsToSkillDirs(skill, dirs) && !incoming.has(key)) {
+        dynamicSkills.delete(key)
+      }
+    }
+  }
+
   // Process in reverse order (shallower first) so deeper paths override
   for (let i = loadedSkills.length - 1; i >= 0; i--) {
     for (const { skill } of loadedSkills[i] ?? []) {
       if (skill.type === 'prompt') {
-        dynamicSkills.set(skill.name, skill)
+        dynamicSkills.set(skillMapKey(skill), skill)
       }
     }
   }
@@ -1082,6 +1125,21 @@ export async function addSkillDirectories(dirs: string[]): Promise<void> {
 
   // Notify listeners that skills were loaded (so they can clear caches)
   skillsLoaded.emit()
+}
+
+/**
+ * densable hZc/`gJa` — after cwd has moved, re-read the new project's
+ * skill dirs with `{replace:true}`. No-ops when cwd is still the launch root
+ * (`mn()===Wo()`). `/cd` `ft` does not call this; the skill watcher does.
+ */
+export async function refreshMovedDirectorySkills(): Promise<void> {
+  const cwd = getCwd()
+  if (cwd === getOriginalCwd()) {
+    return
+  }
+  await addSkillDirectories(getProjectDirsUpToHome('skills', cwd), {
+    replace: true,
+  })
 }
 
 /**
@@ -1146,7 +1204,7 @@ export function activateConditionalSkillsForPaths(
 
       if (skillIgnore.ignores(relativePath)) {
         // Activate this skill by moving it to dynamic skills
-        dynamicSkills.set(name, skill)
+        dynamicSkills.set(skillMapKey(skill), skill)
         conditionalSkills.delete(name)
         activatedConditionalSkillNames.add(name)
         activated.push(name)

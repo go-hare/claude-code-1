@@ -38,13 +38,19 @@ describe('readDaemonLockLoose (densable UTe)', () => {
   })
 
   test('accepts full lock with startedAt + procStart', async () => {
+    const { isWin32ProcTimesFfiAvailable } = await import(
+      '../../utils/genericProcessUtils.js'
+    )
+    const identity = isWin32ProcTimesFfiAvailable()
+      ? { procStartFt: '1337' }
+      : { procStart: 'Wed Jan 1 00:00:00 2025' }
     await writeFile(
       getDaemonLockPath(dir),
       JSON.stringify({
         pid: 42,
         version: '2.1.216',
         startedAt: 1_700_000_000_000,
-        procStart: 'Wed Jan 1 00:00:00 2025',
+        ...identity,
       }),
     )
     const got = await readDaemonLockLoose(dir)
@@ -55,15 +61,17 @@ describe('readDaemonLockLoose (densable UTe)', () => {
 
   test('DSr false when procStart missing', async () => {
     expect(isDaemonLockSignalable({ procStart: undefined })).toBe(false)
-    expect(isDaemonLockSignalable({ procStart: 123 })).toBe(true)
     // densable AFe: procStartFt alone is signalable only when BMt/FFI is on.
     // On darwin/linux CI (FFI off), pick returns undefined for Ft-only locks.
     const { isWin32ProcTimesFfiAvailable } = await import(
       '../../utils/genericProcessUtils.js'
     )
     if (isWin32ProcTimesFfiAvailable()) {
+      // FFI on → legacy procStart is void; only procStartFt counts.
+      expect(isDaemonLockSignalable({ procStart: 123 })).toBe(false)
       expect(isDaemonLockSignalable({ procStartFt: '1337' })).toBe(true)
     } else {
+      expect(isDaemonLockSignalable({ procStart: 123 })).toBe(true)
       expect(isDaemonLockSignalable({ procStartFt: '1337' })).toBe(false)
     }
     expect(isDaemonLockSignalable(null)).toBe(false)

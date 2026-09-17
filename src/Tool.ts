@@ -239,6 +239,12 @@ export type ToolUseContext = {
   }
   abortController: AbortController
   /**
+   * densable persist handles (official tool context `storageV5` / `credentials`).
+   * Pinned createLocalFsBackend from pinStorageV5.
+   */
+  storageV5?: unknown
+  credentials?: unknown
+  /**
    * densable shouldStopBeforeNextApiCall — when true at the top of a main-thread
    * query iteration (before the next API request), query returns
    * `{ reason: 'background_requested' }` so left-arrow defer-then-fork can
@@ -551,6 +557,31 @@ export function findToolByName(tools: Tools, name: string): Tool | undefined {
   )
 }
 
+/**
+ * densable `jh` — batch-tool duck type used by tHr / QOs.
+ * A batch tool expands one tool_use into per-entry synthetics (`id_0`, `id_1`).
+ */
+export type BatchTool = Tool & {
+  underlyingV1ToolName: string
+  entryFieldName: string
+  perEntryHookInputs: (input: unknown) => {
+    v1Tool: Tool
+    entries: unknown[]
+  }
+  reassemble: (inputs: unknown[]) => unknown
+}
+
+/** densable `jh` */
+export function isBatchTool(tool: Tool): tool is BatchTool {
+  const t = tool
+  return (
+    typeof t.underlyingV1ToolName === 'string' &&
+    typeof t.entryFieldName === 'string' &&
+    typeof t.perEntryHookInputs === 'function' &&
+    typeof t.reassemble === 'function'
+  )
+}
+
 function hasSameMcpToolIdentity(a: Tool, b: Tool): boolean {
   return (
     a.mcpInfo !== undefined &&
@@ -615,6 +646,17 @@ export type Tool<
    * Prefer terms not already in the tool name (e.g. 'jupyter' for NotebookEdit).
    */
   searchHint?: string
+  /**
+   * densable `jh` batch-tool fields. When all four are set, normalize `tHr`
+   * merges per-entry `tool_result` ids (`${id}_0`) back onto the parent.
+   */
+  underlyingV1ToolName?: string
+  entryFieldName?: string
+  perEntryHookInputs?(input: z.infer<Input>): {
+    v1Tool: Tool
+    entries: unknown[]
+  }
+  reassemble?(inputs: unknown[]): unknown
   call(
     args: z.infer<Input>,
     context: ToolUseContext,

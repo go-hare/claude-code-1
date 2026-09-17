@@ -250,6 +250,8 @@ import {
   getAutoModeEnabledStateIfCached,
   initializeToolPermissionContext,
   initialPermissionModeFromCLI,
+  subprocessEnvScrubNotification,
+  permissionModeSuppliedOnInvocationFromKo,
   isDefaultPermissionModeAuto,
   parseToolListFromCLI,
   removeDangerousPermissions,
@@ -3210,6 +3212,7 @@ async function run(): Promise<CommanderCommand> {
       let root!: Root;
       let getFpsMetrics!: () => FpsMetrics | undefined;
       let stats!: StatsStore;
+      let mcpApprovalSkipWarning: { key: string; text: string } | null = null;
 
       // Show setup screens after commands are loaded
       if (!isNonInteractiveSession) {
@@ -3245,14 +3248,17 @@ async function run(): Promise<CommanderCommand> {
 
         logForDebugging('[STARTUP] Running showSetupScreens()...');
         const setupScreensStart = Date.now();
-        const onboardingShown = await showSetupScreens(
+        const setupScreens = await showSetupScreens(
           root,
           permissionMode,
           allowDangerouslySkipPermissions,
           commands,
           enableClaudeInChrome,
           devChannels,
+          strictMcpConfig,
         );
+        const { onboardingShown } = setupScreens;
+        mcpApprovalSkipWarning = setupScreens.mcpApprovalSkipWarning;
         logForDebugging(`[STARTUP] showSetupScreens() completed in ${Date.now() - setupScreensStart}ms`);
 
         // Now that trust is established and GrowthBook has auth headers,
@@ -3900,6 +3906,13 @@ async function run(): Promise<CommanderCommand> {
             fallbackModel: userSpecifiedFallbackModel,
             teleport,
             sdkUrl,
+            permissionModeSuppliedOnInvocation: permissionModeSuppliedOnInvocationFromKo({
+              permissionModeCli,
+              dangerouslySkipPermissions,
+              agentPermissionMode: agentCli
+                ? agentDefinitions.activeAgents.find(a => a.agentType === agentCli)?.permissionMode
+                : undefined,
+            }),
             replayUserMessages: effectiveReplayUserMessages,
             includePartialMessages: effectiveIncludePartialMessages,
             forwardSubagentText: effectiveForwardSubagentText,
@@ -3938,10 +3951,30 @@ async function run(): Promise<CommanderCommand> {
         color?: 'warning';
         priority: 'high';
       }> = [];
-      if (permissionModeNotification) {
+      // initialPermissionModeFromCLI runs before agents are loaded, so it cannot
+      // see an --agent frontmatter permissionMode. Its scrub branch is an early
+      // return, so when scrub is set this is the only other notification source
+      // and the fallback cannot mask a different one.
+      const scrubNotification =
+        permissionModeNotification ??
+        subprocessEnvScrubNotification({
+          permissionModeCli,
+          dangerouslySkipPermissions,
+          agentPermissionMode: mainThreadAgentDefinition?.permissionMode,
+        });
+      if (scrubNotification) {
         initialNotifications.push({
           key: 'permission-mode-notification',
-          text: permissionModeNotification,
+          text: scrubNotification,
+          priority: 'high',
+        });
+      }
+      // densable `if(tt) le.push({key:tt.key,text:tt.text,color:"warning",priority:"high"})`
+      if (mcpApprovalSkipWarning) {
+        initialNotifications.push({
+          key: mcpApprovalSkipWarning.key,
+          text: mcpApprovalSkipWarning.text,
+          color: 'warning',
           priority: 'high',
         });
       }
@@ -4076,8 +4109,12 @@ async function run(): Promise<CommanderCommand> {
         replBridgeSessionUrl: undefined,
         replBridgeEnvironmentId: undefined,
         replBridgeSessionId: undefined,
+        // densable leftover hook Gi — void 0 / unset at boot.
+        replBridgeSessionGroupingId: undefined,
+        replBridgeSkipNextArchive: undefined,
         replBridgeError: undefined,
         replBridgeErrorKind: undefined,
+        authChangeGeneration: 0,
         replBridgeInitialName: remoteControlName,
         showRemoteCallout: false,
         notifications: {

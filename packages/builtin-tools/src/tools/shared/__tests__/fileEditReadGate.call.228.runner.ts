@@ -18,6 +18,7 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { analyticsMock } from '../../../../../../tests/mocks/analytics.js'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -132,10 +133,7 @@ function installMocks(): void {
     ...gitDiffActual,
     fetchSingleFileGitDiff: async () => undefined,
   }))
-  mock.module('src/services/analytics/index.js', () => ({
-    ...analyticsActual,
-    logEvent: () => {},
-  }))
+  mock.module('src/services/analytics/index.js', analyticsMock)
   mock.module('src/services/analytics/growthbook.js', () => ({
     ...growthbookActual,
     getFeatureValue_CACHED_MAY_BE_STALE: () => false,

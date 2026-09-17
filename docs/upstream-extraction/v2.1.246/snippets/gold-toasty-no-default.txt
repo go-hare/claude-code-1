@@ -1,0 +1,22 @@
+# Official 2.1.246 SEA — no default batching_reminder copy
+#
+# kXo @214228145:
+#   env CLAUDE_CODE_TOASTY_THIMBLE if !== undefined → SXo
+#   else fg()?.tengu_toasty_thimble
+#     missing/null → null
+#     not a map → warn once, null
+#     wXo miss → null
+#     non-string value → warn once, null
+#   no hardcoded fallback string
+#
+# Binary search (246 SEA):
+#   tengu_toasty_thimble — key / telemetry / env name only
+#   no tengu_toasty_thimble:{ map
+#   no "Batch independent" / "batch your tool" / "prefer to batch"
+#
+# Do not invent default tip text.
+# Do not LOCAL_GATE_DEFAULTS['tengu_toasty_thimble'].
+#
+# Different string (tDs / assembleBatchedToolResult, not toasty):
+#   single-entry batch tool_result tip:
+#   "Tip: ${tool.name} accepts multiple entries in one call..."

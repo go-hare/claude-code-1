@@ -111,7 +111,8 @@ export async function waitForSyncSkillMaterialization(
               }),
             timeoutMs,
           )
-          timer.unref?.()
+          // Must stay referenced — Bun does not fire an unref'd timer while
+          // the other Promise.race arm is a never-settling registration.
         }),
       ])
     } finally {

@@ -1,4 +1,16 @@
-import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -73,9 +85,16 @@ const getSettingsForSourceMock = mock(
 )
 const settingsSnap = snapshotModuleExports(realSettings)
 
-mock.module('bun:bundle', () => ({
-  feature: (name: string) => name === 'TRANSCRIPT_CLASSIFIER',
-}))
+mock.module('bun:bundle', bunBundleMock)
+let popYoloFeature: (() => void) | undefined
+beforeAll(() => {
+  popYoloFeature = pushFeatureOverride(
+    (name: string) => name === 'TRANSCRIPT_CLASSIFIER',
+  )
+})
+afterAll(() => {
+  popYoloFeature?.()
+})
 
 function mockGetAutoModeConfig() {
   const allow: string[] = []

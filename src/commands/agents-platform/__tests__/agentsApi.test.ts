@@ -11,6 +11,10 @@ import {
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
+import {
+  oauthConfigMock,
+  teleportApiMock,
+} from '../../../../tests/mocks/oauthSurface.js'
 
 // Mock side-effect modules first
 mock.module('src/utils/log.ts', logMock)
@@ -19,17 +23,17 @@ mock.module('src/utils/debug.ts', debugMock)
 // ── Workspace API key mock ──────────────────────────────────────────────────
 const mockApiKey = 'sk-ant-api03-test-agents-key'
 
-mock.module('src/constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-}))
+mock.module('src/constants/oauth.js', oauthConfigMock)
 
 const prepareWorkspaceApiRequestMock = mock(async () => ({
   apiKey: mockApiKey,
 }))
 
-mock.module('src/utils/teleport/api.js', () => ({
-  prepareWorkspaceApiRequest: prepareWorkspaceApiRequestMock,
-}))
+mock.module('src/utils/teleport/api.js', () =>
+  teleportApiMock({
+    prepareWorkspaceApiRequest: prepareWorkspaceApiRequestMock,
+  }),
+)
 
 // Note: we do NOT mock src/services/auth/hostGuard.js here.
 // The real assertWorkspaceHost() is called with the URL from getOauthConfig()

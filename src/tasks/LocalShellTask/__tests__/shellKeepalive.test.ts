@@ -3,6 +3,10 @@ import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import {
+  cleanupRegistryMock,
+  speculationMock,
+} from '../../../../tests/mocks/taskSurface.js'
 
 const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
@@ -33,9 +37,7 @@ function diskOutputMock() {
 mock.module('src/utils/task/diskOutput.js', diskOutputMock)
 mock.module('../../../utils/task/diskOutput.js', diskOutputMock)
 
-mock.module('src/utils/cleanupRegistry.js', () => ({
-  registerCleanup: () => () => {},
-}))
+mock.module('src/utils/cleanupRegistry.js', cleanupRegistryMock)
 
 const realAnalytics = await import('src/services/analytics/index.js')
 const analyticsSnap = snapshotModuleExports(realAnalytics)
@@ -45,9 +47,7 @@ mock.module('src/services/analytics/index.js', () => ({
   stripProtoFields: (x: unknown) => x,
 }))
 
-mock.module('src/services/PromptSuggestion/speculation.js', () => ({
-  abortSpeculation: noop,
-}))
+mock.module('src/services/PromptSuggestion/speculation.js', speculationMock)
 
 afterAll(() => {
   mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))

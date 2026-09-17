@@ -16,11 +16,12 @@ import { logMock } from '../../../../tests/mocks/log.js'
 mock.module('src/utils/log.ts', logMock)
 
 // bun:bundle must be mocked before imports that use feature()
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 
 // settings.js must be mocked to cut bootstrap chain.
 // Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
 import * as realSettings from 'src/utils/settings/settings.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 import {
   createSettingsMock,
   restoreSettingsMockWith,

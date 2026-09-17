@@ -82,6 +82,7 @@ Your response must be a JSON object matching one of the following schemas:
           hasAppendSystemPrompt: false,
           agents: [],
           querySource: 'hook_prompt',
+          promptTooLongIsHandled: true,
           mcpTools: [],
           agentId: toolUseContext.agentId,
           langfuseTrace: toolUseContext.langfuseTrace,

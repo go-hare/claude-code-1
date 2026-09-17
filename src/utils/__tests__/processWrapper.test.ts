@@ -77,6 +77,9 @@ describe('validateProcessWrapperArgv (official Hsg)', () => {
   })
 
   test('accepts executable absolute file', () => {
+    // Official Hsg: PROCESS_WRAPPER ignored on win32; Unix mode bits also
+    // do not stick on NTFS under Bun, so densable darwin probes skip here.
+    if (process.platform === 'win32') return
     const dir = mkdtempSync(join(tmpdir(), 'pw-'))
     const bin = join(dir, 'launcher')
     writeFileSync(bin, '#!/bin/sh\n')
@@ -92,6 +95,7 @@ describe('validateProcessWrapperArgv (official Hsg)', () => {
   })
 
   test('rejects own execPath as launcher', () => {
+    if (process.platform === 'win32') return
     const dir = mkdtempSync(join(tmpdir(), 'pw-'))
     const bin = join(dir, 'claude-bin')
     writeFileSync(bin, '#!/bin/sh\n')
@@ -114,6 +118,7 @@ describe('applyProcessWrapperToLaunch (official qCe)', () => {
   })
 
   test('prefixes when wrapper set and valid', () => {
+    if (process.platform === 'win32') return
     const dir = mkdtempSync(join(tmpdir(), 'pw-'))
     const bin = join(dir, 'wrap')
     writeFileSync(bin, '#!/bin/sh\n')
@@ -140,6 +145,8 @@ describe('formatProcessWrapperStatusLines / relaunch refuse', () => {
   })
 
   test('refuse line when misconfigured', () => {
+    // Official Hsg: PROCESS_WRAPPER is ignored on win32 — status is a no-op.
+    if (process.platform === 'win32') return
     const env = {
       [PROCESS_WRAPPER_ENV_KEY]: 'relative-not-abs',
     } as NodeJS.ProcessEnv
@@ -153,6 +160,7 @@ describe('formatProcessWrapperStatusLines / relaunch refuse', () => {
   })
 
   test('Self-exec line when valid', () => {
+    if (process.platform === 'win32') return
     const dir = mkdtempSync(join(tmpdir(), 'pw-'))
     const bin = join(dir, 'wrap')
     writeFileSync(bin, '#!/bin/sh\n')

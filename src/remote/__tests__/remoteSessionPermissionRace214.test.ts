@@ -8,17 +8,17 @@
  * - dialog cancel before permission cancel
  */
 import { describe, expect, mock, test } from 'bun:test'
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
 import { debugMock } from '../../../tests/mocks/debug.js'
+import { logMock } from '../../../tests/mocks/log.js'
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', () => ({
+  ...logMock(),
   logError: mock(() => {}),
   logForDebugging: mock(() => {}),
 }))
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: mock(() => {}),
-  logEventAsync: mock(async () => {}),
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 import type { SDKMessage } from '../../entrypoints/agentSdkTypes.js'
 import type {

@@ -6,6 +6,8 @@
  * starting a second reconnect. The leader logs `reauth_retry`.
  */
 
+import { SdkError, SdkErrorCode } from '@modelcontextprotocol/client'
+
 export type AuthReconnectKind = 'mcp_headers_helper' | 'mcp_oauth_refresh'
 
 export type AuthReconnectJoin =
@@ -54,16 +56,41 @@ export function classifyAuthReconnectKind(opts: {
 }
 
 /**
+ * Official WZe `E instanceof hr && E.code === mr.ConnectionClosed`.
+ * `hr` is v2 `SdkError`; `mr.ConnectionClosed === "CONNECTION_CLOSED"`.
+ */
+export function isMcpSdkConnectionClosed(error: unknown): boolean {
+  return (
+    error instanceof SdkError && error.code === SdkErrorCode.ConnectionClosed
+  )
+}
+
+/**
+ * Official WZe `E instanceof us && E.code === -32000 && message includes Connection closed`.
+ */
+export function isMcpLegacyConnectionClosed(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as Error & { code?: number }).code
+  return code === -32000 && error.message.includes('Connection closed')
+}
+
+/** Official WZe ConnectionClosed pair (`hr` or `us`). */
+export function isMcpConnectionClosedError(error: unknown): boolean {
+  return isMcpSdkConnectionClosed(error) || isMcpLegacyConnectionClosed(error)
+}
+
+/**
  * Official W: ConnectionClosed while a reconnect is already running for this
  * server → collateral rejoin even without a fresh 401 classification.
+ * SEA: `E instanceof hr && E.code === mr.ConnectionClosed || E instanceof us && E.code === -32000`
+ * (`us` here also requires the "Connection closed" message, same as the expired arm).
  */
 export function isConnectionClosedWhileReconnecting(
   error: unknown,
   hasInflight: boolean,
 ): boolean {
-  if (!hasInflight || !(error instanceof Error)) return false
-  const code = (error as Error & { code?: number }).code
-  return code === -32000 && error.message.includes('Connection closed')
+  if (!hasInflight) return false
+  return isMcpConnectionClosedError(error)
 }
 
 /** In-flight reconnect promises keyed by getServerCacheKey (official OHs). */

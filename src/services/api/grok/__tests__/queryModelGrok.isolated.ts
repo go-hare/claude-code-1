@@ -5,7 +5,17 @@
  * no usage. Background agent footer reads message.usage and stayed at
  * "↓ 0 tokens" forever. Assembly must happen at message_stop with real usage.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import { debugMock } from '../../../../../tests/mocks/debug'
+import { snapshotModuleExports } from '../../../../../tests/mocks/settings.js'
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type {
   AssistantMessage,
@@ -90,17 +100,28 @@ mock.module('../client.js', () => ({
   }),
 }))
 
-mock.module('../../../../utils/debug.js', () => ({
-  logForDebugging: () => {},
-}))
+mock.module('../../../../utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
+mock.module('src/utils/debug.js', debugMock)
 
 mock.module('../../../../cost-tracker.js', () => ({
   addToTotalSessionCost: () => {},
 }))
 
+const realModelCost = await import('src/utils/modelCost.js')
+const modelCostSnap = snapshotModuleExports(realModelCost)
 mock.module('../../../../utils/modelCost.js', () => ({
+  ...modelCostSnap,
   calculateUSDCost: () => 0,
 }))
+mock.module('src/utils/modelCost.js', () => ({
+  ...modelCostSnap,
+  calculateUSDCost: () => 0,
+}))
+afterAll(() => {
+  mock.module('../../../../utils/modelCost.js', () => ({ ...modelCostSnap }))
+  mock.module('src/utils/modelCost.js', () => ({ ...modelCostSnap }))
+})
 
 mock.module('../../../../services/langfuse/tracing.js', () => ({
   recordLLMObservation: () => {},

@@ -1,25 +1,29 @@
 import partition from 'lodash-es/partition.js';
+import uniq from 'lodash-es/uniq.js';
 import React, { useCallback } from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
 import { Box, Text } from '@anthropic/ink';
+import { formatMcpServerLabel } from '../services/mcp/formatMcpServerLabel.js';
+import { approveSessionMcpServers, rejectSessionMcpServers } from '../services/mcp/mcpSessionApprovedServers.js';
+import { getProjectPathForConfig } from '../utils/config.js';
 import { getSettings_DEPRECATED, updateSettingsForSource } from '../utils/settings/settings.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { SelectMulti } from './CustomSelect/SelectMulti.js';
 import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { MCPServerDialogCopy } from './MCPServerDialogCopy.js';
+import type { McpApprovalPersistResult } from './MCPServerApprovalDialog.js';
 
 type Props = {
   serverNames: string[];
-  onDone(): void;
+  /** densable ce `pluginServerNames` — option labels go through UKc/`v`. */
+  pluginServerNames?: Set<string>;
+  onDone(result: McpApprovalPersistResult): void;
 };
 
-export function MCPServerMultiselectDialog({ serverNames, onDone }: Props): React.ReactNode {
-  function onSubmit(selectedServers: string[]) {
-    const currentSettings = getSettings_DEPRECATED() || {};
-    const enabledServers = currentSettings.enabledMcpjsonServers || [];
-    const disabledServers = currentSettings.disabledMcpjsonServers || [];
+export function MCPServerMultiselectDialog({ serverNames, pluginServerNames, onDone }: Props): React.ReactNode {
+  const pluginNames = pluginServerNames ?? new Set<string>();
 
-    // Use partition to separate approved and rejected servers
+  function onSubmit(selectedServers: string[]) {
     const [approvedServers, rejectedServers] = partition(serverNames, server => selectedServers.includes(server));
 
     logEvent('tengu_mcp_multidialog_choice', {
@@ -27,43 +31,43 @@ export function MCPServerMultiselectDialog({ serverNames, onDone }: Props): Reac
       rejected: rejectedServers.length,
     });
 
-    // Update settings with approved servers
+    let persistFailed = false;
     if (approvedServers.length > 0) {
-      const newEnabledServers = [...new Set([...enabledServers, ...approvedServers])];
-      updateSettingsForSource('localSettings', {
-        enabledMcpjsonServers: newEnabledServers,
+      const currentSettings = getSettings_DEPRECATED() || {};
+      const { error } = updateSettingsForSource('localSettings', {
+        enabledMcpjsonServers: uniq([...(currentSettings.enabledMcpjsonServers || []), ...approvedServers]),
       });
+      persistFailed ||= error != null;
     }
 
-    // Update settings with rejected servers
     if (rejectedServers.length > 0) {
-      const newDisabledServers = [...new Set([...disabledServers, ...rejectedServers])];
-      updateSettingsForSource('localSettings', {
-        disabledMcpjsonServers: newDisabledServers,
+      const currentSettings = getSettings_DEPRECATED() || {};
+      const { error } = updateSettingsForSource('localSettings', {
+        disabledMcpjsonServers: uniq([...(currentSettings.disabledMcpjsonServers || []), ...rejectedServers]),
       });
+      persistFailed ||= error != null;
     }
 
-    onDone();
+    // densable h(C(), n) — comma after the enabled write; empty n is a no-op
+    approveSessionMcpServers(getProjectPathForConfig(), approvedServers);
+    rejectSessionMcpServers(getProjectPathForConfig(), rejectedServers);
+
+    onDone({ persistFailed });
   }
 
-  // Handle ESC to reject all servers
   const handleEscRejectAll = useCallback(() => {
     const currentSettings = getSettings_DEPRECATED() || {};
-    const disabledServers = currentSettings.disabledMcpjsonServers || [];
-
-    const newDisabledServers = [...new Set([...disabledServers, ...serverNames])];
-
-    updateSettingsForSource('localSettings', {
-      disabledMcpjsonServers: newDisabledServers,
+    rejectSessionMcpServers(getProjectPathForConfig(), serverNames);
+    const { error } = updateSettingsForSource('localSettings', {
+      disabledMcpjsonServers: uniq([...(currentSettings.disabledMcpjsonServers || []), ...serverNames]),
     });
-
-    onDone();
+    onDone({ persistFailed: error != null });
   }, [serverNames, onDone]);
 
   return (
     <>
       <Dialog
-        title={`${serverNames.length} new MCP servers found in .mcp.json`}
+        title={`${serverNames.length} new MCP servers found in this project`}
         subtitle="Select any you wish to enable."
         color="warning"
         onCancel={handleEscRejectAll}
@@ -73,7 +77,7 @@ export function MCPServerMultiselectDialog({ serverNames, onDone }: Props): Reac
 
         <SelectMulti
           options={serverNames.map(server => ({
-            label: server,
+            label: formatMcpServerLabel(server, pluginNames.has(server)),
             value: server,
           }))}
           defaultValue={serverNames}

@@ -4,12 +4,17 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   mock,
   test,
 } from 'bun:test'
+import {
+  analyticsMock,
+  pushAnalyticsLogEvent,
+} from '../../../tests/mocks/analytics.js'
 import {
   createSettingsMock,
   restoreSettingsMockWith,
@@ -26,6 +31,7 @@ import * as realAnalytics from 'src/services/analytics/index.js'
 const settingsSnap = snapshotModuleExports(realSettings)
 const providersSnap = snapshotModuleExports(realProviders)
 const authSnap = snapshotModuleExports(realAuth)
+const residualGatesSnap = snapshotModuleExports(realResidualFinalEnvGates)
 const bundledModeSnap = snapshotModuleExports(realBundledMode)
 // Snapshot BEFORE mock.module — live namespace after mock re-points into the mock.
 const growthbookSnap = snapshotModuleExports(realGrowthbook)
@@ -35,32 +41,10 @@ const analyticsEvents: Array<{
   name: string
   meta: Record<string, unknown>
 }> = []
-const analyticsMock = () => ({
-  ...analyticsSnap,
-  logEvent(
-    name: string,
-    metadata: Record<string, boolean | number | undefined>,
-  ) {
-    analyticsEvents.push({
-      name,
-      meta: metadata as Record<string, unknown>,
-    })
-  },
-  async logEventAsync(
-    name: string,
-    metadata: Record<string, boolean | number | undefined>,
-  ) {
-    analyticsEvents.push({
-      name,
-      meta: metadata as Record<string, unknown>,
-    })
-  },
-})
+let popAnalyticsLogEvent: (() => void) | undefined
 
-// Capture logEvent via mock.module (scrollTelemetry pattern) so dU still
-// records when a sibling suite stubbed analytics/index to a no-op logEvent.
-// Spread the snapshot so attachAnalyticsSink / _resetForTesting stay present
-// for co-running promptCacheBreakDetection.238 tests.
+// Capture logEvent via the shared factory so dU still records when a sibling
+// suite stubbed analytics/index, without wiping attachAnalyticsSink.
 mock.module('../../services/analytics/index.ts', analyticsMock)
 mock.module('../../services/analytics/index.js', analyticsMock)
 mock.module('src/services/analytics/index.ts', analyticsMock)
@@ -136,7 +120,7 @@ mock.module('src/utils/residualMoreEnvGates.js', () => ({
 // Process-global mock.module: must preserve full residualFinalEnvGates surface
 // (isUseBedrockEnvEnabled etc.) or getAPIProvider / co-suites collapse to firstParty.
 mock.module('src/utils/residualFinalEnvGates.js', () => ({
-  ...realResidualFinalEnvGates,
+  ...residualGatesSnap,
   isFastModeDisabled: () => false,
 }))
 
@@ -145,7 +129,7 @@ afterAll(() => {
   mock.module('src/utils/auth.js', () => ({ ...authSnap }))
   mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
   mock.module('src/utils/residualFinalEnvGates.js', () => ({
-    ...realResidualFinalEnvGates,
+    ...residualGatesSnap,
   }))
   mock.module('src/utils/privacyLevel.js', () => ({ ...privacySnap }))
   mock.module('src/utils/residualMoreEnvGates.js', () => ({
@@ -155,6 +139,7 @@ afterAll(() => {
     ...growthbookSnap,
   }))
   mock.module('src/utils/bundledMode.js', () => ({ ...bundledModeSnap }))
+  popAnalyticsLogEvent?.()
   const restoreAnalytics = () => ({ ...analyticsSnap })
   mock.module('../../services/analytics/index.ts', restoreAnalytics)
   mock.module('../../services/analytics/index.js', restoreAnalytics)
@@ -168,6 +153,15 @@ import {
   resolveFastModeAfterModelSwitch,
   applyFastModeOnModelSwitch,
 } from '../fastMode.js'
+
+beforeAll(() => {
+  popAnalyticsLogEvent = pushAnalyticsLogEvent((name, metadata) => {
+    analyticsEvents.push({
+      name,
+      meta: (metadata ?? {}) as Record<string, unknown>,
+    })
+  })
+})
 
 beforeEach(() => {
   mock.module('../../services/analytics/index.ts', analyticsMock)

@@ -28,7 +28,8 @@ import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
 import { clearAllCaches } from './cacheUtils.js'
-import { getPluginCommands } from './loadPluginCommands.js'
+import { clearInstalledPluginsCache } from './installedPluginsManager.js'
+import { getPluginCommands, getPluginSkills } from './loadPluginCommands.js'
 import { loadPluginHooks } from './loadPluginHooks.js'
 import { loadPluginLspServers } from './lspPluginIntegration.js'
 import { loadPluginMcpServers } from './mcpPluginIntegration.js'
@@ -41,6 +42,8 @@ export type RefreshActivePluginsResult = {
   enabled_count: number
   disabled_count: number
   command_count: number
+  /** densable 2.1.246 — `J()` skills loader; `/reload-plugins` sums with command_count. */
+  skill_count: number
   agent_count: number
   hook_count: number
   mcp_count: number
@@ -73,12 +76,16 @@ export type RefreshActivePluginsResult = {
  */
 export async function refreshActivePlugins(
   setAppState: SetAppState,
+  opts: { applyStagedInstalls?: boolean } = {},
 ): Promise<RefreshActivePluginsResult> {
+  const applyStagedInstalls = opts.applyStagedInstalls ?? true
   logForDebugging('refreshActivePlugins: clearing all plugin caches')
+  // densable Tn: `if (l) X(); U(t,a); if (l) re()`.
+  // X = E0a clearInstalledPluginsCache; U = K_t clearAllCaches;
+  // re = v6a clearPluginCacheExclusions. Not staged-copy.
+  if (applyStagedInstalls) clearInstalledPluginsCache()
   clearAllCaches()
-  // Orphan exclusions are session-frozen by default, but /reload-plugins is
-  // an explicit "disk changed, re-read it" signal — recompute them too.
-  clearPluginCacheExclusions()
+  if (applyStagedInstalls) clearPluginCacheExclusions()
 
   // Sequence the full load before cache-only consumers. Before #23693 all
   // three shared loadAllPlugins()'s memoize promise so Promise.all was a
@@ -88,8 +95,9 @@ export async function refreshActivePlugins(
   // the plugin, returning plugin-cache-miss. loadAllPlugins warms the
   // cache-only memoize on completion, so the awaits below are ~free.
   const pluginResult = await loadAllPlugins()
-  const [pluginCommands, agentDefinitions] = await Promise.all([
+  const [pluginCommands, pluginSkills, agentDefinitions] = await Promise.all([
     getPluginCommands(),
+    getPluginSkills(),
     getAgentDefinitionsWithOverrides(getOriginalCwd()),
   ])
 
@@ -183,13 +191,14 @@ export async function refreshActivePlugins(
   }, 0)
 
   logForDebugging(
-    `refreshActivePlugins: ${enabled.length} enabled, ${pluginCommands.length} commands, ${agentDefinitions.allAgents.length} agents, ${hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
+    `refreshActivePlugins: ${enabled.length} enabled, ${pluginCommands.length} commands, ${pluginSkills.length} skills, ${agentDefinitions.allAgents.length} agents, ${hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
   )
 
   return {
     enabled_count: enabled.length,
     disabled_count: disabled.length,
     command_count: pluginCommands.length,
+    skill_count: pluginSkills.length,
     agent_count: agentDefinitions.allAgents.length,
     hook_count,
     mcp_count,

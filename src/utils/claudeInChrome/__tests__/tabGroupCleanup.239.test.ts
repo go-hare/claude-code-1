@@ -1,9 +1,10 @@
 /**
  * densable 2.1.239 #54 — `jrl` / `ENS` / `SNS` / `iDn` / `/clear` onlyIfEmpty.
  */
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { growthbookMock } from '../../../../tests/mocks/growthbook.js'
 import { resetChromeInstallSessionState } from '../sessionState.js'
 import {
   CHROME_TAB_GROUP_CLOSE_CAP,
@@ -14,6 +15,15 @@ import {
   parseTabsContextResult,
   shouldForceCloseChromeTabGroupOnClear,
 } from '../tabGroupCleanup.js'
+
+beforeEach(() => {
+  // Re-assert GrowthBook mock so incomplete last-write-wins factories cannot
+  // force tengu_chrome_tab_group_close → false (closeSessionTabGroup → disabled).
+  mock.module('src/services/analytics/growthbook.js', growthbookMock)
+  mock.module('src/services/analytics/growthbook.ts', growthbookMock)
+  delete process.env.CLAUDE_CODE_REMOTE_SESSION_ID
+  resetChromeInstallSessionState()
+})
 
 afterEach(() => {
   delete process.env.CLAUDE_CODE_REMOTE_SESSION_ID

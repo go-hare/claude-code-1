@@ -20,43 +20,40 @@ import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+import { authMock } from '../../../../tests/mocks/auth.js'
+import {
+  oauthClientMock,
+  oauthConfigMock,
+  teleportApiMock,
+} from '../../../../tests/mocks/oauthSurface.js'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
-// ── Analytics mock ──────────────────────────────────────────────────────────
-const realAnalytics = await import('src/services/analytics/index.js')
-const logEventMock = mock(() => {})
-mock.module('src/services/analytics/index.js', () => ({
-  ...realAnalytics,
-  logEvent: logEventMock,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // ── Auth / OAuth mocks ──────────────────────────────────────────────────────
-const realAuth = await import('src/utils/auth.js')
 mock.module('src/utils/auth.js', () => ({
-  ...realAuth,
+  ...authMock(),
   getClaudeAIOAuthTokens: () => ({ accessToken: 'test-token-ms' }),
 }))
-mock.module('src/services/oauth/client.js', () => ({
-  getOrganizationUUID: async () => 'org-uuid-ms',
-}))
-mock.module('src/constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-}))
-// Spread real teleport/api so any export not explicitly stubbed (like
-// prepareApiRequest, axiosGetWithRetry, type guards, schemas)
-// remains available to transitive importers.
-const realTeleportApi = await import('src/utils/teleport/api.js')
-mock.module('src/utils/teleport/api.js', () => ({
-  ...realTeleportApi,
-  getOAuthHeaders: (token: string) => ({ Authorization: `Bearer ${token}` }),
-  prepareApiRequest: async () => ({
-    apiKey: 'test-workspace-key',
+mock.module('src/services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => 'org-uuid-ms',
   }),
-  prepareWorkspaceApiRequest: async () => ({
-    apiKey: 'test-workspace-key',
+)
+mock.module('src/constants/oauth.js', oauthConfigMock)
+mock.module('src/utils/teleport/api.js', () =>
+  teleportApiMock({
+    getOAuthHeaders: (token: string) => ({ Authorization: `Bearer ${token}` }),
+    prepareApiRequest: async () => ({
+      apiKey: 'test-workspace-key',
+    }),
+    prepareWorkspaceApiRequest: async () => ({
+      apiKey: 'test-workspace-key',
+    }),
   }),
-}))
+)
 mock.module('src/services/auth/hostGuard.ts', () => ({
   assertSubscriptionBaseUrl: () => {},
   assertWorkspaceHost: () => {},
@@ -115,7 +112,6 @@ beforeEach(() => {
   axiosPostMock.mockClear()
   axiosPatchMock.mockClear()
   axiosDeleteMock.mockClear()
-  logEventMock.mockClear()
   memoryStoresViewMock.mockClear()
 })
 

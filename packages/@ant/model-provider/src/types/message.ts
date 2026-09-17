@@ -53,6 +53,27 @@ export type Message = {
   isCompactSummary?: boolean
   toolUseResult?: unknown
   isVisibleInTranscriptOnly?: boolean
+  /** densable teo/Ar — API-error assistant carrier. */
+  isApiErrorMessage?: boolean
+  /**
+   * densable leftover #55 GJn — producer @217050118
+   * `truncatedAfterOutput: yl&&!Xr`.
+   */
+  truncatedAfterOutput?: boolean
+  /**
+   * densable leftover #55 GJn — official dt({turnCompanion:!0}).
+   * Recovery nudge rides the same turn; not a new human prompt.
+   */
+  turnCompanion?: boolean
+  /**
+   * densable leftover #55 — official dt({replacesSpan}) / Ze walker
+   * @209365248. A span-replacing user message stops pairing lookup.
+   */
+  replacesSpan?: boolean
+  /** densable leftover #55 ae @209364706. */
+  sourceToolUseID?: string
+  sourceToolAssistantUUID?: UUID
+  apiError?: string
   /** densable Ace provenance — peer/channel/observer/goal/… */
   origin?: MessageOrigin
   attachment?: {
@@ -73,9 +94,20 @@ export type Message = {
   [key: string]: unknown
 }
 
+/** densable qXe `batchToolUses` — parent Batch* tool_use after decompose. */
+export type BatchToolUseRef = {
+  id: string
+  name: string
+}
+
 export type AssistantMessage = Message & {
   type: 'assistant'
   message: NonNullable<Message['message']>
+  /**
+   * densable qXe / eHr. Parent Batch* `{id, name}` when content was
+   * decomposed into `${id}_n` v1 synthetics. Persist as `batch_tool_uses`.
+   */
+  batchToolUses?: BatchToolUseRef[]
 }
 export type AttachmentMessage<T = { type: string; [key: string]: unknown }> =
   Message & { type: 'attachment'; attachment: T }

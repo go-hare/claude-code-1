@@ -21,7 +21,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { hasEmbeddedSearchTools } from '../utils/embeddedTools.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { formatFileSize } from '../utils/format.js'
-import { getProjectDir } from '../utils/sessionStorage.js'
+import { getProjectDir } from '../utils/sessionPaths.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import {
   MEMORY_FRONTMATTER_EXAMPLE,

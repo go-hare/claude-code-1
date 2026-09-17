@@ -12,13 +12,12 @@ import type { LocalJSXCommandCall } from '../../../types/command.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 // ── Mock module-level side effects BEFORE any imports ──
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 // ── Teleport utilities (spread real + restore — incomplete strip poisons co-suites) ──
 const validateGitStateMock = mock(() => Promise.resolve())

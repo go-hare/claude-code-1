@@ -8,33 +8,39 @@
  */
 
 import { afterAll, mock, describe, test, expect } from 'bun:test'
+import * as realConfig from 'src/utils/config.js'
+import * as realClaudeAiLimits from 'src/services/claudeAiLimits.js'
+import * as realCostTracker from 'src/cost-tracker.js'
+import { authMock } from '../../../../tests/mocks/auth.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
+import { debugMock } from '../../../../tests/mocks/debug.js'
+import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const configSnap = snapshotModuleExports(realConfig)
+const claudeAiLimitsSnap = snapshotModuleExports(realClaudeAiLimits)
+const costTrackerSnap = snapshotModuleExports(realCostTracker)
 
 // Must mock before importing anything that pulls in bootstrap/state
-import { logMock } from '../../../../tests/mocks/log.js'
 mock.module('src/utils/log.ts', logMock)
-
-import { debugMock } from '../../../../tests/mocks/debug.js'
 mock.module('src/utils/debug.ts', debugMock)
-
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 
 mock.module('src/utils/auth.ts', () => ({
+  ...authMock(),
   isClaudeAISubscriber: () => false,
   getOAuthAccount: () => null,
 }))
 
 mock.module('src/services/claudeAiLimits.ts', () => ({
+  ...claudeAiLimitsSnap,
   currentLimits: { isUsingOverage: false },
 }))
 
 mock.module('src/cost-tracker.ts', () => ({
+  ...costTrackerSnap,
   formatTotalCost: () => 'Total cost: $0.0012',
 }))
-
-// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
-import * as realConfig from 'src/utils/config.js'
-import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
-const configSnap = snapshotModuleExports(realConfig)
 function usageConfigMock() {
   return {
     ...configSnap,

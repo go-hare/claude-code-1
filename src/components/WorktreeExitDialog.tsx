@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import type { CommandResultDisplay } from 'src/commands.js';
-import { logEvent } from 'src/services/analytics/index.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { Box, Text, Dialog } from '@anthropic/ink';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
@@ -55,12 +58,21 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
         if (changeLines.length === 0 && count === 0) {
           setStatus('removing');
           void cleanupWorktree()
-            .then(() => {
+            .then(removed => {
               process.chdir(worktreeSession.originalCwd);
               setCwd(worktreeSession.originalCwd);
               recordWorktreeExit();
               getPlansDirectory.cache.clear?.();
-              setResultMessage('Worktree removed (no changes)');
+              if (removed) {
+                logEvent('tengu_worktree_removed', {
+                  source: 'exit_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  commits: 0,
+                  changed_files: 0,
+                });
+                setResultMessage('Worktree removed (no changes)');
+              } else {
+                setResultMessage(`Worktree could not be removed — kept at ${worktreeSession.worktreePath}`);
+              }
             })
             .catch(error => {
               logForDebugging(`Failed to clean up worktree: ${error}`, {
@@ -142,19 +154,25 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
       setStatus('done');
     } else if (value === 'remove' || value === 'remove-with-tmux') {
       setStatus('removing');
-      logEvent('tengu_worktree_removed', {
-        commits: commitCount,
-        changed_files: changes.length,
-      });
       if (worktreeSession.tmuxSessionName) {
         await killTmuxSession(worktreeSession.tmuxSessionName);
       }
       try {
-        await cleanupWorktree();
+        const removed = await cleanupWorktree();
         process.chdir(worktreeSession.originalCwd);
         setCwd(worktreeSession.originalCwd);
         recordWorktreeExit();
         getPlansDirectory.cache.clear?.();
+        if (!removed) {
+          setResultMessage(`Worktree could not be removed — kept at ${worktreeSession.worktreePath}`);
+          setStatus('done');
+          return;
+        }
+        logEvent('tengu_worktree_removed', {
+          source: 'exit_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          commits: commitCount,
+          changed_files: changes.length,
+        });
       } catch (error) {
         logForDebugging(`Failed to clean up worktree: ${error}`, {
           level: 'error',

@@ -68,6 +68,25 @@ describe('densable 2.1.243 #58 occupancy notice', () => {
       'from the resumed transcript is still served by local pid',
     )
     expect(init).toContain('Explicit enable is taking over bridge session')
+    expect(init).toContain('getCurrentSessionBridge')
+    expect(init).toContain('restoredPointerOccupancy')
+    expect(init).toContain('localHolderGuard &&')
+    expect(init).toContain('restoredPointerOccupancy &&')
+    expect(init).toContain('reattachSessionId &&')
+    expect(init).toContain('isBridgeResumeRespectsLocalOwner()')
+    expect(init).toContain('tengu_bridge_resume_respects_local_owner')
+    expect(init).toContain('restoredPointerTakeover = true')
+    expect(init).toContain(
+      "logEvent('tengu_bridge_restored_pointer_takeover', {})",
+    )
+    const takeoverIdx = init.indexOf('restoredPointerTakeover = true')
+    const emitIdx = init.indexOf(
+      "logEvent('tengu_bridge_restored_pointer_takeover', {})",
+    )
+    const yrIdx = init.indexOf('initEnvLessBridgeCore({')
+    expect(takeoverIdx).toBeGreaterThan(-1)
+    expect(emitIdx).toBeGreaterThan(takeoverIdx)
+    expect(yrIdx).toBeGreaterThan(emitIdx)
     const hook = readFileSync(
       join(import.meta.dir, '../../hooks/useReplBridge.tsx'),
       'utf8',
@@ -75,5 +94,14 @@ describe('densable 2.1.243 #58 occupancy notice', () => {
     expect(hook).toContain('Init declined: session held by local pid')
     expect(hook).toContain('leaving Remote Control off')
     expect(hook).toContain('formatRemoteControlOccupancyNotice')
+    // Occupancy qn only fires when reattachSessionId is empty and init fills
+    // it from Bkn, so what this locks is that the arg is fed from the ref.
+    // leftover #49 puts `leftoverPn ? undefined :` (K first uuid drift) in
+    // front of it; assert the wiring, not the conditional's shape.
+    const reattachArg = hook
+      .split('\n')
+      .find(line => line.includes('reattachSessionId:'))
+    expect(reattachArg).toBeDefined()
+    expect(reattachArg).toContain('lastBridgeSessionIdRef.current')
   })
 })

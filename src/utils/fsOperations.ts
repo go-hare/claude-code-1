@@ -13,7 +13,33 @@ import {
 import { homedir } from 'os'
 import * as nodePath from 'path'
 import { getErrnoCode } from './errors.js'
+import { getPlatform } from './platform.js'
 import { slowLogging } from './slowOperations.js'
+
+/**
+ * densable APn / realpathSync.native — expand Windows 8.3 short names so
+ * permission checks and suspicious-pattern gates see consistent long paths.
+ * Plain realpathSync on win32 often returns ADMINI~1 while other APIs return
+ * Administrator; native aligns them for symmetric working-dir containment.
+ */
+export function realpathSyncCanonical(path: string): string {
+  const platform = getPlatform()
+  if (platform === 'windows' || platform === 'wsl') {
+    const native = (
+      fs.realpathSync as typeof fs.realpathSync & {
+        native?: (p: string) => string
+      }
+    ).native
+    if (native) {
+      try {
+        return native(path).normalize('NFC')
+      } catch {
+        // fall through to plain realpathSync
+      }
+    }
+  }
+  return fs.realpathSync(path).normalize('NFC')
+}
 
 /**
  * Simplified filesystem operations interface based on Node.js fs module.
@@ -565,7 +591,7 @@ export const NodeFsOperations: FsOperations = {
 
   realpathSync(path: string) {
     using _ = slowLogging`fs.realpathSync(${path})`
-    return fs.realpathSync(path).normalize('NFC')
+    return realpathSyncCanonical(path)
   },
 
   mkdirSync(dirPath, options) {

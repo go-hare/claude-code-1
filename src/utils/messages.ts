@@ -78,6 +78,7 @@ import {
   demoteOrphanApiSystemMessages,
   extractPureTextFromUserMessages,
   isApiSystemMessage,
+  shouldSkipSystemReminderWrap,
   shouldUseMidConversationSystem,
 } from './midConversationSystem.js'
 import { isAdvisorBlock } from './advisor.js'
@@ -152,6 +153,8 @@ import {
 import { DiagnosticTrackingService } from '../services/diagnosticTracking.js'
 import {
   findToolByName,
+  isBatchTool,
+  type BatchTool,
   type Tool,
   type Tools,
   toolMatchesName,
@@ -175,6 +178,8 @@ import { formatFileSize } from './format.js'
 import { validateImagesForAPI } from './imageValidation.js'
 import { safeParseJSON } from './json.js'
 import { logError, logMCPDebug } from './log.js'
+import { coerceNestedStringifiedToolInput } from './toolInputNestedStringCoerce.js'
+import { repairDoubleEscapedUnicode } from './toolInputUnicodeRepair.js'
 import { normalizeLegacyToolName } from './permissions/permissionRuleParser.js'
 import {
   getPlanModeV2AgentCount,
@@ -193,7 +198,6 @@ import {
   updateStreamingToolJsonPreview,
 } from './streamingToolJsonPreview.js'
 import { isTodoV2Enabled } from './tasks.js'
-import { repairDoubleEscapedUnicode } from './toolInputUnicodeRepair.js'
 
 // Lazy import to avoid circular dependency (teammateMailbox -> teammate -> ... -> messages)
 function getTeammateMailbox(): typeof import('./teammateMailbox.js') {
@@ -259,6 +263,11 @@ export function deriveShortMessageId(uuid: string): string {
 export const INTERRUPT_MESSAGE = '[Request interrupted by user]'
 export const INTERRUPT_MESSAGE_FOR_TOOL_USE =
   '[Request interrupted by user for tool use]'
+/** densable `Q0` — aTe prefix for plugin-cancelled tool_use. */
+export const INTERRUPT_MESSAGE_FOR_PLUGIN_TOOL_USE =
+  '[Request interrupted by a plugin for tool use]'
+/** densable `foe` — StreamingToolExecutor user_interrupted toolUseResult. */
+export const USER_REJECTED_TOOL_USE = 'User rejected tool use'
 export const CANCEL_MESSAGE =
   "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed."
 export const REJECT_MESSAGE =
@@ -271,6 +280,51 @@ export const SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX =
   'Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). The user said:\n'
 export const PLAN_REJECTION_PREFIX =
   'The agent proposed a plan that was rejected by the user. The user chose to stay in plan mode rather than proceed with implementation.\n\nRejected plan:\n'
+
+/** densable `aTe` — Nvo interrupt content prefixes. */
+const INTERRUPT_TOOL_RESULT_PREFIXES = [
+  INTERRUPT_MESSAGE,
+  INTERRUPT_MESSAGE_FOR_TOOL_USE,
+  INTERRUPT_MESSAGE_FOR_PLUGIN_TOOL_USE,
+  CANCEL_MESSAGE,
+] as const
+
+/**
+ * densable `Nvo` / `qn.interruptedCall`.
+ * Collapse uses this so "Ran 1 shell command" is not the only signal when
+ * a command in the group was cut (2.1.246 #12).
+ */
+export function interruptedCall(
+  message:
+    | {
+        type?: string
+        message?: { content?: unknown }
+        toolUseResult?: unknown
+      }
+    | undefined
+    | null,
+): boolean {
+  if (message?.type !== 'user') return false
+  const content = message.message?.content
+  const first = Array.isArray(content) ? content.at(0) : undefined
+  if (
+    first === undefined ||
+    typeof first !== 'object' ||
+    first === null ||
+    !('type' in first) ||
+    first.type !== 'tool_result' ||
+    !('is_error' in first) ||
+    first.is_error !== true
+  ) {
+    return false
+  }
+  if (message.toolUseResult === USER_REJECTED_TOOL_USE) return true
+  const body = 'content' in first ? first.content : undefined
+  return (
+    typeof body === 'string' &&
+    INTERRUPT_TOOL_RESULT_PREFIXES.some(prefix => body.startsWith(prefix))
+  )
+}
 
 /**
  * Shared guidance for permission denials, instructing the model on appropriate workarounds.
@@ -513,6 +567,7 @@ function baseCreateAssistantMessage({
   apiError,
   error,
   errorDetails,
+  truncatedAfterOutput,
   isVirtual,
   usage = {
     input_tokens: 0,
@@ -535,6 +590,7 @@ function baseCreateAssistantMessage({
   apiError?: AssistantMessage['apiError']
   error?: SDKAssistantMessageError
   errorDetails?: string
+  truncatedAfterOutput?: boolean
   isVirtual?: true
   usage?: Usage
 }): AssistantMessage {
@@ -558,6 +614,7 @@ function baseCreateAssistantMessage({
     apiError,
     error,
     errorDetails,
+    truncatedAfterOutput,
     isApiErrorMessage,
     isVirtual,
   }
@@ -592,11 +649,13 @@ export function createAssistantAPIErrorMessage({
   apiError,
   error,
   errorDetails,
+  truncatedAfterOutput,
 }: {
   content: string
   apiError?: AssistantMessage['apiError']
   error?: SDKAssistantMessageError
   errorDetails?: string
+  truncatedAfterOutput?: boolean
 }): AssistantMessage {
   return baseCreateAssistantMessage({
     content: [
@@ -609,6 +668,7 @@ export function createAssistantAPIErrorMessage({
     apiError,
     error,
     errorDetails,
+    truncatedAfterOutput,
   })
 }
 
@@ -629,6 +689,9 @@ export function createUserMessage({
   origin,
   interruptedMessageId,
   interruptedByShutdown,
+  turnCompanion,
+  replacesSpan,
+  sourceToolUseID,
 }: {
   content: string | ContentBlockParam[]
   isMeta?: true
@@ -659,6 +722,12 @@ export function createUserMessage({
   interruptedMessageId?: string
   /** densable Ede — shutdown abort path */
   interruptedByShutdown?: boolean
+  /** densable leftover #55 GJn — official dt({turnCompanion:!0}) */
+  turnCompanion?: true
+  /** densable leftover #55 — official dt({replacesSpan}) @217912782. */
+  replacesSpan?: true
+  /** densable leftover #55 ae @209364706. */
+  sourceToolUseID?: string
 }): UserMessage {
   const m: UserMessage = {
     type: 'user',
@@ -681,8 +750,143 @@ export function createUserMessage({
     origin,
     interruptedMessageId,
     interruptedByShutdown,
+    turnCompanion,
+    replacesSpan,
+    sourceToolUseID,
   }
   return m
+}
+
+/**
+ * densable leftover #55 `ae` @209364706.
+ * Companion / tool-sourced user message — not a new human prompt.
+ */
+export function isCompanionOrToolUserMessage(message: {
+  toolUseResult?: unknown
+  sourceToolAssistantUUID?: unknown
+  sourceToolUseID?: unknown
+  turnCompanion?: unknown
+}): boolean {
+  return (
+    message.toolUseResult !== undefined ||
+    message.sourceToolAssistantUUID !== undefined ||
+    message.sourceToolUseID !== undefined ||
+    message.turnCompanion === true
+  )
+}
+
+function extractExclusiveToolResultIds(message: {
+  message?: { content?: unknown }
+}): string[] | null {
+  const t = message.message?.content
+  if (!Array.isArray(t) || t.length === 0) return null
+  const n: string[] = []
+  for (const r of t) {
+    if (
+      typeof r !== 'object' ||
+      r === null ||
+      (r as { type?: unknown }).type !== 'tool_result'
+    ) {
+      return null
+    }
+    n.push((r as { tool_use_id: string }).tool_use_id)
+  }
+  return n
+}
+
+function collectToolResultIdsFromContent(message: {
+  message?: { content?: unknown }
+}): string[] {
+  const t = message.message?.content
+  return Array.isArray(t)
+    ? t.flatMap(n =>
+        typeof n === 'object' &&
+        n !== null &&
+        (n as { type?: unknown }).type === 'tool_result'
+          ? [(n as { tool_use_id: string }).tool_use_id]
+          : [],
+      )
+    : []
+}
+
+function isSameAssistantMessageById(
+  e: { message?: { id?: unknown } },
+  t: { message?: { id?: unknown } },
+): boolean {
+  return (
+    e === t || (e.message?.id !== undefined && e.message.id === t.message?.id)
+  )
+}
+
+/**
+ * densable leftover #55 `Ze` @209364748.
+ * True when user[t] is only tool_results paired to the preceding assistant
+ * tool_uses. `replacesSpan===true` stops the walk.
+ */
+export function isUserMessageWithPairedToolResultsOnly(
+  messages: ReadonlyArray<{
+    type?: string
+    origin?: unknown
+    replacesSpan?: unknown
+    message?: { content?: unknown; id?: unknown }
+    toolUseResult?: unknown
+    sourceToolAssistantUUID?: unknown
+    sourceToolUseID?: unknown
+    turnCompanion?: unknown
+  }>,
+  t: number,
+): boolean {
+  const n = messages[t]
+  if (
+    n?.type !== 'user' ||
+    !(n.origin === undefined || isUnsetOrHumanMessageOrigin(n.origin))
+  ) {
+    return false
+  }
+  const r = extractExclusiveToolResultIds(n)
+  if (r === null) return false
+  const i = new Set(r)
+  let p:
+    | {
+        type?: string
+        message?: { content?: unknown; id?: unknown }
+      }
+    | undefined
+  for (let u = t - 1; u >= 0 && i.size > 0; u--) {
+    const s = messages[u]
+    if (s?.type === 'assistant') {
+      if (p !== undefined && !isSameAssistantMessageById(s, p)) break
+      p = s
+      const d = s.message?.content
+      for (const f of Array.isArray(d) ? d : []) {
+        if (
+          typeof f === 'object' &&
+          f !== null &&
+          (f as { type?: unknown }).type === 'tool_use'
+        ) {
+          i.delete((f as { id: string }).id)
+        }
+      }
+    } else if (s?.type === 'user') {
+      if (s.replacesSpan === true) break
+      const d = isCompanionOrToolUserMessage(s)
+        ? collectToolResultIdsFromContent(s)
+        : extractExclusiveToolResultIds(s)
+      if (d === null) break
+      if (d.some(f => i.has(f))) return false
+    }
+  }
+  return i.size === 0
+}
+
+/** densable leftover #55 `S` — origin unset or kind human. */
+function isUnsetOrHumanMessageOrigin(origin: unknown): boolean {
+  return (
+    origin === undefined ||
+    (typeof origin === 'object' &&
+      origin !== null &&
+      (origin as { kind?: unknown }).kind === 'human')
+  )
 }
 
 export function prepareUserContent({
@@ -950,6 +1154,7 @@ export function normalizeMessages(messages: Message[]): NormalizedMessage[] {
             uuid,
             error: message?.error,
             isApiErrorMessage: message.isApiErrorMessage,
+            truncatedAfterOutput: message.truncatedAfterOutput,
             advisorModel: message.advisorModel,
           } as NormalizedAssistantMessage
         })
@@ -1003,6 +1208,12 @@ export function normalizeMessages(messages: Message[]): NormalizedMessage[] {
               timestamp: uMsg.timestamp as string | undefined,
               imagePasteIds: imageId !== undefined ? [imageId] : undefined,
               origin: uMsg.origin as MessageOrigin | undefined,
+              turnCompanion: uMsg.turnCompanion === true ? true : undefined,
+              replacesSpan: uMsg.replacesSpan === true ? true : undefined,
+              sourceToolUseID:
+                typeof uMsg.sourceToolUseID === 'string'
+                  ? uMsg.sourceToolUseID
+                  : undefined,
             }),
             uuid: isNewChain ? deriveUUID(uMsg.uuid, index) : uMsg.uuid,
           } as NormalizedMessage
@@ -2307,9 +2518,11 @@ function ensureSystemReminderWrap(msg: UserMessage): UserMessage {
  *
  * Idempotent. Pure function of shape.
  */
+type NormalizedApiMessage = UserMessage | AssistantMessage | ApiSystemMessage
+
 function smooshSystemReminderSiblings(
-  messages: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
+  messages: NormalizedApiMessage[],
+): NormalizedApiMessage[] {
   return messages.map(msg => {
     if (msg.type !== 'user') return msg
     const content = msg.message.content
@@ -2357,8 +2570,8 @@ function smooshSystemReminderSiblings(
  * text left behind by a stripped image is re-merged.
  */
 function sanitizeErrorToolResultContent(
-  messages: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
+  messages: NormalizedApiMessage[],
+): NormalizedApiMessage[] {
   return messages.map(msg => {
     if (msg.type !== 'user') return msg
     const content = msg.message.content
@@ -2379,6 +2592,439 @@ function sanitizeErrorToolResultContent(
     if (!changed) return msg
     return { ...msg, message: { ...msg.message, content: newContent } }
   })
+}
+
+/** densable `Jzr` — batched synthetic tool_use / tool_result id suffix */
+const BATCH_ENTRY_ID_RE = /_(\d+)$/
+
+/** densable `lWt` */
+function batchEntryId(parentId: string, index: number): string {
+  return `${parentId}_${index}`
+}
+
+/** densable `Pwe` — parent id if `id` is `${parent}_${n}` */
+function batchEntryParentId(id: string): string | undefined {
+  const m = BATCH_ENTRY_ID_RE.exec(id)
+  return m ? id.slice(0, -m[0].length) : undefined
+}
+
+type BatchEntrySlot = {
+  input?: unknown
+  result?: ToolResultBlockParam
+  error?: string
+}
+
+/** densable `eDs` */
+function expandBatchEntrySlots(
+  tool: BatchTool | undefined,
+  input: unknown,
+  parentId: string,
+  results: Map<string, ToolResultBlockParam>,
+): BatchEntrySlot[] {
+  let entries: unknown[] | undefined
+  if (tool !== undefined) {
+    try {
+      const parsed = tool.inputSchema.safeParse(input)
+      if (parsed.success) {
+        entries = tool.perEntryHookInputs(parsed.data).entries
+      }
+    } catch {
+      // official eDs swallows parse / perEntryHookInputs throws
+    }
+  }
+  let size = entries?.length ?? 0
+  for (const key of results.keys()) {
+    const m = BATCH_ENTRY_ID_RE.exec(key)
+    if (m) size = Math.max(size, Number(m[1]) + 1)
+  }
+  return Array.from({ length: size }, (_, i) => {
+    const result = results.get(batchEntryId(parentId, i))
+    return result !== undefined
+      ? { input: entries?.[i], result }
+      : { input: entries?.[i], error: 'no result' }
+  })
+}
+
+type ToolResultPart = Exclude<
+  NonNullable<ToolResultBlockParam['content']>,
+  string
+>[number]
+
+/** densable `tDs` */
+function assembleBatchedToolResult(
+  tool: BatchTool | undefined,
+  parentId: string,
+  slots: BatchEntrySlot[],
+): ToolResultBlockParam {
+  const blocks: ToolResultPart[] = []
+  let textBuf = ''
+  let anyError = false
+  const appendText = (chunk: string): void => {
+    if (chunk.length > 0) {
+      textBuf = textBuf === '' ? chunk : `${textBuf}\n${chunk}`
+    }
+  }
+  const flushText = (): void => {
+    if (textBuf !== '') {
+      blocks.push({ type: 'text', text: textBuf })
+      textBuf = ''
+    }
+  }
+  for (const [i, slot] of slots.entries()) {
+    const failed = slot.result === undefined || slot.result.is_error === true
+    if (failed) anyError = true
+    appendText(`--- entry ${i + 1}${failed ? ' (error)' : ''} ---`)
+    if (slot.result !== undefined) {
+      const content = slot.result.content
+      if (typeof content === 'string') {
+        appendText(content)
+      } else if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part.type === 'text') appendText(part.text)
+          else {
+            flushText()
+            blocks.push(part)
+          }
+        }
+      }
+    } else {
+      appendText(`[entry ${i + 1} error: ${slot.error ?? 'no result'}]`)
+    }
+  }
+  if (slots.length === 1 && tool !== undefined) {
+    appendText(
+      `<system-reminder>Tip: ${tool.name} accepts multiple entries in one call (\`${tool.entryFieldName}: [{...}, {...}]\`). Batching related operations into a single call is faster than issuing them as separate or parallel calls. No action needed for this result.</system-reminder>`,
+    )
+  }
+  flushText()
+  return {
+    type: 'tool_result',
+    tool_use_id: parentId,
+    content:
+      blocks.length === 1 && blocks[0]?.type === 'text'
+        ? blocks[0].text
+        : blocks,
+    ...(anyError ? { is_error: true } : {}),
+  }
+}
+
+/**
+ * densable `tHr` — merge per-entry `tool_result` (`${parent}_n`) back onto
+ * the parent `tool_use` id. Fast-path no-op unless a batch tool is present
+ * or a result id has the `_n` suffix.
+ */
+function mergeBatchedToolResults(
+  messages: NormalizedApiMessage[],
+  tools: Tools,
+): NormalizedApiMessage[] {
+  let needed = false
+  for (const msg of messages) {
+    if (msg.type === 'assistant' && Array.isArray(msg.message.content)) {
+      for (const block of msg.message.content) {
+        if (typeof block !== 'string' && block.type === 'tool_use') {
+          const tool = findToolByName(tools, block.name)
+          if (tool !== undefined && isBatchTool(tool)) needed = true
+        }
+      }
+    }
+    if (msg.type === 'user' && !needed) {
+      if (
+        Array.isArray(msg.message.content) &&
+        msg.message.content.some(
+          b =>
+            b.type === 'tool_result' &&
+            batchEntryParentId(b.tool_use_id) !== undefined,
+        )
+      ) {
+        needed = true
+      }
+    }
+  }
+  if (!needed) return messages
+
+  const toolUses = new Map<string, ToolUseBlockParam>()
+  for (const msg of messages) {
+    if (msg.type !== 'assistant' || !Array.isArray(msg.message.content)) {
+      continue
+    }
+    for (const block of msg.message.content) {
+      if (typeof block !== 'string' && block.type === 'tool_use') {
+        toolUses.set(block.id, block)
+      }
+    }
+  }
+
+  const resultsByParent = new Map<string, Map<string, ToolResultBlockParam>>()
+  for (const msg of messages) {
+    if (msg.type !== 'user' || !Array.isArray(msg.message.content)) continue
+    for (const block of msg.message.content) {
+      if (block.type !== 'tool_result') continue
+      const parentId = batchEntryParentId(block.tool_use_id)
+      if (parentId === undefined || !toolUses.has(parentId)) continue
+      let byEntry = resultsByParent.get(parentId)
+      if (byEntry === undefined) {
+        byEntry = new Map()
+        resultsByParent.set(parentId, byEntry)
+      }
+      if (!byEntry.has(block.tool_use_id)) {
+        byEntry.set(block.tool_use_id, block)
+      }
+    }
+  }
+  if (resultsByParent.size === 0) return messages
+
+  const mergedParents = new Set<string>()
+  return messages.flatMap(msg => {
+    if (msg.type !== 'user' || !Array.isArray(msg.message.content)) {
+      return [msg]
+    }
+    let touched = false
+    const next: unknown[] = []
+    for (const block of msg.message.content) {
+      if (block.type !== 'tool_result') {
+        next.push(block)
+        continue
+      }
+      const parentId = batchEntryParentId(block.tool_use_id)
+      const entryMap =
+        parentId !== undefined ? resultsByParent.get(parentId) : undefined
+      if (parentId === undefined || entryMap === undefined) {
+        next.push(block)
+        continue
+      }
+      touched = true
+      if (mergedParents.has(parentId)) continue
+      mergedParents.add(parentId)
+      const toolUse = toolUses.get(parentId)
+      const found =
+        toolUse !== undefined ? findToolByName(tools, toolUse.name) : undefined
+      const batch =
+        found !== undefined && isBatchTool(found) ? found : undefined
+      next.push(
+        assembleBatchedToolResult(
+          batch,
+          parentId,
+          expandBatchEntrySlots(batch, toolUse?.input, parentId, entryMap),
+        ),
+      )
+    }
+    if (!touched) return [msg]
+    if (next.length === 0) return []
+    return [
+      {
+        ...msg,
+        message: {
+          ...msg.message,
+          content: next as unknown as UserMessage['message']['content'],
+        },
+      },
+    ]
+  })
+}
+
+type BatchToolUseBlock = {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+  caller?: unknown
+}
+
+function isBatchToolUseBlock(block: unknown): block is BatchToolUseBlock {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as { type?: unknown }).type === 'tool_use' &&
+    typeof (block as { id?: unknown }).id === 'string' &&
+    typeof (block as { name?: unknown }).name === 'string'
+  )
+}
+
+function logBatchToolsEvent(
+  toolName: string,
+  reason?:
+    | 'parse_failed'
+    | 'zero_entries'
+    | 'per_entry_threw'
+    | 'reassemble_threw',
+): void {
+  logEvent('batch_tools', {
+    ...(reason !== undefined && {
+      reason:
+        reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }),
+    tool_name: sanitizeToolNameForAnalytics(toolName),
+    isMcp: false,
+  })
+}
+
+/**
+ * densable `QOs` — expand one Batch* tool_use into per-entry v1 synthetics.
+ * Fail paths (`parse_failed` / `zero_entries` / `per_entry_threw`) emit one
+ * `${id}_0` still named the batch tool and `decomposed: false`.
+ */
+function decomposeBatchedToolUse(
+  block: BatchToolUseBlock,
+  tools: Tools,
+): { synthetics: BatchToolUseBlock[]; decomposed: boolean } | null {
+  const tool = findToolByName(tools, block.name)
+  if (tool === undefined || !isBatchTool(tool)) return null
+  const fail = (
+    reason: 'parse_failed' | 'zero_entries' | 'per_entry_threw',
+  ): BatchToolUseBlock[] => {
+    logBatchToolsEvent(tool.name, reason)
+    return [
+      {
+        type: 'tool_use',
+        id: batchEntryId(block.id, 0),
+        name: tool.name,
+        input: block.input,
+        ...(block.caller !== undefined && { caller: block.caller }),
+      },
+    ]
+  }
+  try {
+    const parsed = tool.inputSchema.safeParse(block.input)
+    if (!parsed.success) {
+      return { synthetics: fail('parse_failed'), decomposed: false }
+    }
+    const { v1Tool, entries } = tool.perEntryHookInputs(parsed.data)
+    if (entries.length === 0) {
+      return { synthetics: fail('zero_entries'), decomposed: false }
+    }
+    return {
+      decomposed: true,
+      synthetics: entries.map((entry, index) => ({
+        type: 'tool_use' as const,
+        id: batchEntryId(block.id, index),
+        name: v1Tool.name,
+        input: entry,
+        ...(block.caller !== undefined && { caller: block.caller }),
+      })),
+    }
+  } catch {
+    return { synthetics: fail('per_entry_threw'), decomposed: false }
+  }
+}
+
+/**
+ * densable `qXe` — walk content; replace Batch* tool_use with QOs synthetics.
+ * `batchToolUses` is only pushed when `decomposed` is true.
+ */
+export function decomposeBatchedToolUses<T>(
+  content: T[],
+  tools: Tools,
+): {
+  content: T[]
+  batchToolUses: NonNullable<AssistantMessage['batchToolUses']>
+} {
+  let next: T[] | undefined
+  const batchToolUses: NonNullable<AssistantMessage['batchToolUses']> = []
+  for (let i = 0; i < content.length; i++) {
+    const block = content[i]
+    if (!isBatchToolUseBlock(block)) {
+      next?.push(block as T)
+      continue
+    }
+    const result = decomposeBatchedToolUse(block, tools)
+    if (result === null) {
+      next?.push(block as T)
+      continue
+    }
+    next ??= content.slice(0, i)
+    next.push(...(result.synthetics as T[]))
+    if (result.decomposed) {
+      batchToolUses.push({ id: block.id, name: block.name })
+      logBatchToolsEvent(block.name)
+    }
+  }
+  return { content: next ?? content, batchToolUses }
+}
+
+/** densable `JOs.of(hn().host)` — one `reassemble_threw` per parent id. */
+const reassembleThrewLogged = new Set<string>()
+
+/**
+ * densable `eHr` — inverse of QOs. Group `${parent}_n` synthetics listed in
+ * `batchToolUses` and `tool.reassemble(inputs)` back to the parent tool_use.
+ */
+export function reassembleBatchedToolUses<T>(
+  content: T[],
+  batchToolUses: AssistantMessage['batchToolUses'],
+  tools: Tools,
+): T[] {
+  if (batchToolUses === undefined || batchToolUses.length === 0) {
+    return content
+  }
+  const parents = new Map<
+    string,
+    NonNullable<AssistantMessage['batchToolUses']>[number]
+  >()
+  for (const ref of batchToolUses) {
+    if (!parents.has(ref.id)) parents.set(ref.id, ref)
+  }
+  const reassembled = new Map<string, T>()
+  for (const ref of parents.values()) {
+    const tool = findToolByName(tools, ref.name)
+    if (tool === undefined || !isBatchTool(tool)) continue
+    const inputs: unknown[] = []
+    let first: BatchToolUseBlock | undefined
+    for (const block of content) {
+      if (
+        isBatchToolUseBlock(block) &&
+        batchEntryParentId(block.id) === ref.id
+      ) {
+        first ??= block
+        inputs.push(block.input)
+      }
+    }
+    try {
+      reassembled.set(ref.id, {
+        type: 'tool_use',
+        id: ref.id,
+        name: ref.name,
+        input: tool.reassemble(inputs),
+        ...(first?.caller !== undefined && { caller: first.caller }),
+      } as T)
+    } catch {
+      if (!reassembleThrewLogged.has(ref.id)) {
+        reassembleThrewLogged.add(ref.id)
+        logBatchToolsEvent(ref.name, 'reassemble_threw')
+      }
+    }
+  }
+  const emitted = new Set<string>()
+  const out: T[] = []
+  for (const block of content) {
+    if (isBatchToolUseBlock(block)) {
+      const parentId = batchEntryParentId(block.id)
+      if (parentId !== undefined && reassembled.has(parentId)) {
+        if (!emitted.has(parentId)) {
+          emitted.add(parentId)
+          out.push(reassembled.get(parentId) as T)
+        }
+        continue
+      }
+    }
+    out.push(block)
+  }
+  return out
+}
+
+/**
+ * densable `Qzr` — when any Batch* tool is present, drop tools whose name is
+ * an `underlyingV1ToolName` so the model sees the wrapper, not the v1 tool.
+ */
+export function hideUnderlyingV1Tools(tools: Tools): Tools {
+  let hidden: Set<string> | undefined
+  for (const tool of tools) {
+    if (isBatchTool(tool)) {
+      hidden ??= new Set()
+      hidden.add(tool.underlyingV1ToolName)
+    }
+  }
+  if (hidden === undefined) return tools
+  return tools.filter(tool => !hidden.has(tool.name))
 }
 
 /**
@@ -2406,8 +3052,8 @@ function sanitizeErrorToolResultContent(
  * finds nothing to move.
  */
 function relocateToolReferenceSiblings(
-  messages: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
+  messages: NormalizedApiMessage[],
+): NormalizedApiMessage[] {
   const result = [...messages]
 
   for (let i = 0; i < result.length; i++) {
@@ -2474,6 +3120,9 @@ export function normalizeMessagesForAPI(
   // densable o = r!==void 0 && J8t(r) — mid-conv system inject path
   const midConvEnabled =
     model !== undefined && shouldUseMidConversationSystem({ model })
+  // densable i = n!==void 0 && o && FXe(n)
+  const skipSystemReminderWrap =
+    model !== undefined && midConvEnabled && shouldSkipSystemReminderWrap(model)
   // Build set of available tool names for filtering unavailable tool references
   const availableToolNames = new Set(tools.map(t => t.name))
 
@@ -2558,25 +3207,30 @@ export function normalizeMessagesForAPI(
   // densable w — pure-text meta buffer flushed into api_system after user
   const metaBuffer: string[] = []
   let emittedApiSystem = false
+  // densable C — batching_reminder flush marks created/merged api_system ephemeral
+  let pendingBatchingReminderEphemeral = false
   const flushMetaBuffer = (): void => {
     if (metaBuffer.length === 0) return
     const text = metaBuffer.join('\n\n')
     metaBuffer.length = 0
+    const markEphemeral = pendingBatchingReminderEphemeral
+    pendingBatchingReminderEphemeral = false
     const lastMessage = last(result)
     if (isApiSystemMessage(lastMessage)) {
       lastMessage.message.content += `\n\n${text}`
+      if (markEphemeral) lastMessage.ephemeral = true
       return
     }
     if (lastMessage?.type === 'user') {
       // densable: last is user → B6n mid-conversation system block
       emittedApiSystem = true
-      result.push(createApiSystemMessage(text))
+      result.push(createApiSystemMessage(text, markEphemeral || undefined))
       return
     }
     // else → meta user (pre-conversation or after assistant)
     result.push(
       createUserMessage({
-        content: wrapInSystemReminder(text),
+        content: skipSystemReminderWrap ? text : wrapInSystemReminder(text),
         isMeta: true,
       }),
     )
@@ -2740,14 +3394,20 @@ export function normalizeMessagesForAPI(
           // like 'caller' from tool_use blocks, as these are only valid with the
           // tool search beta header
           const searchExtraToolsEnabled = isSearchExtraToolsEnabledOptimistic()
+          // densable B=eHr(j.message.content, j.batchToolUses, t) then walk B
+          const rawAssistantContent = Array.isArray(message.message.content)
+            ? message.message.content
+            : []
+          const reassembledContent = reassembleBatchedToolUses(
+            rawAssistantContent,
+            message.batchToolUses,
+            tools,
+          )
           const normalizedMessage: AssistantMessage = {
             ...message,
             message: {
               ...message.message,
-              content: (Array.isArray(message.message.content)
-                ? message.message.content
-                : []
-              ).map(block => {
+              content: reassembledContent.map(block => {
                 if (typeof block === 'string') return block
                 if (block.type === 'tool_use') {
                   const toolUseBlk = block as ToolUseBlock
@@ -2813,23 +3473,31 @@ export function normalizeMessagesForAPI(
           return
         }
         case 'attachment': {
+          // densable: D && !o → drop batching_reminder (resume safety)
+          const isBatchingReminder =
+            message.attachment.type === 'batching_reminder'
+          if (isBatchingReminder && !midConvEnabled) {
+            return
+          }
           const rawAttachmentMessage = normalizeAttachmentForAPI(
             message.attachment as Attachment,
           )
+          // densable: l6s(B) on raw B before chair O5s; E.push(i?El(G):G)
+          if (midConvEnabled) {
+            const pure = extractPureTextFromUserMessages(rawAttachmentMessage)
+            if (pure !== null) {
+              metaBuffer.push(
+                skipSystemReminderWrap ? wrapInSystemReminder(pure) : pure,
+              )
+              if (isBatchingReminder) pendingBatchingReminderEphemeral = true
+              return
+            }
+          }
           const attachmentMessage = checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
             'tengu_chair_sermon',
           )
             ? rawAttachmentMessage.map(ensureSystemReminderWrap)
             : rawAttachmentMessage
-
-          // densable o: pure-text attachments → meta buffer → api_system after user
-          if (midConvEnabled) {
-            const pure = extractPureTextFromUserMessages(attachmentMessage)
-            if (pure !== null) {
-              metaBuffer.push(pure)
-              return
-            }
-          }
 
           // If the last message is also a user message, merge them
           const lastMessage = last(result)
@@ -2850,32 +3518,8 @@ export function normalizeMessagesForAPI(
   // densable end-of-loop I() flush residual meta buffer
   flushMetaBuffer()
 
-  // densable: post-process user|assistant only; re-interleave api_system by
-  // original index so mid-conv system blocks keep position for Jdy cache.
-  type NormMsg = UserMessage | AssistantMessage | ApiSystemMessage
-  const apiSystemSlots: Array<{ index: number; msg: ApiSystemMessage }> = []
-  const baseOnly: (UserMessage | AssistantMessage)[] = []
-  for (let i = 0; i < result.length; i++) {
-    const m = result[i]!
-    if (isApiSystemMessage(m)) {
-      apiSystemSlots.push({ index: baseOnly.length, msg: m })
-    } else {
-      baseOnly.push(m)
-    }
-  }
-  const reinsertApiSystem = (
-    base: (UserMessage | AssistantMessage)[],
-  ): NormMsg[] => {
-    if (apiSystemSlots.length === 0) return base
-    const out: NormMsg[] = [...base]
-    // insert from end so earlier indices stay valid
-    for (let s = apiSystemSlots.length - 1; s >= 0; s--) {
-      const { index, msg } = apiSystemSlots[s]!
-      const at = Math.min(index, out.length)
-      out.splice(at, 0, msg)
-    }
-    return out
-  }
+  // Official fG/b6s/pG/S6s walk mixed v (api_system is transparent).
+  type NormMsg = NormalizedApiMessage
 
   // Relocate text siblings off tool_reference messages — prevents the
   // anomalous two-consecutive-human-turns pattern that teaches the model
@@ -2886,14 +3530,16 @@ export function normalizeMessagesForAPI(
   const relocated = checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
     'tengu_toolref_defer_j8m',
   )
-    ? relocateToolReferenceSiblings(baseOnly)
-    : baseOnly
+    ? relocateToolReferenceSiblings(result)
+    : result
 
   // Filter orphaned thinking-only assistant messages (likely introduced by
   // compaction slicing away intervening messages between a failed streaming
   // response and its retry). Without this, consecutive assistant messages with
   // mismatched thinking block signatures cause API 400 errors.
-  const withFilteredOrphans = filterOrphanedThinkingOnlyMessages(relocated)
+  const withFilteredOrphans = filterOrphanedThinkingOnlyMessages(
+    relocated as Message[],
+  ) as NormMsg[]
 
   // Order matters: strip trailing thinking first, THEN filter whitespace-only
   // messages. The reverse order has a bug: a message like [text("\n\n"), thinking("...")]
@@ -2905,37 +3551,47 @@ export function normalizeMessagesForAPI(
   // pass that cleans content, then validates in one shot.
   const withFilteredThinking =
     filterTrailingThinkingFromLastAssistant(withFilteredOrphans)
-  const withFilteredWhitespace =
-    filterWhitespaceOnlyAssistantMessages(withFilteredThinking)
-  const withNonEmpty = ensureNonEmptyAssistantContent(withFilteredWhitespace)
+  const withFilteredWhitespace = filterWhitespaceOnlyAssistantMessages(
+    withFilteredThinking as Message[],
+  ) as NormMsg[]
+  const W = ensureNonEmptyAssistantContent(withFilteredWhitespace)
 
-  // filterOrphanedThinkingOnlyMessages doesn't merge adjacent users (whitespace
-  // filter does, but only when IT fires). Merge here so smoosh can fold the
-  // SR-text sibling that hoistToolResults produces. The smoosh itself folds
-  // <system-reminder>-prefixed text siblings into the adjacent tool_result.
-  // Gated together: the merge exists solely to feed the smoosh; running it
-  // ungated changes VCR fixture hashes for @-mention scenarios (adjacent
-  // [prompt, attachment] users) without any benefit when the smoosh is off.
-  const smooshed = checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
-    'tengu_chair_sermon',
-  )
-    ? smooshSystemReminderSiblings(mergeAdjacentUserMessages(withNonEmpty))
-    : withNonEmpty
-
-  // Unconditional — catches transcripts persisted before smooshIntoToolResult
-  // learned to filter on is_error. Without this a resumed session with an
-  // image-in-error tool_result 400s forever.
-  const sanitizedBase = sanitizeErrorToolResultContent(smooshed)
-  let sanitized: NormMsg[] = reinsertApiSystem(sanitizedBase)
-
-  // densable w3y — demote orphan api_system when mid-conv path emitted any
-  if (midConvEnabled && emittedApiSystem) {
-    sanitized = demoteOrphanApiSystemMessages(sanitized, {
-      createUserMeta: content =>
-        createUserMessage({ content, isMeta: true }) as NormMsg,
-      wrapSystemReminder: wrapInSystemReminder,
-    })
+  // densable tail @217936570:
+  //   if (o) H = R ? W5s(W, i) : W
+  //   else if (chair_sermon) H = leo(peo(W))
+  //   else H = W
+  //   let te = $5s(H); return tHr(te, t)
+  // R = emittedApiSystem (flush created api_system after a user).
+  let H: NormMsg[] = W
+  if (midConvEnabled) {
+    if (emittedApiSystem) {
+      const folded = demoteOrphanApiSystemMessages(W, {
+        createUserMeta: content =>
+          createUserMessage({ content, isMeta: true }) as NormMsg,
+        wrapSystemReminder: wrapInSystemReminder,
+        skipSystemReminderWrap,
+      })
+      // densable W5s: return n ? peo(n) : e
+      if (folded !== W) {
+        const peo: NormMsg[] = []
+        for (const m of folded) {
+          const prev = peo.at(-1)
+          if (m.type === 'user' && prev?.type === 'user') {
+            peo[peo.length - 1] = mergeUserMessages(prev, m)
+          } else {
+            peo.push(m)
+          }
+        }
+        H = peo
+      }
+    }
+  } else if (
+    checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_chair_sermon')
+  ) {
+    H = smooshSystemReminderSiblings(mergeAdjacentUserMessages(W))
   }
+  const te = sanitizeErrorToolResultContent(H)
+  const sanitized = mergeBatchedToolResults(te, tools)
 
   // Append message ID tags for snip tool visibility (after all merging,
   // so tags always match the surviving message's messageId field).
@@ -3064,9 +3720,9 @@ export function mergeUserMessages(a: UserMessage, b: UserMessage): UserMessage {
 }
 
 function mergeAdjacentUserMessages(
-  msgs: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
-  const out: (UserMessage | AssistantMessage)[] = []
+  msgs: NormalizedApiMessage[],
+): NormalizedApiMessage[] {
+  const out: NormalizedApiMessage[] = []
   for (const m of msgs) {
     const prev = out.at(-1)
     if (m.type === 'user' && prev?.type === 'user') {
@@ -3333,22 +3989,26 @@ export function normalizeContentFromAPI(
           normalizedInput = contentBlock.input
         }
 
-        // densable 2.1.218 #3 jYd: double-escaped unicode repair with Windows
-        // path skip (Cky) BEFORE tool-specific normalizeToolInput (UYd).
-        if (typeof normalizedInput === 'object' && normalizedInput !== null) {
-          try {
-            normalizedInput = repairDoubleEscapedUnicode(normalizedInput)
-          } catch (error) {
-            logError(new Error('Error repairing tool input unicode: ' + error))
-          }
+        // densable Owe: qPy/V5s → jYd/$zr → UYd/Ozr. Arrays skip (SEA !W9).
+        // Empty / meta-only JSON Schema properties coerce as "any" so MCP
+        // tools that advertise `{}` receive real objects instead of strings.
+        if (
+          typeof normalizedInput === 'object' &&
+          normalizedInput !== null &&
+          !Array.isArray(normalizedInput)
+        ) {
           const tool = findToolByName(tools, contentBlock.name)
           if (tool) {
             try {
-              normalizedInput = normalizeToolInput(
-                tool,
+              const coerced = coerceNestedStringifiedToolInput(
                 normalizedInput as { [key: string]: unknown },
-                agentId,
+                tool.inputSchema,
+                tool.inputJSONSchema,
               )
+              const repaired = repairDoubleEscapedUnicode(coerced) as {
+                [key: string]: unknown
+              }
+              normalizedInput = normalizeToolInput(tool, repaired, agentId)
             } catch (error) {
               logError(
                 new Error(
@@ -5216,6 +5876,17 @@ You have exited auto mode. The user may now want to interact more directly. You 
           isMeta: true,
         }),
       ]
+    case 'batching_reminder':
+      // densable j9e: dt({content:El(e.text),isMeta:!0})
+      return [
+        createUserMessage({
+          content: wrapInSystemReminder(attachment.text),
+          isMeta: true,
+        }),
+      ]
+    case 'batching_reminder_sent':
+      // densable j9e: ()=>[] — transcript marker only
+      return []
     case 'budget_usd':
       return [
         createUserMessage({
@@ -6068,8 +6739,8 @@ function isThinkingBlock(
  * The API doesn't allow assistant messages to end with thinking/redacted_thinking blocks.
  */
 function filterTrailingThinkingFromLastAssistant(
-  messages: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
+  messages: NormalizedApiMessage[],
+): NormalizedApiMessage[] {
   const lastMessage = messages.at(-1)
   if (!lastMessage || lastMessage.type !== 'assistant') {
     // Last message is not assistant, nothing to filter
@@ -6227,8 +6898,8 @@ export function filterWhitespaceOnlyAssistantMessages(
  * Note: Whitespace-only text content is handled separately by filterWhitespaceOnlyAssistantMessages.
  */
 function ensureNonEmptyAssistantContent(
-  messages: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
+  messages: NormalizedApiMessage[],
+): NormalizedApiMessage[] {
   if (messages.length === 0) {
     return messages
   }
@@ -6536,30 +7207,46 @@ export function ensureToolResultPairing(
     const assistantContent = Array.isArray(aMsg5.message.content)
       ? aMsg5.message.content
       : []
-    const finalContent = assistantContent.filter(block => {
-      if (typeof block === 'string') return true
+    // densable ZWr: strip dups / orphan server uses; thinking sandwich →
+    // `[Tool use removed]` (not a bare drop).
+    let assistantContentChanged = false
+    const finalContent = assistantContent.flatMap((block, k, all) => {
+      if (typeof block === 'string') return [block]
+      let strip = false
       if (block.type === 'tool_use') {
         if (allSeenToolUseIds.has((block as ToolUseBlock).id)) {
-          repaired = true
-          return false
+          strip = true
+        } else {
+          allSeenToolUseIds.add((block as ToolUseBlock).id)
+          seenToolUseIds.add((block as ToolUseBlock).id)
         }
-        allSeenToolUseIds.add((block as ToolUseBlock).id)
-        seenToolUseIds.add((block as ToolUseBlock).id)
-      }
-      if (
+      } else if (
         ((block.type as string) === 'server_tool_use' ||
           (block.type as string) === 'mcp_tool_use') &&
         !serverResultIds.has((block as { id: string }).id)
       ) {
-        repaired = true
-        return false
+        strip = true
       }
-      return true
+      if (!strip) return [block]
+      repaired = true
+      assistantContentChanged = true
+      const prev = all[k - 1]
+      const next = all[k + 1]
+      const prevType =
+        prev !== undefined && typeof prev !== 'string' ? prev.type : undefined
+      const nextType =
+        next !== undefined && typeof next !== 'string' ? next.type : undefined
+      return (prevType === 'thinking' || prevType === 'redacted_thinking') &&
+        (nextType === 'thinking' || nextType === 'redacted_thinking')
+        ? [
+            {
+              type: 'text' as const,
+              text: '[Tool use removed]',
+              citations: [],
+            },
+          ]
+        : []
     })
-
-    const assistantContentChanged =
-      finalContent.length !==
-      (aMsg5.message.content as (ContentBlockParam | ContentBlock)[]).length
 
     // If stripping orphaned server tool uses empties the content array,
     // insert a placeholder so the API doesn't reject empty assistant content.

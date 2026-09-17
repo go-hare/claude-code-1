@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import chalk from 'chalk';
 import { SentryErrorBoundary } from './SentryErrorBoundary.js';
-import type { UUID } from 'crypto';
+import { randomUUID, type UUID } from 'crypto';
 import type { RefObject } from 'react';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -530,29 +530,34 @@ const MessagesImpl = ({
   // stays stable — precompute the Set so the filter is O(k) not O(n×k) per chunk.
   const normalizedToolUseIDs = useMemo(() => getToolUseIDs(normalizedMessages), [normalizedMessages]);
 
+  // densable 246 $M/jM/_e: proxy `tool_use` without `id` must still render —
+  // mint a stable id via WeakMap keyed on contentBlock (wrapper is recreated
+  // on every input_json_delta; not stream/`Owe` synthesis).
+  const mintedStreamingToolUseIdsRef = useRef<WeakMap<object, string> | null>(null);
+  const resolveStreamingToolUseId = useCallback((stu: StreamingToolUse): { id: string; minted: boolean } => {
+    const map = (mintedStreamingToolUseIdsRef.current ??= new WeakMap());
+    return resolveMintedStreamingToolUseId(map, stu);
+  }, []);
+
   const streamingToolUsesWithoutInProgress = useMemo(
-    () =>
-      streamingToolUses.filter(
-        stu => !inProgressToolUseIDs.has(stu.contentBlock.id) && !normalizedToolUseIDs.has(stu.contentBlock.id),
-      ),
+    () => filterStreamingToolUsesWithoutInProgress(streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs),
     [streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs],
   );
 
   const syntheticStreamingToolUseMessages = useMemo(
     () =>
       streamingToolUsesWithoutInProgress.flatMap(streamingToolUse => {
+        const { id, minted } = resolveStreamingToolUseId(streamingToolUse);
+        const contentBlock = minted ? { ...streamingToolUse.contentBlock, id } : streamingToolUse.contentBlock;
         const msg = createAssistantMessage({
-          content: [streamingToolUse.contentBlock],
+          content: [contentBlock],
         });
-        // Override randomUUID with deterministic value derived from content
-        // block ID to prevent React key changes on every memo recomputation.
-        // Same class of bug fixed in normalizeMessages (commit 383326e613):
-        // fresh randomUUID → unstable React keys → component remounts →
-        // Ink rendering corruption (overlapping text from stale DOM nodes).
-        msg.uuid = deriveUUID(streamingToolUse.contentBlock.id as UUID, 0);
+        // Real API ids: deriveUUID for stable React keys across memo recomputes.
+        // Minted ids: use the minted UUID directly (densable `ce?V:Hg(V,0)`).
+        msg.uuid = minted ? (id as UUID) : deriveUUID(id as UUID, 0);
         return normalizeMessages([msg]);
       }),
-    [streamingToolUsesWithoutInProgress],
+    [streamingToolUsesWithoutInProgress, resolveStreamingToolUseId],
   );
 
   const isTranscriptMode = screen === 'transcript';
@@ -765,8 +770,8 @@ const MessagesImpl = ({
   }, [collapsed, renderRange, virtualScrollRuntimeGate, disableRenderCap]);
 
   const streamingToolUseIDs = useMemo(
-    () => new Set(streamingToolUses.map(_ => _.contentBlock.id)),
-    [streamingToolUses],
+    () => new Set(streamingToolUses.map(stu => resolveStreamingToolUseId(stu).id)),
+    [streamingToolUses, resolveStreamingToolUseId],
   );
 
   // Divider insertion point and selected index: combined into a single pass
@@ -1068,6 +1073,56 @@ const MessagesImpl = ({
     </SentryErrorBoundary>
   );
 };
+
+/** densable 246 `$M` — non-empty string tool_use id. */
+export function hasNonEmptyStreamingToolUseId(id: unknown): id is string {
+  return typeof id === 'string' && id.length > 0;
+}
+
+/**
+ * densable 246 `_e` mint — key WeakMap on `contentBlock`, not the
+ * StreamingToolUse wrapper (messages.ts recreates the wrapper on each
+ * input_json_delta while keeping the same contentBlock ref).
+ */
+export function resolveMintedStreamingToolUseId(
+  map: WeakMap<object, string>,
+  stu: StreamingToolUse,
+  mint: () => string = randomUUID,
+): { id: string; minted: boolean } {
+  const raw = stu.contentBlock.id;
+  if (hasNonEmptyStreamingToolUseId(raw)) {
+    return { id: raw, minted: false };
+  }
+  const cached = map.get(stu.contentBlock);
+  if (cached) return { id: cached, minted: true };
+  const minted = mint();
+  map.set(stu.contentBlock, minted);
+  return { id: minted, minted: true };
+}
+
+/**
+ * densable 246 `jM` — streaming tool uses not yet in progress / normalized.
+ * Missing `id` is kept (caller mints for render); present ids dedupe.
+ */
+export function filterStreamingToolUsesWithoutInProgress(
+  streamingToolUses: StreamingToolUse[],
+  inProgressToolUseIDs: Set<string>,
+  normalizedToolUseIDs: Set<string>,
+): StreamingToolUse[] {
+  const seen = new Set<string>();
+  const out: StreamingToolUse[] = [];
+  for (const stu of streamingToolUses) {
+    const id = stu.contentBlock.id;
+    if (hasNonEmptyStreamingToolUseId(id)) {
+      if (inProgressToolUseIDs.has(id) || normalizedToolUseIDs.has(id) || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+    }
+    out.push(stu);
+  }
+  return out;
+}
 
 /** Key for click-to-expand: tool_use_id where available (so tool_use + its
  *  tool_result expand together), else uuid for groups/thinking. */

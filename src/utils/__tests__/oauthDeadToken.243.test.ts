@@ -13,6 +13,7 @@ import {
   isOAuthScopeExpansionAttempted,
   isStoredOAuthRefreshTokenCleared,
   markDeadOAuthRefreshToken,
+  OAuthRefreshDeadError,
   recordOAuthScopeExpansionAttempt,
   parseAccountOnHoldBody,
   parseOAuthErrorBody,
@@ -160,6 +161,14 @@ describe('densable 2.1.243 zk / Wk / Vk mutate / $s', () => {
     ).toBe(true)
     clearOAuthAccountOnHoldCaches()
     expect(isOAuthRefreshTokenKnownDead('test-rt-never-real')).toBe(false)
+  })
+
+  test('Z9 OAuthRefreshDeadError uses official sentence', () => {
+    const err = new OAuthRefreshDeadError()
+    expect(err.name).toBe('OAuthRefreshDeadError')
+    expect(err.message).toBe(
+      'OAuth refresh token is no longer valid; run /login to re-authenticate',
+    )
   })
 })
 

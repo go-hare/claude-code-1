@@ -2,11 +2,10 @@
  * densable 2.1.234 #20 — mid-turn queue stamps historyEntry; flush on drain.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
 import { mock } from 'bun:test'
 
-mock.module('../../services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('../../services/analytics/index.js', analyticsMock)
 
 import {
   enqueue,

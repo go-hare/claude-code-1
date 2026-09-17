@@ -5,6 +5,7 @@ import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseError
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { OutputLine } from 'src/components/shell/OutputLine.js';
 import { ShellProgressMessage } from 'src/components/shell/ShellProgressMessage.js';
+import { findLastShellProgress } from '../shared/shellProgress.js';
 import { ShellTimeDisplay } from 'src/components/shell/ShellTimeDisplay.js';
 import { Box, Text } from '@anthropic/ink';
 import type { Tool } from 'src/Tool.js';
@@ -68,7 +69,7 @@ export function renderToolUseProgressMessage(
     inProgressToolCallCount?: number;
   },
 ): React.ReactNode {
-  const lastProgress = progressMessagesForMessage.at(-1);
+  const lastProgress = findLastShellProgress(progressMessagesForMessage, 'powershell_progress');
 
   if (!lastProgress || !lastProgress.data) {
     return (

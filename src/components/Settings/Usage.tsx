@@ -15,6 +15,7 @@ import {
   type Utilization,
 } from '../../services/api/usage.js';
 import { useAppState } from '../../state/AppState.js';
+import type { Message } from '../../types/message.js';
 import { formatResetText, formatRelativeTimeAgo, formatTokens } from '../../utils/format.js';
 import {
   collectLoopUsageRows,
@@ -324,7 +325,10 @@ function LoopCol({ width, text }: { width: number; text: string }): React.ReactN
 
 /** densable 2.1.243 #1 — SEA `Xu` Loops table on `/usage`. */
 function LoopsUsageTable({ maxWidth }: { maxWidth: number }): React.ReactNode {
-  const messages = useAppState(s => s.messages);
+  const messages = useAppState(s => {
+    const raw = (s as { messages?: unknown }).messages;
+    return Array.isArray(raw) ? (raw as Message[]) : [];
+  });
   const rows = React.useMemo(() => collectLoopUsageRows(messages), [messages]);
   if (rows.length === 0) {
     return null;

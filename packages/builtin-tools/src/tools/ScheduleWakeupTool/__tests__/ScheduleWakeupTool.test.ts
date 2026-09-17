@@ -1,24 +1,53 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import { debugMock } from '../../../../../../tests/mocks/debug.js'
+import {
+  growthbookMock,
+  pushGrowthbookFeatureGetter,
+} from '../../../../../../tests/mocks/growthbook.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+import * as realAnalytics from 'src/services/analytics/index.js'
+import * as realAuth from 'src/utils/auth.js'
 
-// Mutable GrowthBook values for jKe / Cfr
+// Mutable GrowthBook values for jKe / Cfr — pushed onto the shared stack so
+// last-write-wins still honors this suite while it is running.
 const gb = new Map<string, unknown>()
+const analyticsSnap = snapshotModuleExports(realAnalytics)
+const authSnap = snapshotModuleExports(realAuth)
 
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: (key: string, defaultValue: unknown) =>
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+mock.module('src/services/analytics/growthbook.ts', growthbookMock)
+
+let popGb: (() => void) | undefined
+beforeAll(() => {
+  popGb = pushGrowthbookFeatureGetter((key, defaultValue) =>
     gb.has(key) ? gb.get(key) : defaultValue,
-  getFeatureValue_CACHED_WITH_REFRESH: (key: string, defaultValue: unknown) =>
-    gb.has(key) ? gb.get(key) : defaultValue,
-}))
+  )
+})
+afterAll(() => {
+  popGb?.()
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/utils/auth.js', () => ({ ...authSnap }))
+})
 
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
 
-mock.module('src/utils/debug.js', () => ({
-  logForDebugging: () => {},
-}))
+mock.module('src/utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
 
 mock.module('src/utils/auth.js', () => ({
+  ...authSnap,
   isClaudeAISubscriber: () => false,
 }))
 
@@ -35,6 +64,11 @@ import {
 
 describe('ScheduleWakeupTool', () => {
   beforeEach(() => {
+    // Re-assert shared growthbook mock so last-write-wins incomplete mocks from
+    // earlier files cannot ignore pushGrowthbookFeatureGetter (Cfr default ON
+    // would then require noop and break gate_off / schedule tests).
+    mock.module('src/services/analytics/growthbook.js', growthbookMock)
+    mock.module('src/services/analytics/growthbook.ts', growthbookMock)
     gb.clear()
     // densable jKe default false
     gb.set('tengu_kairos_loop_dynamic', false)

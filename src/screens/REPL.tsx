@@ -57,6 +57,8 @@ import {
   mergeFileStateCaches,
   READ_FILE_STATE_CACHE_SIZE,
 } from '../utils/fileStateCache.js';
+import { refreshActivePlugins } from '../utils/plugins/refresh.js';
+import { retireDepartedAdditionalDirectories } from '../utils/settings/applySettingsChange.js';
 import {
   updateLastInteractionTime,
   getLastInteractionTime,
@@ -79,16 +81,18 @@ import {
 } from '../bootstrap/state.js';
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
+import { getPinnedStorageV5 } from '../utils/storageV5/index.js';
 import { QueryGuard } from '../utils/QueryGuard.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
-import {
-  resolveIdleThresholdMinutes,
-  resolveIdleThresholdMs,
-  resolveIdleTokenThreshold,
-} from '../utils/residualMsEnvGates.js';
-import { formatTokens, truncateToWidth } from '../utils/format.js';
+import { truncateToWidth } from '../utils/format.js';
 import { tokenCountFromLastAPIResponse } from '../utils/tokens.js';
-import { idleReturnContextTokens } from '../utils/idleReturnHint.js';
+import {
+  createIdleReturnClock,
+  createIdleReturnTurnSource,
+  IdleReturnController,
+} from '../utils/idleReturnController.js';
+import { hasPendingLoopWakeups } from '../utils/loopDynamic.js';
+import { isQuotaAutoResumeArmed } from '../services/quotaAutoResume.js';
 import { consumeEarlyInput } from '../utils/earlyInput.js';
 import {
   claimConsumableQueuedAutonomyCommands,
@@ -130,6 +134,7 @@ import {
   type CommandResultDisplay,
   type ResumeEntrypoint,
   getCommandName,
+  hasCommand,
   isCommandEnabled,
 } from '../commands.js';
 import type { PromptInputMode, QueuedCommand, VimMode } from '../types/textInputTypes.js';
@@ -309,7 +314,9 @@ import {
   applyTurnStartOriginFraming,
   isMetaVisibleOrigin,
 } from '../utils/messages.js';
-import { generateSessionTitle } from '../utils/sessionTitle.js';
+import { generateSessionTitle, isSyntheticSessionTitleText } from '../utils/sessionTitle.js';
+import { startsWithRegisteredSlashCommand } from '../utils/slashCommandParsing.js';
+import { getReplBridgeHandle } from '../bridge/replBridgeHandle.js';
 import {
   BASH_INPUT_TAG,
   COMMAND_MESSAGE_TAG,
@@ -2072,6 +2079,30 @@ export function REPL({
     });
   }, []);
 
+  // densable z8n: REPL mount means boot finished — drop the starting…
+  // sentinel so a long first turn cannot trip the 45s startup wedge.
+  useEffect(() => {
+    if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
+      return;
+    }
+    void import('../daemon/rendezvousServer.js').then(async m => {
+      m.disarmStartupWedgeWatchdog();
+      const jobDir = process.env.CLAUDE_JOB_DIR;
+      if (!jobDir) return;
+      const { readBgJobState, writeBgJobState } = await import('../daemon/jobState.js');
+      const short = jobDir.split(/[/\\]/).pop();
+      if (!short) return;
+      const state = readBgJobState(short);
+      if (state?.detail === m.STARTUP_DETAIL_RPT) {
+        writeBgJobState(short, {
+          ...state,
+          detail: '',
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    });
+  }, []);
+
   // densable msf sandbox slot: DialogStore top FRr (cEr / wrs), not K8c invent.
   // Depend on top id+host — same-kind A→B swap must refresh (kind alone is stale).
   const topSandboxHost =
@@ -2149,8 +2180,6 @@ export function REPL({
     },
     [markTurnStart],
   );
-  // densable Nc — idle-return hint shown this session (boolean, not hint_v2).
-  const idleHintShownRef = useRef(false);
   // Wrap setMessages so messagesRef is always current the instant the
   // call returns — not when React later processes the batch.  Apply the
   // updater eagerly against the ref, then hand React the computed value
@@ -2836,6 +2865,53 @@ export function REPL({
   const getStreamingTextRaw = useCallback(() => streamingDisplayStore.getState().raw, [streamingDisplayStore]);
 
   const [lastQueryCompletionTime, setLastQueryCompletionTime] = useState(0);
+  const idleReturnTurnSourceRef = useRef<ReturnType<typeof createIdleReturnTurnSource> | null>(null);
+  // densable 2.1.246 `[sm]=L(()=>new F$(...))` — construct once during render.
+  const [idleReturnController] = useState(() => {
+    const source = createIdleReturnTurnSource({
+      isLoading,
+      lastQueryCompletionTime,
+      submitCount,
+    });
+    idleReturnTurnSourceRef.current = source;
+    return new IdleReturnController({
+      turn: source.turn,
+      getMessages: () => messagesRef.current,
+      clock: createIdleReturnClock(),
+      now: Date.now,
+      getLastInteractionTime,
+      isDialogOnScreen: () => focusedInputDialogRef.current != null || dialogStore.getState().open.length > 0,
+      hasPendingLoopWakeup: hasPendingLoopWakeups,
+      hasArmedQuotaAutoResume: isQuotaAutoResumeArmed,
+      getIdleNotifThresholdMs: () => getGlobalConfig().messageIdleNotifThresholdMs,
+      sendIdleNotification: () => {
+        void sendNotification(
+          {
+            message: 'Claude is waiting for your input',
+            notificationType: 'idle_prompt',
+          },
+          terminal,
+        );
+      },
+      addNotification,
+      removeNotification,
+      hasSeededRemotePrompt: remoteSessionConfig?.initialPromptUuid !== undefined,
+    });
+  });
+  // densable `x(()=>{sm.setLocalOverlayShowing(Go!==null)},[sm,Go])`
+  useEffect(() => {
+    idleReturnController.setLocalOverlayShowing(toolJSX != null);
+  }, [idleReturnController, toolJSX]);
+  // Ge publishes isLoading / lastQueryCompletionTime / submitCount; local Turn is a thin adapter.
+  useEffect(() => {
+    idleReturnTurnSourceRef.current?.publish({
+      isLoading,
+      lastQueryCompletionTime,
+      submitCount,
+    });
+  }, [isLoading, lastQueryCompletionTime, submitCount]);
+  // densable 2.1.246 `x(()=>()=>{sm.dispose(),...},[sm,...])`
+  useEffect(() => () => idleReturnController.dispose(), [idleReturnController]);
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
   const [spinnerColor, setSpinnerColor] = useState<keyof Theme | null>(null);
   const [spinnerShimmerColor, setSpinnerShimmerColor] = useState<keyof Theme | null>(null);
@@ -2844,8 +2920,6 @@ export function REPL({
   const [isMessageSelectorVisible, setIsMessageSelectorVisible] = useState(false);
   const [messageSelectorPreselect, setMessageSelectorPreselect] = useState<UserMessage | undefined>(undefined);
   const [conversationId, setConversationId] = useState(randomUUID());
-  const lastQueryCompletionTimeRef = useRef(lastQueryCompletionTime);
-  lastQueryCompletionTimeRef.current = lastQueryCompletionTime;
   const costThresholdReachedLoggedRef = useRef(false);
 
   // Aggregate tool result budget: per-conversation decision tracking.
@@ -4390,11 +4464,26 @@ export function REPL({
           hasInterruptibleToolInProgressRef.current = v;
         },
         resume,
+        // densable /cd `Mt` — refresh plugins/MCP after a directory move
+        reloadPlugins: async () => {
+          await refreshActivePlugins(setAppState, { applyStagedInstalls: false });
+        },
+        // densable Te/`le` — `/cd` `Rt` skips project MCP approval when set
+        strictMcpConfig,
+        // densable /cd `p()` — retire previous project additionalDirectories
+        retireDepartedAdditionalDirectories: directories => {
+          setAppState(prev => {
+            const next = retireDepartedAdditionalDirectories(prev.toolPermissionContext, directories);
+            return next === prev.toolPermissionContext ? prev : { ...prev, toolPermissionContext: next };
+          });
+        },
         setConversationId,
         requestPrompt: feature('HOOK_PROMPTS') ? requestPrompt : undefined,
         contentReplacementState: contentReplacementStateRef.current,
         // densable doo / Bgp — REPL DialogStore requestDialog host
         requestDialog: requestDialog as NonNullable<ProcessUserInputContext['requestDialog']>,
+        // densable PBr a?.storageV5 ?? m — pinned createLocalFsBackend handle.
+        storageV5: getPinnedStorageV5(),
       };
     },
     [
@@ -4422,6 +4511,7 @@ export function REPL({
       appendSystemPrompt,
       appendSubagentSystemPrompt,
       setConversationId,
+      strictMcpConfig,
     ],
   );
 
@@ -4938,30 +5028,29 @@ export function REPL({
       // useDeferredHookMessages) and attachment messages (appended by
       // processTextPrompt) — both pushed length past 1 on turn one, so the
       // title silently fell through to the "Claude Code" default.
-      if (!titleDisabled && !sessionTitle && !agentTitle && !haikuTitleAttemptedRef.current) {
+      // densable 2.1.246 `_runImpl`: !titleDisabled && !sessionTitle &&
+      // !aiSessionTitle && !agentTitle && !haikuTitleAttempted
+      if (!titleDisabled && !sessionTitle && !sessionAiTitle && !agentTitle && !haikuTitleAttemptedRef.current) {
         const firstUserMessage = newMessages.find(m => m.type === 'user' && !m.isMeta);
         const text =
           firstUserMessage?.type === 'user'
             ? getContentText(firstUserMessage.message!.content as string | ContentBlockParam[])
             : null;
-        // Skip synthetic breadcrumbs — slash-command output, prompt-skill
-        // expansions (/commit → <command-message>), local-command headers
-        // (/help → <command-name>), and bash-mode (!cmd → <bash-input>).
-        // None of these are the user's topic; wait for real prose.
-        if (
-          text &&
-          !text.startsWith(`<${LOCAL_COMMAND_STDOUT_TAG}>`) &&
-          !text.startsWith(`<${COMMAND_MESSAGE_TAG}>`) &&
-          !text.startsWith(`<${COMMAND_NAME_TAG}>`) &&
-          !text.startsWith(`<${BASH_INPUT_TAG}>`)
-        ) {
+        // densable 2.1.246: ye && !Abe(ye) && !KSe(ye, cmd => MN(cmd, commands))
+        const isRegisteredSlash =
+          text != null && startsWithRegisteredSlashCommand(text, name => hasCommand(name, commands));
+        if (text && !isSyntheticSessionTitleText(text) && !isRegisteredSlash) {
           haikuTitleAttemptedRef.current = true;
+          const titleSessionId = getSessionId();
           void generateSessionTitle(text, new AbortController().signal).then(
             title => {
+              // densable: drop if the session id changed while Haiku ran
+              if (titleSessionId !== getSessionId()) return;
               if (title) {
                 setHaikuTitle(title);
                 // densable: persist ai-title so resume + BQi subscribers see it
-                saveAiGeneratedTitle(getSessionId() as UUID, title);
+                saveAiGeneratedTitle(titleSessionId as UUID, title);
+                getReplBridgeHandle()?.adoptLocalAiTitle?.();
               } else haikuTitleAttemptedRef.current = false;
             },
             () => {
@@ -5295,7 +5384,9 @@ export function REPL({
       mainThreadAgentDefinition,
       onQueryEvent,
       sessionTitle,
+      sessionAiTitle,
       titleDisabled,
+      commands,
       hostEngine,
       addNotification,
       markIdleForkMidTurn,
@@ -5886,14 +5977,8 @@ export function REPL({
             isCommandEnabled(cmd) &&
             (cmd.name === commandName || cmd.aliases?.includes(commandName) || getCommandName(cmd) === commandName),
         );
-        if (matchingCommand?.name === 'clear' && idleHintShownRef.current) {
-          logEvent('tengu_idle_return_action', {
-            action: 'hint_converted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            idleMinutes: Math.round((Date.now() - lastQueryCompletionTimeRef.current) / 60_000),
-            messageCount: messagesRef.current.length,
-            contextTokens: idleReturnContextTokens(messagesRef.current),
-          });
-          idleHintShownRef.current = false;
+        if (matchingCommand?.name === 'clear') {
+          idleReturnController.onClearSubmitted();
         }
 
         // densable ARt(cmd, args): immediate may be boolean | (args)=>boolean
@@ -6789,109 +6874,6 @@ export function REPL({
       startBackgroundHousekeeping();
     }
   }, [submitCount]);
-
-  // Show notification when Claude is done responding and user is idle
-  useEffect(() => {
-    // Don't set up notification if Claude is busy
-    if (isLoading) return;
-
-    // Only enable notifications after the first new interaction in this session
-    if (submitCount === 0) return;
-
-    // No query has completed yet
-    if (lastQueryCompletionTime === 0) return;
-
-    // Set timeout to check idle state
-    const timer = setTimeout(
-      (lastQueryCompletionTime, isLoading, toolJSX, focusedInputDialogRef, terminal) => {
-        // Check if user has interacted since the response ended
-        const lastUserInteraction = getLastInteractionTime();
-
-        if (lastUserInteraction > lastQueryCompletionTime) {
-          // User has interacted since Claude finished - they're not idle, don't notify
-          return;
-        }
-
-        // User hasn't interacted since response ended, check other conditions
-        const idleTimeSinceResponse = Date.now() - lastQueryCompletionTime;
-        if (
-          !isLoading &&
-          !toolJSX &&
-          // Use ref to get current dialog state, avoiding stale closure
-          focusedInputDialogRef.current === undefined &&
-          idleTimeSinceResponse >= getGlobalConfig().messageIdleNotifThresholdMs
-        ) {
-          void sendNotification(
-            {
-              message: 'Claude is waiting for your input',
-              notificationType: 'idle_prompt',
-            },
-            terminal,
-          );
-        }
-      },
-      getGlobalConfig().messageIdleNotifThresholdMs,
-      lastQueryCompletionTime,
-      isLoading,
-      toolJSX,
-      focusedInputDialogRef,
-      terminal,
-    );
-
-    return () => clearTimeout(timer);
-  }, [isLoading, toolJSX, submitCount, lastQueryCompletionTime, terminal]);
-
-  // densable 2.1.239 idle-return is ungated hint-only (no focused dialog).
-  useEffect(() => {
-    if (lastQueryCompletionTime === 0) return;
-    if (isLoading) return;
-
-    const tokenThreshold = resolveIdleTokenThreshold();
-    if (idleReturnContextTokens(messagesRef.current) < tokenThreshold) return;
-
-    const idleThresholdMs = resolveIdleThresholdMs();
-    const elapsed = Date.now() - lastQueryCompletionTime;
-    const remaining = idleThresholdMs - elapsed;
-
-    const timer = setTimeout(
-      (lqct, addNotif, msgsRef, hintRef) => {
-        if (msgsRef.current.length === 0) return;
-        const totalTokens = idleReturnContextTokens(msgsRef.current);
-        const formattedTokens = formatTokens(totalTokens);
-        const idleMinutes = (Date.now() - lqct) / 60_000;
-        addNotif({
-          key: 'idle-return-hint',
-          kind: 'contextual',
-          segments: [
-            { text: 'new task? ', dim: true },
-            { text: '/clear', color: 'suggestion' },
-            { text: ' to save ', dim: true },
-            { text: `${formattedTokens} tokens`, color: 'suggestion' },
-          ],
-          priority: 'medium',
-          timeoutMs: 0x7fffffff,
-        });
-        hintRef.current = true;
-        logEvent('tengu_idle_return_action', {
-          action: 'hint_shown' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          idleMinutes: Math.round(idleMinutes),
-          messageCount: msgsRef.current.length,
-          contextTokens: totalTokens,
-        });
-      },
-      Math.max(0, remaining),
-      lastQueryCompletionTime,
-      addNotification,
-      messagesRef,
-      idleHintShownRef,
-    );
-
-    return () => {
-      clearTimeout(timer);
-      removeNotification('idle-return-hint');
-      idleHintShownRef.current = false;
-    };
-  }, [lastQueryCompletionTime, isLoading, addNotification, removeNotification]);
 
   // Submits incoming prompts from teammate messages or tasks mode as new turns
   // Returns true if submission succeeded, false if a query is already running
@@ -8197,6 +8179,7 @@ export function REPL({
                       summary={leftArrowConfirm.summary}
                       carryOverCount={leftArrowConfirm.carryOverCount}
                       monitorParkCount={leftArrowConfirm.monitorParkCount}
+                      workflowAgents={leftArrowConfirm.workflowAgents}
                       onConfirm={() => {
                         const cur = leftArrowConfirm;
                         logEvent('tengu_left_arrow_confirm', {
@@ -8204,6 +8187,7 @@ export function REPL({
                           count: cur.inFlight.count,
                           kinds: [...cur.inFlight.kinds].sort().join(',') as never,
                           carryover_count: cur.carryOverCount,
+                          workflow_agent_count: cur.workflowAgents.running,
                         });
                         setLeftArrowConfirm(null);
                         cur.proceed();
@@ -8214,6 +8198,7 @@ export function REPL({
                           count: leftArrowConfirm.inFlight.count,
                           kinds: [...leftArrowConfirm.inFlight.kinds].sort().join(',') as never,
                           carryover_count: leftArrowConfirm.carryOverCount,
+                          workflow_agent_count: leftArrowConfirm.workflowAgents.running,
                         });
                         setLeftArrowConfirm(null);
                       }}

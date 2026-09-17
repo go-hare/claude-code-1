@@ -1,24 +1,48 @@
 /**
  * densable 2.1.233 #6 — subscriptions/listen re-open / park helpers.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import {
+  analyticsMock,
+  pushAnalyticsLogEvent,
+} from '../../../../tests/mocks/analytics.js'
+import { debugMock } from '../../../../tests/mocks/debug.js'
+import {
+  growthbookMock,
+  pushGrowthbookFeatureGetter,
+} from '../../../../tests/mocks/growthbook.js'
 
-const growthbookMock = {
-  getFeatureValue_CACHED_MAY_BE_STALE: mock((k: string, d: unknown) => {
+mock.module('src/services/analytics/growthbook.ts', growthbookMock)
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+let popGrowthbook: (() => void) | undefined
+beforeAll(() => {
+  popGrowthbook = pushGrowthbookFeatureGetter((k, d) => {
     if (k === 'tengu_mcp_listen_reopen_park') return true
     if (k === 'tengu_mcp_listen_reopen_park_tuning') return null
     return d
-  }),
-}
-mock.module('src/services/analytics/growthbook.ts', () => growthbookMock)
-mock.module('src/services/analytics/growthbook.js', () => growthbookMock)
+  })
+})
+afterAll(() => {
+  popGrowthbook?.()
+})
 
-const analyticsMock = { logEvent: mock(() => {}) }
-mock.module('src/services/analytics/index.ts', () => analyticsMock)
-mock.module('src/services/analytics/index.js', () => analyticsMock)
+const logEvent = mock(
+  (_name: string, _metadata?: Record<string, unknown>) => {},
+)
+let popAnalyticsLogEvent: (() => void) | undefined
+mock.module('src/services/analytics/index.ts', analyticsMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
 
-mock.module('src/utils/debug.ts', () => ({ logForDebugging: () => {} }))
-mock.module('src/utils/debug.js', () => ({ logForDebugging: () => {} }))
+mock.module('src/utils/debug.ts', debugMock)
+mock.module('src/utils/debug.js', debugMock)
 
 import {
   computeMcpListenParkUntilMs,
@@ -33,9 +57,18 @@ import {
   tryReopenMcpListen,
 } from '../mcpListenReopen.js'
 
+beforeAll(() => {
+  popAnalyticsLogEvent = pushAnalyticsLogEvent((name, metadata) => {
+    logEvent(name, metadata)
+  })
+})
+
 afterEach(() => {
-  growthbookMock.getFeatureValue_CACHED_MAY_BE_STALE.mockClear()
-  analyticsMock.logEvent.mockClear()
+  logEvent.mockClear()
+})
+
+afterAll(() => {
+  popAnalyticsLogEvent?.()
 })
 
 describe('MCP listen re-open constants densable Q3r/YdS/ZdS', () => {
@@ -173,8 +206,8 @@ describe('tryReopenMcpListen', () => {
       { toolsListChanged: true },
       { timeout: 30_000 },
     )
-    expect(analyticsMock.logEvent).toHaveBeenCalled()
-    const firstCall = analyticsMock.logEvent.mock.calls[0] as unknown as
+    expect(logEvent).toHaveBeenCalled()
+    const firstCall = logEvent.mock.calls[0] as unknown as
       | [string, { mcpServerKeyHash?: string; outcome?: string }]
       | undefined
     const payload = firstCall?.[1]

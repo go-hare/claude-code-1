@@ -2,11 +2,13 @@
  * Official 2.1.206 MCP auth reconnect coordinator (OHs / collateral_rejoin).
  */
 import { afterEach, describe, expect, test } from 'bun:test'
+import { SdkError, SdkErrorCode } from '@modelcontextprotocol/client'
 import {
   classifyAuthReconnectKind,
   clearAuthReconnectInFlightForTests,
   getAuthReconnectInFlightKeysForTests,
   isConnectionClosedWhileReconnecting,
+  isMcpConnectionClosedError,
   joinOrStartAuthReconnect,
   planAuthReconnectJoin,
 } from '../authReconnect.js'
@@ -69,6 +71,18 @@ describe('isConnectionClosedWhileReconnecting', () => {
     expect(isConnectionClosedWhileReconnecting(err, false)).toBe(false)
     expect(
       isConnectionClosedWhileReconnecting(new Error('Connection closed'), true),
+    ).toBe(false)
+  })
+
+  test('WZe hr: SdkError CONNECTION_CLOSED matches with inflight', () => {
+    const err = new SdkError(SdkErrorCode.ConnectionClosed, 'closed')
+    expect(isMcpConnectionClosedError(err)).toBe(true)
+    expect(isConnectionClosedWhileReconnecting(err, true)).toBe(true)
+    expect(isConnectionClosedWhileReconnecting(err, false)).toBe(false)
+    expect(
+      isMcpConnectionClosedError(
+        new SdkError(SdkErrorCode.RequestTimeout, 'timeout'),
+      ),
     ).toBe(false)
   })
 })

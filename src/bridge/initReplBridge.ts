@@ -15,10 +15,18 @@
 
 import { feature } from 'bun:bundle'
 import { hostname } from 'os'
+import { basename } from 'path'
 import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
+import {
+  logEvent,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from '../services/analytics/index.js'
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import type { SDKControlResponse } from '../entrypoints/sdk/controlTypes.js'
-import { getFeatureValue_CACHED_WITH_REFRESH } from '../services/analytics/growthbook.js'
+import {
+  getFeatureValue_CACHED_MAY_BE_STALE,
+  getFeatureValue_CACHED_WITH_REFRESH,
+} from '../services/analytics/growthbook.js'
 import { getOrganizationUUID } from '../services/oauth/client.js'
 import {
   isPolicyAllowed,
@@ -29,10 +37,12 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.js'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
+  getOauthAccountInfoFromDisk,
   handleOAuth401Error,
 } from '../utils/auth.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { logForDebugging } from '../utils/debug.js'
+import { errorMessage } from '../utils/errors.js'
 import { stripDisplayTagsAllowEmpty } from '../utils/displayTags.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { getBranch, getRemoteUrl } from '../utils/git.js'
@@ -43,11 +53,40 @@ import {
   isSyntheticMessage,
 } from '../utils/messages.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
-import { getCurrentSessionTitle } from '../utils/sessionStorage.js'
+import {
+  clearBridgeSession,
+  getCurrentSessionAiTitle,
+  getCurrentSessionBridge,
+  getCurrentSessionTitle,
+  getForeignBoundSid,
+  getProject,
+  getTranscriptPathForSession,
+  isForeignSessionBinding,
+  clearScanUncertaintyHoldSid,
+  isKnownTaintedSession,
+  isPrecautionarySuppressed,
+  isSessionHistorySuppressed,
+  applyScanPrecautionHold,
+  releaseScanPrecautionHold,
+  probeActiveSessionHistorySuppression,
+  isScanUncertaintyHeld,
+  markPrecautionarySessionSuppression,
+  markResilientPrecautionSid,
+  markSessionHistorySuppressed,
+  saveAgentName,
+  saveCustomTitle,
+  shouldSuppressSessionTitleHistory,
+  writeHistorySuppression,
+} from '../utils/sessionStorage.js'
+import { startTranscriptPersistenceBackfill } from '../utils/sessionPersistenceSync.js'
+import { applyLeftoverS8nUserName } from '../utils/sessionNameUniqueness.js'
+import { getPinnedStorageV5 } from '../utils/storageV5/index.js'
 import {
   extractConversationText,
   generateSessionTitle,
 } from '../utils/sessionTitle.js'
+import { sanitizeSessionTitle } from '../utils/sessionTitleSanitize.js'
+import { isTeammate } from '../utils/teammate.js'
 import { generateShortWordSlug } from '../utils/words.js'
 import {
   getBridgeAccessToken,
@@ -61,15 +100,20 @@ import {
   isCseShimEnabled,
   isEnvLessBridgeEnabled,
 } from './bridgeEnabled.js'
-import { archiveBridgeSession, createBridgeSession } from './createSession.js'
+import {
+  archiveBridgeSession,
+  createBridgeSession,
+  getBridgeSession,
+} from './createSession.js'
 import { createTitleWriteScheduler } from './titleWriteScheduler.js'
 import { getPersistedBridgeSession } from './bridgeSessionMeta.js'
+import { HOST_ACCOUNT_CHANGED_HINT } from './hostSignedOut.js'
 import { logBridgeSkip } from './debugUtils.js'
 import { checkEnvLessBridgeMinVersion } from './envLessBridgeConfig.js'
 import { getPollIntervalConfig } from './pollConfig.js'
 import type { BridgeState, ReplBridgeHandle } from './replBridge.js'
 import { initBridgeCore } from './replBridge.js'
-import { setCseShimGate } from './sessionIdCompat.js'
+import { setCseShimGate, toCompatSessionId } from './sessionIdCompat.js'
 import type { BridgeWorkerType } from './types.js'
 
 export type InitBridgeOptions = {
@@ -79,6 +123,7 @@ export type InitBridgeOptions = {
   onStopTask?: (taskId: string) => Promise<unknown>
   onSetModel?: (
     model: string | undefined,
+    // biome-ignore lint/suspicious/noConfusingVoidType: load-bearing, see bridgeMessaging.ts
   ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   onSetPermissionMode?: (
@@ -88,7 +133,11 @@ export type InitBridgeOptions = {
     serverName: string,
     mode: string | null,
   ) => { ok: true; warning?: string } | { ok: false; error: string }
-  onStateChange?: (state: BridgeState, detail?: string) => void
+  onStateChange?: (
+    state: BridgeState,
+    detail?: string,
+    kind?: 'auth' | 'terminal',
+  ) => void
   initialMessages?: Message[]
   // Explicit session name from `/remote-control <name>`. When set, overrides
   // the title derived from the conversation or /rename.
@@ -119,6 +168,10 @@ export type InitBridgeOptions = {
    */
   reattachSessionId?: string
   /**
+   * densable reattachOrFail (Si / ae) — hook/revive pin; owner-match may set it.
+   */
+  reattachOrFail?: boolean
+  /**
    * densable reattachSequenceNum (O/V) — high-water for SSE resume.
    * Env CLAUDE_BRIDGE_REATTACH_SEQ overrides when REATTACH_SESSION is set.
    */
@@ -136,11 +189,88 @@ export type InitBridgeOptions = {
     mode: 'decline' | 'observe'
     onDeclined?: (holder: LocalBridgeSessionHolder) => void
   }
+  /**
+   * densable reviveInitiated (Yn / _i) — auth-revive watcher re-enable.
+   */
+  reviveInitiated?: boolean
+  /**
+   * densable expectedAccount (jn / Dr) — account the watcher validated.
+   */
+  expectedAccount?: {
+    accountUuid?: string
+    organizationUuid?: string
+  }
+  /**
+   * densable leftover `$n` / `suppressHistoryBackfill`.
+   * Official hook `et||Dt||Mo` host is not local — do not invent those refs.
+   */
+  suppressHistoryBackfill?: boolean
+  /**
+   * densable leftover `an` / `onHistoryBackfillSuppressed`.
+   * `Xn` → `{uncertaintyOnly:true}` or `undefined`.
+   */
+  onHistoryBackfillSuppressed?: (info?: { uncertaintyOnly?: true }) => void
 }
 
 export type LocalBridgeSessionHolder = {
   pid: number
   startedAt?: number
+}
+
+/** densable Fe / UG — live OAuth vs recorded pointer owner. */
+function oauthAccountsMatch(
+  live: { accountUuid?: string; organizationUuid?: string } | undefined,
+  recorded: { accountUuid?: string; organizationUuid?: string },
+): boolean {
+  return (
+    Boolean(live?.accountUuid) &&
+    live?.accountUuid === recorded.accountUuid &&
+    (live?.organizationUuid || undefined) ===
+      (recorded.organizationUuid || undefined)
+  )
+}
+
+/** densable Qe / zS — `Ms().project?.sessionFile??null`. */
+function getProjectSessionFile(): string | null {
+  return getProject().sessionFile ?? null
+}
+
+/** densable JJe — `eoe(t)===`${e}.jsonl``. */
+function sessionFileMatchesId(sessionId: string, sessionFile: string): boolean {
+  return basename(sessionFile) === `${sessionId}.jsonl`
+}
+
+/** densable xe — both defined and sessionFile is not `{sid}.jsonl`. */
+function isTornEntryPair(): boolean {
+  const sessionFile = getProjectSessionFile()
+  return (
+    sessionFile != null && !sessionFileMatchesId(getSessionId(), sessionFile)
+  )
+}
+
+/** densable ze — both ids defined and equal after cse_/session_ compat. */
+function sameBridgeSessionId(
+  left: string | undefined,
+  right: string | undefined,
+): boolean {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    toCompatSessionId(left) === toCompatSessionId(right)
+  )
+}
+
+/** densable Fr — `D("tengu_sequential_puffin", true)`. */
+function isSequentialPuffinEnabled(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_sequential_puffin', true)
+}
+
+/** densable Mr — `D("tengu_bridge_resume_respects_local_owner", true)`. */
+function isBridgeResumeRespectsLocalOwner(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_bridge_resume_respects_local_owner',
+    true,
+  )
 }
 
 /** densable 2.1.243 #58 `Ht` — live local pid advertising this bridge session. */
@@ -182,8 +312,12 @@ export async function initReplBridge(
     tags,
     reattachSessionId: reattachSessionIdOpt,
     reattachSequenceNum: reattachSequenceNumOpt,
+    reattachOrFail: reattachOrFailOpt,
     sessionGroupingId: sessionGroupingIdOpt,
     localHolderGuard,
+    expectedAccount,
+    suppressHistoryBackfill = false,
+    onHistoryBackfillSuppressed,
   } = options ?? {}
 
   // densable initReplBridge: consume CLAUDE_BRIDGE_REATTACH_* once at entry
@@ -212,9 +346,15 @@ export async function initReplBridge(
       ? Number.parseInt(envReattachSeq, 10) || undefined
       : undefined
     : reattachSequenceNumOpt
-  // densable ie — force skipInitialHistoryFlush (noHistoryBackfill) when env
-  // NO_BACKFILL or restored pointer carries the flag (2.1.228 #5).
-  let forceNoHistoryBackfill = false
+  // densable leftover `b=B(k())`. `R=Boolean($n)||ie()||re(b)||on(b)`.
+  const historySid = getSessionId()
+  let forceNoHistoryBackfill =
+    Boolean(suppressHistoryBackfill) ||
+    isSessionHistorySuppressed() ||
+    isPrecautionarySuppressed(historySid) ||
+    isKnownTaintedSession(historySid)
+  // densable leftover `Le` — Kn owner veto latch.
+  let ownerVetoLatched = false
   // densable: if (!q) { let Me=wXr(); if(Me) q=Me.id, V=Me.seq }
   if (!reattachSessionId) {
     const persisted = getPersistedBridgeSession()
@@ -225,6 +365,143 @@ export async function initReplBridge(
       logForDebugging(
         `[bridge:repl] Reattaching to persisted bridge session ${persisted.id} at seq ${persisted.seq}`,
       )
+    }
+  }
+  // densable 2.1.246: if (!Z) { if (S) { Fe/Fr/ze owner-match; qn only on Bkn adopt } }
+  // Occupancy is `sn&&qn&&T&&Mr()`. Env / CXr / hook-passed id must not set qn.
+  let restoredPointerOccupancy = false
+  // densable ae=Si, de=Z?"env":zn?"option":void 0
+  let reattachOrFail = reattachOrFailOpt === true
+  let reattachOrigin: string | undefined = envReattachSession
+    ? 'env'
+    : reattachSessionIdOpt
+      ? 'option'
+      : undefined
+  let hostTargetOwner:
+    | { accountUuid?: string; organizationUuid?: string }
+    | undefined
+  // densable xe — mid-/resume sessionFile vs live sid. Kn reads this latch.
+  const tornEntryPair = isTornEntryPair()
+  const applyOwnerVetoTaint = (
+    carrier: string,
+    cause: 'restored_owner_mismatch' | 'env_owner_mismatch',
+    vetoedAccount?: string,
+  ): void => {
+    forceNoHistoryBackfill = true
+    ownerVetoLatched = true
+    if (tornEntryPair) {
+      logEvent('rc_cross_account_suppression', {
+        reason:
+          'torn_entry_pair' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      logForDebugging(
+        `[bridge:repl] ${carrier} veto under a TORN entry pair (mid-/resume window): precautionary suppression only, no permanent taint write`,
+        { level: 'warn' },
+      )
+      // Official leftover Kn: if(xe) L(b),_e(b). L=qXs, _e=ZXs.
+      markPrecautionarySessionSuppression(getSessionId())
+      clearScanUncertaintyHoldSid(getSessionId())
+      return
+    }
+    logEvent('rc_cross_account_suppression', {})
+    writeHistorySuppression(
+      getSessionId() as import('crypto').UUID,
+      getProjectSessionFile() ?? undefined,
+      cause,
+      vetoedAccount,
+    )
+  }
+  const restored = getCurrentSessionBridge()
+  if (!envReattachSession && restored) {
+    const hasRecordedOwner = Boolean(restored.ownerAccountUuid)
+    // Disk, not getGlobalConfig's cache — same reason as the env-handoff and
+    // hostTargetOwner checks below. The cache is refreshed by a non-blocking
+    // watcher, so an account switch in another process leaves a stale
+    // oauthAccount here and this veto waves through the window it exists to close.
+    const live = hasRecordedOwner ? getOauthAccountInfoFromDisk() : undefined
+    const ownerVeto =
+      hasRecordedOwner &&
+      live?.accountUuid &&
+      !oauthAccountsMatch(live, {
+        accountUuid: restored.ownerAccountUuid,
+        organizationUuid: restored.ownerOrganizationUuid,
+      })
+    if (ownerVeto) {
+      const carrier = reattachSessionId ? 'Host-directed' : 'Restored-pointer'
+      logForDebugging(
+        `[bridge:repl] ${carrier} reattach vetoed: the credential store account changed since this conversation\u2019s pointer was persisted \u2014 minting fresh, history channels suppressed`,
+        { level: 'warn' },
+      )
+      reattachSessionId = undefined
+      reattachSequenceNum = undefined
+      reattachOrigin = undefined
+      // leftoverGt / hook pin must not refuse the mint this arm just promised
+      reattachOrFail = false
+      applyOwnerVetoTaint(carrier, 'restored_owner_mismatch', live?.accountUuid)
+    } else {
+      const ownerConfirmed =
+        hasRecordedOwner &&
+        oauthAccountsMatch(live, {
+          accountUuid: restored.ownerAccountUuid,
+          organizationUuid: restored.ownerOrganizationUuid,
+        })
+      if (restored.noHistoryBackfill) forceNoHistoryBackfill = true
+      if (
+        reattachSessionId &&
+        sameBridgeSessionId(reattachSessionId, restored.id)
+      ) {
+        reattachSessionId = restored.id
+      }
+      if (!reattachSessionId) {
+        reattachSessionId = restored.id
+        reattachSequenceNum = restored.seq
+        if (!ownerConfirmed || !isSequentialPuffinEnabled()) {
+          reattachOrFail = true
+        }
+        if (!ownerConfirmed) {
+          // Fail closed, matching the host-directed arm below: a pointer whose
+          // owner is absent (pre-2.1.246 writes, or a swallowed account read)
+          // or unreadable is not proof that this login owns the cse_* session,
+          // so don't forward initialMessages into it.
+          forceNoHistoryBackfill = true
+        }
+        const origin = ownerConfirmed
+          ? reattachOrFail
+            ? 'restored_owner_match_pinned'
+            : 'restored_owner_match'
+          : hasRecordedOwner
+            ? 'restored_identity_unreadable'
+            : 'restored_owner_unknown'
+        restoredPointerOccupancy = true
+        reattachOrigin = origin
+        logForDebugging(
+          `[bridge:repl] Reattaching to persisted bridge session ${restored.id} at seq ${restored.seq} (${reattachOrFail ? 'reattach-or-fail' : 'fresh-mint fallback'}, ${origin})`,
+        )
+      } else if (ownerConfirmed) {
+        if (!sameBridgeSessionId(reattachSessionId, restored.id)) {
+          hostTargetOwner = {
+            accountUuid: restored.ownerAccountUuid,
+            organizationUuid: restored.ownerOrganizationUuid,
+          }
+        }
+      } else if (!ownerConfirmed) {
+        if (sameBridgeSessionId(reattachSessionId, restored.id)) {
+          reattachOrFail = true
+          // Same fail-closed as the adopt arm above and the different-id arm
+          // below: unconfirmed owner is not proof this login owns the cse_*
+          // session, so do not forward initialMessages into it.
+          forceNoHistoryBackfill = true
+          logForDebugging(
+            `[bridge:repl] Reattaching to the recorded bridge session ${restored.id} as named by the carrier; owner unconfirmed \u2014 reattach-or-fail, history suppressed`,
+          )
+        } else {
+          forceNoHistoryBackfill = true
+          logForDebugging(
+            '[bridge:repl] Host-directed reattach: this conversation\u2019s recorded owner could not be confirmed as the current login \u2014 attaching with history channels suppressed',
+            { level: 'warn' },
+          )
+        }
+      }
     }
   }
   // densable env-handoff: NO_BACKFILL → force history suppression before
@@ -240,8 +517,7 @@ export async function initReplBridge(
   // handoff omitted ORG, compare account only (missing org ≠ "must be empty").
   if (envReattachSession && reattachSessionId && envOwnerAcct) {
     try {
-      const { getOauthAccountInfo } = await import('../utils/auth.js')
-      const live = getOauthAccountInfo()
+      const live = getOauthAccountInfoFromDisk()
       if (live?.accountUuid) {
         const sameAcct = live.accountUuid === envOwnerAcct
         const sameOrg =
@@ -255,16 +531,29 @@ export async function initReplBridge(
           )
           reattachSessionId = undefined
           reattachSequenceNum = undefined
-          forceNoHistoryBackfill = true
+          reattachOrigin = undefined
+          reattachOrFail = false
+          applyOwnerVetoTaint(
+            'Env-handoff',
+            'env_owner_mismatch',
+            live.accountUuid,
+          )
         }
       } else {
         // densable: owner identity unavailable → reattach-or-fail (keep id)
+        reattachOrFail = true
+        reattachOrigin = 'env_or_fail'
         logForDebugging(
           '[bridge:repl] Env-handoff reattach: owner identity unavailable — reattach-or-fail',
         )
       }
     } catch {
-      // best-effort — keep reattach id
+      // densable Y(w).catch → treat as unreadable identity (fail-closed)
+      reattachOrFail = true
+      reattachOrigin = 'env_or_fail'
+      logForDebugging(
+        '[bridge:repl] Env-handoff reattach: owner identity unavailable — reattach-or-fail',
+      )
     }
   }
   // densable: if ae === sEe()?.id && sEe()?.noHistoryBackfill → ie
@@ -276,6 +565,28 @@ export async function initReplBridge(
     ) {
       forceNoHistoryBackfill = true
     }
+    const restored = getCurrentSessionBridge()
+    if (
+      restored?.id === reattachSessionId &&
+      restored.noHistoryBackfill === true
+    ) {
+      forceNoHistoryBackfill = true
+    }
+  }
+  // densable leftover `Xn` / `if(R)Ce=Xn(),an?.(Ce)` before occupancy.
+  const historyPointer = getCurrentSessionBridge()
+  const leftoverXn = (): { uncertaintyOnly: true } | undefined =>
+    isScanUncertaintyHeld(historySid) &&
+    !suppressHistoryBackfill &&
+    !ownerVetoLatched &&
+    !isSessionHistorySuppressed() &&
+    !isKnownTaintedSession(historySid) &&
+    historyPointer?.noHistoryBackfill !== true &&
+    getSessionId() === historySid
+      ? { uncertaintyOnly: true }
+      : undefined
+  if (forceNoHistoryBackfill) {
+    onHistoryBackfillSuppressed?.(leftoverXn())
   }
   // densable Q: if (q) Q=W?B:wXr()?.groupingId; else Q=k
   // When reattaching from env use GROUPING env; from wXr use meta grouping;
@@ -286,7 +597,9 @@ export async function initReplBridge(
       sessionGroupingId = envReattachGrouping || undefined
     } else {
       sessionGroupingId =
-        getPersistedBridgeSession()?.groupingId ?? sessionGroupingIdOpt
+        getPersistedBridgeSession()?.groupingId ??
+        getCurrentSessionBridge()?.groupingId ??
+        sessionGroupingIdOpt
     }
   } else {
     sessionGroupingId = sessionGroupingIdOpt
@@ -314,8 +627,22 @@ export async function initReplBridge(
   // instead of a misleading policy error from a stale/wrong-org cache.
   if (!getBridgeAccessToken()) {
     logBridgeSkip('no_oauth', '[bridge:repl] Skipping: no OAuth tokens')
-    onStateChange?.('failed', '/login')
+    onStateChange?.('failed', '/login', 'auth')
     return null
+  }
+
+  // densable Jn(jn): revive identity re-check before policy. Same helper as
+  // host-directed ln; do not invent watcher internals here.
+  if (expectedAccount) {
+    const live = getOauthAccountInfoFromDisk()
+    if (!oauthAccountsMatch(live, expectedAccount)) {
+      logBridgeSkip(
+        'revive_identity_recheck_failed',
+        '[bridge:repl] Skipping: revive identity re-check failed (store changed or unreadable since the watcher validated)',
+      )
+      onStateChange?.('failed', HOST_ACCOUNT_CHANGED_HINT, 'terminal')
+      return null
+    }
   }
 
   // 3. Check organization policy — remote control may be disabled
@@ -329,8 +656,16 @@ export async function initReplBridge(
     return null
   }
 
-  // densable 2.1.243 #58 — restored pointer still served by another local pid.
-  if (localHolderGuard && reattachSessionId) {
+  // densable 2.1.243 #58 / 2.1.246 qn — occupancy `sn&&qn&&T&&Mr()`.
+  // Zn latches takeover; Ye fires immediately before Yr, not here
+  // (later skip paths must not emit the event).
+  let restoredPointerTakeover = false
+  if (
+    localHolderGuard &&
+    restoredPointerOccupancy &&
+    reattachSessionId &&
+    isBridgeResumeRespectsLocalOwner()
+  ) {
     const holder = await findLocalBridgeSessionHolder(reattachSessionId)
     if (holder) {
       if (localHolderGuard.mode === 'decline') {
@@ -344,7 +679,45 @@ export async function initReplBridge(
       logForDebugging(
         `[bridge:repl] Explicit enable is taking over bridge session ${reattachSessionId} from local pid ${holder.pid}`,
       )
+      restoredPointerTakeover = true
     }
+  }
+
+  // densable leftover ci=UXs / De=HXs / li=JXs / Me=YXs.
+  // After Zn takeover, before oauth dead skip. torn/gone 不调 Me.
+  const scanSid = historySid
+  if (!isSessionHistorySuppressed()) {
+    const scan = await probeActiveSessionHistorySuppression(
+      getPinnedStorageV5(),
+    )
+    if (scan === 'found') {
+      markSessionHistorySuppressed(scanSid as import('crypto').UUID)
+    } else if (scan === 'clean') {
+      releaseScanPrecautionHold(scanSid)
+    } else if (scan === 'torn') {
+      logEvent('rc_cross_account_suppression', {
+        reason:
+          'scan_torn' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    } else {
+      logEvent('rc_cross_account_suppression', {
+        reason: (scan === 'budget-exhausted'
+          ? 'scan_budget_exhausted'
+          : 'scan_read_error') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      applyScanPrecautionHold(scanSid)
+    }
+  }
+  // densable leftover `if(!R&&(ie()||re(b)||on(b)||k()!==b))R=!0,Ce=Xn(),an?.(Ce)`
+  if (
+    !forceNoHistoryBackfill &&
+    (isSessionHistorySuppressed() ||
+      isPrecautionarySuppressed(scanSid) ||
+      isKnownTaintedSession(scanSid) ||
+      getSessionId() !== scanSid)
+  ) {
+    forceNoHistoryBackfill = true
+    onHistoryBackfillSuppressed?.(leftoverXn())
   }
 
   // When CLAUDE_BRIDGE_OAUTH_TOKEN is set (ant-only local dev), the bridge
@@ -407,7 +780,7 @@ export async function initReplBridge(
         'oauth_expired_unrefreshable',
         '[bridge:repl] Skipping: OAuth token expired and refresh failed (re-login required)',
       )
-      onStateChange?.('failed', '/login')
+      onStateChange?.('failed', '/login', 'auth')
       // Persist for the next process. Increments failCount when re-discovering
       // the same dead token (matched by expiresAt); resets to 1 for a different
       // token. Once count reaches 3, step 2a's early-return fires and this path
@@ -441,6 +814,23 @@ export async function initReplBridge(
   // The slug fallback (e.g. "remote-control-graceful-unicorn") makes
   // auto-started sessions distinguishable in the claude.ai list before the
   // first prompt.
+  // Official Ae leftover @233518704:
+  //   Ae=(e)=>{if(R||He()||Ne())return;let n=k();return n?e(n):void 0}
+  // He = t9s. Ne = en(B(k())). B = Xg = identity, so B(k()) is k().
+  // Ne leftover: Jre||Sno||xno.noHistoryBackfill||Ano||Cno||_4t||y4t.
+  const sessionTitleUnlessHistorySuppressed = (
+    reader: (sid: ReturnType<typeof getSessionId>) => string | undefined,
+  ): string | undefined => {
+    if (
+      forceNoHistoryBackfill ||
+      isForeignSessionBinding() ||
+      shouldSuppressSessionTitleHistory(getSessionId())
+    ) {
+      return undefined
+    }
+    const sid = getSessionId()
+    return sid ? reader(sid) : undefined
+  }
   let title = `remote-control-${generateShortWordSlug()}`
   let hasTitle = false
   let hasExplicitTitle = false
@@ -448,15 +838,23 @@ export async function initReplBridge(
     title = initialName
     hasTitle = true
     hasExplicitTitle = true
-  } else {
-    const sessionId = getSessionId()
-    const customTitle = sessionId
-      ? getCurrentSessionTitle(sessionId)
-      : undefined
+  } else if (!forceNoHistoryBackfill) {
+    // densable R: do not stamp this conversation's title onto a
+    // suppressed / host-directed attach. Official also L(b)/_e(b);
+    // those helpers are not locked locally — skip derivation only.
+    const customTitle = sessionTitleUnlessHistorySuppressed(
+      getCurrentSessionTitle,
+    )
+    const aiTitle = sessionTitleUnlessHistorySuppressed(
+      getCurrentSessionAiTitle,
+    )
     if (customTitle) {
       title = customTitle
       hasTitle = true
       hasExplicitTitle = true
+    } else if (aiTitle) {
+      title = aiTitle
+      hasTitle = true
     } else if (initialMessages && initialMessages.length > 0) {
       // Find the last user message that has meaningful content. Skip meta
       // (nudges), tool results, compact summaries ("This session is being
@@ -488,22 +886,33 @@ export async function initReplBridge(
   }
 
   // Shared by both v1 and v2 — fires on every title-worthy user message until
-  // it returns true. At count 1: deriveTitle placeholder immediately, then
-  // generateSessionTitle (Haiku, sentence-case) fire-and-forget upgrade. At
-  // count 3: re-generate over the full conversation. Skips entirely if the
-  // title is explicit (/remote-control <name> or /rename) — re-checks
-  // sessionStorage at call time so /rename between messages isn't clobbered.
-  // Skips count 1 if initialMessages already derived (that title is fresh);
-  // still refreshes at count 3. v2 passes cse_*; updateBridgeSessionTitle
-  // retags internally.
+  // it returns true. Official Ii @233528249:
+  //   H||Bi(n)||ne===n → done; Ae(X) → done; it(n) → done; then G++
+  //   G===1&&!V → rt (Haiku only; no Xo/deriveTitle)
+  //   G===3 → rt over the conversation (even when V)
+  //   done: G>=3&&(V||H)||G>=8
+  // Count-3 may overwrite our own derived title. Official rt @233526302:
+  //   ei → ct (H / $e / pn / custom / foreign AI title) → rn →
+  //   Pe===null abort / Pe.title&&!Re → ne / else hn.
+  // Bi latch + Ae leftover locked. Do not invent Ln/W/He.
   let userMessageCount = 0
   let lastBridgeSessionId: string | undefined
   let genSeq = 0
   // densable 2.1.239 #39 `_ts` — coalesce + rate-limit title PATCH.
   const ownTitles = new Set<string>(title ? [title] : [])
+  // Official leftover tt=Promise.resolve() — serialize Pi → Kr(s8n).
+  let titlePropagateChain = Promise.resolve()
+  // densable `et` — mint-after-gone slug, distinct from derived `z`.
+  const neutralFallbackTitle = `remote-control-${generateShortWordSlug()}`
   const titleWriter = createTitleWriteScheduler({
     isOwnTitle: (_sessionId, ownTitle) => ownTitles.has(ownTitle),
+    onRemoteTitleAdopted: sessionId => {
+      lastAdoptedRemoteSession = sessionId
+    },
   })
+  // Official Re=(e,n)=>q.has(n)||x.hasSent(e,n). Not isKnownTitle.
+  const isOwnOrSentTitle = (sessionId: string, value: string): boolean =>
+    ownTitles.has(value) || titleWriter.hasSent(sessionId, value)
   const patch = (
     derived: string,
     bridgeSessionId: string,
@@ -519,6 +928,8 @@ export async function initReplBridge(
       .update(bridgeSessionId, derived, {
         baseUrl,
         getAccessToken: getBridgeAccessToken,
+        // Official hn shouldSend: ue=()=>!gn. Do not invent Ln/W/He.
+        shouldSend: () => !teardownStarted,
       })
       .catch(() => {})
   }
@@ -527,23 +938,95 @@ export async function initReplBridge(
   // out-of-order resolution (genSeq — count-1's Haiku resolving after count-3
   // would clobber the richer title). generateSessionTitle never rejects.
   const generateAndPatch = (input: string, bridgeSessionId: string): void => {
+    if (teardownStarted) {
+      return
+    }
     const gen = ++genSeq
     const atCount = userMessageCount
     void generateSessionTitle(input, AbortSignal.timeout(15_000)).then(
-      generated => {
-        if (
-          generated &&
-          gen === genSeq &&
-          lastBridgeSessionId === bridgeSessionId &&
-          !getCurrentSessionTitle(getSessionId())
-        ) {
-          patch(generated, bridgeSessionId, atCount)
+      async generated => {
+        const stale = (): boolean => {
+          const stored = getCurrentSessionTitle(getSessionId())
+          const aiTitle = getCurrentSessionAiTitle(getSessionId())
+          return (
+            teardownStarted ||
+            gen !== genSeq ||
+            lastBridgeSessionId !== bridgeSessionId ||
+            hasExplicitTitle ||
+            Boolean(stored && !ownTitles.has(stored)) ||
+            Boolean(aiTitle && !ownTitles.has(aiTitle))
+          )
         }
+        if (!generated || stale()) {
+          return
+        }
+        const remote = await getBridgeSession(bridgeSessionId, {
+          baseUrl,
+          getAccessToken: getBridgeAccessToken,
+        }).catch(() => null)
+        if (stale()) {
+          return
+        }
+        if (remote === null) {
+          return
+        }
+        if (remote.title && !isOwnOrSentTitle(bridgeSessionId, remote.title)) {
+          titleWriter.noteRemoteTitle(bridgeSessionId, remote.title)
+          lastAdoptedRemoteSession = bridgeSessionId
+          return
+        }
+        patch(generated, bridgeSessionId, atCount)
       },
     )
   }
   const onUserMessage = (text: string, bridgeSessionId: string): boolean => {
-    if (hasExplicitTitle || getCurrentSessionTitle(getSessionId())) {
+    // Official Ii: if(H||Bi(n)||ne===n)return!0.
+    // Bi=(e)=>mn?.bridgeSessionId===e&&mn.sessionId===k()
+    if (
+      hasExplicitTitle ||
+      alreadyAdoptedLocalAi(bridgeSessionId) ||
+      lastAdoptedRemoteSession === bridgeSessionId
+    ) {
+      return true
+    }
+    // Official Ae(X) leftover @233527944 — mid-session /rename that has
+    // not yet set H. He() = foreign binding. Ne() leftover Jre/Sno/xno/y4t.
+    const customTitle = sessionTitleUnlessHistorySuppressed(
+      getCurrentSessionTitle,
+    )
+    if (customTitle) {
+      if (!isOwnOrSentTitle(bridgeSessionId, customTitle)) {
+        void getBridgeSession(bridgeSessionId, {
+          baseUrl,
+          getAccessToken: getBridgeAccessToken,
+        })
+          .catch(() => null)
+          .then(remote => {
+            if (
+              hasExplicitTitle ||
+              getCurrentSessionTitle(getSessionId()) !== customTitle
+            ) {
+              return
+            }
+            if (remote === null) {
+              return
+            }
+            if (
+              remote.title &&
+              !isOwnOrSentTitle(bridgeSessionId, remote.title)
+            ) {
+              titleWriter.noteRemoteTitle(bridgeSessionId, remote.title)
+              lastAdoptedRemoteSession = bridgeSessionId
+              return
+            }
+            patch(customTitle, bridgeSessionId, userMessageCount)
+            hasExplicitTitle = true
+          })
+      }
+      return true
+    }
+    // Official it(n) before increment — REPL AI title → CCR PATCH.
+    if (syncLocalAiTitle(bridgeSessionId)) {
       return true
     }
     // v1 env-lost re-creates the session with a new ID. Reset the count so
@@ -559,18 +1042,177 @@ export async function initReplBridge(
     lastBridgeSessionId = bridgeSessionId
     userMessageCount++
     if (userMessageCount === 1 && !hasTitle) {
-      const placeholder = deriveTitle(text)
-      if (placeholder) patch(placeholder, bridgeSessionId, userMessageCount)
       generateAndPatch(text, bridgeSessionId)
     } else if (userMessageCount === 3) {
-      const msgs = getMessages?.()
+      // densable Ii: `R||He()||Ne() ? void 0 : p?.()` — bounce sets R so
+      // count-3 must not title the minted cse_* from this conversation.
+      const msgs =
+        forceNoHistoryBackfill ||
+        isForeignSessionBinding() ||
+        shouldSuppressSessionTitleHistory(getSessionId())
+          ? undefined
+          : getMessages?.()
       const input = msgs
         ? extractConversationText(getMessagesAfterCompactBoundary(msgs))
         : text
       generateAndPatch(input, bridgeSessionId)
     }
-    // Also re-latches if v1 env-lost resets the transport's done flag past 3.
-    return userMessageCount >= 3
+    // Official: G>=3&&(V||H) || G>=8
+    return (
+      (userMessageCount >= 3 && (hasTitle || hasExplicitTitle)) ||
+      userMessageCount >= 8
+    )
+  }
+
+  // densable 2.1.246 `it` / `Ui` — REPL Haiku title → CCR PATCH.
+  let handleRef: ReplBridgeHandle | null = null
+  let teardownStarted = false
+  let lastAdoptedRemoteSession: string | undefined
+  let adoptedLocalAi: { bridgeSessionId: string; sessionId: string } | undefined
+  const alreadyAdoptedLocalAi = (bridgeSessionId: string): boolean =>
+    adoptedLocalAi?.bridgeSessionId === bridgeSessionId &&
+    adoptedLocalAi.sessionId === getSessionId()
+  const syncLocalAiTitle = (bridgeSessionId: string): boolean => {
+    // Official it: if(!Ae(we)||Re(e,Ae(we)))return!1
+    const aiTitle = sessionTitleUnlessHistorySuppressed(
+      getCurrentSessionAiTitle,
+    )
+    if (!aiTitle || isOwnOrSentTitle(bridgeSessionId, aiTitle)) {
+      return false
+    }
+    const sessionId = getSessionId()
+    void getBridgeSession(bridgeSessionId, {
+      baseUrl,
+      getAccessToken: getBridgeAccessToken,
+    })
+      .catch(() => null)
+      .then(remote => {
+        if (
+          hasExplicitTitle ||
+          teardownStarted ||
+          lastAdoptedRemoteSession === bridgeSessionId ||
+          getCurrentSessionTitle(getSessionId())
+        ) {
+          return
+        }
+        if (remote === null) return
+        if (remote.title && !isOwnOrSentTitle(bridgeSessionId, remote.title)) {
+          titleWriter.noteRemoteTitle(bridgeSessionId, remote.title)
+          lastAdoptedRemoteSession = bridgeSessionId
+          return
+        }
+        if (
+          getSessionId() !== sessionId ||
+          getCurrentSessionAiTitle(sessionId) !== aiTitle
+        ) {
+          return
+        }
+        ownTitles.add(aiTitle)
+        // Official it: pn++ before hn so in-flight rt aborts.
+        genSeq++
+        adoptedLocalAi = { bridgeSessionId, sessionId }
+        void titleWriter
+          .update(bridgeSessionId, aiTitle, {
+            baseUrl,
+            getAccessToken: getBridgeAccessToken,
+            shouldSend: () => !teardownStarted,
+          })
+          .catch(() => {})
+      })
+    return true
+  }
+  const adoptLocalAiTitle = (): void => {
+    const e = handleRef?.bridgeSessionId
+    if (
+      !e ||
+      hasExplicitTitle ||
+      teardownStarted ||
+      lastAdoptedRemoteSession === e ||
+      getCurrentSessionTitle(getSessionId())
+    ) {
+      return
+    }
+    syncLocalAiTitle(e)
+  }
+  const attachAdoptLocalAiTitle = <T extends ReplBridgeHandle>(
+    handle: T | null,
+  ): T | null => {
+    if (!handle) return null
+    handleRef = handle
+    const originalTeardown = handle.teardown.bind(handle)
+    handle.teardown = async opts => {
+      teardownStarted = true
+      titleWriter.forget(handle.bridgeSessionId)
+      await originalTeardown(opts)
+    }
+    handle.adoptLocalAiTitle = adoptLocalAiTitle
+    // Official leftover after Yr: M.selfTitle=z
+    handle.selfTitle = title
+    handle.titleWriter = titleWriter
+    return handle
+  }
+
+  // Official Pi @233526810 leftover. Cr = leftover sanitize (local uge).
+  // Or = Jxc = isTeammate. Kr = s8n leftover 3-arg (zd/u8n/p8n/rTe/ZAt/J0/doe).
+  // BQ=Li / VAt=Ti / Pm=Oi / mhe=u8o / storageV5=w leftover.
+  const onRenameSession = (
+    rawTitle: string,
+  ): { ok: true } | { ok: false; error: string } => {
+    const n = sanitizeSessionTitle(rawTitle)
+    if (!n) {
+      return { ok: false, error: 'title must be non-empty' }
+    }
+    title = n
+    hasTitle = true
+    hasExplicitTitle = true
+    ownTitles.add(n)
+    ownTitles.add(rawTitle)
+    if (handleRef) {
+      handleRef.selfTitle = n
+      titleWriter.noteRemoteTitle(handleRef.bridgeSessionId, n)
+      if (rawTitle !== n) {
+        titleWriter.noteRemoteTitle(handleRef.bridgeSessionId, rawTitle)
+      }
+    }
+    const foreign = isForeignSessionBinding()
+    const sid = foreign ? getForeignBoundSid() : getSessionId()
+    if (sid) {
+      void saveCustomTitle(
+        sid as import('crypto').UUID,
+        n,
+        foreign ? getTranscriptPathForSession(sid) : undefined,
+        'remote',
+        getPinnedStorageV5(),
+      ).catch(err => {
+        logForDebugging(
+          `saveCustomTitle: transcript append failed: ${errorMessage(err)}`,
+        )
+      })
+    } else {
+      logForDebugging(
+        '[bridge:repl] Dropping inbound rename mirror: foreign binding with no bound-sid exposure \u2014 the live conversation is not the one the phone renamed',
+      )
+    }
+    // Official leftover: if(!Or()&&!u) tt.then(Kr(n,"user",w))
+    if (!isTeammate() && !foreign) {
+      titlePropagateChain = titlePropagateChain.then(async () => {
+        try {
+          await applyLeftoverS8nUserName(n, {
+            persistAgentName: async name => {
+              const liveSid = getSessionId()
+              if (!liveSid) return
+              await saveAgentName(liveSid as import('crypto').UUID, name)
+            },
+            storageV5: getPinnedStorageV5(),
+          })
+        } catch (err) {
+          logForDebugging(
+            `onRenameSession: name propagation failed: ${errorMessage(err)}`,
+          )
+        }
+      })
+    }
+    return { ok: true }
   }
 
   const initialHistoryCap = getFeatureValue_CACHED_WITH_REFRESH(
@@ -630,42 +1272,105 @@ export async function initReplBridge(
         ? `[bridge:repl] Forcing env-less path for reattach ${reattachSessionId}`
         : '[bridge:repl] Using env-less bridge path (tengu_bridge_repl_v2)',
     )
+    // densable Jn(ln): host-directed target on a recorded conversation —
+    // re-verify Fe immediately before Yr. Do not invent jn/revive recheck.
+    if (hostTargetOwner) {
+      // densable Jn: We() fresh store read, not the getGlobalConfig cache.
+      const live = getOauthAccountInfoFromDisk()
+      if (!oauthAccountsMatch(live, hostTargetOwner)) {
+        logBridgeSkip(
+          'host_target_owner_recheck_failed',
+          '[bridge:repl] Skipping: the login changed (or became unreadable) between adjudicating this conversation\u2019s owner and connecting \u2014 not attaching it to the host\u2019s session.',
+        )
+        onStateChange?.('failed', HOST_ACCOUNT_CHANGED_HINT)
+        return null
+      }
+      logForDebugging(
+        '[bridge:repl] Host-directed target on a recorded conversation: owner re-verified immediately before connecting',
+      )
+    }
+    // densable `if(Zn)Ye("tengu_bridge_restored_pointer_takeover",{})` — after
+    // Jn, immediately before Yr. Do not invent env-based / v1 emit.
+    if (restoredPointerTakeover) {
+      logEvent('tengu_bridge_restored_pointer_takeover', {})
+    }
     const { initEnvLessBridgeCore } = await import('./remoteBridgeCore.js')
-    return initEnvLessBridgeCore({
-      baseUrl,
-      orgUUID,
-      title,
-      getAccessToken: getBridgeAccessToken,
-      onAuth401: handleOAuth401Error,
-      toSDKMessages,
-      initialHistoryCap,
-      initialMessages,
-      // densable Hzu: reattachSessionId / reattachSequenceNum reuse Se when set.
-      // Fresh sessions mint a new cse_* id (no previouslyFlushedUUIDs — the set
-      // would block history across enable→disable→re-enable). Reattach skips
-      // initial history flush the same way (server already has events).
-      // densable noHistoryBackfill:ie — q5o/NO_BACKFILL forces Ge skip (#5).
-      onInboundMessage,
-      onUserMessage,
-      onPermissionResponse,
-      onInterrupt,
-      onStopTask,
-      onSetModel,
-      onSetMaxThinkingTokens,
-      onSetPermissionMode,
-      onSetMcpPermissionModeOverride,
-      onStateChange,
-      outboundOnly,
-      tags,
-      sessionGroupingId,
-      reattachSessionId,
-      reattachSequenceNum,
-      noHistoryBackfill: forceNoHistoryBackfill || undefined,
-      // densable mOp neutralFallbackTitle:jt — mint-after-gone drops derived
-      // title (Pe=c??slug). Precompute a neutral slug so resumed conversation
-      // title is not stamped onto the fresh remote session (#5).
-      neutralFallbackTitle: `remote-control-${generateShortWordSlug()}`,
-    })
+    return attachAdoptLocalAiTitle(
+      await initEnvLessBridgeCore({
+        baseUrl,
+        orgUUID,
+        title,
+        getAccessToken: getBridgeAccessToken,
+        onAuth401: handleOAuth401Error,
+        toSDKMessages,
+        initialHistoryCap,
+        // densable initialMessages: R ? void 0 : J
+        initialMessages: forceNoHistoryBackfill ? undefined : initialMessages,
+        // densable Hzu: reattachSessionId / reattachSequenceNum reuse Se when set.
+        // Fresh sessions mint a new cse_* id (no previouslyFlushedUUIDs — the set
+        // would block history across enable→disable→re-enable). Reattach skips
+        // initial history flush the same way (server already has events).
+        // densable noHistoryBackfill:ie — q5o/NO_BACKFILL forces Ge skip (#5).
+        onInboundMessage,
+        onUserMessage,
+        onPermissionResponse,
+        onInterrupt,
+        onStopTask,
+        onSetModel,
+        onSetMaxThinkingTokens,
+        onSetPermissionMode,
+        onSetMcpPermissionModeOverride,
+        onRenameSession,
+        onStateChange,
+        outboundOnly,
+        tags,
+        sessionGroupingId,
+        reattachSessionId,
+        reattachSequenceNum,
+        reattachOrFail,
+        reattachOrigin,
+        // densable u: q.add(et), R=!0, an?.(), L(b), te(b), _e(b).
+        // an hook 未锁. L=qXs, te=KXs, _e=ZXs.
+        onReattachGoneBounce: () => {
+          ownTitles.add(neutralFallbackTitle)
+          forceNoHistoryBackfill = true
+          const sid = getSessionId()
+          markPrecautionarySessionSuppression(sid)
+          markResilientPrecautionSid(sid)
+          clearScanUncertaintyHoldSid(sid)
+        },
+        onReattachPointerDead: () => {
+          const sid = getSessionId()
+          markPrecautionarySessionSuppression(sid)
+          markResilientPrecautionSid(sid)
+          clearScanUncertaintyHoldSid(sid)
+          // densable pi(b,cn,…) only when !xe — torn pair must not tombstone
+          // the other session's pointer.
+          if (!tornEntryPair) {
+            const sessionFile = getProjectSessionFile()
+            clearBridgeSession(
+              sid as import('crypto').UUID,
+              sessionFile ?? undefined,
+              sessionFile ? { targetExists: true } : undefined,
+            )
+          }
+        },
+        // densable leftover `Ei.onTransportPersistenceReady`.
+        // `R||Ne()` → skip `ur`, still `ii`/`si`. `l=await zr(w); await ur(...)`.
+        onTransportPersistenceReady: (writer, readers) => {
+          startTranscriptPersistenceBackfill(
+            forceNoHistoryBackfill ||
+              shouldSuppressSessionTitleHistory(getSessionId()),
+            writer,
+            readers,
+            getPinnedStorageV5(),
+          )
+        },
+        noHistoryBackfill: forceNoHistoryBackfill || undefined,
+        // densable mOp neutralFallbackTitle:jt — same `et` bounce adds to q.
+        neutralFallbackTitle,
+      }),
+    )
   }
 
   // ── v1 path: env-based (register/poll/ack/heartbeat) ──────────────────
@@ -702,65 +1407,74 @@ export async function initReplBridge(
   // 6. Delegate. BridgeCoreHandle is a structural superset of
   // ReplBridgeHandle (adds writeSdkMessages which REPL callers don't use),
   // so no adapter needed — just the narrower type on the way out.
-  return initBridgeCore({
-    dir: getOriginalCwd(),
-    machineName: hostname(),
-    branch,
-    gitRepoUrl,
-    title,
-    baseUrl,
-    sessionIngressUrl,
-    workerType,
-    getAccessToken: getBridgeAccessToken,
-    createSession: opts =>
-      createBridgeSession({
-        ...opts,
-        events: [],
-        baseUrl,
-        getAccessToken: getBridgeAccessToken,
-      }),
-    archiveSession: async sessionId => {
-      const ok = await archiveBridgeSession(sessionId, {
-        baseUrl,
-        getAccessToken: getBridgeAccessToken,
-        // gracefulShutdown.ts:407 races runCleanupFunctions against 2s.
-        // Teardown also does stopWork (parallel) + deregister (sequential),
-        // so archive can't have the full budget. 1.5s matches v2's
-        // teardown_archive_timeout_ms default.
-        timeoutMs: 1500,
-      })
-      if (!ok) {
-        logForDebugging(
-          `[bridge:repl] archiveBridgeSession failed for ${sessionId}`,
-          { level: 'error' },
-        )
-      }
-    },
-    // getCurrentTitle is read on reconnect-after-env-lost to re-title the new
-    // session. /rename writes to session storage; onUserMessage mutates
-    // `title` directly — both paths are picked up here.
-    getCurrentTitle: () => getCurrentSessionTitle(getSessionId()) ?? title,
-    onUserMessage,
-    toSDKMessages,
-    onAuth401: handleOAuth401Error,
-    getPollIntervalConfig,
-    initialHistoryCap,
-    initialMessages,
-    previouslyFlushedUUIDs,
-    onInboundMessage,
-    onPermissionResponse,
-    onInterrupt,
-    onStopTask,
-    onSetModel,
-    onSetMaxThinkingTokens,
-    onSetPermissionMode,
-    onSetMcpPermissionModeOverride,
-    onStateChange,
-    perpetual,
-    // densable classic Qt: B / He pass-through for left-arrow rit
-    outboundOnly,
-    sessionGroupingId,
-  })
+  return attachAdoptLocalAiTitle(
+    await initBridgeCore({
+      dir: getOriginalCwd(),
+      machineName: hostname(),
+      branch,
+      gitRepoUrl,
+      title,
+      baseUrl,
+      sessionIngressUrl,
+      workerType,
+      getAccessToken: getBridgeAccessToken,
+      createSession: opts =>
+        createBridgeSession({
+          ...opts,
+          events: [],
+          baseUrl,
+          getAccessToken: getBridgeAccessToken,
+        }),
+      archiveSession: async sessionId => {
+        const ok = await archiveBridgeSession(sessionId, {
+          baseUrl,
+          getAccessToken: getBridgeAccessToken,
+          // gracefulShutdown.ts:407 races runCleanupFunctions against 2s.
+          // Teardown also does stopWork (parallel) + deregister (sequential),
+          // so archive can't have the full budget. 1.5s matches v2's
+          // teardown_archive_timeout_ms default.
+          timeoutMs: 1500,
+        })
+        if (!ok) {
+          logForDebugging(
+            `[bridge:repl] archiveBridgeSession failed for ${sessionId}`,
+            { level: 'error' },
+          )
+        }
+      },
+      // getCurrentTitle is read on reconnect-after-env-lost to re-title the new
+      // session. /rename writes to session storage; onUserMessage mutates
+      // `title` directly — both paths are picked up here. Same R gate as v2:
+      // owner-veto / no-backfill must not stamp this conversation's title onto
+      // a freshly minted remote session.
+      getCurrentTitle: () =>
+        sessionTitleUnlessHistorySuppressed(getCurrentSessionTitle) ?? title,
+      onUserMessage,
+      toSDKMessages,
+      onAuth401: handleOAuth401Error,
+      getPollIntervalConfig,
+      initialHistoryCap,
+      // densable initialMessages: R ? void 0 : J — v1 must honor the same
+      // withhold as env-less. Owner veto clears reattachSessionId so this
+      // path is the default (GB v2 off / perpetual).
+      initialMessages: forceNoHistoryBackfill ? undefined : initialMessages,
+      previouslyFlushedUUIDs,
+      onInboundMessage,
+      onPermissionResponse,
+      onInterrupt,
+      onStopTask,
+      onSetModel,
+      onSetMaxThinkingTokens,
+      onSetPermissionMode,
+      onSetMcpPermissionModeOverride,
+      onRenameSession,
+      onStateChange,
+      perpetual,
+      // densable classic Qt: B / He pass-through for left-arrow rit
+      outboundOnly,
+      sessionGroupingId,
+    }),
+  )
 }
 
 const TITLE_MAX_LEN = 50

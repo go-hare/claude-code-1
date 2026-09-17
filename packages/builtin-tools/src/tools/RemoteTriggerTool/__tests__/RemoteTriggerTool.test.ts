@@ -10,6 +10,9 @@ import {
 } from 'bun:test'
 import { authMock } from '../../../../../../tests/mocks/auth'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
+import { oauthClientMock } from '../../../../../../tests/mocks/oauthSurface.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+import * as realRemoteTriggerAudit from 'src/utils/remoteTriggerAudit.js'
 
 let requestStatus = 200
 const auditRecords: Record<string, unknown>[] = []
@@ -26,11 +29,13 @@ beforeAll(() => {
 
 mock.module('src/utils/auth.js', authMock)
 
-mock.module('src/services/oauth/client.js', () => ({
-  getOrganizationUUID: async () => 'org',
-}))
+mock.module('src/services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => 'org',
+  }),
+)
+const remoteTriggerAuditSnap = snapshotModuleExports(realRemoteTriggerAudit)
 
-import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 const realGrowthbook = await import('src/services/analytics/growthbook.js')
 const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
@@ -70,6 +75,7 @@ mock.module('src/constants/oauth.js', () => {
 })
 
 mock.module('src/utils/remoteTriggerAudit.js', () => ({
+  ...remoteTriggerAuditSnap,
   appendRemoteTriggerAuditRecord: async (record: Record<string, unknown>) => {
     const fullRecord = {
       auditId: `audit-${auditRecords.length + 1}`,

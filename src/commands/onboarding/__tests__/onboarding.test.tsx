@@ -1,4 +1,5 @@
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { analyticsMock, pushAnalyticsLogEvent } from '../../../../tests/mocks/analytics.js';
 import * as React from 'react';
 import { logMock } from '../../../../tests/mocks/log';
 import { debugMock } from '../../../../tests/mocks/debug';
@@ -15,19 +16,14 @@ afterAll(() => {
   mock.module('@anthropic/ink', () => ({ ..._inkSnap }));
 });
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}));
+mock.module('bun:bundle', bunBundleMock);
 
 mock.module('src/utils/log.ts', logMock);
 mock.module('src/utils/debug.ts', debugMock);
 
 const loggedEvents: Array<{ name: string; payload: unknown }> = [];
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: (name: string, payload: unknown) => {
-    loggedEvents.push({ name, payload });
-  },
-}));
+let popAnalyticsLogEvent: (() => void) | undefined;
+mock.module('src/services/analytics/index.js', analyticsMock);
 
 // In-memory config used by the global/project config helpers so the
 // command's persistence path is exercised without touching disk.
@@ -90,6 +86,7 @@ mock.module('src/components/ThemePicker.js', () => ({
 import { callOnboarding, parseSubcommand, type OnboardingSubcommand } from '../launchOnboarding.js';
 import onboardingCommand from '../index.js';
 import type { LocalJSXCommandContext } from '../../../types/command.js';
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js';
 
 type DoneCall = { msg?: string; opts?: { display?: string } };
 
@@ -109,6 +106,16 @@ function makeOnDone(): {
     calls,
   };
 }
+
+beforeAll(() => {
+  popAnalyticsLogEvent = pushAnalyticsLogEvent((name, payload) => {
+    loggedEvents.push({ name, payload });
+  });
+});
+
+afterAll(() => {
+  popAnalyticsLogEvent?.();
+});
 
 beforeEach(() => {
   loggedEvents.length = 0;

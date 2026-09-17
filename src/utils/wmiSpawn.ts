@@ -1,5 +1,6 @@
 /**
- * Daemon self-spawn densable (official 2.1.210 client-attach Ay6).
+ * Daemon self-spawn densable (official 2.1.210 client-attach Ay6 + 2.1.246
+ * npm-reinstall wait).
  *
  *   Ay6(cliArgs):
  *     argv = WE() + cliArgs
@@ -7,14 +8,20 @@
  *     if windows: dAO(WMI) → ok return
  *                 else short warn + tengu_bg_daemon_wmi_fallback
  *     err = rsK(argv, env)   // all platforms
+ *     if errno∈to && target under node_modules/@… : cr() wait + respawn
+ *       (tengu_bg_daemon_spawn_reinstall_wait)  — densable 246 #8
  *     if ENOENT|EACCES: WE({pinToCurrentBinary:true}) + rsK again
  *
  * WMI details: dAO/cAO/lAO/nAO/iAO (Windows only).
  */
 
 import { spawn, spawnSync, type ChildProcess } from 'child_process'
+import { access, constants, stat } from 'fs/promises'
 import { logEvent } from '../services/analytics/index.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/index.js'
 import { buildCliLaunch } from './cliLaunch.js'
+import { logForDebugging } from './debug.js'
+import { getSelfLaunch } from './processWrapper.js'
 
 export interface WmiSpawnOptions {
   execPath: string
@@ -29,9 +36,74 @@ export interface WmiSpawnResult {
   pid?: number
   error?: string
   usedFallback?: 'direct' | 'execpath'
+  /** densable 246 — spawn succeeded after waiting out an npm rewrite. */
+  recoveredAfterReinstallWait?: boolean
   /** Official dAO reason tag when WMI failed (timeout / enoent / rc=N / …). */
   wmiReason?: string
   rc?: number
+}
+
+/** densable Zn — max wait while npm rewrites the package binary. */
+export const DAEMON_REINSTALL_WAIT_MS = 10_000
+/** densable Qn — poll interval during reinstall wait. */
+export const DAEMON_REINSTALL_POLL_MS = 250
+/** densable eo — reject npm stub shims smaller than this. */
+export const DAEMON_NPM_STUB_MAX_BYTES = 65_536
+/** densable `to` — errnos that trigger reinstall wait on npm package paths. */
+export const DAEMON_REINSTALL_WAIT_ERRNOS = new Set([
+  'ENOENT',
+  'EACCES',
+  'ENOEXEC',
+  'EFTYPE',
+  'ETXTBSY',
+  'EBUSY',
+  'EUNKNOWN',
+  'EPERM',
+])
+
+/**
+ * densable `dr` — npm global/package path that can vanish mid-reinstall.
+ * SEA checks `@anthropic-ai/`; local publish scope is `@go-hare/`.
+ */
+export function isNpmClaudePackagePath(path: string): boolean {
+  const n = path.replace(/\\/g, '/')
+  return (
+    n.includes('/node_modules/@anthropic-ai/') ||
+    n.includes('/node_modules/@go-hare/')
+  )
+}
+
+/** densable `Z` — file exists, executable, and not a tiny npm stub. */
+export async function isRunnableDaemonBinary(
+  path: string,
+  opts?: { rejectNpmStub?: boolean },
+): Promise<boolean> {
+  try {
+    const st = await stat(path)
+    if (!st.isFile()) return false
+    if (opts?.rejectNpmStub && st.size < DAEMON_NPM_STUB_MAX_BYTES) {
+      return false
+    }
+    await access(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** densable `cr` — poll until target is runnable again (or Zn elapses). */
+export async function waitForNpmReinstallRecovery(
+  path: string,
+): Promise<{ recovered: boolean; waitedMs: number }> {
+  const start = Date.now()
+  const deadline = start + DAEMON_REINSTALL_WAIT_MS
+  while (Date.now() < deadline) {
+    await new Promise<void>(r => setTimeout(r, DAEMON_REINSTALL_POLL_MS))
+    if (await isRunnableDaemonBinary(path, { rejectNpmStub: true })) {
+      return { recovered: true, waitedMs: Date.now() - start }
+    }
+  }
+  return { recovered: false, waitedMs: Date.now() - start }
 }
 
 /**
@@ -493,7 +565,7 @@ export async function spawnDaemonCli(
   }
 
   // All platforms: official rsK.
-  const first = await spawnDetachedDirect(primaryArgv, env)
+  let first = await spawnDetachedDirect(primaryArgv, env)
   if (!first.error) {
     return {
       success: true,
@@ -502,7 +574,57 @@ export async function spawnDaemonCli(
     }
   }
 
-  const code = errnoCode(first.error)
+  // densable 246: wait out npm rewrite of node_modules/@… target before pin.
+  let code = errnoCode(first.error)
+  const target = getSelfLaunch(baseEnv).target
+  if (
+    code !== undefined &&
+    DAEMON_REINSTALL_WAIT_ERRNOS.has(code) &&
+    isNpmClaudePackagePath(target)
+  ) {
+    const wait = await waitForNpmReinstallRecovery(target)
+    let respawnOk = false
+    let respawnErrno: string | undefined
+    if (wait.recovered) {
+      if (process.platform === 'win32') {
+        const wmi = await spawnViaWmi(primaryArgv, env, timeout)
+        first = wmi.ok
+          ? { error: null, pid: undefined }
+          : await spawnDetachedDirect(primaryArgv, env)
+      } else {
+        first = await spawnDetachedDirect(primaryArgv, env)
+      }
+      respawnOk = first.error === null
+      respawnErrno = errnoCode(first.error)
+    }
+    logEvent('tengu_bg_daemon_spawn_reinstall_wait', {
+      waited_ms: wait.waitedMs,
+      recovered: wait.recovered,
+      respawn_ok: wait.recovered && respawnOk,
+      errno: (code ??
+        'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...(wait.recovered && !respawnOk && respawnErrno
+        ? {
+            respawn_errno:
+              respawnErrno as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }
+        : {}),
+    })
+    if (wait.recovered && respawnOk) {
+      logForDebugging(
+        `daemon: ${target} was being reinstalled (exec ${code}); started it after ${wait.waitedMs}ms`,
+        { level: 'warn' },
+      )
+      return {
+        success: true,
+        pid: first.pid,
+        recoveredAfterReinstallWait: true,
+        usedFallback: process.platform === 'win32' ? 'direct' : undefined,
+      }
+    }
+    code = errnoCode(first.error) ?? code
+  }
+
   if (code === 'ENOENT' || code === 'EACCES') {
     // Official: WE({ pinToCurrentBinary: true }) when cmd differs.
     const pinned = buildCliLaunch(cliArgs, {
@@ -535,7 +657,7 @@ export async function spawnDaemonCli(
 
   return {
     success: false,
-    error: first.error.message,
+    error: first.error?.message ?? 'failed to spawn transient daemon',
     usedFallback: 'direct',
   }
 }

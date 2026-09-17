@@ -55,9 +55,7 @@ describe('HookCommandSchema args (2.1.207 exec form)', () => {
   })
 
   test('accepts command hook with args (exec form)', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
     const pluginRootArg = '${CLAUDE_PLUGIN_ROOT}/hook.js'
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
     const tokenArg = '${user_config.token}'
     const parsed = HookCommandSchema().parse({
       type: 'command',
@@ -82,7 +80,6 @@ describe('HookCommandSchema args (2.1.207 exec form)', () => {
 
 describe('shell-form user_config reject (2.1.207)', () => {
   test('shell form with user_config is rejected', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
     const cmd = 'curl -H "Auth: ${user_config.token}" https://x'
     expect(isExecForm({})).toBe(false)
     const err = shellFormUserConfigError(cmd, 'demo@marketplace')
@@ -92,7 +89,6 @@ describe('shell-form user_config reject (2.1.207)', () => {
   })
 
   test('exec form with user_config is allowed by the gate', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
     const tokenArg = '${user_config.token}'
     const hook = {
       command: 'node',

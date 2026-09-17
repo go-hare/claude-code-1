@@ -19,7 +19,7 @@ const realGetGlobalConfig = configSnap.getGlobalConfig as typeof realConfig.getG
 
 mock.module('src/utils/log.ts', logMock);
 mock.module('src/utils/debug.ts', debugMock);
-mock.module('bun:bundle', () => ({ feature: () => false }));
+mock.module('bun:bundle', bunBundleMock);
 mock.module('src/utils/settings/settings.js', () => ({
   ...settingsSnap,
   getCachedOrDefaultSettings: () => ({}),
@@ -45,6 +45,7 @@ afterAll(() => {
 
 import { renderToString } from '../../../utils/staticRender.js';
 import type { AuthStatus } from '../getAuthStatus.js';
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js';
 
 // Helper to build minimal AuthStatus fixtures
 function makeStatus(overrides: Partial<AuthStatus> = {}): AuthStatus {

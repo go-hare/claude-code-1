@@ -14,17 +14,23 @@ import {
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { setProjectRoot } from '../bootstrap/state.js'
+import { getProjectRoot, setProjectRoot } from '../bootstrap/state.js'
 import * as realEnvUtils from '../utils/envUtils.js'
 import * as realResidualGates from '../utils/residualFinalEnvGates.js'
 import { debugMock } from '../../tests/mocks/debug.js'
 import { snapshotModuleExports } from '../../tests/mocks/settings.js'
+import { cleanupRegistryMock } from '../../tests/mocks/taskSurface.js'
+import * as realLockfile from '../utils/lockfile.js'
+import * as realPasteStore from '../utils/pasteStore.js'
 
 let tmpHome: string
+const suiteProjectRoot = getProjectRoot()
 
 // Snapshot BEFORE mock.module — live namespace rebinds under Bun.
 const envUtilsSnap = snapshotModuleExports(realEnvUtils)
 const residualGatesSnap = snapshotModuleExports(realResidualGates)
+const lockfileSnap = snapshotModuleExports(realLockfile)
+const pasteStoreSnap = snapshotModuleExports(realPasteStore)
 
 // Preserve full residual gate surface — incomplete mocks pollute sibling files.
 mock.module('src/utils/residualFinalEnvGates.js', () => ({
@@ -32,9 +38,7 @@ mock.module('src/utils/residualFinalEnvGates.js', () => ({
   shouldSkipPromptHistory: () => false,
 }))
 
-mock.module('src/utils/cleanupRegistry.js', () => ({
-  registerCleanup: () => {},
-}))
+mock.module('src/utils/cleanupRegistry.js', cleanupRegistryMock)
 
 // Complete debug surface — incomplete {logForDebugging} drops isDebugToStdErr
 // and poisons /tui co-suites under process-global mock.module.
@@ -51,12 +55,14 @@ mock.module('src/utils/envUtils.js', () => ({
 }))
 
 mock.module('src/utils/pasteStore.js', () => ({
+  ...pasteStoreSnap,
   hashPastedText: (s: string) => `h:${s.length}`,
   storePastedText: async () => {},
   retrievePastedText: async () => null,
 }))
 
 mock.module('src/utils/lockfile.js', () => ({
+  ...lockfileSnap,
   lock: async () => async () => {},
 }))
 
@@ -101,6 +107,7 @@ describe('densable 2.1.218 #20 history race', () => {
 
   afterEach(() => {
     clearPendingHistoryEntries()
+    setProjectRoot(suiteProjectRoot)
     try {
       rmSync(tmpHome, { recursive: true, force: true })
     } catch {
@@ -111,10 +118,14 @@ describe('densable 2.1.218 #20 history race', () => {
   afterAll(() => {
     // Explicit restore with pre-mock snapshots — do NOT mock.restore() after
     // re-registering (restore can re-apply last factories that close over tmpHome).
+    setProjectRoot(suiteProjectRoot)
     mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
     mock.module('src/utils/residualFinalEnvGates.js', () => ({
       ...residualGatesSnap,
     }))
+    mock.module('src/utils/lockfile.js', () => ({ ...lockfileSnap }))
+    mock.module('src/utils/lockfile.ts', () => ({ ...lockfileSnap }))
+    mock.module('src/utils/pasteStore.js', () => ({ ...pasteStoreSnap }))
   })
 
   test('flush keeps concurrent adds: two sequential adds both land once', async () => {

@@ -6,7 +6,7 @@
 
 import type { Command } from '../../commands.js'
 import type { AppState } from '../../state/AppStateStore.js'
-import type { Tool } from '../../Tool.js'
+import type { Tool, Tools } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { isShuttingDown } from '../../utils/gracefulShutdown.js'
@@ -41,7 +41,7 @@ const POLICY_BLOCKED_ERROR = 'MCP server blocked by policy'
 
 export type HeadlessDynamicMcpState = {
   clients: MCPServerConnection[]
-  tools: Tool[]
+  tools: Tools
   configs?: Record<string, ScopedMcpServerConfig>
 }
 

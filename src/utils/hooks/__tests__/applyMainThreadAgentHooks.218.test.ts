@@ -5,12 +5,10 @@ import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: <T>(v: T) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 const { getMainThreadAgentHooks, setMainThreadAgentHooks } = await import(
   '../../../bootstrap/state.js'

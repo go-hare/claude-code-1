@@ -67,6 +67,8 @@ export type RemoteSessionConfig = {
   orgUuid: string
   /** True if session was created with an initial prompt that's being processed */
   hasInitialPrompt?: boolean
+  /** densable `I.initialPromptUuid` — seeded remote prompt id for F$ */
+  initialPromptUuid?: string
   /**
    * When true, this client is a pure viewer. Ctrl+C/Escape do NOT send
    * interrupt to the remote agent; 60s reconnect timeout is disabled;

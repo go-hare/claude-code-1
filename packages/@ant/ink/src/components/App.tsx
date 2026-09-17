@@ -53,14 +53,8 @@ import {
 } from '../core/parse-keypress.js';
 import reconciler from '../core/reconciler.js';
 import instances from '../core/instances.js';
-import {
-  clearSelection,
-  finishSelection,
-  hasSelection,
-  type SelectionState,
-  startSelection,
-} from '../core/selection.js';
-import { isXtermJs, setXtversionName, supportsExtendedKeys } from '../core/terminal.js';
+import { clearSelection, finishSelection, hasSelection, type SelectionState } from '../core/selection.js';
+import { isGhosttyXtversion, isXtermJs, setXtversionName, supportsExtendedKeys } from '../core/terminal.js';
 import { _getClipboardHostPlatform, readNativeClipboard } from '../core/termio/osc.js';
 import type { MouseClickResult } from '../core/events/click-event.js';
 import {
@@ -146,6 +140,11 @@ type Props = {
   // screen buffer to find word/line boundaries and mutates selection,
   // setting isDragging=true so a subsequent drag extends by word/line.
   readonly onMultiClick: (col: number, row: number, count: 2 | 3) => void;
+  /**
+   * densable `onSelectionStart` — first left press. Ink implements
+   * `startSelection` (official `Tp`; `Cy(rootNode)` scope unidentified).
+   */
+  readonly onSelectionStart: (col: number, row: number) => void;
   // Called on drag-motion. Mode-aware: char mode updates focus to the
   // exact cell; word/line mode snaps to word/line boundaries. Needs
   // screen-buffer access (word boundaries) so lives on Ink, not here.
@@ -189,6 +188,17 @@ const MULTI_CLICK_TIMEOUT_MS = 500;
 const MULTI_CLICK_DISTANCE = 1;
 /** densable `yvf` — click-to-focus grace after `Jhf()`. */
 export const WINDOW_ACTIVATION_GRACE_MS = 400;
+
+/**
+ * densable `macCmdClickArrivesWithoutSgrModifierBit` @209579069.
+ * Ghostty/Warp on Darwin drop the Cmd SGR modifier bit.
+ */
+export function macCmdClickArrivesWithoutSgrModifierBit(): boolean {
+  return (
+    process.platform === 'darwin' &&
+    (process.env.TERM_PROGRAM === 'ghostty' || process.env.TERM_PROGRAM === 'WarpTerminal')
+  );
+}
 
 type ErrorInfo = {
   readonly message: string;
@@ -287,6 +297,11 @@ export default class App extends PureComponent<Props, State> {
   // the word without also opening the browser). DOM onClick dispatch is
   // NOT deferred — it returns true from onClickAt and skips this timer.
   pendingHyperlinkTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * densable `pendingHyperlinkOpensInPanel`. SEA schedules with `=!1`
+   * and never assigns `=!0` — dblclick still gates `!opensInPanel`.
+   */
+  pendingHyperlinkOpensInPanel = false;
   // Last mode-1003 motion position. Terminals already dedupe to cell
   // granularity but this also lets us skip dispatchHover entirely on
   // repeat events (drag-then-release at same cell, etc.).
@@ -371,6 +386,7 @@ export default class App extends PureComponent<Props, State> {
     if (this.pendingHyperlinkTimer) {
       clearTimeout(this.pendingHyperlinkTimer);
       this.pendingHyperlinkTimer = null;
+      this.pendingHyperlinkOpensInPanel = false;
     }
     // ignore calling setRawMode on an handle stdin it cannot be called
     if (this.isRawModeSupported()) {
@@ -1038,9 +1054,8 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
       app.lastClickRow = row;
     }
     if (app.clickCount >= 2) {
-      // Cancel any pending hyperlink-open from the first click — this is
-      // a double-click, not a single-click on a link.
-      if (app.pendingHyperlinkTimer) {
+      // densable: cancel unless pendingHyperlinkOpensInPanel
+      if (app.pendingHyperlinkTimer && !app.pendingHyperlinkOpensInPanel) {
         clearTimeout(app.pendingHyperlinkTimer);
         app.pendingHyperlinkTimer = null;
       }
@@ -1049,7 +1064,7 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
       app.props.onMultiClick(col, row, count);
       return;
     }
-    startSelection(sel, col, row);
+    app.props.onSelectionStart(col, row);
     // SGR bit 0x08 = alt (xterm.js wires altKey here, not metaKey — see
     // comment at the hyperlink-open guard below). On macOS xterm.js,
     // receiving alt means macOptionClickForcesSelection is OFF (otherwise
@@ -1107,17 +1122,25 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
       // drops metaKey before SGR encoding (ICoreMouseEvent has no meta
       // field; the SGR bit we call 'meta' is wired to alt). Let xterm.js
       // own link-opening; Cmd+click is the native UX there anyway.
-      // TERM_PROGRAM is the sync fast-path; isXtermJs() is the XTVERSION
-      // probe result (catches SSH + non-VS Code embedders like Hyper).
-      if (url && process.env.TERM_PROGRAM !== 'vscode' && !isXtermJs()) {
+      // densable: url && TERM_PROGRAM!=="vscode" && !xi() &&
+      //   ((button&24)!==0 || macCmdClick() || ME())
+      // ME = isGhosttyXtversion. Do not treat ME as false.
+      if (
+        url &&
+        process.env.TERM_PROGRAM !== 'vscode' &&
+        !isXtermJs() &&
+        ((m.button & 24) !== 0 || macCmdClickArrivesWithoutSgrModifierBit() || isGhosttyXtversion())
+      ) {
         // Clear any prior pending timer — clicking a second link
         // supersedes the first (only the latest click opens).
         if (app.pendingHyperlinkTimer) {
           clearTimeout(app.pendingHyperlinkTimer);
         }
+        app.pendingHyperlinkOpensInPanel = false;
         app.pendingHyperlinkTimer = setTimeout(
           (app, url) => {
             app.pendingHyperlinkTimer = null;
+            app.pendingHyperlinkOpensInPanel = false;
             app.props.onOpenHyperlink(url);
           },
           MULTI_CLICK_TIMEOUT_MS,

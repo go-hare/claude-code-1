@@ -270,17 +270,18 @@ function createPluginCommand(
     )
     const whenToUse = frontmatter.when_to_use as string | undefined
     const version = frontmatter.version as string | undefined
-    // densable 2.1.216 #28: frontmatter `name` must NOT drop the plugin prefix
-    // in autocomplete. densable uzr:
-    //   x = a.name; I = e.slice(0, e.lastIndexOf(":")+1); D = x ? `${I}${x}` : e
-    //   aliases = x && !x.includes(":") ? [x] : undefined
-    //   userFacingName(){ return D }
+    // densable uzr / 2.1.246 #19:
+    //   v = a.name; E = e.slice(0, e.lastIndexOf(":")+1)
+    //   C = v ? (v.startsWith(E) ? v : `${E}${v}`) : e
+    //   R = v && !v.includes(":") ? [v] : undefined
     const frontmatterName =
       frontmatter.name != null ? String(frontmatter.name) : undefined
     const pluginPrefix = commandName.slice(0, commandName.lastIndexOf(':') + 1)
     const userFacing =
       frontmatterName !== undefined
-        ? `${pluginPrefix}${frontmatterName}`
+        ? frontmatterName.startsWith(pluginPrefix)
+          ? frontmatterName
+          : `${pluginPrefix}${frontmatterName}`
         : commandName
     const aliases =
       frontmatterName !== undefined && !frontmatterName.includes(':')
@@ -693,6 +694,13 @@ export const getPluginCommands = memoize(async (): Promise<Command[]> => {
           }
         }
       }
+      if (plugin.serverPluginId !== undefined) {
+        for (const u of pluginCommands) {
+          if (u.type === 'prompt' && u.pluginInfo !== undefined) {
+            u.pluginInfo.serverPluginId = plugin.serverPluginId
+          }
+        }
+      }
       return pluginCommands
     }),
   )
@@ -960,6 +968,13 @@ export const getPluginSkills = memoize(async (): Promise<Command[]> => {
         )
         for (const skills of pathResults) {
           pluginSkills.push(...skills)
+        }
+      }
+      if (plugin.serverPluginId !== undefined) {
+        for (const g of pluginSkills) {
+          if (g.type === 'prompt' && g.pluginInfo !== undefined) {
+            g.pluginInfo.serverPluginId = plugin.serverPluginId
+          }
         }
       }
       return pluginSkills

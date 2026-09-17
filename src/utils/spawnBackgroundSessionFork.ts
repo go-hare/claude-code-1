@@ -212,9 +212,9 @@ export type SpawnBackgroundSessionForkResult =
  */
 export function resolveKeepParentForkName(opts: {
   seedName?: string
-  seedNameSource?: 'user' | 'auto'
+  seedNameSource?: 'user' | 'auto' | 'collision'
   prompt: string
-}): { name: string; nameSource: 'user' | 'auto' } {
+}): { name: string; nameSource: 'user' | 'auto' | 'collision' } {
   const promptLabel = opts.prompt ? collapseForkPromptLabel(opts.prompt) : ''
   if (opts.seedName) {
     if (promptLabel) {
@@ -556,8 +556,8 @@ async function spawnBackgroundSessionForkImpl(
       bgIsolation: 'default',
       sessionPermissionRules: opts.sessionPermissionRules,
       memoryToggledOff,
-      forkSourceAlive: true,
-      forkBoundaryAt: forkBoundaryAt ?? new Date().toISOString(),
+      forkSourceAlive: hasBoundaryTs,
+      forkBoundaryAt,
       forkSessionId: providedSessionId,
       forkParentSessionId: parentSessionId,
     })

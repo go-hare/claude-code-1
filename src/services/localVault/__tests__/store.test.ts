@@ -19,11 +19,12 @@ import { join } from 'node:path'
 import { logMock } from '../../../../tests/mocks/log.js'
 
 mock.module('src/utils/log.ts', logMock)
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 
 // ── Keychain mock (unavailable by default to test fallback path) ───────────────
 
 import { KeychainUnavailableError } from '../keychain.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 const keychainUnavailable = async (): Promise<never> => {
   throw new KeychainUnavailableError('test: keychain mocked as unavailable')

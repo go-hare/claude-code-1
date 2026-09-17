@@ -18,9 +18,15 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { authMock } from '../../../../tests/mocks/auth.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
+import {
+  oauthClientMock,
+  oauthConfigMock,
+  teleportApiMock,
+} from '../../../../tests/mocks/oauthSurface.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -30,27 +36,30 @@ const mockAccessToken = 'test-token-triggers'
 const mockOrgUUID = 'org-uuid-triggers'
 
 mock.module('src/utils/auth.js', () => ({
+  ...authMock(),
   getClaudeAIOAuthTokens: () => ({ accessToken: mockAccessToken }),
 }))
-mock.module('src/services/oauth/client.js', () => ({
-  getOrganizationUUID: async () => mockOrgUUID,
-}))
-mock.module('src/constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-}))
-mock.module('src/utils/teleport/api.js', () => ({
-  getOAuthHeaders: (token: string) => ({
-    Authorization: `Bearer ${token}`,
-    'anthropic-version': '2023-06-01',
+mock.module('src/services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => mockOrgUUID,
   }),
-  prepareApiRequest: async () => ({
-    accessToken: mockAccessToken,
-    orgUUID: mockOrgUUID,
+)
+mock.module('src/constants/oauth.js', oauthConfigMock)
+mock.module('src/utils/teleport/api.js', () =>
+  teleportApiMock({
+    getOAuthHeaders: (token: string) => ({
+      Authorization: `Bearer ${token}`,
+      'anthropic-version': '2023-06-01',
+    }),
+    prepareApiRequest: async () => ({
+      accessToken: mockAccessToken,
+      orgUUID: mockOrgUUID,
+    }),
+    prepareWorkspaceApiRequest: async () => ({
+      apiKey: 'test-workspace-key',
+    }),
   }),
-  prepareWorkspaceApiRequest: async () => ({
-    apiKey: 'test-workspace-key',
-  }),
-}))
+)
 // ── Axios mock ──────────────────────────────────────────────────────────────
 const axiosGetMock = mock(async () => ({}))
 const axiosPostMock = mock(async () => ({}))

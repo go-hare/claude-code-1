@@ -41,7 +41,10 @@ export class ScheduleWakeupInputError extends Error {
   }
 }
 
-/** densable `QYs` — shape rebuilds when first resolved; Cfr gates `noop`. */
+/** densable `QYs` — `noop` always optional on the wire schema.
+ * densable sticky-gated the field on first resolve via Cfr; that poisons
+ * suites when GrowthBook defaults ON before this module warms. Call/prompt
+ * still gate on live `isLoopNoopFoldEnabled()` (Cfr). */
 const inputSchema = lazySchema(() =>
   z.strictObject({
     delaySeconds: semanticNumber(z.number().optional()).describe(
@@ -65,16 +68,12 @@ const inputSchema = lazySchema(() =>
       .describe(
         'Set to true to end the dynamic loop immediately instead of scheduling another wakeup. When true, all other fields are ignored and no further wakeups fire.',
       ),
-    ...(isLoopNoopFoldEnabled()
-      ? {
-          noop: z
-            .boolean()
-            .optional()
-            .describe(
-              "true = nothing changed (you checked and there is nothing to report). false = something happened worth keeping (edited a file, posted a message, advanced state, surfaced a finding). Consecutive noop:true ticks are collapsed in the user's terminal view and tracked as a streak. Required unless `stop` is true.",
-            ),
-        }
-      : {}),
+    noop: z
+      .boolean()
+      .optional()
+      .describe(
+        "true = nothing changed (you checked and there is nothing to report). false = something happened worth keeping (edited a file, posted a message, advanced state, surfaced a finding). Consecutive noop:true ticks are collapsed in the user's terminal view and tracked as a streak. Required unless `stop` is true.",
+      ),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -128,9 +127,10 @@ export const ScheduleWakeupTool = buildTool({
   },
 
   async prompt() {
-    // densable: FKu("noop"in QYs().shape, e===t?e:void 0)
+    // densable: FKu("noop"in QYs().shape, …) — use live Cfr (schema always
+    // carries optional noop so sticky first-resolve cannot poison tests).
     return buildScheduleWakeupPrompt(
-      'noop' in inputSchema().shape,
+      isLoopNoopFoldEnabled(),
       resolveScheduleWakeupCacheGuidance(),
     )
   },
@@ -190,9 +190,11 @@ export const ScheduleWakeupTool = buildTool({
         '`prompt` is required when `stop` is not true.',
       )
     }
-    // densable: "noop"in QYs().shape && e.noop===void 0
+    // densable: "noop"in QYs().shape && e.noop===void 0 — check live Cfr so
+    // sticky lazySchema first-resolve (default ON) cannot poison suites that
+    // flip tengu_loop_noop_fold via GrowthBook mock after schema warm-up.
     if (
-      'noop' in inputSchema().shape &&
+      isLoopNoopFoldEnabled() &&
       (input as { noop?: boolean }).noop === undefined
     ) {
       throw new ScheduleWakeupInputError(

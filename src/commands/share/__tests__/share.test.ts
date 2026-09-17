@@ -17,11 +17,20 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { promisify } from 'node:util'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  clearChildProcessStubs,
+  installChildProcessHarness,
+  setChildProcessStubs,
+} from '../../../../tests/mocks/childProcessHarness.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
 // Default: gh --version succeeds, gist create fails (upload error is acceptable
 // for tests that only need to reach the content-preparation stage).
 let _execFileImplBase: (
@@ -31,83 +40,10 @@ let _execFileImplBase: (
   cb: (err: Error | null, stdout: string, stderr: string) => void,
 ) => void = (_cmd, _args, _opts, cb) => cb(null, '', '')
 
-const execFileMockBase = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-  cb: (err: Error | null, stdout: string, stderr: string) => void,
-) => _execFileImplBase(cmd, args, opts, cb)
+installChildProcessHarness()
+mock.module('bun:bundle', bunBundleMock)
 
-;(execFileMockBase as unknown as Record<symbol, unknown>)[
-  promisify.custom as symbol
-] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> =>
-  new Promise((resolve, reject) =>
-    _execFileImplBase(cmd, args, opts, (err, stdout, stderr) => {
-      if (err) reject(err)
-      else resolve({ stdout, stderr })
-    }),
-  )
-
-// Spread real child_process + flag-gated stub (see share-gh.test.ts for the
-// promisify.custom rationale). Default OFF; suite's beforeAll flips on,
-// afterAll flips off so projectContext.test and other child_process consumers
-// see the real impl outside this suite.
-let useShareCpStubs = false
-const wrappedShareExecFile = ((...args: unknown[]) =>
-  useShareCpStubs
-    ? (execFileMockBase as (...a: unknown[]) => unknown)(...args)
-    : // eslint-disable-next-line @typescript-eslint/no-require-imports
-      (require('node:child_process').execFile as (...a: unknown[]) => unknown)(
-        ...args,
-      )) as unknown as Record<symbol, unknown> & ((...a: unknown[]) => unknown)
-;(wrappedShareExecFile as Record<symbol, unknown>)[promisify.custom as symbol] =
-  (
-    cmd: string,
-    args: string[],
-    opts: unknown,
-  ): Promise<{ stdout: string; stderr: string }> => {
-    if (useShareCpStubs) {
-      return new Promise((resolve, reject) =>
-        _execFileImplBase(cmd, args, opts, (err, stdout, stderr) =>
-          err ? reject(err) : resolve({ stdout, stderr }),
-        ),
-      )
-    }
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const real = require('node:child_process') as Record<string, unknown>
-    return promisify(real.execFile as never)(cmd, args, opts) as Promise<{
-      stdout: string
-      stderr: string
-    }>
-  }
-mock.module('node:child_process', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return {
-    ...real,
-    default: real,
-    execFile: wrappedShareExecFile as typeof real.execFile,
-    execFileSync: ((...args: unknown[]) =>
-      useShareCpStubs
-        ? Buffer.from('')
-        : (real.execFileSync as (...a: unknown[]) => unknown)(
-            ...args,
-          )) as typeof real.execFileSync,
-  }
-})
-
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
-
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: (v: unknown) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // NOTE: We do NOT mock src/bootstrap/state.js here to avoid interfering with
 // other test files (particularly launchAutofixPr.test.ts). We dynamically
@@ -169,12 +105,17 @@ async function writeSessionLog(entries?: string[]): Promise<void> {
   writeFileSync(join(dir, `${sessionId}.jsonl`), content.join('\n') + '\n')
 }
 
-// Activate child_process stubs only for this suite.
+let popFeature: (() => void) | undefined
 beforeAll(() => {
-  useShareCpStubs = true
+  popFeature = pushFeatureOverride(() => true)
+  setChildProcessStubs('share', {
+    execFile: (cmd, args, opts, cb) => _execFileImplBase(cmd, args, opts, cb),
+    execFileSync: () => Buffer.from(''),
+  })
 })
 afterAll(() => {
-  useShareCpStubs = false
+  popFeature?.()
+  clearChildProcessStubs('share')
 })
 
 describe('share command — metadata', () => {

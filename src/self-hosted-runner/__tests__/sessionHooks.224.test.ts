@@ -63,8 +63,11 @@ describe('densable 2.1.224 #1 hook env + resolve (D2h/vKn)', () => {
     expect(await resolveHookPath(dir, 'checkout')).toBeNull()
     const path = join(dir, 'checkout')
     writeFileSync(path, '#!/bin/sh\nexit 0\n')
-    expect(await resolveHookPath(dir, 'checkout')).toBeNull() // not +x
-    chmodSync(path, 0o755)
+    // Windows X_OK succeeds for any existing file; Unix mode bits do not stick.
+    if (process.platform !== 'win32') {
+      expect(await resolveHookPath(dir, 'checkout')).toBeNull() // not +x
+      chmodSync(path, 0o755)
+    }
     expect(await resolveHookPath(dir, 'checkout')).toBe(path)
   })
 })
@@ -260,6 +263,8 @@ describe('densable 2.1.224 #1 source map helpers (G7s/dWd/J7s/Ljv/pjv)', () => {
 
 describe('densable 2.1.224 #1 runCheckoutHook (H2h)', () => {
   test('success requires dir + .git', async () => {
+    // Extensionless #!/bin/sh hooks are not spawnable on win32 (ENOENT).
+    if (process.platform === 'win32') return
     const dir = tmp()
     const hook = join(dir, 'checkout')
     const checkoutPath = join(dir, 'repo')
@@ -280,6 +285,7 @@ describe('densable 2.1.224 #1 runCheckoutHook (H2h)', () => {
   })
 
   test('fails when .git missing unless skip', async () => {
+    if (process.platform === 'win32') return
     const dir = tmp()
     const hook = join(dir, 'checkout')
     const checkoutPath = join(dir, 'repo')

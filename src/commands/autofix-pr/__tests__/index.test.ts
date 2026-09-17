@@ -1,9 +1,11 @@
-import { beforeAll, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
 // Must mock bun:bundle before importing index
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 let cmd: {
   isEnabled?: () => boolean
@@ -71,4 +73,12 @@ describe('autofixPr getBridgeInvocationError', () => {
   test('load is defined as an async function', () => {
     expect(typeof cmd.load).toBe('function')
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

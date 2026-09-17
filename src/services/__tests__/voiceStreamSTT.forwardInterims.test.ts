@@ -1,10 +1,8 @@
-import { describe, expect, test } from 'bun:test'
-import { mock } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
+import { growthbookMock } from '../../../tests/mocks/growthbook.js'
 
 // Avoid loading growthbook/auth side effects — unit-test pure gate only.
-mock.module('../analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-}))
+mock.module('../analytics/growthbook.js', growthbookMock)
 
 import {
   sanitizeVoiceKeyterms,

@@ -1,0 +1,39 @@
+# Official 2.1.246 SEA — jh Batch* product tools ABSENT
+# Deeper peel 2026-09-09. Do not invent BatchRead / BatchEdit / factory.
+
+Counts in claude.exe:
+  underlyingV1ToolName = 19  (all reads / jh typeof / string table)
+  perEntryHookInputs   = 4   (jh check + QOs + eDs + string table)
+  entryFieldName       = 3   (jh check + tDs tip + string table)
+  .reassemble(         = 1   (eHr only: l.reassemble(c) @216969940)
+  utf-16le field name  = 0
+
+Assignment needles:
+  underlyingV1ToolName:   1 hit — ternary Hcr @215010285
+  perEntryHookInputs:     0
+  entryFieldName:         0
+  reassemble:             0
+  BatchRead / BatchEdit / BatchWrite / BatchGlob / BatchGrep = 0
+  makeBatch / createBatchTool / asBatchTool / BatchTool = 0
+
+jh @208070729 — duck type only.
+
+Official getAllBaseTools analog mE() @216470006:
+  ...OEs()  and  function OEs(){return[]}
+  z$r=H$r=W$r=G$r=V$r=null  (compiled-out gated slots, names not in this SEA)
+  No Batch* identifier in the array.
+
+Official tool-name allowlist xGo @213777571:
+  Bash BashOutput KillShell PowerShell Tmux Monitor REPL
+  Read Edit MultiEdit Write NotebookEdit Glob Grep LS
+  TodoWrite Task* LSP Web* Agent Task Workflow Skill Cron*
+  … (mcp__github__* etc.)
+  MultiEdit is a legacy first-class name (permission family with Edit/Write).
+  NOT jh. No Batch* in xGo.
+
+Consumers (read-only): QOs/qXe/eHr/Qzr, C7o, isToolDisallowed,
+permission Map, Hcr isolation.
+
+246 ships the pipe. No product tool sets the four fields.
+Empty chain on official = empty chain locally. Do not invent wrappers.
+Do not treat MultiEdit as Batch*. Do not open 247.

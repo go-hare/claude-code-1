@@ -13,7 +13,6 @@ describe('headersHelper user_config reject (2.1.207)', () => {
       {
         type: 'http',
         url: 'https://example.com/mcp',
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
         headersHelper: 'echo ${user_config.token}',
       },
       { path: '/plugins/demo', source: 'demo@marketplace' },
@@ -36,7 +35,6 @@ describe('headersHelper user_config reject (2.1.207)', () => {
     }
     // Original helper left unchanged when rejected
     if (result.type === 'http') {
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
       expect(result.headersHelper).toBe('echo ${user_config.token}')
     }
   })
@@ -47,7 +45,6 @@ describe('headersHelper user_config reject (2.1.207)', () => {
       {
         type: 'http',
         url: 'https://example.com/mcp',
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
         headersHelper: '${CLAUDE_PLUGIN_ROOT}/bin/headers.sh',
       },
       { path: '/plugins/demo', source: 'demo@marketplace' },
@@ -69,7 +66,6 @@ describe('headersHelper user_config reject (2.1.207)', () => {
         type: 'http',
         url: 'https://example.com/mcp',
         headers: {
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: plugin placeholder syntax under test
           Authorization: 'Bearer ${user_config.token}',
         },
       },

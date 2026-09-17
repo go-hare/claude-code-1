@@ -1,4 +1,5 @@
 import {
+  beforeAll,
   afterAll,
   afterEach,
   beforeEach,
@@ -7,25 +8,18 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { debugMock } from '../../../../tests/mocks/debug.js'
+import { logMock } from '../../../../tests/mocks/log.js'
 
 // Mock bun:bundle before any imports that use feature()
 // Note: in the test environment AWAY_SUMMARY compile-time flag is false, so
 // isEnabled() will always return false regardless of the GrowthBook value.
 // We mock to true here to allow other feature-flagged code paths to be tested.
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 // Mock log/debug to avoid bootstrap side effects
-mock.module('src/utils/log.ts', () => ({
-  logError: () => {},
-  logInfo: () => {},
-  logWarning: () => {},
-}))
-mock.module('src/utils/debug.ts', () => ({
-  logForDebugging: () => {},
-  isDebug: () => false,
-}))
+mock.module('src/utils/log.ts', logMock)
+mock.module('src/utils/debug.ts', debugMock)
 
 // Mock settings to avoid filesystem side effects.
 // Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
@@ -52,6 +46,11 @@ afterAll(() => {
 // Mock analytics (GrowthBook) — required for isEnabled()
 // Spread shared mock — incomplete growthbook mocks poison co-running suites.
 import { growthbookMock } from '../../../../tests/mocks/growthbook'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
+
 let gbValue = true
 mock.module('src/services/analytics/growthbook.js', () => ({
   ...growthbookMock(),
@@ -200,4 +199,12 @@ describe('recap command call()', () => {
     await loaded.call('', fakeContext)
     expect(capturedSignal).toBe(fakeContext.abortController.signal)
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

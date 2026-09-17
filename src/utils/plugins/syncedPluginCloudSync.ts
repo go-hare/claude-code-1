@@ -107,6 +107,10 @@ export type SyncedCloudPlugin = {
   version: string | null
   updatedAt: string | null
   requestedVersion?: string
+  /** densable sun / Gbn — `installation_preference` from claude.ai list. */
+  installationPreference?: 'required' | 'auto_install'
+  /** densable sun / Gbn — real marketplace for `plugin_id_hash`. */
+  marketplaceName?: string
 }
 
 type ListedPluginRow = {
@@ -116,6 +120,8 @@ type ListedPluginRow = {
   version?: unknown
   updated_at?: unknown
   enabled?: unknown
+  installation_preference?: unknown
+  marketplace_name?: unknown
 }
 
 /** leftover 239 C1h — cowork Uln.listEntries("plugins") row. */
@@ -174,14 +180,31 @@ export async function listCoworkPluginEntries(): Promise<
   return getSessionRefsStore().listEntries('plugins')
 }
 
-/** leftover 239 Fzf */
+/** densable oun — only the hyo admin-install values. */
+export function parseInstallationPreference(
+  value: unknown,
+): 'required' | 'auto_install' | undefined {
+  if (value === 'required' || value === 'auto_install') return value
+  return undefined
+}
+
+/** leftover 239 Fzf / densable sun */
 export function mapCloudListedPlugin(row: ListedPluginRow): SyncedCloudPlugin {
+  const installationPreference = parseInstallationPreference(
+    row.installation_preference,
+  )
+  const marketplaceName =
+    typeof row.marketplace_name === 'string' && row.marketplace_name.length > 0
+      ? row.marketplace_name
+      : undefined
   return {
     pluginId: String(row.id ?? ''),
     name: String(row.name ?? ''),
     description: typeof row.description === 'string' ? row.description : '',
     version: typeof row.version === 'string' ? row.version : null,
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+    ...(installationPreference && { installationPreference }),
+    ...(marketplaceName && { marketplaceName }),
   }
 }
 
@@ -544,6 +567,11 @@ const syncedCloudPluginSchema = z.object({
   version: z.string().nullable().catch(null),
   updatedAt: z.string().nullable().catch(null),
   requestedVersion: z.string().optional().catch(undefined),
+  installationPreference: z
+    .enum(['required', 'auto_install'])
+    .optional()
+    .catch(undefined),
+  marketplaceName: z.string().optional().catch(undefined),
 })
 
 /** leftover 239 tVE — leftover keys survive for T1h Hos. */

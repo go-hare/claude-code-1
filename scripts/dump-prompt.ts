@@ -3,6 +3,7 @@
  * Usage: bun run scripts/dump-prompt.ts
  */
 import { mock } from 'bun:test'
+import { bunBundleMock } from '../tests/mocks/bunBundle.js'
 
 // --- Mock chain (block side-effects) ---
 mock.module('src/bootstrap/state.js', () => ({
@@ -65,7 +66,7 @@ mock.module('src/utils/debug.js', () => ({ logForDebugging: () => {} }))
 mock.module('src/services/analytics/growthbook.js', () => ({
   getFeatureValue_CACHED_MAY_BE_STALE: () => false,
 }))
-mock.module('bun:bundle', () => ({ feature: (_name: string) => false }))
+mock.module('bun:bundle', bunBundleMock)
 mock.module('src/constants/systemPromptSections.js', () => ({
   systemPromptSection: (_name: string, fn: () => any) => ({
     __deferred: true,

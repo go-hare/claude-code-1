@@ -1,8 +1,9 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 mock.module('src/utils/log.ts', logMock)
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 
 // ── In-memory store backing the mock ─────────────────────────────────────────
 

@@ -8,13 +8,32 @@
  */
 
 import { feature } from 'bun:bundle'
+import { getSessionId, isTeleportedSessionId } from '../bootstrap/state.js'
+import { getReplBridgeHandle } from '../bridge/replBridgeHandle.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
+  getRegisteredSessionName,
   listLiveSessionRecords,
+  type RegisteredSessionName,
   type SessionNameSource,
   updateSessionName,
 } from './concurrentSessions.js'
 import { logForDebugging } from './debug.js'
+import {
+  patchBgJobDirRespawnFlags,
+  resolveBgJobShortId,
+  patchBgJobRegistrySessionName,
+} from './sessionNameJobSidecar.js'
+import {
+  getCurrentSessionAgentName,
+  getCurrentSessionTitle,
+  getActiveSessionTranscriptPath,
+  saveAgentName,
+  saveAiGeneratedTitle,
+  saveCustomTitle,
+  shouldSuppressSessionTitleHistory,
+} from './sessionStorage.js'
+import { getPinnedStorageV5 } from './storageV5/index.js'
 import {
   SESSION_TITLE_MAX_CODE_POINTS,
   sanitizeSessionTitle,
@@ -651,6 +670,516 @@ export async function resolveSessionNameWithLiveRegistry(
     )
     return { name: desiredName, yielded: false }
   }
+}
+
+/**
+ * densable leftover `p8n(e, t)` — strict `===` on registry + title + agent.
+ * `t===true` forces false (u8o `o` skip). Official: `d_()?.name===e&&my(We())===e&&l1e()===e`.
+ */
+export function isSessionNameFullyApplied(
+  name: string,
+  skipCheck = false,
+): boolean {
+  if (skipCheck) return false
+  return (
+    getRegisteredSessionName()?.name === name &&
+    getCurrentSessionTitle(getSessionId()) === name &&
+    getCurrentSessionAgentName() === name
+  )
+}
+
+/**
+ * densable leftover `rTe(e, t, n)` — live registry won during settle.
+ * `e` = u8n snapshot `d_()`; `t` requested; `n` bY name.
+ */
+export function findSupersedingRegistryName(
+  snapshot: RegisteredSessionName | undefined,
+  requested: string,
+  resolved: string,
+): RegisteredSessionName | undefined {
+  const live = getRegisteredSessionName()
+  if (live === undefined || live.source === 'derived') return undefined
+  if (
+    live.source === 'collision' &&
+    reuseLastYieldName(snapshot?.name ?? requested, live.name) !== undefined
+  ) {
+    return undefined
+  }
+  const key = normalizeSessionNameKey(live.name)
+  if (
+    (snapshot !== undefined &&
+      key === normalizeSessionNameKey(snapshot.name)) ||
+    key === normalizeSessionNameKey(requested) ||
+    key === normalizeSessionNameKey(resolved)
+  ) {
+    return undefined
+  }
+  return live
+}
+
+export type SessionNameApplySource = 'user' | 'auto' | 'collision'
+
+export type SessionNameSettleResult = {
+  requested: string
+  name: string
+  recordSource: SessionNameSource
+  settle:
+    | 'pre-decided'
+    | 'own-name'
+    | 'held'
+    | 'superseded'
+    | 'kept'
+    | 'yielded'
+}
+
+/** densable leftover `c8n`. */
+export function mapApplySourceToAgentSource(
+  source: SessionNameApplySource,
+): 'user' | 'auto' | 'hook' {
+  return source === 'collision' ? 'hook' : source
+}
+
+/** densable leftover `d8n`. */
+export function getRegisteredOrAgentSessionName(): string | undefined {
+  return getRegisteredSessionName()?.name ?? getCurrentSessionAgentName()
+}
+
+/** densable leftover `o8n`. */
+export function mapSettleResultToOutcome(
+  result: SessionNameSettleResult,
+): 'superseded' | 'yielded' | 'kept' {
+  switch (result.settle) {
+    case 'superseded':
+      return 'superseded'
+    case 'yielded':
+    case 'held':
+      return 'yielded'
+    default:
+      return 'kept'
+  }
+}
+
+export type ApplySessionNameOptions = {
+  persistAgentName?: (
+    name: string,
+    source: 'user' | 'auto' | 'hook',
+  ) => Promise<void>
+  writeName?: (name: string, source: SessionNameSource) => Promise<void>
+  deps?: SessionNameUniquenessDeps
+  scheduleRecheck?: (fn: () => void) => void
+  storageV5?: unknown
+  credentials?: unknown
+}
+
+/** densable leftover `u8n(e,t,n)`. */
+export async function settleSessionNameApply(
+  requested: string,
+  source: SessionNameApplySource,
+  skipRte = false,
+  deps: SessionNameUniquenessDeps = defaultDeps,
+): Promise<SessionNameSettleResult> {
+  await deps.whenRegistered()
+  const registered = getRegisteredSessionName()
+  if (source === 'collision') {
+    return {
+      requested,
+      name: requested,
+      recordSource: 'collision',
+      settle: 'pre-decided',
+    }
+  }
+  if (source === 'auto') {
+    return {
+      requested,
+      name: requested,
+      recordSource: 'auto',
+      settle: 'own-name',
+    }
+  }
+  if (
+    registered !== undefined &&
+    normalizeSessionNameKey(registered.name) ===
+      normalizeSessionNameKey(requested) &&
+    registered.source !== 'auto' &&
+    registered.source !== 'derived'
+  ) {
+    return {
+      requested,
+      name: requested,
+      recordSource:
+        registered.source === 'collision' && !skipRte ? 'collision' : source,
+      settle: 'own-name',
+    }
+  }
+  const settled = await resolveSessionNameWithLiveRegistry(
+    requested,
+    'rename',
+    deps,
+  )
+  const superseded = skipRte
+    ? undefined
+    : findSupersedingRegistryName(registered, requested, settled.name)
+  if (superseded !== undefined) {
+    return {
+      requested,
+      name: superseded.name,
+      recordSource: superseded.source,
+      settle: 'superseded',
+    }
+  }
+  if (!settled.yielded) {
+    return {
+      requested,
+      name: requested,
+      recordSource: source,
+      settle: 'kept',
+    }
+  }
+  const name = sanitizeSessionTitle(settled.name) || requested
+  return {
+    requested,
+    name,
+    recordSource: 'collision',
+    settle: settled.name === registered?.name ? 'held' : 'yielded',
+  }
+}
+
+async function mirrorSessionNameToJobSidecar(
+  name: string,
+  recordSource: SessionNameSource,
+  storageV5: unknown,
+  previousNames: Array<string | undefined>,
+): Promise<void> {
+  const f = recordSource === 'collision' ? 'collision' : 'user'
+  const prev = previousNames.filter((n): n is string => n !== undefined)
+  await patchBgJobDirRespawnFlags(
+    '--name',
+    ['-n'],
+    name,
+    { name, nameSource: f },
+    storageV5,
+    prev,
+  )
+  await patchBgJobRegistrySessionName(
+    resolveBgJobShortId(),
+    name,
+    f,
+    storageV5,
+    prev,
+  )
+}
+
+/**
+ * densable leftover `s8n(e,t,n,r,o=!1,s,i)`.
+ */
+export async function persistSettledSessionName(
+  rawName: string,
+  source: SessionNameApplySource = 'user',
+  storageV5: unknown = getPinnedStorageV5(),
+  precomputed?: SessionNameSettleResult,
+  setUserTyped = false,
+  previousNames?: Array<string | undefined>,
+  credentials?: unknown,
+  opts: ApplySessionNameOptions = {},
+): Promise<string | null> {
+  const a = sanitizeSessionTitle(rawName)
+  if (!a) return null
+  const writeName =
+    opts.writeName ??
+    ((name: string, recordSource: SessionNameSource) =>
+      updateSessionName(name, recordSource, storageV5))
+  const deps = opts.deps ?? defaultDeps
+  const persistAgentName = opts.persistAgentName
+  const l = previousNames ?? [getRegisteredOrAgentSessionName(), a]
+  const c =
+    precomputed?.name === a
+      ? precomputed
+      : await settleSessionNameApply(a, source, setUserTyped, deps)
+  const u = c.name
+  if (c.settle === 'superseded') return u
+  if (
+    precomputed === undefined &&
+    source !== 'auto' &&
+    isSessionNameFullyApplied(u, false)
+  ) {
+    return u
+  }
+  // Official `if(await ZAt(d,u,p,c8n(t),n),o)yp().userTypedName=u`.
+  // ZAt always; p=`zS()??Du()`. persistAgentName is leftover test hook.
+  if (persistAgentName) {
+    await persistAgentName(u, mapApplySourceToAgentSource(source))
+  } else {
+    const sid = getSessionId()
+    if (sid) {
+      await saveAgentName(
+        sid as import('crypto').UUID,
+        u,
+        getActiveSessionTranscriptPath(),
+        mapApplySourceToAgentSource(source),
+      )
+    }
+  }
+  if (setUserTyped) sessionNameState.userTypedName = u
+  await writeName(u, c.recordSource)
+  if (c.settle === 'kept' || c.settle === 'yielded') {
+    scheduleSessionNameRenameRecheck({
+      name: u,
+      suffixBase: c.settle === 'yielded' ? c.requested : undefined,
+      onYield: async f => {
+        if (sessionNameState.hasAdopter) {
+          await writeName(f, 'collision')
+        } else {
+          await applySessionName(
+            f,
+            'collision',
+            storageV5,
+            false,
+            false,
+            credentials,
+            {
+              ...opts,
+              writeName,
+              deps,
+            },
+          )
+        }
+      },
+      deps,
+      scheduleRecheck: opts.scheduleRecheck,
+    })
+  }
+  if (source !== 'auto') {
+    await mirrorSessionNameToJobSidecar(u, c.recordSource, storageV5, l)
+  }
+  return u
+}
+
+/**
+ * densable leftover `fj` = `pt` = `At().remote`.
+ * Default caps.remote is null. Official `Kx`/`En` have no product JS caller.
+ */
+export type SurfaceRemoteKind = 'ccr' | 'ssh' | 'direct'
+
+export type SurfaceRemoteHandle = {
+  kind: SurfaceRemoteKind
+  isRemoteMode: true
+  viewerOnly?: boolean
+  sessionId?: string
+}
+
+export type SurfaceCapabilities = {
+  renderTarget: 'ink'
+  workspace: 'local' | 'remote'
+  canDrive: boolean
+  transcriptSource: 'local-jsonl'
+  remote: SurfaceRemoteHandle | null
+}
+
+function createDefaultSurfaceCapabilities(): SurfaceCapabilities {
+  return {
+    renderTarget: 'ink',
+    workspace: 'local',
+    canDrive: true,
+    transcriptSource: 'local-jsonl',
+    remote: null,
+  }
+}
+
+let currentSurfaceCapabilities = createDefaultSurfaceCapabilities()
+
+/** densable leftover `At` / `Nx` — `surfaceCapabilities.caps()`. */
+export function getSurfaceCapabilities(): SurfaceCapabilities {
+  return currentSurfaceCapabilities
+}
+
+/** densable leftover `fj` / `pt`. */
+export function getSurfaceRemoteHandle(): SurfaceRemoteHandle | null {
+  return getSurfaceCapabilities().remote
+}
+
+/** densable leftover `Kx` — `replaceCaps`. Official JS has no caller. */
+export function replaceSurfaceCapabilities(next: SurfaceCapabilities): void {
+  currentSurfaceCapabilities = next
+}
+
+export function resetSurfaceCapabilitiesForTests(): void {
+  currentSurfaceCapabilities = createDefaultSurfaceCapabilities()
+}
+
+/**
+ * densable leftover `i8n` / `ke(e,o)`.
+ * Official `S` = `lQc` / `f` @206645384: strip `session_`/`cse_` prefix.
+ * `u()??a()` → getReplBridgeHandle. `V(o)` = non-empty string.
+ */
+export function stripBridgeSessionIdPrefix(id: string): string {
+  return id.replace(/^(?:session|cse)_/, '')
+}
+
+export function syncReplBridgeSelfTitle(
+  bridgeSessionId: string,
+  name: string,
+): void {
+  const handle = getReplBridgeHandle()
+  if (
+    handle &&
+    stripBridgeSessionIdPrefix(handle.bridgeSessionId) ===
+      stripBridgeSessionIdPrefix(bridgeSessionId)
+  ) {
+    handle.selfTitle =
+      typeof name === 'string' && name !== '' ? name : undefined
+  }
+}
+
+/** densable leftover `mhe` — returns `u8o` name. */
+export async function applySessionName(
+  rawName: string,
+  source: SessionNameApplySource,
+  storageV5: unknown = getPinnedStorageV5(),
+  skipRte = false,
+  userInitiated = false,
+  credentials?: unknown,
+  opts: ApplySessionNameOptions = {},
+): Promise<string | null> {
+  const result = await applySessionNameWithOutcome(
+    rawName,
+    source,
+    storageV5,
+    skipRte,
+    userInitiated,
+    credentials,
+    opts,
+  )
+  return result === null ? null : result.name
+}
+
+/** densable leftover `u8o`. */
+export async function applySessionNameWithOutcome(
+  rawName: string,
+  source: SessionNameApplySource,
+  storageV5: unknown = getPinnedStorageV5(),
+  skipRte = false,
+  userInitiated = false,
+  credentials?: unknown,
+  opts: ApplySessionNameOptions = {},
+): Promise<{
+  name: string
+  outcome: 'superseded' | 'unchanged' | 'yielded' | 'kept'
+} | null> {
+  const i = sanitizeSessionTitle(rawName)
+  if (!i) return null
+  const previous = [getRegisteredOrAgentSessionName(), i]
+  const settle = await settleSessionNameApply(
+    i,
+    source,
+    skipRte,
+    opts.deps ?? defaultDeps,
+  )
+  const name = settle.name
+  if (settle.settle === 'superseded') {
+    return { name, outcome: 'superseded' }
+  }
+  if (source !== 'auto' && isSessionNameFullyApplied(name, userInitiated)) {
+    if (settle.settle === 'held') {
+      await mirrorSessionNameToJobSidecar(
+        name,
+        'collision',
+        storageV5,
+        previous,
+      )
+    }
+    return { name, outcome: 'unchanged' }
+  }
+  const sid = getSessionId()
+  // Official: auto → XAt(u,c,n); else YAt(u,c,zS()??Du(),c8n(t),n).
+  if (source === 'auto') {
+    saveAiGeneratedTitle(sid as import('crypto').UUID, name)
+  } else {
+    await saveCustomTitle(
+      sid as import('crypto').UUID,
+      name,
+      getActiveSessionTranscriptPath(),
+      mapApplySourceToAgentSource(source),
+      storageV5,
+    )
+  }
+  if (shouldSuppressSessionTitleHistory(sid)) {
+    await persistSettledSessionName(
+      name,
+      source,
+      storageV5,
+      settle,
+      skipRte,
+      previous,
+      credentials,
+      opts,
+    )
+    return { name, outcome: mapSettleResultToOutcome(settle) }
+  }
+  const handle = getReplBridgeHandle()
+  const bridgeSessionId = handle?.bridgeSessionId
+  if (handle && bridgeSessionId && handle.titleWriter) {
+    syncReplBridgeSelfTitle(bridgeSessionId, name)
+    const { getBridgeAccessToken, getBridgeBaseUrl } = await import(
+      '../bridge/bridgeConfig.js'
+    )
+    const token = getBridgeAccessToken()
+    void handle.titleWriter
+      .update(bridgeSessionId, name, {
+        baseUrl: getBridgeBaseUrl(),
+        getAccessToken: token ? () => token : undefined,
+        shouldSend: () => {
+          if (
+            shouldSuppressSessionTitleHistory(sid) ||
+            getReplBridgeHandle()?.bridgeSessionId !== bridgeSessionId
+          ) {
+            return false
+          }
+          return !isTeleportedSessionId(bridgeSessionId)
+        },
+        userInitiated,
+        credentials,
+      })
+      .catch(() => {})
+  }
+  await persistSettledSessionName(
+    name,
+    source,
+    storageV5,
+    settle,
+    skipRte,
+    previous,
+    credentials,
+    opts,
+  )
+  // Official u8o: `m=fj(); m?.kind==="ccr"&&m.sessionId`. fj=`At().remote`.
+  // leftover 239 CCR latch is not fj. Do not invent Kx/En callers.
+  const m = getSurfaceRemoteHandle()
+  if (m?.kind === 'ccr' && m.sessionId) {
+    const g = m.sessionId
+    void import('./teleport/api.js').then(({ updateSessionTitle }) =>
+      updateSessionTitle(g, name),
+    )
+  }
+  return { name, outcome: mapSettleResultToOutcome(settle) }
+}
+
+/**
+ * densable leftover s8n(e, "user", storageV5) — Pi / Kr 3-arg.
+ */
+export async function applyLeftoverS8nUserName(
+  rawName: string,
+  opts: ApplySessionNameOptions = {},
+): Promise<string | null> {
+  return persistSettledSessionName(
+    rawName,
+    'user',
+    opts.storageV5 ?? getPinnedStorageV5(),
+    undefined,
+    false,
+    undefined,
+    opts.credentials,
+    opts,
+  )
 }
 
 /** densable `Uid` — schedule recheck after eO_=3000ms. */

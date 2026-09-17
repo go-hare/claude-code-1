@@ -142,7 +142,7 @@ export function is1PEventLoggingEnabled(): boolean {
 
 /**
  * Log a 1st-party event for internal analytics (async version).
- * Events are batched and exported to /api/event_logging/batch
+ * Events are batched and exported to /api/event_logging/v2/batch
  *
  * This enriches the event with core metadata (model, session, env context, etc.)
  * at log time, similar to logEventToStatsig.
@@ -197,7 +197,7 @@ async function logEventTo1PAsync(
 
 /**
  * Log a 1st-party event for internal analytics.
- * Events are batched and exported to /api/event_logging/batch
+ * Events are batched and exported to /api/event_logging/v2/batch
  *
  * @param eventName - Name of the event (e.g., 'tengu_api_query')
  * @param metadata - Additional metadata for the event (intentionally no strings, to avoid accidentally logging code/filepaths)
@@ -237,7 +237,7 @@ function getEnvironmentForGrowthBook(): string {
 
 /**
  * Log a GrowthBook experiment assignment event to 1P.
- * Events are batched and exported to /api/event_logging/batch
+ * Events are batched and exported to /api/event_logging/v2/batch
  *
  * @param data - GrowthBook experiment assignment data
  */

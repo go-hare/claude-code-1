@@ -18,15 +18,23 @@
  *   - `proceed` + arg pass-through → args (e.g. PR number) reach launchRemoteReview
  *     verbatim (call doesn't parse them itself)
  */
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { analyticsMock } from '../../../../tests/mocks/analytics.js';
+import { authMock } from '../../../../tests/mocks/auth.js';
 import { debugMock } from '../../../../tests/mocks/debug.js';
+import { growthbookMock, pushGrowthbookFeatureGetter } from '../../../../tests/mocks/growthbook.js';
 import { logMock } from '../../../../tests/mocks/log.js';
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js';
+import { oauthConfigMock, teleportApiMock } from '../../../../tests/mocks/oauthSurface.js';
 
 // Pre-import real react/ink and snapshot BEFORE mock.module — live bindings
 // re-point into the mock registry, so flag-flip `return _realInkMod` still
 // exposes stub Box/Text/createElement and hangs AgentsPlatformView etc.
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js';
+import * as realReviewRemote from 'src/commands/review/reviewRemote.js';
+import * as realDetectRepository from 'src/utils/detectRepository.js';
+const reviewRemoteSnap = snapshotModuleExports(realReviewRemote);
+const detectRepositorySnap = snapshotModuleExports(realDetectRepository);
 const _realReactMod = (await import('react')) as Record<string, unknown> & {
   default?: Record<string, unknown>;
 };
@@ -58,19 +66,18 @@ afterAll(() => {
 // Mock dependency chain before any subject import
 mock.module('src/utils/debug.ts', debugMock);
 mock.module('src/utils/log.ts', logMock);
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}));
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => null,
-}));
+mock.module('src/services/analytics/index.js', analyticsMock);
+mock.module('src/services/analytics/growthbook.js', growthbookMock);
+let popGrowthbook: (() => void) | undefined;
+beforeAll(() => {
+  popGrowthbook = pushGrowthbookFeatureGetter(() => null);
+});
+afterAll(() => {
+  popGrowthbook?.();
+});
 
 // Mock auth utilities
-mock.module('src/utils/auth.js', () => ({
-  isClaudeAISubscriber: () => true,
-  isTeamSubscriber: () => false,
-  isEnterpriseSubscriber: () => false,
-}));
+mock.module('src/utils/auth.js', authMock);
 
 // Mock checkOverageGate with a mutable gate result so each test can drive
 // the four branches in ultrareviewCommand.call (not-enabled, low-balance,
@@ -86,6 +93,7 @@ let _gateResult: GateResult = { kind: 'proceed', billingNote: '' };
 let _launchResult: Array<{ type: 'text'; text: string }> | null = [{ type: 'text', text: 'Launched successfully.' }];
 const _capturedLaunchArgs: string[] = [];
 mock.module('src/commands/review/reviewRemote.js', () => ({
+  ...reviewRemoteSnap,
   checkOverageGate: async () => _gateResult,
   confirmOverage: () => {},
   isUltrareviewOverageConfirmed: () => false,
@@ -97,22 +105,22 @@ mock.module('src/commands/review/reviewRemote.js', () => ({
 }));
 
 // Mock OAuth config so real fetchUltrareviewPreflight can run
-mock.module('src/constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-}));
+mock.module('src/constants/oauth.js', oauthConfigMock);
 
 // Mock prepareApiRequest so real fetchUltrareviewPreflight skips auth
-mock.module('src/utils/teleport/api.js', () => ({
-  prepareApiRequest: async () => ({
-    accessToken: 'test-token',
-    orgUUID: 'org-uuid-test',
+mock.module('src/utils/teleport/api.js', () =>
+  teleportApiMock({
+    prepareApiRequest: async () => ({
+      accessToken: 'test-token',
+      orgUUID: 'org-uuid-test',
+    }),
+    getOAuthHeaders: (token: string) => ({
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    }),
   }),
-  getOAuthHeaders: (token: string) => ({
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'anthropic-version': '2023-06-01',
-  }),
-}));
+);
 
 // Mock axios — per-test responses set via mockAxiosPost.mockImplementationOnce
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,6 +143,7 @@ _ultrareviewAxiosHandle.stubs.isAxiosError = (e: unknown) =>
 
 // Mock detectCurrentRepositoryWithHost
 mock.module('src/utils/detectRepository.js', () => ({
+  ...detectRepositorySnap,
   detectCurrentRepositoryWithHost: async () => ({
     host: 'github.com',
     owner: 'testowner',

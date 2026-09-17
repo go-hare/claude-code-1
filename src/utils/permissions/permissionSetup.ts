@@ -32,6 +32,7 @@ import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
 import { applyPermissionRulesToPermissionContext } from './permissions.js'
 import { emitPermissionRecheck } from './permissionRecheck.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
+import { collectUngatedAdditionalDirectories } from './projectGrantsGate.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -730,6 +731,62 @@ function isSymlinkTo({
 }
 
 /**
+ * Official `Ko` `d = Boolean(r||a||i)` — `fu` hydrates only when this is
+ * false (or sdkUrl). Scrub early-return pins `true`.
+ */
+export function permissionModeSuppliedOnInvocationFromKo({
+  permissionModeCli,
+  dangerouslySkipPermissions,
+  agentPermissionMode,
+}: {
+  permissionModeCli: string | undefined
+  dangerouslySkipPermissions?: boolean
+  agentPermissionMode?: string
+}): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
+    return true
+  }
+  return Boolean(
+    dangerouslySkipPermissions || permissionModeCli || agentPermissionMode,
+  )
+}
+
+/**
+ * densable 2.1.227 iTu: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB (allowed_non_write_users
+ * hardening under claude-code-action) forces permission mode default so Bash is
+ * not run under bypass/auto without explicit allowedTools. Notify only when a
+ * non-default mode was requested (CLI flag, permission-mode, or agent frontmatter).
+ *
+ * Exported because `initialPermissionModeFromCLI` runs at startup before agent
+ * definitions are loaded, so it can never supply `agentPermissionMode`. The
+ * notification is not displayed until the initial-notification pass, by which
+ * point the main-thread agent is resolved — that site fills in the agent term.
+ */
+export function subprocessEnvScrubNotification({
+  permissionModeCli,
+  dangerouslySkipPermissions,
+  agentPermissionMode,
+}: {
+  permissionModeCli: string | undefined
+  dangerouslySkipPermissions?: boolean
+  agentPermissionMode?: string
+}): string | undefined {
+  if (!isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
+    return undefined
+  }
+  const requestedMode = permissionModeCli
+    ? permissionModeFromString(permissionModeCli)
+    : undefined
+  const nonDefaultRequested =
+    Boolean(dangerouslySkipPermissions) ||
+    (requestedMode !== undefined && requestedMode !== 'default') ||
+    Boolean(agentPermissionMode && agentPermissionMode !== 'default')
+  return nonDefaultRequested
+    ? 'Permission mode forced to default — CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set (allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.'
+    : undefined
+}
+
+/**
  * Safely convert CLI flags to a PermissionMode
  *
  * Official 2.1.196+: may return `fromAutoFallback` when auto was chosen as a
@@ -738,32 +795,39 @@ function isSymlinkTo({
 export function initialPermissionModeFromCLI({
   permissionModeCli,
   dangerouslySkipPermissions,
+  agentPermissionMode,
 }: {
   permissionModeCli: string | undefined
   dangerouslySkipPermissions: boolean | undefined
+  agentPermissionMode?: string
 }): {
   mode: PermissionMode
   notification?: string
   fromAutoFallback?: boolean
+  modeSuppliedOnInvocation: boolean
 } {
-  // densable 2.1.227 iTu: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB (allowed_non_write_users
-  // hardening under claude-code-action) forces permission mode default so Bash
-  // is not run under bypass/auto without explicit allowedTools. Notify only when
-  // a non-default mode was requested (CLI flag, permission-mode, or agent frontmatter).
+  const modeSuppliedOnInvocation = permissionModeSuppliedOnInvocationFromKo({
+    permissionModeCli,
+    dangerouslySkipPermissions,
+    agentPermissionMode,
+  })
+  // densable 2.1.227 iTu — see subprocessEnvScrubNotification. The forced mode
+  // below is unconditional; only the notification depends on what was requested.
   if (isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
-    const requestedMode = permissionModeCli
-      ? permissionModeFromString(permissionModeCli)
-      : undefined
-    const nonDefaultRequested =
-      Boolean(dangerouslySkipPermissions) ||
-      (requestedMode !== undefined && requestedMode !== 'default')
-    const notification = nonDefaultRequested
-      ? 'Permission mode forced to default — CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set (allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.'
-      : undefined
+    const notification = subprocessEnvScrubNotification({
+      permissionModeCli,
+      dangerouslySkipPermissions,
+      agentPermissionMode,
+    })
     if (feature('TRANSCRIPT_CLASSIFIER')) {
       autoModeStateModule?.setAutoModeFromFallback(false)
     }
-    return { mode: 'default', notification, fromAutoFallback: false }
+    return {
+      mode: 'default',
+      notification,
+      fromAutoFallback: false,
+      modeSuppliedOnInvocation,
+    }
   }
 
   const settings = getSettings_DEPRECATED() || {}
@@ -907,7 +971,7 @@ export function initialPermissionModeFromCLI({
     }
   }
 
-  return { ...result, fromAutoFallback }
+  return { ...result, fromAutoFallback, modeSuppliedOnInvocation }
 }
 
 export function parseToolListFromCLI(tools: string[]): string[] {
@@ -1028,7 +1092,6 @@ export async function initializeToolPermissionContext({
   }
 
   const isBypassPermissionsModeAvailable = true
-  const settings = getSettings_DEPRECATED() || {}
 
   // Load all permission rules from disk
   const rulesFromDisk = loadAllPermissionRulesFromDisk()
@@ -1107,9 +1170,9 @@ export async function initializeToolPermissionContext({
     rulesFromDisk,
   )
 
-  // Add directories from settings and --add-dir
+  // densable `xy` — skip gated project/local additionalDirectories
   const allAdditionalDirectories = [
-    ...(settings.permissions?.additionalDirectories || []),
+    ...collectUngatedAdditionalDirectories(),
     ...addDirs,
   ]
   // Parallelize fs validation; apply updates serially (cumulative context).

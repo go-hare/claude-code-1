@@ -107,11 +107,24 @@ async function hasUsableProcMount(): Promise<boolean> {
 }
 
 /**
- * densable $_a.probeRegistrySweepPermitted.
- * Interactive + not WSL + not sandbox/docker + E_a.
+ * densable $_a.probeRegistrySweepPermitted (2.1.246).
+ * WSL always off. Headless allowed on windows/macos; linux headless still
+ * needs interactive. Then win container / sandbox / docker / E_a.
  */
 async function probeRegistrySweepPermitted(): Promise<boolean> {
-  if (!getIsInteractive() || getPlatform() === 'wsl') return false
+  const platform = getPlatform()
+  if (platform === 'wsl') return false
+  if (!getIsInteractive() && platform !== 'windows' && platform !== 'macos') {
+    return false
+  }
+  if (
+    platform === 'windows' &&
+    (process.env.CONTAINER_SANDBOX_MOUNT_POINT !== undefined ||
+      process.env.USERNAME === 'ContainerAdministrator' ||
+      process.env.USERNAME === 'ContainerUser')
+  ) {
+    return false
+  }
   if (
     envDynamic.getIsBubblewrapSandbox() ||
     isEnvTruthy(process.env.IS_SANDBOX) ||
@@ -282,13 +295,84 @@ export async function registerSession(): Promise<boolean> {
   }
 }
 
+type ConcurrentSessionPidStorage = {
+  read: (reqs: unknown[]) => Promise<{
+    ok: boolean
+    value?: { items: Array<{ found: boolean; value?: Uint8Array }> }
+    error?: { code: string }
+  }>
+  write: (
+    key: unknown,
+    value: string,
+    opts?: { publishDiscipline?: string },
+  ) => Promise<{ ok: boolean; error?: { code: string } }>
+}
+
+function concurrentSessionPidFileKey(): { namespace: 'session'; file: string } {
+  return { namespace: 'session', file: `${process.pid}.json` }
+}
+
+function asPidStorageV5(
+  value: unknown,
+): ConcurrentSessionPidStorage | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const rec = value as { read?: unknown; write?: unknown }
+  if (typeof rec.read !== 'function' || typeof rec.write !== 'function') {
+    return undefined
+  }
+  return value as ConcurrentSessionPidStorage
+}
+
 /**
- * Update this session's name in its PID registry file so ListAgents
- * can surface it. Best-effort: silently no-op if name is falsy, the
- * file doesn't exist (session not registered), or read/write fails.
+ * densable leftover `Vn(patch, storageV5)`.
+ * When storageV5 is present: official `t.read([wl()])` then
+ * `t.write(wl(), json, {publishDiscipline:"inPlace"})`.
  */
-async function updatePidFile(patch: Record<string, unknown>): Promise<void> {
+async function updatePidFile(
+  patch: Record<string, unknown>,
+  storageV5?: unknown,
+): Promise<void> {
   const pidFile = join(getSessionsDir(), `${process.pid}.json`)
+  const v5 = asPidStorageV5(storageV5)
+  if (v5) {
+    const key = concurrentSessionPidFileKey()
+    try {
+      const read = await v5.read([key])
+      if (!read.ok) {
+        logForDebugging(
+          `[concurrentSessions] updatePidFile failed: ${read.error?.code ?? 'read'}`,
+        )
+        return
+      }
+      const item = read.value?.items[0]
+      if (!item?.found || item.value === undefined) {
+        logForDebugging(
+          '[concurrentSessions] updatePidFile failed: pid file not found',
+        )
+        return
+      }
+      const current = jsonParse(
+        Buffer.from(item.value).toString('utf8'),
+      ) as Record<string, unknown>
+      const next: Record<string, unknown> = { ...current, ...patch }
+      for (const field of Object.keys(patch)) {
+        if (patch[field] === undefined) delete next[field]
+      }
+      const written = await v5.write(key, jsonStringify(next), {
+        publishDiscipline: 'inPlace',
+      })
+      if (!written.ok) {
+        logForDebugging(
+          `[concurrentSessions] updatePidFile failed: ${written.error?.code ?? 'write'}`,
+        )
+      }
+    } catch (e) {
+      logForDebugging(
+        `[concurrentSessions] updatePidFile failed: ${errorMessage(e)}`,
+      )
+    }
+    return
+  }
   try {
     const data = jsonParse(await readFile(pidFile, 'utf8')) as Record<
       string,
@@ -391,18 +475,22 @@ export function __resetRegisteredSessionNameForTests(): void {
 export async function updateSessionName(
   name: string | undefined,
   source: SessionNameSource = 'user',
+  storageV5?: unknown,
 ): Promise<void> {
   if (!name) return
   setRegisteredName(name, source)
   const persistSource =
     source === 'derived' || source === 'collision' ? source : undefined
-  await updatePidFile({
-    name,
-    nameSource: persistSource,
-    formerNames: formerNames.length > 0 ? formerNames : undefined,
-    nameSince: registeredName?.since ?? Date.now(),
-    updatedAt: Date.now(),
-  })
+  await updatePidFile(
+    {
+      name,
+      nameSource: persistSource,
+      formerNames: formerNames.length > 0 ? formerNames : undefined,
+      nameSince: registeredName?.since ?? Date.now(),
+      updatedAt: Date.now(),
+    },
+    storageV5,
+  )
 }
 
 /**

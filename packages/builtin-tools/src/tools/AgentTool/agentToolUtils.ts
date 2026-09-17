@@ -68,7 +68,12 @@ import { OBSERVER_REPORT_TOOL_NAME } from '../ObserverReportTool/constants.js'
 import { ObserverReportTool } from '../ObserverReportTool/ObserverReportTool.js'
 import { CRON_CREATE_TOOL_NAME } from '../ScheduleCronTool/prompt.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
-import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.js'
+import {
+  AGENT_TOOL_NAME,
+  LEGACY_AGENT_TOOL_NAME,
+  MAX_TURNS_PARTIAL_PREFIX,
+  ONE_SHOT_BUILTIN_AGENT_TYPES,
+} from './constants.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 /**
@@ -366,6 +371,29 @@ export function countToolUses(messages: MessageType[]): number {
   return count
 }
 
+/**
+ * densable 2.1.246 #54 `btr` — trailing `max_turns_reached` after the last
+ * assistant / real user. Official `bI` skip for some user rows is unused on
+ * the yield-then-break path (attachment is last).
+ */
+export function readMaxTurnsReached(
+  messages: MessageType[],
+): number | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const n = messages[i]
+    if (!n) continue
+    if (n.type === 'assistant' || n.type === 'user') return
+    if (
+      n.type === 'attachment' &&
+      n.attachment?.type === 'max_turns_reached' &&
+      typeof n.attachment.maxTurns === 'number'
+    ) {
+      return n.attachment.maxTurns
+    }
+  }
+  return
+}
+
 export function finalizeAgentTool(
   agentMessages: MessageType[],
   agentId: string,
@@ -489,6 +517,21 @@ export function finalizeAgentTool(
     toolStats = computeAgentToolStats(agentMessages as never)
   } catch {
     toolStats = undefined
+  }
+
+  // densable 2.1.246 #54 Gxt — prepend PARTIAL banner when query hit maxTurns
+  const maxTurnsReached = readMaxTurnsReached(agentMessages)
+  if (maxTurnsReached !== undefined) {
+    const continueHint = ONE_SHOT_BUILTIN_AGENT_TYPES.has(agentType)
+      ? ''
+      : ` Send the agent a message (${SEND_MESSAGE_TOOL_NAME}) to let it continue from where it stopped.`
+    content = [
+      {
+        type: 'text',
+        text: `${MAX_TURNS_PARTIAL_PREFIX}${maxTurnsReached}-turn limit before finishing. The text below is PARTIAL output; treat it as incomplete.${continueHint}\n`,
+      },
+      ...content,
+    ]
   }
 
   return {
@@ -1023,6 +1066,7 @@ export async function runAsyncAgentLifecycle({
       taskId,
       description,
       status: 'completed',
+      maxTurnsReached: readMaxTurnsReached(agentMessages),
       setAppState: rootSetAppState,
       finalMessage,
       usage: {

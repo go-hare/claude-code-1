@@ -457,6 +457,12 @@ describe('readAliveDaemonLock (official bW / densable cI)', () => {
   })
 
   test('returns null when procStart mismatches (PID reuse)', async () => {
+    const { isWin32ProcTimesFfiAvailable } = await import(
+      '../../utils/genericProcessUtils.js'
+    )
+    const identity = isWin32ProcTimesFfiAvailable()
+      ? { procStartFt: 'definitely-not-this-process-start' }
+      : { procStart: 'definitely-not-this-process-start' }
     expect(
       await writeDaemonLock(
         {
@@ -464,7 +470,7 @@ describe('readAliveDaemonLock (official bW / densable cI)', () => {
           version: 'a',
           startedAt: 50,
           origin: 'service',
-          procStart: 'definitely-not-this-process-start',
+          ...identity,
         },
         dir,
       ),

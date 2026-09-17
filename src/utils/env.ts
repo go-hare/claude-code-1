@@ -10,9 +10,12 @@ import { which } from './which.js'
 
 type Platform = 'win32' | 'darwin' | 'linux'
 
-// Config and data paths
-export const getGlobalClaudeFile = memoize((): string => {
-  // Legacy fallback for backwards compatibility
+export type GlobalClaudeFileSeed = 'seeded' | 'unchanged' | 'conflict'
+
+let globalClaudeFile: string | undefined
+
+/** densable leftover `Xt` — compute path when unset. */
+function computeGlobalClaudeFile(): string {
   if (
     getFsImplementation().existsSync(
       join(getClaudeConfigHomeDir(), '.config.json'),
@@ -20,10 +23,33 @@ export const getGlobalClaudeFile = memoize((): string => {
   ) {
     return join(getClaudeConfigHomeDir(), '.config.json')
   }
-
   const filename = `.claude${fileSuffixForOauthConfig()}.json`
   return join(process.env.CLAUDE_CONFIG_DIR || homedir(), filename)
-})
+}
+
+/**
+ * densable leftover `kt` / host `getGlobalClaudeFile`.
+ * `this.globalClaudeFile ??= Xt()`.
+ */
+export function getGlobalClaudeFile(): string {
+  return (globalClaudeFile ??= computeGlobalClaudeFile())
+}
+
+/**
+ * densable leftover `Si` / host `seedGlobalClaudeFile` — qF `Im`.
+ * unset → pin + "seeded"; same path → "unchanged"; else "conflict".
+ */
+export function seedGlobalClaudeFile(path: string): GlobalClaudeFileSeed {
+  if (globalClaudeFile === undefined) {
+    globalClaudeFile = path
+    return 'seeded'
+  }
+  return globalClaudeFile === path ? 'unchanged' : 'conflict'
+}
+
+export function resetGlobalClaudeFileForTests(): void {
+  globalClaudeFile = undefined
+}
 
 const hasInternetAccess = memoize(async (): Promise<boolean> => {
   try {

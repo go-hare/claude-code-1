@@ -4,6 +4,7 @@ import { KeyboardShortcutHint } from '@anthropic/ink';
 import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseErrorMessage.js';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { ShellProgressMessage } from 'src/components/shell/ShellProgressMessage.js';
+import { findLastShellProgress } from '../shared/shellProgress.js';
 import { Box, Text } from '@anthropic/ink';
 import { useKeybinding } from 'src/keybindings/useKeybinding.js';
 import { useShortcutDisplay } from 'src/keybindings/useShortcutDisplay.js';
@@ -134,7 +135,7 @@ export function renderToolUseProgressMessage(
     inProgressToolCallCount?: number;
   },
 ): React.ReactNode {
-  const lastProgress = progressMessagesForMessage.at(-1);
+  const lastProgress = findLastShellProgress(progressMessagesForMessage, 'bash_progress');
 
   if (!lastProgress || !lastProgress.data) {
     return (

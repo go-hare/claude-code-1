@@ -123,7 +123,7 @@ export function classifyOwnNameTarget(to: string): OwnNameClass {
 }
 
 /** densable leftover closest同名 — Vu(closest.name) === Vu(WCe(to)?.name ?? to). */
-export function leftoverClosestHasSameName(
+export function closestCandidateHasSameNormalizedName(
   to: string,
   closest: Array<{ name: string }>,
 ): boolean {
@@ -132,19 +132,21 @@ export function leftoverClosestHasSameName(
 }
 
 /** densable not-found DEe: Qen==="categorical" && !closest同名 && Zen. */
-export function leftoverNotFoundIsSelfSend(
+export function shouldTreatNotFoundAsSelfSend(
   qen: OwnNameClass,
   to: string,
   closest: Array<{ name: string }>,
   zen: boolean,
 ): boolean {
   return (
-    qen === 'categorical' && !leftoverClosestHasSameName(to, closest) && zen
+    qen === 'categorical' &&
+    !closestCandidateHasSameNormalizedName(to, closest) &&
+    zen
   )
 }
 
 /** densable ambiguous DEe: Qen==="categorical" && matchedBy==="prefix" && Zen. */
-export function leftoverAmbiguousIsSelfSend(
+export function shouldTreatPrefixAmbiguousAsSelfSend(
   qen: OwnNameClass,
   matchedBy: 'exact' | 'prefix' | undefined,
   zen: boolean,

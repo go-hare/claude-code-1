@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import {
   GOVERNED_HTTP_GIT_KEYS,
   GIT_PROXY_CRED_HELPER_CONTENT,
@@ -61,13 +61,15 @@ describe('densable 2.1.224 #1 gitConfigure pure ($2h/d2h/p2h)', () => {
   })
 
   test('gitProxyCredHelperPath + governedSigningEntries', () => {
-    expect(gitProxyCredHelperPath('/ws')).toBe('/ws/.runner/git-proxy-cred')
+    expect(gitProxyCredHelperPath('/ws')).toBe(
+      join('/ws', '.runner', 'git-proxy-cred'),
+    )
     const entries = governedSigningEntries('/ws')
     expect(entries).toContainEqual(['user.name', 'Claude'])
     expect(entries).toContainEqual(['gpg.format', 'ssh'])
     expect(
       entries.some(
-        ([k, v]) => k === 'gpg.ssh.program' && v.endsWith('/code-sign'),
+        ([k, v]) => k === 'gpg.ssh.program' && v.endsWith(`${sep}code-sign`),
       ),
     ).toBe(true)
   })
@@ -96,16 +98,16 @@ describe('densable 2.1.224 #1 gitConfigure pure ($2h/d2h/p2h)', () => {
   test('codeSignArtifacts (Fqv) + coauthorHookStubs (Uqv)', () => {
     const arts = codeSignArtifacts('/ws', '/usr/bin/claude')
     expect(arts).toHaveLength(2)
-    expect(arts[0]!.path).toBe('/ws/.runner/code-sign')
+    expect(arts[0]!.path).toBe(join('/ws', '.runner', 'code-sign'))
     expect(arts[0]!.mode).toBe(0o755)
     expect(arts[0]!.content).toContain('self-hosted-runner code-sign')
-    expect(arts[1]!.path).toBe('/ws/.runner/commit_signing_key.pub')
+    expect(arts[1]!.path).toBe(join('/ws', '.runner', 'commit_signing_key.pub'))
     expect(arts[1]!.content).toBe('')
 
     const stubs = coauthorHookStubs('/ws')
-    expect(stubs.some(s => s.path.endsWith('/pre-commit'))).toBe(true)
-    expect(stubs.some(s => s.path.endsWith('/commit-msg'))).toBe(true)
-    const co = stubs.find(s => s.path.endsWith('/commit-msg'))
+    expect(stubs.some(s => s.path.endsWith(`${sep}pre-commit`))).toBe(true)
+    expect(stubs.some(s => s.path.endsWith(`${sep}commit-msg`))).toBe(true)
+    const co = stubs.find(s => s.path.endsWith(`${sep}commit-msg`))
     expect(co!.content).not.toBe(HOOK_STUB_GENERIC)
     expect(co!.mode).toBe(0o755)
   })

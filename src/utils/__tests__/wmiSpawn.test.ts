@@ -3,6 +3,11 @@ import {
   buildDaemonSpawnEnv,
   buildWindowsCommandLine,
   buildWmiPowerShellScript,
+  DAEMON_NPM_STUB_MAX_BYTES,
+  DAEMON_REINSTALL_POLL_MS,
+  DAEMON_REINSTALL_WAIT_ERRNOS,
+  DAEMON_REINSTALL_WAIT_MS,
+  isNpmClaudePackagePath,
   quotePowerShellSingle,
   quoteWindowsArg,
   spawnViaWmiSync,
@@ -136,5 +141,42 @@ describe('spawnViaWmiSync (Windows flash path)', () => {
         /* already exited */
       }
     }
+  })
+})
+
+describe('npm reinstall wait (densable 246 #8)', () => {
+  test('locks Zn/Qn/eo and errno set', () => {
+    expect(DAEMON_REINSTALL_WAIT_MS).toBe(10_000)
+    expect(DAEMON_REINSTALL_POLL_MS).toBe(250)
+    expect(DAEMON_NPM_STUB_MAX_BYTES).toBe(65_536)
+    for (const code of [
+      'ENOENT',
+      'EACCES',
+      'ENOEXEC',
+      'EFTYPE',
+      'ETXTBSY',
+      'EBUSY',
+      'EUNKNOWN',
+      'EPERM',
+    ]) {
+      expect(DAEMON_REINSTALL_WAIT_ERRNOS.has(code)).toBe(true)
+    }
+  })
+
+  test('isNpmClaudePackagePath matches anthropic + go-hare scopes', () => {
+    expect(
+      isNpmClaudePackagePath(
+        '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+      ),
+    ).toBe(true)
+    expect(
+      isNpmClaudePackagePath(
+        'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@go-hare\\claude-code\\bin\\claude.exe',
+      ),
+    ).toBe(true)
+    expect(isNpmClaudePackagePath('/usr/local/bin/claude')).toBe(false)
+    expect(
+      isNpmClaudePackagePath('/home/me/.local/share/claude/versions/2.1.246'),
+    ).toBe(false)
   })
 })

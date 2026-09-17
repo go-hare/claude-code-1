@@ -23,6 +23,7 @@ import {
   permissionRuleValueFromString,
   permissionRuleValueToString,
 } from './permissionRuleParser.js'
+import { filterGatedAllowRules } from './projectGrantsGate.js'
 
 /**
  * Returns true if allowManagedPermissionRulesOnly is enabled in managed settings (policySettings).
@@ -129,7 +130,8 @@ export function loadAllPermissionRulesFromDisk(): PermissionRule[] {
   for (const source of getEnabledSettingSources()) {
     rules.push(...getPermissionRulesForSource(source))
   }
-  return rules
+  // densable `ky` — drop untrusted project/local allow rules (deny/ask stay)
+  return filterGatedAllowRules(rules)
 }
 
 /**

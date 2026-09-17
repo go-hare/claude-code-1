@@ -1162,8 +1162,15 @@ async function closeServer(serverToClose: Server): Promise<void> {
   })
 }
 
+function isWindowsNamedPipePath(path: string): boolean {
+  return (
+    process.platform === 'win32' &&
+    parseWindowsNamedPipeName(path) !== undefined
+  )
+}
+
 async function removeSocketPath(path: string): Promise<void> {
-  if (process.platform === 'win32') return
+  if (isWindowsNamedPipePath(path)) return
   try {
     await unlink(path)
   } catch {
@@ -1218,13 +1225,13 @@ export async function startUdsMessaging(
 
   assertValidUnixSocketPath(path)
 
-  // Ensure parent directory exists (skip on Windows — pipe paths aren't files)
-  if (process.platform !== 'win32') {
+  // Ensure parent directory exists (skip only for Windows named pipes).
+  if (!isWindowsNamedPipePath(path)) {
     await ensureSocketParent(path)
   }
 
-  // Clean up stale socket file (skip on Windows — pipe paths aren't files)
-  if (process.platform !== 'win32') {
+  // Clean up stale socket file (skip only for Windows named pipes).
+  if (!isWindowsNamedPipePath(path)) {
     try {
       await unlink(path)
     } catch {

@@ -14,6 +14,10 @@ import { getSystemContext, getUserContext } from 'src/context.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import { query } from 'src/query.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import { getDumpPromptsPath } from 'src/services/api/dumpPrompts.js'
 import { cleanupAgentTracking } from 'src/services/api/promptCacheBreakDetection.js'
 import {
@@ -985,31 +989,51 @@ export async function* runAgent({
       onQueryProgress?.()
       // Forward subagent API request starts to parent's metrics display
       // so TTFT/OTPS update during subagent execution.
-      if (
-        message.type === 'stream_event' &&
-        (message as any).event.type === 'message_start' &&
-        (message as any).ttftMs != null
-      ) {
-        toolUseContext.pushApiMetricsEntry?.((message as any).ttftMs)
-        continue
+      if (message.type === 'stream_event') {
+        const event = message.event
+        const ttftMs = message.ttftMs
+        if (
+          event !== null &&
+          typeof event === 'object' &&
+          'type' in event &&
+          event.type === 'message_start' &&
+          typeof ttftMs === 'number'
+        ) {
+          toolUseContext.pushApiMetricsEntry?.(ttftMs)
+          continue
+        }
       }
 
       // Yield attachment messages (e.g., structured_output) without recording them
       if (message.type === 'attachment') {
         // Handle max turns reached signal from query.ts
-        if ((message as any).attachment.type === 'max_turns_reached') {
+        const attachment = message.attachment as {
+          type?: string
+          maxTurns?: number
+          turnCount?: number
+        }
+        if (attachment.type === 'max_turns_reached') {
+          // densable 2.1.246 #54 runAgent @214524275:
+          // always debug-log; event+yield only if `!at.signal.aborted`; always break.
+          const maxTurnsAtt = {
+            type: 'max_turns_reached' as const,
+            maxTurns: attachment.maxTurns ?? 0,
+            turnCount: attachment.turnCount ?? 0,
+          }
           logForDebugging(
-            `[Agent
-: $
-{
-  agentDefinition.agentType
-}
-] Reached max turns limit ($
-{
-  (message as any).attachment.maxTurns
-}
-)`,
+            `[Agent: ${agentDefinition.agentType}] Reached max turns limit (${maxTurnsAtt.maxTurns})`,
           )
+          if (!agentAbortController.signal.aborted) {
+            logEvent('tengu_agent_max_turns_reached', {
+              query_source:
+                querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              is_built_in_agent: isBuiltInAgent(agentDefinition),
+              max_turns: maxTurnsAtt.maxTurns,
+              turn_count: maxTurnsAtt.turnCount,
+              is_async: isAsync,
+            })
+            yield message as Message
+          }
           break
         }
         yield message as Message

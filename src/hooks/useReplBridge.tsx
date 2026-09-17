@@ -26,7 +26,24 @@ import {
   getPersistedBridgeSession,
   saveBridgeSessionMeta,
 } from '../bridge/bridgeSessionMeta.js';
-import { clearBridgeSession, registerLiveSuppressionProbe, saveBridgeSession } from '../utils/sessionStorage.js';
+import { HOST_ACCOUNT_CHANGED_HINT } from '../bridge/hostSignedOut.js';
+import {
+  clearBridgeSession,
+  clearBridgeSessionCache,
+  clearScanUncertaintyHoldSid,
+  getCurrentSessionBridge,
+  getProject,
+  isCurrentSessionPrecautionarySuppressed,
+  isLiveBridgeSuppressed,
+  isSessionHistorySuppressed,
+  markPrecautionarySessionSuppression,
+  markResilientPrecautionSid,
+  registerLiveSuppressionProbe,
+  saveBridgeSession,
+  writeHistorySuppression,
+} from '../utils/sessionStorage.js';
+import { registerCleanup } from '../utils/cleanupRegistry.js';
+import { isEligibleBridgeMessage } from '../bridge/bridgeMessaging.js';
 import { extractInboundMessageFields } from '../bridge/inboundMessages.js';
 import type { BridgeState, ReplBridgeHandle } from '../bridge/replBridge.js';
 import { setReplBridgeHandle } from '../bridge/replBridgeHandle.js';
@@ -54,7 +71,12 @@ import {
   shouldEmitReadyPushByProbability,
   shouldSendRemoteControlReadyPushLive,
 } from '../utils/remoteControlReadyPush.js';
-import { drainSdkEvents, setSdkEventEnqueueListener } from '../utils/sdkEventQueue.js';
+import {
+  drainSdkEvents,
+  hasMatchingQueuedSdkEvent,
+  isBridgeForwardableSdkEvent,
+  setSdkEventEnqueueListener,
+} from '../utils/sdkEventQueue.js';
 import { buildTaskStateMessage, getTaskStateSnapshotKey, shouldPublishTaskState } from '../utils/taskStateMessage.js';
 import omit from 'lodash-es/omit.js';
 import { getMcpConfigByName } from '../services/mcp/config.js';
@@ -69,6 +91,61 @@ import {
 import { getLeaderToolUseConfirmQueue } from '../utils/swarm/leaderPermissionBridge.js';
 import { getTaskListId, getTasksDir, listTasks, onTasksUpdated } from '../utils/tasks.js';
 import { ContentBlockParam } from '@anthropic-ai/sdk/resources';
+import { basename } from 'path';
+
+type ReplBridgeOauthAccount = {
+  accountUuid?: string;
+  organizationUuid?: string;
+};
+
+/** densable `sK` / `oB` — GrowthBook kill switch, default ON. */
+function isBridgeAuthReviveEnabled(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_bridge_auth_revive', true);
+}
+
+/** densable leftover hook `Z_` — same Fe/UG fields as init oauthAccountsMatch. */
+function replBridgeOauthAccountsMatch(
+  live: ReplBridgeOauthAccount | undefined,
+  recorded: ReplBridgeOauthAccount,
+): boolean {
+  return (
+    Boolean(live?.accountUuid) &&
+    live?.accountUuid === recorded.accountUuid &&
+    (live?.organizationUuid || undefined) === (recorded.organizationUuid || undefined)
+  );
+}
+
+/** densable leftover hook `Ki` / init `xe` torn pair. */
+function isReplBridgeSessionTorn(sid: string): boolean {
+  const sessionFile = getProject().sessionFile ?? null;
+  return sessionFile != null && basename(sessionFile) !== `${sid}.jsonl`;
+}
+
+/** densable leftover hook `RKt` / `J_e`. */
+function isCompactionOrSummaryMarker(m: Message): boolean {
+  return (
+    (m.type === 'system' && m.subtype === 'compact_boundary') ||
+    (m.type === 'user' && (m as { isCompactSummary?: boolean }).isCompactSummary === true)
+  );
+}
+
+/** densable leftover hook `Pno` / `Z_e`. */
+function shouldSkipBridgeHistoryBackfill(): boolean {
+  return (
+    isSessionHistorySuppressed() ||
+    getCurrentSessionBridge()?.noHistoryBackfill === true ||
+    isLiveBridgeSuppressed() ||
+    isCurrentSessionPrecautionarySuppressed()
+  );
+}
+
+type ReplBridgeEligibleCursor = { index: number; uuid: string };
+type DeferredArchiveCallback = { fire: () => Promise<void>; unregister: () => void };
+type ReplBridgeTranscriptCursor = {
+  head?: string;
+  tail?: ReplBridgeEligibleCursor;
+  eligible?: ReplBridgeEligibleCursor;
+};
 
 const TASK_STATE_DEBOUNCE_MS = 50;
 const TASK_STATE_POLL_MS = 5000;
@@ -93,6 +170,9 @@ export const BRIDGE_FUSE_HINT = 'disabled after repeated failures · restart to 
  * route).
  */
 const MAX_CONSECUTIVE_INIT_FAILURES = 3;
+
+/** densable `$e` `Pe.current=oL` — in-flight snapshot, not a real token. */
+const AUTH_FAIL_TOKEN_LOADING = Symbol('authFailTokenLoading');
 
 /**
  * Hook that initializes an always-on bridge connection in the background
@@ -136,6 +216,91 @@ export function useReplBridge(
   const readyPushSentRef = useRef(false);
   // densable x.current — reattach session treated like outboundOnly for oZp gate
   const bridgeReattachRef = useRef(process.env.CLAUDE_BRIDGE_REATTACH_SESSION !== undefined);
+  // densable W.current — last live cse_* passed as reattachSessionId (Xn).
+  // Occupancy qn only fires when this is empty and init fills from Bkn.
+  const lastBridgeSessionIdRef = useRef<string | undefined>(undefined);
+  // densable leftover hook `ie` / `Se` / `te` / `ee` / `K` / `de`.
+  // Official hook import remap @229911522 (NOT `function HR(` hits):
+  //   GUa as HR ← qXs as GUa = markPrecautionarySessionSuppression
+  //   JUa as jR ← KXs as JUa = markResilientPrecautionSid
+  //   MUa as FK ← ZXs as MUa = clearScanUncertaintyHoldSid
+  //   ZUa as tC ← r9s as ZUa = b4t(Yn()) = clearBridgeSessionCache
+  //   FUa as zc ← Xg as FUa = identity
+  // fe / Z are hook-local refs (not imports).
+  //   Z.current = F.current.eligible {index, uuid}
+  //   fe.current = gt.archive ? {fire:Dt, unregister:Ja(Dt)} : void 0
+  // xe/Pn/tC/fe/Z/F/Gi leftover-wired. Ja=`registerCleanup`. archive on handle.
+  const stashOauthRef = useRef<ReplBridgeOauthAccount | undefined>(undefined);
+  const liveOauthRef = useRef<ReplBridgeOauthAccount | undefined>(undefined);
+  const suppressLatchSidRef = useRef<string | undefined>(undefined);
+  const persistSuppressedRef = useRef(false);
+  const firstMessageUuidRef = useRef<string | undefined>(undefined);
+  const lastSeqRef = useRef<number | undefined>(undefined);
+  const flushedAtTeardownRef = useRef<Set<string> | undefined>(undefined);
+  const writtenLengthAtTeardownRef = useRef<number | undefined>(undefined);
+  const eligibleCursorRef = useRef<ReplBridgeEligibleCursor | undefined>(undefined);
+  const deferredArchiveRef = useRef<DeferredArchiveCallback | undefined>(undefined);
+  const transcriptCursorRef = useRef<ReplBridgeTranscriptCursor>({});
+  const giTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const leftoverEnRef = useRef(false);
+  const leftoverGRef = useRef(false);
+  const leftoverURef = useRef(false);
+  const teardownSidRef = useRef<string | undefined>(undefined);
+
+  /**
+   * densable leftover hook `l_e` @230328570.
+   * `!sessionActive && !outboundOnly && QK(conversation_reset)`.
+   */
+  const leftoverL_e = (handle: { outboundOnly?: boolean }, sessionActive: boolean): boolean => {
+    return !sessionActive && !handle.outboundOnly && hasMatchingQueuedSdkEvent(o => o.type === 'conversation_reset');
+  };
+
+  /**
+   * densable leftover hook `a_e` @230328395.
+   * `zK().filter(S_e).map(iCe)` — drain already stamps uuid/session_id.
+   */
+  const leftoverA_e = (handle: { writeSdkMessages: (events: SDKMessage[]) => void }): void => {
+    try {
+      const t = drainSdkEvents().filter(isBridgeForwardableSdkEvent);
+      if (t.length > 0) handle.writeSdkMessages(t as unknown as SDKMessage[]);
+    } catch (err) {
+      logForDebugging(`[bridge:repl] queued SDK event forward failed: ${errorMessage(err)}`, {
+        level: 'error',
+      });
+    }
+  };
+
+  const leftoverXe = ({ archiveAbandoned: oe }: { archiveAbandoned: boolean }): boolean => {
+    lastBridgeSessionIdRef.current = undefined;
+    lastSeqRef.current = undefined;
+    flushedAtTeardownRef.current = undefined;
+    writtenLengthAtTeardownRef.current = undefined;
+    firstMessageUuidRef.current = undefined;
+    eligibleCursorRef.current = undefined;
+    teardownSidRef.current = undefined;
+    stashOauthRef.current = undefined;
+    suppressLatchSidRef.current = undefined;
+    const ge = deferredArchiveRef.current;
+    deferredArchiveRef.current = undefined;
+    if (!ge) return false;
+    if (oe) {
+      void ge.fire().finally(() => {
+        ge.unregister();
+      });
+      return true;
+    }
+    ge.unregister();
+    return false;
+  };
+  // densable ne/ve — one-shot auth-revive latch consumed at the next init.
+  const reviveLatchRef = useRef(false);
+  const reviveExpectedAccountRef = useRef<{ accountUuid?: string; organizationUuid?: string } | undefined>(undefined);
+  const authFailTokenRef = useRef<string | undefined | typeof AUTH_FAIL_TOKEN_LOADING>(undefined);
+  const authFailAccountRef = useRef<{ accountUuid?: string; organizationUuid?: string } | undefined>(undefined);
+  const authFailGenerationRef = useRef(0);
+  const authFailFetchEpochRef = useRef(0);
+  /** densable `ye` — unattended revive count; cap `Qtt=10`. */
+  const authReviveCountRef = useRef(0);
   const setAppState = useSetAppState();
   const commandsRef = useRef(commands);
   commandsRef.current = commands;
@@ -157,6 +322,11 @@ export function useReplBridge(
   const replBridgeInitialName = feature('BRIDGE_MODE') ? replBridgeInitialNameRaw : undefined;
   const replBridgeExplicitRaw = useAppState(s => s.replBridgeExplicit);
   const replBridgeExplicit = feature('BRIDGE_MODE') ? replBridgeExplicitRaw : false;
+  const replBridgeErrorRaw = useAppState(s => s.replBridgeError);
+  const replBridgeError = feature('BRIDGE_MODE') ? replBridgeErrorRaw : undefined;
+  const replBridgeErrorKindRaw = useAppState(s => s.replBridgeErrorKind);
+  const replBridgeErrorKind = feature('BRIDGE_MODE') ? replBridgeErrorKindRaw : undefined;
+  const authChangeGeneration = useAppState(s => s.authChangeGeneration);
 
   // densable: qE.useEffect(()=>Dkr(()=>{if(d.current)A.current=!0}),[])
   // Latch user activity while a bridge handle is live — suppress ready-push.
@@ -232,20 +402,71 @@ export function useReplBridge(
        * densable nr — after GKT, disable bridge but KEEP replBridgeError (persistent
        * indicator). Local pre-224 cleared the error on the same timer (= toast-only).
        */
-      function scheduleBridgeAutoDisable(): void {
-        clearTimeout(failureTimeoutRef.current);
-        failureTimeoutRef.current = setTimeout(() => {
+      function leftoverGi(): void {
+        const Ge = transcriptCursorRef.current.head;
+        const et = transcriptCursorRef.current.eligible;
+        const s_e = 1e4;
+        clearTimeout(giTimerRef.current);
+        giTimerRef.current = setTimeout(() => {
           if (cancelled) return;
-          failureTimeoutRef.current = undefined;
+          giTimerRef.current = undefined;
+          const gt = handleRef.current;
+          if (gt) {
+            lastBridgeSessionIdRef.current = gt.bridgeSessionId;
+            lastSeqRef.current = gt.getLastSequenceNum?.();
+            suppressLatchSidRef.current = persistSuppressedRef.current ? getSessionId() : undefined;
+            flushedAtTeardownRef.current =
+              flushedUUIDsRef.current.size > 0 ? new Set(flushedUUIDsRef.current) : undefined;
+            writtenLengthAtTeardownRef.current = lastWrittenIndexRef.current;
+            firstMessageUuidRef.current = Ge;
+            eligibleCursorRef.current = et;
+            teardownSidRef.current = getSessionId();
+            stashOauthRef.current = liveOauthRef.current;
+            deferredArchiveRef.current?.unregister();
+            const eo = stashOauthRef.current;
+            const Dt = async (): Promise<void> => {
+              if (eo?.accountUuid === undefined) return;
+              let go: ReplBridgeOauthAccount | undefined;
+              try {
+                const { getOauthAccountInfoFromDisk } =
+                  require('../utils/auth.js') as typeof import('../utils/auth.js');
+                const live = getOauthAccountInfoFromDisk();
+                if (live?.accountUuid) {
+                  go = {
+                    accountUuid: live.accountUuid,
+                    organizationUuid: live.organizationUuid,
+                  };
+                }
+              } catch {
+                return;
+              }
+              if (!replBridgeOauthAccountsMatch(go, eo)) return;
+              await gt.archive?.().catch((Mo: unknown) => {
+                logForDebugging(`[bridge:repl] Deferred archive failed: ${errorMessage(Mo)}`, { level: 'error' });
+              });
+            };
+            deferredArchiveRef.current = gt.archive ? { fire: Dt, unregister: registerCleanup(Dt) } : undefined;
+          }
+          leftoverEnRef.current = true;
           setAppState(prev => {
-            if (!prev.replBridgeError || !prev.replBridgeEnabled) return prev;
+            if (!prev.replBridgeError) return prev;
             return {
               ...prev,
               replBridgeEnabled: false,
-              // densable: do NOT clear replBridgeError / ErrorKind here
+              replBridgeSessionGroupingId: undefined,
+              ...(gt ? { replBridgeSkipNextArchive: true } : {}),
             };
           });
-        }, BRIDGE_FAILURE_DISMISS_MS);
+        }, s_e);
+      }
+
+      /**
+       * densable nr — after GKT, disable bridge but KEEP replBridgeError (persistent
+       * indicator). Local pre-224 cleared the error on the same timer (= toast-only).
+       * Official `Gi` @230335123 is the same `s_e=1e4` timer + stash + disable.
+       */
+      function scheduleBridgeAutoDisable(): void {
+        leftoverGi();
       }
 
       /**
@@ -257,6 +478,47 @@ export function useReplBridge(
       ): void {
         const kind = opts?.kind ?? 'terminal';
         const wasConnected = opts?.wasConnected ?? false;
+        if (kind === 'auth') {
+          // densable `$e` @230333100 — Pe=oL immediately; abort token if
+          // authChangeGeneration moved mid-flight.
+          authFailTokenRef.current = AUTH_FAIL_TOKEN_LOADING;
+          authFailGenerationRef.current = store.getState().authChangeGeneration;
+          const fetchEpoch = ++authFailFetchEpochRef.current;
+          const { getClaudeAIOAuthTokens, getOauthAccountInfoFromDisk } =
+            require('../utils/auth.js') as typeof import('../utils/auth.js');
+          void Promise.resolve()
+            .then(() => {
+              try {
+                const tokens = getClaudeAIOAuthTokens();
+                const acct = getOauthAccountInfoFromDisk();
+                return {
+                  token: tokens?.accessToken,
+                  account: acct?.accountUuid
+                    ? {
+                        accountUuid: acct.accountUuid,
+                        organizationUuid: acct.organizationUuid,
+                      }
+                    : undefined,
+                };
+              } catch {
+                return { token: undefined, account: undefined };
+              }
+            })
+            .then(snap => {
+              if (authFailFetchEpochRef.current !== fetchEpoch) return;
+              if (store.getState().authChangeGeneration !== authFailGenerationRef.current) {
+                authFailAccountRef.current = snap.account;
+                authFailTokenRef.current = undefined;
+                return;
+              }
+              authFailAccountRef.current = snap.account;
+              authFailTokenRef.current = snap.token;
+            })
+            .catch(() => {
+              if (authFailFetchEpochRef.current !== fetchEpoch) return;
+              authFailTokenRef.current = undefined;
+            });
+        }
         notifyBridgeFailed(detail, wasConnected);
         appendBridgeDisconnectMessage(detail);
         setAppState(prev => ({
@@ -404,7 +666,7 @@ export function useReplBridge(
           }
 
           // State change callback — maps bridge lifecycle events to AppState.
-          function handleStateChange(state: BridgeState, detail?: string): void {
+          function handleStateChange(state: BridgeState, detail?: string, kind?: string): void {
             if (cancelled) return;
             // densable eDe: FC/replBridgeActive true on connected|ready (when
             // handle exists), false on failed — gates JT enqueue for RC mid-join.
@@ -584,7 +846,7 @@ export function useReplBridge(
                 // densable case"failed": rt + set error/kind + qe + nr (keep error after disable)
                 clearTimeout(failureTimeoutRef.current);
                 surfaceBridgeFailure(detail, {
-                  kind: 'terminal',
+                  kind: kind ?? 'terminal',
                   wasConnected: handleRef.current !== null,
                 });
                 break;
@@ -614,11 +876,124 @@ export function useReplBridge(
           }
 
           let declinedHolder: LocalBridgeSessionHolder | undefined;
+          // densable Yn=ne.current; ne.current=!1; Dr=ve.current; ve.current=void 0
+          const reviveInitiated = reviveLatchRef.current;
+          reviveLatchRef.current = false;
+          const expectedAccount = reviveExpectedAccountRef.current;
+          reviveExpectedAccountRef.current = undefined;
+          const { getOauthAccountInfoFromDisk } = require('../utils/auth.js') as typeof import('../utils/auth.js');
+          const { logEvent } =
+            require('../services/analytics/index.js') as typeof import('../services/analytics/index.js');
+          // densable leftover hook `xe({archiveAbandoned})` — hook-scope leftoverXe.
+          const historySid = getSessionId();
+          if (teardownSidRef.current !== undefined && teardownSidRef.current !== historySid) {
+            leftoverXe({ archiveAbandoned: true });
+          }
+          // densable leftover `Pn` + official `if(Pn) tC()`.
+          const leftoverPn =
+            (firstMessageUuidRef.current !== undefined && messages[0]?.uuid !== firstMessageUuidRef.current) ||
+            (eligibleCursorRef.current !== undefined &&
+              messages[eligibleCursorRef.current.index]?.uuid !== eligibleCursorRef.current.uuid);
+          if (leftoverPn) {
+            clearBridgeSessionCache();
+          }
+          if (!leftoverPn && lastBridgeSessionIdRef.current !== undefined) {
+            for (const id of flushedAtTeardownRef.current ?? []) {
+              flushedUUIDsRef.current.add(id);
+            }
+          }
+          let leftoverEt = false;
+          let leftoverGt = false;
+          let leftoverEo: ReplBridgeOauthAccount | undefined;
+          if (lastBridgeSessionIdRef.current !== undefined) {
+            const stashed = stashOauthRef.current;
+            const live = getOauthAccountInfoFromDisk();
+            if (live?.accountUuid) {
+              leftoverEo = {
+                accountUuid: live.accountUuid,
+                organizationUuid: live.organizationUuid,
+              };
+            }
+            if (cancelled) return;
+            leftoverGt = !stashed?.accountUuid;
+            const identityUnreadable = Boolean(stashed?.accountUuid) && !live?.accountUuid;
+            const ownerMismatch =
+              stashed !== undefined &&
+              Boolean(stashed.accountUuid) &&
+              Boolean(live?.accountUuid) &&
+              !replBridgeOauthAccountsMatch(live, stashed);
+            if (ownerMismatch || identityUnreadable) {
+              if (reviveInitiated) {
+                logForDebugging(
+                  '[bridge:repl] Auto-revive aborted: stash owner vs current account mismatch/unreadable at init',
+                );
+                setAppState(prev => ({
+                  ...prev,
+                  replBridgeEnabled: false,
+                  replBridgeError: HOST_ACCOUNT_CHANGED_HINT,
+                  replBridgeErrorKind: 'terminal',
+                }));
+                return;
+              }
+              logForDebugging(
+                ownerMismatch
+                  ? '[bridge:repl] Reattach stash owner differs from current credential account — dropping stash, minting fresh (history not uploaded)'
+                  : '[bridge:repl] Current account identity unreadable with an owned stash — dropping stash, minting fresh (history not uploaded)',
+              );
+              leftoverEt = true;
+              deferredArchiveRef.current?.unregister();
+              deferredArchiveRef.current = undefined;
+              // densable leftover `HR(zc(Ur)),jR(zc(Ur)),FK(zc(Ur))`.
+              markPrecautionarySessionSuppression(historySid);
+              markResilientPrecautionSid(historySid);
+              clearScanUncertaintyHoldSid(historySid);
+              const torn = isReplBridgeSessionTorn(historySid);
+              if (ownerMismatch && !torn) {
+                logEvent('rc_cross_account_suppression', {});
+              } else {
+                logEvent('rc_cross_account_suppression', {
+                  reason: (torn
+                    ? 'torn_entry_pair'
+                    : 'identity_unreadable') as import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+              }
+              if (ownerMismatch && !torn) {
+                writeHistorySuppression(
+                  historySid as import('crypto').UUID,
+                  getProject().sessionFile ?? undefined,
+                  'chokepoint_veto',
+                  live?.accountUuid,
+                );
+              } else if (ownerMismatch) {
+                logForDebugging(
+                  '[bridge:repl] Chokepoint veto under a TORN entry pair: precautionary suppression only, no permanent taint write',
+                  { level: 'warn' },
+                );
+              }
+              // densable leftover `xe({archiveAbandoned:!1}),Vn.clear(),Xo()===Ur)tC()`.
+              // ZUa as tC ← r9s as ZUa = b4t(Yn()) = clearBridgeSessionCache.
+              // Xo=`getSessionId`.
+              leftoverXe({ archiveAbandoned: false });
+              flushedUUIDsRef.current.clear();
+              if (getSessionId() === historySid) {
+                clearBridgeSessionCache();
+              }
+            }
+          }
+          const leftoverDt = suppressLatchSidRef.current === historySid;
+          persistSuppressedRef.current = leftoverEt || leftoverDt || (leftoverGt && leftoverPn);
+          const leftoverMo = leftoverGt && leftoverPn;
           const rawHandle = await initReplBridge({
             outboundOnly,
+            reattachSessionId: leftoverPn ? undefined : lastBridgeSessionIdRef.current,
+            reattachOrFail: leftoverPn
+              ? false
+              : (reviveInitiated && lastBridgeSessionIdRef.current !== undefined) || leftoverGt,
+            reviveInitiated,
+            expectedAccount: reviveInitiated ? expectedAccount : leftoverEo,
             tags: outboundOnly ? ['ccr-mirror'] : undefined,
             localHolderGuard:
-              !outboundOnly && !replBridgeExplicit
+              reviveInitiated || (!outboundOnly && !replBridgeExplicit)
                 ? {
                     mode: 'decline',
                     onDeclined: holder => {
@@ -856,6 +1231,14 @@ export function useReplBridge(
             previouslyFlushedUUIDs: flushedUUIDsRef.current,
             initialName: replBridgeInitialName,
             perpetual,
+            // densable leftover `et||Dt||Mo` / `an`.
+            suppressHistoryBackfill: leftoverEt || leftoverDt || leftoverMo,
+            onHistoryBackfillSuppressed: info => {
+              if (cancelled) return;
+              if (info?.uncertaintyOnly) return;
+              persistSuppressedRef.current = true;
+              suppressLatchSidRef.current = historySid;
+            },
           });
           const handle = rawHandle
             ? {
@@ -925,6 +1308,7 @@ export function useReplBridge(
             return;
           }
           handleRef.current = handle;
+          lastBridgeSessionIdRef.current = handle.bridgeSessionId;
           setReplBridgeHandle(handle);
           // densable eDe(!0) after successful init — enable JT/task_progress queue
           // so Remote Control clients joining mid-run receive workflow agent grid.
@@ -949,6 +1333,9 @@ export function useReplBridge(
               const acct = getOauthAccountInfo();
               ownerAccountUuid = acct?.accountUuid || undefined;
               ownerOrganizationUuid = acct?.organizationUuid || undefined;
+              liveOauthRef.current = acct
+                ? { accountUuid: acct.accountUuid, organizationUuid: acct.organizationUuid }
+                : undefined;
             } catch {
               /* optional */
             }
@@ -966,6 +1353,10 @@ export function useReplBridge(
               undefined,
               handle.sessionGroupingId,
               noHistoryBackfill || undefined,
+              {
+                accountUuid: ownerAccountUuid,
+                organizationUuid: ownerOrganizationUuid,
+              },
             );
             registerLiveSuppressionProbe(
               () =>
@@ -1102,23 +1493,38 @@ export function useReplBridge(
         cancelled = true;
         clearTimeout(failureTimeoutRef.current);
         failureTimeoutRef.current = undefined;
+        giTimerRef.current && clearTimeout(giTimerRef.current);
+        giTimerRef.current = undefined;
+        const Ge = store.getState().replBridgeSkipNextArchive;
+        const en = leftoverEnRef.current;
+        leftoverEnRef.current = false;
+        const et = !outboundOnly && hasMatchingQueuedSdkEvent(gt => gt.type === 'conversation_reset');
+        if (et) {
+          logForDebugging('[bridge:repl] bridge_conversation_reset undelivered_at_teardown');
+          leftoverXe({ archiveAbandoned: handleRef.current === null });
+        }
+        if (Ge) {
+          setAppState(gt => (gt.replBridgeSkipNextArchive ? { ...gt, replBridgeSkipNextArchive: false } : gt));
+        }
         if (handleRef.current) {
           const handle = handleRef.current;
-          // densable cleanup: reason + CXr/kEo before teardown.
-          // - remote_control_disabled: user toggled /config off (enabled false)
-          // - host_exit: process exit / unmount while still enabled
-          // Left-arrow may have already latched skipArchive via handle.teardown
-          // ({skipArchive:true}); joining To preserves the latch.
+          // densable leftover cleanup @230351800 — Ge/et/Dt/tC/SD then teardown.
           const stillEnabled = store.getState().replBridgeEnabled;
-          const isDisable = !stillEnabled;
+          const eo = !stillEnabled && !en;
+          const Dt = (eo && !Ge) || et;
+          const go = Boolean(Ge && !(en && et));
+          // densable leftover cleanup: `if(!en) xe({archiveAbandoned:!1})` before persist.
+          if (!en) {
+            leftoverXe({ archiveAbandoned: false });
+          }
           if (!outboundOnly) {
-            if (isDisable) {
-              // densable FCs / kEo + EGt — drop process meta and write
-              // bridgeSessionId:"" tombstone so resume does not force RC on.
-              // densable qCt(void 0) on disconnect.
+            if (Dt) {
+              // densable leftover cleanup `Dt` — aL tombstone + ct.
               clearBridgeSessionMeta();
               clearBridgeSession(getSessionId() as import('crypto').UUID);
               registerLiveSuppressionProbe(undefined);
+            } else if (Ge && !en) {
+              clearBridgeSessionCache();
             } else {
               // densable CXr + Bkn: keep seq/grouping/owner for re-init + resume.
               const seq = handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0;
@@ -1130,6 +1536,9 @@ export function useReplBridge(
                 const acct = getOauthAccountInfo();
                 ownerAccountUuid = acct?.accountUuid || undefined;
                 ownerOrganizationUuid = acct?.organizationUuid || undefined;
+                liveOauthRef.current = acct
+                  ? { accountUuid: acct.accountUuid, organizationUuid: acct.organizationUuid }
+                  : undefined;
               } catch {
                 /* optional */
               }
@@ -1147,19 +1556,27 @@ export function useReplBridge(
                 undefined,
                 handle.sessionGroupingId,
                 noHistoryBackfill || undefined,
+                {
+                  accountUuid: ownerAccountUuid,
+                  organizationUuid: ownerOrganizationUuid,
+                },
               );
               // densable qCt(void 0) when handle is about to be null — probe
               // falls back to process meta / transcript noHistoryBackfill.
               registerLiveSuppressionProbe(undefined);
             }
           }
-          // densable: ur = Rt||Be||Et ? void 0 : Tt?"remote_control_disabled":"host_exit"
-          // (skipArchive / outbound / mode-flip → no reason; else disable vs exit)
-          const reason = outboundOnly ? undefined : isDisable ? 'remote_control_disabled' : 'host_exit';
+          // densable leftover: `Xn=Ge||en||Mo?void 0:eo?"remote_control_disabled":"host_exit"`.
+          const Mo = outboundOnly !== store.getState().replBridgeOutboundOnly && store.getState().replBridgeEnabled;
+          const reason = Ge || en || Mo ? undefined : eo ? 'remote_control_disabled' : 'host_exit';
+          liveOauthRef.current = undefined;
           logForDebugging(
-            `[bridge:repl] Hook cleanup: starting teardown for env=${handle.environmentId} session=${handle.bridgeSessionId}${reason ? ` reason=${reason}` : ''}`,
+            `[bridge:repl] Hook cleanup: starting teardown for session=${handle.bridgeSessionId}${go ? ' (skipArchive)' : ''}${reason ? ` reason=${reason}` : ''}`,
           );
-          teardownPromiseRef.current = handle.teardown(reason ? { reason } : undefined);
+          teardownPromiseRef.current = handle.teardown({
+            skipArchive: go,
+            ...(reason ? { reason } : {}),
+          });
           handleRef.current = null;
           setReplBridgeHandle(null);
           // densable eDe(!1) on teardown — stop interactive JT enqueue.
@@ -1169,7 +1586,16 @@ export function useReplBridge(
           setReplBridgeSessionId(undefined);
         }
         setAppState(prev => {
-          if (!prev.replBridgeConnected && !prev.replBridgeSessionActive && !prev.replBridgeError) {
+          // densable leftover: `en||oe` keeps replBridgeError / kind.
+          const keepError = en || outboundOnly;
+          const nextError = keepError ? prev.replBridgeError : undefined;
+          const nextKind = keepError ? prev.replBridgeErrorKind : undefined;
+          if (
+            !prev.replBridgeConnected &&
+            !prev.replBridgeSessionActive &&
+            prev.replBridgeError === nextError &&
+            prev.replBridgeErrorKind === nextKind
+          ) {
             return prev;
           }
           return {
@@ -1181,17 +1607,136 @@ export function useReplBridge(
             replBridgeSessionUrl: undefined,
             replBridgeEnvironmentId: undefined,
             replBridgeSessionId: undefined,
-            replBridgeError: undefined,
-            replBridgeErrorKind: undefined,
+            replBridgeError: nextError,
+            replBridgeErrorKind: nextKind,
             replBridgePermissionCallbacks: undefined,
           };
         });
         lastWrittenIndexRef.current = 0;
+        flushedUUIDsRef.current = new Set();
+        transcriptCursorRef.current = {};
         pendingResultAfterFlushRef.current = false;
         transcriptResetPendingRef.current = false;
       };
     }
   }, [replBridgeEnabled, replBridgeExplicit, replBridgeOutboundOnly, setAppState, setMessages, addNotification]);
+
+  // densable auth-revive watcher: poll after auth fail; same-account fresh
+  // credential re-enables RC and latches Yn/Dr for the next init.
+  useEffect(() => {
+    if (!feature('BRIDGE_MODE')) return;
+    if (
+      replBridgeEnabled ||
+      replBridgeError === undefined ||
+      replBridgeErrorKind !== 'auth' ||
+      replBridgeOutboundOnly ||
+      !isBridgeAuthReviveEnabled()
+    ) {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const pollMs = 300_000;
+    const AUTH_REVIVE_CAP = 10;
+    const poll = async (): Promise<void> => {
+      const { getClaudeAIOAuthTokens, getOauthAccountInfoFromDisk } =
+        require('../utils/auth.js') as typeof import('../utils/auth.js');
+      const { logEvent } = require('../services/analytics/index.js') as typeof import('../services/analytics/index.js');
+      const generationMoved = store.getState().authChangeGeneration !== authFailGenerationRef.current;
+      const killSwitchOff = !isBridgeAuthReviveEnabled();
+      const brake = killSwitchOff || (!generationMoved && authReviveCountRef.current >= AUTH_REVIVE_CAP);
+      if (brake) {
+        logForDebugging(
+          killSwitchOff
+            ? '[bridge:repl] Auth-revive watcher: kill switch off — still polling, no unattended revive'
+            : '[bridge:repl] Auth-revive watcher: non-interactive revive brake engaged — still polling; an in-process /login bypasses',
+        );
+      }
+      // densable Ue=Pe===oL — still loading; skip this tick (not no_oauth).
+      const stillLoading = authFailTokenRef.current === AUTH_FAIL_TOKEN_LOADING;
+      if (brake || stillLoading) {
+        timer = setTimeout(() => {
+          void poll();
+        }, pollMs);
+        return;
+      }
+      const prevToken = authFailTokenRef.current;
+      const prevAccount = authFailAccountRef.current;
+      let live: { accountUuid?: string; organizationUuid?: string; accessToken?: string } | undefined;
+      try {
+        const tokens = getClaudeAIOAuthTokens();
+        const acct = getOauthAccountInfoFromDisk();
+        live =
+          tokens?.accessToken && acct
+            ? {
+                accessToken: tokens.accessToken,
+                accountUuid: acct.accountUuid,
+                organizationUuid: acct.organizationUuid,
+              }
+            : undefined;
+      } catch {
+        live = undefined;
+      }
+      if (cancelled) return;
+      // no_oauth failures snapshot prevToken as undefined; treat a newly
+      // present token as a fresh credential so /login can revive RC.
+      const tokenArrived = Boolean(live?.accessToken) && (prevToken ? live!.accessToken !== prevToken : true);
+      if (!(tokenArrived && live?.accountUuid)) {
+        timer = setTimeout(() => {
+          void poll();
+        }, pollMs);
+        return;
+      }
+      if (prevAccount?.accountUuid) {
+        const sameAccount =
+          live.accountUuid === prevAccount.accountUuid &&
+          (live.organizationUuid || undefined) === (prevAccount.organizationUuid || undefined);
+        if (!sameAccount) {
+          logForDebugging('[bridge:repl] Auth-revive watcher: credential belongs to a different account — disarming');
+          return;
+        }
+      }
+      logForDebugging(
+        prevToken
+          ? '[bridge:repl] Auth-revive watcher: fresh same-account credential — re-enabling Remote Control'
+          : '[bridge:repl] Auth-revive watcher: credential appeared after no_oauth — re-enabling Remote Control',
+      );
+      let flipped = false;
+      setAppState(prev => {
+        if (prev.replBridgeEnabled || prev.replBridgeError === undefined) {
+          return prev;
+        }
+        flipped = true;
+        return {
+          ...prev,
+          replBridgeEnabled: true,
+          replBridgeError: undefined,
+          replBridgeErrorKind: undefined,
+        };
+      });
+      if (flipped) {
+        logEvent('tengu_bridge_repl_auth_revive', {});
+        authReviveCountRef.current++;
+        reviveLatchRef.current = true;
+        reviveExpectedAccountRef.current = {
+          accountUuid: live.accountUuid,
+          organizationUuid: live.organizationUuid,
+        };
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [
+    replBridgeEnabled,
+    replBridgeError,
+    replBridgeErrorKind,
+    replBridgeOutboundOnly,
+    authChangeGeneration,
+    setAppState,
+  ]);
 
   // Write new messages as they appear.
   // Also re-runs when replBridgeConnected changes (bridge finishes init),
@@ -1203,37 +1748,74 @@ export function useReplBridge(
 
       const handle = handleRef.current;
       if (!handle) return;
+      // densable leftover `l_e(oe,zo)` — skip F upload while reset is queued.
+      if (leftoverL_e(handle, replBridgeSessionActive)) return;
 
       // Clamp the index in case messages were compacted (array shortened).
       // After compaction the ref could exceed messages.length, and without
       // clamping no new messages would be forwarded.
-      if (lastWrittenIndexRef.current > messages.length) {
-        logForDebugging(
-          `[bridge:repl] Compaction detected: lastWrittenIndex=${lastWrittenIndexRef.current} > messages.length=${messages.length}, clamping`,
-        );
-      }
-      const startIndex = Math.min(lastWrittenIndexRef.current, messages.length);
-
-      // densable PSt — user/assistant + system local_command|compact_boundary.
-      // compact_boundary is the post-compaction wire marker (#21); without it
-      // RC clients only see a silent pause until the next user/assistant row.
-      const newMessages: Message[] = [];
-      for (let i = startIndex; i < messages.length; i++) {
-        const msg = messages[i];
-        if (
-          msg &&
-          (msg.type === 'user' ||
-            msg.type === 'assistant' ||
-            (msg.type === 'system' && (msg.subtype === 'local_command' || msg.subtype === 'compact_boundary')))
-        ) {
-          newMessages.push(msg);
+      const ge = leftoverURef.current;
+      leftoverURef.current = false;
+      try {
+        const ke = flushedUUIDsRef.current;
+        const { head: We, tail: nt, eligible: ot } = transcriptCursorRef.current;
+        const headOk = We === undefined || messages[0]?.uuid === We;
+        const eligibleOk = ot === undefined || messages[ot.index]?.uuid === ot.uuid;
+        let ce = 0;
+        if (ge) {
+          leftoverGRef.current = true;
+          logForDebugging(
+            `[bridge:repl] Transcript replaced under a detached binding — ${messages.length} message(s) accounted as seen, not uploaded`,
+          );
+        } else {
+          if (headOk && eligibleOk) {
+            if (nt !== undefined && messages[nt.index]?.uuid === nt.uuid) {
+              ce = nt.index + 1;
+            } else if (ot !== undefined) {
+              ce = ot.index + 1;
+            }
+          }
+          if (ce === 0 && (nt !== undefined || ot !== undefined)) {
+            logForDebugging(
+              `[bridge:repl] Transcript rewrite detected (messages.length=${messages.length}), rescanning`,
+            );
+          }
         }
-      }
-      lastWrittenIndexRef.current = messages.length;
-
-      if (newMessages.length > 0) {
-        handle.writeMessages(newMessages);
-        transcriptResetPendingRef.current = false;
+        let Fe = ce > 0 ? ot : undefined;
+        const pendingUpload: Message[] = [];
+        for (let qt = ce; qt < messages.length; qt++) {
+          const Lt = messages[qt];
+          if (!Lt || !isEligibleBridgeMessage(Lt)) continue;
+          Fe = { index: qt, uuid: Lt.uuid };
+          if (ke.has(Lt.uuid)) continue;
+          if (ge) {
+            // Detached binding: mark seen without uploading.
+            ke.add(Lt.uuid);
+            continue;
+          }
+          if (isCompactionOrSummaryMarker(Lt) && (leftoverGRef.current || shouldSkipBridgeHistoryBackfill())) continue;
+          pendingUpload.push(Lt);
+        }
+        leftoverA_e(handle);
+        if (pendingUpload.length > 0) {
+          handle.writeMessages(pendingUpload);
+          for (const Lt of pendingUpload) ke.add(Lt.uuid);
+          transcriptResetPendingRef.current = false;
+        }
+        // Commit the cursor only after a successful write so a transport throw
+        // does not permanently drop messages that never left the process.
+        lastWrittenIndexRef.current = messages.length;
+        const tail = messages.at(-1);
+        transcriptCursorRef.current = {
+          head: messages[0]?.uuid,
+          tail: tail && { index: messages.length - 1, uuid: tail.uuid },
+          eligible: Fe,
+        };
+      } catch (error) {
+        logForDebugging(`[bridge:repl] Failed forwarding messages to remote control: ${errorMessage(error)}`, {
+          level: 'error',
+        });
+        if (ge) leftoverURef.current = true;
       }
 
       if (
@@ -1251,42 +1833,20 @@ export function useReplBridge(
         handle.sendResult();
       }
     }
-  }, [messages, replBridgeConnected]);
+  }, [messages, replBridgeConnected, replBridgeSessionActive]);
 
-  // densable MGe / DCt drain: forward task_* SDK events (incl. task_progress with
-  // workflow_progress full snapshots) to Remote Control clients. Without this,
-  // mid-run joiners only see empty workflow agent grids (changelog #22).
+  // densable leftover hook enqueue: `KG(oe),oe()` @230355254.
+  // `if(!ge||l_e(ge,sessionActive))return; a_e(ge)`.
   useEffect(() => {
     if (!feature('BRIDGE_MODE')) return;
     if (!replBridgeConnected) return;
 
     const drainTaskEventsToBridge = (): void => {
       const handle = handleRef.current;
-      if (!handle) return;
-      const drained = drainSdkEvents();
-      // densable yBo (+ status): task_* / thinking_tokens / system status
-      // (compacting). conversation_reset is written directly from /clear.
-      const taskEvents = drained.filter(e => {
-        if (e.type === 'conversation_reset') return true;
-        if (e.type !== 'system') return false;
-        return (
-          e.subtype === 'task_started' ||
-          e.subtype === 'task_progress' ||
-          e.subtype === 'task_updated' ||
-          e.subtype === 'task_notification' ||
-          e.subtype === 'background_tasks_changed' ||
-          e.subtype === 'thinking_tokens' ||
-          e.subtype === 'status'
-        );
-      });
-      if (taskEvents.length === 0) return;
-      try {
-        // SDKMessage shape is a superset of drained events; bridge transport
-        // stamps session_id on write.
-        handle.writeSdkMessages(taskEvents as unknown as SDKMessage[]);
-      } catch (err) {
-        logForDebugging(`[bridge:sdk] task-event forward failed: ${errorMessage(err)}`, { level: 'error' });
+      if (!handle || leftoverL_e(handle, store.getState().replBridgeSessionActive)) {
+        return;
       }
+      leftoverA_e(handle);
     };
 
     setSdkEventEnqueueListener(drainTaskEventsToBridge);
@@ -1295,7 +1855,7 @@ export function useReplBridge(
     return () => {
       setSdkEventEnqueueListener(null);
     };
-  }, [replBridgeConnected]);
+  }, [replBridgeConnected, replBridgeSessionActive, store]);
 
   useEffect(() => {
     if (feature('BRIDGE_MODE')) {

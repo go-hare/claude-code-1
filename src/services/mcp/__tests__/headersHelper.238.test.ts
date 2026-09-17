@@ -69,6 +69,9 @@ import {
   type McpRemoteHeadersConfig,
 } from '../headersHelper.js'
 import type { ConfigScope } from '../types.js'
+import { setCwdState, setOriginalCwd } from '../../../bootstrap/state.js'
+
+const suiteCwd = process.cwd()
 
 type HttpHelperConfig = McpRemoteHeadersConfig & {
   scope: ConfigScope
@@ -92,6 +95,7 @@ function httpConfig(
 }
 
 function setPersistedTrust(accepted: boolean): void {
+  getProjectPathForConfig.cache?.clear?.()
   const key = getProjectPathForConfig()
   saveGlobalConfig(current => ({
     ...current,
@@ -116,6 +120,15 @@ describe('MCP headersHelper densable 2.1.238', () => {
   const prevPlugin = process.env.CLAUDE_PLUGIN_ROOT
 
   beforeEach(() => {
+    // Align cwd / memoized project key with hasPersistedTrustAt(getOriginalCwd).
+    try {
+      process.chdir(suiteCwd)
+    } catch {
+      /* ignore */
+    }
+    setCwdState(suiteCwd)
+    setOriginalCwd(suiteCwd)
+    getProjectPathForConfig.cache?.clear?.()
     execMock.mockClear()
     execMock.mockImplementation(async () => ({
       stdout: '{"Authorization":"Bearer minted"}',

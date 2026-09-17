@@ -62,6 +62,7 @@ import {
   getMessagesAfterCompactBoundary,
   createToolUseSummaryMessage,
   createMicrocompactBoundaryMessage,
+  isHumanLikeOrigin,
   stripSignatureBlocks,
 } from './utils/messages.js'
 import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
@@ -72,6 +73,7 @@ import {
   getAttachmentMessages,
   startRelevantMemoryPrefetch,
 } from './utils/attachments.js'
+import { injectBatchingReminder } from './utils/batchingReminder.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const skillPrefetch = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? (require('./services/skillSearch/prefetch.js') as typeof import('./services/skillSearch/prefetch.js'))
@@ -214,6 +216,40 @@ const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
  *
  * Mirrors reactiveCompact.isWithheldPromptTooLong.
  */
+/**
+ * densable GJn @214370857.
+ * assistant + isApiErrorMessage + truncatedAfterOutput +
+ * isNonInteractiveSession + kl(source)==="main" +
+ * we("tengu_truncated_response_recovery", true).
+ */
+function isTruncatedAfterOutputRecovery(
+  msg: Message | StreamEvent | undefined,
+  toolUseContext: ToolUseContext,
+  querySource: QuerySource,
+): msg is AssistantMessage {
+  if (!msg || msg.type !== 'assistant') return false
+  const assistant = msg as AssistantMessage
+  if (assistant.isApiErrorMessage !== true) return false
+  if (assistant.truncatedAfterOutput !== true) return false
+  if (!toolUseContext.options.isNonInteractiveSession) return false
+  let family: string | undefined
+  try {
+    const { getQuerySourceFamily } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/observerAgents.js') as typeof import('./utils/observerAgents.js')
+    family = getQuerySourceFamily(querySource)
+  } catch {
+    family = undefined
+  }
+  return (
+    family === 'main' &&
+    getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_truncated_response_recovery',
+      true,
+    ) === true
+  )
+}
+
 function isWithheldMaxOutputTokens(
   msg: Message | StreamEvent | undefined,
 ): msg is AssistantMessage {
@@ -1300,6 +1336,10 @@ async function* queryLoop(
     )
 
     queryCheckpoint('query_api_loop_start')
+    // densable oe — dedupe batching_reminder_sent across fallback hops
+    let lastBatchingReminderSent:
+      | { afterUuid: string; text: string; model: string }
+      | undefined
     try {
       while (attemptWithFallback) {
         attemptWithFallback = false
@@ -1311,11 +1351,42 @@ async function* queryLoop(
             StreamEvent | AssistantMessage | SystemAPIErrorMessage
           > = []
           queryCheckpoint('query_api_streaming_start')
-          // densable: messages = kRd(wr!==void 0 ? [...pe,wr] : pe, n)
-          const callMessages =
+          // densable _u / mXn — skip inject when silent-stitch meta (_o)
+          const injected =
             partialResponseMetaMessage !== undefined
-              ? [...messagesForQuery, partialResponseMetaMessage]
-              : messagesForQuery
+              ? {
+                  messages: [...messagesForQuery, partialResponseMetaMessage],
+                  text: null as string | null,
+                  afterUuid: null as string | null,
+                }
+              : injectBatchingReminder(
+                  messagesForQuery,
+                  { id: getSessionId() },
+                  currentModel,
+                )
+          if (
+            injected.text !== null &&
+            injected.afterUuid !== null &&
+            !(
+              lastBatchingReminderSent?.afterUuid === injected.afterUuid &&
+              lastBatchingReminderSent.text === injected.text &&
+              lastBatchingReminderSent.model === currentModel
+            )
+          ) {
+            lastBatchingReminderSent = {
+              afterUuid: injected.afterUuid,
+              text: injected.text,
+              model: currentModel,
+            }
+            const sent = createAttachmentMessage({
+              type: 'batching_reminder_sent',
+              text: injected.text,
+              model: currentModel,
+            })
+            yield sent
+            messagesForQuery = [...messagesForQuery, sent]
+          }
+          const callMessages = injected.messages
           // consume credit stamp for this attempt only (re-arm on next hop)
           const creditCodeForAttempt = pendingFallbackCreditCode
           const creditMintModelForAttempt = pendingFallbackCreditMintModel
@@ -1430,6 +1501,7 @@ async function* queryLoop(
                 streamingFallbackOccured = true
               },
               querySource,
+              promptTooLongIsHandled: true,
               agents: toolUseContext.options.agentDefinitions.activeAgents,
               allowedAgentTypes:
                 toolUseContext.options.agentDefinitions.allowedAgentTypes,
@@ -2704,6 +2776,7 @@ async function* queryLoop(
               `Output token limit hit. Resume directly — no apology, no recap of what you were doing. ` +
               `Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.`,
             isMeta: true,
+            turnCompanion: true,
           })
 
           const next: State = {
@@ -2732,6 +2805,58 @@ async function* queryLoop(
 
         // Recovery exhausted — surface the withheld error now.
         yield lastMessage
+      }
+
+      // densable GJn @214370857 / lQn @214417526 — after qJn, before
+      // malformed_tool_use. Shares WJn=3 with max_output_tokens_recovery.
+      if (
+        isTruncatedAfterOutputRecovery(lastMessage, toolUseContext, querySource)
+      ) {
+        if (maxOutputTokensRecoveryCount < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
+          logEvent('query_truncated_response_recovery', {
+            status:
+              'nudged' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            attempt: maxOutputTokensRecoveryCount + 1,
+          })
+          const recoveryMessage = createUserMessage({
+            content:
+              `Your response above was cut off mid-stream. Resume directly from where it stops — no apology, no recap. ` +
+              `If none of it survived, answer the request from the start.`,
+            isMeta: true,
+            turnCompanion: true,
+          })
+          const next: State = {
+            messages: [
+              ...messagesForQuery,
+              ...assistantMessages,
+              recoveryMessage,
+            ],
+            toolUseContext,
+            autoCompactTracking: tracking,
+            maxOutputTokensRecoveryCount: maxOutputTokensRecoveryCount + 1,
+            hasAttemptedReactiveCompact,
+            maxOutputTokensOverride: undefined,
+            pendingToolUseSummary: undefined,
+            stopHookActive: undefined,
+            stopHookBlockCount: 0,
+            turnCount,
+            transition: {
+              reason: 'truncated_response_recovery',
+              attempt: maxOutputTokensRecoveryCount + 1,
+            },
+          }
+          state = next
+          continue
+        }
+        logEvent('query_truncated_response_recovery', {
+          status:
+            'exhausted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        // No yield here, unlike the max_output_tokens branch above: that banner
+        // carries apiError 'max_output_tokens' and is withheld by
+        // applyStreamMediaReplay, so exhaustion is its first delivery. This one
+        // is 'server_error' (createAssistantAPIErrorMessage in claude.ts), never
+        // withheld, and was already yielded when the stream produced it.
       }
 
       // Skip stop hooks when the last message is an API error (rate limit,
@@ -3081,7 +3206,9 @@ async function* queryLoop(
             : undefined,
         })
       }
-      // Check maxTurns before returning when aborted
+      // densable 2.1.246 #54 query @214424458:
+      // abort_tools still yields max_turns_reached when over the limit.
+      // runAgent then drops event+yield if the agent abort signal is already set.
       const nextTurnCountOnAbort = turnCount + 1
       if (maxTurns && nextTurnCountOnAbort > maxTurns) {
         yield createAttachmentMessage({
@@ -3178,6 +3305,23 @@ async function* queryLoop(
         }
       }
       removeFromQueue(claimedConsumedCommands)
+      // densable 2.1.246 d9n — main-thread mid-turn human prompt resets the
+      // idle check-in burst (Js=isMainThread && OY(origin)).
+      if (
+        isMainThread &&
+        claimedConsumedCommands.some(
+          cmd =>
+            cmd.mode === 'prompt' &&
+            !cmd.isMeta &&
+            (cmd as { shouldQuery?: boolean }).shouldQuery !== false &&
+            isHumanLikeOrigin(cmd.origin),
+        )
+      ) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { clearGoalIdleCheckinCount } =
+          require('./services/goal/goalIdleCheckin.js') as typeof import('./services/goal/goalIdleCheckin.js')
+        clearGoalIdleCheckinCount(toolUseContext.setAppState)
+      }
     }
 
     for await (const attachment of getAttachmentMessages(

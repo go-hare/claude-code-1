@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import * as realXyr from '../xyrRespawn.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+const xyrSnap = snapshotModuleExports(realXyr)
 
 const ROOT = join(import.meta.dir, '..')
 const SRC_ROOT = join(import.meta.dir, '../..')
@@ -17,12 +21,30 @@ describe('densable C2e / gJ_ source contract #28', () => {
     expect(src).toContain('kill_unconfirmed')
     expect(src).toContain('JOB_SHORT_RE')
     expect(src).toContain('/^[a-f0-9]{8}$/')
-    expect(src).toContain("keptReason: 'dirty'")
-    expect(src).toContain("keptReason: 'unpushed'")
-    expect(src).toContain("keptReason: 'in_use'")
+    expect(src).toContain("keptReason = 'dirty'")
+    expect(src).toContain("keptReason = 'unpushed'")
+    expect(src).toContain("keptReason = 'in_use'")
+    expect(src).toContain("keptReason = 'live_lock'")
+    expect(src).toContain("keptReason = 'occupied'")
+    expect(src).toContain("'shared_record'")
+    expect(src).toContain("'records_unreadable'")
     expect(src).toContain("keptReason: 'remove_failed'")
+    expect(src).toContain("keptReason: 'unverified'")
+    expect(src).toContain("keptReason: 'identity_changed'")
+    expect(src).toContain('WORKTREE_RESOLUTION_CHANGED')
+    expect(src).toContain('resolveJobWorktreeGitRoot')
+    expect(src).toContain('findGitRoot(state.originCwd)')
+    expect(src).toContain('parseClaudeWorktreeLockPid')
+    expect(src).toContain('resolveGitRootIfPresent')
+    expect(src).toContain('siblingSettledWorktreeRecord')
+    expect(src).toContain('liveSessionOccupyingWorktree')
+    expect(src).toContain('liveSessionsUnread')
+    expect(src).toContain('cannot rule out an occupant, keeping')
+    expect(src).not.toContain('listLiveSessions().catch(() => [])')
+    expect(src).toContain('{ storageV5: persist }')
     expect(src).toContain('leftWorktreeDir')
     expect(src).toContain('formatKeptWorktreeReason')
+    expect(src).toContain('probeJobPresent')
   })
 
   test('AgentView delete uses deleteJob force:true not bare removeJob', () => {
@@ -39,6 +61,10 @@ describe('densable C2e / gJ_ source contract #28', () => {
     expect(src).toContain('worktree kept at')
     expect(src).toContain('background service may be restarting')
     expect(src).toContain('worktree directory left at')
+    expect(src).toContain('shared_record')
+    expect(src).toContain('records_unreadable')
+    expect(src).toContain('claude stop <id>')
+    expect(src).toContain('wait for that session to finish')
   })
 
   test('cli.tsx top-level rm + daemonMain case rm', () => {
@@ -58,12 +84,21 @@ describe('deleteJob pure gates', () => {
     expect(formatKeptWorktreeReason('unpushed')).toBe(
       'has commits that are not pushed anywhere',
     )
+    expect(formatKeptWorktreeReason('occupied')).toBe(
+      'is the working directory of a live Claude Code session',
+    )
+    expect(formatKeptWorktreeReason('shared_record')).toContain(
+      'another finished session',
+    )
+    expect(formatKeptWorktreeReason('records_unreadable')).toContain(
+      'sibling record was unreadable',
+    )
     const long = 'x'.repeat(200)
     const out = formatKeptWorktreeReason('remove_failed', long)
     expect(out.startsWith('could not be removed (')).toBe(true)
     expect(out.includes('\u2026')).toBe(true)
     expect(out.length).toBeLessThan(200)
-  })
+  }, 20_000)
 
   test('JOB_SHORT_RE only 8 hex', async () => {
     const { JOB_SHORT_RE } = await import('../deleteJob.js')
@@ -130,6 +165,7 @@ describe('deleteJob kill_unconfirmed + jobdir rm', () => {
   test('kill unconfirmed does not rm jobdir', async () => {
     // mock killJobConfirmed before importing deleteJob path that uses it
     mock.module('../xyrRespawn.js', () => ({
+      ...xyrSnap,
       killJobConfirmed: async () => ({
         confirmed: false,
         error: 'supervisor starting',
@@ -170,7 +206,7 @@ describe('deleteJob kill_unconfirmed + jobdir rm', () => {
       if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR
       else process.env.CLAUDE_CONFIG_DIR = prev
       rmSync(configDir, { recursive: true, force: true })
-      mock.restore()
+      mock.module('../xyrRespawn.js', () => ({ ...xyrSnap }))
     }
   })
 })

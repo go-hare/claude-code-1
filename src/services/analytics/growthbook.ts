@@ -37,6 +37,7 @@ import {
   resetUserCache,
 } from '../../utils/user.js'
 import { registerAccountOnHoldGateReader } from '../../utils/accountOnHold.js'
+import { registerFileGateReader } from '../../utils/file.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
 import {
@@ -1628,4 +1629,12 @@ export function getDynamicConfig_CACHED_MAY_BE_STALE<T>(
 // densable `de` — Gx `wx` / `he` reads `tengu_lively_beaver` through this slot.
 registerAccountOnHoldGateReader(gate =>
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE(gate),
+)
+
+// file.ts reads `tengu_compact_line_prefix_killswitch` through this slot
+// instead of importing this module — that import was the edge that dragged
+// analytics/auth into file.ts and settings.ts.
+// See docs/task/task-017-session-storage-hub-split.md.
+registerFileGateReader((gate, fallback) =>
+  getFeatureValue_CACHED_MAY_BE_STALE(gate, fallback),
 )

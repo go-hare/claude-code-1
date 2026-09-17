@@ -210,6 +210,85 @@ export function isPolicyLimitsEligible(): boolean {
   return true
 }
 
+const POLICY_LIMITS_V5_MAX_BYTES = 1_048_576
+
+/**
+ * densable ct / primePolicyLimitsCache @209394709.
+ * Official: if (!C() || e === void 0 || !u()) return;
+ * then storageV5.read(ie.state("policy-limits")).
+ */
+export async function primePolicyLimitsCache(
+  storageV5: unknown,
+): Promise<void> {
+  const { isHoverRestOn } = await import(
+    '../../utils/storageV5/hoverRestPin.js'
+  )
+  if (
+    !isHoverRestOn() ||
+    storageV5 === undefined ||
+    !isPolicyLimitsEligible()
+  ) {
+    return
+  }
+  const host = storageV5 as {
+    read?: (
+      reqs: Array<{ key: unknown; offset: number; length: number }>,
+    ) => Promise<
+      | {
+          ok: true
+          value: {
+            items: Array<{
+              found: boolean
+              totalBytes: number
+              value?: Uint8Array | string
+            }>
+          }
+        }
+      | { ok: false; error: { code: string } }
+    >
+  }
+  if (typeof host.read !== 'function') return
+  try {
+    const result = await host.read([
+      {
+        key: { namespace: 'state', id: 'policy-limits' },
+        offset: 0,
+        length: POLICY_LIMITS_V5_MAX_BYTES + 1,
+      },
+    ])
+    if (!result.ok) {
+      logForDebugging(
+        `Policy limits: prime read failed: ${result.error.code}; raw cache read stays`,
+      )
+      return
+    }
+    const item = result.value.items[0]
+    if (!item?.found) {
+      return
+    }
+    if (item.totalBytes > POLICY_LIMITS_V5_MAX_BYTES) {
+      logForDebugging(
+        'Policy limits: prime skipped (oversize cache); raw cache read stays',
+      )
+      return
+    }
+    const raw =
+      typeof item.value === 'string'
+        ? item.value
+        : item.value
+          ? Buffer.from(item.value).toString('utf-8')
+          : ''
+    const parsed = PolicyLimitsResponseSchema().safeParse(
+      safeParseJSON(raw, false),
+    )
+    if (parsed.success) {
+      sessionCache = parsed.data.restrictions
+    }
+  } catch (error) {
+    logForDebugging(`Policy limits: prime failed: ${String(error)}`)
+  }
+}
+
 /**
  * Wait for the initial policy limits loading to complete
  * Returns immediately if user is not eligible or loading has already completed

@@ -197,8 +197,13 @@ describe('proxyAuthHelper fkn runtime', () => {
   test('runs shell helper and caches', async () => {
     const prev = process.env.CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER
     process.env.CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER = '1'
+    // printf is Unix-only; node -e works on Windows too.
+    const helper =
+      process.platform === 'win32'
+        ? 'node -e "console.log(\'Bearer tok123\')"'
+        : 'printf "Bearer tok123"'
     setProxyAuthHelperConfig({
-      helper: 'printf "Bearer tok123"',
+      helper,
       fromProjectOrLocal: false,
       trustAccepted: () => true,
     })

@@ -40,16 +40,20 @@ function sdkEventQueueMock() {
 }
 mock.module('src/utils/sdkEventQueue.js', sdkEventQueueMock)
 mock.module('../sdkEventQueue.js', sdkEventQueueMock)
+const diskOutputSnap = snapshotModuleExports(realDiskOutput)
 afterAll(() => {
   mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
   mock.module('../sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+  mock.module('../diskOutput.js', () => ({ ...diskOutputSnap }))
 })
 
-// Spread real diskOutput so DiskTaskOutput survives process-global mock.module
-// pollution when this file runs with agentKeepalive / LocalAgentTask suites.
+// Spread a pre-mock diskOutput snapshot so DiskTaskOutput survives
+// process-global mock.module when this file runs with agentKeepalive /
+// LocalAgentTask suites. Do not spread the live namespace.
 function diskOutputMock() {
   return {
-    ...realDiskOutput,
+    ...diskOutputSnap,
     getTaskOutputPath: (id: string) => `/tmp/output/${id}`,
     getTaskOutputDelta: async () => null,
     evictTaskOutput: noop,

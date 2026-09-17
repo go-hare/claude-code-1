@@ -12,12 +12,17 @@ import { fileURLToPath } from 'node:url'
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   mock,
   test,
 } from 'bun:test'
+import {
+  analyticsMock,
+  pushAnalyticsLogEvent,
+} from '../../../../tests/mocks/analytics.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import { getSessionId, switchSession } from 'src/bootstrap/state.js'
 import { asAgentId, asSessionId } from 'src/types/ids.js'
@@ -33,27 +38,7 @@ const analyticsEvents: Array<{
   name: string
   meta: Record<string, unknown>
 }> = []
-const analyticsMock = () => ({
-  ...analyticsSnap,
-  logEvent(
-    name: string,
-    metadata: Record<string, boolean | number | undefined>,
-  ) {
-    analyticsEvents.push({
-      name,
-      meta: metadata as Record<string, unknown>,
-    })
-  },
-  async logEventAsync(
-    name: string,
-    metadata: Record<string, boolean | number | undefined>,
-  ) {
-    analyticsEvents.push({
-      name,
-      meta: metadata as Record<string, unknown>,
-    })
-  },
-})
+let popAnalyticsLogEvent: (() => void) | undefined
 mock.module('../../analytics/index.ts', analyticsMock)
 mock.module('../../analytics/index.js', analyticsMock)
 mock.module('src/services/analytics/index.ts', analyticsMock)
@@ -72,7 +57,17 @@ import {
   type PromptStateSnapshot,
 } from '../promptCacheBreakDetection.js'
 
+beforeAll(() => {
+  popAnalyticsLogEvent = pushAnalyticsLogEvent((name, metadata) => {
+    analyticsEvents.push({
+      name,
+      meta: (metadata ?? {}) as Record<string, unknown>,
+    })
+  })
+})
+
 afterAll(() => {
+  popAnalyticsLogEvent?.()
   const restore = () => ({ ...analyticsSnap })
   mock.module('../../analytics/index.ts', restore)
   mock.module('../../analytics/index.js', restore)

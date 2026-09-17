@@ -3,17 +3,26 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
+import { formatMcpServerLabel } from '../services/mcp/formatMcpServerLabel.js';
+import { approveSessionMcpServers, rejectSessionMcpServers } from '../services/mcp/mcpSessionApprovedServers.js';
+import { getProjectPathForConfig } from '../utils/config.js';
 import { getSettings_DEPRECATED, updateSettingsForSource } from '../utils/settings/settings.js';
 import { Select } from './CustomSelect/index.js';
 import { Dialog } from '@anthropic/ink';
 import { MCPServerDialogCopy } from './MCPServerDialogCopy.js';
 
-type Props = {
-  serverName: string;
-  onDone(): void;
+export type McpApprovalPersistResult = {
+  persistFailed: boolean;
 };
 
-export function MCPServerApprovalDialog({ serverName, onDone }: Props): React.ReactNode {
+type Props = {
+  serverName: string;
+  /** densable ee `isPluginServer` — titles go through UKc/`v`. */
+  isPluginServer?: boolean;
+  onDone(result: McpApprovalPersistResult): void;
+};
+
+export function MCPServerApprovalDialog({ serverName, isPluginServer = false, onDone }: Props): React.ReactNode {
   function onChange(value: 'yes' | 'yes_all' | 'no') {
     logEvent('tengu_mcp_dialog_choice', {
       choice: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -22,53 +31,61 @@ export function MCPServerApprovalDialog({ serverName, onDone }: Props): React.Re
     switch (value) {
       case 'yes':
       case 'yes_all': {
-        // Get current enabled servers from settings
+        let persistFailed = false;
         const currentSettings = getSettings_DEPRECATED() || {};
         const enabledServers = currentSettings.enabledMcpjsonServers || [];
 
-        // Add server if not already enabled
         if (!enabledServers.includes(serverName)) {
-          updateSettingsForSource('localSettings', {
+          const { error } = updateSettingsForSource('localSettings', {
             enabledMcpjsonServers: [...enabledServers, serverName],
           });
+          persistFailed ||= error != null;
         }
 
         if (value === 'yes_all') {
-          updateSettingsForSource('localSettings', {
+          const { error } = updateSettingsForSource('localSettings', {
             enableAllProjectMcpServers: true,
           });
+          persistFailed ||= error != null;
         }
-        onDone();
+        // densable h(C(), [r]) — even when persistFailed
+        approveSessionMcpServers(getProjectPathForConfig(), [serverName]);
+        onDone({ persistFailed });
         break;
       }
       case 'no': {
-        // Get current disabled servers from settings
         const currentSettings = getSettings_DEPRECATED() || {};
         const disabledServers = currentSettings.disabledMcpjsonServers || [];
+        rejectSessionMcpServers(getProjectPathForConfig(), [serverName]);
 
-        // Add server if not already disabled
         if (!disabledServers.includes(serverName)) {
-          updateSettingsForSource('localSettings', {
+          const { error } = updateSettingsForSource('localSettings', {
             disabledMcpjsonServers: [...disabledServers, serverName],
           });
+          onDone({ persistFailed: error != null });
+          break;
         }
-        onDone();
+        onDone({ persistFailed: false });
         break;
       }
     }
   }
 
   return (
-    <Dialog title={`New MCP server found in .mcp.json: ${serverName}`} color="warning" onCancel={() => onChange('no')}>
+    <Dialog
+      title={`New MCP server found in this project: ${formatMcpServerLabel(serverName, isPluginServer)}`}
+      color="warning"
+      onCancel={() => onChange('no')}
+    >
       <MCPServerDialogCopy />
 
       <Select
         options={[
+          { label: `Use this MCP server`, value: 'yes' },
           {
             label: `Use this and all future MCP servers in this project`,
             value: 'yes_all',
           },
-          { label: `Use this MCP server`, value: 'yes' },
           { label: `Continue without using this MCP server`, value: 'no' },
         ]}
         onChange={value => onChange(value as 'yes_all' | 'yes' | 'no')}

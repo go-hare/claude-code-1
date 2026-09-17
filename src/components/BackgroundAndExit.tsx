@@ -24,6 +24,7 @@ import {
   formatBgHints,
   type BackgroundSeedMessage,
 } from '../cli/bg/helpers.js';
+import { settleBackgroundSeedName } from '../cli/bg/jobNameSettle.js';
 import { getOriginalCwd, getSessionId, isSessionPersistenceDisabled } from '../bootstrap/state.js';
 import { isBgSession } from '../utils/concurrentSessions.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
@@ -92,6 +93,10 @@ export async function runExitBackgroundHandoff(input: {
   tasks?: Record<string, unknown> | null;
   cwd?: string;
 }): Promise<ExitBackgroundHandoffResult> {
+  const seed = await settleBackgroundSeedName({
+    intent: input.seed.intent,
+    name: input.seed.name,
+  });
   const { ensureDaemonRunning } = await import('../daemon/installPrompt.js');
   // densable: lifecycle log-only; no install prompt mid exit handoff.
   const daemon = await ensureDaemonRunning({
@@ -186,8 +191,8 @@ export async function runExitBackgroundHandoff(input: {
   const { submitDispatch } = await import('../daemon/bgManager.js');
   try {
     const dispatch = await submitDispatch({
-      intent: input.seed.intent,
-      name: input.seed.name,
+      intent: seed.intent,
+      name: seed.name,
       cwd: input.cwd ?? getOriginalCwd(),
       source: 'exit',
       resumeSessionId: input.resumeSessionId,
@@ -264,13 +269,14 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
         }
       };
 
-      const seed = deriveBackgroundSeed(messages, '');
-      if (seed === null) {
+      const derived = deriveBackgroundSeed(messages, '');
+      if (derived === null) {
         onDone('Nothing to background — exiting.');
         await cancelBgHandoffQuota();
         await gracefulShutdown(0, 'prompt_input_exit');
         return;
       }
+      const seed = await settleBackgroundSeedName(derived);
 
       try {
         let sessionId: string | undefined;

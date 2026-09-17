@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   HOST_SEED_WRITE_TIMEOUT_MS,
   KW_PATH_BYTE_LIMIT,
@@ -55,19 +55,19 @@ describe('densable 2.1.224 #1 sessionSeed (YMt/oBh/G2h)', () => {
   })
 
   test('resolveUnderSessionRoot (oBh) blocks escape', () => {
-    const root = '/tmp/session-root'
-    expect(resolveUnderSessionRoot(root, 'repo')).toBe(join(root, 'repo'))
-    expect(resolveUnderSessionRoot(root, root)).toBe(root)
-    expect(resolveUnderSessionRoot(root, '/etc/passwd')).toBeNull()
+    const root = join('/tmp', 'session-root')
+    expect(resolveUnderSessionRoot(root, 'repo')).toBe(resolve(root, 'repo'))
+    expect(resolveUnderSessionRoot(root, root)).toBe(resolve(root))
+    expect(resolveUnderSessionRoot(root, join('/etc', 'passwd'))).toBeNull()
     expect(resolveUnderSessionRoot(root, '../escape')).toBeNull()
   })
 
   test('resolveChildCwdAndAddDirs (G2h)', () => {
-    const root = '/ws/_sessions/s1'
-    const a = `${root}/a`
-    const b = `${root}/b`
-    expect(resolveChildCwdAndAddDirs(root, [a], `${root}/a`)).toEqual({
-      childCwd: a,
+    const root = join('/ws', '_sessions', 's1')
+    const a = join(root, 'a')
+    const b = join(root, 'b')
+    expect(resolveChildCwdAndAddDirs(root, [a], a)).toEqual({
+      childCwd: resolve(a),
       addDirs: [a, root],
     })
     expect(resolveChildCwdAndAddDirs(root, [a])).toEqual({

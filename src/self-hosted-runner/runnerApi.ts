@@ -9,8 +9,11 @@ const ANTHROPIC_VERSION = '2023-06-01'
 /** densable `Zdu` — pollWork HTTP timeout (not the 30s spawn-hint timeout) */
 export const POLL_WORK_TIMEOUT_MS = 10_000
 
-/** densable `Z6v` — id safety for path segments */
+/** densable `Z6v` / official `ft` — id safety for path segments */
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/
+
+/** Official `Ae` — max id length for `Le` / `D`. */
+export const SAFE_ID_MAX_LENGTH = 256
 
 /** densable `aHt` — VERSION without leading v / pre-release / build */
 export function resolveRunnerVersion(
@@ -37,10 +40,21 @@ export function extractRunnerApiErrorDetail(data: unknown): string | undefined {
   return undefined
 }
 
-/** densable `ere` */
+/** Official `Le` — string, ≤256, `[a-zA-Z0-9_-]`. */
+export function isSafePollAssignmentId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= SAFE_ID_MAX_LENGTH &&
+    SAFE_ID_RE.test(value)
+  )
+}
+
+/** Official `D` / densable `ere` */
 export function assertSafeId(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !SAFE_ID_RE.test(value)) {
-    throw new Error(`Invalid ${label}: contains unsafe characters`)
+  if (!isSafePollAssignmentId(value)) {
+    throw new Error(
+      `Invalid ${label}: contains unsafe characters or exceeds ${SAFE_ID_MAX_LENGTH} characters`,
+    )
   }
   return value
 }
@@ -224,6 +238,7 @@ export type SelfHostedRunnerApi = {
     availableCapacity: number,
     signal?: AbortSignal,
     wakeSource?: string,
+    warmupComplete?: boolean,
   ) => Promise<PollWorkResult>
   issueSessionToken: (
     runnerToken: string,
@@ -420,6 +435,7 @@ export function createSelfHostedRunnerApi(
       availableCapacity,
       signal,
       wakeSource,
+      warmupComplete,
     ) {
       assertSafeId(runnerId, 'runnerId')
       const prevEmpty = emptyPolls
@@ -429,6 +445,9 @@ export function createSelfHostedRunnerApi(
         {
           available_capacity: availableCapacity,
           ...(wakeSource !== undefined ? { wake_source: wakeSource } : {}),
+          ...(warmupComplete !== undefined
+            ? { warmup_complete: warmupComplete }
+            : {}),
         },
         {
           headers: runnerAuthHeaders(runnerToken, runnerVersion),
@@ -438,8 +457,33 @@ export function createSelfHostedRunnerApi(
         },
       )
       assertRunnerApiOk(res.status, res.data, 'PollWork')
-      const data = res.data as Record<string, unknown>
-      const assignmentIds = (data.assignment_ids as string[] | undefined) ?? []
+      const data = res.data
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        throw new Error(
+          'PollWork: response body is not a JSON object (an intercepting proxy may have answered) — rejecting the malformed poll response',
+        )
+      }
+      const assignmentIdsRaw = (data as { assignment_ids?: unknown })
+        .assignment_ids
+      if (
+        assignmentIdsRaw !== undefined &&
+        assignmentIdsRaw !== null &&
+        !Array.isArray(assignmentIdsRaw)
+      ) {
+        throw new Error(
+          'PollWork: response assignment_ids is not an array — rejecting the malformed poll response',
+        )
+      }
+      if (
+        Array.isArray(assignmentIdsRaw) &&
+        !assignmentIdsRaw.every(isSafePollAssignmentId)
+      ) {
+        throw new Error(
+          'PollWork: response assignment_ids contains a malformed session id — rejecting the malformed poll response',
+        )
+      }
+      const assignmentIds =
+        (data as { assignment_ids?: string[] }).assignment_ids ?? []
       if (assignmentIds.length === 0) {
         emptyPolls = prevEmpty + 1
         if (emptyPolls === 1 || emptyPolls % emptyPollLogEvery === 0) {
@@ -452,11 +496,17 @@ export function createSelfHostedRunnerApi(
           `[runner:api] PollWork -> ${res.status} assignments=${assignmentIds.length}`,
         )
       }
+      const leaseExpiresAt = (data as { lease_expires_at?: unknown })
+        .lease_expires_at
+      const sessionAssignments = (data as { session_assignments?: unknown })
+        .session_assignments
       return {
         assignment_ids: assignmentIds,
-        lease_expires_at: data.lease_expires_at,
-        session_assignments:
-          (data.session_assignments as unknown[] | undefined) ?? [],
+        lease_expires_at:
+          typeof leaseExpiresAt === 'string' ? leaseExpiresAt : undefined,
+        session_assignments: Array.isArray(sessionAssignments)
+          ? sessionAssignments
+          : [],
       }
     },
 

@@ -1429,8 +1429,16 @@ export async function getClaudeCodeMcpConfigs(
   const enabledPluginServers: Record<string, ScopedMcpServerConfig> = {}
   const disabledPluginServers: Record<string, ScopedMcpServerConfig> = {}
   for (const [name, config] of Object.entries(pluginMcpServers)) {
+    // Plugin keys now reach the approval dialog (collectPendingProjectMcpApprovals),
+    // which persists the answer to enabled/disabledMcpjsonServers — a different
+    // key from the disabledMcpServers that isMcpServerDisabled reads. Without
+    // this check "don't use this server" writes a setting nothing consults, the
+    // server starts anyway, and the status flips to rejected so the user is
+    // never asked again. Only an explicit rejection gates here: a plugin server
+    // that was never asked about stays enabled, as before 2.1.246.
     if (
       isMcpServerDisabled(name) ||
+      getProjectMcpServerStatus(name) === 'rejected' ||
       !isMcpServerAllowedByPolicy(name, config)
     ) {
       disabledPluginServers[name] = config

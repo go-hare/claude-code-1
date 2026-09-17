@@ -326,7 +326,7 @@ export function resolvePeerByName(args: {
       }
     }
     // densable yRw — after exact miss, before tTl not-found
-    const prefix = leftoverPrefixPeers(to, candidates)
+    const prefix = findPrefixMatchingPeerCandidates(to, candidates)
     if (prefix.length > 0) {
       return {
         kind: 'ambiguous',
@@ -451,7 +451,7 @@ export function closestNormalizedNames(
  * densable tTl closest — nQr over Vu names, then first candidate per name.
  * Includes exact-name hits so leftover DEe `closest同名` is live.
  */
-export function leftoverClosestPeers(
+export function findClosestPeerCandidates(
   to: string,
   candidates: PeerCandidate[],
   cap = CLOSEST_NAME_CAP,
@@ -470,7 +470,7 @@ export function leftoverClosestPeers(
  * Local candidates are sessions (never in-process), so unique prefix stays
  * ambiguous + matchedBy prefix — official Jnr is "one" only for in-process.
  */
-export function leftoverPrefixPeers(
+export function findPrefixMatchingPeerCandidates(
   to: string,
   candidates: PeerCandidate[],
 ): PeerCandidate[] {

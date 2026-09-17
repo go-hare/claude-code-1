@@ -1,16 +1,32 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+mock.module('bun:bundle', bunBundleMock)
+let popPerfFeature: (() => void) | undefined
+beforeAll(() => {
+  popPerfFeature = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popPerfFeature?.()
+})
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: (v: unknown) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 let tmpDir: string
 let claudeDir: string

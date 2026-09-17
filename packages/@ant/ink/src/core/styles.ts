@@ -391,6 +391,12 @@ export type Styles = {
   readonly overflowY?: 'visible' | 'hidden' | 'scroll'
 
   /**
+   * densable `selectionScope` — first ancestor with this set becomes the
+   * Cy x-range for startSelection. Overflow hidden/scroll parents clamp it.
+   */
+  readonly selectionScope?: boolean
+
+  /**
    * Exclude this box's cells from text selection in fullscreen mode.
    * Cells inside this region are skipped by both the selection highlight
    * and the copied text — useful for fencing off gutters (line numbers,

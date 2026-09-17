@@ -65,6 +65,16 @@ describe('applyGzipRequestBodyInit', () => {
     expect(init).toBe(orig)
   })
 
+  test('YOo storageV5 slot does not change gzip gate', () => {
+    const orig = { body: '{"a":1}' }
+    const init = applyGzipRequestBodyInit(
+      'https://api.anthropic.com/v1/messages',
+      orig,
+      { env: {}, gbValue: false, storageV5: {} },
+    )
+    expect(init).toBe(orig)
+  })
+
   test('pad length is body + space + 0..256', () => {
     const padded = padGzipRequestBody('x')
     expect(padded.startsWith('x ')).toBe(true)

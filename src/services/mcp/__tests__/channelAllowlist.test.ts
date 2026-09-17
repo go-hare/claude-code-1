@@ -1,8 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test'
+import { growthbookMock } from '../../../../tests/mocks/growthbook.js'
 
-mock.module('../../analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => [],
-}))
+mock.module('../../analytics/growthbook.js', growthbookMock)
 
 import { isChannelAllowlisted } from '../channelAllowlist.js'
 

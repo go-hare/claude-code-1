@@ -3,6 +3,7 @@ import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import { xmlMock } from '../../../../tests/mocks/taskSurface.js'
 
 // ─── Mocks（仅 mock 有副作用的依赖链）───
 
@@ -10,18 +11,20 @@ const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 
-mock.module('src/constants/xml.js', () => ({
-  TASK_NOTIFICATION_TAG: 'task_notification',
-  TASK_ID_TAG: 'task_id',
-  TOOL_USE_ID_TAG: 'tool_use_id',
-  OUTPUT_FILE_TAG: 'output_file',
-  STATUS_TAG: 'status',
-  SUMMARY_TAG: 'summary',
-  WORKTREE_TAG: 'worktree',
-  WORKTREE_PATH_TAG: 'worktree_path',
-  WORKTREE_BRANCH_TAG: 'worktree_branch',
-  TASK_TYPE_TAG: 'task_type',
-}))
+mock.module('src/constants/xml.js', () =>
+  xmlMock({
+    TASK_NOTIFICATION_TAG: 'task_notification',
+    TASK_ID_TAG: 'task_id',
+    TOOL_USE_ID_TAG: 'tool_use_id',
+    OUTPUT_FILE_TAG: 'output_file',
+    STATUS_TAG: 'status',
+    SUMMARY_TAG: 'summary',
+    WORKTREE_TAG: 'worktree',
+    WORKTREE_PATH_TAG: 'worktree_path',
+    WORKTREE_BRANCH_TAG: 'worktree_branch',
+    TASK_TYPE_TAG: 'task_type',
+  }),
+)
 
 // Do not mock messageQueueManager — process-global stubs break SleepTool.
 

@@ -9,14 +9,32 @@ import {
   mkdir,
   readdir,
   readFile,
+  readlink,
   realpath,
+  rm,
+  rmdir,
   stat,
+  unlink,
+  writeFile,
   symlink,
   utimes,
 } from 'fs/promises'
 import ignore from 'ignore'
-import { basename, dirname, join, resolve, sep } from 'path'
-import { logEvent } from 'src/services/analytics/index.js'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from 'path'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import { saveCurrentProjectConfig } from './config.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
@@ -50,8 +68,16 @@ import {
   executeWorktreeCreateHook,
   executeWorktreeRemoveHook,
   hasWorktreeCreateHook,
+  hasWorktreeRemoveHook,
 } from './hooks.js'
-import { containsPathTraversal } from './path.js'
+import {
+  containsPathTraversal,
+  hasPathDotSegment,
+  isNetworkUncPath,
+  isNtObjectNamespacePathNormalized,
+  isWindowsDeviceNamespacePath,
+} from './path.js'
+import { containsVulnerableUncPath } from './shell/readOnlyCommandValidation.js'
 import { getPlatform } from './platform.js'
 import {
   getInitialSettings,
@@ -59,9 +85,35 @@ import {
 } from './settings/settings.js'
 import { sleep } from './sleep.js'
 import { isInITerm2 } from './swarm/backends/detection.js'
+import {
+  buildProcessStartIdentityFields,
+  isProcessGone,
+  isProcessRunning,
+  ownProcStartAsync,
+  processLstartMatches,
+} from './genericProcessUtils.js'
 
 const VALID_WORKTREE_SLUG_SEGMENT = /^[a-zA-Z0-9._-]+$/
 const MAX_WORKTREE_SLUG_LENGTH = 64
+
+/** densable Ijr / Mjr / Ojr — marker that we enabled worktreeConfig. */
+const ENABLED_WORKTREE_CONFIG_KEY = 'claude.enabledWorktreeConfigExtension'
+/** densable ijr — BMs per-sweep unlock cap. */
+const STALE_LOCK_RELEASE_CAP = 50
+/** densable NMs — git no longer recognizes the worktree. */
+const WORKTREE_NOT_REGISTERED =
+  /is not a working tree|validation failed|not a git repository: .*[\\/]\.git[\\/]worktrees[\\/]/
+/** densable xne — W7 expectedResolvedPath mismatch. */
+export const WORKTREE_RESOLUTION_CHANGED =
+  'resolution changed since ownership verification'
+/** densable Pjr — Ane/W7 hook refuse when the dir still has files. */
+export const WORKTREE_UNVERIFIABLE_FILES =
+  'has files but no repository to verify them against'
+/** densable xjr — M4 refused. */
+export const WORKTREE_UNREMOVABLE_REPARSE =
+  'unremovable reparse point in the worktree'
+/** densable IHt / xAt — same sentinel eq() returns. */
+const WORKTREE_UNVERIFIED_ANCESTRY = '\0unverified-ancestry'
 
 /**
  * Official 2.1.207: sparse linked worktrees need extensions.worktreeConfig.
@@ -81,6 +133,12 @@ export async function ensureExtensionsWorktreeConfig(
   await execFileNoThrowWithCwd(
     gitExe(),
     ['config', '--local', 'extensions.worktreeConfig', 'true'],
+    { cwd: repoRoot, env: gitWorktreeEnv() },
+  )
+  // densable Ojr — Mne only restores when we marked that we enabled it.
+  await execFileNoThrowWithCwd(
+    gitExe(),
+    ['config', '--local', ENABLED_WORKTREE_CONFIG_KEY, 'true'],
     { cwd: repoRoot, env: gitWorktreeEnv() },
   )
 }
@@ -242,6 +300,12 @@ export type WorktreeSession = {
   sessionId: string
   tmuxSessionName?: string
   hookBased?: boolean
+  /**
+   * densable `enteredExisting` — guest / enter into an existing tree.
+   * Owner sessions that successfully `Cjr` leave this unset; guests set `true`
+   * so keep/exit must not `releaseOwnWorktreeLock`.
+   */
+  enteredExisting?: boolean
   /** How long worktree creation took (unset when resuming an existing worktree). */
   creationDurationMs?: number
   /** True if git sparse-checkout was applied via settings.worktree.sparsePaths. */
@@ -332,7 +396,8 @@ export async function enterExistingWorktreeSession(
   sessionId: string,
 ): Promise<WorktreeSession> {
   const originalCwd = getCwd()
-  const preEnter = getCurrentWorktreeSession()?.originalCwd ?? originalCwd
+  const prev = getCurrentWorktreeSession()
+  const preEnter = prev?.originalCwd ?? originalCwd
   let extraRoot: string | undefined =
     findCanonicalGitRoot(worktreePath) ?? undefined
   try {
@@ -353,6 +418,18 @@ export async function enterExistingWorktreeSession(
     [],
     liveLaunchDirs(preEnter, extraRoot),
   )
+  // densable $fr @216889824 — release owned lock when switching trees.
+  if (prev && !prev.enteredExisting && !prev.hookBased) {
+    const prevReal = await realpath(prev.worktreePath).catch(
+      () => prev.worktreePath,
+    )
+    if (worktreePath !== prevReal) {
+      await releaseOwnWorktreeLock(
+        prev.worktreePath,
+        resolveWorktreeLockGitRoot(prev.originalCwd, prev.worktreePath),
+      )
+    }
+  }
   const { stdout: branchOut } = await execFileNoThrowWithCwd(
     gitExe(),
     ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -373,6 +450,7 @@ export async function enterExistingWorktreeSession(
     worktreeBranch,
     originalHeadCommit: headOut.trim() || undefined,
     sessionId,
+    enteredExisting: true,
   }
 
   saveCurrentProjectConfig(current => ({
@@ -407,6 +485,7 @@ type WorktreeCreateResult =
       worktreeBranch: string
       headCommit: string
       existed: true
+      refreshed?: true
     }
   | {
       worktreePath: string
@@ -530,6 +609,51 @@ export async function assertWorktreeCreateContainment(
   )
 }
 
+/**
+ * densable EHt/CHt arm — readlink(worktree) EINVAL/ENOENT → unlink `.git`.
+ * Used when M4 refuses `git worktree remove` on a create-fail leftover.
+ */
+async function unlinkDanglingWorktreeGitPointer(
+  worktreePath: string,
+): Promise<void> {
+  const dangling = await readlink(worktreePath).then(
+    () => false,
+    (error: unknown) => getErrnoCode(error) === 'EINVAL' || isENOENT(error),
+  )
+  if (dangling) {
+    await unlink(join(worktreePath, '.git')).catch(() => {})
+  }
+}
+
+/**
+ * densable create-fail teardown: M4 → `worktree remove --force` [+ prune];
+ * else EHt EINVAL/ENOENT → CHt `.git`. Sparse also runs Mne afterwards.
+ */
+async function teardownFailedWorktreeCreate(
+  worktreePath: string,
+  repoRoot: string,
+  opts?: { prune?: boolean; restoreConfig?: boolean },
+): Promise<void> {
+  if (await isWorktreePathRemovable(worktreePath)) {
+    await execFileNoThrowWithCwd(
+      gitExe(),
+      ['worktree', 'remove', '--force', worktreePath],
+      { cwd: repoRoot, env: gitWorktreeEnv() },
+    )
+    if (opts?.prune) {
+      await execFileNoThrowWithCwd(gitExe(), ['worktree', 'prune'], {
+        cwd: repoRoot,
+        env: gitWorktreeEnv(),
+      })
+    }
+  } else {
+    await unlinkDanglingWorktreeGitPointer(worktreePath)
+  }
+  if (opts?.restoreConfig) {
+    await restoreWorktreeConfigExtension(repoRoot)
+  }
+}
+
 // Flatten nested slugs (`user/feature` → `user+feature`) for both the branch
 // name and the directory path. Nesting in either location is unsafe:
 //   - git refs: `worktree-user` (file) vs `worktree-user/feature` (needs dir)
@@ -630,10 +754,32 @@ async function getOrCreateWorktree(
       [],
       liveLaunchDirs(getCwd(), repoRoot),
     )
+    // densable zHt: s = fromHead ?? (!prNumber && baseRef==="head")
+    const fromHead =
+      !options?.prNumber && getInitialSettings().worktree?.baseRef === 'head'
+    const baseline = await readWorktreeBaseline(worktreePath)
+    if (!fromHead && !options?.prNumber) {
+      const resetTo = await resetResumedWorktreeIfFullyUpstream(
+        repoRoot,
+        worktreePath,
+        worktreeBranch,
+        existingHead,
+        baseline,
+      )
+      if (resetTo) {
+        return {
+          worktreePath,
+          worktreeBranch,
+          headCommit: resetTo,
+          existed: true,
+          refreshed: true,
+        }
+      }
+    }
     return {
       worktreePath,
       worktreeBranch,
-      headCommit: existingHead,
+      headCommit: baseline ?? existingHead,
       existed: true,
     }
   }
@@ -735,11 +881,21 @@ async function getOrCreateWorktree(
   if (createCode !== 0) {
     // densable: me("git_worktree_create", "git_worktree_create_add_failed")
     logEvent('git_worktree_create_add_failed', {})
+    // densable PHt → M4 remove / else EHt+CHt `.git`
+    if (await readWorktreeHeadSha(worktreePath)) {
+      await teardownFailedWorktreeCreate(worktreePath, repoRoot)
+    }
     throw new Error(`Failed to create worktree: ${createStderr}`)
   }
 
   // densable: post-add realpath containment (defense in depth after xqi)
-  await assertWorktreeCreateContainment(worktreePath)
+  // Official `g`: M4 remove+prune, else unlink `.git`, then rethrow.
+  try {
+    await assertWorktreeCreateContainment(worktreePath)
+  } catch (error) {
+    await teardownFailedWorktreeCreate(worktreePath, repoRoot, { prune: true })
+    throw error
+  }
 
   if (sparsePaths?.length) {
     // Linked sparse worktrees require extensions.worktreeConfig=true in the
@@ -751,12 +907,11 @@ async function getOrCreateWorktree(
     // is registered and HEAD is set but the working tree is empty. Next run's
     // fast-resume (rev-parse HEAD) would succeed and present a broken worktree
     // as "resumed". Tear it down before propagating the error.
+    // densable `h`: M4 remove (no prune) else unlink `.git`; then Mne.
     const tearDown = async (msg: string): Promise<never> => {
-      await execFileNoThrowWithCwd(
-        gitExe(),
-        ['worktree', 'remove', '--force', worktreePath],
-        { cwd: repoRoot, env: gitWorktreeEnv() },
-      )
+      await teardownFailedWorktreeCreate(worktreePath, repoRoot, {
+        restoreConfig: true,
+      })
       throw new Error(msg)
     }
     const { code: sparseCode, stderr: sparseErr } =
@@ -778,6 +933,8 @@ async function getOrCreateWorktree(
     }
   }
 
+  // densable vjr(r,u) — CLAUDE_BASE in the worktree git admin dir.
+  await writeWorktreeBaseline(worktreePath, baseSha)
   return {
     worktreePath,
     worktreeBranch,
@@ -1366,6 +1523,13 @@ export async function createWorktreeForSession(
       creationDurationMs = Date.now() - createStart
     }
 
+    // densable Cjr @216884155 — write `git worktree lock` after create/resume.
+    const locked = await lockClaudeWorktree(
+      worktreePath,
+      gitRoot,
+      slug,
+      'session',
+    )
     session = {
       originalCwd,
       worktreePath,
@@ -1376,6 +1540,7 @@ export async function createWorktreeForSession(
       sessionId,
       tmuxSessionName,
       creationDurationMs,
+      enteredExisting: locked ? undefined : true,
       usedSparsePaths:
         (getInitialSettings().worktree?.sparsePaths?.length ?? 0) > 0,
     }
@@ -1402,10 +1567,25 @@ export async function keepWorktree(): Promise<void> {
   }
 
   try {
-    const { worktreePath, originalCwd, worktreeBranch } = currentWorktreeSession
+    const session = currentWorktreeSession
+    const { worktreePath, originalCwd, worktreeBranch } = session
+    // densable qHt(originalCwd, worktreePath) — unlock cwd for Ejr.
+    const lockGitRoot = resolveWorktreeLockGitRoot(originalCwd, worktreePath)
 
-    // Change back to original directory first
-    process.chdir(originalCwd)
+    // Change back to original directory first (densable oK(s) uses qHt root).
+    try {
+      process.chdir(lockGitRoot)
+    } catch (error) {
+      logForDebugging(
+        `Could not chdir to original directory while keeping worktree: ${error}`,
+      )
+      process.chdir(originalCwd)
+    }
+
+    // densable Qfr / Ejr — release our lock when we owned it (!enteredExisting && !hook).
+    if (!session.enteredExisting && !session.hookBased) {
+      await releaseOwnWorktreeLock(worktreePath, lockGitRoot)
+    }
 
     // Clear the session but keep the worktree intact
     currentWorktreeSession = null
@@ -1429,96 +1609,172 @@ export async function keepWorktree(): Promise<void> {
   }
 }
 
-export async function cleanupWorktree(): Promise<void> {
+function clearActiveWorktreeSession(): void {
+  currentWorktreeSession = null
+  saveCurrentProjectConfig(current => ({
+    ...current,
+    activeWorktreeSession: undefined,
+  }))
+}
+
+/**
+ * densable Ajr @216896631 — `git branch -D --end-of-options`.
+ * emr: `{logSuccess:true}`. W7: `{errorLabel}` only (no success log).
+ */
+async function deleteWorktreeBranch(
+  cwd: string,
+  branch: string,
+  opts?: { logSuccess?: boolean; errorLabel?: string },
+): Promise<boolean> {
+  const { code, stderr } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['branch', '-D', '--end-of-options', branch],
+    { cwd, env: gitWorktreeEnv() },
+  )
+  if (code !== 0) {
+    logForDebugging(
+      `${opts?.errorLabel ?? 'Could not delete worktree branch'}: ${stderr}`,
+      { level: 'error' },
+    )
+    return false
+  }
+  if (opts?.logSuccess) {
+    logForDebugging(`Deleted worktree branch: ${branch}`)
+  }
+  return true
+}
+
+/**
+ * densable emr @216891333.
+ * Returns false when the worktree was kept. Official `!n` → true.
+ */
+export async function cleanupWorktree(persist?: {
+  storageV5?: unknown
+  credentials?: unknown
+}): Promise<boolean> {
   if (!currentWorktreeSession) {
-    return
+    return true
   }
 
   try {
-    const {
-      worktreePath,
-      originalCwd,
-      worktreeBranch,
-      hookBased,
-      usedSparsePaths,
-    } = currentWorktreeSession
+    const { worktreePath, originalCwd, worktreeBranch, hookBased } =
+      currentWorktreeSession
+    const gitRoot = findCanonicalGitRoot(originalCwd) ?? originalCwd
 
-    // Change back to original directory first
     process.chdir(originalCwd)
 
+    let hookRemoved = false
     if (hookBased) {
-      // Hook-based worktree: delegate cleanup to WorktreeRemove hook
-      const hookRan = await executeWorktreeRemoveHook(worktreePath)
-      if (hookRan) {
+      hookRemoved = await executeWorktreeRemoveHook(worktreePath, persist)
+      if (hookRemoved) {
         logForDebugging(`Removed hook-based worktree at: ${worktreePath}`)
-      } else {
+      } else if (hasWorktreeRemoveHook()) {
         logForDebugging(
-          `No WorktreeRemove hook configured, hook-based worktree left at: ${worktreePath}`,
+          `WorktreeRemove hook did not remove worktree, kept at: ${worktreePath}`,
           { level: 'warn' },
         )
-      }
-    } else {
-      // Git-based worktree: use git worktree remove.
-      // Explicit cwd: process.chdir above does NOT update getCwd() (the state
-      // CWD that execFileNoThrow defaults to). If the model cd'd to a non-repo
-      // dir, the bare execFileNoThrow variant would fail silently here.
-      const { code: removeCode, stderr: removeError } =
-        await execFileNoThrowWithCwd(
-          gitExe(),
-          ['worktree', 'remove', '--force', worktreePath],
-          { cwd: originalCwd, env: gitWorktreeEnv() },
-        )
-
-      if (removeCode !== 0) {
-        logForDebugging(`Failed to remove linked worktree: ${removeError}`, {
-          level: 'error',
-        })
+        clearActiveWorktreeSession()
+        return false
       } else {
-        logForDebugging(`Removed linked worktree at: ${worktreePath}`)
-        // Official 2.1.207: after the last sparsePaths worktree is gone,
-        // drop extensions.worktreeConfig so go-git tools (tea, etc.) work.
-        if (usedSparsePaths) {
-          await maybeRestoreExtensionsWorktreeConfig(originalCwd, worktreePath)
-        }
+        logForDebugging(
+          `No WorktreeRemove hook configured; falling back to git worktree remove for: ${worktreePath}`,
+        )
       }
     }
 
-    // Clear the session
-    currentWorktreeSession = null
-
-    // Update config
-    saveCurrentProjectConfig(current => ({
-      ...current,
-      activeWorktreeSession: undefined,
-    }))
-
-    // Delete the temporary worktree branch (git-based only)
-    if (!hookBased && worktreeBranch) {
-      // Wait a bit to ensure git has released all locks
-      await sleep(100)
-
-      const { code: deleteBranchCode, stderr: deleteBranchError } =
-        await execFileNoThrowWithCwd(
-          gitExe(),
-          ['branch', '-D', worktreeBranch],
-          { cwd: originalCwd, env: gitWorktreeEnv() },
+    if (!hookRemoved) {
+      try {
+        const lockReason = await porcelainLockReason(worktreePath, gitRoot)
+        if (!canReapDespiteLock(lockReason)) {
+          logForDebugging(
+            `cleanupWorktree: kept ${worktreePath} — locked by another live Claude Code process, or with a reason we did not write (${lockReason || 'no reason'})`,
+            { level: 'warn' },
+          )
+          clearActiveWorktreeSession()
+          return false
+        }
+        await unlockAgentWorktree(worktreePath, gitRoot)
+        let skipReparse = false
+        if (hookBased && getPlatform() === 'windows') {
+          const listed = await listPorcelainWorktrees(gitRoot).catch(() => null)
+          if (listed != null) {
+            skipReparse = true
+            const here = await realpath(worktreePath).catch(() => worktreePath)
+            for (const row of listed) {
+              if (
+                here ===
+                (await realpath(row.worktreePath).catch(() => row.worktreePath))
+              ) {
+                skipReparse = false
+                break
+              }
+            }
+          }
+        }
+        if (!skipReparse && !(await isWorktreePathRemovable(worktreePath))) {
+          logForDebugging(
+            `Kept linked worktree — unremovable reparse point in ${worktreePath}`,
+            { level: 'warn' },
+          )
+          clearActiveWorktreeSession()
+          return false
+        }
+        const { code: removeCode, stderr: removeError } =
+          await execFileNoThrowWithCwd(
+            gitExe(),
+            ['worktree', 'remove', '--force', worktreePath],
+            { cwd: gitRoot, env: gitWorktreeEnv() },
+          )
+        if (removeCode !== 0) {
+          const stillThere = await lstat(worktreePath).then(
+            () => true,
+            () => false,
+          )
+          if (stillThere) {
+            logForDebugging(
+              `Failed to remove linked worktree, kept ${worktreePath}: ${removeError.trim()}`,
+              { level: 'warn' },
+            )
+            clearActiveWorktreeSession()
+            return false
+          }
+        }
+        logForDebugging(`Removed linked worktree at: ${worktreePath}`)
+        await restoreWorktreeConfigExtension(gitRoot)
+      } catch (error) {
+        const stillThere = await lstat(worktreePath).then(
+          () => true,
+          () => false,
         )
-
-      if (deleteBranchCode !== 0) {
+        if (stillThere) {
+          logForDebugging(
+            `cleanupWorktree: kept ${worktreePath} — cannot read the worktree registry to verify lock ownership (${errorMessage(error)})`,
+            { level: 'warn' },
+          )
+          clearActiveWorktreeSession()
+          return false
+        }
         logForDebugging(
-          `Could not delete worktree branch: ${deleteBranchError}`,
-          { level: 'error' },
+          `cleanupWorktree: worktree registry unreadable and ${worktreePath} is already gone (${errorMessage(error)}); continuing to the already-removed path`,
         )
-      } else {
-        logForDebugging(`Deleted worktree branch: ${worktreeBranch}`)
       }
+    }
+
+    clearActiveWorktreeSession()
+
+    // densable Ajr({logSuccess:!0}) — git-based only, after session clear
+    if (!hookBased && worktreeBranch) {
+      await sleep(100)
+      await deleteWorktreeBranch(gitRoot, worktreeBranch, { logSuccess: true })
     }
 
     logForDebugging('Linked worktree cleaned up completely')
+    return true
   } catch (error) {
     logForDebugging(`Error cleaning up worktree: ${error}`, {
       level: 'error',
     })
+    return false
   }
 }
 
@@ -1584,6 +1840,9 @@ export async function createAgentWorktree(slug: string): Promise<{
     logForDebugging(`Resuming existing agent worktree at: ${worktreePath}`)
   }
 
+  // densable Cjr @216895517 — agents always take the lock (kind=agent).
+  await lockClaudeWorktree(worktreePath, gitRoot, slug, 'agent')
+
   await assertIsolationWorktreeAllowed(
     worktreePath,
     [],
@@ -1594,85 +1853,1579 @@ export async function createAgentWorktree(slug: string): Promise<{
 }
 
 /**
- * Remove a worktree created by createAgentWorktree.
- * For git-based worktrees, removes the worktree directory and deletes the temporary branch.
- * For hook-based worktrees, delegates to the WorktreeRemove hook.
- * Must be called with the main repo's git root (for git worktrees), not the worktree path,
- * since the worktree directory is deleted during this operation.
+ * densable p / Rtb / ef @207666xxx — Turkish-i / long-s fold for M4 and Xy.
+ */
+function foldWorktreePathCase(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\u0131/g, 'i')
+    .replace(/\u017F/g, 's')
+}
+
+/**
+ * densable Xy — case-fold on windows/macos for $Xe relative retry.
+ */
+function foldWorktreePathCompare(value: string): string {
+  const platform = getPlatform()
+  return platform === 'windows' || platform === 'macos'
+    ? foldWorktreePathCase(value)
+    : value
+}
+
+/**
+ * densable ie — UNC host, or null for device-ns that is not `\\?\UNC\`.
+ */
+function worktreeUncHost(path: string): string | null {
+  if (/^[\\/]{2}[?.][\\/](?!unc[\\/])/i.test(path)) return null
+  return (
+    path
+      .match(/^[\\/]{2}(?:[?.][\\/]unc[\\/])?([^\\/]+)/i)?.[1]
+      ?.replace(/[A-Z]/g, c => c.toLowerCase()) ?? null
+  )
+}
+
+/**
+ * densable P — UNC `//`/`\\` or NT `\??\`.
+ */
+function isWorktreeUncOrNtObject(path: string): boolean {
+  return /^[\\/]{2}/.test(path) || isNtObjectNamespacePathNormalized(path)
+}
+
+/**
+ * densable ae — UNC/NT path that is device/NT/dotted, or a different host than cwd.
+ */
+function isWorktreeUncForeignToCwd(path: string, cwd: string): boolean {
+  if (!isWorktreeUncOrNtObject(path)) return false
+  if (
+    isWindowsDeviceNamespacePath(path) ||
+    isNtObjectNamespacePathNormalized(path)
+  ) {
+    return true
+  }
+  if (hasPathDotSegment(path)) return true
+  const host = worktreeUncHost(path)
+  return host === null || host !== worktreeUncHost(cwd)
+}
+
+/**
+ * densable $o / MXe. Official `J`/`N` stubs are false/null, so only ae arms run.
+ */
+function isWorktreePathNetworkRelativeToCwd(
+  path: string,
+  cwd: string,
+): boolean {
+  const resolved = resolve(cwd, path)
+  return (
+    isWorktreeUncForeignToCwd(path, cwd) ||
+    isWorktreeUncForeignToCwd(resolved, cwd)
+  )
+}
+
+/**
+ * densable Ine — Windows `//`/`\\` prefix after win32.normalize.
+ */
+function isWindowsUncPrefix(path: string): boolean {
+  return getPlatform() === 'windows' && /^[\\/]{2}/.test(path)
+}
+
+/**
+ * densable xXe @216885408 — `Ine(win32.normalize)||Ip(n,true)||MXe(e,cwd)`.
+ * Ip is containsVulnerableUncPath (official kr / sI).
+ */
+function isWorktreeNetworkPath(path: string, cwd: string): boolean {
+  const normalized = win32.normalize(path)
+  return (
+    isWindowsUncPrefix(normalized) ||
+    containsVulnerableUncPath(normalized, true) ||
+    isWorktreePathNetworkRelativeToCwd(path, cwd)
+  )
+}
+
+/**
+ * densable w @207665954 — try unlink/rmdir a Windows reparse; recurse children.
+ * true = unremovable (M4 then false).
+ */
+async function tryRemoveReparsePointBeforeRemoval(
+  path: string,
+  expected: string | null,
+): Promise<boolean> {
+  try {
+    await unlink(path)
+    logForDebugging(`[worktree] unlinked reparse point before removal: ${path}`)
+    return false
+  } catch {
+    // not a file-like reparse
+  }
+  try {
+    await rmdir(path)
+    logForDebugging(
+      `[worktree] removed reparse point or empty directory before removal: ${path}`,
+    )
+    return false
+  } catch (error) {
+    if (isENOENT(error)) return false
+    if (getErrnoCode(error) !== 'ENOTEMPTY') {
+      const kind = await readlink(path).then(
+        () => 'link' as const,
+        (readError: unknown) =>
+          getErrnoCode(readError) === 'EINVAL' || isENOENT(readError)
+            ? ('not-link' as const)
+            : ('unknown' as const),
+      )
+      const resolved =
+        kind !== 'not-link' || expected === null
+          ? null
+          : await realpath(path)
+              .then(value => foldWorktreePathCase(value))
+              .catch(() => null)
+      if (
+        resolved === null ||
+        (resolved !== expected && !resolved.startsWith(expected + sep))
+      ) {
+        logForDebugging(
+          `[worktree] refusing to enumerate unremovable entry before removal: ${path}`,
+          { level: 'warn' },
+        )
+        return true
+      }
+    }
+  }
+  const entries = await readdir(path, { withFileTypes: true }).catch(error =>
+    isENOENT(error) ? [] : null,
+  )
+  if (entries === null) {
+    logForDebugging(
+      `[worktree] could not enumerate ${path} before removal; not certifying`,
+      { level: 'warn' },
+    )
+    return true
+  }
+  let unremovable = false
+  for (const entry of entries) {
+    if (entry.isSymbolicLink() || entry.isDirectory()) {
+      unremovable =
+        (await tryRemoveReparsePointBeforeRemoval(
+          join(path, entry.name),
+          expected,
+        )) || unremovable
+    }
+  }
+  return unremovable
+}
+
+/**
+ * densable M4 / Stb / j @207666760.
+ * Non-Windows → true. Windows → !w(path, fold(join(realpath(parent), basename))).
+ *
+ * Reads as a predicate but MUTATES on Windows: it unlinks/rmdirs reparse points
+ * and empty directories under `path` so the `git worktree remove --force` that
+ * follows can succeed. Only call it once removal is already decided — both
+ * current callers do (cleanupWorktree has unlocked by then; the other is
+ * create-failure teardown). A `false` return means teardown is incomplete, not
+ * that the worktree is untouched.
+ */
+export async function isWorktreePathRemovable(path: string): Promise<boolean> {
+  if (getPlatform() !== 'windows') return true
+  const parentReal = await realpath(dirname(path)).catch(() => null)
+  return !(await tryRemoveReparsePointBeforeRemoval(
+    path,
+    parentReal === null
+      ? null
+      : foldWorktreePathCase(join(parentReal, basename(path))),
+  ))
+}
+
+/**
+ * densable $Xe @216866269 — walk relative components from root; first symlink
+ * or unreadable component. Jc is identity. Null = no symlink on the suffix
+ * (or relative escapes the root).
+ */
+export async function findWorktreePathSymlinkComponent(
+  worktreePath: string,
+  root: string,
+): Promise<{ component: string; kind: 'symlink' | 'unverifiable' } | null> {
+  if (hasPathDotSegment(worktreePath) || hasPathDotSegment(root)) {
+    return { component: worktreePath, kind: 'unverifiable' }
+  }
+  const isBadRelative = (rel: string): boolean =>
+    !rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)
+  let rel = relative(root, worktreePath)
+  if (isBadRelative(rel)) {
+    rel = relative(
+      foldWorktreePathCompare(root),
+      foldWorktreePathCompare(worktreePath),
+    )
+    if (isBadRelative(rel)) return null
+  }
+  let cursor = root
+  for (const part of rel.split(sep)) {
+    cursor = join(cursor, part)
+    let st: Awaited<ReturnType<typeof lstat>>
+    try {
+      st = await lstat(cursor)
+    } catch (error) {
+      if (isENOENT(error)) return null
+      return { component: cursor, kind: 'unverifiable' }
+    }
+    if (st.isSymbolicLink()) {
+      return { component: cursor, kind: 'symlink' }
+    }
+  }
+  return null
+}
+
+/**
+ * densable si / Ea @206556923 — git root still has `.git` (cache heal on ENOENT).
+ * Returns the root string or null (official `===null` test).
+ */
+export async function resolveGitRootIfPresent(
+  path: string,
+): Promise<string | null> {
+  const root = findGitRoot(path)
+  if (root === null) return null
+  try {
+    await lstat(join(root, '.git'))
+    return root
+  } catch (error) {
+    if (!isENOENT(error) && getErrnoCode(error) !== 'ENOTDIR') return root
+    findGitRoot.cache.delete(path)
+    return findGitRoot(path)
+  }
+}
+
+/**
+ * densable si / cjr — git root still has a `.git` (cache heal on ENOENT).
+ */
+async function stillResolvesToRepository(path: string): Promise<boolean> {
+  return (await resolveGitRootIfPresent(path)) !== null
+}
+
+/**
+ * densable Kb(yt(), path, {surfaceNetworkRaw, anchor}). Dynamic import
+ * avoids worktree ↔ bgIsolationContainment load cycle.
+ */
+async function resolveWorktreeAncestry(
+  path: string,
+  cwd: string,
+): Promise<string | undefined> {
+  const { eq, getEqFs } = await import('./bgIsolationContainment.js')
+  return eq(getEqFs(), path, { surfaceNetworkRaw: true, anchor: cwd })
+}
+
+function refuseNoRootRemoval(
+  worktreePath: string,
+  reason: string,
+): RemoveAgentWorktreeResult {
+  logForDebugging(
+    `removeAgentWorktree: refused no-root removal of ${worktreePath} — ${reason}`,
+    { level: 'warn' },
+  )
+  return { outcome: 'failed', errorSummary: reason }
+}
+
+function removedNoRoot(
+  reason: string,
+  extras?: { hookBased?: boolean; alreadyGone?: boolean },
+): RemoveAgentWorktreeResult {
+  logEvent('tengu_worktree_removed', {
+    source:
+      reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    changed_files: 0,
+    commits: 0,
+    ...(extras?.hookBased ? { hook_based: true } : { no_root: 1 }),
+    ...(extras?.alreadyGone ? { already_gone: 1 } : {}),
+  })
+  return { outcome: 'removed' }
+}
+
+/**
+ * densable Ane @216896913 — no-root (or hook-path safety fail) removal.
+ */
+export async function removeAgentWorktreeWithoutGitRoot(
+  worktreePath: string,
+  reason: string,
+  expectedResolvedPath?: string,
+  hookManaged?: boolean,
+): Promise<RemoveAgentWorktreeResult> {
+  if (!isAbsolute(worktreePath)) {
+    return refuseNoRootRemoval(worktreePath, 'path is not absolute')
+  }
+  const cwd = getCwd()
+  const isNetwork = (value: string): boolean =>
+    isWorktreeNetworkPath(value, cwd)
+  if (isNetwork(worktreePath)) {
+    return refuseNoRootRemoval(worktreePath, 'network path (UNC or automount)')
+  }
+  if (hasPathDotSegment(worktreePath)) {
+    return refuseNoRootRemoval(worktreePath, 'unverifiable symlinked ancestor')
+  }
+  const landed = await resolveWorktreeAncestry(worktreePath, cwd)
+  if (landed === WORKTREE_UNVERIFIED_ANCESTRY) {
+    return refuseNoRootRemoval(worktreePath, 'unverifiable symlinked ancestor')
+  }
+  if (landed !== undefined && isNetwork(landed)) {
+    return refuseNoRootRemoval(worktreePath, 'network path (UNC or automount)')
+  }
+  if (landed !== undefined && hasPathDotSegment(landed)) {
+    return refuseNoRootRemoval(worktreePath, 'unverifiable symlinked ancestor')
+  }
+  let st: Awaited<ReturnType<typeof lstat>>
+  try {
+    st = await lstat(worktreePath)
+  } catch (error) {
+    if (!isENOENT(error) && getErrnoCode(error) !== 'ENOTDIR') {
+      return refuseNoRootRemoval(
+        worktreePath,
+        `cannot stat the directory (${getErrnoCode(error) ?? 'unknown error'})`,
+      )
+    }
+    logForDebugging(
+      hookManaged
+        ? `removeAgentWorktree: ${worktreePath} already gone — nothing left to remove (hook-managed)`
+        : `removeAgentWorktree: ${worktreePath} already gone and no git root resolves — nothing left to remove`,
+    )
+    return removedNoRoot(
+      reason,
+      hookManaged
+        ? { alreadyGone: true, hookBased: true }
+        : { alreadyGone: true },
+    )
+  }
+  if (!st.isDirectory()) {
+    return refuseNoRootRemoval(worktreePath, 'not a directory')
+  }
+  const canonical = await realpath(worktreePath).catch(() => null)
+  if (canonical === null) {
+    return refuseNoRootRemoval(worktreePath, 'could not canonicalize the path')
+  }
+  if (isNetwork(canonical)) {
+    return refuseNoRootRemoval(worktreePath, 'network path (UNC or automount)')
+  }
+  if (
+    expectedResolvedPath !== undefined &&
+    canonical !== expectedResolvedPath
+  ) {
+    return refuseNoRootRemoval(worktreePath, WORKTREE_RESOLUTION_CHANGED)
+  }
+  const parent = dirname(canonical)
+  if (
+    parent === canonical ||
+    basename(parent) !== 'worktrees' ||
+    basename(dirname(parent)) !== '.claude'
+  ) {
+    return refuseNoRootRemoval(
+      worktreePath,
+      'not directly under a .claude/worktrees directory',
+    )
+  }
+  if (await stillResolvesToRepository(canonical)) {
+    return refuseNoRootRemoval(worktreePath, 'still resolves to a repository')
+  }
+  const entries = await readdir(canonical).catch(() => null)
+  if (entries === null) {
+    return refuseNoRootRemoval(worktreePath, 'unreadable directory')
+  }
+  if (entries.length > 0 && reason !== 'job_delete_force') {
+    logForDebugging(
+      `removeAgentWorktree: kept rootless ${worktreePath} — ${entries.length} unverifiable file(s); only an explicit discard may remove them`,
+      { level: 'warn' },
+    )
+    logEvent('tengu_worktree_removed', {
+      source:
+        reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      changed_files: 0,
+      commits: 0,
+      no_root: 1,
+      aborted: 1,
+    })
+    return {
+      outcome: 'failed',
+      errorSummary: WORKTREE_UNVERIFIABLE_FILES,
+      needsForce: true,
+    }
+  }
+  if ((await realpath(canonical).catch(() => null)) !== canonical) {
+    return refuseNoRootRemoval(worktreePath, WORKTREE_RESOLUTION_CHANGED)
+  }
+  if (!(await isWorktreePathRemovable(canonical))) {
+    logForDebugging(
+      `removeAgentWorktree: aborted ${reason} removal — unremovable reparse point in ${worktreePath}`,
+      { level: 'warn' },
+    )
+    return {
+      outcome: 'failed',
+      errorSummary: WORKTREE_UNREMOVABLE_REPARSE,
+    }
+  }
+  if (
+    (await realpath(canonical).catch(error =>
+      isENOENT(error) ? canonical : null,
+    )) !== canonical
+  ) {
+    return refuseNoRootRemoval(worktreePath, WORKTREE_RESOLUTION_CHANGED)
+  }
+  await rm(canonical, { recursive: true, force: true })
+  logForDebugging(`Removed agent worktree with no git root at: ${worktreePath}`)
+  return removedNoRoot(reason)
+}
+
+/** densable W7 return. Slu/blu treat anything except `failed` as success. */
+export type RemoveAgentWorktreeResult = {
+  outcome: 'failed' | 'removed' | 'left_in_place'
+  errorSummary?: string
+  needsForce?: boolean
+}
+
+/**
+ * densable W7 @216899222.
+ * `reason` default `"unknown"`. Slu `"job_retention_sweep"`, blu `"stale_cleanup"`,
+ * deleteJob `"job_delete"` / `"job_delete_force"`.
  */
 export async function removeAgentWorktree(
   worktreePath: string,
   worktreeBranch?: string,
   gitRoot?: string,
   hookBased?: boolean,
-): Promise<boolean> {
+  reason = 'unknown',
+  expectedResolvedPath?: string,
+  extra?: string,
+  persist?: { storageV5?: unknown; credentials?: unknown },
+): Promise<RemoveAgentWorktreeResult> {
   if (hookBased) {
-    const hookRan = await executeWorktreeRemoveHook(worktreePath)
-    if (hookRan) {
-      logForDebugging(`Removed hook-based agent worktree at: ${worktreePath}`)
-    } else {
-      logForDebugging(
-        `No WorktreeRemove hook configured, hook-based agent worktree left at: ${worktreePath}`,
-        { level: 'warn' },
+    if (
+      !isAbsolute(worktreePath) ||
+      hasPathDotSegment(worktreePath) ||
+      isWorktreeNetworkPath(worktreePath, getCwd())
+    ) {
+      return removeAgentWorktreeWithoutGitRoot(
+        worktreePath,
+        reason,
+        expectedResolvedPath,
+        true,
       )
     }
-    return hookRan
+    let hookPath = worktreePath
+    if (expectedResolvedPath !== undefined) {
+      const cwd = getCwd()
+      const landed = await resolveWorktreeAncestry(worktreePath, cwd)
+      if (
+        landed === WORKTREE_UNVERIFIED_ANCESTRY ||
+        (landed !== undefined &&
+          (isWorktreeNetworkPath(landed, cwd) || hasPathDotSegment(landed)))
+      ) {
+        return removeAgentWorktreeWithoutGitRoot(
+          worktreePath,
+          reason,
+          expectedResolvedPath,
+          true,
+        )
+      }
+      let st: Awaited<ReturnType<typeof lstat>>
+      try {
+        st = await lstat(worktreePath)
+      } catch (error) {
+        if (isENOENT(error) || getErrnoCode(error) === 'ENOTDIR') {
+          return removeAgentWorktreeWithoutGitRoot(
+            worktreePath,
+            reason,
+            expectedResolvedPath,
+            true,
+          )
+        }
+        return {
+          outcome: 'failed',
+          errorSummary: `cannot stat the worktree path (${getErrnoCode(error) ?? 'unknown error'})`,
+        }
+      }
+      if (st.isSymbolicLink()) {
+        logForDebugging(
+          `removeAgentWorktree: refused hook removal of ${worktreePath} — stored worktree path is a symlink`,
+          { level: 'warn' },
+        )
+        return {
+          outcome: 'failed',
+          errorSummary:
+            'the stored worktree path is a symlink — remove the link itself to clear this session',
+        }
+      }
+      for (const root of new Set(
+        [gitRoot, extra].filter((value): value is string => Boolean(value)),
+      )) {
+        const component = await findWorktreePathSymlinkComponent(
+          worktreePath,
+          root,
+        )
+        if (component) {
+          logForDebugging(
+            `removeAgentWorktree: refused hook removal of ${worktreePath} — ${component.kind} at ${component.component}`,
+            { level: 'warn' },
+          )
+          return {
+            outcome: 'failed',
+            errorSummary:
+              component.kind === 'symlink'
+                ? 'a component of the stored worktree path is a symlink — remove the worktree at its resolved location (or the link, if the worktree is already gone), then retry'
+                : 'a component of the stored worktree path could not be verified — check its permissions, then retry',
+          }
+        }
+      }
+      if (reason !== 'job_delete_force') {
+        const entries = await readdir(worktreePath).catch(() => null)
+        if (entries === null) {
+          return { outcome: 'failed', errorSummary: 'unreadable directory' }
+        }
+        if (entries.length > 0) {
+          logForDebugging(
+            `removeAgentWorktree: kept hook worktree ${worktreePath} — ${entries.length} unverifiable file(s); only an explicit discard may dispatch the remove hook`,
+            { level: 'warn' },
+          )
+          logEvent('tengu_worktree_removed', {
+            source:
+              reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            changed_files: 0,
+            commits: 0,
+            hook_based: true,
+            aborted: 1,
+          })
+          return {
+            outcome: 'failed',
+            errorSummary: WORKTREE_UNVERIFIABLE_FILES,
+            needsForce: true,
+          }
+        }
+      }
+      let resolved: string
+      try {
+        resolved = await realpath(worktreePath)
+      } catch (error) {
+        if (isENOENT(error) || getErrnoCode(error) === 'ENOTDIR') {
+          return removeAgentWorktreeWithoutGitRoot(
+            worktreePath,
+            reason,
+            expectedResolvedPath,
+            true,
+          )
+        }
+        return {
+          outcome: 'failed',
+          errorSummary: `cannot resolve the worktree path (${getErrnoCode(error) ?? 'unknown error'})`,
+        }
+      }
+      if (resolved !== expectedResolvedPath) {
+        logForDebugging(
+          `removeAgentWorktree: refused hook removal of ${worktreePath} — ${WORKTREE_RESOLUTION_CHANGED}`,
+          { level: 'warn' },
+        )
+        return {
+          outcome: 'failed',
+          errorSummary: WORKTREE_RESOLUTION_CHANGED,
+        }
+      }
+      if (isWorktreeNetworkPath(resolved, cwd)) {
+        return removeAgentWorktreeWithoutGitRoot(
+          worktreePath,
+          reason,
+          expectedResolvedPath,
+          true,
+        )
+      }
+      hookPath = expectedResolvedPath
+    }
+    if (await executeWorktreeRemoveHook(hookPath, persist)) {
+      logEvent('tengu_worktree_removed', {
+        source:
+          reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        changed_files: 0,
+        commits: 0,
+        hook_based: true,
+      })
+      logForDebugging(`Removed hook-based agent worktree at: ${worktreePath}`)
+      return { outcome: 'removed' }
+    }
+    logForDebugging(
+      `WorktreeRemove hook did not remove agent worktree, left at: ${worktreePath}`,
+      { level: 'warn' },
+    )
+    return {
+      outcome: 'failed',
+      errorSummary: 'WorktreeRemove hook failed',
+    }
   }
 
   if (!gitRoot) {
-    logForDebugging('Cannot remove agent worktree: no git root provided', {
-      level: 'error',
-    })
-    return false
+    return removeAgentWorktreeWithoutGitRoot(
+      worktreePath,
+      reason,
+      expectedResolvedPath,
+    )
   }
 
-  // Run from the main repo root, not the worktree (which we're about to delete)
+  const status = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['status', '--porcelain'],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  let changedFiles =
+    status.code === 0 && status.stdout.trim()
+      ? status.stdout.trim().split('\n').length
+      : 0
+  if (changedFiles > 0 && (await isWorktreeToplevelElsewhere(worktreePath))) {
+    changedFiles = 0
+  }
+  if (
+    changedFiles > 0 &&
+    reason !== 'exit_tool' &&
+    reason !== 'exit_dialog' &&
+    reason !== 'job_delete_force'
+  ) {
+    logForDebugging(
+      `removeAgentWorktree: aborted ${reason} removal — ${changedFiles} changed file(s) would be lost, kept ${worktreePath}`,
+      { level: 'warn' },
+    )
+    logEvent('tengu_worktree_removed', {
+      source:
+        reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      changed_files: changedFiles,
+      commits: 0,
+      aborted: 1,
+    })
+    return {
+      outcome: 'failed',
+      errorSummary: `${changedFiles} changed file(s) would be lost`,
+    }
+  }
+
+  let alreadyGone = false
+  if (expectedResolvedPath !== undefined) {
+    const resolved = await realpath(worktreePath).catch((error: unknown) => {
+      if (isENOENT(error) || getErrnoCode(error) === 'ENOTDIR') return null
+      return undefined
+    })
+    // null = already gone (official `d=!0`, skip reparse). mismatch → xne.
+    if (resolved === null) {
+      alreadyGone = true
+    } else if (resolved === undefined || resolved !== expectedResolvedPath) {
+      return {
+        outcome: 'failed',
+        errorSummary: WORKTREE_RESOLUTION_CHANGED,
+      }
+    }
+  }
+
+  if (!alreadyGone && !(await isWorktreePathRemovable(worktreePath))) {
+    logForDebugging(
+      `removeAgentWorktree: aborted ${reason} removal — unremovable reparse point in ${worktreePath}`,
+      { level: 'warn' },
+    )
+    return {
+      outcome: 'failed',
+      errorSummary: WORKTREE_UNREMOVABLE_REPARSE,
+    }
+  }
+
+  let checkedOutBranch: string | null = null
+  if (worktreeBranch) {
+    const symbolic = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['symbolic-ref', '--short', '-q', 'HEAD'],
+      { cwd: worktreePath, env: gitWorktreeEnv() },
+    )
+    checkedOutBranch = symbolic.code === 0 ? symbolic.stdout.trim() : null
+  }
+
+  await unlockAgentWorktree(worktreePath, gitRoot)
+
   const { code: removeCode, stderr: removeError } =
     await execFileNoThrowWithCwd(
       gitExe(),
       ['worktree', 'remove', '--force', worktreePath],
-      { cwd: gitRoot, env: gitWorktreeEnv() },
+      { cwd: gitRoot, env: gitWorktreeEnv({ LC_ALL: 'C' }) },
     )
 
-  if (removeCode !== 0) {
-    logForDebugging(`Failed to remove agent worktree: ${removeError}`, {
-      level: 'error',
-    })
-    return false
-  }
-  logForDebugging(`Removed agent worktree at: ${worktreePath}`)
-
-  if (!worktreeBranch) {
-    return true
-  }
-
-  // Delete the temporary worktree branch from the main repo
-  const { code: deleteBranchCode, stderr: deleteBranchError } =
-    await execFileNoThrowWithCwd(gitExe(), ['branch', '-D', worktreeBranch], {
-      cwd: gitRoot,
-      env: gitWorktreeEnv(),
-    })
-
-  if (deleteBranchCode !== 0) {
+  const stillExists = await lstat(worktreePath).then(
+    () => true,
+    () => false,
+  )
+  if (removeCode !== 0 && stillExists) {
+    if (WORKTREE_NOT_REGISTERED.test(removeError)) {
+      const prune = await execFileNoThrowWithCwd(
+        gitExe(),
+        ['worktree', 'prune'],
+        { cwd: gitRoot, env: gitWorktreeEnv() },
+      )
+      const pruned = prune.code === 0
+      await restoreWorktreeConfigExtension(gitRoot)
+      logForDebugging(
+        pruned
+          ? `removeAgentWorktree: git no longer recognizes ${worktreePath} (${removeError.trim()}) — pruned the stale registration, left the directory in place`
+          : `removeAgentWorktree: git no longer recognizes ${worktreePath} (${removeError.trim()}) — registration already unreachable; prune from ${gitRoot} failed (${prune.stderr.trim()}), left the directory in place`,
+        { level: 'warn' },
+      )
+      logEvent('tengu_worktree_removed', {
+        source:
+          reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        changed_files: changedFiles,
+        commits: 0,
+        left_in_place: 1,
+        ...(pruned ? { deregistered_stale: 1 } : {}),
+      })
+      return { outcome: 'left_in_place' }
+    }
     logForDebugging(
-      `Could not delete agent worktree branch: ${deleteBranchError}`,
-      { level: 'error' },
+      `removeAgentWorktree: git worktree remove failed, kept ${worktreePath}: ${removeError.trim()}`,
+      { level: 'warn' },
+    )
+    const summary = removeError.trim().replace(/^(fatal|error|warning):\s*/, '')
+    return {
+      outcome: 'failed',
+      ...(summary ? { errorSummary: summary } : {}),
+    }
+  }
+
+  logForDebugging(`Removed agent worktree at: ${worktreePath}`)
+  await restoreWorktreeConfigExtension(gitRoot)
+  logEvent('tengu_worktree_removed', {
+    source:
+      reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    changed_files: changedFiles,
+    commits: 0,
+  })
+  if (!worktreeBranch) {
+    return { outcome: 'removed' }
+  }
+  if (checkedOutBranch !== worktreeBranch) {
+    logForDebugging(
+      `removeAgentWorktree: kept branch ${worktreeBranch} — not the checked-out branch (${checkedOutBranch ?? 'detached or dir gone'}), so no safety check ever verified it`,
+    )
+    return { outcome: 'removed' }
+  }
+  await deleteWorktreeBranch(gitRoot, worktreeBranch, {
+    errorLabel: 'Could not delete agent worktree branch',
+  })
+  return { outcome: 'removed' }
+}
+
+/** densable BHt — creation marker in the per-worktree git admin dir. */
+export const CLAUDE_BASE = 'CLAUDE_BASE'
+
+/** densable fH — lock reason we wrote (`claude agent|session … (pid N)`). */
+const CLAUDE_WORKTREE_LOCK_REASON =
+  /^claude (?:agent|session) .{1,255} \(pid (\d{1,10})(?: start (.{1,255}))?\)$/
+
+/** densable ljr — object id written by vjr (rev-parse SHA). */
+function isWorktreeBaselineSha(value: string): boolean {
+  return /^[0-9a-f]{12,64}$/.test(value)
+}
+
+/**
+ * densable Cwe — per-worktree gitdir from `<worktree>/.git` pointer.
+ * Official refusals before resolve: symlink `.git` (OHt), network-relative
+ * gitdir (MXe), and dot-segment in the raw pointer (DHt). Local OGr
+ * `readWorktreeGitDir` is the resolve-only half — do not call it alone here.
+ */
+async function resolveWorktreeGitAdminDir(
+  worktreePath: string,
+): Promise<string | null> {
+  try {
+    const pointerPath = join(worktreePath, '.git')
+    if ((await lstat(pointerPath)).isSymbolicLink()) {
+      return null
+    }
+    const ptr = (await readFile(pointerPath, 'utf-8')).trim()
+    if (!ptr.startsWith('gitdir:')) {
+      return null
+    }
+    const raw = ptr.slice('gitdir:'.length).trim()
+    if (isWorktreePathNetworkRelativeToCwd(raw, worktreePath)) {
+      return null
+    }
+    if (hasPathDotSegment(raw)) {
+      return null
+    }
+    return resolve(worktreePath, raw)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable vjr — write CLAUDE_BASE into the worktree git admin dir.
+ */
+export async function writeWorktreeBaseline(
+  worktreePath: string,
+  headCommit: string,
+): Promise<void> {
+  const gitDir = await resolveWorktreeGitAdminDir(worktreePath)
+  if (!gitDir) {
+    logForDebugging(
+      `[worktree] cannot write baseline: gitdir unresolvable for ${worktreePath}`,
+    )
+    return
+  }
+  try {
+    await writeFile(join(gitDir, CLAUDE_BASE), headCommit, 'utf-8')
+  } catch (error) {
+    logForDebugging(
+      `[worktree] failed to write baseline to ${gitDir}: ${errorMessage(error)}`,
     )
   }
+}
+
+/**
+ * densable jHt — read CLAUDE_BASE; null if missing or not an object id.
+ */
+export async function readWorktreeBaseline(
+  worktreePath: string,
+): Promise<string | null> {
+  const gitDir = await resolveWorktreeGitAdminDir(worktreePath)
+  if (!gitDir) {
+    return null
+  }
+  try {
+    const value = (await readFile(join(gitDir, CLAUDE_BASE), 'utf-8')).trim()
+    return isWorktreeBaselineSha(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable Rjr @216895771 — `rev-parse --show-toplevel` is not this
+ * worktree (or a Windows case-fold of it). W7 then treats porcelain as
+ * not this tree's dirt. LMs treats the same case as gitError.
+ */
+export async function isWorktreeToplevelElsewhere(
+  worktreePath: string,
+): Promise<boolean> {
+  const top = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-parse', '--show-toplevel'],
+    { cwd: worktreePath, env: gitWorktreeEnv({ LC_ALL: 'C' }) },
+  )
+  const toplevel = top.stdout.trim()
+  if (top.code !== 0 || !toplevel) return false
+  const topReal = resolve(await realpath(toplevel).catch(() => toplevel))
+  const hereReal = resolve(
+    await realpath(worktreePath).catch(() => worktreePath),
+  )
+  if (topReal === hereReal) return false
+  return process.platform === 'win32'
+    ? topReal.toLowerCase() !== hereReal.toLowerCase()
+    : true
+}
+
+/** densable CMs — git root of the worktree, else originCwd. */
+export function resolveJobWorktreeGitRoot(
+  worktreePath: string,
+  originCwd: string | undefined,
+): string | null {
+  const fromPath =
+    findCanonicalGitRoot(worktreePath) ?? findGitRoot(worktreePath)
+  if (fromPath && isWorktreeUnderClaudeWorktrees(worktreePath, fromPath)) {
+    return fromPath
+  }
+  const fromOrigin = originCwd
+    ? (findCanonicalGitRoot(originCwd) ?? findGitRoot(originCwd))
+    : null
+  return fromOrigin ?? fromPath
+}
+
+/** densable Sjr — dirname(worktree) === `<repo>/.claude/worktrees`. */
+function isWorktreeUnderClaudeWorktrees(
+  worktreePath: string,
+  gitRoot: string,
+): boolean {
+  return resolve(dirname(worktreePath)) === resolve(worktreesDir(gitRoot))
+}
+
+type PorcelainWorktree = {
+  worktreePath: string
+  lockReason?: string
+}
+
+/** densable mH — `git worktree list --porcelain`. */
+export async function listPorcelainWorktrees(
+  gitRoot: string,
+): Promise<PorcelainWorktree[]> {
+  const { code, stdout, stderr } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['worktree', 'list', '--porcelain'],
+    { cwd: gitRoot, timeout: 10_000, env: gitWorktreeEnv() },
+  )
+  if (code !== 0) {
+    throw new Error(
+      `\`git -C ${gitRoot} worktree list\` failed: ${stderr.trim() || `exit ${code}`}`,
+    )
+  }
+  const rows: PorcelainWorktree[] = []
+  let current: PorcelainWorktree | null = null
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      if (current) rows.push(current)
+      current = { worktreePath: line.slice('worktree '.length) }
+    } else if (current && (line === 'locked' || line.startsWith('locked '))) {
+      current.lockReason = line.slice('locked'.length).trim()
+    }
+  }
+  if (current) rows.push(current)
+  return rows
+}
+
+/**
+ * densable Tjr — lock pid is some other live process.
+ * `n===process.pid || !j_(n)` → false.
+ */
+function isForeignLiveWorktreeLock(lockReason: string): boolean {
+  const match = lockReason.match(CLAUDE_WORKTREE_LOCK_REASON)
+  if (!match) return false
+  const pid = Number(match[1])
+  if (pid === process.pid || !isProcessRunning(pid)) return false
   return true
 }
 
 /**
- * Slug patterns for throwaway worktrees created by AgentTool (`agent-a<7hex>`,
- * from earlyAgentId.slice(0,8)), workflow engine isolation:'worktree'
- * (`wf_<8hex>-<3hex>-<n>` derived from sha256(runId:agentId) in
- * claudeCodeBackend — taskId is `w`+base36, not a UUID, so the slug cannot
- * embed runId directly and is hashed to satisfy this hex pattern), and
- * bridgeMain (`bridge-<safeFilenameId>`). These leak when the parent process
- * is killed (Ctrl+C, ESC, crash) before their in-process cleanup runs.
- * Exact-shape patterns avoid sweeping user-named EnterWorktree slugs like `wf-myfeature`.
+ * densable WHt — foreign live lock whose start token still matches.
+ * `n!==process.pid && j_(n) && await WF(n, t[2])`.
+ */
+async function isForeignLiveWorktreeLockWithStart(
+  lockReason: string | undefined,
+): Promise<boolean> {
+  const match = lockReason?.match(CLAUDE_WORKTREE_LOCK_REASON)
+  if (!match) return false
+  const pid = Number(match[1])
+  return (
+    pid !== process.pid &&
+    isProcessRunning(pid) &&
+    (await processLstartMatches(pid, match[2]))
+  )
+}
+
+/**
+ * densable One — ok to remove: no lock, or our/dead `fH` lock.
+ * Unknown lock reason → false (keep).
+ */
+export function canReapDespiteLock(lockReason: string | undefined): boolean {
+  if (lockReason === undefined) return true
+  if (!CLAUDE_WORKTREE_LOCK_REASON.test(lockReason)) return false
+  return !isForeignLiveWorktreeLock(lockReason)
+}
+
+/**
+ * densable vwe — refuse network / device / traversal paths in BMs/Mne.
+ * Official `Ine(normalize)||Ip(t,true)||Hs(e)`; local hosts are the path.ts
+ * equivalents already landed for those checks.
+ */
+function isRefusedWorktreeSweepPath(worktreePath: string): boolean {
+  const normalized = normalize(worktreePath)
+  return (
+    containsPathTraversal(normalized) ||
+    isNetworkUncPath(normalized) ||
+    isWindowsDeviceNamespacePath(worktreePath) ||
+    isNtObjectNamespacePathNormalized(worktreePath)
+  )
+}
+
+/** densable ajr — fH lock whose pid is gone (`$ee`, not `!j_`). */
+function isDeadClaudeWorktreeLock(lockReason: string | undefined): boolean {
+  if (lockReason === undefined || lockReason.length > 512) return false
+  const match = lockReason.match(CLAUDE_WORKTREE_LOCK_REASON)
+  if (!match) return false
+  return isProcessGone(Number(match[1]))
+}
+
+/** densable ylu / claudeWorktreeLockPid — parse Claude lock pid from porcelain. */
+export function parseClaudeWorktreeLockPid(
+  lockReason: string | undefined,
+): number | null {
+  const match = lockReason?.match(CLAUDE_WORKTREE_LOCK_REASON)
+  if (!match) return null
+  return Number(match[1])
+}
+
+/** densable ylu — export-table alias of parseClaudeWorktreeLockPid. */
+export const claudeWorktreeLockPid = parseClaudeWorktreeLockPid
+
+function worktreePathIdentityKey(worktreePath: string): string {
+  const resolved = resolve(worktreePath)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+/**
+ * densable qHt @216890812 — git root for unlock/lock when leaving a session.
+ * Official: `if (!sK(originalCwd)) return originalCwd; return d6(worktree) ?? bMs()`.
+ */
+function resolveWorktreeLockGitRoot(
+  originalCwd: string,
+  worktreePath: string,
+): string {
+  if (
+    findCanonicalGitRoot(originalCwd) === null &&
+    findGitRoot(originalCwd) === null
+  ) {
+    return originalCwd
+  }
+  return (
+    findCanonicalGitRoot(worktreePath) ??
+    findGitRoot(worktreePath) ??
+    originalCwd
+  )
+}
+
+/**
+ * densable Cjr @216881038 / lockAgentWorktree — `git worktree lock --reason`.
+ * Returns true when this process owns (or re-took) the lock; false → guest.
+ */
+async function lockClaudeWorktree(
+  worktreePath: string,
+  gitRoot: string,
+  name: string,
+  kind: 'session' | 'agent',
+): Promise<boolean> {
+  try {
+    // densable HF(await ZC()).procStart — only `.procStart` (not procStartFt).
+    const procStart = buildProcessStartIdentityFields(
+      await ownProcStartAsync(),
+    ).procStart
+    const reason = procStart
+      ? `claude ${kind} ${name} (pid ${process.pid} start ${procStart})`
+      : `claude ${kind} ${name} (pid ${process.pid})`
+    const tryLock = () =>
+      execFileNoThrowWithCwd(
+        gitExe(),
+        ['worktree', 'lock', '--reason', reason, worktreePath],
+        { cwd: gitRoot, env: gitWorktreeEnv() },
+      )
+    const first = await tryLock()
+    if (first.code === 0) return true
+    let existing: string | undefined
+    try {
+      existing = await porcelainLockReason(worktreePath, gitRoot)
+    } catch (error) {
+      logForDebugging(
+        `[worktree] failed to lock ${kind} worktree ${worktreePath} and could not read the registry (${errorMessage(error)}); treating this session as a guest`,
+      )
+      return false
+    }
+    if (existing === undefined) {
+      // Lock failed and porcelain shows no lock — do not claim ownership
+      // (would unlock on exit via releaseOwnWorktreeLock / enteredExisting).
+      logForDebugging(
+        `[worktree] failed to lock ${kind} worktree ${worktreePath}: ${first.stderr.trim()}; treating this session as a guest`,
+      )
+      return false
+    }
+    if (
+      !CLAUDE_WORKTREE_LOCK_REASON.test(existing) ||
+      isForeignLiveWorktreeLock(existing)
+    ) {
+      logForDebugging(
+        `[worktree] ${worktreePath} is already locked (${existing || 'no reason'}); leaving the existing lock in place — this session is a guest, not the owner`,
+      )
+      return false
+    }
+    if (
+      Number(existing.match(CLAUDE_WORKTREE_LOCK_REASON)?.[1]) === process.pid
+    ) {
+      return true
+    }
+    await unlockAgentWorktree(worktreePath, gitRoot)
+    const second = await tryLock()
+    if (second.code !== 0) {
+      logForDebugging(
+        `[worktree] failed to re-lock ${kind} worktree ${worktreePath} after clearing a stale lock: ${second.stderr.trim()}; treating this session as a guest`,
+      )
+      return false
+    }
+    return true
+  } catch (error) {
+    logForDebugging(
+      `[worktree] failed to lock ${kind} worktree ${worktreePath}: ${errorMessage(error)}; treating this session as a guest`,
+    )
+    return false
+  }
+}
+
+/**
+ * densable Ejr / releaseOwnWorktreeLock @216880667.
+ * Unlock when One/canReapDespiteLock says the porcelain lock is ours or dead.
+ */
+export async function releaseOwnWorktreeLock(
+  worktreePath: string,
+  gitRoot: string,
+): Promise<void> {
+  try {
+    if (canReapDespiteLock(await porcelainLockReason(worktreePath, gitRoot))) {
+      await unlockAgentWorktree(worktreePath, gitRoot)
+    }
+  } catch (error) {
+    logForDebugging(
+      `[worktree] left the lock on ${worktreePath} — cannot read the worktree registry to verify ownership (${errorMessage(error)})`,
+    )
+  }
+}
+
+/** densable One / mayReleaseWorktreeLock — export alias of canReapDespiteLock. */
+export async function mayReleaseWorktreeLock(
+  lockReason: string | undefined,
+): Promise<boolean> {
+  return canReapDespiteLock(lockReason)
+}
+
+/** densable OI / unlockAgentWorktree. */
+export async function unlockAgentWorktree(
+  worktreePath: string,
+  gitRoot: string,
+): Promise<void> {
+  await execFileNoThrowWithCwd(gitExe(), ['worktree', 'unlock', worktreePath], {
+    cwd: gitRoot,
+    env: gitWorktreeEnv(),
+  })
+}
+
+/**
+ * densable BMs / releaseStaleClaudeWorktreeLocks @216908202.
+ * blu starts with `await BMs(t)`.
+ */
+export async function releaseStaleClaudeWorktreeLocks(
+  gitRoot: string,
+): Promise<number> {
+  const listed = await listPorcelainWorktrees(gitRoot).catch(
+    (error: unknown) => {
+      logForDebugging(
+        `releaseStaleClaudeWorktreeLocks: skipped — cannot read the worktree registry for ${gitRoot} (${errorMessage(error)})`,
+      )
+      return [] as PorcelainWorktree[]
+    },
+  )
+  const currentPath = currentWorktreeSession?.worktreePath
+  const currentKey =
+    currentPath === undefined
+      ? undefined
+      : worktreePathIdentityKey(
+          await realpath(currentPath).catch(() => currentPath),
+        )
+  let attempted = 0
+  for (const row of listed) {
+    if (
+      currentKey !== undefined &&
+      worktreePathIdentityKey(row.worktreePath) === currentKey
+    ) {
+      continue
+    }
+    if (isRefusedWorktreeSweepPath(row.worktreePath)) continue
+    if (!isDeadClaudeWorktreeLock(row.lockReason)) continue
+    const hasGit = await lstat(join(row.worktreePath, '.git')).then(
+      () => true,
+      () => false,
+    )
+    if (!hasGit) continue
+    if (attempted >= STALE_LOCK_RELEASE_CAP) {
+      logForDebugging(
+        `releaseStaleClaudeWorktreeLocks: per-sweep cap of ${STALE_LOCK_RELEASE_CAP} reached for ${gitRoot}; remaining stale locks will be reconciled on later sweeps`,
+      )
+      break
+    }
+    let resolved: string
+    try {
+      resolved = await realpath(row.worktreePath)
+    } catch {
+      continue
+    }
+    if (isRefusedWorktreeSweepPath(resolved)) continue
+    if (
+      currentKey !== undefined &&
+      worktreePathIdentityKey(resolved) === currentKey
+    ) {
+      continue
+    }
+    const reread = await listPorcelainWorktrees(gitRoot).catch(
+      (error: unknown) => {
+        logForDebugging(
+          `releaseStaleClaudeWorktreeLocks: kept ${row.worktreePath} — cannot re-read the worktree registry at release time (${errorMessage(error)})`,
+        )
+        return [] as PorcelainWorktree[]
+      },
+    )
+    const live = reread.find(item => item.worktreePath === row.worktreePath)
+    if (
+      !isDeadClaudeWorktreeLock(live?.lockReason) ||
+      !canReapDespiteLock(live?.lockReason)
+    ) {
+      continue
+    }
+    await unlockAgentWorktree(row.worktreePath, gitRoot)
+    attempted++
+  }
+  if (attempted > 0) {
+    logForDebugging(
+      `releaseStaleClaudeWorktreeLocks: attempted release of ${attempted} stale liveness lock(s) in ${gitRoot}`,
+    )
+    logEvent('tengu_worktree_stale_lock_released', { attempted })
+  }
+  return attempted
+}
+
+/**
+ * densable Mne / restoreWorktreeConfigExtension @216904043.
+ * blu: readdir fail → `return await Mne(t),0`; end → `return await Mne(t),a`.
+ * W7 also calls Mne after remove / left_in_place.
+ */
+export async function restoreWorktreeConfigExtension(
+  gitRoot: string,
+): Promise<void> {
+  try {
+    const gitDir = await resolveGitDir(gitRoot)
+    const common = gitDir ? ((await getCommonDir(gitDir)) ?? gitDir) : null
+    if (!common) return
+    const marker = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['config', '--local', '--get', ENABLED_WORKTREE_CONFIG_KEY],
+      { cwd: gitRoot, env: gitWorktreeEnv() },
+    )
+    if (marker.code !== 0) return
+    try {
+      if ((await lstat(join(common, 'config.worktree'))).size > 0) return
+    } catch (error) {
+      if (!isENOENT(error) && getErrnoCode(error) !== 'ENOTDIR') return
+    }
+    let remaining = 0
+    for (const row of await listPorcelainWorktrees(gitRoot)) {
+      if (isRefusedWorktreeSweepPath(row.worktreePath)) {
+        remaining++
+        continue
+      }
+      const missing = await lstat(row.worktreePath).then(
+        () => false,
+        (error: unknown) =>
+          isENOENT(error) || getErrnoCode(error) === 'ENOTDIR',
+      )
+      if (missing && canReapDespiteLock(row.lockReason)) continue
+      remaining++
+    }
+    if (remaining > 1) return
+    const unset = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['config', '--local', '--unset-all', 'extensions.worktreeConfig'],
+      { cwd: gitRoot, env: gitWorktreeEnv() },
+    )
+    if (unset.code !== 0 && unset.code !== 5) return
+    await execFileNoThrowWithCwd(
+      gitExe(),
+      ['config', '--local', '--unset-all', ENABLED_WORKTREE_CONFIG_KEY],
+      { cwd: gitRoot, env: gitWorktreeEnv() },
+    )
+    logForDebugging(
+      `Restored extensions.worktreeConfig in ${gitRoot} after removing its last linked worktree`,
+    )
+  } catch (error) {
+    logForDebugging(
+      `Could not restore extensions.worktreeConfig for ${gitRoot}: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
+  }
+}
+
+/**
+ * densable Dne — porcelain lockReason for this worktree path (realpath).
+ */
+async function porcelainLockReason(
+  worktreePath: string,
+  gitRoot: string,
+): Promise<string | undefined> {
+  const realWorktree = await realpath(worktreePath).catch(() => worktreePath)
+  for (const row of await listPorcelainWorktrees(gitRoot)) {
+    const realRow = await realpath(row.worktreePath).catch(
+      () => row.worktreePath,
+    )
+    if (realWorktree === realRow) return row.lockReason
+  }
+  return undefined
+}
+
+/**
+ * densable GHt — origin HEAD ref, else first of origin/main|master that exists.
+ */
+async function resolveOriginHeadRef(gitRoot: string): Promise<string | null> {
+  const symbolic = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'],
+    { cwd: gitRoot, env: gitWorktreeEnv() },
+  )
+  if (symbolic.code === 0 && symbolic.stdout.trim()) {
+    return symbolic.stdout.trim()
+  }
+  for (const ref of ['origin/main', 'origin/master']) {
+    const verified = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['rev-parse', '--verify', '-q', ref],
+      { cwd: gitRoot, env: gitWorktreeEnv() },
+    )
+    if (verified.code === 0) return ref
+  }
+  return null
+}
+
+/**
+ * densable $jr — upstream track is `gone` and no unique cherry commits vs origin.
+ */
+async function isUpstreamGoneWithNoUniqueCommits(
+  worktreePath: string,
+  originHeadRef: string,
+): Promise<boolean> {
+  const head = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['symbolic-ref', '-q', 'HEAD'],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  const ref = head.stdout.trim()
+  if (head.code !== 0 || !ref) return false
+  const track = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['for-each-ref', '--format=%(upstream:track,nobracket)', ref],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  if (track.code !== 0 || track.stdout.trim() !== 'gone') return false
+  const cherry = await execFileNoThrowWithCwd(
+    gitExe(),
+    [
+      'rev-list',
+      '--cherry-pick',
+      '--right-only',
+      '--no-merges',
+      '--max-count=1',
+      `${originHeadRef}...HEAD`,
+    ],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  return cherry.code === 0 && cherry.stdout.trim().length === 0
+}
+
+/**
+ * densable UMs — no unique commits, HEAD===CLAUDE_BASE, or `$jr`.
+ */
+async function isJobWorktreeFullyUpstream(
+  worktreePath: string,
+  originHeadRef: string | null,
+): Promise<boolean> {
+  const unique = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-list', '--max-count=1', 'HEAD', '--not', '--remotes'],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  if (unique.code !== 0) return false
+  if (unique.stdout.trim().length === 0) return true
+  const [head, baseline] = await Promise.all([
+    execFileNoThrowWithCwd(gitExe(), ['rev-parse', 'HEAD'], {
+      cwd: worktreePath,
+      env: gitWorktreeEnv(),
+    }),
+    readWorktreeBaseline(worktreePath),
+  ])
+  if (head.code === 0 && baseline !== null && head.stdout.trim() === baseline) {
+    return true
+  }
+  return (
+    originHeadRef !== null &&
+    (await isUpstreamGoneWithNoUniqueCommits(worktreePath, originHeadRef))
+  )
+}
+
+/** densable Ljr — clean porcelain, then UMs. */
+async function isJobWorktreeSafeToReap(
+  worktreePath: string,
+  originHeadRef: string | null,
+): Promise<boolean> {
+  const status = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['--no-optional-locks', 'status', '--porcelain'],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  if (status.code !== 0 || status.stdout.trim().length > 0) {
+    return false
+  }
+  return isJobWorktreeFullyUpstream(worktreePath, originHeadRef)
+}
+
+/**
+ * densable xMs @216867314 — reset a resumed worktree to origin when
+ * previous work is fully upstream. vjr after reset.
+ */
+export async function resetResumedWorktreeIfFullyUpstream(
+  gitRoot: string,
+  worktreePath: string,
+  worktreeBranch: string,
+  currentHead: string,
+  baseline: string | null,
+): Promise<string | null> {
+  const [defaultBranch, gitDir] = await Promise.all([
+    getDefaultBranch(),
+    resolveGitDir(gitRoot),
+  ])
+  const branch =
+    defaultBranch && !defaultBranch.startsWith('-') ? defaultBranch : null
+  const originSha =
+    branch && gitDir
+      ? await resolveRef(gitDir, `refs/remotes/origin/${branch}`)
+      : null
+  if (!originSha || originSha === currentHead) return null
+  const symbolic = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['symbolic-ref', '--short', '-q', 'HEAD'],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  if (symbolic.code !== 0 || symbolic.stdout.trim() !== worktreeBranch) {
+    return null
+  }
+  const status = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['--no-optional-locks', 'status', '--porcelain'],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  if (status.code !== 0 || status.stdout.trim().length > 0) return null
+  if (!(baseline !== null && currentHead === baseline)) {
+    const originHead = await resolveOriginHeadRef(gitRoot)
+    if (
+      originHead === null ||
+      !(await isUpstreamGoneWithNoUniqueCommits(worktreePath, originHead))
+    ) {
+      return null
+    }
+  }
+  try {
+    if (
+      await isForeignLiveWorktreeLockWithStart(
+        await porcelainLockReason(worktreePath, gitRoot),
+      )
+    ) {
+      return null
+    }
+  } catch {
+    return null
+  }
+  const reset = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['reset', '--hard', originSha],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  if (reset.code !== 0) return null
+  await writeWorktreeBaseline(worktreePath, originSha)
+  logForDebugging(
+    `[worktree] reset resumed worktree ${worktreePath} to ${originSha} — its previous work was fully upstream`,
+  )
+  return originSha
+}
+
+export type ReapJobWorktreeInput = {
+  worktreePath: string
+  worktreeBranch?: string
+  originCwd?: string
+  hookBased?: boolean
+  cutoff: Date
+}
+
+/**
+ * densable Slu / `reapJobWorktreeIfSafe` @216907170.
+ * hookBased → false. jHt===null → keep (user / pre-marker worktree).
+ * W7 reason `job_retention_sweep`. Do not call from cleanupStaleAgentWorktrees.
+ */
+export async function reapJobWorktreeIfSafe(
+  input: ReapJobWorktreeInput,
+): Promise<boolean> {
+  const { worktreePath, worktreeBranch, originCwd, hookBased, cutoff } = input
+  if (hookBased) return false
+  const gitRoot = resolveJobWorktreeGitRoot(worktreePath, originCwd)
+  if (!gitRoot || !isWorktreeUnderClaudeWorktrees(worktreePath, gitRoot)) {
+    return false
+  }
+  let mtimeMs: number
+  try {
+    mtimeMs = (await stat(worktreePath)).mtimeMs
+  } catch {
+    return false
+  }
+  if (mtimeMs >= cutoff.getTime()) return false
+  if ((await readWorktreeBaseline(worktreePath)) === null) {
+    logForDebugging(
+      `reapJobWorktreeIfSafe: kept ${worktreePath} — no Claude Code creation marker (${CLAUDE_BASE}) in its git admin dir, so Claude Code did not create it; not ours to remove`,
+      { level: 'warn' },
+    )
+    return false
+  }
+  const realWorktree = await realpath(worktreePath).catch(() => worktreePath)
+  const currentPath = currentWorktreeSession?.worktreePath
+  if (currentPath) {
+    const realCurrent = await realpath(currentPath).catch(() => currentPath)
+    if (realWorktree === realCurrent) return false
+  }
+  // An unreadable registry must not read as "no lock found": canReapDespiteLock
+  // returns true for an undefined reason, so falling through would drop the lock
+  // check entirely and reap a worktree a live process still holds. Every other
+  // uncertain branch in this function keeps the worktree, so this one does too.
+  // (releaseStaleClaudeWorktreeLocks can degrade to [] because there an empty
+  // list means "release nothing", which is the safe direction.)
+  let listed: PorcelainWorktree[]
+  try {
+    listed = await listPorcelainWorktrees(gitRoot)
+  } catch (error) {
+    logForDebugging(
+      `reapJobWorktreeIfSafe: kept ${worktreePath} — cannot read the worktree registry for ${gitRoot}, so a live lock cannot be ruled out (${errorMessage(error)})`,
+      { level: 'warn' },
+    )
+    return false
+  }
+  let matched: PorcelainWorktree | undefined
+  for (const row of listed) {
+    const realRow = await realpath(row.worktreePath).catch(
+      () => row.worktreePath,
+    )
+    if (realWorktree === realRow) {
+      matched = row
+      break
+    }
+  }
+  if (!canReapDespiteLock(matched?.lockReason)) {
+    logForDebugging(
+      `reapJobWorktreeIfSafe: kept ${worktreePath} — locked by a live Claude Code process, or with a reason we did not write (${matched?.lockReason})`,
+    )
+    return false
+  }
+  if (
+    !(await isJobWorktreeSafeToReap(
+      worktreePath,
+      await resolveOriginHeadRef(gitRoot),
+    ))
+  ) {
+    return false
+  }
+  return (
+    (
+      await removeAgentWorktree(
+        worktreePath,
+        worktreeBranch,
+        gitRoot,
+        false,
+        'job_retention_sweep',
+      )
+    ).outcome !== 'failed'
+  )
+}
+
+/**
+ * Slug patterns for throwaway worktrees created by AgentTool
+ * (`agent-a<16hex>` / leftover `agent-a<7hex>` from earlyAgentId.slice(0,8)),
+ * workflow engine isolation:'worktree' (`wf_<8hex>-<3hex>-<n>` derived from
+ * sha256(runId:agentId) in claudeCodeBackend — taskId is `w`+base36, not a
+ * UUID, so the slug cannot embed runId directly and is hashed to satisfy this
+ * hex pattern), bridgeMain (`bridge-<safeFilenameId>`), template jobs
+ * (`job-<name>-<8hex>`), and bg isolation (`bg-<name>-<8hex>`). These leak
+ * when the parent process is killed (Ctrl+C, ESC, crash) before their
+ * in-process cleanup runs. Exact-shape patterns avoid sweeping user-named
+ * EnterWorktree slugs like `wf-myfeature`.
  */
 const EPHEMERAL_WORKTREE_PATTERNS = [
+  // densable 2.1.246 FMs — 16-hex AgentTool slug (newer) before the 7-hex
+  // leftover from earlyAgentId.slice(0,8).
+  /^agent-a[0-9a-f]{16}$/,
   /^agent-a[0-9a-f]{7}$/,
   /^wf_[0-9a-f]{8}-[0-9a-f]{3}-\d+$/,
   // Legacy wf-<idx> slugs from before workflowRunId disambiguation — kept so
@@ -1683,18 +3436,22 @@ const EPHEMERAL_WORKTREE_PATTERNS = [
   // Template job worktrees: job-<templateName>-<8hex>. Prefix distinguishes
   // from user-named EnterWorktree slugs that happen to end in 8 hex.
   /^job-[a-zA-Z0-9._-]{1,55}-[0-9a-f]{8}$/,
+  // densable 2.1.246 FMs — bg-<name>-<8hex> isolation worktrees.
+  /^bg-[a-zA-Z0-9._-]{1,55}-[0-9a-f]{8}$/,
 ]
 
 /**
  * Remove stale agent/workflow worktrees older than cutoffDate.
  *
- * Safety:
+ * Safety (densable blu):
  * - Only touches slugs matching ephemeral patterns (never user-named worktrees)
  * - Skips the current session's worktree
- * - Fail-closed: skips if git status fails or shows tracked changes
- *   (-uno: untracked files in a 30-day-old crashed agent worktree are build
- *   artifacts; skipping the untracked scan is 5-10× faster on large repos)
- * - Fail-closed: skips if any commits aren't reachable from a remote
+ * - BMs: release stale dead-pid Claude locks first
+ * - Ljr: clean porcelain (no `-uno`) then UMs (including `$jr`)
+ * - One/Dne: keep if locked by a live Claude Code process, or a reason we
+ *   did not write. Porcelain-registry read failure keeps the worktree.
+ * - W7 reason `"stale_cleanup"`. Mne on readdir-fail and after the sweep.
+ *   Official blu does not call Slu.
  *
  * `git worktree remove --force` handles both the directory and git's internal
  * worktree tracking. If git doesn't recognize the path as a worktree (orphaned
@@ -1708,16 +3465,20 @@ export async function cleanupStaleAgentWorktrees(
     return 0
   }
 
+  await releaseStaleClaudeWorktreeLocks(gitRoot)
+
   const dir = worktreesDir(gitRoot)
   let entries: string[]
   try {
     entries = await readdir(dir)
   } catch {
+    await restoreWorktreeConfigExtension(gitRoot)
     return 0
   }
 
   const cutoffMs = cutoffDate.getTime()
   const currentPath = currentWorktreeSession?.worktreePath
+  const originHeadRef = await resolveOriginHeadRef(gitRoot)
   let removed = 0
 
   for (const slug of entries) {
@@ -1740,30 +3501,35 @@ export async function cleanupStaleAgentWorktrees(
       continue
     }
 
-    // Both checks must succeed with empty output. Non-zero exit (corrupted
-    // worktree, git not recognizing it, etc.) means skip — we don't know
-    // what's in there.
-    const [status, unpushed] = await Promise.all([
-      execFileNoThrowWithCwd(
-        gitExe(),
-        ['--no-optional-locks', 'status', '--porcelain', '-uno'],
-        { cwd: worktreePath, env: gitWorktreeEnv() },
-      ),
-      execFileNoThrowWithCwd(
-        gitExe(),
-        ['rev-list', '--max-count=1', 'HEAD', '--not', '--remotes'],
-        { cwd: worktreePath, env: gitWorktreeEnv() },
-      ),
-    ])
-    if (status.code !== 0 || status.stdout.trim().length > 0) {
+    if (!(await isJobWorktreeSafeToReap(worktreePath, originHeadRef))) {
       continue
     }
-    if (unpushed.code !== 0 || unpushed.stdout.trim().length > 0) {
+    try {
+      if (
+        !canReapDespiteLock(await porcelainLockReason(worktreePath, gitRoot))
+      ) {
+        logForDebugging(
+          `cleanupStaleAgentWorktrees: kept ${worktreePath} — locked by a live Claude Code process, or with a reason we did not write`,
+        )
+        continue
+      }
+    } catch (error) {
+      logForDebugging(
+        `cleanupStaleAgentWorktrees: kept ${worktreePath} — cannot read the worktree registry to verify lock ownership (${errorMessage(error)})`,
+      )
       continue
     }
 
     if (
-      await removeAgentWorktree(worktreePath, worktreeBranchName(slug), gitRoot)
+      (
+        await removeAgentWorktree(
+          worktreePath,
+          worktreeBranchName(slug),
+          gitRoot,
+          false,
+          'stale_cleanup',
+        )
+      ).outcome !== 'failed'
     ) {
       removed++
     }
@@ -1778,6 +3544,7 @@ export async function cleanupStaleAgentWorktrees(
       `cleanupStaleAgentWorktrees: removed ${removed} stale worktree(s)`,
     )
   }
+  await restoreWorktreeConfigExtension(gitRoot)
   return removed
 }
 

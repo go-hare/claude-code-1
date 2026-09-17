@@ -121,6 +121,25 @@ async function main(): Promise<void> {
   const { profileCheckpoint } = await import('../utils/startupProfiler.js');
   profileCheckpoint('cli_entry');
 
+  // densable pinStorageV5FromEnv after cli_entry — skip --preload / --bg-spare.
+  // Official UF default factory is qb (empty). Do not auto-call qF.
+  {
+    const { credentialsStoreFor, isHoverRestOn, pinCredentialsStore, pinStorageV5, pinStorageV5FromEnv } = await import(
+      '../utils/storageV5/index.js'
+    );
+    const hoverRestSnapshot =
+      args[0] !== '--preload' && args[0] !== '--bg-spare' && process.env.CLAUDE_CODE_HOVER_REST
+        ? pinStorageV5FromEnv()
+        : undefined;
+    const pinned = pinStorageV5(hoverRestSnapshot);
+    // densable A() && l !== void 0 — credentialsStoreFor + primePolicyLimitsCache.
+    if (isHoverRestOn() && pinned !== undefined) {
+      pinCredentialsStore(credentialsStoreFor(pinned));
+      const { primePolicyLimitsCache } = await import('../services/policyLimits/index.js');
+      await primePolicyLimitsCache(pinned);
+    }
+  }
+
   // Fast-path for --dump-system-prompt: output the rendered system prompt and exit.
   // Used by prompt sensitivity evals to extract the system prompt at a specific commit.
   // Ant-only: eliminated from external builds via feature flag.

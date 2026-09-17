@@ -16,6 +16,20 @@ import {
   restoreBackupNoFollow,
 } from '../fileHistory.js'
 
+/** Windows without Developer Mode refuses symlink creation (EPERM). */
+async function trySymlink(
+  target: string,
+  path: string,
+  type?: 'dir' | 'file',
+): Promise<boolean> {
+  try {
+    await symlink(target, path, type)
+    return true
+  } catch {
+    return false
+  }
+}
+
 describe('assertRewindDestinationSafe (densable Q3g)', () => {
   const dirs: string[] = []
 
@@ -50,7 +64,7 @@ describe('assertRewindDestinationSafe (densable Q3g)', () => {
     const target = join(d, 'target.txt')
     const linkPath = join(d, 'link.txt')
     await writeFile(target, 'x')
-    await symlink(target, linkPath)
+    if (!(await trySymlink(target, linkPath, 'file'))) return
     const r = await assertRewindDestinationSafe(linkPath)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toContain('symlink')
@@ -130,7 +144,7 @@ describe('restoreBackupNoFollow (densable Z3g)', () => {
     const target = join(d, 'target.txt')
     const dest = join(d, 'dest.txt')
     await writeFile(target, 'payload')
-    await symlink(target, dest)
+    if (!(await trySymlink(target, dest, 'file'))) return
 
     // backup missing → backup-missing (not skippedLinks); use a fake name
     // that will not exist under session file-history dir.

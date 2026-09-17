@@ -11,6 +11,8 @@ import * as realInstallPrompt from '../../../daemon/installPrompt.js'
 import * as realBootstrap from '../../../bootstrap/state.js'
 import * as realSessionStorage from '../../../utils/sessionStorage.js'
 import * as realWorktree from '../../../utils/worktree.js'
+import * as realIds from '../../../types/ids.js'
+import * as realReplBridgeHandle from '../../../bridge/replBridgeHandle.js'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -29,8 +31,14 @@ const bootstrapSnap = snapshotModuleExports(realBootstrap)
 const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 const worktreeSnap = snapshotModuleExports(realWorktree)
 const installPromptSnap = snapshotModuleExports(realInstallPrompt)
+const idsSnap = snapshotModuleExports(realIds)
+const replBridgeHandleSnap = snapshotModuleExports(realReplBridgeHandle)
 
 function restoreLeftArrowModuleMocks(): void {
+  mock.module('../../../types/ids.js', () => ({ ...idsSnap }))
+  mock.module('../../../bridge/replBridgeHandle.js', () => ({
+    ...replBridgeHandleSnap,
+  }))
   mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('../../../utils/sessionStorage.js', () => ({
@@ -248,6 +256,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
+      ...idsSnap,
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
@@ -255,6 +264,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
+      ...replBridgeHandleSnap,
       getReplBridgeHandle: () => null,
       takeLeftArrowBridgeHandle: () => null,
       stashLeftArrowBridgeHandle: () => {},
@@ -304,6 +314,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
+      ...idsSnap,
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
@@ -311,6 +322,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
+      ...replBridgeHandleSnap,
       getReplBridgeHandle: () => null,
       takeLeftArrowBridgeHandle: () => null,
       stashLeftArrowBridgeHandle: () => {},
@@ -352,6 +364,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
+      ...idsSnap,
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
@@ -359,6 +372,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
+      ...replBridgeHandleSnap,
       getReplBridgeHandle: () => null,
       takeLeftArrowBridgeHandle: () => null,
       stashLeftArrowBridgeHandle: () => {},
@@ -440,6 +454,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
+      ...idsSnap,
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
@@ -447,6 +462,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
+      ...replBridgeHandleSnap,
       getReplBridgeHandle: () => null,
       takeLeftArrowBridgeHandle: () => null,
       stashLeftArrowBridgeHandle: () => {},
@@ -569,6 +585,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       flushSessionStorage: async () => {},
     }))
     mock.module('../../../types/ids.js', () => ({
+      ...idsSnap,
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
@@ -576,6 +593,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
+      ...replBridgeHandleSnap,
       getReplBridgeHandle: () => null,
       takeLeftArrowBridgeHandle: () => null,
       stashLeftArrowBridgeHandle: () => {},

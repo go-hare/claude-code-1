@@ -1,10 +1,34 @@
-import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import * as realProviders from 'src/utils/model/providers.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+const providersSnap = snapshotModuleExports(realProviders)
+let providerOverride: ReturnType<typeof realProviders.getAPIProvider> | null =
+  null
+
+mock.module('src/utils/model/providers.js', () => ({
+  ...providersSnap,
+  getAPIProvider: (...args: Parameters<typeof realProviders.getAPIProvider>) =>
+    providerOverride ??
+    (providersSnap.getAPIProvider as typeof realProviders.getAPIProvider)(
+      ...args,
+    ),
+}))
+
+const {
   getBuddyReactionModel,
   installCompanionObserver,
   parseBuddyReactionResponse,
   triggerCompanionReaction,
-} from '../companionReact.js'
+} = await import('../companionReact.js')
 
 const ORIGINAL_ENV = {
   CLAUDE_CODE_USE_OPENAI: process.env.CLAUDE_CODE_USE_OPENAI,
@@ -24,13 +48,23 @@ function restoreEnv() {
   }
 }
 
+beforeAll(() => {
+  // ensure dynamic import resolved under the mock
+  expect(typeof getBuddyReactionModel).toBe('function')
+})
+
 afterEach(() => {
+  providerOverride = null
   restoreEnv()
   delete (
     globalThis as typeof globalThis & {
       fireCompanionObserver?: unknown
     }
   ).fireCompanionObserver
+})
+
+afterAll(() => {
+  mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
 })
 
 describe('companionReact', () => {
@@ -47,6 +81,9 @@ describe('companionReact', () => {
   })
 
   test('uses OPENAI_MODEL for reactions when no haiku override is configured', () => {
+    // Pin provider — host settings often have modelType=anthropic which
+    // short-circuits CLAUDE_CODE_USE_OPENAI via getAPIProvider().
+    providerOverride = 'openai'
     process.env.CLAUDE_CODE_USE_OPENAI = '1'
     process.env.OPENAI_MODEL = 'gpt-5.4'
     delete process.env.OPENAI_SMALL_FAST_MODEL
@@ -57,6 +94,7 @@ describe('companionReact', () => {
   })
 
   test('prefers OPENAI_SMALL_FAST_MODEL when configured', () => {
+    providerOverride = 'openai'
     process.env.CLAUDE_CODE_USE_OPENAI = '1'
     process.env.OPENAI_MODEL = 'gpt-5.4'
     process.env.OPENAI_SMALL_FAST_MODEL = 'gpt-4.1-mini'

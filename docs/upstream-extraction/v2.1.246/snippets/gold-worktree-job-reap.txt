@@ -1,0 +1,186 @@
+# Official 2.1.246 SEA — #16 Slu / vjr / zr / xMs / $jr
+# Offsets: vjr @216866948  jHt @216867173  Cwe @216866694
+#          xMs @216867314  $jr @216904943  GHt @216905414
+#          UMs @216905742  Ljr @216906110  blu @216906284
+#          Slu @216907170  zr @221588623  k() @221582127
+#          O @221576704  Fe/nt @207762666  b("jobs") @221584033
+# BHt="CLAUDE_BASE" @216909736
+# Do not wire Slu into cleanupStaleAgentWorktrees (that's blu / FMs).
+
+async function Cwe(e){
+  try{
+    if(OHt(xl(e,".git"),e))return null;
+    let t=(await OXe(xl(e,".git"),"utf-8")).trim();
+    if(!t.startsWith("gitdir:"))return null;
+    let n=t.slice(7).trim();
+    if(MXe(n,e))return null;
+    if(DHt(n,e))return null;
+    return Dm(e,n)
+  }catch{return null}
+}
+async function vjr(e,t){
+  let n=await Cwe(e);
+  if(!n){b(`[worktree] cannot write baseline: gitdir unresolvable for ${e}`);return}
+  try{await kMs(xl(n,BHt),t,"utf-8")}catch(r){b(`[worktree] failed to write baseline to ${n}: ${r}`)}
+}
+async function jHt(e){
+  let t=await Cwe(e);
+  if(!t)return null;
+  try{let n=(await OXe(xl(t,BHt),"utf-8")).trim();return ljr(n)?n:null}
+  catch{return null}
+}
+
+async function xMs(e,t,n,r,o){
+  let[s,i]=await Promise.all([fT(),fU(e)]);
+  let a=s&&!s.startsWith("-")?s:null;
+  let l=a&&i?await IXe(i,`refs/remotes/origin/${a}`):null;
+  if(!l||l===r)return null;
+  let c=await jn(Nn(),[...go,"symbolic-ref","--short","-q","HEAD"],{cwd:t,env:ds()});
+  if(c.code!==0||c.stdout.trim()!==n)return null;
+  let u=await jn(Nn(),[...go,"--no-optional-locks","status","--porcelain"],{cwd:t,env:ds()});
+  if(u.code!==0||u.stdout.trim().length>0)return null;
+  if(!(o!==null&&r===o)){
+    let f=await GHt(e);
+    if(f===null||!await $jr(t,f))return null
+  }
+  try{if(await WHt(await Dne(t,e)))return null}catch{return null}
+  if((await jn(Nn(),[...go,"reset","--hard",l],{cwd:t,env:ds()})).code!==0)return null;
+  return await vjr(t,l),b(`[worktree] reset resumed worktree ${t} to ${l} — its previous work was fully upstream`),l
+}
+
+# zHt resume host @216870611:
+#   s=n?.fromHead??(!n?.prNumber&&Ao().worktree?.baseRef==="head")
+#   S=await jHt(r)
+#   if(!s&&!n?.prNumber){T=await xMs(e,r,o,i,S);if(T)return{...,existed:!0,refreshed:!0}}
+#   return{...,headCommit:S??i,existed:!0}
+
+async function $jr(e,t){
+  let n=await jn(Nn(),[...go,"symbolic-ref","-q","HEAD"],{cwd:e,env:ds()}),r=n.stdout.trim();
+  if(n.code!==0||!r)return!1;
+  let o=await jn(Nn(),[...go,"for-each-ref","--format=%(upstream:track,nobracket)",r],{cwd:e,env:ds()});
+  if(o.code!==0||o.stdout.trim()!=="gone")return!1;
+  let s=await jn(Nn(),[...go,"rev-list","--cherry-pick","--right-only","--no-merges","--max-count=1",`${t}...HEAD`],{cwd:e,env:ds()});
+  return s.code===0&&s.stdout.trim().length===0
+}
+async function GHt(e){
+  let t=await jn(Nn(),[...go,"symbolic-ref","-q","--short","refs/remotes/origin/HEAD"],{cwd:e,env:ds()});
+  if(t.code===0&&t.stdout.trim())return t.stdout.trim();
+  for(let n of["origin/main","origin/master"])
+    if((await jn(Nn(),[...go,"rev-parse","--verify","-q",n],{cwd:e,env:ds()})).code===0)return n;
+  return null
+}
+async function UMs(e,t){
+  let n=await jn(Nn(),[...go,"rev-list","--max-count=1","HEAD","--not","--remotes"],{cwd:e,env:ds()});
+  if(n.code!==0)return!1;
+  if(n.stdout.trim().length===0)return!0;
+  let[r,o]=await Promise.all([jn(Nn(),[...go,"rev-parse","HEAD"],{cwd:e,env:ds()}),jHt(e)]);
+  if(r.code===0&&o!==null&&r.stdout.trim()===o)return!0;
+  return t!==null&&await $jr(e,t)
+}
+async function Ljr(e,t){
+  let n=await jn(Nn(),[...go,"--no-optional-locks","status","--porcelain"],{cwd:e,env:ds()});
+  if(n.code!==0||n.stdout.trim().length>0)return!1;
+  return UMs(e,t)
+}
+
+function CMs(e,t){let n=Ds(e);if(n&&Sjr(e,n))return n;return(t?Ds(t):null)??n}
+function Sjr(e,t){return Dm(BE(e))===Dm(E0(t))}
+# E0(t)=<repo>/.claude/worktrees
+
+async function Tjr(e){
+  let t=e?.match(fH);if(!t)return!1;
+  let n=Number(t[1]);
+  if(n===process.pid||!j_(n))return!1;
+  return!0
+}
+async function WHt(e){
+  let t=e?.match(fH);if(!t)return!1;
+  let n=Number(t[1]);
+  return n!==process.pid&&j_(n)&&await WF(n,t[2])
+}
+async function One(e){
+  if(e===void 0)return!0;
+  if(!fH.test(e))return!1;
+  return!await Tjr(e)
+}
+
+# blu @216906284: GHt once; Ljr(c,i); One(Dne); W7(...,"stale_cleanup"). Not Slu.
+
+async function Slu(e){
+  let{worktreePath:t,worktreeBranch:n,originCwd:r,hookBased:o,cutoff:s}=e;
+  if(o)return!1;
+  let i=CMs(t,r);if(!i||!Sjr(t,i))return!1;
+  let a;try{a=(await Pne(t)).mtimeMs}catch{return!1}
+  if(a>=s.getTime())return!1;
+  if(await jHt(t)===null)return b(`reapJobWorktreeIfSafe: kept ${t} — no Claude Code creation marker (${BHt}) in its git admin dir, so Claude Code did not create it; not ours to remove`,{level:"warn"}),!1;
+  # current session realpath skip; porcelain lock One; Ljr(t,GHt(i)); W7(...,"job_retention_sweep")
+}
+
+# zr jobs skipIf:
+#   if(!n&&(f===null||!te(f)))return!0
+#   if(f?.worktreePath&&te(f)&&a)await vt({...cutoff:a}).catch(()=>{});
+#   return!1
+
+# zr @221588623:
+#   r=k(jobs/settled,".json")
+#   r+=k(daemon/dispatch/rejected,".json")
+#   r+=k(daemon/dispatch,".json",!1)
+#   r+=k(daemon/auth,".json")
+#   host-managed: jobs/<name> ENOENT → O(file)
+#   if(!n) for(c of await nt(e)) s.add(c)   # Fe = pins.json shorts
+#   roster live Ne(pid,procStart) exclude
+#   b("jobs") skipIf → Slu
+#   if(a!==null) daemon.log / daemon.log.1 / roster.json / roster.json.corrupt.*
+
+# Fe / nt @207762666 (imported O4a as nt from _467.js):
+#   if(e) return er(e)  # storageV5 T.jobPins()={namespace:"jobsRoot",file:"pins"}
+#   stat pins.json; !file → heal; too large → empty Set
+#   ENOENT → write [] ; parse JSON array of strings
+# er @207762924: ot(e, T.jobPins(), {cap:I, screens:Dt(), screenKey:D(), heal:te})
+# ot @207753120: statMeta/readText + screens ok/refused
+
+# P() @221575518 = {messages:0,errors:0,filesRetainedFresh:0,filesPastCutoff:0}
+# C merges all four. O @221576704 increments the two file counters.
+
+# BMs @216908202 releaseStaleClaudeWorktreeLocks — blu starts with await BMs(t)
+# Mne @216904043 restoreWorktreeConfigExtension — blu readdir-fail + blu end + W7
+# W7 @216899222 reason default "unknown"; Slu "job_retention_sweep"; blu "stale_cleanup"
+# W7 also: agent_tool / workflow_tool; Rjr zeros porcelain; s=realpath identity (xne)
+# deleteJob Ma: te=CMs, P=realpath, force?"job_delete_force":"job_delete"
+#   failed needsForce→unverified; errorSummary===xne→identity_changed
+# LMs: git fail + Rjr → dirty+gitError
+# ywe: any hook succeeded
+# ywe persist: {storageV5,credentials} → Fd → kwe(h,y); REPL PBr a?.storageV5??m
+# kwe uses jIs(h,u) + Nw(d,y). Local: pluginDirectoryExists + loadPluginOptionsNw.
+# Official storageV5 backend: createLocalFsBackend (hb @207543077),
+#   tryCreateLocalV5Backend = qF (Po then hb), tryCreateV5Backend = qb (empty),
+#   pinStorageV5FromEnv UF, pinStorageV5 v, recordHoverRestDecision Ub.
+# Local: src/utils/storageV5 — factory + pin + CLI after cli_entry.
+# leftover methods: scopeKind / stat / statMeta / read / readText / write /
+#   delete / acquireLease / listLeases / subscribe. Official blu does not call Slu.
+# CLI does not auto-call qF. credentialsStoreFor + primePolicyLimitsCache when pinned.
+# cleanupWorktree: One/Dne + OI + Mne (not W7)
+# cleanupWorktree gjr: hook fail + hasWorktreeRemoveHook → keep; !gjr → git fallback
+# cleanupWorktree M4; Windows hook porcelain skip
+# Ajr @216896631: emr {logSuccess:!0}; W7 {errorLabel} only
+# create-fail: PHt → M4 remove else EHt EINVAL/ENOENT CHt .git
+#   containment g: M4 remove+prune else unlink .git
+#   sparse h: M4 remove else unlink .git; throw Mne
+# deleteJob ze: in_use / shared_record / records_unreadable / live_lock / occupied
+#   then dirty/unpushed; Ma extra q=Sa(originCwd)=findGitRoot; persist {storageV5:r}
+# ExitWorktree/dialog source exit_tool|exit_dialog (outside W7; not W7 reason)
+# $ee Se: invalid pid false; kill(0) false; ESRCH true; EPERM false (not !j_)
+
+# Ane @216896913 — no-root / hook-safety fail. W7 `if(!n)return Ane(e,o,s)`
+# $Xe @216866269 — walk relative components; Jc=identity; Xy=fold on win/mac
+# M4 / j @207666760 — non-Windows true; Windows !w(unlink/rmdir/readdir)
+# xXe @216885408 — Ine(win32.normalize)||Ip(n,true)||MXe(e,cwd)
+#   Ip = kr/sI containsVulnerableUncPath; MXe=$o (J/N stubs)
+# Kb/IHt = eq/xAt; yt=getEqFs; Ewe=isAbsolute; Jf=_e=hasPathDotSegment
+# Twe=readdir; yjr=rm; cjr=si (git root still has .git)
+# Pjr / xjr strings; hook $Xe + stored-symlink + Twe needsForce
+
+# Create host: await vjr(r,u) after git worktree add (not hook).
+# Resume-reset xMs also vjr.
+
+# Official blu does not call Slu. Do not invent blu←Slu.

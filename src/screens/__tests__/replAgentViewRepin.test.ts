@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { fileURLToPath } from 'url'
 
 /**
  * Structural gate: enter/exit agent transcript must repin ScrollBox.
@@ -8,7 +9,7 @@ import { describe, expect, test } from 'bun:test'
 describe('REPL agent-view transcript swap repin', () => {
   test('source: viewingAgentTaskId change → repinScroll in useLayoutEffect', async () => {
     const src = await Bun.file(
-      new URL('../REPL.tsx', import.meta.url).pathname,
+      fileURLToPath(new URL('../REPL.tsx', import.meta.url)),
     ).text()
 
     const idx = src.indexOf('Transcript swap (enter/exit agent view)')

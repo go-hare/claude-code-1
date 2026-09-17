@@ -186,7 +186,8 @@ export function seedJobStateClient(
   const existing = opts.freshDir ? null : readBgJobState(req.short)
   if (existing === null) {
     const state: BgJobState = {
-      state: 'starting',
+      // Official sr() seed: working + rPt so z8n startup wedge can arm.
+      state: 'working',
       detail: 'starting…',
       tempo: 'active',
       output: null,

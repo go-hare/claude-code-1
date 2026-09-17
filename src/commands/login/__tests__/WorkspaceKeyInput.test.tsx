@@ -22,13 +22,15 @@ import { restoreSettingsMockWith, snapshotModuleExports } from '../../../../test
 
 import * as realSettings from 'src/utils/settings/settings.js';
 import * as realConfig from 'src/utils/config.js';
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js';
+
 const settingsSnap = snapshotModuleExports(realSettings);
 const configSnap = snapshotModuleExports(realConfig);
 const realGetGlobalConfig = configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig;
 
 mock.module('src/utils/log.ts', logMock);
 mock.module('src/utils/debug.ts', debugMock);
-mock.module('bun:bundle', () => ({ feature: () => false }));
+mock.module('bun:bundle', bunBundleMock);
 mock.module('src/utils/settings/settings.js', () => ({
   ...settingsSnap,
   getCachedOrDefaultSettings: () => ({}),

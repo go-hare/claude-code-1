@@ -541,9 +541,9 @@ async function executeForkedSlashCommand(
  * @returns true if it looks like a command name, false if it contains non-command characters
  */
 export function looksLikeCommand(commandName: string): boolean {
-  // Command names should only contain [a-zA-Z0-9:_-]
-  // If it contains other characters, it's probably a file path or other input
-  return !/[^a-zA-Z0-9:\-_]/.test(commandName);
+  // densable 2.1.246 #29 cn — must start with [A-Za-z0-9_], then [A-Za-z0-9:_-]*.
+  // `/--…` is a prompt, not an unknown slash command.
+  return /^[a-zA-Z0-9_][a-zA-Z0-9:_-]*$/.test(commandName);
 }
 
 /** densable `cie` — skillOverrides "off" hides from Did-you-mean. */

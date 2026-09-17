@@ -32,6 +32,19 @@ import { calculatePluginVersion } from '../pluginVersioning.js'
 
 const tempDirs: string[] = []
 
+/** Cross-platform plugin source command: print one path (no trailing newline). */
+function writePathCommand(path: string): string {
+  const script = `process.stdout.write(${JSON.stringify(path)})`
+  return `node -e "${script.replace(/"/g, '\\"')}"`
+}
+
+/** Cross-platform plugin source command: print two non-empty lines. */
+function writeMultilinePathsCommand(line1: string, line2: string): string {
+  const content = `${line1}\n${line2}\n`
+  const script = `process.stdout.write(${JSON.stringify(content)})`
+  return `node -e "${script.replace(/"/g, '\\"')}"`
+}
+
 afterEach(async () => {
   mock.restore()
   while (tempDirs.length > 0) {
@@ -216,11 +229,9 @@ describe('densable 2.1.229 #4 d6_ assertCommandSourceConsent', () => {
 describe('densable 2.1.229 #4 c6_ runPluginCommandSource', () => {
   test('runs command and returns plugin directory', async () => {
     const pluginDir = await makePluginDir()
-    // shell:true — quote path for spaces safety
-    const quoted = JSON.stringify(pluginDir)
     const resolved = await runPluginCommandSource({
       source: 'command',
-      command: `printf %s ${quoted}`,
+      command: writePathCommand(pluginDir),
     })
     expect(resolved).toBe(pluginDir)
   })
@@ -229,7 +240,7 @@ describe('densable 2.1.229 #4 c6_ runPluginCommandSource', () => {
     await expect(
       runPluginCommandSource({
         source: 'command',
-        command: 'printf %s relative/path',
+        command: writePathCommand('relative/path'),
       }),
     ).rejects.toMatchObject({
       reason: 'plugin command source printed a relative path',
@@ -240,8 +251,7 @@ describe('densable 2.1.229 #4 c6_ runPluginCommandSource', () => {
     await expect(
       runPluginCommandSource({
         source: 'command',
-        // two non-empty lines via shell
-        command: "printf '%s\\n%s\\n' /tmp/a /tmp/b",
+        command: writeMultilinePathsCommand('/tmp/a', '/tmp/b'),
       }),
     ).rejects.toMatchObject({
       reason: 'plugin command source printed multiple lines',
@@ -255,7 +265,7 @@ describe('densable 2.1.229 #4 c6_ runPluginCommandSource', () => {
     await expect(
       runPluginCommandSource({
         source: 'command',
-        command: `printf %s ${JSON.stringify(real)}`,
+        command: writePathCommand(real),
       }),
     ).rejects.toMatchObject({
       reason: 'plugin command source directory has no plugin content',
@@ -280,7 +290,7 @@ describe('densable 2.1.229 #4 Oxd install with exact consent', () => {
     const targetParent = await mkdtemp(join(tmpdir(), 'cmd-tgt-'))
     tempDirs.push(targetParent)
     const target = join(targetParent, 'install')
-    const command = `printf %s ${JSON.stringify(pluginDir)}`
+    const command = writePathCommand(pluginDir)
 
     const result = await installCommandPluginSource(
       { source: 'command', command },

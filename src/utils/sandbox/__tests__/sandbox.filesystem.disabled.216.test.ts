@@ -3,6 +3,7 @@
  */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { SandboxFilesystemConfigSchema } from 'src/entrypoints/sandboxTypes.js'
+import * as realPlatform from 'src/utils/platform.js'
 import * as realSettings from 'src/utils/settings/settings.js'
 import type { SettingsJson } from 'src/utils/settings/types.js'
 import {
@@ -12,12 +13,18 @@ import {
 } from '../../../../tests/mocks/settings.js'
 
 // --- platform mock (memoized getPlatform) ---
+// Snapshot REAL exports before mock.module — afterAll must restore them so
+// later suites (pathQuoteChars / inputRedirect / UNC withhold) keep host OS
+// path semantics. Leaving getPlatform pinned to macos makes Windows drive
+// letters match the POSIX PSDrive provider regex.
 let platformOverride: 'macos' | 'linux' | 'wsl' | 'windows' | 'unknown' =
   'macos'
+const realPlatformSnap = snapshotModuleExports(realPlatform)
 const platformSnap = {
+  ...realPlatformSnap,
   getPlatform: () => platformOverride,
-  getWslVersion: () => undefined,
-  SUPPORTED_PLATFORMS: ['macos', 'wsl'] as const,
+  getWslVersion: () =>
+    platformOverride === 'wsl' ? ('2' as const) : undefined,
 }
 mock.module('src/utils/platform.js', () => platformSnap)
 mock.module('src/utils/platform.ts', () => platformSnap)
@@ -109,6 +116,9 @@ afterAll(() => {
     'src/utils/settings/settings.ts',
     '../settings/settings.js',
   ])
+  mock.module('src/utils/platform.js', () => ({ ...realPlatformSnap }))
+  mock.module('src/utils/platform.ts', () => ({ ...realPlatformSnap }))
+  mock.module('../platform.js', () => ({ ...realPlatformSnap }))
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
   mock.module('src/utils/ripgrep.js', () => ({ ...ripgrepSnap }))

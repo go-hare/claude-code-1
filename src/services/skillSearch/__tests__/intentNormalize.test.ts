@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import * as realClaude from '../../api/claude.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const claudeSnap = snapshotModuleExports(realClaude)
 
 // Must mock queryHaiku before importing the module under test so the ESM
 // import binding picks up the stub.
@@ -8,6 +12,7 @@ let haikuResponder: (userPrompt: string) => Promise<unknown> = async () => ({
 })
 
 mock.module('../../api/claude.js', () => ({
+  ...claudeSnap,
   queryHaiku: mock(
     async (args: { systemPrompt: unknown; userPrompt: string }) => {
       haikuCalls.push({

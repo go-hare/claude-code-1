@@ -11,14 +11,21 @@ import React from 'react';
 import { getOriginalCwd, setCwdState, setOriginalCwd } from '../../bootstrap/state.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import type { ToolPermissionContext } from '../../Tool.js';
-import { getGlobalConfig, isPathTrusted, saveGlobalConfig } from '../../utils/config.js';
+import { getGlobalConfig, getProjectPathForConfig, isPathTrusted, saveGlobalConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { findCanonicalGitRootUncached, findGitRootUncached, getIsGit } from '../../utils/git.js';
 import { reanchorGitFileWatcher } from '../../utils/git/gitFilesystem.js';
+import { uniq } from '../../utils/array.js';
 import { expandPath, normalizePathForConfigKey } from '../../utils/path.js';
+import { getSettingsForSource } from '../../utils/settings/settings.js';
 import { logEvent } from '../../services/analytics/index.js';
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js';
+import {
+  CdPendingMcpApproval,
+  collectPendingMcpApprovalsForCd,
+  type McpApprovalSkipWarning,
+} from '../../services/mcpServerApproval.js';
 import { resolveTrustRootNote } from '../../components/TrustDialog/trustDialogCopy.js';
 import { readBgJobState, patchBgJobState } from '../../daemon/jobState.js';
 import {
@@ -30,9 +37,16 @@ import {
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { wrapInSystemReminder } from '../../utils/messages.js';
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import { updateHooksConfigSnapshot } from '../../utils/hooks/hooksConfigSnapshot.js';
+import { getProjectDirsUpToHome } from '../../utils/markdownConfigLoader.js';
+import { settingsChangeDetector } from '../../utils/settings/changeDetector.js';
+import { skillChangeDetector } from '../../utils/skills/skillChangeDetector.js';
+import { addSkillDirectories } from '../../skills/loadSkillsDir.js';
+import { clearPluginCache } from '../../utils/plugins/pluginLoader.js';
 import { escapeXmlForSystemReminder } from '../../utils/xml.js';
 import { getGitStatus } from '../../context.js';
-import { CdTrustPrompt } from './CdTrustPrompt.js';
+import { CdUntrustedMoveFlow, replaceGatedNotice } from './CdUntrustedMoveFlow.js';
+import { readCdDisclosures } from './cdDisclosures.js';
 import {
   cdRuleRefusalMessage,
   checkCdPermission,
@@ -40,6 +54,9 @@ import {
   hasUnsafePathChars,
   safeWireMessage,
 } from './cdPermission.js';
+import { probeProjectGrantsGated } from '../../utils/permissions/projectGrantsGate.js';
+import { invalidateAllRenders } from '../../utils/render/invalidateAllRenders.js';
+import { resetLocalSettingsGitTrackedCache } from '../../utils/settings/localSettingsGitTracked.js';
 
 function meta(s: string): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
   return s as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS;
@@ -54,6 +71,16 @@ function meta(s: string): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEP
  */
 export function projectTrustConfigKey(directory: string): string {
   return normalizePathForConfigKey(findCanonicalGitRootUncached(directory) ?? resolve(directory));
+}
+
+/**
+ * densable Omt + settings detector trustFlip — only after a successful relocate.
+ * Failed transcript/cwd rollback must not leave the dest permanently trusted.
+ */
+function persistTrustAfterSuccessfulMove(directory: string): void {
+  acceptTrustForDirectory(directory);
+  updateHooksConfigSnapshot();
+  settingsChangeDetector.notifyChange('projectSettings', { trustFlip: true });
 }
 
 /** densable Omt — persist hasTrustDialogAccepted under aq(directory). */
@@ -165,15 +192,43 @@ export async function loadCdMemoryContext(directory: string): Promise<string> {
  * densable NC()?.refreshGitBranch?.() is a host/UI status-line callback —
  * no local hang point; omitted intentionally.
  */
+/**
+ * densable `ft` `a` — project+local additionalDirectories expanded against
+ * both originalCwd and cwd, captured before chdir.
+ */
+function collectDepartedAdditionalDirectories(originalCwd: string, cwd: string): string[] {
+  const anchors = uniq([originalCwd, cwd]);
+  return uniq(
+    [
+      ...(getSettingsForSource('projectSettings')?.permissions?.additionalDirectories ?? []),
+      ...(getSettingsForSource('localSettings')?.permissions?.additionalDirectories ?? []),
+    ].flatMap(dir => {
+      try {
+        return anchors.map(anchor => expandPath(dir, anchor));
+      } catch {
+        return [];
+      }
+    }),
+  );
+}
+
 export async function relocateSessionCwd(
   directory: string,
   source: 'cd_command' | 'set_cwd' = 'cd_command',
-): Promise<{ modelMessage: string; transcriptRelocated: boolean }> {
+): Promise<{
+  modelMessage: string;
+  transcriptRelocated: boolean;
+  projectGrantsGated: boolean;
+  gatedNotice: string;
+  departedAdditionalDirectories: string[];
+}> {
   const previous = getCwd();
   const previousOriginal = getOriginalCwd();
+  const departedAdditionalDirectories = collectDepartedAdditionalDirectories(previousOriginal, previous);
   process.chdir(directory);
   setCwdState(directory);
   setOriginalCwd(directory);
+  resetLocalSettingsGitTrackedCache();
 
   // densable tNt — transcript rehome; rollback cwd on throw when chdir back works
   let transcriptRelocated = true;
@@ -213,12 +268,57 @@ export async function relocateSessionCwd(
   getGitStatus.cache?.clear?.();
   // Memory files are cwd-rooted; clear so next turn reloads for new root.
   clearMemoryFileCaches();
-  // densable Fo.refreshConfig()
+
+  // densable 2.1.246 `ft`: retarget watchers and apply the new directory's
+  // project settings/hooks/skills immediately (not on --resume).
+  // densable A() = Qte = setProjectPathForConfig(null)
+  getProjectPathForConfig.cache?.clear?.();
+  try {
+    await settingsChangeDetector.rehome();
+  } catch (e) {
+    logForDebugging(
+      `directory move: re-targeting the settings watcher failed (continuing with the previous watch): ${e}`,
+      { level: 'error' },
+    );
+  }
+  try {
+    // densable M() = Hzb/J — store hooks snapshot (also resets settings cache)
+    updateHooksConfigSnapshot();
+    settingsChangeDetector.notifyChange('projectSettings', { prevCwd: previousOriginal });
+  } catch (e) {
+    logForDebugging(`directory move: re-resolving settings and hooks for the new directory failed (continuing): ${e}`, {
+      level: 'error',
+    });
+  }
+  try {
+    // densable ke(de("skills", cwd)) = iXe(o3("skills", getCwd()))
+    await addSkillDirectories(getProjectDirsUpToHome('skills', getCwd()));
+  } catch (e) {
+    logForDebugging(`directory move: registering the new directory's skills failed (continuing without them): ${e}`, {
+      level: 'error',
+    });
+  }
+  try {
+    await skillChangeDetector.rehome();
+  } catch (e) {
+    logForDebugging(
+      `directory move: re-targeting the skill watcher failed (continuing with the previous watch): ${e}`,
+      { level: 'error' },
+    );
+  }
+  // densable ee() = T0c/so = git watcher reanchor (after skill rehome)
+  reanchorGitFileWatcher();
+
+  // Te/`Rt` after /cd must see dest plugins, not the origin loadAllPlugins memo.
+  clearPluginCache('directory move: dest plugin discovery');
+
+  // densable Fo.refreshConfig() — official runs this after watcher rehome
   try {
     SandboxManager.refreshConfig();
   } catch (e) {
     logForDebugging(`directory move: sandbox refreshConfig failed (continuing): ${e}`, { level: 'error' });
   }
+  invalidateAllRenders();
 
   logEvent('tengu_cd_command', { source: meta(source) });
 
@@ -237,14 +337,36 @@ export async function relocateSessionCwd(
   const body =
     `The session's working directory has changed to ${escaped} (${via}). ` +
     'The environment block at the start of this conversation still names the previous directory — that information is stale. ' +
-    `All tool calls and relative paths now resolve from ${escaped}.`;
+    `All tool calls and relative paths now resolve from ${escaped}. ` +
+    `Project settings (permission rules, hooks), project MCP servers, and project skills now come from ${escaped}; its CLAUDE.md, if any, follows below. ` +
+    "Environment variables set by the previous directory's settings stay in effect for this process — they cannot be unset — and " +
+    "the new directory's settings env is applied on top of them.";
   const notice = wrapInSystemReminder(body);
-  const modelMessage = memory ? `${notice}\n\n${memory}` : notice;
+  let projectGrantsGated = false;
+  try {
+    projectGrantsGated = probeProjectGrantsGated();
+  } catch (e) {
+    logForDebugging(`directory move: probing the gated project grants failed (continuing): ${e}`, {
+      level: 'error',
+    });
+  }
+  const gatedNotice = projectGrantsGated
+    ? wrapInSystemReminder(
+        `Note: ${escaped} declares project permission rules and/or additional directories in its settings, but they are NOT applied — the workspace is trusted only through a parent directory's grant, and project-scoped grants require trusting this directory explicitly. Tool calls those rules would have pre-approved will ask for permission.`,
+      )
+    : '';
+  const modelMessage = [notice, gatedNotice, memory].filter(Boolean).join('\n');
 
   if (previous !== directory) {
     logForDebugging(`/cd relocated ${previous} → ${directory}`);
   }
-  return { modelMessage, transcriptRelocated };
+  return {
+    modelMessage,
+    transcriptRelocated,
+    projectGrantsGated,
+    gatedNotice,
+    departedAdditionalDirectories,
+  };
 }
 
 export type ResolveCdResult =
@@ -340,6 +462,7 @@ export type SetCwdControlHost = {
   isBusy: () => boolean;
   toolPermissionContext: ToolPermissionContext;
   enqueueMoveNotice: (modelMessage: string) => void;
+  retireDepartedAdditionalDirectories?: (directories: string[]) => void;
 };
 
 const UNSAFE_PATH_REJECT_MESSAGE =
@@ -453,6 +576,7 @@ export async function handleSetCwdControlRequest(
   }
 
   const directory = n.directory;
+  let latchTrustAfterMove = false;
   if (!isDirectoryTrusted(directory)) {
     // densable I8e via resolveTrustRootNote — uncached rHo/Ydu for trust_root
     const { trustRoot, showRepoRootNote } = resolveTrustRootNote(
@@ -487,8 +611,7 @@ export async function handleSetCwdControlRequest(
             : { status: 'needs_trust', directory },
       };
     }
-    // densable Omt — latch trust before relocate
-    acceptTrustForDirectory(directory);
+    latchTrustAfterMove = true;
   }
 
   // Re-check busy after async validation (densable second gate)
@@ -503,7 +626,20 @@ export async function handleSetCwdControlRequest(
     };
   }
 
-  const { modelMessage, transcriptRelocated } = await relocateSessionCwd(directory, 'set_cwd');
+  const { modelMessage, transcriptRelocated, departedAdditionalDirectories } = await relocateSessionCwd(
+    directory,
+    'set_cwd',
+  );
+  if (latchTrustAfterMove) {
+    persistTrustAfterSuccessfulMove(directory);
+  }
+  try {
+    host.retireDepartedAdditionalDirectories?.(departedAdditionalDirectories);
+  } catch (e) {
+    logForDebugging(`set_cwd: retiring the previous project's additional directories failed (continuing): ${e}`, {
+      level: 'error',
+    });
+  }
   try {
     host.enqueueMoveNotice(modelMessage);
   } catch (e) {
@@ -574,25 +710,117 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   }
 
   const directory = resolved.directory;
-  const doMove = async () => {
+
+  // densable `m` / `Mt` — reload plugins after relocate (and after MCP V).
+  // Official `$o`/`No` = logFeatureBad/Ok (`tengu_feature_bad`/`_ok`).
+  const finishMove = async (
+    modelMessage: string,
+    persist?: { persistFailed: boolean },
+    skipNotice?: McpApprovalSkipWarning,
+  ) => {
     try {
-      const { modelMessage } = await relocateSessionCwd(directory, 'cd_command');
-      onDone(`Moved to ${directory}`, {
-        display: 'system',
-        metaMessages: [modelMessage],
+      await context.reloadPlugins?.();
+    } catch (e) {
+      logForDebugging(`/cd: refreshing plugins/MCP for the new directory failed (continuing): ${e}`, {
+        level: 'error',
       });
+    }
+    if (persist?.persistFailed) {
+      logEvent('tengu_feature_bad', {
+        feature_name: 'mcp_project_approval_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code: 'mcp_approval_persist_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+    } else if (persist) {
+      logEvent('tengu_feature_ok', {
+        feature_name: 'mcp_project_approval_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+    }
+    const moved = `Moved to ${directory}`;
+    const notice = persist?.persistFailed
+      ? `${moved}. One or more of your MCP server choices could not be saved (check permissions on .claude/settings.local.json) \u2014 you will be asked again next time.`
+      : skipNotice
+        ? `${moved}. ${skipNotice.text}`
+        : moved;
+    onDone(notice, {
+      display: 'system',
+      metaMessages: [modelMessage],
+    });
+  };
+
+  // densable `p` — relocate then `Rt` pending collection. Official also
+  // returns `projectGrantsGated` so a trusted-but-gated dest can reopen
+  // as backstop `ae`.
+  const afterRelocate = async () => {
+    let relocated: Awaited<ReturnType<typeof relocateSessionCwd>>;
+    try {
+      relocated = await relocateSessionCwd(directory, 'cd_command');
     } catch (e) {
       logForDebugging(`/cd relocate failed: ${e}`, { level: 'error' });
       onDone(
         `Couldn't move to ${directory} — the directory may no longer exist, or the session couldn't be moved. Staying in ${getCwd()}.`,
         { display: 'system' },
       );
+      return null;
     }
+    try {
+      context.retireDepartedAdditionalDirectories?.(relocated.departedAdditionalDirectories);
+    } catch (e) {
+      logForDebugging(`/cd: retiring the previous project's additional directories failed (continuing): ${e}`, {
+        level: 'error',
+      });
+    }
+    const pending = await collectPendingMcpApprovalsForCd({
+      strictMcpConfig: context.strictMcpConfig === true,
+    });
+    return {
+      modelMessage: relocated.modelMessage,
+      projectGrantsGated: relocated.projectGrantsGated,
+      gatedNotice: relocated.gatedNotice,
+      pending,
+      skipNotice: pending.skipNotice,
+    };
+  };
+
+  // densable `lr` — persist trust + tell the settings detector this is a
+  // trust flip so projectSettings reload applies the gated grants.
+  // Gated backstop `ae` only: dest is already relocated.
+  const onTrustFlip = () => {
+    persistTrustAfterSuccessfulMove(directory);
   };
 
   if (isDirectoryTrusted(directory)) {
-    await doMove();
-    return null;
+    const outcome = await afterRelocate();
+    if (outcome === null) {
+      return null;
+    }
+    if (outcome.projectGrantsGated) {
+      return (
+        <CdUntrustedMoveFlow
+          directory={directory}
+          initialOutcome={outcome}
+          onConfirm={async () => outcome}
+          onComplete={(modelMessage, persist, skipNotice) => {
+            void finishMove(modelMessage, persist, skipNotice);
+          }}
+          onCancel={() => {
+            onDone(`Staying in ${getCwd()}`, { display: 'system' });
+          }}
+          onTrustFlip={onTrustFlip}
+        />
+      );
+    }
+    if (outcome.pending.pendingServers.length === 0) {
+      await finishMove(outcome.modelMessage, undefined, outcome.skipNotice);
+      return null;
+    }
+    return (
+      <CdPendingMcpApproval
+        pending={outcome.pending}
+        onComplete={persist => {
+          void finishMove(outcome.modelMessage, persist, outcome.skipNotice);
+        }}
+      />
+    );
   }
 
   // densable JqE: trustRoot = I8e(resolve(i)) when distinct — uncached
@@ -602,17 +830,39 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
     findGitRootUncached,
   );
 
+  let disclosures: Awaited<ReturnType<typeof readCdDisclosures>> | undefined;
+  try {
+    disclosures = await readCdDisclosures(directory);
+  } catch (e) {
+    logForDebugging(`/cd: reading the target's project settings for the trust prompt failed: ${e}`, { level: 'error' });
+  }
+
   return (
-    <CdTrustPrompt
+    <CdUntrustedMoveFlow
       directory={directory}
       trustRoot={showRepoRootNote ? trustRoot : undefined}
-      onConfirm={() => {
-        acceptTrustForDirectory(directory);
-        void doMove();
+      disclosures={disclosures}
+      onConfirm={async () => {
+        const outcome = await afterRelocate();
+        if (outcome === null) {
+          return null;
+        }
+        persistTrustAfterSuccessfulMove(directory);
+        // First-prompt Yes already trusted dest — do not reopen `ae`.
+        return {
+          ...outcome,
+          projectGrantsGated: false,
+          gatedNotice: '',
+          modelMessage: replaceGatedNotice(outcome.modelMessage, outcome.gatedNotice),
+        };
+      }}
+      onComplete={(modelMessage, persist, skipNotice) => {
+        void finishMove(modelMessage, persist, skipNotice);
       }}
       onCancel={() => {
         onDone(`Staying in ${getCwd()}`, { display: 'system' });
       }}
+      onTrustFlip={onTrustFlip}
     />
   );
 };

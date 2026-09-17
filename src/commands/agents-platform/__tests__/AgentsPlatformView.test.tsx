@@ -4,14 +4,17 @@
  */
 import { describe, expect, mock, test } from 'bun:test';
 import * as React from 'react';
+import { cronMock } from '../../../../tests/mocks/oauthSurface.js';
 import { renderToString } from '../../../utils/staticRender.js';
 
 // Mock cron utility before importing AgentsPlatformView
-mock.module('src/utils/cron.js', () => ({
-  cronToHuman: (expr: string) => `HumanCron(${expr})`,
-  parseCronExpression: () => null,
-  computeNextCronRun: () => null,
-}));
+mock.module('src/utils/cron.js', () =>
+  cronMock({
+    cronToHuman: (expr: string) => `HumanCron(${expr})`,
+    parseCronExpression: () => null,
+    computeNextCronRun: () => null,
+  }),
+);
 
 const { AgentsPlatformView } = await import('../AgentsPlatformView.js');
 

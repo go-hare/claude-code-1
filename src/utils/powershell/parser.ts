@@ -1698,7 +1698,6 @@ export function getPipelineSegments(
  */
 export function isNullRedirectionTarget(target: string): boolean {
   const t = target.trim().toLowerCase()
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: ${null} is PowerShell syntax, not a JS template literal
   return t === '$null' || t === '${null}'
 }
 

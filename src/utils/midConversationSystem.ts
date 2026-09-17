@@ -9,7 +9,8 @@
  * - KQn / e9i reject detectors
  * - Vri / Gri midConvCachePromotionRejected demote latch
  * - sticky o3 reject → midConvLatchedOff (DV stickyBetas)
- * - w3y demote orphan api_system not between user and assistant
+ * - W5s / w3y demote orphan api_system not between user and assistant
+ *   (official: before $5s / tHr; FXe skip wrap; ephemeral inherit)
  * - xNi 3P beta allowlist keeps o3
  */
 
@@ -56,17 +57,23 @@ export type ApiSystemMessage = {
     role: 'system'
     content: string
   }
+  /** densable W5s / A() — batching_reminder flush sets this; inherit on merge. */
+  ephemeral?: boolean
   /** densable per-turn effort statement carrier (not used for mid-conv text). */
   outputConfig?: { effort?: string | number }
 }
 
-/** densable B6n */
-export function createApiSystemMessage(content: string): ApiSystemMessage {
+/** densable B6n — optional ephemeral from A() C latch. */
+export function createApiSystemMessage(
+  content: string,
+  ephemeral?: boolean,
+): ApiSystemMessage {
   return {
     type: 'api_system',
     uuid: randomUUID(),
     timestamp: new Date().toISOString(),
     message: { role: 'system', content },
+    ...(ephemeral ? { ephemeral: true } : {}),
   }
 }
 
@@ -176,6 +183,14 @@ export function shouldUseMidConversationSystem(input: {
   }
   // densable fj(P_(e)) capability fallback for unknown/newer models on 1P-ish.
   return providerSupportsMidConvCapability(input.provider)
+}
+
+/**
+ * densable FXe (212 q5n) — `P(e)==="claude-sonnet-5"`.
+ * Official `i = model!==undefined && midConv && FXe(model)` skips `El` wrap.
+ */
+export function shouldSkipSystemReminderWrap(model: string): boolean {
+  return getCanonicalName(model) === 'claude-sonnet-5'
 }
 
 /** densable Gri */
@@ -388,11 +403,15 @@ export function demoteOrphanApiSystemMessages<
       out ??= messages.slice(0, n)
       const last = out.at(-1) as T & {
         message: { content: string }
+        ephemeral?: boolean
       }
       const oMsg = o as unknown as ApiSystemMessage
       const content =
         typeof oMsg.message?.content === 'string' ? oMsg.message.content : ''
       last.message.content += `\n\n${content}`
+      if (oMsg.ephemeral) {
+        last.ephemeral = true
+      }
       continue
     }
     const afterUser = prev?.type === 'user'

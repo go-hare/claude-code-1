@@ -26,13 +26,9 @@ const repl = readFileSync(
 
 describe('densable 2.1.224 #21 RC compact progress + /clear', () => {
   test('writeMessages filter includes compact_boundary (densable PSt)', () => {
-    expect(hook).toContain("msg.subtype === 'compact_boundary'")
-    // co-located with local_command filter
-    const idx = hook.indexOf("msg.subtype === 'local_command'")
-    expect(idx).toBeGreaterThan(-1)
-    expect(
-      hook.indexOf("msg.subtype === 'compact_boundary'", idx),
-    ).toBeGreaterThan(idx)
+    expect(hook).toContain('isEligibleBridgeMessage')
+    expect(hook).toContain("m.subtype === 'compact_boundary'")
+    expect(hook).toContain('isCompactionOrSummaryMarker')
   })
 
   test('toSDKMessages maps compact_boundary for RC wire', () => {
@@ -47,8 +43,12 @@ describe('densable 2.1.224 #21 RC compact progress + /clear', () => {
   })
 
   test('bridge drain forwards status + conversation_reset', () => {
-    expect(hook).toContain("e.subtype === 'status'")
-    expect(hook).toContain("e.type === 'conversation_reset'")
+    expect(hook).toContain('leftoverL_e')
+    expect(hook).toContain('leftoverA_e')
+    expect(hook).toContain('hasMatchingQueuedSdkEvent')
+    expect(hook).toContain('isBridgeForwardableSdkEvent')
+    expect(sdkQ).toContain("event.type === 'conversation_reset'")
+    expect(sdkQ).toContain("event.subtype === 'status'")
   })
 
   test('REPL setSDKStatus enqueues compacting status for bridge', () => {

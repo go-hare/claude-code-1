@@ -1,17 +1,20 @@
 import { describe, expect, mock, test } from 'bun:test'
 
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+import { bunBundleMock } from '../../../tests/mocks/bunBundle.js'
 import { debugMock } from '../../../tests/mocks/debug'
 import { logMock } from '../../../tests/mocks/log'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realMetadata from 'src/services/analytics/metadata.js'
 
-mock.module('bun:bundle', () => ({
-  feature: () => false,
-}))
+const metadataSnap = snapshotModuleExports(realMetadata)
+
+mock.module('bun:bundle', bunBundleMock)
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 mock.module('src/services/analytics/metadata.js', () => ({
+  ...metadataSnap,
   sanitizeToolNameForAnalytics: (n: string) => n,
 }))
 

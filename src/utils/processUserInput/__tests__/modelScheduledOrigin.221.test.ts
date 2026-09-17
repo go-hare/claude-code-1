@@ -6,13 +6,12 @@ import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { logMock } from '../../../../tests/mocks/log'
 import { debugMock } from '../../../../tests/mocks/debug'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 // Avoid builtInCommandNames → getCommands → login auth during slash path.
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 const prevKey = process.env.ANTHROPIC_API_KEY
 beforeAll(() => {

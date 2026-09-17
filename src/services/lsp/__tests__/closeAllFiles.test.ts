@@ -1,4 +1,6 @@
 import { describe, expect, test, mock } from 'bun:test'
+import { debugMock } from '../../../../tests/mocks/debug.js'
+import { logMock } from '../../../../tests/mocks/log.js'
 import { createLSPServerManager } from '../LSPServerManager.js'
 
 // Mock config loading to avoid real filesystem/LSP server access
@@ -36,13 +38,8 @@ mock.module('../LSPServerInstance.js', () => ({
 }))
 
 // Mock log modules with side effects
-mock.module('../../../utils/log.js', () => ({
-  logError: mock(() => {}),
-}))
-
-mock.module('../../../utils/debug.js', () => ({
-  logForDebugging: mock(() => {}),
-}))
+mock.module('../../../utils/log.js', logMock)
+mock.module('../../../utils/debug.js', debugMock)
 
 describe('LSPServerManager closeAllFiles', () => {
   test('closeAllFiles is a no-op when no files are open', async () => {

@@ -1,9 +1,23 @@
 /**
- * densable 2.1.224 #10 — sandbox deny trailing slash must not be bypassable.
- * Gold: Mmr strips trailing `/` on non-Windows non-glob paths.
+ * Pin stripTrailingSlashForSandbox tests to non-Windows — densable Mmr is a
+ * no-op when getPlatform()==='windows'. Without an explicit mock, a prior
+ * suite that left macos leaked made these pass on Windows hosts; restoring
+ * platform correctly exposed the alone-red.
  */
-import { describe, expect, test } from 'bun:test'
-import { stripTrailingSlashForSandbox } from '../sandbox-adapter.js'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
+import * as realPlatform from 'src/utils/platform.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const platformSnap = snapshotModuleExports(realPlatform)
+mock.module('src/utils/platform.js', () => ({
+  ...platformSnap,
+  getPlatform: () => 'macos' as const,
+}))
+afterAll(() => {
+  mock.module('src/utils/platform.js', () => ({ ...platformSnap }))
+})
+
+const { stripTrailingSlashForSandbox } = await import('../sandbox-adapter.js')
 
 describe('densable 2.1.224 #10 stripTrailingSlashForSandbox (Mmr)', () => {
   test('strips trailing slash on deny-style absolute path', () => {

@@ -7,6 +7,14 @@ import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import * as realMessageQueue from 'src/utils/messageQueueManager.js'
 import { createMessageQueueManagerMock } from '../../../../tests/mocks/messageQueueManager.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+import {
+  abortControllerMock,
+  cleanupRegistryMock,
+  collapseReadSearchMock,
+  speculationMock,
+  xmlMock,
+} from '../../../../tests/mocks/taskSurface.js'
 // ─── Mocks ───
 
 const noop = () => {}
@@ -103,23 +111,16 @@ afterAll(() => {
   mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
 })
 
-mock.module('src/services/PromptSuggestion/speculation.js', () => ({
-  abortSpeculation: noop,
-}))
+mock.module('src/services/PromptSuggestion/speculation.js', speculationMock)
 
 const cleanupFns: (() => void)[] = []
-mock.module('src/utils/cleanupRegistry.js', () => ({
-  registerCleanup: () => noop,
-}))
+mock.module('src/utils/cleanupRegistry.js', () =>
+  cleanupRegistryMock({
+    registerCleanup: () => noop,
+  }),
+)
 
-mock.module('src/utils/abortController.js', () => ({
-  createAbortController: () => new AbortController(),
-  createChildAbortController: (parent: AbortController) => {
-    const ac = new AbortController()
-    parent.signal.addEventListener('abort', () => ac.abort())
-    return ac
-  },
-}))
+mock.module('src/utils/abortController.js', abortControllerMock)
 
 mock.module('src/utils/task/sdkProgress.js', () => ({
   emitTaskProgress: noop,
@@ -134,32 +135,24 @@ mock.module('src/utils/sdkEventQueue.js', () => ({
   enqueueSdkEvent: noop,
 }))
 
-mock.module('src/constants/xml.js', () => ({
-  TASK_NOTIFICATION_TAG: 'task_notification',
-  TASK_ID_TAG: 'task_id',
-  TOOL_USE_ID_TAG: 'tool_use_id',
-  OUTPUT_FILE_TAG: 'output_file',
-  STATUS_TAG: 'status',
-  SUMMARY_TAG: 'summary',
-  WORKTREE_TAG: 'worktree',
-  WORKTREE_PATH_TAG: 'worktree_path',
-  WORKTREE_BRANCH_TAG: 'worktree_branch',
-  TASK_TYPE_TAG: 'task_type',
-}))
+mock.module('src/constants/xml.js', () =>
+  xmlMock({
+    TASK_NOTIFICATION_TAG: 'task_notification',
+    TASK_ID_TAG: 'task_id',
+    TOOL_USE_ID_TAG: 'tool_use_id',
+    OUTPUT_FILE_TAG: 'output_file',
+    STATUS_TAG: 'status',
+    SUMMARY_TAG: 'summary',
+    WORKTREE_TAG: 'worktree',
+    WORKTREE_PATH_TAG: 'worktree_path',
+    WORKTREE_BRANCH_TAG: 'worktree_branch',
+    TASK_TYPE_TAG: 'task_type',
+  }),
+)
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: noop,
-  logEventAsync: async () => {},
-  stripProtoFields: (v: any) => v,
-  attachAnalyticsSink: noop,
-  _resetForTesting: noop,
-  AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS: undefined,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
-mock.module('src/utils/collapseReadSearch.js', () => ({
-  getSearchExtraToolsOrReadInfo: () => undefined,
-  getToolSearchOrReadInfo: () => undefined,
-}))
+mock.module('src/utils/collapseReadSearch.js', collapseReadSearchMock)
 
 // ─── Import after mocks ───
 
@@ -1066,6 +1059,29 @@ describe('enqueueAgentNotification', () => {
     )
     expect(enqueuedNotifications[0]).toContain(
       'A task-notification fires each time this agent stops',
+    )
+  })
+
+  test('completed + maxTurnsReached uses official partial summary', async () => {
+    const { setAppState } = createSetAppState({
+      tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
+    })
+
+    await enqueueAgentNotification({
+      taskId: 'test-agent-001',
+      description: 'refactor auth',
+      status: 'completed',
+      maxTurnsReached: 5,
+      setAppState: setAppState as any,
+      finalMessage: 'halfway',
+    })
+
+    expect(enqueuedNotifications[0]).toContain(
+      'Agent "refactor auth" stopped at its 5-turn limit (partial result; SendMessage to task-id to continue)',
+    )
+    expect(enqueuedNotifications[0]).toContain('<status>completed</status>')
+    expect(enqueuedNotifications[0]).not.toContain(
+      'Agent "refactor auth" finished',
     )
   })
 

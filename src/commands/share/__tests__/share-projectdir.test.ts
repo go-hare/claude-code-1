@@ -17,9 +17,17 @@ import {
   test,
 } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  clearChildProcessStubs,
+  installChildProcessHarness,
+  setChildProcessStubs,
+} from '../../../../tests/mocks/childProcessHarness.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
 // ── child_process mock (gh fails → shows gh not installed) ──
 let _execFileImplPD: (
@@ -29,57 +37,8 @@ let _execFileImplPD: (
   cb: (err: Error | null, stdout: string, stderr: string) => void,
 ) => void = (_cmd, _args, _opts, cb) => cb(new Error('ENOENT'), '', '')
 
-const execFileMockPD = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-  cb: (err: Error | null, stdout: string, stderr: string) => void,
-) => _execFileImplPD(cmd, args, opts, cb)
-
-;(execFileMockPD as unknown as Record<symbol, unknown>)[
-  promisify.custom as symbol
-] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> =>
-  new Promise((resolve, reject) =>
-    _execFileImplPD(cmd, args, opts, (err, stdout, stderr) => {
-      if (err) reject(err)
-      else resolve({ stdout, stderr })
-    }),
-  )
-
-// Spread real child_process + gate stub behind useShareProjectdirCpStubs.
-// Default OFF: only this suite's beforeAll flips on; afterAll flips off.
-// Without spread, every other test in the same `bun test` run that imports
-// child_process (e.g. src/services/skillLearning/projectContext.ts which uses
-// execFileSync for git) gets our stubs and breaks.
-let useShareProjectdirCpStubs = false
-mock.module('node:child_process', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return {
-    ...real,
-    default: real,
-    execFile: ((...args: unknown[]) =>
-      useShareProjectdirCpStubs
-        ? (execFileMockPD as (...a: unknown[]) => unknown)(...args)
-        : (real.execFile as (...a: unknown[]) => unknown)(
-            ...args,
-          )) as typeof real.execFile,
-    execFileSync: ((...args: unknown[]) =>
-      useShareProjectdirCpStubs
-        ? Buffer.from('')
-        : (real.execFileSync as (...a: unknown[]) => unknown)(
-            ...args,
-          )) as typeof real.execFileSync,
-  }
-})
-
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+installChildProcessHarness()
+mock.module('bun:bundle', bunBundleMock)
 
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
@@ -134,12 +93,17 @@ async function getCallFn(): Promise<CallFn> {
   return loaded.call.bind(loaded) as CallFn
 }
 
-// Gate child_process stub on for this suite only.
+let popFeature: (() => void) | undefined
 beforeAll(() => {
-  useShareProjectdirCpStubs = true
+  popFeature = pushFeatureOverride(() => true)
+  setChildProcessStubs('share-projectdir', {
+    execFile: (cmd, args, opts, cb) => _execFileImplPD(cmd, args, opts, cb),
+    execFileSync: () => Buffer.from(''),
+  })
 })
 afterAll(() => {
-  useShareProjectdirCpStubs = false
+  popFeature?.()
+  clearChildProcessStubs('share-projectdir')
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))

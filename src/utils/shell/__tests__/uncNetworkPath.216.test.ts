@@ -2,24 +2,36 @@
  * densable 2.1.216 #20 — Windows read-only commands on network/UNC paths
  * must not auto-allow; path-mode `sI(e, true)` catches bare + mixed forms.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import * as realPlatform from 'src/utils/platform.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
-const originalPlatform = {
-  getPlatform: () => 'macos' as const,
-  getIsWindows: () => false,
-}
+const platformSnap = snapshotModuleExports(realPlatform)
 
 function mockWindows(): void {
   mock.module('src/utils/platform.js', () => ({
+    ...platformSnap,
     getPlatform: () => 'windows' as const,
     getIsWindows: () => true,
   }))
 }
 
 function mockMacos(): void {
-  mock.module('src/utils/platform.js', () => ({ ...originalPlatform }))
+  mock.module('src/utils/platform.js', () => ({
+    ...platformSnap,
+    getPlatform: () => 'macos' as const,
+    getIsWindows: () => false,
+  }))
 }
 
 mockWindows()
@@ -33,7 +45,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  mockMacos()
+  // Restore host snapshot — do NOT leave macos pinned for later suites.
+  mock.module('src/utils/platform.js', () => ({ ...platformSnap }))
+})
+afterAll(() => {
+  mock.module('src/utils/platform.js', () => ({ ...platformSnap }))
 })
 
 const emptyCtx = {

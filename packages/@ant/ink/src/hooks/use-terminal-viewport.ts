@@ -1,13 +1,7 @@
-import {
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useContext, useLayoutEffect, useRef } from 'react'
 import { TerminalSizeContext } from '../components/TerminalSizeContext.js'
 import type { DOMElement } from '../core/dom.js'
+import { clampScrollTopToContentMax } from '../core/scrollHeightHwm.js'
 
 type ViewportEntry = {
   /**
@@ -16,54 +10,43 @@ type ViewportEntry = {
   isVisible: boolean
 }
 
+type TerminalSize = {
+  rows: number
+}
+
 /**
- * Scroll / sticky-follow can move an element into view without re-rendering
- * the animated consumer (e.g. Spinner sits in FullscreenLayout.scrollable;
- * "Jump to bottom" remounts the virtual list but does not re-render Spinner).
- * useAnimationFrame freezes while isVisible=false and only re-subscribes on
- * re-render — so a pure scroll-into-view left the spinner frozen for seconds
- * until the next token/state push.
- *
- * ScrollBox notifies these watchers after imperative scroll so visibility can
- * flip and force a consumer re-render immediately.
+ * densable 2.1.246 `HS`: visibility walk must clamp scrollTop to content max.
+ * Unclamped HWM overscroll flips isVisible every commit.
  */
-const scrollVisibilityWatchers = new Set<() => void>()
-
-export function notifyScrollVisibilityWatchers(): void {
-  for (const listener of scrollVisibilityWatchers) {
-    listener()
-  }
-}
-
-function subscribeScrollVisibility(listener: () => void): () => void {
-  scrollVisibilityWatchers.add(listener)
-  return () => {
-    scrollVisibilityWatchers.delete(listener)
-  }
+function readClampedScrollTop(node: DOMElement): number {
+  return clampScrollTopToContentMax(
+    node.scrollTop ?? 0,
+    node.scrollHeight,
+    node.scrollViewportHeight,
+  )
 }
 
 /**
- * Yoga absolute top (screen rows) accounting for ScrollBox scrollTop.
- * Same walk as the previous inline layout effect — kept as a pure helper so
- * scroll-driven rechecks share one implementation with useLayoutEffect.
+ * densable 2.1.246 `ER(e, o)`: Yoga absolute top (screen rows) minus clamped
+ * ScrollBox scrollTop. Returns null when the node is unmeasurable.
+ *
+ * Height 0 uses `top >= viewportY` (not `bottom > viewportY`) so an empty
+ * box sitting on the viewport edge is still visible.
  */
 export function computeElementViewportVisibility(
-  element: DOMElement,
-  terminalRows: number,
-): boolean {
-  if (!element.yogaNode) {
-    return true
+  element: DOMElement | null | undefined,
+  size: TerminalSize | null | undefined,
+): boolean | null {
+  if (!element?.yogaNode || !size) {
+    return null
   }
 
   const height = element.yogaNode.getComputedHeight()
-  const rows = terminalRows
+  const rows = size.rows
 
   // Walk the DOM parent chain (not yoga.getParent()) so we can detect
   // scroll containers and subtract their scrollTop. Yoga computes layout
   // positions without scroll offset — scrollTop is applied at render time.
-  // Without this, an element inside a ScrollBox whose yoga position exceeds
-  // terminalRows would be considered offscreen even when scrolled into view
-  // (e.g., the spinner in fullscreen mode after enough messages accumulate).
   let absoluteTop = element.yogaNode.getComputedTop()
   let parent: DOMElement | undefined = element.parentNode
   let root = element.yogaNode
@@ -72,40 +55,31 @@ export function computeElementViewportVisibility(
       absoluteTop += parent.yogaNode.getComputedTop()
       root = parent.yogaNode
     }
-    // scrollTop is only ever set on scroll containers (by ScrollBox + renderer).
-    // Non-scroll nodes have undefined scrollTop → falsy fast-path.
-    if (parent.scrollTop) absoluteTop -= parent.scrollTop
+    // Official: if (u.scrollTop) s -= HS(u)
+    if (parent.scrollTop) absoluteTop -= readClampedScrollTop(parent)
     parent = parent.parentNode
   }
 
-  // Only the root's height matters
   const screenHeight = root.getComputedHeight()
-
   const bottom = absoluteTop + height
-  // When content overflows the viewport (screenHeight > rows), the
-  // cursor-restore at frame end scrolls one extra row into scrollback.
-  // log-update.ts accounts for this with scrollbackRows = viewportY + 1.
-  // We must match, otherwise an element at the boundary is considered
-  // "visible" here (animation keeps ticking) but its row is treated as
-  // scrollback by log-update (content change → full reset → flicker).
   const cursorRestoreScroll = screenHeight > rows ? 1 : 0
   const viewportY = Math.max(0, screenHeight - rows) + cursorRestoreScroll
   const viewportBottom = viewportY + rows
+  if (height === 0) {
+    return absoluteTop >= viewportY && absoluteTop < viewportBottom
+  }
   return bottom > viewportY && absoluteTop < viewportBottom
 }
 
 /**
  * Hook to detect if a component is within the terminal viewport.
  *
- * densable YVe returns `[ref, entry, recompute, pureCheck]`:
- * - recompute: update entry + return current visibility (side-effecting)
+ * densable 2.1.246 `D0` / YVe returns `[ref, entry, recompute, pureCheck]`:
+ * - recompute: update entry ref + return current visibility (NO setState)
  * - pureCheck: visibility without mutating entry (null when no yoga node)
  *
- * Visibility flips DO re-render the consumer (via an epoch state). That is
- * load-bearing for useAnimationFrame resume after "Jump to bottom" / scroll
- * into view — without it the offscreen-paused clock never re-subscribes.
- * Flip-only setState avoids the infinite layout loops the old ref-only design
- * was protecting against.
+ * Official does not setState on visibility flip. A local epoch/notify
+ * path caused Maximum update depth under MessagesBoundary on large resumes.
  *
  * @example
  * const [ref, entry] = useTerminalViewport()
@@ -120,11 +94,7 @@ export function useTerminalViewport(): [
   const terminalSize = useContext(TerminalSizeContext)
   const elementRef = useRef<DOMElement | null>(null)
   const entryRef = useRef<ViewportEntry>({ isVisible: true })
-  // Epoch bumps only when isVisible flips — forces useAnimationFrame (and
-  // other consumers) to re-render and re-subscribe to the animation clock.
-  const [, setVisibilityEpoch] = useState(0)
-  // densable a.current=e: pureCheck reads latest terminalSize without
-  // closing over a stale recompute dependency.
+  // densable a.current=e: latest terminalSize without stale recompute deps.
   const terminalSizeRef = useRef(terminalSize)
   terminalSizeRef.current = terminalSize
 
@@ -132,47 +102,33 @@ export function useTerminalViewport(): [
     elementRef.current = el
   }, [])
 
-  // densable o() — recompute with side effect; returns current visibility.
+  // densable D0 `s()` — ref-only; never setState.
   const recompute = useCallback((): boolean => {
-    const element = elementRef.current
-    const size = terminalSizeRef.current
-    if (!element?.yogaNode || !size) {
+    const visible = computeElementViewportVisibility(
+      elementRef.current,
+      terminalSizeRef.current,
+    )
+    if (visible === null) {
       return entryRef.current.isVisible
     }
-
-    const visible = computeElementViewportVisibility(element, size.rows)
     if (visible !== entryRef.current.isVisible) {
       entryRef.current = { isVisible: visible }
-      setVisibilityEpoch(n => n + 1)
     }
     return visible
   }, [])
 
-  // densable l() — pure F_u without mutating entry; null when unmeasurable.
+  // densable D0 `h` — pure ER; null when unmeasurable.
   const pureCheck = useCallback((): boolean | null => {
-    const element = elementRef.current
-    const size = terminalSizeRef.current
-    if (!element?.yogaNode || !size) {
-      return null
-    }
-    return computeElementViewportVisibility(element, size.rows)
+    return computeElementViewportVisibility(
+      elementRef.current,
+      terminalSizeRef.current,
+    )
   }, [])
 
-  // Runs on every render because yoga layout values can change
-  // without React being aware. Flip-only setState (above) keeps this safe.
+  // densable D0 `CR(()=>{s()})` — yoga can change without React knowing.
   useLayoutEffect(() => {
     recompute()
   })
-
-  // Imperative scroll (pill / PgDn / wheel) mutates scrollTop without
-  // re-rendering this consumer — recheck immediately after ScrollBox notify.
-  useEffect(
-    () =>
-      subscribeScrollVisibility(() => {
-        recompute()
-      }),
-    [recompute],
-  )
 
   return [setElement, entryRef.current, recompute, pureCheck]
 }

@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  beforeAll,
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import {
   existsSync,
   mkdirSync,
@@ -10,15 +19,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as cliRelaunchModule from '../../../utils/cliRelaunch.js'
 import { getClaudeConfigHomeDir } from '../../../utils/envUtils.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+mock.module('bun:bundle', bunBundleMock)
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: (v: unknown) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // `/tui on|off` runs the official oyt relaunch: acceptTuiRelaunch spawnSyncs a
 // replacement CLI and applyTuiRelaunchAfterSwitch then process.exit()s. Under
@@ -377,4 +386,12 @@ describe('densable 2.1.234 W4e/iyt refuse before persist', () => {
     expect(carry?.effort).toBe('high')
     expect(carry?.tasks?.a).toBeTruthy()
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

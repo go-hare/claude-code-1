@@ -1,0 +1,65 @@
+# Official 2.1.246 SEA — #55 GJn midstream continue
+# Local host landed (query + teo/Ar slot + producer). 09-16 promoted to HAVE.
+
+# GJn @214370857 — gate only. Local: isTruncatedAfterOutputRecovery.
+function GJn(e,t,n){
+  return e?.type==="assistant"
+    && e.isApiErrorMessage===!0
+    && e.truncatedAfterOutput===!0
+    && t.options.isNonInteractiveSession
+    && kl(n)==="main"
+    && we("tengu_truncated_response_recovery",!0)
+}
+
+# Neighbor qJn (already local leftover max_output_tokens_recovery):
+function qJn(e){return e?.type==="assistant"&&e.apiError==="max_output_tokens"}
+
+# WJn @214431057 — shared cap with max_output_tokens_recovery
+WJn=3
+
+# lQn host @214417526 — after qJn/thinking-block, before malformed_tool_use
+if(GJn(tt,z,l)){
+  if(ne<WJn){
+    ee("query_truncated_response_recovery","nudged",{attempt:ne+1})
+    y={messages:[...ve,...je,dt({
+      content:"Your response above was cut off mid-stream. Resume directly from where it stops — no apology, no recap. "
+        +"If none of it survived, answer the request from the start.",
+      isMeta:!0,turnCompanion:!0,now:m.now,uuidFn:m.uuid
+    })],
+    maxOutputTokensRecoveryCount:ne+1,
+    transition:{reason:"truncated_response_recovery",attempt:ne+1}}
+    continue
+  }
+  J("query_truncated_response_recovery","exhausted")
+  yield tt
+}
+
+# Producer write @217050118 — stall/sleep/server_error/connection finalize
+# yl = po||Cr (has output); Xr = has tool_use
+# Only true write of truncatedAfterOutput in the stream producer.
+yield Ar({
+  content: <stall/sleep/server/connection banner>,
+  error:"server_error",
+  truncatedAfterOutput: yl&&!Xr ? !0 : void 0
+})
+
+# Ar / teo @217910842 — field slot only (createAssistantAPIErrorMessage)
+function teo({...,truncatedAfterOutput:a,...}){return {...,truncatedAfterOutput:a,isApiErrorMessage:t}}
+function Ar({...,truncatedAfterOutput:i,...}){
+  let c=teo({...,isApiErrorMessage:!0,truncatedAfterOutput:i})
+  if(ceo(c))c.healsDistinctCarrier=!0
+  return c
+}
+
+# lDs @216975590 — transcript sanitize copies the field. Not a writer.
+
+# Official qJn recovery @214417073 also dt({isMeta:!0,turnCompanion:!0}).
+# Local leftover: GJn + field + lQn continue + producer write +
+# GJn/qJn dt turnCompanion landed.
+# Contract itself is leftover fallback. Neighbor qJn is leftover too.
+# DIG 2026-09-16 — ae/Ze official-same complete:
+# ae @209364706 + Ze @209364748 in messages.ts 1:1.
+# Official host is turn-tail ze() @209362700 (`ie(d)||Ze(e,s)`).
+# Local analyzeTurnTail calls isUserMessageWithPairedToolResultsOnly.
+# Official query.ts / GJn / lQn do not call Ze — same-shaped, complete.
+# #55 GJn contract leftover-wired. 09-16 promoted to HAVE.

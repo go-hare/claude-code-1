@@ -168,6 +168,7 @@ const {
   getQuotaAutoResumeRearmCap,
   getQuotaAutoResumeState,
   hasPendingQuotaContinuationInQueue,
+  isQuotaAutoResumeArmed,
   isQuotaAutoResumeArmedOrPending,
   isQuotaRearmEligibleRateLimit,
   cancelQuotaAutoResumeWithNotice,
@@ -178,6 +179,7 @@ const {
   isAutoContinueAtUsageLimitEffective,
   isAutoContinueAtUsageLimitToggleable,
   isQuotaRejectedForAutoContinue,
+  isQuotaAutoResumeWaiting,
   isQuotaWaitStale,
   offerArmQuotaAutoResume,
   refreshAutoContinueKeyPresence,
@@ -487,6 +489,28 @@ describe('quotaAutoResume densable 2.1.234', () => {
     expect(getQuotaAutoResumeState().phase).toBe('stale')
     expect(isQuotaWaitStale()).toBe(true)
     expect(getStaleQuotaWaitPrompt()).toBe(CONTINUATION_PROMPT)
+  })
+
+  test('Zt / Qze is armed-only — stale waiting does not count', () => {
+    resetQuotaAutoResumeForTests()
+    expect(isQuotaAutoResumeArmed()).toBe(false)
+    expect(isQuotaAutoResumeWaiting()).toBe(false)
+    armQuotaAutoResume(
+      Math.floor(Date.now() / 1000) - 10,
+      Date.now() - 120_000,
+      'dialog',
+    )
+    expect(isQuotaAutoResumeArmed()).toBe(true)
+    expect(isQuotaAutoResumeWaiting()).toBe(true)
+    const armed = getQuotaAutoResumeState()
+    expect(
+      tickQuotaAutoResume(
+        (armed as { fireAtMs: number }).fireAtMs + 31 * 60 * 1000,
+        false,
+      ),
+    ).toBe('stale')
+    expect(isQuotaAutoResumeArmed()).toBe(false)
+    expect(isQuotaAutoResumeWaiting()).toBe(true)
   })
 
   test('Axi cancel setting_off via setAutoContinueAtUsageLimitSetting(false)', () => {

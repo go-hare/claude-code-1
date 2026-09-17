@@ -1,0 +1,29 @@
+# Official 2.1.246 SEA — mXn r6 binding (was "name collision")
+#
+# Call: mXn @214229333  if(!dXn(s)||r6(s))return r
+# Same ESM file imports:  ged as r6  from _815.js  @211490198
+# _815 export map @205155433:  we as ged
+# we @205147424:
+#   function we(t){
+#     if(t.type!=="user")return!1;
+#     let e=t.message?.content;
+#     return Array.isArray(e)&&e.some((r)=>
+#       r?.type==="text"&&typeof r.text==="string"&&r.text.startsWith(`<${xt}>`))
+#   }
+# we-module imports:  Ekd as xt  from _825.js  @205100827
+# _825 export map @205093680:  Am as Ekd
+# Am @205058495:  function Am(){return n()}  // session getter, not a tag string
+#
+# Runtime: `<${xt}>` stringifies the function. No user text starts with that.
+# r6(s) is always false. ||r6(s) never aborts inject.
+#
+# Nearby after we: de="command-name" — NOT the xt we closes over.
+# Do not invent r6 = isCompactSummary or command-name.
+# Omit the guard (same observable as official).
+#
+# Official aE (normalize module, @217929949) — NOT r6:
+#   function aE(e){
+#     if(e.type==="api_system")return!1;
+#     return e.type==="progress"||e.type==="system"&&!ieo(e)||vj(e)||EJe(e)
+#   }
+#   ieo = local_command   vj = isVirtual   EJe = synthetic api error

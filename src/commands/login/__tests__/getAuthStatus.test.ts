@@ -12,6 +12,7 @@ import {
   beforeEach,
   afterEach,
 } from 'bun:test'
+import { authMock } from '../../../../tests/mocks/auth.js'
 import { logMock } from '../../../../tests/mocks/log'
 import { debugMock } from '../../../../tests/mocks/debug'
 import {
@@ -21,6 +22,7 @@ import {
 
 import * as realSettings from 'src/utils/settings/settings.js'
 import * as realConfig from 'src/utils/config.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 // Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
 const settingsSnap = snapshotModuleExports(realSettings)
@@ -31,7 +33,7 @@ const realGetGlobalConfig =
 // Mock side-effect modules before importing subject
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 mock.module('src/utils/settings/settings.js', () => ({
   ...settingsSnap,
   getCachedOrDefaultSettings: () => ({}),
@@ -55,7 +57,26 @@ afterAll(() => {
   ])
   mock.module('src/utils/config.ts', () => ({ ...configSnap }))
   mock.module('src/utils/config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/auth.ts', authMock)
 })
+
+function statusAuthMock(
+  overrides: {
+    getClaudeAIOAuthTokens?: () => unknown
+    hasAnthropicApiKeyAuth?: () => boolean
+    isAnthropicAuthEnabled?: () => boolean
+    getSubscriptionType?: () => string | null
+  } = {},
+) {
+  return {
+    ...authMock(),
+    getClaudeAIOAuthTokens: () => null,
+    hasAnthropicApiKeyAuth: () => false,
+    isAnthropicAuthEnabled: () => false,
+    getSubscriptionType: () => null,
+    ...overrides,
+  }
+}
 
 // We mock auth.ts getClaudeAIOAuthTokens to return controlled values
 // per test — we mock getClaudeAIOAuthTokens from within the test using spies
@@ -100,12 +121,7 @@ describe('getAuthStatus', () => {
   })
 
   test('subscription.active=false when no OAuth tokens present', async () => {
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => false,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () => statusAuthMock())
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     expect(status.subscription.active).toBe(false)
@@ -113,12 +129,13 @@ describe('getAuthStatus', () => {
   })
 
   test('subscription.active=true and plan=pro when OAuth tokens present with subscriptionType=pro', async () => {
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => SUBSCRIPTION_TOKEN_FIXTURE,
-      hasAnthropicApiKeyAuth: () => false,
-      isAnthropicAuthEnabled: () => true,
-      getSubscriptionType: () => 'pro',
-    }))
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        getClaudeAIOAuthTokens: () => SUBSCRIPTION_TOKEN_FIXTURE,
+        isAnthropicAuthEnabled: () => true,
+        getSubscriptionType: () => 'pro',
+      }),
+    )
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     expect(status.subscription.active).toBe(true)
@@ -126,12 +143,7 @@ describe('getAuthStatus', () => {
   })
 
   test('workspaceKey.set=false when ANTHROPIC_API_KEY not set', async () => {
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => false,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () => statusAuthMock())
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     expect(status.workspaceKey.set).toBe(false)
@@ -144,12 +156,11 @@ describe('getAuthStatus', () => {
     // 52-char key: prefix (14) + 38 chars
     process.env.ANTHROPIC_API_KEY =
       'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => true,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        hasAnthropicApiKeyAuth: () => true,
+      }),
+    )
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     expect(status.workspaceKey.set).toBe(true)
@@ -166,12 +177,11 @@ describe('getAuthStatus', () => {
   test('workspaceKey.prefixValid=false when key has wrong prefix', async () => {
     process.env.ANTHROPIC_API_KEY =
       'sk-wrong-prefix-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => true,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        hasAnthropicApiKeyAuth: () => true,
+      }),
+    )
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     expect(status.workspaceKey.set).toBe(true)
@@ -182,12 +192,11 @@ describe('getAuthStatus', () => {
     // Build a key: sk-ant-api03- (14 chars) + ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567 (34 chars) = 48 chars total
     const key = 'sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567'
     process.env.ANTHROPIC_API_KEY = key
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => true,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        hasAnthropicApiKeyAuth: () => true,
+      }),
+    )
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     const preview = status.workspaceKey.keyPreview
@@ -208,12 +217,11 @@ describe('getAuthStatus', () => {
 
   test('workspaceKey.source=env when ANTHROPIC_API_KEY env var is set', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant-api03-' + 'X'.repeat(50)
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => true,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        hasAnthropicApiKeyAuth: () => true,
+      }),
+    )
     mock.module('src/utils/config.ts', () =>
       configMock('sk-ant-api03-' + 'Y'.repeat(50)),
     )
@@ -228,12 +236,7 @@ describe('getAuthStatus', () => {
 
   test('workspaceKey.source=settings when only workspaceApiKey in config is set', async () => {
     delete process.env.ANTHROPIC_API_KEY
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => false,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () => statusAuthMock())
     mock.module('src/utils/config.ts', () =>
       configMock('sk-ant-api03-' + 'Z'.repeat(50)),
     )
@@ -249,12 +252,7 @@ describe('getAuthStatus', () => {
 
   test('workspaceKey.source=null when neither env nor settings has a key', async () => {
     delete process.env.ANTHROPIC_API_KEY
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => false,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () => statusAuthMock())
     mock.module('src/utils/config.ts', () => configMock(undefined))
     mock.module('src/utils/config.js', () => configMock(undefined))
     const { getAuthStatus } = await import('../getAuthStatus.js')
@@ -265,12 +263,11 @@ describe('getAuthStatus', () => {
 
   test('env takes precedence over settings when both are set', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant-api03-FROMENV' + 'E'.repeat(40)
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => null,
-      hasAnthropicApiKeyAuth: () => true,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        hasAnthropicApiKeyAuth: () => true,
+      }),
+    )
     mock.module('src/utils/config.ts', () =>
       configMock('sk-ant-api03-FROMSETTINGS' + 'S'.repeat(40)),
     )
@@ -290,30 +287,28 @@ describe('getAuthStatus', () => {
   // configuration. See AuthPlaneSummary.tsx for the rationale.
 
   test('subscription with non-standard subscriptionType → plan="unknown"', async () => {
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => ({
-        ...SUBSCRIPTION_TOKEN_FIXTURE,
-        subscriptionType: 'lifetime-deluxe',
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        getClaudeAIOAuthTokens: () => ({
+          ...SUBSCRIPTION_TOKEN_FIXTURE,
+          subscriptionType: 'lifetime-deluxe',
+        }),
       }),
-      hasAnthropicApiKeyAuth: () => false,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    )
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     expect(status.subscription.plan).toBe('unknown')
   })
 
   test('subscription with subscriptionType=null → plan=null', async () => {
-    mock.module('src/utils/auth.ts', () => ({
-      getClaudeAIOAuthTokens: () => ({
-        ...SUBSCRIPTION_TOKEN_FIXTURE,
-        subscriptionType: null,
+    mock.module('src/utils/auth.ts', () =>
+      statusAuthMock({
+        getClaudeAIOAuthTokens: () => ({
+          ...SUBSCRIPTION_TOKEN_FIXTURE,
+          subscriptionType: null,
+        }),
       }),
-      hasAnthropicApiKeyAuth: () => false,
-      isAnthropicAuthEnabled: () => false,
-      getSubscriptionType: () => null,
-    }))
+    )
     const { getAuthStatus } = await import('../getAuthStatus.js')
     const status = getAuthStatus()
     expect(status.subscription.plan).toBeNull()

@@ -31,7 +31,10 @@ export function toInternalMessages(
   return messages.flatMap(message => {
     if (!message) return []
     switch (message.type) {
-      case 'assistant':
+      case 'assistant': {
+        const batchToolUses = (
+          message as { batch_tool_uses?: { id: string; name: string }[] }
+        ).batch_tool_uses
         return [
           {
             type: 'assistant',
@@ -39,8 +42,11 @@ export function toInternalMessages(
             uuid: message.uuid,
             requestId: undefined,
             timestamp: new Date().toISOString(),
+            ...(batchToolUses !== undefined &&
+              batchToolUses.length > 0 && { batchToolUses }),
           } as Message,
         ]
+      }
       case 'user':
         return [
           {
@@ -145,19 +151,23 @@ export function toSDKMessages(messages: Message[]): SDKMessage[] {
   return messages.flatMap((message): SDKMessage[] => {
     if (!message) return []
     switch (message.type) {
-      case 'assistant':
+      case 'assistant': {
+        const assistant = message as AssistantMessage
         return [
           {
             type: 'assistant',
-            message: normalizeAssistantMessageForSDK(
-              message as AssistantMessage,
-            ),
+            message: normalizeAssistantMessageForSDK(assistant),
             session_id: getSessionId(),
             parent_tool_use_id: null,
             uuid: message.uuid,
             error: message?.error,
+            ...(assistant.batchToolUses !== undefined &&
+              assistant.batchToolUses.length > 0 && {
+                batch_tool_uses: assistant.batchToolUses,
+              }),
           },
         ]
+      }
       case 'user':
         return [
           {

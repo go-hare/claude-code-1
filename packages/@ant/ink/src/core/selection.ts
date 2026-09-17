@@ -10,7 +10,11 @@
  * the cursor is now). The rendered highlight normalizes to start ≤ end.
  */
 
+import type { DOMElement } from './dom.js'
+import { hitTest } from './hit-test.js'
 import { clamp } from './layout/geometry.js'
+import { LayoutEdge } from './layout/node.js'
+import { nodeCache } from './node-cache.js'
 import type { Screen, StylePool } from './screen.js'
 import { CellWidth, cellAt, cellAtIndex, setCellStyleId } from './screen.js'
 
@@ -18,6 +22,49 @@ type Point = { col: number; row: number }
 
 /** densable d7a `scope` — column box `{x1,x2}` + optional official `node`. */
 export type SelectionScope = { x1: number; x2: number; node?: unknown }
+
+/**
+ * densable `Cy(root, col, row)` @209926644.
+ * Xa hit-test, first `selectionScope` ancestor seeds x1/x2 (yoga L/R
+ * border+padding inset), overflow hidden/scroll parents clamp.
+ */
+export function selectionScopeAt(
+  root: DOMElement,
+  col: number,
+  row: number,
+): SelectionScope | undefined {
+  let node: DOMElement | undefined = hitTest(root, col, row) ?? undefined
+  let scope: SelectionScope | undefined
+  while (node) {
+    const layout = nodeCache.get(node)
+    if (layout) {
+      const x1 = Math.floor(layout.x)
+      const x2 = Math.floor(layout.x + layout.width)
+      if (!scope) {
+        if (node.style.selectionScope) {
+          const yoga = node.yogaNode
+          const insetLeft = yoga
+            ? yoga.getComputedBorder(LayoutEdge.Left) +
+              yoga.getComputedPadding(LayoutEdge.Left)
+            : 0
+          const insetRight = yoga
+            ? yoga.getComputedBorder(LayoutEdge.Right) +
+              yoga.getComputedPadding(LayoutEdge.Right)
+            : 0
+          scope = { x1: x1 + insetLeft, x2: x2 - insetRight, node }
+        }
+      } else {
+        const overflow = node.style.overflowX ?? node.style.overflow
+        if (overflow === 'hidden' || overflow === 'scroll') {
+          scope.x1 = Math.max(scope.x1, x1)
+          scope.x2 = Math.min(scope.x2, x2)
+        }
+      }
+    }
+    node = node.parentNode
+  }
+  return scope && scope.x2 > scope.x1 ? scope : undefined
+}
 
 export type SelectionState = {
   /** Where the mouse-down occurred. Null when no selection. */

@@ -1,0 +1,85 @@
+# Official 2.1.246 SEA — QOs / qXe / eHr / Qzr / lWt / Pwe
+# Offsets: lWt @216968319  QOs @216968429  qXe @216969249
+#          eHr @216969587  Qzr @216969101  Jzr @216972968
+# Stream receive (after Owe heal), 3 hosts:
+#   @217036514  content_block → assistant
+#   @217056030  message complete
+#   @217058621  fallback/retry complete
+# qXe(Owe(...), tools) — 2 args; QOs third arg n is undefined.
+# Send: normalize assistant case B=eHr(j.message.content, j.batchToolUses, t) @217934973
+# Tools list: v=Qzr(T) after search filter @217001833
+# Persist: batch_tool_uses ↔ batchToolUses (length>0 only)
+# H5s merge does NOT concat batchToolUses ({...first}). Do not invent.
+# JOs=new dn(()=>new Set); one reassemble_threw per id per host.
+
+function lWt(e,t){return`${e}_${t}`}
+function Pwe(e){let t=Jzr.exec(e);return t?e.slice(0,-t[0].length):void 0}
+Jzr=/_(\d+)$/
+
+function QOs(e,t,n){
+  let r=fs(t,e.name,n);
+  if(r===void 0||!NI(r))return null;
+  let o=(s)=>(ee("batch_tools",s,{tool_name:gr(r.name),isMcp:!1}),
+    [{type:"tool_use",id:lWt(e.id,0),name:r.name,input:e.input,
+      ...e.caller!==void 0&&{caller:e.caller}}]);
+  try{
+    let s=r.inputSchema.safeParse(e.input);
+    if(!s.success)return{synthetics:o("parse_failed"),decomposed:!1};
+    let{v1Tool:i,entries:a}=r.perEntryHookInputs(s.data);
+    if(a.length===0)return{synthetics:o("zero_entries"),decomposed:!1};
+    return{decomposed:!0,synthetics:a.map((l,c)=>({
+      type:"tool_use",id:lWt(e.id,c),name:i.name,input:l,
+      ...e.caller!==void 0&&{caller:e.caller}}))}
+  }catch{return{synthetics:o("per_entry_threw"),decomposed:!1}}
+}
+
+function Qzr(e){
+  let t;
+  for(let n of e)if(NI(n))t??=new Set,t.add(n.underlyingV1ToolName);
+  if(t===void 0)return e;
+  return e.filter((n)=>!t.has(n.name))
+}
+
+function qXe(e,t,n){
+  let r,o=[];
+  for(let s=0;s<e.length;s++){
+    let i=e[s];
+    if(i.type!=="tool_use"){r?.push(i);continue}
+    let a=QOs(i,t,n);
+    if(a===null){r?.push(i);continue}
+    if(r??=e.slice(0,s),r.push(...a.synthetics),a.decomposed)
+      o.push({id:i.id,name:i.name}),
+      le("batch_tools",{tool_name:gr(i.name),isMcp:!1})
+  }
+  return{content:r??e,batchToolUses:o}
+}
+
+function eHr(e,t,n){
+  if(t===void 0||t.length===0)return e;
+  let r=new Map;
+  for(let a of t)if(!r.has(a.id))r.set(a.id,a);
+  let o=new Map;
+  for(let a of r.values()){
+    let l=fs(n,a.name);
+    if(l===void 0||!NI(l))continue;
+    let c=[],u;
+    for(let d of e)if(d.type==="tool_use"&&Pwe(d.id)===a.id)u??=d,c.push(d.input);
+    try{o.set(a.id,{type:"tool_use",id:a.id,name:a.name,input:l.reassemble(c),...u?.caller!==void 0&&{caller:u.caller}})}
+    catch{let d=JOs.of(hn().host);if(!d.has(a.id))d.add(a.id),ee("batch_tools","reassemble_threw",{tool_name:gr(a.name),isMcp:!1})}
+  }
+  let s=new Set,i=[];
+  for(let a of e){
+    if(a.type==="tool_use"){
+      let l=Pwe(a.id);
+      if(l!==void 0&&o.has(l)){
+        if(!s.has(l))s.add(l),i.push(o.get(l));
+        continue
+      }
+    }
+    i.push(a)
+  }
+  return i
+}
+
+# Local: tHr / Pwe / lWt / jh + QOs/qXe/eHr/Qzr hosts
+# HAVE 246 #38. No default toasty copy. Omit dead r6.

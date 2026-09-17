@@ -1,10 +1,12 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { beforeAll, afterAll, describe, expect, mock, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 describe('resumeAgent', () => {
   test('module exports resumeAgentBackground', async () => {
@@ -244,4 +246,12 @@ describe('resumeAgent', () => {
     expect(src).toContain('agent:observer:')
     expect(src).toContain('resumeQuerySource')
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

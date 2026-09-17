@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
+import { logMock } from '../../../tests/mocks/log.js'
 import {
   startToolHeartbeat,
   TOOL_HEARTBEAT_INTERVAL_MS,
@@ -7,10 +8,7 @@ import {
 } from '../toolHeartbeat.js'
 
 // Avoid bootstrap side effects from logError path
-mock.module('src/utils/log.ts', () => ({
-  logError: () => {},
-  logEvent: () => {},
-}))
+mock.module('src/utils/log.ts', logMock)
 
 describe('startToolHeartbeat (densable _Lu / Pss)', () => {
   afterEach(() => {

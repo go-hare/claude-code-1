@@ -35,12 +35,13 @@ mock.module('src/utils/settings/settings.js', settingsMock)
 mock.module('../settings/settings.js', settingsMock)
 
 const realConstants = await import('src/utils/settings/constants.js')
+const constantsSnap = snapshotModuleExports(realConstants)
 mock.module('src/utils/settings/constants.js', () => ({
-  ...realConstants,
+  ...constantsSnap,
   isSettingSourceEnabled: () => true,
 }))
 mock.module('../settings/constants.js', () => ({
-  ...realConstants,
+  ...constantsSnap,
   isSettingSourceEnabled: () => true,
 }))
 
@@ -95,6 +96,8 @@ afterAll(() => {
   mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
   mock.module('src/utils/ripgrep.js', () => ({ ...ripgrepSnap }))
   mock.module('src/utils/hostProxyPorts.js', () => ({ ...hostProxySnap }))
+  mock.module('src/utils/settings/constants.js', () => ({ ...constantsSnap }))
+  mock.module('../settings/constants.js', () => ({ ...constantsSnap }))
 })
 
 describe('densable 2.1.229 #26 IPv6 domain warnings', () => {

@@ -63,11 +63,13 @@ export const call: LocalCommandCall = async (args, context) => {
     forced: force && cacheImpact.wouldInvalidateCache,
   })
 
-  const r = await refreshActivePlugins(context.setAppState)
+  const r = await refreshActivePlugins(context.setAppState, {
+    applyStagedInstalls: false,
+  })
 
   const parts = [
     n(r.enabled_count, 'plugin'),
-    n(r.command_count, 'skill'),
+    n(r.command_count + r.skill_count, 'skill'),
     n(r.agent_count, 'agent'),
     n(r.hook_count, 'hook'),
     // "plugin MCP/LSP" disambiguates from user-config/built-in servers,

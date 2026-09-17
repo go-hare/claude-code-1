@@ -1,14 +1,9 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
 
-const analyticsSnap = {
-  logEvent: () => {},
-}
-
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: analyticsSnap.logEvent,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 import { enterTeammateView } from '../teammateViewHelpers.js'
 import type { AppState } from '../AppState.js'
@@ -25,18 +20,6 @@ function apply(
 }
 
 describe('enterTeammateView', () => {
-  beforeAll(() => {
-    mock.module('src/services/analytics/index.js', () => ({
-      ...analyticsSnap,
-    }))
-  })
-
-  afterAll(() => {
-    mock.module('src/services/analytics/index.js', () => ({
-      ...analyticsSnap,
-    }))
-  })
-
   test('unknown task id does not set viewingAgentTaskId (no flash auto-exit)', () => {
     const prev = {
       tasks: {},

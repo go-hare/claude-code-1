@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import { statSync } from 'fs'
+import { statSync, type Stats } from 'fs'
 import { lstat, readdir, readFile, realpath, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
@@ -13,6 +13,7 @@ import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { isFsInaccessible } from './errors.js'
 import { normalizePathForComparison } from './file.js'
+import { realpathSyncCanonical } from './fsOperations.js'
 import type { FrontmatterData } from './frontmatterParser.js'
 import { parseFrontmatter } from './frontmatterParser.js'
 import { findCanonicalGitRoot, findGitRoot } from './git.js'
@@ -231,6 +232,40 @@ function resolveStopBoundary(cwd: string): string | null {
  * @param cwd Current working directory to start from
  * @returns Array of directory paths containing .claude/subdir, from most specific (cwd) to least specific
  */
+/**
+ * Compare dirs across Windows 8.3 short names (ADMINI~1 vs Administrator).
+ * Plain resolve/normalize leave tmpdir's short form unequal to os.homedir().
+ * `onUnresolved: 'same'` fail-closes the home stop so a realpath error cannot
+ * walk past home into `~/.claude/skills` as projectSettings.
+ */
+function sameCanonicalDir(
+  a: string,
+  b: string,
+  onUnresolved: 'same' | 'different' = 'different',
+): boolean {
+  if (normalizePathForComparison(a) === normalizePathForComparison(b)) {
+    return true
+  }
+  try {
+    return (
+      normalizePathForComparison(realpathSyncCanonical(a)) ===
+      normalizePathForComparison(realpathSyncCanonical(b))
+    )
+  } catch {
+    try {
+      const sa: Stats = statSync(a)
+      const sb: Stats = statSync(b)
+      // Trusted identity when both inodes are non-zero; otherwise fall through.
+      if (Number(sa.ino) !== 0 && Number(sb.ino) !== 0) {
+        return sa.dev === sb.dev && sa.ino === sb.ino
+      }
+    } catch {
+      // fall through
+    }
+    return onUnresolved === 'same'
+  }
+}
+
 export function getProjectDirsUpToHome(
   subdir: ClaudeConfigDirectory,
   cwd: string,
@@ -243,10 +278,9 @@ export function getProjectDirsUpToHome(
   // Traverse from current directory up to git root (or home if not in a git repo)
   while (true) {
     // Stop if we've reached the home directory (don't check it, as it's loaded separately as userDir)
-    // Use normalized comparison to handle Windows drive letter casing (C:\ vs c:\)
-    if (
-      normalizePathForComparison(current) === normalizePathForComparison(home)
-    ) {
+    // Use canonical comparison so Windows 8.3 (ADMINI~1) matches long home path.
+    // Unresolved → treat as home (fail-closed against leaking user skills).
+    if (sameCanonicalDir(current, home, 'same')) {
       break
     }
 
@@ -266,11 +300,7 @@ export function getProjectDirsUpToHome(
 
     // Stop after processing the git root directory - this prevents commands from parent
     // directories outside the repository from appearing in the project
-    if (
-      gitRoot &&
-      normalizePathForComparison(current) ===
-        normalizePathForComparison(gitRoot)
-    ) {
+    if (gitRoot && sameCanonicalDir(current, gitRoot)) {
       break
     }
 

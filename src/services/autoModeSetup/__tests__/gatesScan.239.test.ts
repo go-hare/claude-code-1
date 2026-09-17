@@ -1,7 +1,24 @@
 /**
  * densable gates + AutoModeScanTask smoke.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import * as realClassifierModel from '../classifierModel.js'
+
+const classifierModelSnap = snapshotModuleExports(realClassifierModel)
 import {
   SUMMARY_TAG,
   TASK_NOTIFICATION_TAG,
@@ -16,11 +33,19 @@ import {
   resetCommandQueue,
 } from '../../../utils/messageQueueManager.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (name: string) => name === 'TRANSCRIPT_CLASSIFIER',
-}))
+mock.module('bun:bundle', bunBundleMock)
+let popGatesFeature: (() => void) | undefined
+beforeAll(() => {
+  popGatesFeature = pushFeatureOverride(
+    (name: string) => name === 'TRANSCRIPT_CLASSIFIER',
+  )
+})
+afterAll(() => {
+  popGatesFeature?.()
+})
 
 mock.module('../classifierModel.js', () => ({
+  ...classifierModelSnap,
   resolveAutoModeSetupClassifierModel: () => 'claude-sonnet-4-5',
 }))
 

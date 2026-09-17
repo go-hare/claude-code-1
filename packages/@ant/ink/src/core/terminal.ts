@@ -172,6 +172,11 @@ export function isXtermJs(): boolean {
   return xtversionName?.startsWith('xterm.js') ?? false
 }
 
+/** densable `ME` / `Ln` — XTVERSION ghostty (SSH-safe; not TERM_PROGRAM). */
+export function isGhosttyXtversion(): boolean {
+  return xtversionName?.toLowerCase().startsWith('ghostty') ?? false
+}
+
 // Terminals known to correctly implement the Kitty keyboard protocol
 // (CSI >1u) and/or xterm modifyOtherKeys (CSI >4;2m) for ctrl+shift+<letter>
 // disambiguation. We previously enabled unconditionally (#23350), assuming

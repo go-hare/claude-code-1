@@ -37,8 +37,9 @@ import { PermissionRuleInput } from './PermissionRuleInput.js';
 import { RecentDenialsTab } from './RecentDenialsTab.js';
 import { RemoveWorkspaceDirectory } from './RemoveWorkspaceDirectory.js';
 import { WorkspaceTab } from './WorkspaceTab.js';
+import { AutoModeRulesTab } from './AutoModeRulesTab.js';
 
-type TabType = 'recent' | 'allow' | 'ask' | 'deny' | 'workspace';
+type TabType = 'recent' | 'allow' | 'ask' | 'deny' | 'automode' | 'workspace';
 
 type RuleSourceTextProps = {
   rule: PermissionRule;
@@ -313,6 +314,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
             return askRulesByKey;
           case 'workspace':
           case 'recent':
+          case 'automode':
             return new Map<string, PermissionRule>();
         }
       })();
@@ -320,7 +322,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
       const options: Option[] = [];
 
       // Only show "Add a new rule" for allow and deny tabs (and not when searching)
-      if (tab !== 'workspace' && tab !== 'recent' && !query) {
+      if (tab !== 'workspace' && tab !== 'recent' && tab !== 'automode' && !query) {
         options.push({
           label: `Add a new rule${figures.ellipsis}`,
           value: 'add-new-rule',
@@ -546,7 +548,12 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
     return <RuleDetails rule={selectedRule} onDelete={handleDeleteRule} onCancel={() => setSelectedRule(undefined)} />;
   }
 
-  if (addingRuleToTab && addingRuleToTab !== 'workspace' && addingRuleToTab !== 'recent') {
+  if (
+    addingRuleToTab &&
+    addingRuleToTab !== 'workspace' &&
+    addingRuleToTab !== 'recent' &&
+    addingRuleToTab !== 'automode'
+  ) {
     return (
       <PermissionRuleInput
         onCancel={handleRuleInputCancel}
@@ -656,30 +663,39 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
           initialHeaderFocused={!hasDenials}
           navFromContent={!isSearchMode}
         >
-          <Tab id="recent" title="Recently denied">
-            <RecentDenialsTab onHeaderFocusChange={handleHeaderFocusChange} onStateChange={handleDenialStateChange} />
-          </Tab>
-          <Tab id="allow" title="Allow">
-            <PermissionRulesTab tab="allow" {...sharedRulesProps} />
-          </Tab>
-          <Tab id="ask" title="Ask">
-            <PermissionRulesTab tab="ask" {...sharedRulesProps} />
-          </Tab>
-          <Tab id="deny" title="Deny">
-            <PermissionRulesTab tab="deny" {...sharedRulesProps} />
-          </Tab>
-          <Tab id="workspace" title="Workspace">
-            <Box flexDirection="column">
-              <Text>Claude Code can read files in the workspace, and make edits when auto-accept edits is on.</Text>
-              <WorkspaceTab
-                onExit={onExit}
-                toolPermissionContext={toolPermissionContext}
-                onRequestAddDirectory={handleRequestAddDirectory}
-                onRequestRemoveDirectory={handleRequestRemoveDirectory}
-                onHeaderFocusChange={handleHeaderFocusChange}
-              />
-            </Box>
-          </Tab>
+          {[
+            <Tab key="recent" id="recent" title="Recently denied">
+              <RecentDenialsTab onHeaderFocusChange={handleHeaderFocusChange} onStateChange={handleDenialStateChange} />
+            </Tab>,
+            <Tab key="allow" id="allow" title="Allow">
+              <PermissionRulesTab tab="allow" {...sharedRulesProps} />
+            </Tab>,
+            <Tab key="ask" id="ask" title="Ask">
+              <PermissionRulesTab tab="ask" {...sharedRulesProps} />
+            </Tab>,
+            <Tab key="deny" id="deny" title="Deny">
+              <PermissionRulesTab tab="deny" {...sharedRulesProps} />
+            </Tab>,
+            ...(toolPermissionContext.isAutoModeAvailable !== false
+              ? [
+                  <Tab key="automode" id="automode" title="Auto mode">
+                    <AutoModeRulesTab searchQuery={searchQuery} isFocused={isTerminalFocused} />
+                  </Tab>,
+                ]
+              : []),
+            <Tab key="workspace" id="workspace" title="Workspace">
+              <Box flexDirection="column">
+                <Text>Claude Code can read files in the workspace, and make edits when auto-accept edits is on.</Text>
+                <WorkspaceTab
+                  onExit={onExit}
+                  toolPermissionContext={toolPermissionContext}
+                  onRequestAddDirectory={handleRequestAddDirectory}
+                  onRequestRemoveDirectory={handleRequestRemoveDirectory}
+                  onHeaderFocusChange={handleHeaderFocusChange}
+                />
+              </Box>
+            </Tab>,
+          ]}
         </Tabs>
         <Box marginTop={1} paddingLeft={1}>
           <Text dimColor>

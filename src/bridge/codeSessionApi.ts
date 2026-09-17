@@ -105,6 +105,32 @@ export function classifyCodeSessionCreateStatus(
   }
 }
 
+/** densable untrustedDeviceHint / HKe default. */
+export const UNTRUSTED_DEVICE_HINT =
+  'this device is not enrolled as a trusted device; run /login to enroll'
+
+/** densable kz session_stale_relogin. */
+export const SESSION_STALE_RELOGIN_DETAIL =
+  'session expired for trusted-device check — run /login to re-authenticate'
+
+/**
+ * densable kz — user-facing /bridge + unarchive elevated-auth copy.
+ */
+export function formatBridgeCredentialFailure(
+  failure: BridgeCredentialTerminalFailure,
+): string {
+  switch (failure.reason) {
+    case 'untrusted_device':
+      return UNTRUSTED_DEVICE_HINT
+    case 'session_stale_relogin':
+      return SESSION_STALE_RELOGIN_DETAIL
+    case 'request_rejected':
+      return `Remote Control server rejected the request (HTTP ${failure.status}) — run /remote-control to retry`
+    default:
+      return formatCodeSessionCreateFailure(failure)
+  }
+}
+
 /**
  * densable `mr(Vr)` — user-facing session-create failure copy.
  * `requestedGrouping` ≈ `_e`; `groupingId` ≈ `vt` (must be set for grouping copy).
@@ -325,7 +351,14 @@ export async function unarchiveCodeSession(
   timeoutMs: number,
   /** Optional: inject trusted-device header (CLI path). */
   trustedDeviceToken?: string,
-): Promise<number | 'timeout' | 'error' | 'invalid'> {
+): Promise<
+  | number
+  | 'timeout'
+  | 'error'
+  | 'invalid'
+  | 'untrusted_device'
+  | 'session_stale_relogin'
+> {
   if (!sessionId) return 'invalid'
   const compatId = toCompatSessionId(sessionId)
   if (!compatId) return 'invalid'
@@ -348,6 +381,19 @@ export async function unarchiveCodeSession(
     logForDebugging(
       `[code-session] Unarchive ${compatId} status=${response.status}`,
     )
+    // densable E2d a==="elevated_auth": 403 resource tokens, not status.
+    if (response.status === 403) {
+      const resource = extractBridge403Resource(
+        response.data,
+        extractErrorDetail(response.data),
+      )
+      if (
+        resource === 'untrusted_device' ||
+        resource === 'session_stale_relogin'
+      ) {
+        return resource
+      }
+    }
     return response.status
   } catch (err: unknown) {
     logForDebugging(

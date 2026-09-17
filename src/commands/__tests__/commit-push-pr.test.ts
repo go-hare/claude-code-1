@@ -10,12 +10,11 @@ import {
 import type { Command } from '../../commands.js'
 import * as realGit from '../../utils/git.js'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import { bunBundleMock } from '../../../tests/mocks/bunBundle.js'
 
 const gitSnap = snapshotModuleExports(realGit)
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 mock.module('src/utils/attribution.ts', () => ({
   getAttributionTexts: () => ({ commit: '', pr: '' }),

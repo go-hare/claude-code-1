@@ -13,7 +13,6 @@ import {
   sep,
 } from 'path'
 import { logEvent } from 'src/services/analytics/index.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getCwd } from '../utils/cwd.js'
 import { logForDebugging } from './debug.js'
 import { isENOENT, isFsInaccessible } from './errors.js'
@@ -277,6 +276,42 @@ export async function suggestPathUnderCwd(
   }
 }
 
+export const COMPACT_LINE_PREFIX_KILLSWITCH =
+  'tengu_compact_line_prefix_killswitch'
+
+export type FileGateReader = (gate: string, fallback: boolean) => boolean
+
+class FileGateSlot {
+  reader: FileGateReader | null = null
+  register(next: FileGateReader | null): FileGateReader | null {
+    const prev = this.reader
+    this.reader = next
+    return prev
+  }
+}
+
+const gateSlot = new FileGateSlot()
+
+/**
+ * Swap the feature-gate reader; returns the previous. Mirrors
+ * `registerAccountOnHoldGateReader` (densable `de`).
+ *
+ * This module used to import `getFeatureValue_CACHED_MAY_BE_STALE` directly.
+ * That single edge pulled the whole analytics/auth tree in and put `file.ts`
+ * — and through it `settings/settings.ts` — inside the 770-module import
+ * cycle. Reversing the direction drops `file.ts` to 36 modules and
+ * `settings.ts` to 91. See docs/task/task-017-session-storage-hub-split.md.
+ *
+ * No reader registered reads the same as an unwarmed GrowthBook cache: the
+ * caller's fallback. `getFeatureValue_CACHED_MAY_BE_STALE` makes no stronger
+ * promise — `_CACHED_MAY_BE_STALE` is in its name.
+ */
+export function registerFileGateReader(
+  reader: FileGateReader | null,
+): FileGateReader | null {
+  return gateSlot.register(reader)
+}
+
 /**
  * Whether to use the compact line-number prefix format (`N\t` instead of
  * `     N→`). The padded-arrow format costs 9 bytes/line overhead; at
@@ -289,10 +324,13 @@ export async function suggestPathUnderCwd(
 export function isCompactLinePrefixEnabled(): boolean {
   // 3P default: killswitch off = compact format enabled. Client-side only —
   // no server support needed, safe for Bedrock/Vertex/Foundry.
-  return !getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_compact_line_prefix_killswitch',
-    false,
-  )
+  const reader = gateSlot.reader
+  if (!reader) return true
+  try {
+    return !reader(COMPACT_LINE_PREFIX_KILLSWITCH, false)
+  } catch {
+    return true
+  }
 }
 
 /**

@@ -23,6 +23,16 @@ import {
 
 const temps: string[] = []
 
+/** Windows without Developer Mode refuses symlinks; skip those assertions. */
+async function trySymlink(target: string, path: string): Promise<boolean> {
+  try {
+    await symlink(target, path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 afterEach(async () => {
   await Promise.all(
     temps.splice(0).map(p => rm(p, { recursive: true, force: true })),
@@ -38,7 +48,7 @@ describe('densable 2.1.228 #9 plugin symlink orphan skip', () => {
     const linkVersion = join(root, 'link-version')
     await mkdir(realVersion)
     await writeFile(join(realVersion, 'plugin.json'), '{}', 'utf8')
-    await symlink(realVersion, linkVersion)
+    if (!(await trySymlink(realVersion, linkVersion))) return
 
     expect(await readlink(linkVersion)).toBe(realVersion)
 
@@ -72,7 +82,7 @@ describe('densable 2.1.228 #9 plugin symlink orphan skip', () => {
     const realVersion = join(root, 'real-1.0.0')
     const linkVersion = join(root, '1.0.0')
     await mkdir(realVersion)
-    await symlink(realVersion, linkVersion)
+    if (!(await trySymlink(realVersion, linkVersion))) return
 
     const names = await listPluginCacheSubdirs(root)
     expect(names).toContain('1.0.0')

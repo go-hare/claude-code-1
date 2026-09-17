@@ -12,6 +12,7 @@ import {
   MAX_TOOL_RESULT_BYTES,
   MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
 } from '../constants/toolLimits.js'
+import { TOOL_RESULTS_SUBDIR } from '../constants/toolResults.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logEvent } from '../services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../services/analytics/metadata.js'
@@ -20,11 +21,13 @@ import { logForDebugging } from './debug.js'
 import { getErrnoCode, toError } from './errors.js'
 import { formatFileSize } from './format.js'
 import { logError } from './log.js'
-import { getProjectDir } from './sessionStorage.js'
+import { getProjectDir } from './sessionPaths.js'
 import { jsonStringify } from './slowOperations.js'
 
-// Subdirectory name for tool results within a session
-export const TOOL_RESULTS_SUBDIR = 'tool-results'
+// Subdirectory name for tool results within a session. Defined in a leaf
+// module because this file sits in an import cycle — see the comment in
+// ../constants/toolResults.ts. Re-exported so existing importers still work.
+export { TOOL_RESULTS_SUBDIR }
 
 // XML tag used to wrap persisted output messages
 export const PERSISTED_OUTPUT_TAG = '<persisted-output>'

@@ -43,6 +43,18 @@ describe('densable 2.1.243 #22 first-byte / StreamNoResponse', () => {
     ).toBe(180_000)
   })
 
+  test('ZMo: dirty CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS falls through', () => {
+    expect(
+      resolveFirstByteTimeoutMs('firstParty', {
+        CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS: 'abc',
+        CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS: String(
+          FIRST_BYTE_TIMEOUT_DEFAULT_MS,
+        ),
+        CLAUDE_ENABLE_BYTE_WATCHDOG: '1',
+      }),
+    ).toBe(FIRST_BYTE_TIMEOUT_DEFAULT_MS)
+  })
+
   test('ZMo: unset API_TIMEOUT uses byte-idle (firstParty 3 min)', () => {
     expect(
       resolveFirstByteTimeoutMs('firstParty', {

@@ -28,7 +28,10 @@ import {
   pathInAllowedWorkingPath,
 } from '../permissions/filesystem.js'
 import { permissionRuleValueFromString } from '../permissions/permissionRuleParser.js'
-import { getPathsForPermissionCheck } from '../fsOperations.js'
+import {
+  getPathsForPermissionCheck,
+  realpathSyncCanonical,
+} from '../fsOperations.js'
 import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.js'
 import { DEFAULT_STAGE_FILE_ROOT } from '../syncedFileSyncer.js'
 import { getPlatform } from '../platform.js'
@@ -150,6 +153,15 @@ function isNetworkOrUncPath(path: string): boolean {
   return false
 }
 
+/** Expand to long form before suspicious-pattern checks (Windows 8.3 from mkdtemp). */
+function pathForSuspiciousPatternCheck(path: string): string {
+  try {
+    return realpathSyncCanonical(path)
+  } catch {
+    return path
+  }
+}
+
 /** densable eat — subset via filesystem hasSuspicious patterns (inlined). */
 function hasSuspiciousWindowsPathPattern(path: string): boolean {
   const platform = getPlatform()
@@ -224,13 +236,14 @@ export async function assertChromeUploadPath(
   const variants = getPathsForPermissionCheck(expanded)
 
   for (const p of [originalPath.trim(), ...variants]) {
-    if (isNetworkOrUncPath(p)) {
+    const checked = pathForSuspiciousPatternCheck(p)
+    if (isNetworkOrUncPath(checked)) {
       throw new ChromeUploadPathError(
         `network path not allowed: ${p}`,
         'claudeInChrome/fileUpload: network path rejected before filesystem access',
       )
     }
-    if (hasSuspiciousWindowsPathPattern(p)) {
+    if (hasSuspiciousWindowsPathPattern(checked)) {
       throw new ChromeUploadPathError(
         `suspicious path spelling: ${p}`,
         'claudeInChrome/fileUpload: suspicious Windows path pattern rejected',
@@ -240,7 +253,7 @@ export async function assertChromeUploadPath(
 
   let realPath: string
   try {
-    realPath = await realpathAsync(expanded)
+    realPath = realpathSyncCanonical(expanded)
   } catch {
     throw new ChromeUploadPathError(
       `unresolvable: ${originalPath}`,
@@ -250,13 +263,14 @@ export async function assertChromeUploadPath(
 
   const after = new Set([...variants, ...getPathsForPermissionCheck(realPath)])
   for (const p of after) {
-    if (isNetworkOrUncPath(p)) {
+    const checked = pathForSuspiciousPatternCheck(p)
+    if (isNetworkOrUncPath(checked)) {
       throw new ChromeUploadPathError(
         `network path not allowed: ${p}`,
         'claudeInChrome/fileUpload: network path rejected after resolution',
       )
     }
-    if (hasSuspiciousWindowsPathPattern(p)) {
+    if (hasSuspiciousWindowsPathPattern(checked)) {
       throw new ChromeUploadPathError(
         `suspicious path spelling: ${p}`,
         'claudeInChrome/fileUpload: suspicious Windows path pattern rejected',

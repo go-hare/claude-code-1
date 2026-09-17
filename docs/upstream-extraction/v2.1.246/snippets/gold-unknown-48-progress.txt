@@ -1,0 +1,105 @@
+# Official 2.1.246 SEA — #48 cloud task progress
+# DIG 2026-09-15 — W.todos() is pGn(), not last-TodoWrite.
+# Ie render still [completed,"/",length]. No padMissing.
+#
+# Changelog: "3/5 occasionally missing a task" on bg cloud (/autofix-pr).
+# Product fix is the poll source, not a second counter in Ie.
+
+# ---------------------------------------------------------------------------
+# Ie @229463832 — RemoteSessionProgress (HAVE, same shape)
+# ---------------------------------------------------------------------------
+# empty todoList → `${status}…`
+# else Te(todoList, vu) / todoList.length → children [va, "/", wa]
+
+if(!ce.todoList.length) return n(o,{dimColor:!0,children:[ce.status,"…"]})
+ue=Te(ce.todoList,vu)
+va=ue
+wa=ce.todoList.length
+ku=n(o,{dimColor:!0,children:[va,"/",wa]})
+
+# ---------------------------------------------------------------------------
+# poll @213807560 — kGn tick writes todoList: W.todos()
+# ---------------------------------------------------------------------------
+# he = status==="running"||status==="starting"
+# ge = W.todos()
+# skip only when he && ge===et.todoList && reviewProgress===undefined
+# else { ... todoList: ge }
+#
+# W is created once per poll lifetime (pGn). observe() on each SDK event.
+
+# ---------------------------------------------------------------------------
+# pGn @213791282 — incremental Task* observer + TodoWrite fallback
+# ---------------------------------------------------------------------------
+# state e = { pendingCreates: Map<tool_use_id, item>, tasks: Map<taskId, item> }
+# t = last TodoWrite assistant message (name===pf)
+# n = cached todos() result (invalidated to void 0 on observe hit)
+
+function o2o(e, t) {
+  // TaskCreate (schema n2o: subject, activeForm?)
+  //   pendingCreates.set(t.id, {content:subject, activeForm:activeForm??subject, status:"pending"})
+  // TaskUpdate Cp (schema r2o: taskId, status?, subject?, activeForm?)
+  //   status==="deleted" → tasks.delete
+  //   else merge {content, activeForm, status} (defaults keep previous / pending)
+  // else return false
+}
+
+function s2o(e, t) {
+  // tool_result for a pending TaskCreate
+  let n = e.pendingCreates.get(t.tool_use_id)
+  if (!n) return false
+  if (t.is_error) { e.pendingCreates.delete(t.tool_use_id); return true }
+  // t2o = /^Task #(\S+) created successfully/
+  let o = content.match(t2o)?.[1]
+  if (!o) return false
+  e.pendingCreates.delete(t.tool_use_id)
+  if (!e.tasks.has(o)) e.tasks.set(o, n)
+  return true
+}
+
+function i2o(e) {
+  return [...e.tasks.values(), ...e.pendingCreates.values()]
+}
+
+function pGn() {
+  let e = { pendingCreates: new Map, tasks: new Map }, t, n
+  return {
+    observe(r) {
+      if (r.type === "assistant" && !r.parent_tool_use_id) {
+        for (let s of r.message.content)
+          if (s.type === "tool_use" && o2o(e, s)) n = void 0
+        let o = r.message.content.find(s => s.type === "tool_use" && s.name === pf)
+        if (o) t = { ...r, message: { ...r.message, content: [o] } }, n = void 0
+      } else if (r.type === "user") {
+        let o = r.message.content
+        if (!Array.isArray(o)) return
+        for (let s of o)
+          if (s.type === "tool_result" && s2o(e, s)) n = void 0
+      }
+    },
+    todos() {
+      if (n === void 0) {
+        let r = i2o(e)
+        n = r.length > 0 ? r : t ? e2o([t]) : []
+      }
+      return n
+    },
+  }
+}
+
+# e2o([t]) = parse last TodoWrite input.todos (local extractTodoListFromLog)
+# pf = TodoWrite. t2o matches TaskCreateTool mapToolResult:
+#   `Task #${task.id} created successfully: ${task.subject}`
+
+# Priority: TaskCreate/TaskUpdate maps (incl. in-flight pendingCreates)
+#           ELSE last TodoWrite snapshot
+#           ELSE []
+
+# ---------------------------------------------------------------------------
+# Local after 对齐
+# ---------------------------------------------------------------------------
+# createRemoteTodoObserver = pGn. Wired in startRemoteSessionPolling:
+#   observe() each newEvents item; todoList = observer.todos().
+# Skip: (running|starting) && ge===prev.todoList && newProgress===undefined.
+# Render {completed}/{total} is still 1:1 Ie — do not invent padMissing.
+
+# Invent-ban still: padMissing, second counter, state:"running".

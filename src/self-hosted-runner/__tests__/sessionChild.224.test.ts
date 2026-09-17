@@ -2,6 +2,7 @@
  * densable 2.1.224 #1 — session child argv/env (sjv/Njv/fff/xWl).
  */
 import { describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
 import {
   BLOCKED_CLAUDE_CODE_ARGS,
   buildSessionChildArgs,
@@ -31,7 +32,7 @@ describe('densable 2.1.224 #1 sessionChild Njv/tBh', () => {
 
   test('sessionIngressTokenPath (tBh)', () => {
     expect(sessionIngressTokenPath('/cfg', 3)).toBe(
-      '/cfg/.session_ingress_token.e3',
+      join('/cfg', '.session_ingress_token.e3'),
     )
   })
 })

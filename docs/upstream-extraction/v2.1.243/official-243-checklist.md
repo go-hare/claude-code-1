@@ -1,7 +1,7 @@
 # densable 2.1.243 — 官方更新清单 × tip 对照
 
 > 来源：CHANGELOG **2.1.243**（60 bullets）。SEA **已下载**（win32-x64 sha256 `895a32a6…`）。  
-> 基线：本地 tip densable **2.1.239 leftover** + npm **2.7.47**。**本 pack 只盘点 2.1.243**（勿折入 240/241 空节、245+）。  
+> 基线：本地 tip densable **2.1.243** + npm **2.7.48**（叠在 239 leftover / 2.7.47 上）。**本 pack 只盘点 2.1.243**（勿折入 240/241 空节、245+）。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 更新：2026-09-04 — #24 补官方 `y`/`pe`/`me` 凭证目录锁。HAVE **49** / PARTIAL **0** / GAP **0** / N/A **11** / UNKNOWN **0**。  
 > 口径：densable-first 1:1 · 官方函数体是合同 · 禁止「未锁就不搬」。

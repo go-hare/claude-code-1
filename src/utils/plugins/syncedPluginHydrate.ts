@@ -70,6 +70,97 @@ export function getSyncedPluginsManifestPath(
   return join(getSyncedPluginsRoot(pluginsDir), SYNCED_PLUGINS_MANIFEST)
 }
 
+/** densable `Nl` — `Fo="server_plugin_id"` wire format. */
+export const SERVER_PLUGIN_ID_RE = /^plugin_[A-Za-z0-9]{1,64}$/
+
+/** densable 2.1.246 hyo load copy — fields written back onto LoadedPlugin. */
+export type SyncedPluginAttribution = {
+  installationPreference?: 'required' | 'auto_install'
+  marketplaceName?: string
+  serverPluginId?: string
+}
+
+/**
+ * densable 2.1.246: `if (p.installationPreference !== void 0) g.installationPreference = p.installationPreference`
+ * and `if (p.marketplaceName !== void 0)` remap (official `Nsn`; local field).
+ */
+export function applySyncedPluginAttribution(
+  plugin: {
+    installationPreference?: 'required' | 'auto_install'
+    marketplaceName?: string
+    serverPluginId?: string
+  },
+  attr: SyncedPluginAttribution | undefined,
+): void {
+  if (!attr) return
+  if (attr.installationPreference !== undefined) {
+    plugin.installationPreference = attr.installationPreference
+  }
+  if (attr.marketplaceName !== undefined) {
+    plugin.marketplaceName = attr.marketplaceName
+  }
+  if (attr.serverPluginId !== undefined) {
+    plugin.serverPluginId = attr.serverPluginId
+  }
+}
+
+/**
+ * Read Gbn-style camelCase rows from the synced manifest.
+ * Avoids pluginLoader → cloudSync for a second parse of the same JSON.
+ */
+export async function readSyncedPluginAttributionMap(
+  pluginsDir?: string,
+): Promise<Map<string, SyncedPluginAttribution>> {
+  const map = new Map<string, SyncedPluginAttribution>()
+  const path = getSyncedPluginsManifestPath(pluginsDir)
+  let raw: string
+  try {
+    raw = await readFile(path, 'utf8')
+  } catch {
+    return map
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return map
+  }
+  if (!parsed || typeof parsed !== 'object') return map
+  const plugins = (parsed as { plugins?: unknown }).plugins
+  if (!Array.isArray(plugins)) return map
+  for (const row of plugins) {
+    if (!row || typeof row !== 'object') continue
+    const rec = row as Record<string, unknown>
+    const name = typeof rec.name === 'string' ? rec.name : ''
+    if (!name) continue
+    const pref = rec.installationPreference
+    const installationPreference =
+      pref === 'required' || pref === 'auto_install' ? pref : undefined
+    const marketplaceName =
+      typeof rec.marketplaceName === 'string' && rec.marketplaceName.length > 0
+        ? rec.marketplaceName
+        : undefined
+    const rawServerPluginId =
+      typeof rec.serverPluginId === 'string'
+        ? rec.serverPluginId
+        : typeof rec.server_plugin_id === 'string'
+          ? rec.server_plugin_id
+          : undefined
+    const serverPluginId =
+      rawServerPluginId !== undefined &&
+      SERVER_PLUGIN_ID_RE.test(rawServerPluginId)
+        ? rawServerPluginId
+        : undefined
+    if (!installationPreference && !marketplaceName && !serverPluginId) continue
+    map.set(name, {
+      ...(installationPreference && { installationPreference }),
+      ...(marketplaceName && { marketplaceName }),
+      ...(serverPluginId && { serverPluginId }),
+    })
+  }
+  return map
+}
+
 /**
  * densable W1h — unique `A0r(name)` dirs under `dPe()`.
  * Joins only. Does not `stat` plugin leaves — official `jXl` is `qMr(W1h(t.plugins))`.

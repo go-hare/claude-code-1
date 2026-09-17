@@ -33,9 +33,9 @@ export const AUTO_MODE_DEFAULTS_SENTINEL = '$defaults' as const
 const RULE_KEYS = ['allow', 'soft_deny', 'hard_deny'] as const
 type RuleKey = (typeof RULE_KEYS)[number]
 
-/** densable ivr / Rqi / W3w / G3w / D8 / z3w */
-const MAX_ENTRIES = 200
-const MAX_ENTRY_CHARS = 10_000
+/** densable ivr / Rqi / W3w / G3w / D8 / z3w · setup `ut`/`xr` · tab `Ni`/`Li` */
+export const MAX_ENTRIES = 200
+export const MAX_ENTRY_CHARS = 10_000
 const ENV_ENTRY_WARN = 200
 const ENV_BYTES_WARN = 50_000
 const SETTINGS_FILE_CAP = 2_097_152

@@ -5,6 +5,7 @@ import type { Command } from '../../commands.js'
 import type { AgentMcpServerInfo } from '../../components/mcp/types.js'
 import type { Tool } from '../../Tool.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import { getProjectPathForConfig } from '../../utils/config.js'
 import { getCwd } from '../../utils/cwd.js'
 import { getGlobalClaudeFile } from '../../utils/env.js'
 import { isSettingSourceEnabled } from '../../utils/settings/constants.js'
@@ -14,6 +15,7 @@ import {
 } from '../../utils/settings/settings.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getEnterpriseMcpFilePath, getMcpConfigByName } from './config.js'
+import { isSessionRejectedMcpServer } from './mcpSessionApprovedServers.js'
 import { mcpInfoFromString } from './mcpStringUtils.js'
 import { normalizeNameForMCP } from './normalization.js'
 import {
@@ -414,6 +416,12 @@ export function getProjectMcpServerStatus(
   const strict = getProjectMcpServerStatusStrict(serverName)
   if (strict !== 'pending') {
     return strict
+  }
+
+  // persistFailed "don't use" never reaches disabledMcpjsonServers. Keep the
+  // session reject so plugin MCP does not start, and Te does not re-prompt.
+  if (isSessionRejectedMcpServer(getProjectPathForConfig(), serverName)) {
+    return 'rejected'
   }
 
   // In bypass permissions mode (--dangerously-skip-permissions), there's no way

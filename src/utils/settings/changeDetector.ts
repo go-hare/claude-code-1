@@ -67,8 +67,18 @@ let mdmPollTimer: ReturnType<typeof setInterval> | null = null
 let lastMdmSnapshot: string | null = null
 let initialized = false
 let disposed = false
+/** densable G6 `p` — generation so a stale getWatchTargets cannot replace a newer watch. */
+let watchGeneration = 0
 const pendingDeletions = new Map<string, ReturnType<typeof setTimeout>>()
-const settingsChanged = createSignal<[source: SettingSource]>()
+
+/** densable notifyChange extra (`prevCwd` from /cd `ft`, `trustFlip` from `lr`). */
+export type SettingsChangeExtra = {
+  prevCwd?: string
+  trustFlip?: boolean
+}
+
+const settingsChanged =
+  createSignal<[source: SettingSource, extra?: SettingsChangeExtra]>()
 
 // Test overrides for timing constants
 let testOverrides: {
@@ -78,22 +88,22 @@ let testOverrides: {
   deletionGrace?: number
 } | null = null
 
+type WatchTargets = {
+  dirs: string[]
+  settingsFiles: Set<string>
+  dropInDir: string | null
+}
+
 /**
- * Initialize file watching
+ * densable G6 `v` — close the previous watcher and attach dirs from a fresh
+ * getWatchTargets. Generation-guards a raced rehome/initialize.
  */
-export async function initialize(): Promise<void> {
-  if (getIsRemoteMode()) return
-  if (initialized || disposed) return
-  initialized = true
-
-  // Start MDM poll for registry/plist changes (independent of filesystem watching)
-  startMdmPoll()
-
-  // Register cleanup to properly dispose during graceful shutdown
-  registerCleanup(dispose)
-
-  const { dirs, settingsFiles, dropInDir } = await getWatchTargets()
-  if (disposed) return // dispose() ran during the await
+function attachWatchTargets(targets: WatchTargets, generation: number): void {
+  if (generation !== watchGeneration) return
+  const { dirs, settingsFiles, dropInDir } = targets
+  const previous = watcher
+  watcher = null
+  if (previous) previous.close().catch(() => {})
   if (dirs.length === 0) return
 
   logForDebugging(
@@ -149,6 +159,45 @@ export async function initialize(): Promise<void> {
       level: 'warn',
     })
   })
+}
+
+/**
+ * Initialize file watching
+ */
+export async function initialize(): Promise<void> {
+  if (getIsRemoteMode()) return
+  if (initialized || disposed) return
+  initialized = true
+
+  // Start MDM poll for registry/plist changes (independent of filesystem watching)
+  startMdmPoll()
+
+  // Register cleanup to properly dispose during graceful shutdown
+  registerCleanup(dispose)
+
+  const generation = ++watchGeneration
+  const targets = await getWatchTargets()
+  if (disposed) return // dispose() ran during the await
+  attachWatchTargets(targets, generation)
+}
+
+/**
+ * densable G6 `ge` — retarget the settings watcher after `/cd` chdir.
+ * Drops pending-deletion timers for paths that are no longer a settings file
+ * under the new cwd, then rebuilds the watch list.
+ */
+export async function rehome(): Promise<void> {
+  if (!initialized || disposed || getIsRemoteMode()) return
+  for (const [path, timer] of pendingDeletions) {
+    if (getSourceForPath(path) === undefined) {
+      clearTimeout(timer)
+      pendingDeletions.delete(path)
+    }
+  }
+  const generation = ++watchGeneration
+  const targets = await getWatchTargets()
+  if (disposed) return
+  attachWatchTargets(targets, generation)
 }
 
 /**
@@ -440,19 +489,23 @@ function startMdmPoll(): void {
  * first listener to call getSettingsWithErrors() pays the miss and
  * repopulates; all subsequent listeners hit the cache.
  */
-function fanOut(source: SettingSource): void {
+function fanOut(source: SettingSource, extra?: SettingsChangeExtra): void {
   resetSettingsCache()
-  settingsChanged.emit(source)
+  settingsChanged.emit(source, extra)
 }
 
 /**
  * Manually notify listeners of a settings change.
  * Used for programmatic settings changes (e.g., remote managed settings refresh)
  * that don't involve file system changes.
+ * densable F(I,P) → G(I, void 0, P): extra is `prevCwd` / `trustFlip`.
  */
-export function notifyChange(source: SettingSource): void {
+export function notifyChange(
+  source: SettingSource,
+  extra?: SettingsChangeExtra,
+): void {
   logForDebugging(`Programmatic settings change notification for ${source}`)
-  fanOut(source)
+  fanOut(source, extra)
 }
 
 /**
@@ -479,6 +532,7 @@ export function resetForTesting(overrides?: {
   lastMdmSnapshot = null
   initialized = false
   disposed = false
+  watchGeneration = 0
   testOverrides = overrides ?? null
   const w = watcher
   watcher = null
@@ -488,6 +542,7 @@ export function resetForTesting(overrides?: {
 export const settingsChangeDetector = {
   initialize,
   dispose,
+  rehome,
   subscribe,
   notifyChange,
   resetForTesting,

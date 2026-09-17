@@ -145,7 +145,10 @@ describe('densable 2.1.229 #2 yjw materializeLauncherHooks', () => {
     expect(result?.settingsPath).toBe(join(cfg, 'launcher-settings.json'))
     const scriptPath = join(cfg, 'hooks', '.ccr-launcher', 'stop_gate.sh')
     expect(readFileSync(scriptPath, 'utf8')).toContain('echo stop')
-    expect(statSync(scriptPath).mode & 0o777).toBe(0o700)
+    // Windows does not persist Unix mode bits from writeFile/mkdir.
+    if (process.platform !== 'win32') {
+      expect(statSync(scriptPath).mode & 0o777).toBe(0o700)
+    }
     const settings = JSON.parse(readFileSync(result!.settingsPath, 'utf8')) as {
       hooks: Record<
         string,

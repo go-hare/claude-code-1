@@ -11,10 +11,11 @@ import { getToolUseIdsFromCollapsedGroup } from '../../utils/collapseReadSearch.
 import { getDisplayPath } from '../../utils/file.js';
 import { formatDuration, formatSecondsShort } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import type { buildMessageLookups } from '../../utils/messages.js';
+import { interruptedCall, type buildMessageLookups } from '../../utils/messages.js';
 import { extractSafeToolInputFields } from '../../utils/safeToolInput.js';
 import type { ThemeName } from '../../utils/theme.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
+import { FallbackToolUseRejectedMessage } from '../FallbackToolUseRejectedMessage.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 import { PrBadge } from '../PrBadge.js';
 import { ToolUseLoader } from '../ToolUseLoader.js';
@@ -125,6 +126,8 @@ export function CollapsedReadSearchContent({
   const [theme] = useTheme();
   const toolUseIds = getToolUseIdsFromCollapsedGroup(message);
   const anyError = toolUseIds.some(id => lookups.erroredToolUseIDs.has(id));
+  // densable V6 `fe` — Nvo/interruptedCall on any tool_result in the group.
+  const anyInterrupted = toolUseIds.some(id => interruptedCall(lookups.toolResultByToolUseID.get(id)));
   const hasMemoryOps = memorySearchCount > 0 || memoryReadCount > 0 || memoryWriteCount > 0;
   const hasTeamMemoryOps = feature('TEAMMEM') ? teamMemCollapsed!.checkHasTeamMemOps(message) : false;
 
@@ -510,7 +513,7 @@ export function CollapsedReadSearchContent({
     }
     nonMemParts.push(
       <Text key="bash">
-        {verb} <Text bold>{bashCount}</Text> bash {bashCount === 1 ? 'command' : 'commands'}
+        {verb} <Text bold>{bashCount}</Text> shell {bashCount === 1 ? 'command' : 'commands'}
       </Text>,
     );
   }
@@ -571,6 +574,7 @@ export function CollapsedReadSearchContent({
           {isActiveGroup && <Text key="ellipsis">…</Text>} <CtrlOToExpand />
         </Text>
       </Box>
+      {anyInterrupted && <FallbackToolUseRejectedMessage />}
       {isActiveGroup && effectiveHint !== undefined && (
         // Row layout: 5-wide gutter for ⎿, then a flex column for the text.
         // Ink's wrap stays inside the right column so continuation lines

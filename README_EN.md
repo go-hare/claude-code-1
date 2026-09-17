@@ -43,7 +43,36 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59**; no public **2.1.230**). **Published npm version is whatever `package.json` says** (currently **2.7.47**; trust `package.json` / npm) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2**; no public **2.1.230** / no 240·241 bullets). **Published npm version is whatever `package.json` says** (currently **2.7.48**; trust `package.json` / npm) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+
+#### densable 2.1.246 alignment (2.7.48)
+
+Source of truth: `docs/upstream-extraction/v2.1.246/official-246-checklist.md` (**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**), `cross-pack-residuals.md`. Stacked on landed **2.1.243**. **2.7.48** ships the 246 CLI product surface; no official 2.1.244 bullets — **do not fold 245 glibc / 247+**.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **#1 / #42** | wildcard allow `valid:true`+warning; dangling `&&`/`\|\|` → ERROR → ask | do not turn that into deny |
+| **#4 / #6** | `rg`: `F` aborts and `x=null`; sticky / large unpinned scroll only clears freeze | do not change `MAX_MOUNTED` / overscan; sticky abort does not null `x` |
+| **#16 / #18** | keep worktree if no `CLAUDE_BASE` / lock unread; plugin cache SHA dedupe | `blu` does not call `Slu` |
+| **#22 / #52** | `/reload-plugins` counts `skills/*/SKILL.md`; `/cd` apply-now; official hosts pass `applyStagedInstalls: false` | `/cd` `ft` still omits replace |
+| **#44 / #45 / #54 / #55** | withhold misrouted cred; `decodeJwtExpiry`; abort still yields `max_turns_reached`; GJn already yields `server_error` | no JWT `jp` / second yield invent |
+| **storageV5** | empty `qb` + pin `UF(e=qb)` | CLI does not auto-call `qF` |
+| **N/A 2** | #39 #59 official installer | same-missing = aligned; do not invent |
+
+#### densable 2.1.243 alignment
+
+Source of truth: `docs/upstream-extraction/v2.1.243/official-243-checklist.md` (**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**), `cross-pack-residuals.md`. Already landed; ships with 246 as **2.7.48**. No official 2.1.240/241 bullets — **do not fold 245+**.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **#24 WIF** | `y`/`pe`/`me`/`H`/`Ee`/`lt`: user_oauth fail-closed; OIDC env-quad fail-open; `lt` clears TokenCache and records last-issued (not disk) | no JWT-org / Sentry / `jwo` invent |
+| **#11 MCP `-p`** | remote MCP disconnect peek/detach then reconnect; apply only when `peekSettled===w` | do not mix with 239 #15 |
+| **#13 / #14 auto-mode** | empty cache `gb-before-mode`; disk killswitch recheck; xml_s1 resets wall clock per fetch | latch `ASe=$O=null` never hits |
+| **#55 / #56 RC** | poll 404 remint ≤3 (same `environment_id`); `BridgeFatalError` rejected | crash+idle 404 uses `yt`; no sticky `crashedSessionIds` invent |
+| **#19 / #33 / #53** | urlOutdent leading cols; Ctrl+[ vim ESC; macOS Finder `request_access` | — |
+| **#26 / #35 / #36** | hook-if command-subst fallback; sandbox exit 0 still annotates violations; usage persist without invent ISO window | — |
+| **#39 / #44 / #57** | Chrome stable launcher; org env pin (no JWT); inbox first-line 30s deadline | — |
+| **N/A 11** | four VSCode + Desktop CIMD + cloud mid-turn + official installer / heap_gc | same-missing = aligned; do not invent |
 
 #### densable 2.1.239 leftover alignment (2.7.47)
 
@@ -252,10 +281,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.47)
+### Recent updates (2.7.5 → 2.7.48)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.48** | **densable 2.1.246** (on landed 243): HAVE **59** / N/A **2**. #1 wildcard allow warn, #4/#6 `rg` freeze abort, #16 keep user worktrees, #22 skill counts, #42 dangling `&&`/`\|\|`, #44 withhold, #52 `/cd` apply-now, #54 abort+maxTurns, storageV5 empty `qb` pin. N/A: official installer. No 244/245/247+; no `blu`←`Slu` / auto `qF` / JWT-org invent. 243 HAVE 49 ships in the same version. |
 | **2.7.47** | **densable 2.1.239 leftover closeout** (on 2.7.46 / 236–238): `@synced` disk hydrate (`CLAUDE_CODE_SYNC_PLUGINS` default OFF); artifact auto-react (watch/reply/relay + parse5); NMs permission Host split; plan resume **continue hard gate** (resume runs `y_u`; print `--continue` does not); CRI `createCriPolicyPrecheck` + NO_PROXY. **236** drops invent `goalIdleArmGeneration`. **234 leftover** anthropic profile / OIDC / oRr “Run /login”. Local: Win32 title 40ms unstick; DeepSeek/Grok/Kimi context windows + China vision-exp. No cowork / CCR E2E / VSCode banner / 240·241 invent. |
 | **2.7.46** | **densable 2.1.236–2.1.238**: 236 HAVE **32** / N/A 1 (`ANTHROPIC_DEFAULT_MODEL`, `notify_when_idle`, sandbox deny, fullscreen fallback, goal check-in, `/model` `LFh`/`sgM`); 237 HAVE 3 (`canMarkApiSystem`, Concise, `r7` truncate); 238 HAVE **39** (`keybindingFlavor`, marketplace/MCP `headersHelper`, runner defer-shutdown / Proxy-Authorization, isolation pin, RC Stop/sign-out/403, update check 10s). Restores **234 leftovers** still in official 238 SEA (stale Enter, SendMessage `to`/truncated, `GGc`, session persist, markdown `d0l`). Ship-time README said PARTIAL; local contracts later closed. No leftover #3 / G0S / chrome UI invent. |
 | **2.7.45** | **densable 2.1.235 (HAVE 15 + analog 3 / N/A 1)** + tip **2.1.234** quota auto-resume: spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP gate / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX gate**; CLI IDE bridge `uSm`; quota rearm `HEv=2`. **#19 VSCode host focus N/A**. analog is a footnote, not a gap. |

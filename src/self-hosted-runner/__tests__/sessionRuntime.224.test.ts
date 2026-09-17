@@ -96,11 +96,17 @@ describe('densable 2.1.224 #1 sessionRuntime (xjv/Ijv/B2h/Fjv)', () => {
     expect(await ensureDirsUnderSessionRoot(root, nested)).toBe(true)
     expect(await isRealpathUnderSessionRoot(root, nested)).toBe(true)
     expect(await ensureDirsUnderSessionRoot(root, '/etc')).toBe(false)
-    // symlink segment rejected
+    // symlink segment rejected (junction on Windows — no admin symlink privilege)
     const real = join(root, 'real')
     mkdirSync(real)
     const link = join(root, 'link')
-    symlinkSync(real, link)
+    try {
+      symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir')
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (process.platform === 'win32' && code === 'EPERM') return
+      throw err
+    }
     expect(await ensureDirsUnderSessionRoot(root, join(link, 'x'))).toBe(false)
   })
 

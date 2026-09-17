@@ -79,6 +79,12 @@ export type LogOption = {
   bridgeDialogKinds?: string[]
   bridgeSessionGroupingId?: string
   bridgeNoHistoryBackfill?: boolean
+  /** densable currentSessionBridgeOwnerAccountUuid via Bkn last-wins. */
+  bridgeOwnerAccountUuid?: string
+  /** densable currentSessionBridgeOwnerOrganizationUuid via Bkn last-wins. */
+  bridgeOwnerOrganizationUuid?: string
+  /** densable sessionHistorySuppressed — history-suppression last-wins / taint. */
+  sessionHistorySuppressed?: boolean
 }
 
 export type SummaryMessage = {
@@ -311,6 +317,22 @@ export type BridgeSessionEntry = {
   declaredDialogKinds?: string[]
   sessionGroupingId?: string
   noHistoryBackfill?: boolean
+  /** densable Bkn `a.accountUuid` — OAuth account that owned this pointer. */
+  ownerAccountUuid?: string
+  /** densable Bkn `a.organizationUuid`. */
+  ownerOrganizationUuid?: string
+}
+
+/**
+ * densable `history-suppression` (g4t / JKt) — permanent taint that the
+ * conversation's history must not backfill into a newly minted RC session.
+ */
+export type HistorySuppressionEntry = {
+  type: 'history-suppression'
+  sessionId: UUID
+  cause: string
+  vetoedAgainstAccountUuid?: string
+  ts: string
 }
 
 /**
@@ -499,6 +521,7 @@ export type Entry =
   | ModeEntry
   | WorktreeStateEntry
   | BridgeSessionEntry
+  | HistorySuppressionEntry
   | ContentReplacementEntry
   | ContextCollapseCommitEntry
   | ContextCollapseSnapshotEntry

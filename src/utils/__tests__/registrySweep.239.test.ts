@@ -41,7 +41,8 @@ describe('densable 2.1.239 fBr isRegistrySweepPermitted', () => {
     _resetRegistrySweepPermittedForTests()
   })
 
-  test('false when not interactive', async () => {
+  test('false when not interactive (linux/unknown only; 246 allows win/mac headless)', async () => {
+    if (process.platform === 'win32' || process.platform === 'darwin') return
     setIsInteractive(false)
     _resetRegistrySweepPermittedForTests()
     expect(await isRegistrySweepPermitted()).toBe(false)
@@ -67,6 +68,7 @@ describe('densable 2.1.239 PYb gated by fBr', () => {
   let previousConfigDir: string | undefined
   let tempConfigDir = ''
   const savedInteractive = getIsInteractive()
+  const savedSandbox = process.env.IS_SANDBOX
 
   function socket(label: string): string {
     if (process.platform === 'win32') {
@@ -86,6 +88,11 @@ describe('densable 2.1.239 PYb gated by fBr', () => {
   afterEach(async () => {
     await stopUdsMessaging()
     setIsInteractive(savedInteractive)
+    if (savedSandbox === undefined) {
+      delete process.env.IS_SANDBOX
+    } else {
+      process.env.IS_SANDBOX = savedSandbox
+    }
     _resetRegistrySweepPermittedForTests()
     if (previousConfigDir === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR
@@ -99,7 +106,8 @@ describe('densable 2.1.239 PYb gated by fBr', () => {
   })
 
   test('xWd leaves CYb tmp when sweep is not permitted', async () => {
-    setIsInteractive(false)
+    setIsInteractive(true)
+    process.env.IS_SANDBOX = '1'
     _resetRegistrySweepPermittedForTests()
     const dir = join(tempConfigDir, 'sessions')
     await mkdir(dir, { recursive: true, mode: 0o700 })
@@ -128,17 +136,24 @@ describe('densable 2.1.239 b1e/mBr pid sweep', () => {
   let previousConfigDir: string | undefined
   let tempConfigDir = ''
   const savedInteractive = getIsInteractive()
+  const savedSandbox = process.env.IS_SANDBOX
 
   beforeEach(async () => {
     previousConfigDir = process.env.CLAUDE_CONFIG_DIR
     tempConfigDir = await mkdtemp(join(tmpdir(), 'uds-pid-sweep-239-'))
     process.env.CLAUDE_CONFIG_DIR = tempConfigDir
-    setIsInteractive(false)
+    setIsInteractive(true)
+    process.env.IS_SANDBOX = '1'
     _resetRegistrySweepPermittedForTests()
   })
 
   afterEach(async () => {
     setIsInteractive(savedInteractive)
+    if (savedSandbox === undefined) {
+      delete process.env.IS_SANDBOX
+    } else {
+      process.env.IS_SANDBOX = savedSandbox
+    }
     _resetRegistrySweepPermittedForTests()
     if (previousConfigDir === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR

@@ -599,12 +599,17 @@ export async function invalidateWifToken(
   }
 }
 
+type ProfileFetchFn = (
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+) => ReturnType<typeof fetch>
+
 /**
  * leftover 239 userOAuthProvider refresh: POST `${baseURL}/v1/oauth/token`.
  */
 async function refreshProfileUserOauthAccessTokenImpl(
   env: NodeJS.ProcessEnv = process.env,
-  fetchFn: typeof fetch = globalThis.fetch,
+  fetchFn: ProfileFetchFn = globalThis.fetch,
 ): Promise<ProfileUserOauthToken> {
   const loaded = loadProfileFileConfig(env)
   if (loaded === null) {
@@ -729,7 +734,7 @@ async function refreshProfileUserOauthAccessTokenImpl(
 /** densable 243 #24 — WIF sibling adoption + invalid_grant cleanup wrappers. */
 export async function refreshProfileUserOauthAccessToken(
   env: NodeJS.ProcessEnv = process.env,
-  fetchFn: typeof fetch = globalThis.fetch,
+  fetchFn: ProfileFetchFn = globalThis.fetch,
 ): Promise<ProfileUserOauthToken> {
   const loaded = loadProfileFileConfig(env)
   if (loaded === null) {
@@ -761,7 +766,7 @@ export async function refreshProfileUserOauthAccessToken(
 /** leftover 239 token cache: refresh when within GHt of expiry. */
 export async function resolveProfileUserOauthAccessToken(
   env: NodeJS.ProcessEnv = process.env,
-  fetchFn: typeof fetch = globalThis.fetch,
+  fetchFn: ProfileFetchFn = globalThis.fetch,
 ): Promise<ProfileUserOauthToken | null> {
   const force = profileUserOauthForceRefresh
   if (force) profileUserOauthForceRefresh = false

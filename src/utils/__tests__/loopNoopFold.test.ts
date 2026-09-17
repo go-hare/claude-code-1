@@ -1,13 +1,11 @@
 import { describe, expect, mock, test } from 'bun:test'
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+import { debugMock } from '../../../tests/mocks/debug.js'
 import { randomUUID } from 'crypto'
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
-mock.module('src/utils/debug.js', () => ({
-  logForDebugging: () => {},
-}))
+mock.module('src/utils/debug.js', debugMock)
 
 import type { Message } from '../../types/message.js'
 import { SCHEDULE_WAKEUP_TOOL_NAME } from '@claude-code/builtin-tools/tools/ScheduleWakeupTool/constants.js'

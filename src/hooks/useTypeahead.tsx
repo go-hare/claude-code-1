@@ -1058,11 +1058,12 @@ export function useTypeahead({
             }
           }
 
-          // Skip if we already fetched for this exact token (prevents loop from
-          // suggestions dependency causing updateSuggestions to be recreated)
-          if (latestSearchTokenRef.current === searchToken) {
-            return;
-          }
+          // densable 2.1.246: at-path miss falls through to fuzzy (`ze`), which
+          // clears on empty. Do NOT Te() here — that is bash-path only.
+          // Drop a stale same-token short-circuit: the last fuzzy token can
+          // match this miss while suggestionType is still the previous
+          // at-path 'directory' hit, which would skip ze and leave the picker.
+          latestSearchTokenRef.current = null;
           void debouncedFetchFileSuggestions(searchToken, true);
           return;
         }

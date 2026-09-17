@@ -14,12 +14,14 @@ import {
 } from 'bun:test'
 import * as realBootstrapState from '../../../bootstrap/state.js'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
+import * as realLocalAgentTask from '../../LocalAgentTask/LocalAgentTask.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 const bootstrapSnap = snapshotModuleExports(realBootstrapState)
 const diskOutputSnap = snapshotModuleExports(realDiskOutput)
+const localAgentSnap = snapshotModuleExports(realLocalAgentTask)
 
 const sdkEvents: Array<Record<string, unknown>> = []
 const agentBgCalls: string[] = []
@@ -70,6 +72,7 @@ mock.module('../../../utils/sdkEventQueue.js', sdkEventQueueMock)
 // Paths must match resolved module ids from LocalShellTask.tsx (not this test file).
 function localAgentTaskMock() {
   return {
+    ...localAgentSnap,
     isLocalAgentTask: (task: unknown): boolean =>
       typeof task === 'object' &&
       task !== null &&
@@ -231,6 +234,16 @@ afterAll(() => {
   mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
   mock.module('../../../utils/sdkEventQueue.js', () => ({
     ...sdkEventQueueSnap,
+  }))
+  mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
+    ...localAgentSnap,
+  }))
+  mock.module('../../LocalAgentTask/LocalAgentTask.js', () => ({
+    ...localAgentSnap,
+  }))
+  mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+  mock.module('../../../utils/task/diskOutput.js', () => ({
+    ...diskOutputSnap,
   }))
 })
 

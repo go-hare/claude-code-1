@@ -1,12 +1,17 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   mock,
   test,
 } from 'bun:test'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 import type { QueuedCommand } from '../../../types/textInputTypes'
 import {
   resetStateForTests,
@@ -92,15 +97,11 @@ function releaseRunAgent(): void {
   releaseRunAgentBlocker = null
 }
 
-function bunBundleMock() {
-  return {
-    // While this suite owns the mock: only KAIROS. After afterAll: all false
-    // so SleepTool / proactive gates don't stay latched open for co-suites.
-    feature: (name: string) =>
-      useSlashCommandMocks ? name === 'KAIROS' : false,
-  }
-}
 mock.module('bun:bundle', bunBundleMock)
+let popSlashFeature: (() => void) | undefined
+beforeAll(() => {
+  popSlashFeature = pushFeatureOverride((name: string) => name === 'KAIROS')
+})
 
 function runAgentMock() {
   if (!useSlashCommandMocks) {
@@ -167,7 +168,7 @@ mock.module('src/utils/messageQueueManager.js', createMessageQueueManagerMock)
 
 afterAll(() => {
   useSlashCommandMocks = false
-  mock.module('bun:bundle', () => ({ feature: () => false }))
+  popSlashFeature?.()
   mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
     ...runAgentSnap,
   }))

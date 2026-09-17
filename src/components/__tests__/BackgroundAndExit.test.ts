@@ -1,12 +1,21 @@
 import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
 import * as realInstallPrompt from '../../daemon/installPrompt.js'
+import * as realControlSocket from '../../daemon/controlSocketClient.js'
+import * as realBgCheckpoint from '../../utils/bgCheckpoint.js'
+import * as realSessionStorage from '../../utils/sessionStorage.js'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 import {
   buildBackgroundExitArgs,
   runExitBackgroundHandoff,
 } from '../BackgroundAndExit.js'
+
+const installSnap = snapshotModuleExports(realInstallPrompt)
+const controlSnap = snapshotModuleExports(realControlSocket)
+const bgSnap = snapshotModuleExports(realBgCheckpoint)
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 
 beforeAll(() => {
   ;(globalThis as { MACRO?: { VERSION: string } }).MACRO = {
@@ -72,8 +81,16 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
   afterEach(() => {
     if (prevHome === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = prevHome
+    delete process.env.CLAUDE_JOB_DIR
     if (dir) rmSync(dir, { recursive: true, force: true })
-    mock.restore()
+    mock.module('../../daemon/installPrompt.js', () => ({ ...installSnap }))
+    mock.module('../../daemon/controlSocketClient.js', () => ({
+      ...controlSnap,
+    }))
+    mock.module('../../utils/bgCheckpoint.js', () => ({ ...bgSnap }))
+    mock.module('../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
+    }))
   })
 
   test('writes adopt.json BEFORE dispatch when tasks present (CAo→Jlr→yNo)', async () => {
@@ -84,17 +101,19 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     const order: string[] = []
 
     mock.module('../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installSnap,
       ensureDaemonRunning: async () => {
         order.push('daemon')
         return { ok: true }
       },
     }))
     mock.module('../../daemon/controlSocketClient.js', () => ({
+      ...controlSnap,
       sendControlRequest: async () => ({ ok: false, error: 'offline' }),
       isDaemonReachable: async () => false,
     }))
     mock.module('../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       flushSessionStorage: async () => {
         order.push('flush')
       },
@@ -113,12 +132,11 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
       },
     }
 
-    // Spy writeAdoptJson order via real module + order push on dispatch write
-    const bg = await import('../../utils/bgCheckpoint.js')
-    const origWrite = bg.writeAdoptJson
-    const origCollect = bg.collectPortableCheckpoint
+    // Spy writeAdoptJson order via real snapshot — do not spread live namespace.
+    const origWrite = bgSnap.writeAdoptJson
+    const origCollect = bgSnap.collectPortableCheckpoint
     mock.module('../../utils/bgCheckpoint.js', () => ({
-      ...bg,
+      ...bgSnap,
       writeAdoptJson: async (...args: Parameters<typeof origWrite>) => {
         order.push('adopt')
         return origWrite(...args)
@@ -137,8 +155,6 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
           },
         }
       },
-      abandonCheckpointShells: bg.abandonCheckpointShells,
-      reapNonHandoffTasks: bg.reapNonHandoffTasks,
     }))
 
     const result = await runExitBackgroundHandoff({
@@ -190,12 +206,13 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     delete process.env.CLAUDE_JOB_DIR
 
     mock.module('../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installSnap,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     // densable yNo settled crashed → real submitDispatch throws (do NOT mock
     // bgManager.js — Bun mock.module is process-global and pollutes leftArrow).
     mock.module('../../daemon/controlSocketClient.js', () => ({
+      ...controlSnap,
       sendControlRequest: async () => ({
         ok: true,
         settled: 'crashed',
@@ -205,9 +222,8 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     }))
 
     let abandoned = false
-    const bg = await import('../../utils/bgCheckpoint.js')
     mock.module('../../utils/bgCheckpoint.js', () => ({
-      ...bg,
+      ...bgSnap,
       // Force a non-null CAo so adoptWriteOk can become true
       collectPortableCheckpoint: () => ({
         payload: {
@@ -252,10 +268,11 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     delete process.env.CLAUDE_JOB_DIR
 
     mock.module('../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installSnap,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     mock.module('../../daemon/controlSocketClient.js', () => ({
+      ...controlSnap,
       sendControlRequest: async () => ({
         ok: true,
         settled: 'crashed',
@@ -265,9 +282,8 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     }))
 
     let abandoned = false
-    const bg = await import('../../utils/bgCheckpoint.js')
     mock.module('../../utils/bgCheckpoint.js', () => ({
-      ...bg,
+      ...bgSnap,
       collectPortableCheckpoint: () => ({
         payload: {
           writtenAtMs: Date.now(),
@@ -312,20 +328,22 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     process.env.CLAUDE_JOB_DIR = join(dir, 'poison-job')
 
     mock.module('../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installSnap,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     // Offline control socket → real submitDispatch file fallback (no bgManager mock).
     mock.module('../../daemon/controlSocketClient.js', () => ({
+      ...controlSnap,
       sendControlRequest: async () => ({ ok: false, error: 'offline' }),
       isDaemonReachable: async () => false,
     }))
 
     // Track write path; implement writeAdoptJson with real fs so we don't
-    // inherit a prior test's throwing mock via `...bg` / origWrite capture.
+    // inherit a prior test's throwing mock via live-namespace capture.
     const writeDirs: string[] = []
     const { mkdir, writeFile } = await import('fs/promises')
     mock.module('../../utils/bgCheckpoint.js', () => ({
+      ...bgSnap,
       collectPortableCheckpoint: () => ({
         payload: {
           writtenAtMs: Date.now(),
@@ -407,23 +425,22 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
 
     try {
       mock.module('../../daemon/installPrompt.js', () => ({
-        ...realInstallPrompt,
+        ...installSnap,
         ensureDaemonRunning: async () => ({ ok: true }),
       }))
       mock.module('../../daemon/controlSocketClient.js', () => ({
+        ...controlSnap,
         sendControlRequest: async () => ({ ok: false, error: 'offline' }),
         isDaemonReachable: async () => false,
       }))
       mock.module('../../utils/sessionStorage.js', () => ({
+        ...sessionStorageSnap,
         flushSessionStorage: async () => {},
       }))
 
-      // Bun mock.module is process-global — prior tests stub collect with fixed
-      // cron:[]. This test asserts BackgroundAndExit passes session crons into
-      // CAo; rebind collect to densable shape that preserves input.cron.
-      const bg = await import('../../utils/bgCheckpoint.js')
+      // Rebind collect to densable shape that preserves input.cron.
       mock.module('../../utils/bgCheckpoint.js', () => ({
-        ...bg,
+        ...bgSnap,
         collectPortableCheckpoint: (input: {
           tasks?: Record<string, unknown> | null
           cron?: ReadonlyArray<{
@@ -460,9 +477,6 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
             checkpointAgents: async () => {},
           }
         },
-        writeAdoptJson: bg.writeAdoptJson,
-        abandonCheckpointShells: bg.abandonCheckpointShells,
-        reapNonHandoffTasks: bg.reapNonHandoffTasks,
       }))
 
       expect(getSessionCronTasks().some(t => t.id === cronId)).toBe(true)

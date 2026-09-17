@@ -2,20 +2,32 @@
  * densable 2.1.243 #55 / #56 — work-bridge env remint after poll 404.
  * Official `It` / `gn` / `Li` / `pn` / `tr` / `u` / `ar` / `yt`.
  */
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
 import { debugMock } from '../../../tests/mocks/debug.js'
 import { logMock } from '../../../tests/mocks/log.js'
 
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realDiagLogs from '../../utils/diagLogs.js'
+
+const diagLogsSnap = snapshotModuleExports(realDiagLogs)
+const realAnalytics = await import('../../services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
+
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
-mock.module('src/services/analytics/index.ts', () => ({
-  logEvent: () => {},
-  logEventAsync: async () => {},
-}))
+mock.module('src/services/analytics/index.ts', analyticsMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
+
+afterAll(() => {
+  mock.module('src/services/analytics/index.ts', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+})
 mock.module('src/utils/diagLogs.ts', () => ({
+  ...diagLogsSnap,
   logForDiagnosticsNoPII: () => {},
 }))
 

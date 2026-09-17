@@ -4,12 +4,17 @@
  *   import { authMock } from '../../tests/mocks/auth'
  *   mock.module('src/utils/auth.js', authMock)
  *
- * Tests that need different return values can override the helper used by
- * the suite (e.g. by extending this object and re-registering with mock.module).
- * Always extend here rather than inlining a different shape per test, so the
- * surface stays consistent when `auth.ts` exports change.
+ * Bun `mock.module` is process-global last-write-wins. Hand-listing a few
+ * subscriber helpers wipes the other 60+ exports for every later file.
+ * Snapshot the real module and override only the values suites pin.
  */
+import * as realAuth from '../../src/utils/auth.js'
+import { snapshotModuleExports } from './settings.js'
+
+const authSnap = snapshotModuleExports(realAuth)
+
 export const authMock = () => ({
+  ...authSnap,
   // Mirrors the production contract: src/utils/auth.ts returns
   // Promise<boolean> ("did the access token change") and a token object that
   // carries scopes, subscriptionType, expiresAt, etc. Tests that branch on

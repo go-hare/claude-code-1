@@ -3,6 +3,7 @@
  * Uses tip buildHandoffEligibilityMap as densable KHe.
  */
 import { getSessionCronTasks } from '../bootstrap/state.js'
+import { isLocalWorkflowTask } from '../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
 import { type TaskState } from '../tasks/types.js'
 import {
   buildHandoffEligibilityMap,
@@ -23,12 +24,102 @@ export type LeftArrowInFlight = {
   restartableCount?: number
 }
 
+export type WorkflowAgentsCount = {
+  running: number
+  finished: number
+  rerun: number
+}
+
+export const EMPTY_WORKFLOW_AGENTS: WorkflowAgentsCount = {
+  running: 0,
+  finished: 0,
+  rerun: 0,
+}
+
 export type LeftArrowConfirmState = {
   inFlight: LeftArrowInFlight
   summary: string
   carryOverCount: number
   monitorParkCount: number
+  /** densable 2.1.246 wr `workflowAgents` / Pr */
+  workflowAgents: WorkflowAgentsCount
   proceed: () => void
+}
+
+/**
+ * densable 2.1.246 Pr — handoff-eligible local_workflow agent() counts.
+ * running: progress, or start that is not still queued (queuedAt set, startedAt unset).
+ * finished: done at/before the first error index (kept on background).
+ * rerun: done after a failed agent (those run again).
+ */
+export function countWorkflowAgents(
+  tasks: Record<string, TaskState> | null | undefined,
+  eligibility = buildHandoffEligibilityMap(asPortableTasks(tasks)),
+): WorkflowAgentsCount {
+  let running = 0
+  let finished = 0
+  let rerun = 0
+  for (const task of Object.values(tasks ?? {})) {
+    if (
+      !isLocalWorkflowTask(task) ||
+      !isHandoffEligible(task.id, eligibility)
+    ) {
+      continue
+    }
+    let firstError = Number.POSITIVE_INFINITY
+    for (const step of task.workflowProgress) {
+      if (step.type === 'workflow_agent' && step.state === 'error') {
+        firstError = Math.min(firstError, step.index)
+      }
+    }
+    for (const step of task.workflowProgress) {
+      if (step.type !== 'workflow_agent') continue
+      if (step.state === 'done') {
+        if (step.index > firstError) rerun++
+        else finished++
+      } else if (
+        step.state === 'progress' ||
+        (step.state === 'start' &&
+          !(step.queuedAt !== undefined && step.startedAt === undefined))
+      ) {
+        running++
+      }
+    }
+  }
+  return { running, finished, rerun }
+}
+
+/** densable 2.1.246 j — workflow restart subtitle. Empty when running===0. */
+export function formatWorkflowAgentsSubtitle(
+  agents: WorkflowAgentsCount,
+): string {
+  const { running, finished, rerun } = agents
+  if (running === 0) return ''
+  const kept =
+    finished > 0
+      ? `; ${finished} finished ${plural(finished, 'subagent')} ${finished === 1 ? 'is' : 'are'} kept`
+      : ''
+  const again =
+    rerun > 0
+      ? `; ${rerun} that finished after a failed one ${rerun === 1 ? 'runs' : 'run'} again`
+      : ''
+  return `${running} running workflow ${plural(running, 'subagent')} ${running === 1 ? 'restarts' : 'restart'} from the beginning${kept}${again}.`
+}
+
+/**
+ * densable 2.1.246 ge — LAc confirm label.
+ * hasAbandonSummary wins; else running workflow uses restart count (running+rerun).
+ */
+export function formatWorkflowAgentsConfirmLabel(
+  hasAbandonSummary: boolean,
+  agents: WorkflowAgentsCount,
+): string {
+  if (hasAbandonSummary) return 'Background anyway (tasks will be stopped)'
+  const n = agents.running + agents.rerun
+  if (agents.running > 0) {
+    return `Background anyway (${n} ${plural(n, 'subagent')} ${n === 1 ? 'restarts' : 'restart'})`
+  }
+  return 'Background'
 }
 
 /** densable Tgn — Artifact comment monitor subtitle. */
@@ -286,13 +377,18 @@ export function formatDeferMonitorCancelToast(newMonitorCount: number): string {
 }
 
 /**
- * densable Swh — show LAc when abandonable work remains or monitors park.
+ * densable Swh / Ko — LAc when abandonable, parked monitors, or running workflow agents.
  */
 export function shouldConfirmLeftArrowBackground(
   tasks: Record<string, TaskState> | null | undefined,
 ): boolean {
+  const eligibility = buildHandoffEligibilityMap(asPortableTasks(tasks))
   const monitors = collectFrameLiveMonitorSlugs(tasks)
-  return countAbandonableLeftArrow(tasks) > 0 || monitors.size > 0
+  return (
+    countAbandonableLeftArrow(tasks) > 0 ||
+    monitors.size > 0 ||
+    countWorkflowAgents(tasks, eligibility).running > 0
+  )
 }
 
 /** Build densable Tt payload; proceed() continues left-arrow handoff. */
@@ -318,6 +414,7 @@ export function buildLeftArrowConfirmState(
     summary,
     carryOverCount: Math.max(0, fan - monitorParkCount),
     monitorParkCount,
+    workflowAgents: countWorkflowAgents(tasks, eligibility),
     proceed: () => proceed(summary !== ''),
   }
 }

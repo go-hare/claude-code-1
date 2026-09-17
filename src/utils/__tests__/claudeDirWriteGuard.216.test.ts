@@ -12,6 +12,16 @@ import {
   assertProjectClaudeDirWritable,
 } from '../claudeDirWriteGuard.js'
 
+/** Windows without Developer Mode refuses symlink creation (EPERM). */
+async function trySymlink(target: string, path: string): Promise<boolean> {
+  try {
+    await symlink(target, path, 'dir')
+    return true
+  } catch {
+    return false
+  }
+}
+
 describe('assertProjectClaudeDirWritable (densable 2.1.216)', () => {
   let dir: string
   const dirs: string[] = []
@@ -42,7 +52,7 @@ describe('assertProjectClaudeDirWritable (densable 2.1.216)', () => {
   test('symlink escaping project root is refused', async () => {
     const root = await tmp()
     const outside = await tmp()
-    await symlink(outside, join(root, '.claude'))
+    if (!(await trySymlink(outside, join(root, '.claude')))) return
     await expect(assertProjectClaudeDirWritable(root)).rejects.toBeInstanceOf(
       SymlinkWriteRefusedError,
     )
@@ -59,7 +69,7 @@ describe('assertProjectClaudeDirWritable (densable 2.1.216)', () => {
     const root = await tmp()
     const target = join(root, 'inner-claude')
     await mkdir(target)
-    await symlink(target, join(root, '.claude'))
+    if (!(await trySymlink(target, join(root, '.claude')))) return
     await expect(assertProjectClaudeDirWritable(root)).rejects.toBeInstanceOf(
       SymlinkWriteRefusedError,
     )
@@ -67,7 +77,10 @@ describe('assertProjectClaudeDirWritable (densable 2.1.216)', () => {
 
   test('broken symlink is refused', async () => {
     const root = await tmp()
-    await symlink(join(root, 'does-not-exist'), join(root, '.claude'))
+    if (
+      !(await trySymlink(join(root, 'does-not-exist'), join(root, '.claude')))
+    )
+      return
     await expect(assertProjectClaudeDirWritable(root)).rejects.toBeInstanceOf(
       SymlinkWriteRefusedError,
     )

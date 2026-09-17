@@ -2,6 +2,7 @@
  * densable 2.1.235 #1 — spellcheck settings tier resolve (user/flag/managed only).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { debugMock } from '../../../../tests/mocks/debug.js'
 import type { SettingsJson } from '../../settings/types.js'
 import type { SettingSource } from '../../settings/constants.js'
 import {
@@ -12,6 +13,7 @@ import {
 
 const debugLogs: string[] = []
 mock.module('../../debug.js', () => ({
+  ...debugMock(),
   logForDebugging: (msg: string) => {
     debugLogs.push(msg)
   },

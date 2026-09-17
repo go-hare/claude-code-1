@@ -104,7 +104,7 @@
 
 ### 粗标备注
 
-- tip baseline：densable **2.1.239 leftover** 已落地 + npm **2.7.47**。
+- tip baseline：densable **2.1.243** 已落地 + npm **2.7.48**（叠在 239 leftover / 2.7.47 上）。
 - `#2` 的 `modelPicker` **setting**（策划 `/model` 列表）≠ tip 已有的 `ModelPicker` UI / `chat:modelPicker` 快捷键。勿把现成 picker 组件当成 HAVE。
 - `#8`/`#9` 已按 SEA 文案落地；`#38` 旧 `gh`（无 `gh auth token`）已 HAVE（`yh` + `gh_too_old`）。
 - `#12` Desktop CIMD / `#17` 云端 mid-turn：宿主面 **同缺 = 已对齐**（239 已钉）。只挖 CLI OAuth / resume 对等。

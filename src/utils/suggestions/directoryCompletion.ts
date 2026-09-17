@@ -2,6 +2,8 @@ import { LRUCache } from 'lru-cache'
 import { basename, dirname, join, sep } from 'path'
 import type { SuggestionItem } from 'src/components/PromptInput/PromptInputFooterSuggestions.js'
 import { getCwd } from 'src/utils/cwd.js'
+import { logForDebugging } from 'src/utils/debug.js'
+import { errorMessage } from 'src/utils/errors.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { logError } from 'src/utils/log.js'
 import { expandPath } from 'src/utils/path.js'
@@ -84,6 +86,24 @@ export function parsePartialPath(
 }
 
 /**
+ * densable 2.1.246 #33 `P` — wrap `V`/`parsePartialPath`. expandPath throws on
+ * a null byte in the token or cwd; completion must skip, not fail.
+ */
+export function tryParsePartialPath(
+  partialPath: string,
+  basePath?: string,
+): ParsedPath | null {
+  try {
+    return parsePartialPath(partialPath, basePath)
+  } catch (error) {
+    logForDebugging(
+      `Skipping path completion for an unexpandable token: ${errorMessage(error)}`,
+    )
+    return null
+  }
+}
+
+/**
  * Scans a directory and returns subdirectories
  * Uses LRU cache to avoid repeated filesystem calls
  */
@@ -130,7 +150,9 @@ export async function getDirectoryCompletions(
 ): Promise<SuggestionItem[]> {
   const { basePath = getCwd(), maxResults = 10 } = options
 
-  const { directory, prefix } = parsePartialPath(partialPath, basePath)
+  const parsed = tryParsePartialPath(partialPath, basePath)
+  if (!parsed) return []
+  const { directory, prefix } = parsed
   const entries = await scanDirectory(directory)
   const prefixLower = prefix.toLowerCase()
   const matches = entries
@@ -223,7 +245,9 @@ export async function getPathCompletions(
     keepDotPrefix = false,
   } = options
 
-  const { directory, prefix } = parsePartialPath(partialPath, basePath)
+  const parsed = tryParsePartialPath(partialPath, basePath)
+  if (!parsed) return []
+  const { directory, prefix } = parsed
   const entries = await scanDirectoryForPaths(directory, includeHidden)
   const prefixLower = prefix.toLowerCase()
 

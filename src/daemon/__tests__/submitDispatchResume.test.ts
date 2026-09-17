@@ -2,6 +2,29 @@ import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { fileURLToPath } from 'url'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+const controlSnap = snapshotModuleExports(
+  await import('../controlSocketClient.js'),
+)
+
+/** bgManager statically imports controlSocket → controlSocketClient; mock both specifiers. */
+function mockControlSocket(overrides: Partial<typeof controlSnap> = {}): void {
+  const impl = () => ({
+    ...controlSnap,
+    sendControlRequest: async () => ({ ok: false, error: 'offline' }),
+    isDaemonReachable: async () => false,
+    ...overrides,
+  })
+  mock.module('../controlSocketClient.js', impl)
+  mock.module('src/daemon/controlSocketClient.js', impl)
+}
+
+/** `new URL(...).pathname` yields `/D:/...` on win32, which Bun.file rejects. */
+function siblingSource(relative: string): string {
+  return fileURLToPath(new URL(relative, import.meta.url))
+}
 
 describe('submitDispatch resume/fork path (official Hbe subset)', () => {
   const prevHome = process.env.CLAUDE_CONFIG_DIR
@@ -18,10 +41,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
     dir = mkdtempSync(join(tmpdir(), 'dispatch-nonce-'))
     process.env.CLAUDE_CONFIG_DIR = dir
 
-    mock.module('../controlSocketClient.js', () => ({
-      sendControlRequest: async () => ({ ok: false, error: 'offline' }),
-      isDaemonReachable: async () => false,
-    }))
+    mockControlSocket()
 
     const { submitDispatch } = await import('../bgManager.js')
     await submitDispatch({
@@ -43,10 +63,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
     dir = mkdtempSync(join(tmpdir(), 'dispatch-'))
     process.env.CLAUDE_CONFIG_DIR = dir
 
-    mock.module('../controlSocketClient.js', () => ({
-      sendControlRequest: async () => ({ ok: false, error: 'offline' }),
-      isDaemonReachable: async () => false,
-    }))
+    mockControlSocket()
 
     const { submitDispatch } = await import('../bgManager.js')
     const result = await submitDispatch({
@@ -90,7 +107,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
     dir = mkdtempSync(join(tmpdir(), 'dispatch-crash-'))
     process.env.CLAUDE_CONFIG_DIR = dir
 
-    mock.module('../controlSocketClient.js', () => ({
+    mockControlSocket({
       sendControlRequest: async () => ({
         ok: true,
         op: 'dispatch',
@@ -98,7 +115,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
         settled: 'crashed',
       }),
       isDaemonReachable: async () => true,
-    }))
+    })
 
     const { submitDispatch } = await import('../bgManager.js')
     await expect(
@@ -115,7 +132,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
     dir = mkdtempSync(join(tmpdir(), 'dispatch-timeout-'))
     process.env.CLAUDE_CONFIG_DIR = dir
 
-    mock.module('../controlSocketClient.js', () => ({
+    mockControlSocket({
       sendControlRequest: async () => ({
         ok: false,
         op: 'dispatch',
@@ -125,7 +142,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
         error: 'worker ack timeout',
       }),
       isDaemonReachable: async () => true,
-    }))
+    })
 
     const { submitDispatch } = await import('../bgManager.js')
     await expect(
@@ -153,7 +170,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
     dir = mkdtempSync(join(tmpdir(), 'dispatch-ealive-'))
     process.env.CLAUDE_CONFIG_DIR = dir
 
-    mock.module('../controlSocketClient.js', () => ({
+    mockControlSocket({
       sendControlRequest: async () => ({
         ok: false,
         op: 'dispatch',
@@ -164,7 +181,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
           'Session deadbeef is already running — `claude attach deadbeef` to join it',
       }),
       isDaemonReachable: async () => true,
-    }))
+    })
 
     const { submitDispatch, isSubmitDispatchAliveError } = await import(
       '../bgManager.js'
@@ -203,10 +220,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
     const prevShell = process.env.SHELL
     process.env.SHELL = '/bin/zsh'
 
-    mock.module('../controlSocketClient.js', () => ({
-      sendControlRequest: async () => ({ ok: false, error: 'offline' }),
-      isDaemonReachable: async () => false,
-    }))
+    mockControlSocket()
 
     try {
       const { submitDispatch } = await import('../bgManager.js')
@@ -254,10 +268,7 @@ describe('submitDispatch resume/fork path (official Hbe subset)', () => {
     dir = mkdtempSync(join(tmpdir(), 'dispatch-exec-ws-'))
     process.env.CLAUDE_CONFIG_DIR = dir
 
-    mock.module('../controlSocketClient.js', () => ({
-      sendControlRequest: async () => ({ ok: false, error: 'offline' }),
-      isDaemonReachable: async () => false,
-    }))
+    mockControlSocket()
 
     const { submitDispatch } = await import('../bgManager.js')
     await submitDispatch({
@@ -280,9 +291,7 @@ describe('ghost-job guards (#2 claimSpare / awaitWorkerAck)', () => {
   test('claimSpare is async and await-sendClaim-before-register in source', async () => {
     // Structural: densable D3q registered handle then fire-and-forget sendClaim.
     // Local product fix awaits sendClaim, only then BgWorker.claim; fail → throw.
-    const bgSpareSrc = await Bun.file(
-      new URL('../bgSpare.ts', import.meta.url).pathname,
-    ).text()
+    const bgSpareSrc = await Bun.file(siblingSource('../bgSpare.ts')).text()
     expect(bgSpareSrc).toMatch(/export async function claimSpare\s*\(/)
     expect(bgSpareSrc).toMatch(/await sendClaim\(/)
     // throw after killSparePty so bgManager can cold-spawn
@@ -295,9 +304,7 @@ describe('ghost-job guards (#2 claimSpare / awaitWorkerAck)', () => {
     expect(awaitSend).toBeGreaterThan(0)
     expect(bgClaim).toBeGreaterThan(awaitSend)
 
-    const bgManagerSrc = await Bun.file(
-      new URL('../bgManager.ts', import.meta.url).pathname,
-    ).text()
+    const bgManagerSrc = await Bun.file(siblingSource('../bgManager.ts')).text()
     // register only in .then(worker => handles.set(...))
     expect(bgManagerSrc).toMatch(
       /void claimSpare\([\s\S]*?\.then\(worker =>[\s\S]*?handles\.set\(req\.short, worker\)/,
@@ -309,9 +316,7 @@ describe('ghost-job guards (#2 claimSpare / awaitWorkerAck)', () => {
   })
 
   test('awaitWorkerAck polls for missing handle — never immediate ok:true', async () => {
-    const src = await Bun.file(
-      new URL('../bgManager.ts', import.meta.url).pathname,
-    ).text()
+    const src = await Bun.file(siblingSource('../bgManager.ts')).text()
     const idx = src.indexOf('function awaitWorkerAck(')
     expect(idx).toBeGreaterThan(0)
     const body = src.slice(idx, idx + 5500)
@@ -331,9 +336,7 @@ describe('ghost-job guards (#2 claimSpare / awaitWorkerAck)', () => {
   })
 
   test('dispatch ack timeout covers claimSpare sendClaim budget', async () => {
-    const src = await Bun.file(
-      new URL('../bgManager.ts', import.meta.url).pathname,
-    ).text()
+    const src = await Bun.file(siblingSource('../bgManager.ts')).text()
     // Client/server must share budget > sendClaim 5s (was 5_000 → race).
     // Product uses DEFAULT_WORKER_ACK_TIMEOUT_MS directly (no DISPATCH_ACK alias).
     expect(src).toMatch(/DEFAULT_WORKER_ACK_TIMEOUT_MS\s*=\s*12_000/)
@@ -348,9 +351,7 @@ describe('ghost-job guards (#2 claimSpare / awaitWorkerAck)', () => {
     // Local intentionally awaits sendClaim before BgWorker.claim/register.
     // Runtime e2e of slow claim is covered by claimingShorts + 12s ack budget
     // structural gates above — not by re-implementing gold fire-and-forget.
-    const bgSpareSrc = await Bun.file(
-      new URL('../bgSpare.ts', import.meta.url).pathname,
-    ).text()
+    const bgSpareSrc = await Bun.file(siblingSource('../bgSpare.ts')).text()
     expect(bgSpareSrc).toMatch(/densable sWa/)
     expect(bgSpareSrc).toMatch(/Local product \(intentional/)
     const claimIdx = bgSpareSrc.indexOf('export async function claimSpare')

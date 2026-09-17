@@ -7,6 +7,7 @@ export type {
   TypedMessageContent,
   Message,
   AssistantMessage,
+  BatchToolUseRef,
   AttachmentMessage,
   ProgressMessage,
   SystemLocalCommandMessage,

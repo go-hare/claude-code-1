@@ -6,6 +6,12 @@ import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+import {
+  abortControllerMock,
+  cleanupRegistryMock,
+  speculationMock,
+} from '../../../../tests/mocks/taskSurface.js'
 const noop = () => {}
 // Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
 const bootstrapSnap = snapshotModuleExports(realBootstrapState)
@@ -91,20 +97,14 @@ afterAll(() => {
   mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
   mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
 })
-mock.module('src/services/PromptSuggestion/speculation.js', () => ({
-  abortSpeculation: noop,
-}))
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: noop,
-  stripProtoFields: (x: unknown) => x,
-}))
-mock.module('src/utils/cleanupRegistry.js', () => ({
-  registerCleanup: () => noop,
-}))
-mock.module('src/utils/abortController.js', () => ({
-  createAbortController: () => new AbortController(),
-  createChildAbortController: () => new AbortController(),
-}))
+mock.module('src/services/PromptSuggestion/speculation.js', speculationMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
+mock.module('src/utils/cleanupRegistry.js', () =>
+  cleanupRegistryMock({
+    registerCleanup: () => noop,
+  }),
+)
+mock.module('src/utils/abortController.js', abortControllerMock)
 // Spread real sdkEventQueue — drainSdkEvents:()=>[] without restore empties
 // workflow notifications co-suite under process-global mock.module.
 const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')

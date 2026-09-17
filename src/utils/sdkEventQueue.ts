@@ -263,6 +263,38 @@ export function enqueueSdkEvent(event: SdkEvent): void {
   onEnqueueListener?.()
 }
 
+/**
+ * densable leftover hook `QK` / `jj` @206816743 — `Io().hasQueued(e)`.
+ * Peek. Does not drain.
+ */
+export function hasMatchingQueuedSdkEvent(
+  pred: (event: SdkEvent) => boolean,
+): boolean {
+  return queue.some(pred)
+}
+
+/**
+ * densable leftover hook `S_e` / `Nn` @209368305.
+ * `a_e` = `zK().filter(S_e).map(iCe)`.
+ */
+export function isBridgeForwardableSdkEvent(event: {
+  type?: string
+  subtype?: string
+}): boolean {
+  return (
+    event.type === 'conversation_reset' ||
+    (event.type === 'system' && event.subtype === 'status') ||
+    event.subtype === 'task_started' ||
+    event.subtype === 'task_progress' ||
+    event.subtype === 'task_updated' ||
+    event.subtype === 'task_notification' ||
+    event.subtype === 'background_tasks_changed' ||
+    event.subtype === 'thinking_tokens' ||
+    event.subtype === 'code_change_published' ||
+    event.subtype === 'vcs_state_changed'
+  )
+}
+
 export function drainSdkEvents(): Array<
   SdkEvent & { uuid: UUID | string; session_id: string; timestamp: string }
 > {

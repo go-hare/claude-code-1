@@ -53,11 +53,15 @@ afterAll(() => {
   mock.module('src/services/analytics/growthbook.js', () => ({
     ...growthbookSnap,
   }))
+  mock.module('src/utils/execFileNoThrow.js', () => ({ ...execSnap }))
+  mock.module('src/utils/execFileNoThrow.ts', () => ({ ...execSnap }))
 })
+const realExec = await import('src/utils/execFileNoThrow.js')
+const execSnap = snapshotModuleExports(realExec)
 mock.module('src/utils/execFileNoThrow.js', () => ({
+  ...execSnap,
   execFileNoThrow: async () => ({ code: 1, stdout: '', stderr: '' }),
   execFileNoThrowWithCwd: async () => ({ code: 1, stdout: '', stderr: '' }),
-  execSyncWithDefaults_DEPRECATED: () => '',
 }))
 
 const {

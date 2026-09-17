@@ -20,13 +20,16 @@ import {
   snapshotModuleExports,
 } from '../../../../tests/mocks/settings.js'
 import * as realAnalytics from 'src/services/analytics/index.js'
+import * as realAnalyticsConfig from 'src/services/analytics/config.js'
 import * as realGrowthbook from 'src/services/analytics/growthbook.js'
+import * as realPolicyLimits from 'src/services/policyLimits/index.js'
 import * as realConfig from 'src/utils/config.js'
+import * as realAllowlist from 'src/utils/model/modelAllowlist.js'
+import * as realResidualGates from 'src/utils/residualFinalEnvGates.js'
 import * as realSettings from 'src/utils/settings/settings.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: () => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -35,6 +38,10 @@ const configSnap = snapshotModuleExports(realConfig)
 const settingsSnap = snapshotModuleExports(realSettings)
 const growthbookSnap = snapshotModuleExports(realGrowthbook)
 const analyticsSnap = snapshotModuleExports(realAnalytics)
+const allowlistSnap = snapshotModuleExports(realAllowlist)
+const analyticsConfigSnap = snapshotModuleExports(realAnalyticsConfig)
+const policySnap = snapshotModuleExports(realPolicyLimits)
+const residualSnap = snapshotModuleExports(realResidualGates)
 
 const logEventMock = mock(
   (_name: string, _data?: Record<string, unknown>) => {},
@@ -117,18 +124,22 @@ mock.module('src/utils/settings/settings.js', settingsMock)
 mock.module('src/utils/settings/settings.ts', settingsMock)
 
 mock.module('src/utils/model/modelAllowlist.js', () => ({
+  ...allowlistSnap,
   isModelAllowed: (_model: string) => modelAllowed,
 }))
 
 mock.module('src/services/analytics/config.js', () => ({
+  ...analyticsConfigSnap,
   isFeedbackSurveyDisabled: () => false,
 }))
 
 mock.module('src/services/policyLimits/index.js', () => ({
+  ...policySnap,
   isPolicyAllowed: () => true,
 }))
 
 mock.module('src/utils/residualFinalEnvGates.js', () => ({
+  ...residualSnap,
   isFeedbackSurveyEnvDisabled: () => false,
 }))
 
@@ -139,6 +150,14 @@ afterAll(() => {
     ...growthbookSnap,
   }))
   mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/utils/model/modelAllowlist.js', () => ({ ...allowlistSnap }))
+  mock.module('src/services/analytics/config.js', () => ({
+    ...analyticsConfigSnap,
+  }))
+  mock.module('src/services/policyLimits/index.js', () => ({ ...policySnap }))
+  mock.module('src/utils/residualFinalEnvGates.js', () => ({
+    ...residualSnap,
+  }))
   restoreSettingsMockWith(mock.module, settingsSnap, [
     'src/utils/settings/settings.js',
     'src/utils/settings/settings.ts',

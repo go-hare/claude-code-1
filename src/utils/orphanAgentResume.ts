@@ -541,19 +541,49 @@ export async function enrichOrphanCandidatesWithDisk(
     let hasMeta = false
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getAgentTranscriptPath, readAgentMetadata } =
-        require('./sessionStorage.js') as typeof import('./sessionStorage.js')
+      const {
+        getAgentTranscriptPath,
+        bindSubagentTranscriptPersistence,
+        readAgentMetadata,
+      } = require('./sessionStorage.js') as typeof import('./sessionStorage.js')
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { asAgentId } =
         require('../types/ids.js') as typeof import('../types/ids.js')
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { stat } = require('fs/promises') as typeof import('fs/promises')
+      const { getPinnedStorageV5 } =
+        require('./storageV5/index.js') as typeof import('./storageV5/index.js')
       const path = getAgentTranscriptPath(asAgentId(a.agentId))
       try {
-        const st = await stat(path)
-        mtimeMs = st.size > 0 ? st.mtimeMs : null
+        // densable leftover `Ii` @228342935 — `pe()&&t?On(n,t).statMeta:yi`.
+        const bind = bindSubagentTranscriptPersistence(
+          path,
+          getPinnedStorageV5(),
+        )
+        const backend = bind?.backend as
+          | {
+              statMeta?: (key: unknown) => Promise<{
+                ok: boolean
+                value?: { size?: number; mtimeMs?: number }
+              }>
+            }
+          | undefined
+        if (bind && backend?.statMeta) {
+          const meta = await backend.statMeta(bind.key)
+          if (meta.ok && (meta.value?.size ?? 0) > 0) {
+            mtimeMs = meta.value?.mtimeMs ?? null
+          }
+        }
       } catch {
-        mtimeMs = null
+        /* leftover On miss → FS yi */
+      }
+      if (mtimeMs === null) {
+        try {
+          const st = await stat(path)
+          mtimeMs = st.size > 0 ? st.mtimeMs : null
+        } catch {
+          mtimeMs = null
+        }
       }
       let stoppedByUser = false
       try {

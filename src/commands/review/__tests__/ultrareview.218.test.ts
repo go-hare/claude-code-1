@@ -63,7 +63,10 @@ afterAll(() => {
 // mocks drop dirIsInGitRepo and break the teleport/gitignore import graph
 // (Bun mock.module is process-global; partial re-exports fail named imports).
 let revParseHits = new Set<string>()
+const realExec = await import('src/utils/execFileNoThrow.js')
+const execSnap = snapshotModuleExports(realExec)
 mock.module('src/utils/execFileNoThrow.js', () => ({
+  ...execSnap,
   execFileNoThrow: async (_cmd: string, args: string[]) => {
     // git rev-parse --verify --quiet <ref>
     const ref = args[args.length - 1] ?? ''
@@ -74,10 +77,11 @@ mock.module('src/utils/execFileNoThrow.js', () => ({
     stdout: '',
     stderr: '',
   }),
-  // re-export surface from execFileNoThrowPortable — partial mock breaks
-  // named imports in git/teleport graph (Bun mock.module process-global)
-  execSyncWithDefaults_DEPRECATED: () => '',
 }))
+afterAll(() => {
+  mock.module('src/utils/execFileNoThrow.js', () => ({ ...execSnap }))
+  mock.module('src/utils/execFileNoThrow.ts', () => ({ ...execSnap }))
+})
 
 const {
   parseUltrareviewArgs,

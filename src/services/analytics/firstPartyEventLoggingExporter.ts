@@ -24,7 +24,10 @@ import { checkHasTrustDialogAccepted } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { errorMessage, isFsInaccessible, toError } from '../../utils/errors.js'
-import { getAuthHeaders } from '../../utils/http.js'
+import {
+  getAuthHeaders,
+  withholdMisroutedCredential,
+} from '../../utils/http.js'
 import { readJSONLFile } from '../../utils/json.js'
 import { logError } from '../../utils/log.js'
 import { sleep } from '../../utils/sleep.js'
@@ -56,7 +59,7 @@ type FirstPartyEventLoggingPayload = {
 }
 
 /**
- * Exporter for 1st-party event logging to /api/event_logging/batch.
+ * Exporter for 1st-party event logging to /api/event_logging/v2/batch.
  *
  * Export cycles are controlled by OpenTelemetry's BatchLogRecordProcessor, which
  * triggers export() when either:
@@ -117,7 +120,7 @@ export class FirstPartyEventLoggingExporter implements LogRecordExporter {
         ? 'https://api-staging.anthropic.com'
         : 'https://api.anthropic.com')
 
-    this.endpoint = `${baseUrl}${options.path || '/api/event_logging/batch'}`
+    this.endpoint = `${baseUrl}${options.path || '/api/event_logging/v2/batch'}`
 
     this.timeout = options.timeout || 10000
     this.maxBatchSize = options.maxBatchSize || 200
@@ -510,7 +513,14 @@ export class FirstPartyEventLoggingExporter implements LogRecordExporter {
     const authResult = shouldSkipAuth
       ? { headers: {}, error: 'trust not established or Oauth token expired' }
       : getAuthHeaders()
-    const useAuth = !authResult.error
+    // densable 2.1.246 #44 ky — do not POST a 3P gateway key to 1P event logging.
+    const routed = withholdMisroutedCredential(authResult, this.endpoint)
+    if (routed.reasonCode === 'misrouted_credential') {
+      logForDebugging(
+        '1P event logging: credential does not belong to the event logging endpoint host, withholding',
+      )
+    }
+    const useAuth = !routed.error
 
     if (!useAuth && false) {
       logForDebugging(
@@ -519,7 +529,7 @@ export class FirstPartyEventLoggingExporter implements LogRecordExporter {
     }
 
     const headers = useAuth
-      ? { ...baseHeaders, ...authResult.headers }
+      ? { ...baseHeaders, ...routed.headers }
       : baseHeaders
 
     try {

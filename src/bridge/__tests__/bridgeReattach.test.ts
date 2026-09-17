@@ -89,6 +89,49 @@ describe('unarchiveCodeSession (densable Nls)', () => {
     expect(status).toBe('invalid')
     expect(axiosPost).not.toHaveBeenCalled()
   })
+
+  test('403 untrusted_device / session_stale_relogin return resource tokens', async () => {
+    const { unarchiveCodeSession } = await import('../codeSessionApi.js')
+    axiosPost.mockImplementationOnce(async () => ({
+      status: 403,
+      data: { error: { resource: 'untrusted_device' } },
+    }))
+    expect(
+      await unarchiveCodeSession(
+        'cse_abc',
+        'https://api.example',
+        'tok',
+        'org-1',
+        1500,
+      ),
+    ).toBe('untrusted_device')
+    axiosPost.mockImplementationOnce(async () => ({
+      status: 403,
+      data: { error: { resource: 'session_stale_relogin' } },
+    }))
+    expect(
+      await unarchiveCodeSession(
+        'cse_abc',
+        'https://api.example',
+        'tok',
+        'org-1',
+        1500,
+      ),
+    ).toBe('session_stale_relogin')
+    axiosPost.mockImplementationOnce(async () => ({
+      status: 403,
+      data: {},
+    }))
+    expect(
+      await unarchiveCodeSession(
+        'cse_abc',
+        'https://api.example',
+        'tok',
+        'org-1',
+        1500,
+      ),
+    ).toBe(403)
+  })
 })
 
 describe('buildBridgeReattachEnv (densable rit/EAt)', () => {
@@ -562,6 +605,8 @@ describe('initReplBridge densable wXr + force env-less reattach', () => {
       'utf8',
     )
     expect(init).toContain('getPersistedBridgeSession')
+    expect(init).toContain('getCurrentSessionBridge')
+    expect(init).toContain('restoredPointerOccupancy')
     expect(init).toContain('Reattaching to persisted bridge session')
     expect(init).toContain('forceEnvLessReattach')
     expect(init).toContain(

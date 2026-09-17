@@ -163,7 +163,7 @@ describe('xSeSpawn densable e6_/xSe shell', () => {
     if (!r.ok) return
     const { readBgJobState } = await import('../jobState.js')
     const st = readBgJobState(r.short)
-    expect(st?.state).toBe('starting')
+    expect(st?.state).toBe('working')
     expect(st?.intent).toContain('seed me')
   })
 })

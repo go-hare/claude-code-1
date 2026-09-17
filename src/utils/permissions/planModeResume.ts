@@ -1,14 +1,18 @@
 /**
- * densable 2.1.239 #13 planModeResume — official `YWy`/`g_u`/`QnT`/`eoT`/`y_u`/`XWy`/`__u`/`h_u`/`Ibu`.
+ * densable 2.1.239 #13 + 2.1.246 #40 planModeResume.
  *
- * Cloud idle-worker restart drops the session out of plan mode because
- * `external_metadata.permission_mode` is not the record. Official writes
- * `internal_metadata.worker_permission_mode` and re-enters plan on resume.
+ * 239: `uu`/`ll`/`bD`/`dy`/`mu`/`cy`/`__u`/`h_u`/`Ibu` — worker
+ * `internal_metadata.worker_permission_mode` re-enters plan on resume.
+ * 246 print: `my`/`pu`/`fu`/`uy`/`vD`/`CD` — `--continue` hydrates from
+ * an open transcript plan segment. Resume runs `mu` then `pu`.
  *
- * Invent-ban: do not implement official empty `EaT`. Do not restore
- * `session_allow_rules` (`nxh`) or upgrade `rxh` here.
+ * Invent-ban: do not implement official empty `iX`/`EaT`. Do not call
+ * `my` on interactive `--continue`. Do not restore `session_allow_rules`.
  */
 import type { ToolPermissionContext } from '../../Tool.js'
+import { COMMAND_NAME_TAG } from '../../constants/xml.js'
+import { ENTER_PLAN_MODE_TOOL_NAME } from '@claude-code/builtin-tools/tools/EnterPlanModeTool/constants.js'
+import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js'
 import {
   EXTERNAL_PERMISSION_MODES,
   type ExternalPermissionMode,
@@ -21,16 +25,31 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../../services/analytics/index.js'
 
-export type PlanModeResumeSource = 'none' | 'internal'
+export type PlanModeResumeSource = 'none' | 'internal' | 'transcript'
 
 export type PlanModeRecordedMode = ExternalPermissionMode | 'absent' | 'invalid'
 
 export type PlanModeOnResume = 'restored' | 'declined' | 'none'
 
+export type TranscriptPlanState = 'open' | 'exited' | 'none'
+
 export type PlanModeResumeTracker = {
   source: PlanModeResumeSource
   trustedMode: PermissionMode | undefined
   recordedMode: PlanModeRecordedMode
+  transcriptOpen?: boolean
+  recordTranscriptState?: TranscriptPlanState
+}
+
+/** Structural transcript rows for official `uy` / `vD` / `CD`. */
+export type TranscriptPlanScanMessage = {
+  type?: string
+  attachment?: { type?: string }
+  message?: { content?: unknown }
+  permissionMode?: string
+  isMeta?: boolean
+  origin?: { kind?: string }
+  toolUseResult?: unknown
 }
 
 export type WorkerInternalMetadata = {
@@ -74,12 +93,13 @@ export function parseRecordedWorkerPermissionMode(
   return 'invalid'
 }
 
-/** Official `g_u`. */
+/** Official `ll` / 239 `g_u`. 246: `transcriptOpen` also declines. */
 export function classifyPlanModeOnResume(
   tracker: PlanModeResumeTracker,
 ): PlanModeOnResume {
   if (tracker.source !== 'none') return 'restored'
-  return tracker.recordedMode === 'plan' && tracker.trustedMode !== 'plan'
+  return (tracker.recordedMode === 'plan' || tracker.transcriptOpen === true) &&
+    tracker.trustedMode !== 'plan'
     ? 'declined'
     : 'none'
 }
@@ -114,6 +134,7 @@ export type PlanModeResumeAppState = {
 
 export type ApplyPlanModeResumeOptions = {
   forkSession?: boolean
+  transcript?: readonly TranscriptPlanScanMessage[]
   isGuardEnabled?: () => boolean
   isExitPlanModeEnabled?: () => boolean
   isExitPlanModeDenied?: (ctx: ToolPermissionContext) => boolean
@@ -155,8 +176,8 @@ function defaultIsExitPlanModeDenied(ctx: ToolPermissionContext): boolean {
 }
 
 /**
- * Official `y_u` — setAppState updater. `qqe` is ExitPlanMode (EnterPlanMode
- * `isEnabled()` delegates to it). `KS` is a matching deny rule on that tool.
+ * Official `mu` / 239 `y_u`. 246 records `uy(transcript)` when the worker
+ * record is plan. `Ei` is ExitPlanMode; `du` is a matching deny rule.
  */
 export function applyPlanModeResumeFromInternal<
   T extends PlanModeResumeAppState,
@@ -165,18 +186,24 @@ export function applyPlanModeResumeFromInternal<
   tracker: PlanModeResumeTracker,
   options: ApplyPlanModeResumeOptions = {},
 ): (prev: T) => T {
+  const log = options.log ?? logForDebugging
+  const isGuardEnabled = options.isGuardEnabled ?? isPlanModeResumeGuardEnabled
+  tracker.recordedMode = parseRecordedWorkerPermissionMode(internal)
+  if (tracker.recordedMode === 'invalid') {
+    log(
+      '[planModeResume] ignoring unrecognized internal_metadata.worker_permission_mode',
+      { level: 'warn' },
+    )
+  }
+  if (
+    tracker.recordedMode === 'plan' &&
+    options.transcript &&
+    isGuardEnabled()
+  ) {
+    tracker.recordTranscriptState = scanTranscriptPlanState(options.transcript)
+  }
   return prev => {
-    tracker.trustedMode = prev.toolPermissionContext.mode
-    tracker.recordedMode = parseRecordedWorkerPermissionMode(internal)
-    const log = options.log ?? logForDebugging
-    if (tracker.recordedMode === 'invalid') {
-      log(
-        '[planModeResume] ignoring unrecognized internal_metadata.worker_permission_mode',
-        { level: 'warn' },
-      )
-    }
-    const isGuardEnabled =
-      options.isGuardEnabled ?? isPlanModeResumeGuardEnabled
+    tracker.trustedMode ??= prev.toolPermissionContext.mode
     const isExitEnabled =
       options.isExitPlanModeEnabled ?? defaultIsExitPlanModeEnabled
     const isDenied = options.isExitPlanModeDenied ?? defaultIsExitPlanModeDenied
@@ -260,12 +287,286 @@ export function recordPlanModeResumeTelemetry(
     had_external: options.hadExternal,
     had_internal: options.hadInternal,
     guard_enabled: guardEnabled,
+    ...(tracker.recordTranscriptState
+      ? {
+          record_transcript_state:
+            tracker.recordTranscriptState as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }
+      : {}),
+    ...(tracker.transcriptOpen ? { transcript_open: true } : {}),
   })
+}
+
+const PLAN_SLASH_PREFIX = `<${COMMAND_NAME_TAG}>/plan</${COMMAND_NAME_TAG}>`
+const LEADER_PLAN_SUBMITTED = 'Your plan has been submitted to the team lead'
+
+function isTranscriptToolResultUser(
+  message: TranscriptPlanScanMessage,
+): boolean {
+  if (message.type !== 'user') return false
+  const content = message.message?.content
+  if (!content || typeof content === 'string' || !Array.isArray(content)) {
+    return false
+  }
+  return content.some(
+    block =>
+      block !== null &&
+      typeof block === 'object' &&
+      (block as { type?: string }).type === 'tool_result',
+  )
+}
+
+function userMessageText(message: TranscriptPlanScanMessage): string | null {
+  const { getUserMessageText } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../messages.js') as typeof import('../messages.js')
+  return getUserMessageText(message as Parameters<typeof getUserMessageText>[0])
+}
+
+function isHumanLikeTranscriptOrigin(
+  origin: { kind?: string } | undefined,
+): boolean {
+  const { isHumanLikeOrigin } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../messages.js') as typeof import('../messages.js')
+  return isHumanLikeOrigin(origin)
+}
+
+/** Official `CD`. */
+export function isLeaderApprovalPlanResult(
+  message: TranscriptPlanScanMessage,
+  content: unknown,
+): boolean {
+  const result = message.toolUseResult
+  if (
+    result !== null &&
+    typeof result === 'object' &&
+    (result as { awaitingLeaderApproval?: unknown }).awaitingLeaderApproval ===
+      true
+  ) {
+    return true
+  }
+  return (
+    typeof content === 'string' && content.startsWith(LEADER_PLAN_SUBMITTED)
+  )
+}
+
+/** Official `vD` — assistant `tool_use` ids that appear more than once. */
+export function duplicateToolUseIds(
+  messages: readonly TranscriptPlanScanMessage[],
+): Set<string> {
+  const seen = new Set<string>()
+  const dupes = new Set<string>()
+  for (const message of messages) {
+    if (
+      message.type !== 'assistant' ||
+      !Array.isArray(message.message?.content)
+    ) {
+      continue
+    }
+    for (const block of message.message.content) {
+      if (
+        block === null ||
+        typeof block !== 'object' ||
+        (block as { type?: string }).type !== 'tool_use'
+      ) {
+        continue
+      }
+      const id = (block as { id?: unknown }).id
+      if (typeof id !== 'string') continue
+      if (seen.has(id)) dupes.add(id)
+      else seen.add(id)
+    }
+  }
+  return dupes
+}
+
+/** Official `uy` — scan backwards for an open / exited / none plan segment. */
+export function scanTranscriptPlanState(
+  messages: readonly TranscriptPlanScanMessage[],
+): TranscriptPlanState {
+  const errorIds = new Set<string>()
+  const successIds = new Set<string>()
+  const dupes = duplicateToolUseIds(messages)
+  let laterHumanNonPlan = false
+  const openOrNone = (): TranscriptPlanState =>
+    laterHumanNonPlan ? 'none' : 'open'
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (!message) continue
+    if (message.type === 'attachment') {
+      const kind = message.attachment?.type
+      if (kind === 'plan_mode' || kind === 'plan_mode_reentry') {
+        return openOrNone()
+      }
+      if (kind === 'plan_mode_exit') return 'exited'
+      continue
+    }
+    if (
+      message.type === 'assistant' &&
+      Array.isArray(message.message?.content)
+    ) {
+      const blocks = message.message.content
+      for (let j = blocks.length - 1; j >= 0; j--) {
+        const block = blocks[j] as {
+          type?: string
+          name?: string
+          id?: string
+        }
+        if (block?.type !== 'tool_use') continue
+        const id = block.id
+        if (typeof id !== 'string') continue
+        if (
+          block.name === EXIT_PLAN_MODE_V2_TOOL_NAME &&
+          successIds.has(id) &&
+          !errorIds.has(id) &&
+          !dupes.has(id)
+        ) {
+          return 'exited'
+        }
+        if (
+          block.name === ENTER_PLAN_MODE_TOOL_NAME &&
+          successIds.has(id) &&
+          (!errorIds.has(id) || dupes.has(id))
+        ) {
+          return openOrNone()
+        }
+      }
+      continue
+    }
+    if (message.type === 'user' && isTranscriptToolResultUser(message)) {
+      const content = message.message?.content
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (
+            block === null ||
+            typeof block !== 'object' ||
+            (block as { type?: string }).type !== 'tool_result'
+          ) {
+            continue
+          }
+          const id = (block as { tool_use_id?: unknown }).tool_use_id
+          if (typeof id !== 'string') continue
+          const failed =
+            (block as { is_error?: boolean }).is_error ||
+            isLeaderApprovalPlanResult(
+              message,
+              (block as { content?: unknown }).content,
+            )
+          ;(failed ? errorIds : successIds).add(id)
+        }
+      }
+      continue
+    }
+    if (message.type === 'user') {
+      if (userMessageText(message)?.trimStart().startsWith(PLAN_SLASH_PREFIX)) {
+        return openOrNone()
+      }
+      if (message.permissionMode === 'plan') return openOrNone()
+      if (
+        message.permissionMode !== undefined &&
+        !message.isMeta &&
+        isHumanLikeTranscriptOrigin(message.origin)
+      ) {
+        laterHumanNonPlan = true
+      }
+    }
+  }
+  return 'none'
+}
+
+export type HydratePlanFromTranscriptOptions = {
+  sdkUrl?: string
+  permissionModeSuppliedOnInvocation?: boolean
+  forkSession?: boolean
+  isExitPlanModeEnabled?: () => boolean
+}
+
+/** Official `fu`. */
+export function shouldHydratePlanFromTranscript(
+  options: HydratePlanFromTranscriptOptions,
+): boolean {
+  const isExitEnabled =
+    options.isExitPlanModeEnabled ?? defaultIsExitPlanModeEnabled
+  if (!isExitEnabled() || options.forkSession) return false
+  return (
+    !!options.sdkUrl || options.permissionModeSuppliedOnInvocation === false
+  )
+}
+
+/** Official `pu`. */
+export function applyPlanModeResumeFromTranscript<
+  T extends PlanModeResumeAppState,
+>(
+  messages: readonly TranscriptPlanScanMessage[],
+  tracker: PlanModeResumeTracker,
+  setAppState: (f: (prev: T) => T) => void,
+  shouldHydrate: boolean,
+  options: ApplyPlanModeResumeOptions = {},
+): void {
+  const isGuardEnabled = options.isGuardEnabled ?? isPlanModeResumeGuardEnabled
+  const shouldEnter =
+    shouldHydrate &&
+    tracker.source === 'none' &&
+    (tracker.recordedMode === 'absent' || tracker.recordedMode === 'invalid') &&
+    isGuardEnabled() &&
+    scanTranscriptPlanState(messages) === 'open'
+  if (shouldEnter) tracker.transcriptOpen = true
+  const isDenied = options.isExitPlanModeDenied ?? defaultIsExitPlanModeDenied
+  const enterPlan = options.enterPlan ?? enterPlanModeFromWorkerRecord
+  const log = options.log ?? logForDebugging
+  setAppState(prev => {
+    tracker.trustedMode ??= prev.toolPermissionContext.mode
+    if (
+      !shouldEnter ||
+      prev.toolPermissionContext.mode === 'plan' ||
+      isDenied(prev.toolPermissionContext)
+    ) {
+      return prev
+    }
+    tracker.source = 'transcript'
+    log(
+      `[planModeResume] re-entering plan mode from the transcript's open plan segment (was ${prev.toolPermissionContext.mode})`,
+    )
+    return enterPlan(prev)
+  })
+}
+
+/**
+ * Official `my` — print `--continue` only. Fresh tracker; no `y_u`.
+ * `hadExternal`/`hadInternal` are dead false.
+ */
+export function hydratePlanModeFromTranscript<T extends PlanModeResumeAppState>(
+  setAppState: (f: (prev: T) => T) => void,
+  messages: readonly TranscriptPlanScanMessage[],
+  options: HydratePlanFromTranscriptOptions & {
+    isGuardEnabled?: () => boolean
+    isExitPlanModeDenied?: (ctx: ToolPermissionContext) => boolean
+    enterPlan?: <TState extends PlanModeResumeAppState>(state: TState) => TState
+    log?: (message: string, extra?: { level?: string }) => void
+  } = {},
+): PlanModeOnResume {
+  const tracker = createPlanModeResumeTracker()
+  applyPlanModeResumeFromTranscript(
+    messages,
+    tracker,
+    setAppState,
+    shouldHydratePlanFromTranscript(options),
+    options,
+  )
+  recordPlanModeResumeTelemetry(tracker, {
+    lane: options.sdkUrl ? 'sdk_url' : 'print',
+    hadExternal: false,
+    hadInternal: false,
+    isGuardEnabled: options.isGuardEnabled,
+  })
+  return classifyPlanModeOnResume(tracker)
 }
 
 /**
  * densable Jqy: continue never runs y_u, even if a CCR stash leaks in.
  * Resume / mid-session /resume clears this before applying.
+ * 246 print `--continue` uses `my` instead — this gate stays for `y_u`.
  */
 let skipPlanModeResumeBecauseContinue = false
 
@@ -279,7 +580,8 @@ export function isPlanModeResumeSkippedBecauseContinue(): boolean {
 
 /**
  * densable OMo-then-y_u hydrate — print + interactive share this.
- * `continue` must not call (gold). Hard-gated by the continue skip flag.
+ * `continue` must not call `y_u` (239 gold / 246 `my` is a different entry).
+ * Print `--resume` then runs official `pu` when `transcript` is passed.
  */
 export function hydratePlanModeFromRestoredWorker<
   T extends PlanModeResumeAppState,
@@ -289,6 +591,15 @@ export function hydratePlanModeFromRestoredWorker<
   options: {
     forkSession?: boolean
     lane: 'print' | 'sdk_url' | 'interactive'
+    transcript?: readonly TranscriptPlanScanMessage[]
+    applyTranscriptHydrate?: boolean
+    sdkUrl?: string
+    permissionModeSuppliedOnInvocation?: boolean
+    isGuardEnabled?: () => boolean
+    isExitPlanModeEnabled?: () => boolean
+    isExitPlanModeDenied?: (ctx: ToolPermissionContext) => boolean
+    enterPlan?: <TState extends PlanModeResumeAppState>(state: TState) => TState
+    log?: (message: string, extra?: { level?: string }) => void
   },
 ): PlanModeOnResume {
   if (skipPlanModeResumeBecauseContinue) {
@@ -299,13 +610,42 @@ export function hydratePlanModeFromRestoredWorker<
     applyPlanModeResumeFromInternal<T>(
       (restored?.internal ?? null) as WorkerInternalMetadata | null,
       tracker,
-      { forkSession: !!options.forkSession },
+      {
+        forkSession: !!options.forkSession,
+        transcript: options.transcript,
+        isGuardEnabled: options.isGuardEnabled,
+        isExitPlanModeEnabled: options.isExitPlanModeEnabled,
+        isExitPlanModeDenied: options.isExitPlanModeDenied,
+        enterPlan: options.enterPlan,
+        log: options.log,
+      },
     ),
   )
+  if (options.applyTranscriptHydrate && options.transcript !== undefined) {
+    applyPlanModeResumeFromTranscript(
+      options.transcript,
+      tracker,
+      setAppState,
+      shouldHydratePlanFromTranscript({
+        sdkUrl: options.sdkUrl,
+        permissionModeSuppliedOnInvocation:
+          options.permissionModeSuppliedOnInvocation,
+        forkSession: options.forkSession,
+        isExitPlanModeEnabled: options.isExitPlanModeEnabled,
+      }),
+      {
+        isGuardEnabled: options.isGuardEnabled,
+        isExitPlanModeDenied: options.isExitPlanModeDenied,
+        enterPlan: options.enterPlan,
+        log: options.log,
+      },
+    )
+  }
   recordPlanModeResumeTelemetry(tracker, {
     lane: options.lane,
     hadExternal: !!restored?.external,
     hadInternal: !!restored?.internal,
+    isGuardEnabled: options.isGuardEnabled,
   })
   return classifyPlanModeOnResume(tracker)
 }

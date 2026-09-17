@@ -18,6 +18,7 @@ import {
 } from '../tasks/MonitorMcpTask/MonitorMcpTask.js'
 import type { AppState } from '../state/AppState.js'
 import { logForDebugging } from './debug.js'
+import { isAbortError } from './errors.js'
 import { enqueuePendingNotification } from './messageQueueManager.js'
 import { isBackgroundTasksDisabled } from './residualFinalEnvGates.js'
 import { sleep } from './sleep.js'
@@ -98,6 +99,9 @@ export type McpAutoBackgroundCallResult = {
   structuredContent?: Record<string, unknown>
   /** densable: auto-bg path returns text content only */
   autoBackgrounded?: boolean
+  /** densable 2.1.246 #10 WZe — abort resolves, does not throw */
+  interrupted?: boolean
+  isError?: boolean
 }
 
 /**
@@ -187,8 +191,45 @@ export async function callMcpToolWithAutoBackground<
     taskId,
   })
 
+  const finishBackgroundFailure = (interrupted: boolean, msg: string): void => {
+    failMonitorMcpTask(taskId, input.setAppState)
+    try {
+      logEvent('mcp_auto_background', {
+        completed: false,
+        interrupted,
+      })
+    } catch {
+      /* optional */
+    }
+    logForDebugging(
+      `MCP auto-background task ${taskId} ${interrupted ? 'interrupted' : 'failed'}: ${msg}`,
+      { level: interrupted ? 'info' : 'error' },
+    )
+    enqueuePendingNotification({
+      value: interrupted
+        ? `MCP task ${taskId} was interrupted`
+        : `MCP task ${taskId} failed: ${msg}`,
+      mode: 'task-notification',
+      priority: 'next',
+    })
+  }
+
   void runPromise
     .then(async result => {
+      // densable 2.1.246 #10: callMCPTool resolves abort as
+      // `{interrupted,isError}` instead of throwing. The waiter must not
+      // treat that payload as a successful completion.
+      const interrupted =
+        result.interrupted === true ||
+        input.parentAbortController.signal.aborted
+      if (interrupted || result.isError === true) {
+        const summary = summarizeMcpResult(result)
+        finishBackgroundFailure(
+          interrupted,
+          summary || (interrupted ? 'interrupted' : 'error'),
+        )
+        return
+      }
       completeMonitorMcpTask(taskId, input.setAppState)
       try {
         logEvent('mcp_auto_background', { completed: true })
@@ -203,21 +244,10 @@ export async function callMcpToolWithAutoBackground<
       })
     })
     .catch((err: unknown) => {
-      failMonitorMcpTask(taskId, input.setAppState)
+      const interrupted =
+        isAbortError(err) || input.parentAbortController.signal.aborted
       const msg = err instanceof Error ? err.message : String(err)
-      try {
-        logEvent('mcp_auto_background', { completed: false })
-      } catch {
-        /* optional */
-      }
-      logForDebugging(`MCP auto-background task ${taskId} failed: ${msg}`, {
-        level: 'error',
-      })
-      enqueuePendingNotification({
-        value: `MCP task ${taskId} failed: ${msg}`,
-        mode: 'task-notification',
-        priority: 'next',
-      })
+      finishBackgroundFailure(interrupted, msg)
     })
 
   // densable $cy: tool result is "moved to background" — NOT a successful

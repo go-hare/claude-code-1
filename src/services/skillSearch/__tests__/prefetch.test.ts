@@ -9,15 +9,19 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { clearCommandsCache } from '../../../commands.js'
+import { getClaudeConfigHomeDir } from '../../../utils/envUtils.js'
 import { getTurnZeroSkillDiscovery } from '../prefetch.js'
 import { clearSkillIndexCache } from '../localSearch.js'
 
 let root: string
 const suiteCwd = process.cwd()
 const originalEnv = { ...process.env }
+const originalUserProfile = process.env.USERPROFILE
+const originalHome = process.env.HOME
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-search-prefetch-'))
+  mkdirSync(join(root, 'config', 'skills'), { recursive: true })
   process.chdir(root)
   process.env = { ...originalEnv }
   process.env.CLAUDE_CONFIG_DIR = join(root, 'config')
@@ -26,6 +30,12 @@ beforeEach(() => {
   process.env.SKILL_LEARNING_ENABLED = '1'
   process.env.NODE_ENV = 'test'
   process.env.ANTHROPIC_API_KEY = 'test-key'
+  // Keep user-skill discovery off the developer's real ~/.claude/skills.
+  process.env.USERPROFILE = root
+  process.env.HOME = root
+  ;(
+    getClaudeConfigHomeDir as { cache?: { clear?: () => void } }
+  ).cache?.clear?.()
   clearCommandsCache()
   clearSkillIndexCache()
 })
@@ -33,6 +43,13 @@ beforeEach(() => {
 afterEach(() => {
   process.chdir(suiteCwd)
   process.env = { ...originalEnv }
+  if (originalUserProfile === undefined) delete process.env.USERPROFILE
+  else process.env.USERPROFILE = originalUserProfile
+  if (originalHome === undefined) delete process.env.HOME
+  else process.env.HOME = originalHome
+  ;(
+    getClaudeConfigHomeDir as { cache?: { clear?: () => void } }
+  ).cache?.clear?.()
   clearCommandsCache()
   clearSkillIndexCache()
   try {

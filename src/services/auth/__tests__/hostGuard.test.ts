@@ -12,8 +12,12 @@
  */
 
 import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
+import * as realHostGuard from '../hostGuard.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const hostGuardSnap = snapshotModuleExports(realHostGuard)
 
 // Side-effect module mocks must come first
 mock.module('src/utils/log.ts', logMock)
@@ -25,6 +29,7 @@ mock.module('src/utils/debug.ts', debugMock)
 const WORKSPACE_API_HOST = 'api.anthropic.com'
 
 mock.module('src/services/auth/hostGuard.ts', () => ({
+  ...hostGuardSnap,
   assertWorkspaceHost(url: string): void {
     let hostname: string
     try {

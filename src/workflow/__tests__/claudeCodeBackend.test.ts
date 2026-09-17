@@ -1,7 +1,15 @@
 import { afterAll, expect, test, mock } from 'bun:test'
+import * as realMessages from 'src/utils/messages.js'
+import * as realTools from 'src/tools.js'
 import * as realUuid from 'src/utils/uuid.js'
+import * as realWorktree from 'src/utils/worktree.js'
+import * as realAgentToolUtils from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js'
+import * as realRunAgent from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
+import * as realLoadAgentsDir from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+import { debugMock } from '../../../tests/mocks/debug.js'
 // Note: mock specifier must resolve to the same module that impl actually imports (bun mock.module
 // matches by resolved module). impl uses '@claude-code/builtin-tools/...' and 'src/*' alias
 // path imports, so the same specifier is used here.
@@ -10,7 +18,14 @@ import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 // like 'agent-1' fails toAgentId() and makes SendMessage fall through to team
 // mailbox under full-suite co-run. Snapshot+restore uuid after this file.
 const uuidSnap = snapshotModuleExports(realUuid)
+const toolsSnap = snapshotModuleExports(realTools)
+const messagesSnap = snapshotModuleExports(realMessages)
+const worktreeSnap = snapshotModuleExports(realWorktree)
+const agentToolUtilsSnap = snapshotModuleExports(realAgentToolUtils)
+const runAgentSnap = snapshotModuleExports(realRunAgent)
+const loadAgentsDirSnap = snapshotModuleExports(realLoadAgentsDir)
 mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
+  ...runAgentSnap,
   runAgent: async function* () {
     yield {
       type: 'assistant',
@@ -21,6 +36,7 @@ mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
 mock.module(
   '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js',
   () => ({
+    ...agentToolUtilsSnap,
     finalizeAgentTool: () => ({
       content: [{ type: 'text', text: 'agent-text' }],
       usage: { output_tokens: 42 },
@@ -32,12 +48,17 @@ mock.module(
 mock.module(
   '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js',
   () => ({
+    ...loadAgentsDirSnap,
     isBuiltInAgent: () => true,
   }),
 )
 // assembleToolPool returns Tools (array), not { tools: [] } — map() is called on it.
-mock.module('src/tools.js', () => ({ assembleToolPool: () => [] }))
+mock.module('src/tools.js', () => ({
+  ...toolsSnap,
+  assembleToolPool: () => [],
+}))
 mock.module('src/utils/messages.js', () => ({
+  ...messagesSnap,
   // Return a shape that satisfies UserMessage consumers process-wide.
   // Bun's mock.module is process-global (last-write-wins), so an incomplete
   // mock here corrupts every later test that imports the real createUserMessage
@@ -62,9 +83,27 @@ mock.module('src/utils/uuid.js', () => ({
 }))
 afterAll(() => {
   mock.module('src/utils/uuid.js', () => ({ ...uuidSnap }))
+  mock.module('src/tools.js', () => ({ ...toolsSnap }))
+  mock.module('src/utils/messages.js', () => ({ ...messagesSnap }))
+  mock.module('src/utils/worktree.js', () => ({ ...worktreeSnap }))
+  mock.module(
+    '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js',
+    () => ({
+      ...agentToolUtilsSnap,
+    }),
+  )
+  mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
+    ...runAgentSnap,
+  }))
+  mock.module(
+    '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js',
+    () => ({
+      ...loadAgentsDirSnap,
+    }),
+  )
 })
-mock.module('src/services/analytics/index.js', () => ({ logEvent: () => {} }))
-mock.module('src/utils/debug.js', () => ({ logForDebugging: () => {} }))
+mock.module('src/services/analytics/index.js', analyticsMock)
+mock.module('src/utils/debug.js', debugMock)
 
 // isolation:'worktree' tests: mock worktree trio (to avoid actually running git worktree add).
 // Note mock.module is process-global; worktreeState is defined outside the factory for test reset.
@@ -78,6 +117,7 @@ const worktreeState = {
   changesCalls: 0,
 }
 mock.module('src/utils/worktree.js', () => ({
+  ...worktreeSnap,
   createAgentWorktree: async (slug: string) => {
     if (worktreeState.shouldThrow) throw new Error('wt boom')
     worktreeState.created.push(slug)

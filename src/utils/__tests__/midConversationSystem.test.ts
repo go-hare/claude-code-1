@@ -17,6 +17,7 @@ import {
   latchMidConvCachePromotionRejected,
   latchMidConvSystemRejected,
   shouldCacheControlOnApiSystem,
+  shouldSkipSystemReminderWrap,
   shouldUseMidConversationSystem,
 } from '../midConversationSystem.js'
 import { THIRD_PARTY_BETA_ALLOWLIST, filterBetasForProvider } from '../betas.js'
@@ -196,6 +197,43 @@ describe('B6n / w3y / $3y', () => {
     })
     expect(out[0]?.type).toBe('user')
     expect(isApiSystemMessage(out[0])).toBe(false)
+  })
+
+  test('FXe skip wrap leaves demoted api_system unwrapped', () => {
+    const sys = createApiSystemMessage('orphan')
+    const user = createUserMessage({ content: 'u' })
+    const out = demoteOrphanApiSystemMessages([sys, user], {
+      skipSystemReminderWrap: true,
+      createUserMeta: content =>
+        createUserMessage({ content, isMeta: true }) as typeof user,
+      wrapSystemReminder: t => `<system-reminder>${t}</system-reminder>`,
+    })
+    expect(out[0]?.type).toBe('user')
+    const content = out[0] && 'message' in out[0] ? out[0].message.content : ''
+    expect(content).toBe('orphan')
+  })
+
+  test('W5s inherit ephemeral when merging consecutive api_system', () => {
+    const user = createUserMessage({ content: 'u' })
+    const a = createApiSystemMessage('one')
+    const b = { ...createApiSystemMessage('two'), ephemeral: true }
+    const out = demoteOrphanApiSystemMessages([user, a, b], {
+      createUserMeta: content =>
+        createUserMessage({ content, isMeta: true }) as typeof user,
+      wrapSystemReminder: t => t,
+    })
+    expect(out.map(m => m.type)).toEqual(['user', 'api_system'])
+    const sys = out[1]
+    expect(isApiSystemMessage(sys)).toBe(true)
+    if (!isApiSystemMessage(sys)) return
+    expect(sys.message.content).toContain('one')
+    expect(sys.message.content).toContain('two')
+    expect(sys.ephemeral).toBe(true)
+  })
+
+  test('shouldSkipSystemReminderWrap is sonnet-5 only', () => {
+    expect(shouldSkipSystemReminderWrap('claude-sonnet-5')).toBe(true)
+    expect(shouldSkipSystemReminderWrap('claude-mythos-5')).toBe(false)
   })
 })
 

@@ -4,9 +4,8 @@
  */
 import { describe, expect, mock, test } from 'bun:test'
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { US_ONLY_INFERENCE_PREMIUM, calculateUSDCost } from '../modelCost.js'

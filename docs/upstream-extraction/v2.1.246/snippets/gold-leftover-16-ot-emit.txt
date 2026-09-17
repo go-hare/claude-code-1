@@ -1,0 +1,99 @@
+# Official 2.1.246 SEA — #16 storageV5 write-bus emit
+# Locked 2026-09-16. Au.emit / Ot / At / en bodies + hb rename are contract.
+# 09-16b: leftover zl/Xu/$l now call Q + K at official success sites.
+# 09-16c: Ot expectEcho (qe/Xe/Qe/rg/ng) wired 1:1.
+# 09-16d: directory-keyed expect Map is invent — deleted.
+
+# Au @207360606 — expect / isWritingLocally / openedAtMs / addListener / emit
+class Au{
+  listeners=new Set;
+  inFlight=new Map;
+  watchers;
+  tickPhaseMs=Math.floor(Math.random()*60000);
+  referenceCount=0;
+  constructor(e={}){this.watchers=new Cu(e)}
+  expect(e){
+    let r=this.inFlight.get(e);
+    if(r===void 0){
+      let n=performance.now();
+      this.inFlight.set(e,{count:1,openedAtMs:n})
+    }else r.count+=1;
+    return()=>{
+      let n=this.inFlight.get(e);
+      if(n===void 0||n.count<=1)this.inFlight.delete(e);
+      else n.count-=1
+    }
+  }
+  isWritingLocally(e){return this.inFlight.has(e)}
+  openedAtMs(e){return this.inFlight.get(e)?.openedAtMs}
+  addListener(e){return this.listeners.add(e),()=>this.listeners.delete(e)}
+  emit(e,r){
+    for(let n of this.listeners)try{n(e,r)}
+    catch(t){C(`storage change listener threw: ${t}`,{level:"warn"})}
+  }
+}
+
+# Ot @207296119 — sole `.bus.emit(` in leftover window. hb barrel: Ot as o7c.
+function Ot(e,r){
+  if(
+    e.bus.emit(r,e.instanceId),
+    (r.kind==="created"||r.kind==="updated"||r.kind==="deleted")
+      &&!qe(r.key)&&Xe(r.key)==="refuse"
+  )
+    e.bus.watchers.expectEcho(
+      qr(Qe(e.roots,r.key)),
+      e.timing.echoDeadlineMs,
+      e.bus.openedAtMs(ue(r.key))??performance.now()
+    )
+}
+
+# At / en @207296396 — write wrap. hb barrel: At as p7c, en as q7c.
+async function At(e,r,n){return en(e,[r],n)}
+async function en(e,r,n){
+  let i=r.map((t)=>e.bus.expect(ue(t)));
+  try{return await n()}
+  finally{for(let t of i)t()}
+}
+
+# hb import rename @207304266
+#   o7c as K   ← Ot emit
+#   p7c as Q   ← At
+#   q7c as pm  ← en
+# Subscribe wiring in hb @207543508:
+#   unlisten:o.addListener((d,c)=>{for(let f of a)f.deliverLocal(d,c)})
+
+# Representative official K() after successful mutate (do not invent on leftover writes):
+#   Xu append wrap: Q(e,r,()=>Xr(r)?Rg:Eg) then K(e,{kind:"created"|"appended",...})
+#   zl write: Q(...) then K(e,{kind:"created"|"updated",key,version,value})
+#   $l delete: if existed → K(e,{kind:"deleted",key})
+
+# Cu.expectEcho @207363204
+expectEcho(e,r,n){
+  let t=this.watches.get(`flat:${Qr(e)}`);
+  if(t!==void 0&&t.arm.kind==="live")setTimeout(rg,r,t,n).unref()
+}
+
+# qe = Nr @207238282 — stream namespaces skip expectEcho
+function Nr(e){return Qe.has(e.namespace)}
+# Xe = Lr @207234064 — getReadSymlinkClass (not write Kr)
+# Qe = Ee @207254171 — resolveKeyFilesystemPath
+# qr = dirname; ue = Nad = g canon key
+# rg / ng @207366436
+function rg(e,r){setImmediate(ng,e,r)}
+function ng(e,r){
+  if(e.references<=0||e.arm.kind!=="live")return;
+  if(e.lastCallbackAtMs>=r){e.echoMisses=0;return}
+  if(r<=e.lastEchoMissAtMs)return;
+  if(e.lastEchoMissAtMs=performance.now(),e.echoMisses+=1,e.echoMisses>=Yp&&!e.demotedForLife)
+    fa(e,"it did not report our own writes")
+}
+
+# Local:
+#   StorageWatchBus.emit / expect / isWritingLocally / openedAtMs / addListener = Au 1:1
+#   hb addListener → deliverLocal = 1:1
+#   Xu = Q(bus.expect(ue(key))) then Rg/Eg K
+#   zl ja = Q then oy updated / sy created / uy updated
+#   $l = Q then ly; existed → K deleted
+#   Ot expectEcho wired: !Nr(key) && Lr(key)==="refuse" → Cu.expectEcho(dirname(Ee), Wu.echoDeadlineMs, openedAtMs(ue))
+#   09-16d: no directory-keyed expect Map in SEA (At/en = e.bus.expect(ue(t)) only).
+#   Deleted invent digestPathInFlightCounts / digestAcquirePathExpect / digestWithDirectoryExpect.

@@ -1,21 +1,73 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+import {
+  applyGrowthbookFeatureGetters,
+  pushGrowthbookFeatureGetter,
+} from '../../../../../../tests/mocks/growthbook.js'
 
-// GrowthBook is process-global; stub before importing gate.
+// GrowthBook is process-global; snapshot + shared getter stack so siblings
+// keep fallback/real semantics when this file's mock is last-write-wins.
 const gbMock = mock(() => false as unknown)
+let useEndConversationModel = false
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: (_flag: string, fallback: unknown) => {
+  ...growthbookSnap,
+  getFeatureValue_CACHED_MAY_BE_STALE: (flag: string, fallback: unknown) =>
+    applyGrowthbookFeatureGetters(
+      flag,
+      fallback,
+      growthbookSnap.getFeatureValue_CACHED_MAY_BE_STALE as (
+        n: string,
+        d: unknown,
+      ) => unknown,
+    ),
+}))
+
+const realSearchExtra = await import('src/utils/searchExtraTools.js')
+const searchExtraSnap = snapshotModuleExports(realSearchExtra)
+mock.module('src/utils/searchExtraTools.js', () => ({
+  ...searchExtraSnap,
+  isSearchExtraToolsEnabledOptimistic: () =>
+    useEndConversationModel
+      ? true
+      : (
+          searchExtraSnap.isSearchExtraToolsEnabledOptimistic as () => boolean
+        )(),
+}))
+
+const realModel = await import('src/utils/model/model.js')
+const modelSnap = snapshotModuleExports(realModel)
+mock.module('src/utils/model/model.js', () => ({
+  ...modelSnap,
+  getMainLoopModel: ((...args: unknown[]) =>
+    useEndConversationModel
+      ? 'claude-opus-4-8'
+      : (modelSnap.getMainLoopModel as (...a: unknown[]) => unknown)(
+          ...args,
+        )) as typeof modelSnap.getMainLoopModel,
+}))
+
+let popGb: (() => void) | undefined
+beforeAll(() => {
+  useEndConversationModel = true
+  popGb = pushGrowthbookFeatureGetter((_flag, fallback) => {
     const v = gbMock()
     return v === undefined ? fallback : v
-  },
-}))
-
-mock.module('src/utils/searchExtraTools.js', () => ({
-  isSearchExtraToolsEnabledOptimistic: () => true,
-}))
-
-mock.module('src/utils/model/model.js', () => ({
-  getMainLoopModel: () => 'claude-opus-4-8',
-}))
+  })
+})
+afterAll(() => {
+  useEndConversationModel = false
+  popGb?.()
+})
 
 import {
   compileAllowedEntrypointsRegex,

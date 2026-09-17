@@ -1,12 +1,17 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   mock,
   test,
 } from 'bun:test'
+import {
+  analyticsMock,
+  pushAnalyticsLogEvent,
+} from '../../../tests/mocks/analytics.js'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 import { getIsInteractive, setIsInteractive } from '../../bootstrap/state.js'
 import {
@@ -32,28 +37,32 @@ import {
 // Only analytics is mocked so emit's logEvent is interceptable even when an
 // earlier suite already bound scrollTelemetry to a foreign analytics stub.
 const logEventMock = mock(
-  (_name: string, _meta: Record<string, boolean | number | undefined>) => {},
+  (
+    _name: string,
+    _meta: Record<string, boolean | number | undefined> | undefined,
+  ) => {},
 )
 
 const analyticsSnap = snapshotModuleExports(
   await import('../../services/analytics/index.js'),
 )
-const analyticsMock = () => ({
-  ...analyticsSnap,
-  logEvent: logEventMock,
-  logEventAsync: async (
-    name: string,
-    meta: Record<string, boolean | number | undefined>,
-  ) => {
-    logEventMock(name, meta)
-  },
-})
+let popAnalyticsLogEvent: (() => void) | undefined
 mock.module('../../services/analytics/index.ts', analyticsMock)
 mock.module('../../services/analytics/index.js', analyticsMock)
 mock.module('src/services/analytics/index.ts', analyticsMock)
 mock.module('src/services/analytics/index.js', analyticsMock)
 
+beforeAll(() => {
+  popAnalyticsLogEvent = pushAnalyticsLogEvent((name, meta) => {
+    logEventMock(
+      name,
+      meta as Record<string, boolean | number | undefined> | undefined,
+    )
+  })
+})
+
 afterAll(() => {
+  popAnalyticsLogEvent?.()
   const restore = () => ({ ...analyticsSnap })
   mock.module('../../services/analytics/index.ts', restore)
   mock.module('../../services/analytics/index.js', restore)

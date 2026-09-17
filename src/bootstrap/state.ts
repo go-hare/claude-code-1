@@ -253,6 +253,8 @@ type State = {
   needsPlanModeExitAttachment: boolean
   // Track if we need to show the auto mode exit attachment (one-time notification)
   needsAutoModeExitAttachment: boolean
+  // Official sessionFlags #s / vy / by — /pause-memory session latch.
+  memoryToggledOff: boolean
   // Track if LSP plugin recommendation has been shown this session (only show once)
   lspRecommendationShownThisSession: boolean
   // SDK init event state - jsonSchema for structured output
@@ -540,6 +542,8 @@ function getInitialState(): State {
     needsPlanModeExitAttachment: false,
     // Track if we need to show the auto mode exit attachment
     needsAutoModeExitAttachment: false,
+    // Official sessionFlags #s — default false.
+    memoryToggledOff: false,
     // Track if LSP plugin recommendation has been shown this session
     lspRecommendationShownThisSession: false,
     // SDK init event state
@@ -2012,6 +2016,16 @@ export function needsAutoModeExitAttachment(): boolean {
 
 export function setNeedsAutoModeExitAttachment(value: boolean): void {
   STATE.needsAutoModeExitAttachment = value
+}
+
+/** Official vy — n().sessionFlags.memoryToggledOff() */
+export function memoryToggledOff(): boolean {
+  return STATE.memoryToggledOff
+}
+
+/** Official by / Yv — n().sessionFlags.replaceMemoryToggledOff(e) */
+export function replaceMemoryToggledOff(value: boolean): void {
+  STATE.memoryToggledOff = value
 }
 
 export function handleAutoModeTransition(

@@ -13,8 +13,11 @@
  * feed pre-built Anthropic events directly into queryModelOpenAI and inspect
  * what it emits — without any real HTTP calls.
  */
-import { describe, expect, test, mock, beforeEach, afterEach } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import { bunBundleMock } from '../../../../../tests/mocks/bunBundle.js'
+import { debugMock } from '../../../../../tests/mocks/debug.js'
+import { growthbookMock } from '../../../../../tests/mocks/growthbook.js'
 import type {
   AssistantMessage,
   StreamEvent,
@@ -222,13 +225,8 @@ mock.module('@ant/model-provider', () => ({
   anthropicToolChoiceToOpenAI: () => undefined,
 }))
 
-mock.module('../../../../services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, fallback: unknown) =>
-    fallback,
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
-  getFeatureValue_CACHED_WITH_REFRESH: (_key: string, fallback: unknown) =>
-    fallback,
-}))
+mock.module('../../../../services/analytics/growthbook.js', growthbookMock)
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
 // Force Chat Completions path so stream/client mocks apply (not Responses).
 // Avoid partial mocks of bootstrap/state and envUtils — incomplete surfaces
@@ -238,9 +236,7 @@ mock.module('../chatgptAuth.js', () => ({
   getValidChatGPTAuth: async () => null,
 }))
 
-mock.module('bun:bundle', () => ({
-  feature: () => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 mock.module('../client.js', () => ({
   getOpenAIClient: () => ({
@@ -357,20 +353,9 @@ mock.module('../../../../services/langfuse/convert.js', () => ({
   convertToolsToLangfuse: () => [],
 }))
 
-mock.module('../../../../utils/debug.js', () => ({
-  logForDebugging: () => {},
-  logAntError: () => {},
-  isDebugMode: () => false,
-  isDebugToStdErr: () => false,
-  getDebugFilePath: () => null,
-  getDebugLogPath: () => '',
-  getDebugFilter: () => null,
-  getMinDebugLogLevel: () => 'debug',
-  enableDebugLogging: () => false,
-  setHasFormattedOutput: () => {},
-  getHasFormattedOutput: () => false,
-  flushDebugLogs: async () => {},
-}))
+mock.module('../../../../utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
+mock.module('src/utils/debug.js', debugMock)
 
 // ─── tests ───────────────────────────────────────────────────────────────────
 

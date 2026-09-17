@@ -17,6 +17,7 @@ import { dirname, join } from 'path'
 import { logForDebugging } from '../debug.js'
 import { errorMessage, isENOENT, toError } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
+import { stripBOM } from '../jsonRead.js'
 import { logError } from '../log.js'
 import {
   jsonParse,
@@ -58,6 +59,7 @@ import {
 import { getPluginById } from './marketplaceManager.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import {
+  copyPluginCacheOptionsFromPin,
   copyPluginToVersionedCache,
   getPluginCachePath,
   getVersionedCachePath,
@@ -1094,7 +1096,7 @@ function getPluginVersionFromManifest(
 
   try {
     const manifestContent = fs.readFileSync(manifestPath, { encoding: 'utf-8' })
-    const manifest = jsonParse(manifestContent)
+    const manifest = jsonParse(stripBOM(manifestContent))
     return manifest.version || 'unknown'
   } catch {
     logForDebugging(`Could not read version from manifest for ${pluginId}`)
@@ -1282,6 +1284,7 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
                 version,
                 entry,
                 marketplaceDir,
+                copyPluginCacheOptionsFromPin(),
               )
             } catch (materializeError) {
               logForDebugging(

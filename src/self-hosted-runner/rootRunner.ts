@@ -50,6 +50,7 @@ import {
 } from './healthMetrics.js'
 import { getPostSessionHookInFlightCount } from './postSessionInFlight.js'
 import { snapshotHostConfig, type HostConfigSnapshot } from './hostConfig.js'
+import { readWarmupCompleteOs } from './prefetchWarmup.js'
 import {
   createSelfHostedRunnerApi,
   isRetryableRunnerError,
@@ -1229,6 +1230,16 @@ export type PollSkeletonOpts = {
   /** densable `sseHintsEnabledOverride ?? hr(CCR_SHR_SSE_HINTS)` */
   sseHintsEnabledOverride?: boolean
   openWorkHintsStream?: (opts: OpenWorkHintsStreamOpts) => WorkHintsStreamHandle
+  /**
+   * densable `warmupReportEnabledOverride ?? !1`. Host-only; default off so
+   * `pollWork` omits `warmup_complete` unless the host turns reporting on.
+   */
+  warmupReportEnabledOverride?: boolean
+  /**
+   * densable `readWarmupComplete ?? os`. Default `os` reads
+   * `/tmp/ccr-byoc-prefetch-network.state` `ok>=1`.
+   */
+  readWarmupComplete?: () => Promise<boolean>
   retireAtMsOverride?: number
   retireReleaseRetryMsOverride?: number
   retireDeferredGraceMsOverride?: number
@@ -1381,6 +1392,9 @@ export async function runPollSkeleton(
 
   const sseEnabled =
     opts.sseHintsEnabledOverride ?? isSseHintsEnabled(process.env)
+  const warmupReportEnabled = opts.warmupReportEnabledOverride ?? false
+  const readWarmupComplete = opts.readWarmupComplete ?? readWarmupCompleteOs
+  let warmupComplete = false
   const wakeQueue = new PollWakeQueue()
   const openStream = opts.openWorkHintsStream ?? openWorkHintsStream
   let sseHandle: WorkHintsStreamHandle | undefined
@@ -1555,6 +1569,23 @@ export async function runPollSkeleton(
       }
 
       const pollStartedAt = lastPollAt
+      if (
+        warmupReportEnabled &&
+        !warmupComplete &&
+        !sawAnyAssignment &&
+        available > 0
+      ) {
+        try {
+          warmupComplete = await readWarmupComplete()
+        } catch {
+          warmupComplete = false
+        }
+        if (warmupComplete) {
+          opts.onStatus(
+            '[runner:poll] warm-up complete (first network prefetch succeeded) — reporting warmup_complete=true from this poll on',
+          )
+        }
+      }
       let assignmentIds: string[]
       let lease: unknown
       try {
@@ -1564,6 +1595,7 @@ export async function runPollSkeleton(
           available,
           signal,
           sseEnabled ? POLL_WAKE_SOURCE_WIRE[wakeSrc] : undefined,
+          warmupReportEnabled ? warmupComplete : undefined,
         )
         assignmentIds = work.assignment_ids
         lease = work.lease_expires_at

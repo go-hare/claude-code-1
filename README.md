@@ -43,7 +43,36 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59**；官方无 2.1.230）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.47**），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2**；官方无 2.1.230 / 无 240·241 bullets）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.48**），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+
+#### densable 2.1.246 对齐说明（2.7.48）
+
+对照文档：`docs/upstream-extraction/v2.1.246/official-246-checklist.md`（**HAVE 59 / PARTIAL 0 / GAP 0 / N/A 2**）、`cross-pack-residuals.md`。叠在已入库的 **2.1.243** 上。**2.7.48** 收 246 CLI 产品面；官方无 2.1.244 bullets，**勿折入 245 glibc / 247+**。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **#1 / #42** | wildcard allow `valid:true`+warning；dangling `&&`/`\|\|` → ERROR → ask | 不改成 deny |
+| **#4 / #6** | `rg`：`F` 中止并 `x=null`；sticky / 大距离滚动只清 freeze | 勿改 `MAX_MOUNTED` / overscan；sticky 中止不清 `x` |
+| **#16 / #18** | worktree 无 `CLAUDE_BASE` / 锁读失败 keep；plugin cache SHA 去重 | `blu` 不调 `Slu` |
+| **#22 / #52** | `/reload-plugins` 计 `skills/*/SKILL.md`；`/cd` apply-now；官方 false 点传 `applyStagedInstalls: false` | `/cd` `ft` 不传 replace |
+| **#44 / #45 / #54 / #55** | withhold misrouted cred；`decodeJwtExpiry`；abort 仍 yield `max_turns_reached`；GJn 已 yield `server_error` | 勿 invent JWT `jp` / 第二条 yield |
+| **storageV5** | `qb` 空壳 + pin `UF(e=qb)` | CLI 不自动 `qF` |
+| **N/A 2** | #39 #59 官方 installer | 同缺 = 对齐；不 invent |
+
+#### densable 2.1.243 对齐说明
+
+对照文档：`docs/upstream-extraction/v2.1.243/official-243-checklist.md`（**HAVE 49 / PARTIAL 0 / GAP 0 / N/A 11**）、`cross-pack-residuals.md`。已入库，与 246 同发 **2.7.48**。官方无 2.1.240/241 bullets，**勿折入 245+**。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **#24 WIF** | `y`/`pe`/`me`/`H`/`Ee`/`lt`：user_oauth fail-closed；OIDC env-quad fail-open；`lt` 清 TokenCache + 记 last-issued（非 disk） | 不 invent JWT-org / Sentry / `jwo` |
+| **#11 MCP `-p`** | 远程 MCP 断线 peek/detach 后重连；`peekSettled===w` 才 apply | 不与 239 #15 混 |
+| **#13 / #14 auto-mode** | 空 cache `gb-before-mode`；disk killswitch recheck；xml_s1 每次 fetch 重置墙钟 | latch `ASe=$O=null` 永不命中 |
+| **#55 / #56 RC** | poll 404 remint ≤3（同 `environment_id`）；`BridgeFatalError` rejected | crash+idle 404 走 `yt`，不 invent sticky `crashedSessionIds` |
+| **#19 / #33 / #53** | urlOutdent 前几列；Ctrl+[ vim ESC；macOS Finder `request_access` | — |
+| **#26 / #35 / #36** | hook-if 命令替换回退；sandbox exit 0 仍带 violations；usage persist 无 invent ISO 窗 | — |
+| **#39 / #44 / #57** | Chrome 稳定 launcher；org env pin（无 JWT）；inbox 首行 30s deadline | — |
+| **N/A 11** | VSCode 四条 + Desktop CIMD + 云 mid-turn + 官方 installer / heap_gc | 同缺 = 对齐；不 invent |
 
 #### densable 2.1.239 leftover 对齐说明（2.7.47）
 
@@ -252,10 +281,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.47）
+### 近期更新（2.7.5 → 2.7.48）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.48** | **densable 2.1.246**（叠在已入库 243 上）：HAVE **59** / N/A **2**。#1 wildcard allow warn、#4/#6 `rg` freeze abort、#16 worktree 不扫用户树、#22 skills 计数、#42 dangling `&&`/`\|\|`、#44 withhold、#52 `/cd` apply-now、#54 abort+maxTurns、storageV5 `qb` 空 pin。N/A：官方 installer。不折入 244/245/247+；不 invent `blu`←`Slu` / 自动 `qF` / JWT-org。243 HAVE 49 同发。 |
 | **2.7.47** | **densable 2.1.239 leftover 收口**（叠在 2.7.46 / 236–238 上）：`@synced` 磁盘 hydrate（`CLAUDE_CODE_SYNC_PLUGINS` 默认 OFF）；artifact auto-react（watch/reply/relay + parse5）；NMs permission Host 拆分；plan resume **continue 硬门**（resume 跑 `y_u`，print `--continue` 不跑）；CRI `createCriPolicyPrecheck` + NO_PROXY。**236** 删 invent `goalIdleArmGeneration`。**234 leftover** anthropic profile / OIDC / oRr「Run /login」。本机：Win32 标题 40ms 解粘；DeepSeek/Grok/Kimi 上下文窗口 + 国内 vision-exp。不 invent cowork / CCR E2E / VSCode banner / 240·241。 |
 | **2.7.46** | **densable 2.1.236–2.1.238**：236 HAVE **32** / N/A 1（`ANTHROPIC_DEFAULT_MODEL`、`notify_when_idle`、sandbox deny、fullscreen fallback、goal check-in、`/model` `LFh`/`sgM`）；237 HAVE 3（`canMarkApiSystem`、Concise、`r7` truncate）；238 HAVE **39**（`keybindingFlavor`、marketplace/MCP `headersHelper`、runner defer-shutdown / Proxy-Authorization、isolation pin、RC Stop/sign-out/403、update check 10s）。并接回官方 238 仍保留的 **234 leftover**（stale Enter、SendMessage `to`/truncated、`GGc`、session persist、markdown `d0l`）。发版时曾写 PARTIAL，之后本机合同收口。不 invent leftover #3 / G0S / chrome UI。 |
 | **2.7.45** | **densable 2.1.235（HAVE 15 + analog 3 / N/A 1）** + tip **2.1.234** quota auto-resume：spellcheck / LSP latch / md-list / highlight / Shift+Tab cycleMode / Agent GP 门 / notebook+**Edit/Write contentWithheld** / slash oX / update footer / tasklist expand / cloud CPU / suppressAlways / rg 15.x / autocompact-off / vim cursor / dialog race / SendMessage size / rc gateway + **cloud-session mX 门**；CLI IDE bridge `uSm`；quota rearm `HEv=2`。**#19 VSCode host focus N/A**。analog 是注脚，不是缺口。 |

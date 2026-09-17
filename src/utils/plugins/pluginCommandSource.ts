@@ -17,9 +17,21 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { createHash } from 'crypto'
 import { createReadStream } from 'fs'
-import { readdir, readlink, realpath, stat } from 'fs/promises'
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'fs/promises'
 import { homedir } from 'os'
-import { isAbsolute, join, relative, resolve, sep } from 'path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
 import { getPlatform } from '../platform.js'
@@ -116,6 +128,150 @@ export function isCommandPluginSource(
 /** densable d0t */
 export function isCommandPluginLinkMode(source: unknown): boolean {
   return isCommandPluginSource(source) && source.mode === 'link'
+}
+
+/** densable fkr / Pe */
+export const COMMAND_PLUGIN_LINK_MARKER = '.claude-plugin-link'
+
+/** densable m6_ / Ha — marker must be a small regular file */
+export const COMMAND_PLUGIN_LINK_MARKER_MAX_BYTES = 16_384
+
+/** densable ts / Ba — junk names skipped by BLn symlink scan */
+const COMMAND_PLUGIN_LINK_JUNK_NAMES = new Set(['.ds_store', '__macosx'])
+
+function isCommandPluginLinkJunkName(name: string): boolean {
+  return COMMAND_PLUGIN_LINK_JUNK_NAMES.has(name.toLowerCase())
+}
+
+function parseCommandPluginLinkMarker(raw: string): { target: string } {
+  const parsed: unknown = JSON.parse(raw)
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    !('target' in parsed) ||
+    typeof (parsed as { target: unknown }).target !== 'string'
+  ) {
+    throw new PluginCommandSourceError(
+      'The link-farm marker is not a small regular file; refusing to read it.',
+      'plugin command source link marker not a small regular file',
+    )
+  }
+  const target = (parsed as { target: string }).target
+  if (
+    target.length < 1 ||
+    target.length > 4096 ||
+    !isAbsolute(target) ||
+    isWindowsUncOrDevicePath(target)
+  ) {
+    throw new PluginCommandSourceError(
+      'The link-farm marker is not a small regular file; refusing to read it.',
+      'plugin command source link marker not a small regular file',
+    )
+  }
+  return { target }
+}
+
+/** densable is — read `.claude-plugin-link` if it is a small regular file. */
+async function readCommandPluginLinkMarker(
+  markerPath: string,
+): Promise<string> {
+  const st = await lstat(markerPath)
+  if (!st.isFile() || st.size > COMMAND_PLUGIN_LINK_MARKER_MAX_BYTES) {
+    throw new PluginCommandSourceError(
+      'The link-farm marker is not a small regular file; refusing to read it.',
+      'plugin command source link marker not a small regular file',
+    )
+  }
+  return readFile(markerPath, 'utf8')
+}
+
+/**
+ * densable AFe / Bl — dest already has a parseable link-farm marker.
+ */
+export async function hasCommandPluginLinkFarm(dest: string): Promise<boolean> {
+  try {
+    parseCommandPluginLinkMarker(
+      await readCommandPluginLinkMarker(join(dest, COMMAND_PLUGIN_LINK_MARKER)),
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable Rxd / es — resolve top-level link entries against the producer.
+ */
+async function resolveCommandPluginLinkEntries(
+  producer: string,
+  entries: { name: string; path: string }[],
+): Promise<{ name: string; target: string; isDirectory: boolean }[]> {
+  const resolved: { name: string; target: string; isDirectory: boolean }[] = []
+  for (const { name, path: entryPath } of entries) {
+    let real: string
+    let isDir: boolean
+    try {
+      real = await realpath(entryPath)
+      isDir = (await stat(real)).isDirectory()
+    } catch {
+      throw new PluginCommandSourceError(
+        `A top-level entry of the plugin directory its command produced could not be resolved (${clipForError(name, 80)}); refusing to link it.`,
+        'plugin command source link entry unresolvable',
+      )
+    }
+    const rel = relative(producer, real)
+    if (
+      rel === '' ||
+      rel === '..' ||
+      rel.startsWith(`..${sep}`) ||
+      isAbsolute(rel)
+    ) {
+      throw new PluginCommandSourceError(
+        `A top-level entry of the plugin directory its command produced (${clipForError(name, 80)}) points outside that directory; refusing to link it.`,
+        'plugin command source link escapes producer directory',
+      )
+    }
+    resolved.push({ name, target: real, isDirectory: isDir })
+  }
+  return resolved
+}
+
+/**
+ * densable BLn / Vl — relink an existing farm into dest via `${dest}.linking-${pid}`.
+ */
+export async function relinkCommandPluginLinkFarm(
+  src: string,
+  dest: string,
+): Promise<void> {
+  const markerRaw = await readCommandPluginLinkMarker(
+    join(src, COMMAND_PLUGIN_LINK_MARKER),
+  )
+  const producer = await realpath(
+    parseCommandPluginLinkMarker(markerRaw).target,
+  )
+  const names = (await readdir(src, { withFileTypes: true })).filter(
+    entry => !isCommandPluginLinkJunkName(entry.name) && entry.isSymbolicLink(),
+  )
+  const links = await resolveCommandPluginLinkEntries(
+    producer,
+    names.map(entry => ({ name: entry.name, path: join(src, entry.name) })),
+  )
+  await mkdir(dirname(dest), { recursive: true })
+  const staging = `${dest}.linking-${process.pid}`
+  await rm(staging, { recursive: true, force: true })
+  await mkdir(staging)
+  try {
+    for (const { name, target, isDirectory } of links) {
+      await symlink(target, join(staging, name), isDirectory ? 'dir' : 'file')
+    }
+    await writeFile(join(staging, COMMAND_PLUGIN_LINK_MARKER), markerRaw, {
+      flag: 'wx',
+    })
+    await rename(staging, dest)
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true })
+    throw error
+  }
 }
 
 /**
@@ -966,46 +1122,24 @@ export async function installCommandPluginSource(
 
   const mode = source.mode === 'link' ? 'link' : 'copy'
   if (mode === 'link') {
-    const { mkdir, symlink, writeFile } = await import('fs/promises')
     await mkdir(targetPath, { recursive: true })
-    const names = (await readdir(producer)).filter(
-      // densable Ixd junk filter is separate; skip only known non-plugin junk lightly
-      n => n !== '.DS_Store' && n !== '__MACOSX',
+    const names = (await readdir(producer))
+      .filter(n => !isCommandPluginLinkJunkName(n))
+      .sort()
+    const linkMeta = await resolveCommandPluginLinkEntries(
+      producer,
+      names.map(name => ({ name, path: join(producer, name) })),
     )
-    names.sort()
-    const linkMeta: { name: string; target: string; isDirectory: boolean }[] =
-      []
-    for (const name of names) {
-      const entry = join(producer, name)
-      let real: string
-      let isDir: boolean
-      try {
-        real = await realpath(entry)
-        isDir = (await stat(real)).isDirectory()
-      } catch {
-        throw new PluginCommandSourceError(
-          `A top-level entry of the plugin directory its command produced could not be resolved (${clipForError(name, 80)}); refusing to link it.`,
-          'plugin command source link entry unresolvable',
-        )
-      }
-      const rel = relative(producer, real)
-      if (
-        rel === '' ||
-        rel === '..' ||
-        rel.startsWith(`..${sep}`) ||
-        isAbsolute(rel)
-      ) {
-        throw new PluginCommandSourceError(
-          `A top-level entry of the plugin directory its command produced (${clipForError(name, 80)}) points outside that directory; refusing to link it.`,
-          'plugin command source link escapes producer directory',
-        )
-      }
-      await symlink(real, join(targetPath, name), isDir ? 'dir' : 'file')
-      linkMeta.push({ name, target: real, isDirectory: isDir })
+    for (const { name, target, isDirectory } of linkMeta) {
+      await symlink(
+        target,
+        join(targetPath, name),
+        isDirectory ? 'dir' : 'file',
+      )
     }
     // densable fkr
     await writeFile(
-      join(targetPath, '.claude-plugin-link'),
+      join(targetPath, COMMAND_PLUGIN_LINK_MARKER),
       JSON.stringify({ target: producer }),
       { flag: 'wx' },
     )

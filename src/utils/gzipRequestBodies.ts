@@ -59,8 +59,11 @@ export function applyGzipRequestBodyInit(
   input?: {
     env?: NodeJS.ProcessEnv
     gbValue?: boolean
+    /** densable YOo/jht 4th arg — IOo/Wht latch persist when present. */
+    storageV5?: unknown
   },
 ): RequestInit | undefined {
+  void input?.storageV5
   if (!isGzipRequestBodiesEnabled(input)) return init
   if (!isGzipRequestBodyUrlEligible(url)) return init
   const next: RequestInit & { compress?: string } = { ...(init ?? {}) }

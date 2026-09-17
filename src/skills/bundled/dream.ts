@@ -6,7 +6,7 @@ import { getAutoMemPath, isAutoMemoryEnabled } from '../../memdir/paths.js'
 import { buildConsolidationPrompt } from '../../services/autoDream/consolidationPrompt.js'
 import { recordConsolidation } from '../../services/autoDream/consolidationLock.js'
 import { getOriginalCwd } from '../../bootstrap/state.js'
-import { getProjectDir } from '../../utils/sessionStorage.js'
+import { getProjectDir } from '../../utils/sessionPaths.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 
 const DREAM_PROMPT_PREFIX = `# Dream: Memory Consolidation (manual run)

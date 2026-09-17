@@ -14,11 +14,20 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { promisify } from 'node:util'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  clearChildProcessStubs,
+  installChildProcessHarness,
+  setChildProcessStubs,
+} from '../../../../tests/mocks/childProcessHarness.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
 // ── Mock control state ──
 let _execFileSyncImpl: (cmd: string, args: string[], opts?: unknown) => Buffer =
   () => Buffer.from('')
@@ -30,88 +39,10 @@ let _execFileImpl: (
   cb: (err: Error | null, stdout: string, stderr: string) => void,
 ) => void = (_cmd, _args, _opts, cb) => cb(null, '', '')
 
-const execFileSyncMockCore = (
-  cmd: string,
-  args: string[],
-  opts?: unknown,
-): Buffer => _execFileSyncImpl(cmd, args, opts)
+installChildProcessHarness()
+mock.module('bun:bundle', bunBundleMock)
 
-const execFileMockCore = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-  cb: (err: Error | null, stdout: string, stderr: string) => void,
-) => _execFileImpl(cmd, args, opts, cb)
-
-;(execFileMockCore as unknown as Record<symbol, unknown>)[
-  promisify.custom as symbol
-] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> =>
-  new Promise((resolve, reject) =>
-    _execFileImpl(cmd, args, opts, (err, stdout, stderr) => {
-      if (err) reject(err)
-      else resolve({ stdout, stderr })
-    }),
-  )
-
-// Spread real child_process + flag-gated stub (see share-gh.test.ts for the
-// promisify.custom rationale).
-let useIssueGhCpStubs = false
-const wrappedIssueGhExecFile = ((...args: unknown[]) =>
-  useIssueGhCpStubs
-    ? (execFileMockCore as (...a: unknown[]) => unknown)(...args)
-    : // eslint-disable-next-line @typescript-eslint/no-require-imports
-      (require('node:child_process').execFile as (...a: unknown[]) => unknown)(
-        ...args,
-      )) as unknown as Record<symbol, unknown> & ((...a: unknown[]) => unknown)
-;(wrappedIssueGhExecFile as Record<symbol, unknown>)[
-  promisify.custom as symbol
-] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> => {
-  if (useIssueGhCpStubs) {
-    return new Promise((resolve, reject) =>
-      _execFileImpl(cmd, args, opts, (err, stdout, stderr) =>
-        err ? reject(err) : resolve({ stdout, stderr }),
-      ),
-    )
-  }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return promisify(real.execFile as never)(cmd, args, opts) as Promise<{
-    stdout: string
-    stderr: string
-  }>
-}
-mock.module('node:child_process', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return {
-    ...real,
-    default: real,
-    execFile: wrappedIssueGhExecFile as typeof real.execFile,
-    execFileSync: ((...args: unknown[]) =>
-      useIssueGhCpStubs
-        ? (execFileSyncMockCore as (...a: unknown[]) => unknown)(...args)
-        : (real.execFileSync as (...a: unknown[]) => unknown)(
-            ...args,
-          )) as typeof real.execFileSync,
-  }
-})
-
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
-
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: (v: unknown) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // ── State ──
 let tmpDir: string
@@ -226,11 +157,17 @@ function setupMocks(opts: {
 }
 
 // Activate child_process stubs only for this suite.
+let popFeature: (() => void) | undefined
 beforeAll(() => {
-  useIssueGhCpStubs = true
+  popFeature = pushFeatureOverride(() => true)
+  setChildProcessStubs('issue-gh', {
+    execFile: (cmd, args, opts, cb) => _execFileImpl(cmd, args, opts, cb),
+    execFileSync: (cmd, args, opts) => _execFileSyncImpl(cmd, args, opts),
+  })
 })
 afterAll(() => {
-  useIssueGhCpStubs = false
+  popFeature?.()
+  clearChildProcessStubs('issue-gh')
 })
 
 describe('issue command — tryDetectGitRemoteUrl catch path', () => {

@@ -1,7 +1,12 @@
-import { describe, expect, test, mock } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
+import * as realMessages from 'src/utils/messages.js'
+import * as realSearchExtraTools from 'src/utils/searchExtraTools.js'
+import * as realToolErrors from 'src/utils/toolErrors.js'
+import * as realToolsConstants from 'src/constants/tools.js'
 import { logMock } from '../../../../../../tests/mocks/log'
 import { debugMock } from '../../../../../../tests/mocks/debug'
 import { growthbookMock } from '../../../../../../tests/mocks/growthbook'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
 // Same mock setup as ExecuteTool.runner.ts — ExecuteTool's import chain
 // (growthbook, searchExtraTools, messages) loads real modules with side
@@ -12,7 +17,13 @@ mock.module('src/utils/debug.ts', debugMock)
 
 mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
+const searchExtraToolsSnap = snapshotModuleExports(realSearchExtraTools)
+const toolsConstantsSnap = snapshotModuleExports(realToolsConstants)
+const messagesSnap = snapshotModuleExports(realMessages)
+const toolErrorsSnap = snapshotModuleExports(realToolErrors)
+
 mock.module('src/utils/searchExtraTools.js', () => ({
+  ...searchExtraToolsSnap,
   isSearchExtraToolsEnabledOptimistic: () => true,
   getAutoSearchExtraToolsCharThreshold: () => 100,
   getSearchExtraToolsMode: () => 'tst' as const,
@@ -25,10 +36,12 @@ mock.module('src/utils/searchExtraTools.js', () => ({
 }))
 
 mock.module('src/constants/tools.js', () => ({
+  ...toolsConstantsSnap,
   CORE_TOOLS: new Set(['ExecuteExtraTool', 'ToolSearch']),
 }))
 
 mock.module('src/utils/messages.js', () => ({
+  ...messagesSnap,
   createUserMessage: ({ content }: { content: string }) => ({
     type: 'user' as const,
     content,
@@ -38,9 +51,19 @@ mock.module('src/utils/messages.js', () => ({
 }))
 
 mock.module('src/utils/toolErrors.js', () => ({
+  ...toolErrorsSnap,
   formatZodValidationError: (_name: string, error: unknown) =>
     `validation error: ${JSON.stringify(error)}`,
 }))
+
+afterAll(() => {
+  mock.module('src/utils/searchExtraTools.js', () => ({
+    ...searchExtraToolsSnap,
+  }))
+  mock.module('src/constants/tools.js', () => ({ ...toolsConstantsSnap }))
+  mock.module('src/utils/messages.js', () => ({ ...messagesSnap }))
+  mock.module('src/utils/toolErrors.js', () => ({ ...toolErrorsSnap }))
+})
 
 const { ExecuteTool } = await import('../ExecuteTool.js')
 

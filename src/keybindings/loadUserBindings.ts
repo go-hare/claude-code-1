@@ -26,6 +26,7 @@ import { parseBindings } from './parser.js'
 import type { KeybindingBlock, ParsedBinding } from './types.js'
 import {
   checkDuplicateKeysInJson,
+  keepResolvedUserBindings,
   type KeybindingWarning,
   validateBindings,
 } from './validate.js'
@@ -116,6 +117,18 @@ export function getKeybindingsPath(): string {
   return join(getClaudeConfigHomeDir(), 'keybindings.json')
 }
 
+/** densable 2.1.246 q — each issue under --debug. */
+function logKeybindingValidationIssues(warnings: KeybindingWarning[]): void {
+  if (warnings.length === 0) return
+  logForDebugging(`[keybindings] Found ${warnings.length} validation issue(s)`)
+  for (const warning of warnings) {
+    logForDebugging(
+      `[keybindings] [${warning.severity}] ${warning.message}${warning.suggestion ? ` \u2014 ${warning.suggestion}` : ''}`,
+      { level: 'warn' },
+    )
+  }
+}
+
 /**
  * Parse default bindings (cached for performance).
  */
@@ -188,7 +201,7 @@ export async function loadKeybindings(): Promise<KeybindingsLoadResult> {
       }
     }
 
-    const userParsed = parseBindings(userBlocks)
+    const userParsed = keepResolvedUserBindings(parseBindings(userBlocks))
     logForDebugging(
       `[keybindings] Loaded ${userParsed.length} user bindings from ${userPath}`,
     )
@@ -206,11 +219,7 @@ export async function loadKeybindings(): Promise<KeybindingsLoadResult> {
       ...validateBindings(userBlocks, mergedBindings),
     ]
 
-    if (warnings.length > 0) {
-      logForDebugging(
-        `[keybindings] Found ${warnings.length} validation issue(s)`,
-      )
-    }
+    logKeybindingValidationIssues(warnings)
 
     return { bindings: mergedBindings, warnings }
   } catch (error) {
@@ -315,7 +324,7 @@ export function loadKeybindingsSyncWithWarnings(): KeybindingsLoadResult {
       return { bindings: cachedBindings, warnings: cachedWarnings }
     }
 
-    const userParsed = parseBindings(userBlocks)
+    const userParsed = keepResolvedUserBindings(parseBindings(userBlocks))
     logForDebugging(
       `[keybindings] Loaded ${userParsed.length} user bindings from ${userPath}`,
     )
@@ -329,11 +338,7 @@ export function loadKeybindingsSyncWithWarnings(): KeybindingsLoadResult {
       ...duplicateKeyWarnings,
       ...validateBindings(userBlocks, cachedBindings),
     ]
-    if (cachedWarnings.length > 0) {
-      logForDebugging(
-        `[keybindings] Found ${cachedWarnings.length} validation issue(s)`,
-      )
-    }
+    logKeybindingValidationIssues(cachedWarnings)
 
     return { bindings: cachedBindings, warnings: cachedWarnings }
   } catch {

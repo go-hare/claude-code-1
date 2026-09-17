@@ -3,7 +3,7 @@
  */
 
 import axios from 'axios'
-import { OAUTH_BETA_HEADER } from '../constants/oauth.js'
+import { getOauthConfig, OAUTH_BETA_HEADER } from '../constants/oauth.js'
 import {
   getAnthropicApiKey,
   getClaudeAIOAuthTokens,
@@ -60,6 +60,111 @@ export function getWebFetchUserAgent(): string {
 export type AuthHeaders = {
   headers: Record<string, string>
   error?: string
+  /** Official `ky` — telemetry host mismatch. */
+  reasonCode?: 'misrouted_credential'
+}
+
+/** Official `VP` — default first-party telemetry host. */
+const ANTHROPIC_TELEMETRY_HOST = 'api.anthropic.com'
+
+/** Official `Su` — URL host, or undefined. */
+function telemetryUrlHost(url: string | undefined): string | undefined {
+  if (!url) return undefined
+  try {
+    return new URL(url).host
+  } catch {
+    return undefined
+  }
+}
+
+/** Official `YP` — https URL? */
+function isHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official `qP` — host is a known Anthropic telemetry host.
+ * SEA: `Ro(\`https://${e}\`)||Cy.some((t)=>Su(t)===e)`. `Ro`/`Cy` not locked;
+ * locked default is `VP="api.anthropic.com"`.
+ */
+function isKnownAnthropicTelemetryHost(host: string | undefined): boolean {
+  if (host === undefined) return false
+  if (host === ANTHROPIC_TELEMETRY_HOST) return true
+  const oauthHost = oauthApiHost()
+  return oauthHost !== undefined && host === oauthHost
+}
+
+/** Official `WP` — `ANTHROPIC_BASE_URL` host, else `api.anthropic.com`. */
+function apiKeyCredentialHost(): string | undefined {
+  if (process.env.ANTHROPIC_BASE_URL) {
+    return telemetryUrlHost(process.env.ANTHROPIC_BASE_URL)
+  }
+  return ANTHROPIC_TELEMETRY_HOST
+}
+
+/** Official `Ay` — `BASE_API_URL` host. */
+function oauthApiHost(): string | undefined {
+  try {
+    return telemetryUrlHost(getOauthConfig().BASE_API_URL)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Official `Hd` — credential host equals https endpoint host AND host is known.
+ */
+function credentialBelongsToEndpointHost(
+  credentialHost: string | undefined,
+  endpointUrl: string,
+): boolean {
+  const endpointHost = isHttpsUrl(endpointUrl)
+    ? telemetryUrlHost(endpointUrl)
+    : undefined
+  return (
+    credentialHost !== undefined &&
+    credentialHost === endpointHost &&
+    isKnownAnthropicTelemetryHost(endpointHost)
+  )
+}
+
+/** Official `zP` — API key belongs to both `ANTHROPIC_BASE_URL` and `BASE_API_URL` hosts. */
+function apiKeyBelongsToEndpoint(endpointUrl: string): boolean {
+  return (
+    credentialBelongsToEndpointHost(apiKeyCredentialHost(), endpointUrl) &&
+    credentialBelongsToEndpointHost(oauthApiHost(), endpointUrl)
+  )
+}
+
+/** Official `jP` — bearer belongs to `BASE_API_URL` host. */
+function bearerBelongsToEndpoint(endpointUrl: string): boolean {
+  return credentialBelongsToEndpointHost(oauthApiHost(), endpointUrl)
+}
+
+/**
+ * Official `ky` — withhold a credential that does not belong to this telemetry host.
+ */
+export function withholdMisroutedCredential(
+  auth: AuthHeaders,
+  endpointUrl: string,
+): AuthHeaders {
+  const withholdApiKey =
+    'x-api-key' in auth.headers && !apiKeyBelongsToEndpoint(endpointUrl)
+  const withholdBearer =
+    'Authorization' in auth.headers && !bearerBelongsToEndpoint(endpointUrl)
+  if (!(withholdApiKey || withholdBearer)) {
+    return auth
+  }
+  return {
+    headers: {},
+    error:
+      'credential withheld: this telemetry endpoint is not the host it belongs to',
+    reasonCode: 'misrouted_credential',
+  }
 }
 
 /**
@@ -82,8 +187,8 @@ export function getAuthHeaders(): AuthHeaders {
       },
     }
   }
-  // TODO: this will fail if the API key is being set to an LLM Gateway key
-  // should we try to query keychain / credentials for a valid Anthropic key?
+  // Gateway keys are withheld at telemetry call sites via `ky` /
+  // withholdMisroutedCredential — do not send them to api.anthropic.com.
   const apiKey = getAnthropicApiKey()
   if (!apiKey) {
     return {

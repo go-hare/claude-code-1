@@ -19,8 +19,7 @@ import {
   unlink,
   writeFile,
 } from 'fs/promises'
-import memoize from 'lodash-es/memoize.js'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -76,7 +75,12 @@ import { updateSessionName } from './concurrentSessions.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import { isEnvTruthy } from './envUtils.js'
+import {
+  jobIdHasJsonlSegment,
+  isValidStoragePathSegment,
+} from './sessionNameJobSidecar.js'
+import { isHoverRestOn } from './storageV5/hoverRestPin.js'
 import {
   isPrecompactSkipDisabled,
   shouldSkipPromptHistory,
@@ -84,6 +88,7 @@ import {
 import {
   getPersistenceSuppressCause,
   isNestedMarkerSuppressingPersistence,
+  isPersistenceSuppressed,
 } from './sessionPersistenceStatus.js'
 import { repointTaskOutputSymlinks } from './task/diskOutput.js'
 import {
@@ -91,7 +96,12 @@ import {
   recordTranscriptWriteSuccess,
   remapTranscriptWriterPaths,
 } from './transcriptWriterHealth.js'
-import { errorMessage, isFsInaccessible } from './errors.js'
+import {
+  errorMessage,
+  isAbortError,
+  isENOENT,
+  isFsInaccessible,
+} from './errors.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
 import { formatFileSize } from './format.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -107,12 +117,10 @@ import {
   extractJsonStringField,
   extractLastJsonStringField,
   extractTypedJsonlField,
-  getProjectDirNameOverride,
   isSlugCollisionCollapsedCwd,
   lastMessageAtMsFromTail,
   LITE_READ_BUF_SIZE,
   MAX_SANITIZED_LENGTH,
-  projectDirNameOverrideCacheKey,
   readHeadAndTail,
   readTranscriptForLoad,
   recordedCwdCollidesWithProjectResolved,
@@ -123,8 +131,61 @@ import {
 } from './sessionStoragePortable.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
+import { sanitizeSessionTitle } from './sessionTitleSanitize.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
 import { validateUuid } from './uuid.js'
+
+// ── Task 017：以下助手已搬到 ./sessionPaths.js（环外轻量模块，冷加载 ~280ms）──
+// import 的是本文件内部仍在用的；export 的是全部，因为现有调用方的
+// `from './sessionStorage.js'` 不能破。新代码请直接 import './sessionPaths.js'，
+// 否则会白白拖进本文件的 768 个模块。详见 docs/task/task-017-session-storage-hub-split.md
+import {
+  getAgentTranscriptPath,
+  getNodeEnv,
+  getProjectDir,
+  getProjectsDir,
+  getTranscriptPath,
+  getTranscriptPathForSession,
+  getUserType,
+  isChainParticipant,
+  isTranscriptMessage,
+} from './sessionPaths.js'
+export {
+  AGENT_METADATA_PRESERVE_KEYS,
+  clearAgentTranscriptSubdir,
+  deleteRemoteAgentMetadata,
+  getAgentTranscriptPath,
+  getMainSessionObserverPointerPath,
+  getNodeEnv,
+  getProjectDir,
+  getProjectsDir,
+  getTranscriptPath,
+  getTranscriptPathForSession,
+  getUserType,
+  isChainParticipant,
+  isCustomTitleEnabled,
+  isEphemeralToolProgress,
+  isObserverSidecarReattachable,
+  isTranscriptMessage,
+  listRemoteAgentMetadata,
+  MAX_TRANSCRIPT_READ_BYTES,
+  patchAgentMetadata,
+  patchMainSessionObserverPointer,
+  readAgentMetadata,
+  readLatestObserverRef,
+  readMainSessionObserverPointer,
+  readRemoteAgentMetadata,
+  sessionIdExists,
+  setAgentTranscriptSubdir,
+  writeAgentMetadata,
+  writeMainSessionObserverPointer,
+  writeRemoteAgentMetadata,
+} from './sessionPaths.js'
+export type {
+  AgentMetadata,
+  MainSessionObserverPointer,
+  RemoteAgentMetadata,
+} from './sessionPaths.js'
 
 // Cache MACRO.VERSION at module level to work around bun --define bug in async contexts
 // See: https://github.com/oven-sh/bun/issues/26168
@@ -157,36 +218,6 @@ const MAX_TOMBSTONE_REWRITE_BYTES = 50 * 1024 * 1024
 const SKIP_FIRST_PROMPT_PATTERN =
   /^(?:\s*<[a-z][\w-]*[\s>]|\[Request interrupted by user[^\]]*\])/
 
-/**
- * Type guard to check if an entry is a transcript message.
- * Transcript messages include user, assistant, attachment, and system messages.
- * IMPORTANT: This is the single source of truth for what constitutes a transcript message.
- * loadTranscriptFile() uses this to determine which messages to load into the chain.
- *
- * Progress messages are NOT transcript messages. They are ephemeral UI state
- * and must not be persisted to the JSONL or participate in the parentUuid
- * chain. Including them caused chain forks that orphaned real conversation
- * messages on resume (see #14373, #23537).
- */
-export function isTranscriptMessage(entry: Entry): entry is TranscriptMessage {
-  return (
-    entry.type === 'user' ||
-    entry.type === 'assistant' ||
-    entry.type === 'attachment' ||
-    entry.type === 'system'
-  )
-}
-
-/**
- * Entries that participate in the parentUuid chain. Used on the write path
- * (insertMessageChain, useLogMessages) to skip progress when assigning
- * parentUuid. Old transcripts with progress already in the chain are handled
- * by the progressBridge rewrite in loadTranscriptFile.
- */
-export function isChainParticipant(m: Pick<Message, 'type'>): boolean {
-  return m.type !== 'progress'
-}
-
 type LegacyProgressEntry = {
   type: 'progress'
   uuid: UUID
@@ -207,261 +238,6 @@ function isLegacyProgressEntry(entry: unknown): entry is LegacyProgressEntry {
     'uuid' in entry &&
     typeof entry.uuid === 'string'
   )
-}
-
-/**
- * High-frequency tool progress ticks (1/sec for Sleep, per-chunk for Bash).
- * These are UI-only: not sent to the API, not rendered after the tool
- * completes. Used by REPL.tsx to replace-in-place instead of appending, and
- * by loadTranscriptFile to skip legacy entries from old transcripts.
- */
-const EPHEMERAL_PROGRESS_TYPES = new Set([
-  'bash_progress',
-  'powershell_progress',
-  'mcp_progress',
-  ...(feature('PROACTIVE') || feature('KAIROS')
-    ? (['sleep_progress'] as const)
-    : []),
-])
-export function isEphemeralToolProgress(dataType: unknown): boolean {
-  return typeof dataType === 'string' && EPHEMERAL_PROGRESS_TYPES.has(dataType)
-}
-
-export function getProjectsDir(): string {
-  return join(getClaudeConfigHomeDir(), 'projects')
-}
-
-export function getTranscriptPath(): string {
-  const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
-  return join(projectDir, `${getSessionId()}.jsonl`)
-}
-
-export function getTranscriptPathForSession(sessionId: string): string {
-  // When asking for the CURRENT session's transcript, honor sessionProjectDir
-  // the same way getTranscriptPath() does. Without this, hooks get a
-  // transcript_path computed from originalCwd while the actual file was
-  // written to sessionProjectDir (set by switchActiveSession on resume/branch)
-  // — different directories, so the hook sees MISSING (gh-30217). CC-34
-  // made sessionId + sessionProjectDir atomic precisely to prevent this
-  // kind of drift; this function just wasn't updated to read both.
-  //
-  // For OTHER session IDs we can only guess via originalCwd — we don't
-  // track a sessionId→projectDir map. Callers wanting a specific other
-  // session's path should pass fullPath explicitly (most save* functions
-  // already accept this).
-  if (sessionId === getSessionId()) {
-    return getTranscriptPath()
-  }
-  const projectDir = getProjectDir(getOriginalCwd())
-  return join(projectDir, `${sessionId}.jsonl`)
-}
-
-// 50 MB — session JSONL can grow to multiple GB (inc-3930). Callers that
-// read the raw transcript must bail out above this threshold to avoid OOM.
-export const MAX_TRANSCRIPT_READ_BYTES = 50 * 1024 * 1024
-
-// In-memory map of agentId → subdirectory for grouping related subagent
-// transcripts (e.g. workflow runs write to subagents/workflows/<runId>/).
-// Populated before the agent runs; consulted by getAgentTranscriptPath.
-const agentTranscriptSubdirs = new Map<string, string>()
-
-export function setAgentTranscriptSubdir(
-  agentId: string,
-  subdir: string,
-): void {
-  agentTranscriptSubdirs.set(agentId, subdir)
-}
-
-export function clearAgentTranscriptSubdir(agentId: string): void {
-  agentTranscriptSubdirs.delete(agentId)
-}
-
-export function getAgentTranscriptPath(agentId: AgentId): string {
-  // Same sessionProjectDir consistency as getTranscriptPathForSession —
-  // subagent transcripts live under the session dir, so if the session
-  // transcript is at sessionProjectDir, subagent transcripts are too.
-  const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
-  const sessionId = getSessionId()
-  const subdir = agentTranscriptSubdirs.get(agentId)
-  const base = subdir
-    ? join(projectDir, sessionId, 'subagents', subdir)
-    : join(projectDir, sessionId, 'subagents')
-  return join(base, `agent-${agentId}.jsonl`)
-}
-
-function getAgentMetadataPath(agentId: AgentId): string {
-  return getAgentTranscriptPath(agentId).replace(/\.jsonl$/, '.meta.json')
-}
-
-export type AgentMetadata = {
-  agentType: string
-  /**
-   * densable `isFork` — true when spawn was FORK_AGENT (agentType "fork").
-   * Aye: `S?.isFork===true` short-circuits type lookup and forces fork
-   * system-prompt + exact tool pool restore (prevents default-agent revert).
-   */
-  isFork?: boolean
-  /** Worktree path if the agent was spawned with isolation: "worktree" */
-  worktreePath?: string
-  /** densable worktree branch name (paired with worktreePath). */
-  worktreeBranch?: string
-  /**
-   * densable `cwd` — explicit cwd when not worktree-isolated (or host cwd
-   * snapshot). Resume prefers meta.cwd, else live worktree path.
-   */
-  cwd?: string
-  /**
-   * densable `spawnMode` — worker permission mode at spawn (Aye mode chain:
-   * observerCap ?? workerPermissionMode ?? spawnMode ?? agent.permissionMode).
-   */
-  spawnMode?: string
-  /**
-   * densable `permissionMode` on agent_metadata mirror — agent definition
-   * permission mode snapshot when present.
-   */
-  permissionMode?: string
-  /** densable model pin for non-observer resume (`S?.model`). */
-  model?: string
-  /** densable spawnDepth for nested agent analytics / depth caps. */
-  spawnDepth?: number
-  /** densable parentAgentId lineage. */
-  parentAgentId?: string
-  /** densable tool_use id that spawned this agent. */
-  toolUseId?: string
-  /** densable taskKind (workflow/teammate/etc.) when set. */
-  taskKind?: string
-  /** densable teamName for swarm teammates. */
-  teamName?: string
-  /** densable color label. */
-  color?: string
-  /** densable planModeRequired flag. */
-  planModeRequired?: boolean
-  /** densable customAgentType when agentType is a generic wrapper. */
-  customAgentType?: string
-  /** Original task description from the AgentTool input. Persisted so a
-   * resumed agent's notification can show the original description instead
-   * of a placeholder. Optional — older metadata files lack this field. */
-  description?: string
-  /**
-   * Official observer pointer densable — observerTaskId armed for this
-   * observed agent (HXt). Used by resume re-arm (zOu/KOu).
-   */
-  observerTaskId?: string
-  /** Official armingPermissionMode snapshot for observer re-arm. */
-  armingPermissionMode?: string
-  /**
-   * Official n5r/HXt observerStopped tombstone densable. Written on the
-   * observer agent sidecar when pairing is stopped so KOu reattach blocks.
-   */
-  observerStopped?: boolean
-  /**
-   * densable Gzg/hAe — user-initiated stop marker on agent sidecar.
-   * Aye resume blocks auto-resume unless userInitiated clears it.
-   */
-  stoppedByUser?: boolean
-  /**
-   * densable observer sidecar marker (lYy / Aye gate):
-   * spawnFirstRun writes isObserver:true; Aye observer-activity refuses
-   * delivery when sidecar is missing or isObserver !== true.
-   */
-  isObserver?: boolean
-  /**
-   * densable E8/T1e `name` — display name for SendMessage registry.
-   * Aye re-registers when registry entry is missing after cold resume.
-   */
-  name?: string
-}
-
-/**
- * densable `$Ns` — observer pairing keys preserved across full sidecar
- * rewrites (H4d). When a write omits these, keep prior values so runAgent
- * spawn metadata cannot clobber observer pointer/tombstone fields.
- */
-export const AGENT_METADATA_PRESERVE_KEYS = [
-  'isObserver',
-  'observerStopped',
-  'observerTaskId',
-  'armingPermissionMode',
-] as const satisfies ReadonlyArray<keyof AgentMetadata>
-
-/**
- * Persist agent identity used to launch a subagent. Read by resume to
- * restore prompt + tool restrictions — without agentType/isFork/model,
- * resuming silently degrades to general-purpose (changelog #7). Sidecar
- * file avoids JSONL schema changes.
- *
- * densable H4d: when the write omits `$Ns` observer keys, merge prior
- * values from disk so spawn rewrites cannot drop observer pairing state.
- */
-export async function writeAgentMetadata(
-  agentId: AgentId,
-  metadata: AgentMetadata,
-): Promise<void> {
-  const path = getAgentMetadataPath(agentId)
-  let toWrite: AgentMetadata = metadata
-  if (AGENT_METADATA_PRESERVE_KEYS.some(key => metadata[key] === undefined)) {
-    try {
-      const prev = await readAgentMetadata(agentId)
-      if (prev) {
-        let merged = metadata
-        for (const key of AGENT_METADATA_PRESERVE_KEYS) {
-          if (metadata[key] === undefined && prev[key] !== undefined) {
-            merged = { ...merged, [key]: prev[key] }
-          }
-        }
-        toWrite = merged
-      }
-    } catch {
-      // Best-effort preserve; fall through to write as given.
-    }
-  }
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(toWrite))
-}
-
-export async function readAgentMetadata(
-  agentId: AgentId,
-): Promise<AgentMetadata | null> {
-  const path = getAgentMetadataPath(agentId)
-  try {
-    const raw = await readFile(path, 'utf-8')
-    return JSON.parse(raw) as AgentMetadata
-  } catch (e) {
-    if (isFsInaccessible(e)) return null
-    throw e
-  }
-}
-
-/**
- * Official HXt densable — merge-patch agent sidecar metadata (read-merge-write).
- * Used by observer tombstone / pointer writes so concurrent fields survive.
- */
-export async function patchAgentMetadata(
-  agentId: AgentId,
-  patch: Partial<AgentMetadata> & { agentType?: string },
-): Promise<AgentMetadata> {
-  const prev = await readAgentMetadata(agentId)
-  const next: AgentMetadata = {
-    ...(prev ?? {}),
-    ...patch,
-    agentType: patch.agentType ?? prev?.agentType ?? 'unknown',
-  }
-  await writeAgentMetadata(agentId, next)
-  return next
-}
-
-/**
- * Official main-session observer HXt densable — pointer from the *main*
- * session to its armed observerTaskId (mirrors observed-agent agent meta).
- * Lives next to the session transcript so resume/reattach can re-arm VOu
- * across process restarts without a subagent observed sidecar.
- */
-export type MainSessionObserverPointer = {
-  observerTaskId: string
-  /** Snapshot of permission mode at arm time (zOu re-arm). */
-  armingPermissionMode?: string
-  /** Observer agent type used when arming (KOu type-match). */
-  observerAgentType?: string
 }
 
 /**
@@ -492,292 +268,6 @@ export async function appendObserverRef(input: {
   await getProject().appendEntry(entry)
 }
 
-/**
- * Official IZi densable — scan transcript tail-first for last observer-ref.
- * When agentId is provided, match that observed agent; when omitted, match
- * main-session refs (no agentId on the entry).
- *
- * Also falls back to `${sessionId}.observer.meta.json` when no transcript
- * entry exists (compat with earlier densable pointer files).
- */
-export async function readLatestObserverRef(input?: {
-  sessionId?: string
-  agentId?: string
-}): Promise<{
-  observerTaskId: string
-  observerAgentType?: string
-  armingPermissionMode?: string
-  agentId?: string
-  timestamp?: string
-} | null> {
-  const sessionId = input?.sessionId ?? getSessionId()
-  const path = getTranscriptPathForSession(sessionId)
-  try {
-    const st = await stat(path)
-    if (st.size > MAX_TRANSCRIPT_READ_BYTES) {
-      // Fall through to meta pointer for huge transcripts
-    } else {
-      const raw = await readFile(path, 'utf-8')
-      const lines = raw.split('\n')
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i]
-        if (!line || !line.includes('"observer-ref"')) continue
-        try {
-          const parsed = JSON.parse(line) as {
-            type?: string
-            observerTaskId?: string
-            observerAgentType?: string
-            armingPermissionMode?: string
-            agentId?: string
-            timestamp?: string
-          }
-          if (parsed?.type !== 'observer-ref') continue
-          if (typeof parsed.observerTaskId !== 'string') continue
-          if (input?.agentId) {
-            if (parsed.agentId !== input.agentId) continue
-          } else if (parsed.agentId) {
-            // main-session read skips agent-scoped refs
-            continue
-          }
-          return {
-            observerTaskId: parsed.observerTaskId,
-            ...(typeof parsed.observerAgentType === 'string'
-              ? { observerAgentType: parsed.observerAgentType }
-              : {}),
-            ...(typeof parsed.armingPermissionMode === 'string'
-              ? { armingPermissionMode: parsed.armingPermissionMode }
-              : {}),
-            ...(typeof parsed.agentId === 'string'
-              ? { agentId: parsed.agentId }
-              : {}),
-            ...(typeof parsed.timestamp === 'string'
-              ? { timestamp: parsed.timestamp }
-              : {}),
-          }
-        } catch {
-          // skip bad lines
-        }
-      }
-    }
-  } catch (e) {
-    if (!isFsInaccessible(e)) throw e
-  }
-  // Compat fallback: side-file pointer (pre-observer-ref densable).
-  if (!input?.agentId) {
-    return readMainSessionObserverPointer(sessionId)
-  }
-  return null
-}
-
-/**
- * Official kZi densable — whether an observer agent sidecar transcript still
- * exists on disk (reattachable).
- */
-export async function isObserverSidecarReattachable(
-  observerTaskId: string,
-): Promise<boolean> {
-  try {
-    const path = getAgentTranscriptPath(asAgentId(observerTaskId))
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-export function getMainSessionObserverPointerPath(
-  sessionId: string = getSessionId(),
-): string {
-  // Same projectDir resolution as getTranscriptPath / getTranscriptPathForSession.
-  const projectDir =
-    sessionId === getSessionId()
-      ? (getSessionProjectDir() ?? getProjectDir(getOriginalCwd()))
-      : getProjectDir(getOriginalCwd())
-  return join(projectDir, `${sessionId}.observer.meta.json`)
-}
-
-export async function writeMainSessionObserverPointer(
-  pointer: MainSessionObserverPointer,
-  sessionId?: string,
-): Promise<void> {
-  const path = getMainSessionObserverPointerPath(sessionId)
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(pointer))
-}
-
-export async function readMainSessionObserverPointer(
-  sessionId?: string,
-): Promise<MainSessionObserverPointer | null> {
-  const path = getMainSessionObserverPointerPath(sessionId)
-  try {
-    const raw = await readFile(path, 'utf-8')
-    const parsed = JSON.parse(raw) as Partial<MainSessionObserverPointer>
-    if (
-      typeof parsed.observerTaskId !== 'string' ||
-      parsed.observerTaskId.length === 0
-    ) {
-      return null
-    }
-    return {
-      observerTaskId: parsed.observerTaskId,
-      ...(typeof parsed.armingPermissionMode === 'string'
-        ? { armingPermissionMode: parsed.armingPermissionMode }
-        : {}),
-      ...(typeof parsed.observerAgentType === 'string'
-        ? { observerAgentType: parsed.observerAgentType }
-        : {}),
-    }
-  } catch (e) {
-    if (isFsInaccessible(e)) return null
-    throw e
-  }
-}
-
-/**
- * Merge-patch main-session observer pointer (read-merge-write).
- * Requires observerTaskId either in patch or existing file.
- */
-export async function patchMainSessionObserverPointer(
-  patch: Partial<MainSessionObserverPointer>,
-  sessionId?: string,
-): Promise<MainSessionObserverPointer | null> {
-  const prev = await readMainSessionObserverPointer(sessionId)
-  const observerTaskId = patch.observerTaskId ?? prev?.observerTaskId
-  if (!observerTaskId) return null
-  const next: MainSessionObserverPointer = {
-    observerTaskId,
-    ...(patch.armingPermissionMode !== undefined
-      ? { armingPermissionMode: patch.armingPermissionMode }
-      : prev?.armingPermissionMode !== undefined
-        ? { armingPermissionMode: prev.armingPermissionMode }
-        : {}),
-    ...(patch.observerAgentType !== undefined
-      ? { observerAgentType: patch.observerAgentType }
-      : prev?.observerAgentType !== undefined
-        ? { observerAgentType: prev.observerAgentType }
-        : {}),
-  }
-  await writeMainSessionObserverPointer(next, sessionId)
-  return next
-}
-
-export type RemoteAgentMetadata = {
-  taskId: string
-  remoteTaskType: string
-  /** CCR session ID — used to fetch live status from the Sessions API on resume. */
-  sessionId: string
-  title: string
-  command: string
-  spawnedAt: number
-  toolUseId?: string
-  isLongRunning?: boolean
-  isUltraplan?: boolean
-  isRemoteReview?: boolean
-  /** densable 2.1.218 — apply findings locally when review completes */
-  applyFixesOnComplete?: boolean
-  /** densable 2.1.218 — prose findings note (not a base branch) */
-  reviewInstructions?: string
-  remoteTaskMetadata?: Record<string, unknown>
-}
-
-function getRemoteAgentsDir(): string {
-  // Same sessionProjectDir fallback as getAgentTranscriptPath — the project
-  // dir (containing the .jsonl), not the session dir, so sessionId is joined.
-  const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
-  return join(projectDir, getSessionId(), 'remote-agents')
-}
-
-function getRemoteAgentMetadataPath(taskId: string): string {
-  return join(getRemoteAgentsDir(), `remote-agent-${taskId}.meta.json`)
-}
-
-/**
- * Persist metadata for a remote-agent task so it can be restored on session
- * resume. Per-task sidecar file (sibling dir to subagents/) survives
- * hydrateSessionFromRemote's .jsonl wipe; status is always fetched fresh
- * from CCR on restore — only identity is persisted locally.
- */
-export async function writeRemoteAgentMetadata(
-  taskId: string,
-  metadata: RemoteAgentMetadata,
-): Promise<void> {
-  const path = getRemoteAgentMetadataPath(taskId)
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(metadata))
-}
-
-export async function readRemoteAgentMetadata(
-  taskId: string,
-): Promise<RemoteAgentMetadata | null> {
-  const path = getRemoteAgentMetadataPath(taskId)
-  try {
-    const raw = await readFile(path, 'utf-8')
-    return JSON.parse(raw) as RemoteAgentMetadata
-  } catch (e) {
-    if (isFsInaccessible(e)) return null
-    throw e
-  }
-}
-
-export async function deleteRemoteAgentMetadata(taskId: string): Promise<void> {
-  const path = getRemoteAgentMetadataPath(taskId)
-  try {
-    await unlink(path)
-  } catch (e) {
-    if (isFsInaccessible(e)) return
-    throw e
-  }
-}
-
-/**
- * Scan the remote-agents/ directory for all persisted metadata files.
- * Used by restoreRemoteAgentTasks to reconnect to still-running CCR sessions.
- */
-export async function listRemoteAgentMetadata(): Promise<
-  RemoteAgentMetadata[]
-> {
-  const dir = getRemoteAgentsDir()
-  let entries: Dirent[]
-  try {
-    entries = await readdir(dir, { withFileTypes: true })
-  } catch (e) {
-    if (isFsInaccessible(e)) return []
-    throw e
-  }
-  const results: RemoteAgentMetadata[] = []
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.meta.json')) continue
-    try {
-      const raw = await readFile(join(dir, entry.name), 'utf-8')
-      results.push(JSON.parse(raw) as RemoteAgentMetadata)
-    } catch (e) {
-      // Skip unreadable or corrupt files — a partial write from a crashed
-      // fire-and-forget persist shouldn't take down the whole restore.
-      logForDebugging(
-        `listRemoteAgentMetadata: skipping ${entry.name}: ${String(e)}`,
-      )
-    }
-  }
-  return results
-}
-
-export function sessionIdExists(sessionId: string): boolean {
-  const projectDir = getProjectDir(getOriginalCwd())
-  const sessionFile = join(projectDir, `${sessionId}.jsonl`)
-  const fs = getFsImplementation()
-  try {
-    fs.statSync(sessionFile)
-    return true
-  } catch {
-    return false
-  }
-}
-
-// exported for testing
-export function getNodeEnv(): string {
-  return process.env.NODE_ENV || 'development'
-}
-
 export function isTranscriptPersistenceDisabled(): boolean {
   const allowTestPersistence = isEnvTruthy(
     process.env.TEST_ENABLE_SESSION_PERSISTENCE,
@@ -790,33 +280,9 @@ export function isTranscriptPersistenceDisabled(): boolean {
   )
 }
 
-// exported for testing
-export function getUserType(): string {
-  return process.env.USER_TYPE || 'external'
-}
-
 function getEntrypoint(): string | undefined {
   return process.env.CLAUDE_CODE_ENTRYPOINT
 }
-
-export function isCustomTitleEnabled(): boolean {
-  return true
-}
-
-// Memoized: called 12+ times per turn via hooks.ts createBaseHookInput
-// (PostToolUse path, 5×/turn) + various save* functions. Input is a cwd
-// string; homedir/env/regex are all session-invariant so the result is
-// stable for a given input. Worktree switches just change the key — no
-// cache clear needed.
-// densable 2.1.234 #1 / XLe: honor CLAUDE_CODE_PROJECT_DIR_NAME when
-// CLAUDE_CONFIG_DIR is set. Memo key includes both env vars (densable ify).
-export const getProjectDir = memoize(
-  (projectDir: string): string => {
-    const override = getProjectDirNameOverride()
-    return join(getProjectsDir(), override ?? sanitizePath(projectDir))
-  },
-  (projectDir: string) => `${projectDir}\0${projectDirNameOverrideCacheKey()}`,
-)
 
 let project: Project | null = null
 let cleanupRegistered = false
@@ -901,6 +367,50 @@ export function isLiveBridgeSuppressed(): boolean {
 }
 
 /**
+ * densable leftover eQe?.() — official He/fi/Jre live binding probe.
+ * Optional (`eQe?.()`). Official `e9s`/`TUa` has no JS caller. Do not invent
+ * a product setter.
+ */
+export type ForeignSessionBinding = {
+  foreign: boolean
+  boundSid?: string
+}
+
+let liveForeignBindingProbe:
+  | (() => ForeignSessionBinding | undefined)
+  | undefined
+
+/** leftover host hook matching official optional eQe. */
+export function registerForeignSessionBindingProbe(
+  probe: (() => ForeignSessionBinding | undefined) | undefined,
+): void {
+  liveForeignBindingProbe = probe
+}
+
+/** densable eQe?.() */
+export function getForeignSessionBinding(): ForeignSessionBinding | undefined {
+  return liveForeignBindingProbe?.()
+}
+
+/** densable t9s / He */
+export function isForeignSessionBinding(): boolean {
+  return getForeignSessionBinding()?.foreign === true
+}
+
+/** densable n9s / fi */
+export function getForeignBoundSid(): string | undefined {
+  return getForeignSessionBinding()?.boundSid
+}
+
+/** densable Jre — foreign binding whose live sid is missing or not boundSid. */
+export function isForeignBoundSessionMismatch(sessionId?: string): boolean {
+  const binding = getForeignSessionBinding()
+  if (binding?.foreign !== true) return false
+  if (!sessionId || !binding.boundSid) return true
+  return sessionId !== binding.boundSid
+}
+
+/**
  * densable zCt — live bridge pointer for the current session (id/seq/flags).
  * Returns undefined when RC is not live on this process.
  */
@@ -911,6 +421,8 @@ export function getCurrentSessionBridge():
       declaredDialogKinds?: string[]
       groupingId?: string
       noHistoryBackfill?: boolean
+      ownerAccountUuid?: string
+      ownerOrganizationUuid?: string
     }
   | undefined {
   const project = getProject()
@@ -921,6 +433,8 @@ export function getCurrentSessionBridge():
     declaredDialogKinds: project.currentSessionBridgeDialogKinds,
     groupingId: project.currentSessionBridgeGroupingId,
     noHistoryBackfill: project.currentSessionBridgeNoBackfill,
+    ownerAccountUuid: project.currentSessionBridgeOwnerAccountUuid,
+    ownerOrganizationUuid: project.currentSessionBridgeOwnerOrganizationUuid,
   }
 }
 
@@ -1368,6 +882,20 @@ class Project {
   currentSessionBridgeDialogKinds: string[] | undefined
   currentSessionBridgeGroupingId: string | undefined
   currentSessionBridgeNoBackfill: boolean | undefined
+  /** densable currentSessionBridgeOwnerAccountUuid — OAuth account on last Bkn. */
+  currentSessionBridgeOwnerAccountUuid: string | undefined
+  /** densable currentSessionBridgeOwnerOrganizationUuid. */
+  currentSessionBridgeOwnerOrganizationUuid: string | undefined
+  /** densable currentSessionHistorySuppressed — g4t / Sno. */
+  currentSessionHistorySuppressed: boolean | undefined
+  /** densable knownTaintedSessionIds — QJe / y4t. */
+  knownTaintedSessionIds: Set<UUID> | undefined
+  /** densable currentSessionPrecautionarySuppression — qXs / _4t / Cno. */
+  currentSessionPrecautionarySuppression: Set<string> | undefined
+  /** densable leftover KXs / te — clearResilientPrecautionSids. */
+  clearResilientPrecautionSids: Set<string> | undefined
+  /** densable leftover YXs / ZXs / Me / _e — scanUncertaintyHoldSids. */
+  scanUncertaintyHoldSids: Set<string> | undefined
 
   sessionFile: string | null = null
   /**
@@ -1549,6 +1077,11 @@ class Project {
   setSessionFile(path: string | null): void {
     remapTranscriptWriterPaths(this.sessionFile, path)
     this.sessionFile = path
+  }
+
+  /** densable leftover `wno`. */
+  isTranscriptRelocationInProgress(): boolean {
+    return this.relocationBuffer !== null
   }
 
   /** densable `beginTranscriptRelocation` */
@@ -1746,6 +1279,14 @@ class Project {
         timestamp: new Date().toISOString(),
       })
     }
+    if (this.currentSessionHistorySuppressed) {
+      appendEntryToFile(this.sessionFile, {
+        type: 'history-suppression',
+        sessionId,
+        cause: 'migration',
+        ts: new Date().toISOString(),
+      })
+    }
     // densable: re-append live bridge-session so compaction doesn't drop it.
     // Tombstones (empty id) are not re-appended — clearBridgeSession already
     // wrote the empty marker and cleared cache.
@@ -1763,6 +1304,15 @@ class Project {
           : {}),
         ...(this.currentSessionBridgeNoBackfill
           ? { noHistoryBackfill: true }
+          : {}),
+        ...(this.currentSessionBridgeOwnerAccountUuid
+          ? { ownerAccountUuid: this.currentSessionBridgeOwnerAccountUuid }
+          : {}),
+        ...(this.currentSessionBridgeOwnerOrganizationUuid
+          ? {
+              ownerOrganizationUuid:
+                this.currentSessionBridgeOwnerOrganizationUuid,
+            }
           : {}),
       })
     }
@@ -2178,9 +1728,9 @@ class Project {
       if (entry.type === 'queue-operation') {
         // Queue operations are always appended to the session file
         void this.enqueueWrite(sessionFile, entry)
-      } else {
-        // At this point, entry must be a TranscriptMessage (user/assistant/attachment/system)
-        // All other entry types have been handled above
+      } else if (isTranscriptMessage(entry)) {
+        // TranscriptMessage (user/assistant/attachment/system). Other
+        // entry types were handled above; HistorySuppressionEntry is not.
         const isAgentSidechain =
           entry.isSidechain && entry.agentId !== undefined
         const targetFile = isAgentSidechain
@@ -3713,6 +3263,9 @@ export async function loadTranscriptFromFile(
       bridgeDialogKindsBySession,
       bridgeSessionGroupingIds,
       bridgeNoBackfill,
+      bridgeOwnerAccountUuids,
+      bridgeOwnerOrganizationUuids,
+      historySuppressed,
     } = await loadTranscriptFile(filePath)
 
     if (messages.size === 0) {
@@ -3769,6 +3322,12 @@ export async function loadTranscriptFromFile(
             bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
             bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
             bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+            bridgeOwnerAccountUuid: bridgeOwnerAccountUuids.get(sessionId),
+            bridgeOwnerOrganizationUuid:
+              bridgeOwnerOrganizationUuids.get(sessionId),
+            sessionHistorySuppressed: historySuppressed.has(sessionId)
+              ? true
+              : undefined,
           }
         : {}),
     }
@@ -4052,11 +3611,196 @@ function readFileTailSync(fullPath: string): string {
 }
 /* eslint-enable custom-rules/no-sync-fs */
 
+/** densable leftover `$e` / `MJe` — `join(dirname(transcript), sid, "custom-title.json")`. */
+export function getCustomTitleSidecarPath(
+  transcriptPath: string,
+  sessionId: string,
+): string {
+  return join(dirname(transcriptPath), sessionId, 'custom-title.json')
+}
+
+/** densable leftover `zS()??Du()` — `sessionFile ?? getTranscriptPath()`. */
+export function getActiveSessionTranscriptPath(): string {
+  return getProject().sessionFile ?? getTranscriptPath()
+}
+
+/** densable leftover `_585` `V`. */
+const SIDECAR_KEY_MAX_REL_PATH_SEGMENTS = 6
+
+export type SessionSidecarKey = {
+  namespace: 'sidecar'
+  projectKey: string
+  sessionId: string
+  relPath: string[]
+}
+
+type TitleSidecarStorage = {
+  write: (
+    key: unknown,
+    value: string,
+    opts?: { mode?: number },
+  ) => Promise<{ ok: boolean; error?: { code?: string } }>
+  delete: (key: unknown) => Promise<{ ok: boolean; error?: { code?: string } }>
+}
+
+function coerceTitleSidecarStorage(
+  value: unknown,
+): TitleSidecarStorage | undefined {
+  if (typeof value !== 'object' || value === null) return
+  const rec = value as Record<string, unknown>
+  if (typeof rec.write !== 'function' || typeof rec.delete !== 'function') {
+    return
+  }
+  return value as TitleSidecarStorage
+}
+
+/**
+ * densable leftover `Ua` / `Q8c` sidecar arm.
+ * `g(u)===void 0` → key ok. Full `mn`/`Tn`/`an` not inlined.
+ */
+export function getSidecarKeyValidationError(
+  key: SessionSidecarKey,
+): string | undefined {
+  if (
+    !isValidStoragePathSegment(key.projectKey) ||
+    !isValidStoragePathSegment(key.sessionId)
+  ) {
+    return 'invalid'
+  }
+  if (
+    key.relPath.length === 0 ||
+    !key.relPath.every(isValidStoragePathSegment)
+  ) {
+    return 'invalid'
+  }
+  return undefined
+}
+
+/**
+ * densable leftover `nPb` / `k` / `Tg`.
+ * Walk sidecar abs path up to `y()`=`getProjectsDir()`. `p`=`E`/`jobIdHasJsonlSegment`.
+ * `r`=`C`/`isValidStoragePathSegment`. `l.sidecar(d,f,i)`. `g(u)===void 0` → key.
+ */
+export function parseSessionSidecarKeyFromPath(
+  absPath: string,
+): SessionSidecarKey | undefined {
+  const leaf = basename(absPath)
+  if (jobIdHasJsonlSegment(leaf)) return
+  const root = getProjectsDir()
+  const segments = [leaf]
+  let dir = dirname(absPath)
+  while (
+    dir !== root &&
+    segments.length <= SIDECAR_KEY_MAX_REL_PATH_SEGMENTS + 1
+  ) {
+    const parent = dirname(dir)
+    if (parent === dir) return
+    segments.unshift(basename(dir))
+    dir = parent
+  }
+  if (dir !== root || segments.length < 3) return
+  const [projectKey, sessionId, ...relPath] = segments
+  if (
+    !isValidStoragePathSegment(projectKey) ||
+    !isValidStoragePathSegment(sessionId) ||
+    relPath.length === 0 ||
+    !relPath.every(isValidStoragePathSegment)
+  ) {
+    return
+  }
+  const key: SessionSidecarKey = {
+    namespace: 'sidecar',
+    projectKey,
+    sessionId,
+    relPath,
+  }
+  return getSidecarKeyValidationError(key) === undefined ? key : undefined
+}
+
+/** densable leftover `DKt`. Official `Be()&&n` → `Tg` delete then return. */
+async function deleteCustomTitleSidecar(
+  transcriptPath: string,
+  sessionId: string,
+  storageV5?: unknown,
+): Promise<void> {
+  const sidecar = getCustomTitleSidecarPath(transcriptPath, sessionId)
+  try {
+    const storage = coerceTitleSidecarStorage(storageV5)
+    if (isHoverRestOn() && storage) {
+      const key = parseSessionSidecarKeyFromPath(sidecar)
+      if (key !== undefined) {
+        const result = await storage.delete(key)
+        if (!result.ok) {
+          logForDebugging(
+            `deleteSessionTitleSidecar: ${result.error?.code ?? 'error'} via storage`,
+            { level: 'error' },
+          )
+        }
+        return
+      }
+    }
+    await unlink(sidecar)
+  } catch (err) {
+    if (!isENOENT(err)) {
+      logForDebugging(`deleteSessionTitleSidecar: ${errorMessage(err)}`, {
+        level: 'error',
+      })
+    }
+  }
+}
+
+/**
+ * densable leftover `Reo`.
+ * `Be()` leftover → `isHoverRestOn()`. `Tg(o)` then `write(...,{mode:384})`.
+ * v5 attempt always returns (even on write fail). Else mkdir 448 / write 384.
+ */
+export async function writeCustomTitleSidecar(
+  transcriptPath: string,
+  sessionId: string,
+  title: string,
+  storageV5?: unknown,
+): Promise<void> {
+  if (!sanitizeSessionTitle(title)) {
+    await deleteCustomTitleSidecar(transcriptPath, sessionId, storageV5)
+    return
+  }
+  const sidecar = getCustomTitleSidecarPath(transcriptPath, sessionId)
+  try {
+    const storage = coerceTitleSidecarStorage(storageV5)
+    if (isHoverRestOn() && storage) {
+      const key = parseSessionSidecarKeyFromPath(sidecar)
+      if (key !== undefined) {
+        const result = await storage.write(
+          key,
+          jsonStringify({ customTitle: title }),
+          { mode: 384 },
+        )
+        if (!result.ok) {
+          logForDebugging(
+            `writeSessionTitleSidecar: ${result.error?.code ?? 'error'} via storage`,
+            { level: 'error' },
+          )
+        }
+        return
+      }
+    }
+    await mkdir(dirname(sidecar), { recursive: true, mode: 0o700 })
+    await writeFile(sidecar, jsonStringify({ customTitle: title }), {
+      mode: 0o600,
+    })
+  } catch (err) {
+    logForDebugging(`writeSessionTitleSidecar: ${errorMessage(err)}`, {
+      level: 'error',
+    })
+  }
+}
+
 export async function saveCustomTitle(
   sessionId: UUID,
   customTitle: string,
   fullPath?: string,
-  source: 'user' | 'auto' = 'user',
+  source: 'user' | 'auto' | 'remote' | 'hook' = 'user',
+  storageV5?: unknown,
 ) {
   // Fall back to computed path if fullPath is not provided
   const resolvedPath = fullPath ?? getTranscriptPathForSession(sessionId)
@@ -4065,6 +3809,21 @@ export async function saveCustomTitle(
     customTitle,
     sessionId,
   })
+  // densable YAt: if(!dp()) { let i=e===We()?gu(e):s; await Reo(...) }
+  // Current-session sidecar is always gu(e)=getTranscriptPathForSession,
+  // even when jsonl used n=zS()??Du(). Other sessions use resolvedPath.
+  if (!isPersistenceSuppressed()) {
+    const sidecarPath =
+      sessionId === getSessionId()
+        ? getTranscriptPathForSession(sessionId)
+        : resolvedPath
+    await writeCustomTitleSidecar(
+      sidecarPath,
+      sessionId,
+      customTitle,
+      storageV5,
+    )
+  }
   // Cache for current session only (for immediate visibility).
   // densable: empty string clears (h||void 0 on tail); never leave "" so
   // title chain `??` cannot produce "prefix + blank" in the terminal tab.
@@ -4260,6 +4019,11 @@ export function getCurrentSessionTitle(
   return undefined
 }
 
+/** densable leftover `l1e` — currentSessionAgentName, no sid gate. */
+export function getCurrentSessionAgentName(): string | undefined {
+  return getProject().currentSessionAgentName
+}
+
 /**
  * densable `subscribeSessionTitleChanged` / REPL `BQi` — notify when
  * currentSessionTitle / currentSessionAiTitle cache mutates so terminal
@@ -4377,6 +4141,12 @@ export function restoreSessionMetadata(meta: {
   bridgeDialogKinds?: string[]
   bridgeSessionGroupingId?: string
   bridgeNoHistoryBackfill?: boolean
+  /** densable e.bridgeOwnerAccountUuid → currentSessionBridgeOwnerAccountUuid. */
+  bridgeOwnerAccountUuid?: string
+  /** densable e.bridgeOwnerOrganizationUuid → currentSessionBridgeOwnerOrganizationUuid. */
+  bridgeOwnerOrganizationUuid?: string
+  /** densable e.sessionHistorySuppressed → currentSessionHistorySuppressed + QJe. */
+  sessionHistorySuppressed?: boolean
 }): void {
   const project = getProject()
   // ??= so --name (cacheSessionTitle) wins over the resumed
@@ -4420,6 +4190,12 @@ export function restoreSessionMetadata(meta: {
     project.currentSessionBridgeNoBackfill = meta.bridgeNoHistoryBackfill
       ? true
       : undefined
+    project.currentSessionBridgeOwnerAccountUuid = meta.bridgeOwnerAccountUuid
+    project.currentSessionBridgeOwnerOrganizationUuid =
+      meta.bridgeOwnerOrganizationUuid
+  }
+  if (meta.sessionHistorySuppressed) {
+    markSessionHistorySuppressed(getSessionId() as UUID)
   }
 }
 
@@ -4455,6 +4231,15 @@ export function clearSessionMetadata(
   project.currentSessionBridgeDialogKinds = undefined
   project.currentSessionBridgeGroupingId = undefined
   project.currentSessionBridgeNoBackfill = undefined
+  project.currentSessionBridgeOwnerAccountUuid = undefined
+  project.currentSessionBridgeOwnerOrganizationUuid = undefined
+  // Scoped to the session that was vetoed, not the process: markSessionHistorySuppressed
+  // sets this only when the tainted sid is the live one. The per-sid taint lives on in
+  // knownTaintedSessionIds, so the new session starts clean. Leaving it set makes
+  // reAppendSessionMetadata stamp a durable history-suppression entry into the *new*
+  // session's transcript, which restoreSessionMetadata then re-reads on every resume —
+  // an unrecoverable suppression of a session that was never vetoed.
+  project.currentSessionHistorySuppressed = undefined
   notifySessionTitleChanged()
 }
 
@@ -4470,6 +4255,11 @@ export function saveBridgeSession(
   declaredDialogKinds?: string[],
   sessionGroupingId?: string,
   noHistoryBackfill?: boolean,
+  /** densable FXs `a` — live OAuth account stamped onto the pointer. */
+  owner?: {
+    accountUuid?: string
+    organizationUuid?: string
+  },
 ): void {
   if (!bridgeSessionId) return
   const project = getProject()
@@ -4484,6 +4274,10 @@ export function saveBridgeSession(
         ...(declaredDialogKinds?.length ? { declaredDialogKinds } : {}),
         ...(sessionGroupingId ? { sessionGroupingId } : {}),
         ...(noHistoryBackfill ? { noHistoryBackfill: true } : {}),
+        ...(owner?.accountUuid ? { ownerAccountUuid: owner.accountUuid } : {}),
+        ...(owner?.organizationUuid
+          ? { ownerOrganizationUuid: owner.organizationUuid }
+          : {}),
       })
     } catch (err) {
       logForDebugging(
@@ -4501,9 +4295,363 @@ export function saveBridgeSession(
     project.currentSessionBridgeNoBackfill = noHistoryBackfill
       ? true
       : undefined
+    project.currentSessionBridgeOwnerAccountUuid = owner?.accountUuid
+    project.currentSessionBridgeOwnerOrganizationUuid = owner?.organizationUuid
   }
   logForDebugging(
     `[bridge:session] Bkn session=${sessionId} bridge=${bridgeSessionId} seq=${lastSequenceNum}`,
+  )
+}
+
+/**
+ * densable g4t / JKt / QJe / Sno — permanent history-suppression taint.
+ * Kn calls this on owner-mismatch veto (unless the transcript pair is TORN).
+ */
+export function writeHistorySuppression(
+  sessionId?: UUID,
+  fullPath?: string,
+  cause?: string,
+  vetoedAgainstAccountUuid?: string,
+): void {
+  const sid = sessionId ?? (getSessionId() as UUID | undefined)
+  if (!sid) return
+  const resolvedPath = fullPath ?? getTranscriptPathForSession(sid)
+  // densable g4t: if (!dp()) Nf(t ?? gu(s), JKt(...)) — path from sid,
+  // not gated on project.sessionFile already being materialized.
+  if (!isSessionPersistenceDisabled()) {
+    try {
+      appendEntryToFile(resolvedPath, {
+        type: 'history-suppression',
+        sessionId: sid,
+        cause: cause ?? 'restored_owner_mismatch',
+        ...(vetoedAgainstAccountUuid ? { vetoedAgainstAccountUuid } : {}),
+        ts: new Date().toISOString(),
+      })
+    } catch (err) {
+      logForDebugging(
+        `writeHistorySuppression: transcript append failed: ${errorMessage(err)}`,
+      )
+    }
+  }
+  markSessionHistorySuppressed(sid)
+}
+
+/** densable QJe + HXs — taint sid and set currentSessionHistorySuppressed when live. */
+export function markSessionHistorySuppressed(sessionId?: UUID): void {
+  if (sessionId === undefined) return
+  const project = getProject()
+  project.knownTaintedSessionIds ??= new Set()
+  project.knownTaintedSessionIds.add(sessionId)
+  if (sessionId === getSessionId()) {
+    project.currentSessionHistorySuppressed = true
+  }
+}
+
+/** densable Sno. */
+export function isSessionHistorySuppressed(): boolean {
+  return getProject().currentSessionHistorySuppressed === true
+}
+
+/** densable y4t. */
+export function isKnownTaintedSession(sessionId?: string): boolean {
+  return (
+    sessionId !== undefined &&
+    getProject().knownTaintedSessionIds?.has(sessionId as UUID) === true
+  )
+}
+
+/** densable qXs — add sid to currentSessionPrecautionarySuppression. */
+export function markPrecautionarySessionSuppression(sessionId?: string): void {
+  if (!sessionId) return
+  const project = getProject()
+  project.currentSessionPrecautionarySuppression ??= new Set()
+  project.currentSessionPrecautionarySuppression.add(sessionId)
+}
+
+/** densable leftover KXs / te. */
+export function markResilientPrecautionSid(sessionId?: string): void {
+  if (sessionId === undefined) return
+  const project = getProject()
+  project.clearResilientPrecautionSids ??= new Set()
+  project.clearResilientPrecautionSids.add(sessionId)
+}
+
+/** densable leftover YXs / Me. Init scan applyScanPrecautionHold 调; torn/gone 不调. */
+export function markScanUncertaintyHoldSid(sessionId?: string): void {
+  if (sessionId === undefined) return
+  const project = getProject()
+  project.scanUncertaintyHoldSids ??= new Set()
+  project.scanUncertaintyHoldSids.add(sessionId)
+}
+
+/** densable leftover ZXs / _e. */
+export function clearScanUncertaintyHoldSid(sessionId?: string): void {
+  if (sessionId === undefined) return
+  getProject().scanUncertaintyHoldSids?.delete(sessionId)
+}
+
+/** densable leftover `XXs` / `ui`. `e!==void 0 && hold.has(e)===!0`. */
+export function isScanUncertaintyHeld(sessionId?: string): boolean {
+  return (
+    sessionId !== undefined &&
+    getProject().scanUncertaintyHoldSids?.has(sessionId) === true
+  )
+}
+
+/** densable leftover `kno=1e5`. */
+const HISTORY_SUPPRESSION_SCAN_LINE_LIMIT = 100_000
+
+/** densable leftover `wno`. */
+export function isSessionTranscriptRelocating(): boolean {
+  return getProject().isTranscriptRelocationInProgress()
+}
+
+/** densable leftover `JJe`. Persist `ur` `Je(o,a)`. */
+export function isCanonicalSessionTranscriptBasename(
+  sessionId: string | undefined,
+  sessionFile: string | null,
+): boolean {
+  return (
+    sessionId !== undefined &&
+    sessionFile != null &&
+    basename(sessionFile) === `${sessionId}.jsonl`
+  )
+}
+
+/** densable leftover `Tno`. */
+export function isHistorySuppressionJsonlLine(
+  line: string,
+  opts: { sid?: string } = {},
+): boolean {
+  if (!line.includes('"history-suppression"')) return false
+  try {
+    const n = jsonParse(line) as {
+      type?: string
+      sessionId?: string
+    }
+    return (
+      n.type === 'history-suppression' &&
+      (opts.sid === undefined || n.sessionId === opts.sid)
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable leftover `pto` — FS line scan for `h4t`/`UXs` when `uE` misses.
+ * Missing file yields empty (clean), not throw.
+ */
+async function* iterateTranscriptFileLines(
+  filePath: string,
+): AsyncGenerator<string> {
+  const { createReadStream } = await import('fs')
+  const { createInterface } = await import('readline')
+  try {
+    const stream = createReadStream(filePath, { encoding: 'utf8' })
+    const rl = createInterface({ input: stream, crlfDelay: Infinity })
+    for await (const line of rl) {
+      yield line
+    }
+  } catch (err) {
+    if (isENOENT(err)) return
+    throw err
+  }
+}
+
+/** densable leftover `$ib` / `uE` / `ajb` bind — `{backend,key}`. */
+export type TranscriptPersistenceBind = {
+  backend: unknown
+  key: {
+    namespace: 'transcript'
+    projectKey: string
+    sessionId: string
+    agentId?: string
+    agentRelPath?: string[]
+  }
+}
+
+/**
+ * densable leftover `$ib` / `uE` / `I` @210422xxx.
+ * `s()`=`isHoverRestOn`; `o()`=`getProjectsDir`; `c.transcript`+`f`=`tr`.
+ * Main `{projects}/{projectKey}/{session}.jsonl` only — not subagents (`O`).
+ */
+export function bindMainSessionTranscriptPersistence(
+  filePath: string,
+  storageV5: unknown,
+): TranscriptPersistenceBind | undefined {
+  if (!isHoverRestOn() || storageV5 === undefined) return
+  if (!filePath.endsWith('.jsonl')) return
+  const r = dirname(filePath)
+  if (dirname(r) !== getProjectsDir()) return
+  const n = basename(r)
+  const t = basename(filePath, '.jsonl')
+  if (filePath !== join(getProjectsDir(), n, `${t}.jsonl`)) return
+  if (!isValidStoragePathSegment(n) || !isValidStoragePathSegment(t)) return
+  return {
+    backend: storageV5,
+    key: { namespace: 'transcript', projectKey: n, sessionId: t },
+  }
+}
+
+/**
+ * densable leftover `ajb` / `O` @210422xxx.
+ * Subagent `{projects}/{pk}/{sid}/subagents/.../agent-{id}.jsonl`.
+ */
+export function bindSubagentTranscriptPersistence(
+  filePath: string,
+  storageV5: unknown,
+): TranscriptPersistenceBind | undefined {
+  if (!isHoverRestOn() || storageV5 === undefined) return
+  const root = getProjectsDir()
+  const r = relative(root, filePath)
+  if (r === '' || r === '..' || r.startsWith(`..${sep}`) || isAbsolute(r)) {
+    return
+  }
+  const n = r.split(sep)
+  if (filePath !== join(root, ...n)) return
+  const t = n.at(-1)
+  if (
+    n.length < 4 ||
+    n[2] !== 'subagents' ||
+    t === undefined ||
+    !t.startsWith('agent-') ||
+    !t.endsWith('.jsonl')
+  ) {
+    return
+  }
+  const d = t.slice(6, -6)
+  const u = n.slice(3, -1)
+  const projectKey = n[0]
+  const sessionId = n[1]
+  if (
+    projectKey === undefined ||
+    sessionId === undefined ||
+    !isValidStoragePathSegment(projectKey) ||
+    !isValidStoragePathSegment(sessionId) ||
+    !isValidStoragePathSegment(d) ||
+    (u.length > 0 && !u.every(isValidStoragePathSegment))
+  ) {
+    return
+  }
+  return {
+    backend: storageV5,
+    key: {
+      namespace: 'transcript',
+      projectKey,
+      sessionId,
+      agentId: d,
+      ...(u.length > 0 && { agentRelPath: u }),
+    },
+  }
+}
+
+/**
+ * densable leftover `h4t` @218126573.
+ * `r=Be()&&n!==void 0?uE(e,n):void 0; o=r!==void 0?xeo(r.backend,r.key):pto(e)`.
+ */
+export async function scanFileForHistorySuppression(
+  filePath: string,
+  opts: { sid?: string } = {},
+  storageV5?: unknown,
+): Promise<'found' | 'clean' | 'budget-exhausted'> {
+  const r =
+    isHoverRestOn() && storageV5 !== undefined
+      ? bindMainSessionTranscriptPersistence(filePath, storageV5)
+      : undefined
+  const o =
+    r !== undefined
+      ? (
+          await import('./sessionPersistenceSync.js')
+        ).iterateTranscriptRecordPages(r.backend, r.key)
+      : iterateTranscriptFileLines(filePath)
+  let s = 0
+  for await (const i of o) {
+    if (isHistorySuppressionJsonlLine(i, opts)) return 'found'
+    if (++s >= HISTORY_SUPPRESSION_SCAN_LINE_LIMIT) return 'budget-exhausted'
+  }
+  return 'clean'
+}
+
+/**
+ * densable leftover `UXs` / `ci`.
+ * `zS` = project.sessionFile. `Du` = getTranscriptPath. `vno` = sid jsonl.
+ * Official `Et` not fully locked; leftover uses `isAbortError`.
+ */
+export async function probeActiveSessionHistorySuppression(
+  storageV5?: unknown,
+): Promise<'found' | 'clean' | 'torn' | 'budget-exhausted' | 'read-error'> {
+  const t = getSessionId()
+  const n = getProject().sessionFile
+  const r =
+    Boolean(t) && n !== null && !isCanonicalSessionTranscriptBasename(t, n)
+  try {
+    const o = r ? getTranscriptPathForSession(t) : (n ?? getTranscriptPath())
+    const s = await scanFileForHistorySuppression(
+      o,
+      { sid: t || undefined },
+      storageV5,
+    )
+    return r && s === 'clean' ? 'torn' : s
+  } catch (err) {
+    if (isAbortError(err)) {
+      if (r) return 'torn'
+      return isSessionTranscriptRelocating() ? 'read-error' : 'clean'
+    }
+    return 'read-error'
+  }
+}
+
+/** densable leftover `JXs` / `li`. */
+export function releaseScanPrecautionHold(sessionId?: string): void {
+  if (sessionId === undefined) return
+  const project = getProject()
+  if (!project.scanUncertaintyHoldSids?.has(sessionId)) return
+  project.scanUncertaintyHoldSids.delete(sessionId)
+  project.clearResilientPrecautionSids?.delete(sessionId)
+  project.currentSessionPrecautionarySuppression?.delete(sessionId)
+}
+
+/**
+ * densable leftover init/persist-sync `L,te,!re&&Me`.
+ * persist-sync host leftover `ur` / `backfillPersistedTranscripts`. Official `Qt`/`zr`/`yo` leftover-wired.
+ */
+export function applyScanPrecautionHold(sessionId?: string): void {
+  const already = isPrecautionarySuppressed(sessionId)
+  markPrecautionarySessionSuppression(sessionId)
+  markResilientPrecautionSid(sessionId)
+  if (!already) markScanUncertaintyHoldSid(sessionId)
+}
+
+/** densable _4t. */
+export function isPrecautionarySuppressed(sessionId?: string): boolean {
+  return (
+    sessionId !== undefined &&
+    getProject().currentSessionPrecautionarySuppression?.has(sessionId) === true
+  )
+}
+
+/** densable Cno = _4t(Xg(We())). Xg/B is identity. */
+export function isCurrentSessionPrecautionarySuppressed(): boolean {
+  return isPrecautionarySuppressed(getSessionId())
+}
+
+/**
+ * densable pV / en(sid). Official Ne=()=>en(B(k())).
+ * B = Xg = identity, so B(k()) is k().
+ * Pno = Sno || xno()?.noHistoryBackfill || Ano || Cno.
+ * Ano = liveSuppressionProbe?.()===true.
+ * _4t(e) = currentSessionPrecautionarySuppression.has(e).
+ */
+export function shouldSuppressSessionTitleHistory(sessionId?: string): boolean {
+  return (
+    isForeignBoundSessionMismatch(sessionId) ||
+    isSessionHistorySuppressed() ||
+    getCurrentSessionBridge()?.noHistoryBackfill === true ||
+    isLiveBridgeSuppressed() ||
+    isPrecautionarySuppressed(sessionId) ||
+    isCurrentSessionPrecautionarySuppressed() ||
+    isKnownTaintedSession(sessionId)
   )
 }
 
@@ -4540,6 +4688,8 @@ export function clearBridgeSession(
     project.currentSessionBridgeDialogKinds = undefined
     project.currentSessionBridgeGroupingId = undefined
     project.currentSessionBridgeNoBackfill = undefined
+    project.currentSessionBridgeOwnerAccountUuid = undefined
+    project.currentSessionBridgeOwnerOrganizationUuid = undefined
   }
   logForDebugging(`[bridge:session] EGt cleared session=${n}`)
 }
@@ -4552,6 +4702,8 @@ export function clearBridgeSessionCache(): void {
   project.currentSessionBridgeDialogKinds = undefined
   project.currentSessionBridgeGroupingId = undefined
   project.currentSessionBridgeNoBackfill = undefined
+  project.currentSessionBridgeOwnerAccountUuid = undefined
+  project.currentSessionBridgeOwnerOrganizationUuid = undefined
 }
 
 /**
@@ -4570,7 +4722,7 @@ export async function saveAgentName(
   sessionId: UUID,
   agentName: string,
   fullPath?: string,
-  source: 'user' | 'auto' = 'user',
+  source: 'user' | 'auto' | 'hook' = 'user',
 ) {
   const resolvedPath = fullPath ?? getTranscriptPathForSession(sessionId)
   appendEntryToFile(resolvedPath, { type: 'agent-name', agentName, sessionId })
@@ -4760,6 +4912,9 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       bridgeDialogKindsBySession,
       bridgeSessionGroupingIds,
       bridgeNoBackfill,
+      bridgeOwnerAccountUuids,
+      bridgeOwnerOrganizationUuids,
+      historySuppressed,
     } = await loadTranscriptFile(sessionFile)
 
     if (messages.size === 0) {
@@ -4879,6 +5034,14 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
             bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
             bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
             bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+            bridgeOwnerAccountUuid: bridgeOwnerAccountUuids.get(sessionId),
+            bridgeOwnerOrganizationUuid:
+              bridgeOwnerOrganizationUuids.get(sessionId),
+            sessionHistorySuppressed: sessionId
+              ? historySuppressed.has(sessionId)
+                ? true
+                : undefined
+              : undefined,
           }
         : { bridgeSessionId: undefined }),
     }
@@ -5315,12 +5478,16 @@ function applyBridgeSessionEntry(
     declaredDialogKinds?: string[]
     sessionGroupingId?: string
     noHistoryBackfill?: boolean
+    ownerAccountUuid?: string
+    ownerOrganizationUuid?: string
   },
   bridgeSessionIds: Map<UUID, string>,
   bridgeLastSeqs: Map<UUID, number>,
   bridgeDialogKindsBySession: Map<UUID, string[]>,
   bridgeSessionGroupingIds: Map<UUID, string>,
   bridgeNoBackfill: Map<UUID, boolean>,
+  bridgeOwnerAccountUuids: Map<UUID, string>,
+  bridgeOwnerOrganizationUuids: Map<UUID, string>,
 ): void {
   if (!entry.sessionId) return
   const sid = entry.sessionId
@@ -5345,6 +5512,24 @@ function applyBridgeSessionEntry(
     } else {
       bridgeNoBackfill.delete(sid)
     }
+    // densable FKt: invalid uuid on either owner field drops both maps.
+    const ownerAccountUuid = entry.ownerAccountUuid
+    const ownerOrganizationUuid = entry.ownerOrganizationUuid
+    const ownerInvalid =
+      (ownerAccountUuid !== undefined &&
+        validateUuid(ownerAccountUuid) === null) ||
+      (ownerOrganizationUuid !== undefined &&
+        validateUuid(ownerOrganizationUuid) === null)
+    if (!ownerInvalid && ownerAccountUuid) {
+      bridgeOwnerAccountUuids.set(sid, ownerAccountUuid)
+    } else {
+      bridgeOwnerAccountUuids.delete(sid)
+    }
+    if (!ownerInvalid && ownerOrganizationUuid) {
+      bridgeOwnerOrganizationUuids.set(sid, ownerOrganizationUuid)
+    } else {
+      bridgeOwnerOrganizationUuids.delete(sid)
+    }
   } else {
     // Empty-string tombstone (clearBridgeSession) — drop pointer
     bridgeSessionIds.delete(sid)
@@ -5352,6 +5537,8 @@ function applyBridgeSessionEntry(
     bridgeDialogKindsBySession.delete(sid)
     bridgeSessionGroupingIds.delete(sid)
     bridgeNoBackfill.delete(sid)
+    bridgeOwnerAccountUuids.delete(sid)
+    bridgeOwnerOrganizationUuids.delete(sid)
   }
 }
 
@@ -5399,6 +5586,9 @@ export async function loadTranscriptFile(
   bridgeDialogKindsBySession: Map<UUID, string[]>
   bridgeSessionGroupingIds: Map<UUID, string>
   bridgeNoBackfill: Map<UUID, boolean>
+  bridgeOwnerAccountUuids: Map<UUID, string>
+  bridgeOwnerOrganizationUuids: Map<UUID, string>
+  historySuppressed: Set<UUID>
 }> {
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
@@ -5418,6 +5608,9 @@ export async function loadTranscriptFile(
   const bridgeDialogKindsBySession = new Map<UUID, string[]>()
   const bridgeSessionGroupingIds = new Map<UUID, string>()
   const bridgeNoBackfill = new Map<UUID, boolean>()
+  const bridgeOwnerAccountUuids = new Map<UUID, string>()
+  const bridgeOwnerOrganizationUuids = new Map<UUID, string>()
+  const historySuppressed = new Set<UUID>()
   const fileHistorySnapshots = new Map<UUID, FileHistorySnapshotMessage>()
   const attributionSnapshots = new Map<UUID, AttributionSnapshotMessage>()
   const contentReplacements = new Map<UUID, ContentReplacementRecord[]>()
@@ -5547,7 +5740,11 @@ export async function loadTranscriptFile(
             bridgeDialogKindsBySession,
             bridgeSessionGroupingIds,
             bridgeNoBackfill,
+            bridgeOwnerAccountUuids,
+            bridgeOwnerOrganizationUuids,
           )
+        } else if (entry.type === 'history-suppression' && entry.sessionId) {
+          historySuppressed.add(entry.sessionId)
         }
       }
     }
@@ -5658,7 +5855,11 @@ export async function loadTranscriptFile(
           bridgeDialogKindsBySession,
           bridgeSessionGroupingIds,
           bridgeNoBackfill,
+          bridgeOwnerAccountUuids,
+          bridgeOwnerOrganizationUuids,
         )
+      } else if (entry.type === 'history-suppression' && entry.sessionId) {
+        historySuppressed.add(entry.sessionId)
       }
     }
   } catch {
@@ -5781,6 +5982,9 @@ export async function loadTranscriptFile(
     bridgeDialogKindsBySession,
     bridgeSessionGroupingIds,
     bridgeNoBackfill,
+    bridgeOwnerAccountUuids,
+    bridgeOwnerOrganizationUuids,
+    historySuppressed,
   }
 }
 
@@ -5882,6 +6086,9 @@ export async function getLastSessionLog(
     bridgeDialogKindsBySession,
     bridgeSessionGroupingIds,
     bridgeNoBackfill,
+    bridgeOwnerAccountUuids,
+    bridgeOwnerOrganizationUuids,
+    historySuppressed,
   } = await loadSessionFile(sessionId)
   if (messages.size === 0) return null
   // Prime getSessionMessages cache so recordTranscript (called after REPL
@@ -5936,6 +6143,12 @@ export async function getLastSessionLog(
           bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
           bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
           bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+          bridgeOwnerAccountUuid: bridgeOwnerAccountUuids.get(sessionId),
+          bridgeOwnerOrganizationUuid:
+            bridgeOwnerOrganizationUuids.get(sessionId),
+          sessionHistorySuppressed: historySuppressed.has(sessionId)
+            ? true
+            : undefined,
         }
       : {}),
   }
@@ -6685,6 +6898,9 @@ export async function loadAllLogsFromSessionFile(
     bridgeDialogKindsBySession,
     bridgeSessionGroupingIds,
     bridgeNoBackfill,
+    bridgeOwnerAccountUuids,
+    bridgeOwnerOrganizationUuids,
+    historySuppressed,
   } = await loadTranscriptFile(sessionFile, { keepAllLeaves: true })
 
   if (messages.size === 0) return []
@@ -6770,6 +6986,12 @@ export async function loadAllLogsFromSessionFile(
             bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
             bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
             bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+            bridgeOwnerAccountUuid: bridgeOwnerAccountUuids.get(sessionId),
+            bridgeOwnerOrganizationUuid:
+              bridgeOwnerOrganizationUuids.get(sessionId),
+            sessionHistorySuppressed: historySuppressed.has(sessionId)
+              ? true
+              : undefined,
           }
         : {}),
     })

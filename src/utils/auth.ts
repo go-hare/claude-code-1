@@ -41,8 +41,10 @@ import {
   getOAuthRefreshAccountOnHoldUrl,
   isOAuthRefreshAccountOnHoldError,
   isOAuthRefreshDeadInvalidGrant,
+  isOAuthRefreshTokenDead,
   isOAuthRefreshTokenKnownDead,
   isOAuthRefreshTokenOnHold,
+  isStoredOAuthRefreshTokenCleared,
   markDeadOAuthRefreshToken,
   rememberOAuthAccountOnHold,
 } from './accountOnHold.js'
@@ -70,6 +72,7 @@ import {
   type AccountInfo,
   checkHasTrustDialogAccepted,
   getGlobalConfig,
+  readGlobalConfigFromDisk,
   saveGlobalConfig,
 } from './config.js'
 import { logAntError, logForDebugging } from './debug.js'
@@ -80,6 +83,7 @@ import {
   isRunningOnHomespace,
 } from './envUtils.js'
 import { errorMessage } from './errors.js'
+import { decodeJwtExpiry } from './jwtExpiry.js'
 import { execSyncWithDefaults_DEPRECATED } from './execFileNoThrow.js'
 import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
@@ -537,6 +541,43 @@ export function calculateApiKeyHelperTTL(): number {
   return ttlMs
 }
 
+/** densable bR — JWT near-expiry buffer for official QK. */
+export const API_KEY_HELPER_JWT_REFRESH_BUFFER_MS = 30_000
+
+/**
+ * densable QK — helper cache is still usable for JWT-idle purposes.
+ * na = decodeJwtExpiry (W as cwc). No exp → still valid (TTL/SWR only).
+ */
+export function isApiKeyHelperJwtCacheValid(cache: {
+  value: string
+  timestamp: number
+}): boolean {
+  const exp = decodeJwtExpiry(cache.value)
+  if (exp === null) return true
+  const refreshAt = exp * 1000 - API_KEY_HELPER_JWT_REFRESH_BUFFER_MS
+  if (cache.timestamp >= refreshAt) return true
+  return Date.now() < refreshAt
+}
+
+/**
+ * densable ie() && Hs() && !dr() — first-party helper JWT force-refresh gate.
+ * ie = getAPIProvider()==="firstParty" (X as eCc).
+ * Hs = !uo() && source==="apiKeyHelper" (skip execute). uo = managed OAuth.
+ * dr = ga()?void 0:ANTHROPIC_AUTH_TOKEN. ga = homespace.
+ */
+function shouldForceRefreshApiKeyHelperJwt(): boolean {
+  if (getAPIProvider() !== 'firstParty') return false
+  if (isManagedOAuthContext()) return false
+  const { source } = getAnthropicApiKeyWithSource({
+    skipRetrievingKeyFromApiKeyHelper: true,
+  })
+  if (source !== 'apiKeyHelper') return false
+  const authToken = isRunningOnHomespace()
+    ? undefined
+    : process.env.ANTHROPIC_AUTH_TOKEN
+  return !authToken
+}
+
 // Async API key helper with sync cache for non-blocking reads.
 // Epoch bumps on clearApiKeyHelperCache() — orphaned executions check their
 // captured epoch before touching module state so a settings-change or 401-retry
@@ -560,6 +601,22 @@ export async function getApiKeyFromApiKeyHelper(
   if (!getConfiguredApiKeyHelper()) return null
   const ttl = calculateApiKeyHelperTTL()
   if (_apiKeyHelperCache) {
+    // Official IR: !QK(cache)&&ie()&&Hs()&&!dr() → await Yw(..., true).
+    if (
+      !isApiKeyHelperJwtCacheValid(_apiKeyHelperCache) &&
+      shouldForceRefreshApiKeyHelperJwt()
+    ) {
+      if (_apiKeyHelperInflight) return _apiKeyHelperInflight.promise
+      _apiKeyHelperInflight = {
+        promise: _runAndCache(
+          isNonInteractiveSession,
+          true,
+          _apiKeyHelperEpoch,
+        ),
+        startedAt: Date.now(),
+      }
+      return _apiKeyHelperInflight.promise
+    }
     if (Date.now() - _apiKeyHelperCache.timestamp < ttl) {
       return _apiKeyHelperCache.value
     }
@@ -1851,7 +1908,11 @@ async function handleOAuth401ErrorImpl(
  * Delegates to the sync memoized version for env var / file descriptor tokens
  * (which don't hit the keychain), and only uses async for storage reads.
  */
-export async function getClaudeAIOAuthTokensAsync(): Promise<OAuthTokens | null> {
+export async function getClaudeAIOAuthTokensAsync(
+  // densable `J(e)` — official reads the host credentials handle. Local
+  // storage has no such slot (same as markDeadOAuthRefreshToken).
+  _credentials?: unknown,
+): Promise<OAuthTokens | null> {
   if (isBareMode()) return null
 
   // Env var and FD tokens are sync and don't hit the keychain
@@ -1882,6 +1943,9 @@ let pendingRefreshCheck: Promise<boolean> | null = null
 export function checkAndRefreshOAuthTokenIfNeeded(
   retryCount = 0,
   force = false,
+  // densable `aO({credentials, storageV5})` / fk `Op({credentials:i,storageV5:a})`
+  credentials?: unknown,
+  storageV5?: unknown,
 ): Promise<boolean> {
   // Deduplicate concurrent non-retry, non-force calls
   if (retryCount === 0 && !force) {
@@ -1889,20 +1953,52 @@ export function checkAndRefreshOAuthTokenIfNeeded(
       return pendingRefreshCheck
     }
 
-    const promise = checkAndRefreshOAuthTokenIfNeededImpl(retryCount, force)
+    const promise = checkAndRefreshOAuthTokenIfNeededImpl(
+      retryCount,
+      force,
+      credentials,
+      storageV5,
+    )
     pendingRefreshCheck = promise.finally(() => {
       pendingRefreshCheck = null
     })
     return pendingRefreshCheck
   }
 
-  return checkAndRefreshOAuthTokenIfNeededImpl(retryCount, force)
+  return checkAndRefreshOAuthTokenIfNeededImpl(
+    retryCount,
+    force,
+    credentials,
+    storageV5,
+  )
+}
+
+/**
+ * densable 2.1.246 `dl` / fk `_F(i)` — dead refresh on the credentials handle.
+ * `qR(await J(e))`, else `XR(await ne().readAsync(e))`.
+ */
+export async function isOAuthRefreshDead(
+  credentials?: unknown,
+): Promise<boolean> {
+  const tokens = await getClaudeAIOAuthTokensAsync(credentials)
+  const sync = isOAuthRefreshTokenDead(tokens)
+  if (sync !== undefined) return sync
+  try {
+    return isStoredOAuthRefreshTokenCleared(
+      await getSecureStorage().readAsync(),
+    )
+  } catch {
+    return false
+  }
 }
 
 async function checkAndRefreshOAuthTokenIfNeededImpl(
   retryCount: number,
   force: boolean,
+  credentials?: unknown,
+  storageV5?: unknown,
 ): Promise<boolean> {
+  void storageV5
   const MAX_RETRIES = 5
 
   await invalidateOAuthCacheIfDiskChanged()
@@ -1938,7 +2034,7 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
   // Another process might have refreshed them
   getClaudeAIOAuthTokens.cache?.clear?.()
   clearKeychainCache()
-  const freshTokens = await getClaudeAIOAuthTokensAsync()
+  const freshTokens = await getClaudeAIOAuthTokensAsync(credentials)
   if (
     !freshTokens?.refreshToken ||
     !isOAuthTokenExpired(freshTokens.expiresAt)
@@ -1972,7 +2068,12 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
         })
         // Wait a bit before retrying
         await sleep(1000 + Math.random() * 1000)
-        return checkAndRefreshOAuthTokenIfNeededImpl(retryCount + 1, force)
+        return checkAndRefreshOAuthTokenIfNeededImpl(
+          retryCount + 1,
+          force,
+          credentials,
+          storageV5,
+        )
       }
       logEvent('tengu_oauth_token_refresh_lock_retry_limit_reached', {
         maxRetries: MAX_RETRIES,
@@ -1992,7 +2093,7 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     // Check one more time after acquiring lock
     getClaudeAIOAuthTokens.cache?.clear?.()
     clearKeychainCache()
-    const lockedTokens = await getClaudeAIOAuthTokensAsync()
+    const lockedTokens = await getClaudeAIOAuthTokensAsync(credentials)
     if (
       !lockedTokens?.refreshToken ||
       !isOAuthTokenExpired(lockedTokens.expiresAt)
@@ -2033,7 +2134,7 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
 
     getClaudeAIOAuthTokens.cache?.clear?.()
     clearKeychainCache()
-    const currentTokens = await getClaudeAIOAuthTokensAsync()
+    const currentTokens = await getClaudeAIOAuthTokensAsync(credentials)
     if (currentTokens && !isOAuthTokenExpired(currentTokens.expiresAt)) {
       logEvent('tengu_oauth_token_refresh_race_recovered', {})
       return true
@@ -2154,6 +2255,15 @@ export function is1PApiCustomer(): boolean {
  */
 export function getOauthAccountInfo(): AccountInfo | undefined {
   return isAnthropicAuthEnabled() ? getGlobalConfig().oauthAccount : undefined
+}
+
+/**
+ * densable We / Y — oauthAccount from disk (not getGlobalConfig cache).
+ * Used by initReplBridge Jn and env-handoff owner checks.
+ */
+export function getOauthAccountInfoFromDisk(): AccountInfo | undefined {
+  if (!isAnthropicAuthEnabled()) return undefined
+  return readGlobalConfigFromDisk()?.oauthAccount
 }
 
 /**

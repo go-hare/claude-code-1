@@ -22,8 +22,9 @@ import { getCachedPowerShellPath } from './shell/powershellDetection.js'
 import { DEFAULT_HOOK_SHELL } from './shell/shellProvider.js'
 import { buildPowerShellArgs } from './shell/powershellProvider.js'
 import {
-  loadPluginOptions,
+  loadPluginOptionsNw,
   substituteUserConfigVariables,
+  type PluginOptionValues,
 } from './plugins/pluginOptionsStorage.js'
 import { getPluginDataDir } from './plugins/pluginDirectories.js'
 import {
@@ -45,7 +46,7 @@ import {
 import {
   getTranscriptPathForSession,
   getAgentTranscriptPath,
-} from './sessionStorage.js'
+} from './sessionPaths.js'
 import type { AgentId } from '../types/ids.js'
 import {
   getSettings_DEPRECATED,
@@ -868,6 +869,85 @@ function processHookJSONOutput({
  * (POSIX path conversion, .sh auto-prepend, CLAUDE_CODE_SHELL_PREFIX).
  * See docs/design/ps-shell-selection.md §5.1.
  */
+type StorageV5ScopeKindHost = {
+  scopeKind: (
+    scope: {
+      namespace: 'pluginCache'
+      marketplace: string
+      plugin: string
+      version: string
+    },
+    opts: { resolveLink: boolean },
+  ) => Promise<{
+    ok: boolean
+    value?: { kind?: string; linkResolves?: boolean }
+  }>
+}
+
+function isStorageV5ScopeKindHost(
+  value: unknown,
+): value is StorageV5ScopeKindHost {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'scopeKind' in value &&
+    typeof (value as { scopeKind?: unknown }).scopeKind === 'function'
+  )
+}
+
+function parsePluginCacheIdentity(
+  pluginRoot: string,
+): { marketplace: string; plugin: string; version: string } | null {
+  const parts = pluginRoot.split(/[/\\]/).filter(Boolean)
+  const cacheIndex = parts.findIndex(
+    (part, i) => part === 'cache' && parts[i - 1] === 'plugins',
+  )
+  if (cacheIndex === -1) {
+    return null
+  }
+  const marketplace = parts[cacheIndex + 1]
+  const plugin = parts[cacheIndex + 2]
+  const version = parts[cacheIndex + 3]
+  if (!marketplace || !plugin || !version) {
+    return null
+  }
+  return { marketplace, plugin, version }
+}
+
+/**
+ * densable jIs(storageV5, pluginRoot) @216801547.
+ * Official: Be() && host → scopeKind(pluginCache); else el(t)=pathExists.
+ * Host is createLocalFsBackend when hover-rest pinned.
+ */
+async function pluginDirectoryExists(
+  storageV5: unknown,
+  pluginRoot: string,
+): Promise<boolean> {
+  if (isStorageV5ScopeKindHost(storageV5)) {
+    const parsed = parsePluginCacheIdentity(pluginRoot)
+    if (parsed) {
+      const result = await storageV5.scopeKind(
+        { namespace: 'pluginCache', ...parsed },
+        { resolveLink: true },
+      )
+      if (result.ok) {
+        switch (result.value?.kind) {
+          case 'absent':
+            return false
+          case 'directory':
+          case 'other':
+            return true
+          case 'link':
+            return result.value.linkResolves === true
+          default:
+            return Boolean(result.value)
+        }
+      }
+    }
+  }
+  return pathExists(pluginRoot)
+}
+
 async function execCommandHook(
   hook: HookCommand & { type: 'command' },
   hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion',
@@ -881,6 +961,8 @@ async function execCommandHook(
   skillRoot?: string,
   forceSyncExecution?: boolean,
   requestPrompt?: (request: PromptRequest) => Promise<PromptResponse>,
+  storageV5?: unknown,
+  credentials?: unknown,
 ): Promise<{
   stdout: string
   stderr: string
@@ -888,6 +970,7 @@ async function execCommandHook(
   status: number
   aborted?: boolean
   backgrounded?: boolean
+  spawnFailed?: boolean
 }> {
   // Gated to once-per-session events to keep diag_log volume bounded.
   // started/completed live inside the try/finally so setup-path throws
@@ -954,7 +1037,7 @@ async function execCommandHook(
   let execArgs: string[] | undefined = isExecForm
     ? [...(hook.args as string[])]
     : undefined
-  let pluginOpts: ReturnType<typeof loadPluginOptions> | undefined
+  let pluginOpts: PluginOptionValues | undefined
   // Reject before any substitution so shell form never interpolates secrets.
   if (!isExecForm && USER_CONFIG_REF.test(hook.command)) {
     const from = pluginId ? `plugin ${pluginId}` : 'plugin'
@@ -973,7 +1056,7 @@ async function execCommandHook(
     // bricks UserPromptSubmit/Stop until restart. The pre-check is necessary
     // because exit-2-from-missing-script is indistinguishable from an
     // intentional block after spawn.
-    if (!(await pathExists(pluginRoot))) {
+    if (!(await pluginDirectoryExists(storageV5, pluginRoot))) {
       throw new Error(
         `Plugin directory does not exist: ${pluginRoot}` +
           (pluginId ? ` (${pluginId} — run /plugin to reinstall)` : ''),
@@ -1000,7 +1083,7 @@ async function execCommandHook(
       execArgs = execArgs.map(subPluginVars)
     }
     if (pluginId) {
-      pluginOpts = loadPluginOptions(pluginId)
+      pluginOpts = await loadPluginOptionsNw(pluginId, credentials)
       // Throws if a referenced key is missing — that means the hook uses a key
       // that's either not declared in manifest.userConfig or not yet configured.
       // Caught upstream like any other hook exec failure.
@@ -1539,13 +1622,21 @@ async function execCommandHook(
         aborted: true,
       }
     } else {
+      // densable 2.1.246 kwe: spawn-fail uses the resolved argv (plugin
+      // vars already substituted above), so Y(err) shows the real path
+      // instead of a literal ${CLAUDE_PLUGIN_ROOT}.
       const errorMsg = errorMessage(error)
+      logForDebugging(
+        `Hook command failed to spawn (${hookName}): ${errorMsg}`,
+        { level: 'error' },
+      )
       const errOutput = `Error occurred while executing hook command: ${errorMsg}`
       return {
         stdout: '',
         stderr: errOutput,
         output: errOutput,
         status: 1,
+        spawnFailed: true,
       }
     }
   } finally {
@@ -2274,6 +2365,8 @@ async function* executeHooks({
   suppressPerInvocationTelemetry,
   requestPrompt,
   toolInputSummary,
+  storageV5,
+  credentials,
 }: {
   hookInput: HookInput
   toolUseID: string
@@ -2293,7 +2386,12 @@ async function* executeHooks({
     toolInputSummary?: string | null,
   ) => (request: PromptRequest) => Promise<PromptResponse>
   toolInputSummary?: string | null
+  /** densable PBr persist — `a?.storageV5 ?? m` / `a?.credentials ?? g`. */
+  storageV5?: unknown
+  credentials?: unknown
 }): AsyncGenerator<AggregatedHookResult> {
+  const persistStorageV5 = toolUseContext?.storageV5 ?? storageV5
+  const persistCredentials = toolUseContext?.credentials ?? credentials
   if (shouldDisableAllHooksIncludingManaged()) {
     return
   }
@@ -2780,6 +2878,8 @@ async function* executeHooks({
         skillRoot,
         forceSyncExecution,
         boundRequestPrompt,
+        persistStorageV5,
+        persistCredentials,
       )
       cleanup?.()
       const durationMs = Date.now() - hookStartMs
@@ -3378,12 +3478,17 @@ async function executeHooksOutsideREPL({
   matchQuery,
   signal,
   timeoutMs = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  storageV5,
+  credentials,
 }: {
   getAppState?: () => AppState
   hookInput: HookInput
   matchQuery?: string
   signal?: AbortSignal
   timeoutMs: number
+  /** densable Fd persist — last two kwe args (jIs / Nw). */
+  storageV5?: unknown
+  credentials?: unknown
 }): Promise<HookOutsideReplResult[]> {
   if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
     return []
@@ -3454,7 +3559,7 @@ async function executeHooksOutsideREPL({
 
   // Run all hooks in parallel with individual timeouts
   const hookPromises = matchingHooks.map(
-    async ({ hook, pluginRoot, pluginId }, hookIndex) => {
+    async ({ hook, pluginRoot, pluginId, skillRoot }, hookIndex) => {
       // Handle callback hooks
       if (hook.type === 'callback') {
         const callbackTimeoutMs = hook.timeout ? hook.timeout * 1000 : timeoutMs
@@ -3668,6 +3773,11 @@ async function executeHooksOutsideREPL({
           hookIndex,
           pluginRoot,
           pluginId,
+          skillRoot,
+          undefined,
+          undefined,
+          storageV5,
+          credentials,
         )
 
         // Clear timeout if hook completes
@@ -5418,6 +5528,21 @@ export function hasWorktreeCreateHook(): boolean {
 }
 
 /**
+ * densable gjr / hasWorktreeRemoveHook — WorktreeRemove matchers exist.
+ * cleanupWorktree: hook fail + gjr → keep; !gjr → git fallback.
+ */
+export function hasWorktreeRemoveHook(): boolean {
+  const snapshotHooks = getHooksConfigFromSnapshot()?.['WorktreeRemove']
+  if (snapshotHooks && snapshotHooks.length > 0) return true
+  const registeredHooks = getRegisteredHooks()?.['WorktreeRemove']
+  if (!registeredHooks || registeredHooks.length === 0) return false
+  const managedOnly = shouldAllowManagedHooksOnly()
+  return registeredHooks.some(
+    matcher => !(managedOnly && 'pluginRoot' in matcher),
+  )
+}
+
+/**
  * Execute WorktreeCreate hooks.
  * Returns the worktree path from hook stdout.
  * Throws if hooks fail or produce no output.
@@ -5464,6 +5589,7 @@ export async function executeWorktreeCreateHook(
  */
 export async function executeWorktreeRemoveHook(
   worktreePath: string,
+  persist: { storageV5?: unknown; credentials?: unknown } = {},
 ): Promise<boolean> {
   const snapshotHooks = getHooksConfigFromSnapshot()?.['WorktreeRemove']
   const registeredHooks = getRegisteredHooks()?.['WorktreeRemove']
@@ -5482,14 +5608,20 @@ export async function executeWorktreeRemoveHook(
   const results = await executeHooksOutsideREPL({
     hookInput,
     timeoutMs: TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+    storageV5: persist.storageV5,
+    credentials: persist.credentials,
   })
 
   if (results.length === 0) {
     return false
   }
 
+  // densable ywe — true if any hook succeeded (not merely configured).
+  let succeeded = false
   for (const result of results) {
-    if (!result.succeeded) {
+    if (result.succeeded) {
+      succeeded = true
+    } else {
       logForDebugging(
         `WorktreeRemove hook failed [${result.command}]: ${result.output.trim()}`,
         { level: 'error' },
@@ -5497,7 +5629,7 @@ export async function executeWorktreeRemoveHook(
     }
   }
 
-  return true
+  return succeeded
 }
 
 function getHookDefinitionsForTelemetry(

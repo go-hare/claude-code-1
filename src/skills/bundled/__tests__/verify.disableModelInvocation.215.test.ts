@@ -39,11 +39,12 @@ describe('densable 2.1.215: /verify and /code-review user-only', () => {
     expect(verify?.disableModelInvocation).toBe(true)
   })
 
-  test('code-review command is user slash only; simplify stays model-callable', () => {
+  test('code-review stays userInvocable; 246 omits disableModelInvocation', () => {
     const review = codeReview as Command
     const simp = simplify as Command
     expect(review.userInvocable).toBe(true)
-    expect(review.disableModelInvocation).toBe(true)
+    // densable 2.1.246 ji() omits disableModelInvocation (loader ?? false)
+    expect(review.disableModelInvocation).toBeFalsy()
     expect(simp.userInvocable).toBe(true)
     // densable omits the flag on /simplify — must stay model-callable
     expect(simp.disableModelInvocation).toBeFalsy()

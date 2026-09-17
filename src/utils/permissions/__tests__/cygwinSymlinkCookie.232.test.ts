@@ -8,12 +8,11 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { logMock } from '../../../../tests/mocks/log'
 import { debugMock } from '../../../../tests/mocks/debug'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 ;(globalThis as unknown as { MACRO: { VERSION: string } }).MACRO = {
   VERSION: 'test',

@@ -15,3 +15,6 @@ export const ONE_SHOT_BUILTIN_AGENT_TYPES: ReadonlySet<string> = new Set([
 // densable AVo — omit subagent_type when general-purpose is unavailable.
 export const SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE =
   'subagent_type is required: the general-purpose agent is not available in this session'
+
+/** densable 2.1.246 #54 `He` / `DB` — finalize banner before the turn count. */
+export const MAX_TURNS_PARTIAL_PREFIX = 'NOTE: this agent stopped at its '

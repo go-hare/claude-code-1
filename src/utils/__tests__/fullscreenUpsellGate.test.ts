@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, mock, test } from 'bun:test'
 import * as realConfig from '../config.js'
 import * as realSettings from '../settings/settings.js'
+import { growthbookMock } from '../../../tests/mocks/growthbook.js'
 import {
   restoreSettingsMockWith,
   snapshotModuleExports,
@@ -10,13 +11,7 @@ import {
 const configSnap = snapshotModuleExports(realConfig)
 const settingsSnap = snapshotModuleExports(realSettings)
 
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-  getDynamicConfig_CACHED_MAY_BE_STALE: () => ({}),
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
-  initializeGrowthBook: async () => null,
-  resetGrowthBook: () => {},
-}))
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
 // Re-register snapshots (no overrides) so co-suites keep full surfaces, and
 // afterAll can restore without re-exporting a live-bound mock namespace.

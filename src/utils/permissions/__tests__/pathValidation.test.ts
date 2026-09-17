@@ -1,13 +1,12 @@
 import { describe, expect, mock, test } from 'bun:test'
 import { logMock } from '../../../../tests/mocks/log'
 import { debugMock } from '../../../../tests/mocks/debug'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 // Cut the bootstrap/state dependency chain (mock.module requirement).
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 // MACRO is a build-time define injected by `bun --define` (see
 // scripts/dev.ts → -d flags). Without it, `declare const MACRO` references

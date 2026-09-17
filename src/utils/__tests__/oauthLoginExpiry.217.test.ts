@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import { authMock } from '../../../tests/mocks/auth.js'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 import * as realProviders from 'src/utils/model/providers.js'
 
@@ -17,6 +18,7 @@ mock.module('src/utils/model/providers.js', () => ({
 }))
 
 mock.module('src/utils/auth.js', () => ({
+  ...authMock(),
   isClaudeAISubscriber: () => subscriber,
   getClaudeAIOAuthTokens: () => tokens,
 }))

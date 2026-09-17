@@ -340,8 +340,22 @@ export async function rmHandler(target: string | undefined): Promise<void> {
   if (!result.removed) {
     if (result.keptWorktree) {
       // densable: kept ${n} — worktree ${Kjo(c,u)}
+      const followUp =
+        result.keptReason === 'unverified' ||
+        result.keptReason === 'shared_record'
+          ? `if you don't need its contents, remove the directory, then run 'claude rm ${short}' again.`
+          : result.keptReason === 'identity_changed'
+            ? `retry the delete (the directory's resolution changed while it was being verified), then run 'claude rm ${short}' again if it recurs.`
+            : result.keptReason === 'records_unreadable'
+              ? `retry once sibling records are readable (see ~/.claude/jobs), then run 'claude rm ${short}' again.`
+              : result.keptReason === 'occupied'
+                ? `exit the Claude Code session using that directory (shown above; or 'claude stop <id>' if it is a background session), then run 'claude rm ${short}' again.`
+                : result.keptReason === 'in_use' ||
+                    result.keptReason === 'live_lock'
+                  ? `wait for that session to finish (or stop it), then run 'claude rm ${short}' again.`
+                  : `resolve that (commit/push, or remove the worktree), then run 'claude rm ${short}' again.`
       process.stdout.write(
-        `kept ${short} \u2014 worktree ${formatKeptWorktreeReason(result.keptReason, result.keptErrorSummary)}\n  worktree kept at ${result.keptWorktree}\n  resolve that (commit/push, or remove the worktree), then run 'claude rm ${short}' again\n`,
+        `kept ${short} \u2014 worktree ${formatKeptWorktreeReason(result.keptReason, result.keptErrorSummary)}\n  worktree kept at ${result.keptWorktree}\n  ${followUp}\n`,
       )
       process.exitCode = 1
       return

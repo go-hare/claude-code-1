@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve as pathResolve } from 'node:path'
 import {
   ORCH_DEFAULT_API_URL,
   ORCH_DEFAULT_EXPECTED_SPAWN_SECONDS,
@@ -89,7 +89,7 @@ describe('densable 2.1.224 #1 parseOrchestratorArgs (jFh)', () => {
       'debug',
     ])
     expect(a.apiUrl).toBe('https://x.test')
-    expect(a.hooksDir).toBe('/hooks')
+    expect(a.hooksDir).toBe(pathResolve('/hooks'))
     expect(a.hookConcurrency).toBe(8)
     expect(a.hookTimeoutMs).toBe(30_000)
     expect(a.expectedSpawnSeconds).toBe(90)

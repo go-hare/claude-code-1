@@ -14,6 +14,20 @@ import {
 import { writeCronTasks, readCronTasks } from '../cronTasks.js'
 import { saveDynamicWorkflow } from '../../workflow/saveDynamicWorkflow.js'
 
+/** Windows without Developer Mode refuses symlink creation (EPERM). */
+async function trySymlink(
+  target: string,
+  path: string,
+  type?: 'dir' | 'file',
+): Promise<boolean> {
+  try {
+    await symlink(target, path, type)
+    return true
+  } catch {
+    return false
+  }
+}
+
 describe('assertDirChainReal (densable YNn)', () => {
   const dirs: string[] = []
   afterEach(async () => {
@@ -42,10 +56,18 @@ describe('assertDirChainReal (densable YNn)', () => {
     ).resolves.toBeUndefined()
   })
 
+  test('file named .claude (non-symlink) is refused as non-directory', async () => {
+    const root = await tmp()
+    await writeFile(join(root, '.claude'), 'not-a-dir')
+    await expect(
+      assertDirChainReal(root, join(root, '.claude')),
+    ).rejects.toBeInstanceOf(SymlinkWriteRefusedError)
+  })
+
   test('symlink segment is refused (ELOOP/ENOTDIR)', async () => {
     const root = await tmp()
     const outside = await tmp()
-    await symlink(outside, join(root, '.claude'))
+    if (!(await trySymlink(outside, join(root, '.claude'), 'dir'))) return
     await expect(
       assertDirChainReal(root, join(root, '.claude')),
     ).rejects.toBeInstanceOf(SymlinkWriteRefusedError)
@@ -57,7 +79,7 @@ describe('assertDirChainReal (densable YNn)', () => {
   test('assertProjectClaudeDirWritable refuses escape symlink', async () => {
     const root = await tmp()
     const outside = await tmp()
-    await symlink(outside, join(root, '.claude'))
+    if (!(await trySymlink(outside, join(root, '.claude'), 'dir'))) return
     await expect(assertProjectClaudeDirWritable(root)).rejects.toBeInstanceOf(
       SymlinkWriteRefusedError,
     )
@@ -90,7 +112,7 @@ describe('writeFileAndFlush (densable M6)', () => {
     const target = join(outside, 'secret')
     await writeFile(target, 'secret')
     const link = join(root, 'tasks.json')
-    await symlink(target, link)
+    if (!(await trySymlink(target, link, 'file'))) return
     await expect(
       writeFileAndFlush(link, 'pwned', { encoding: 'utf-8' }),
     ).rejects.toBeInstanceOf(SymlinkWriteRefusedError)
@@ -103,7 +125,7 @@ describe('writeFileAndFlush (densable M6)', () => {
     const realParent = join(outside, 'dir')
     await mkdir(realParent)
     const linkedParent = join(root, 'linked')
-    await symlink(realParent, linkedParent)
+    if (!(await trySymlink(realParent, linkedParent, 'dir'))) return
     const file = join(linkedParent, 'x.json')
     await expect(
       writeFileAndFlush(file, 'x', {
@@ -152,7 +174,7 @@ describe('writeCronTasks (densable nWr)', () => {
   test('refuses when .claude is symlink outside project', async () => {
     const root = await tmp()
     const outside = await tmp()
-    await symlink(outside, join(root, '.claude'))
+    if (!(await trySymlink(outside, join(root, '.claude'), 'dir'))) return
     await expect(
       writeCronTasks(
         [
@@ -204,7 +226,7 @@ describe('saveDynamicWorkflow (densable L1a)', () => {
   test('refuses when .claude is escape symlink', async () => {
     const root = await tmp()
     const outside = await tmp()
-    await symlink(outside, join(root, '.claude'))
+    if (!(await trySymlink(outside, join(root, '.claude'), 'dir'))) return
     await expect(
       saveDynamicWorkflow({
         name: 'x',

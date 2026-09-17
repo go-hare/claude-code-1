@@ -48,7 +48,7 @@ import { logError } from './log.js';
 import { createSystemMessage, createUserMessage } from './messages.js';
 import { getMainLoopModel } from './model/model.js';
 import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './model/providers.js';
-import { isTranscriptMessage } from './sessionStorage.js';
+import { isTranscriptMessage } from './sessionPaths.js';
 import { getInitialSettings } from './settings/settings.js';
 import { sleep } from './sleep.js';
 import { jsonStringify } from './slowOperations.js';

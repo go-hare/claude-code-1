@@ -17,7 +17,6 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { promisify } from 'node:util'
 import {
   existsSync,
   mkdirSync,
@@ -27,6 +26,15 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  clearChildProcessStubs,
+  installChildProcessHarness,
+  setChildProcessStubs,
+} from '../../../../tests/mocks/childProcessHarness.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
 // ── child_process mock ──
 let _execFileSyncImplT: (
@@ -41,82 +49,8 @@ let _execFileImplT: (
   cb: (err: Error | null, stdout: string, stderr: string) => void,
 ) => void = (_cmd, _args, _opts, cb) => cb(null, '', '')
 
-const execFileSyncMockT = (
-  cmd: string,
-  args: string[],
-  opts?: unknown,
-): Buffer => _execFileSyncImplT(cmd, args, opts)
-const execFileMockT = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-  cb: (err: Error | null, stdout: string, stderr: string) => void,
-) => _execFileImplT(cmd, args, opts, cb)
-
-;(execFileMockT as unknown as Record<symbol, unknown>)[
-  promisify.custom as symbol
-] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> =>
-  new Promise((resolve, reject) =>
-    _execFileImplT(cmd, args, opts, (err, stdout, stderr) => {
-      if (err) reject(err)
-      else resolve({ stdout, stderr })
-    }),
-  )
-
-// Spread real child_process + flag-gated stub (see share-gh.test.ts for the
-// promisify.custom rationale).
-let useIssueTemplateCpStubs = false
-const wrappedIssueTemplateExecFile = ((...args: unknown[]) =>
-  useIssueTemplateCpStubs
-    ? (execFileMockT as (...a: unknown[]) => unknown)(...args)
-    : // eslint-disable-next-line @typescript-eslint/no-require-imports
-      (require('node:child_process').execFile as (...a: unknown[]) => unknown)(
-        ...args,
-      )) as unknown as Record<symbol, unknown> & ((...a: unknown[]) => unknown)
-;(wrappedIssueTemplateExecFile as Record<symbol, unknown>)[
-  promisify.custom as symbol
-] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> => {
-  if (useIssueTemplateCpStubs) {
-    return new Promise((resolve, reject) =>
-      _execFileImplT(cmd, args, opts, (err, stdout, stderr) =>
-        err ? reject(err) : resolve({ stdout, stderr }),
-      ),
-    )
-  }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return promisify(real.execFile as never)(cmd, args, opts) as Promise<{
-    stdout: string
-    stderr: string
-  }>
-}
-mock.module('node:child_process', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return {
-    ...real,
-    default: real,
-    execFile: wrappedIssueTemplateExecFile as typeof real.execFile,
-    execFileSync: ((...args: unknown[]) =>
-      useIssueTemplateCpStubs
-        ? (execFileSyncMockT as (...a: unknown[]) => unknown)(...args)
-        : (real.execFileSync as (...a: unknown[]) => unknown)(
-            ...args,
-          )) as typeof real.execFileSync,
-  }
-})
-
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+installChildProcessHarness()
+mock.module('bun:bundle', bunBundleMock)
 
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
@@ -223,11 +157,17 @@ function createTemplateInCwd(files: Record<string, string>): string {
 }
 
 // Activate child_process stubs only for this suite.
+let popFeature: (() => void) | undefined
 beforeAll(() => {
-  useIssueTemplateCpStubs = true
+  popFeature = pushFeatureOverride(() => true)
+  setChildProcessStubs('issue-template', {
+    execFile: (cmd, args, opts, cb) => _execFileImplT(cmd, args, opts, cb),
+    execFileSync: (cmd, args, opts) => _execFileSyncImplT(cmd, args, opts),
+  })
 })
 afterAll(() => {
-  useIssueTemplateCpStubs = false
+  popFeature?.()
+  clearChildProcessStubs('issue-template')
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))

@@ -58,3 +58,25 @@ export function parseSlashCommand(input: string): ParsedSlashCommand | null {
     isMcp,
   }
 }
+
+/**
+ * densable 2.1.246 `fn` / `KSe` — true when `text` starts with `/` and the
+ * first token (or its `[a-zA-Z0-9:_-]+` prefix) matches `hasCommand`.
+ * Title Haiku skips when this is true (`je = KSe(ye, cmd => MN(cmd, commands))`).
+ */
+export function startsWithRegisteredSlashCommand(
+  text: string,
+  hasCommand: (name: string) => boolean,
+): boolean {
+  const trimmed = text.trimStart()
+  if (!trimmed.startsWith('/')) return false
+  const prefix = trimmed.slice(1).match(/^[a-zA-Z0-9:_-]+/)?.[0]
+  const firstToken = trimmed.slice(1).split(/\s/, 1)[0]
+  if (prefix !== undefined && hasCommand(prefix)) return true
+  return (
+    firstToken !== undefined &&
+    firstToken !== prefix &&
+    firstToken.length > 0 &&
+    hasCommand(firstToken)
+  )
+}

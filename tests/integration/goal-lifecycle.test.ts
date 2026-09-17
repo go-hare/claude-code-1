@@ -3,14 +3,21 @@
  * Verifies set → work → complete flow, pause/resume, budget limiting,
  * blocked attempts, prompt generation, and audit rules consistency.
  */
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  beforeAll,
+  afterAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 
 import { logMock } from '../mocks/log.js'
+import { bunBundleMock, pushFeatureOverride } from '../mocks/bunBundle.js'
 mock.module('src/utils/log.ts', logMock)
 
-mock.module('bun:bundle', () => ({
-  feature: () => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 import {
   setGoal,
@@ -240,4 +247,12 @@ describe('Format helpers', () => {
     const elapsed = getActiveElapsedMs(goal)
     expect(elapsed).toBeGreaterThanOrEqual(0)
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

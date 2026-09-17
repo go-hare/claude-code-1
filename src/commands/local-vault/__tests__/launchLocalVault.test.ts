@@ -3,9 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
 mock.module('src/utils/log.ts', logMock)
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 
 // Re-register ../keychain.js to override pollution from store.test.ts (which
 // mocks keychain as always-throwing) and keychain.test.ts (which mocks it with

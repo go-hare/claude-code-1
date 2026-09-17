@@ -193,6 +193,16 @@ export const KEYBINDING_ACTIONS = [
   'selection:extendLineEnd',
 ] as const
 
+const KNOWN_KEYBINDING_ACTIONS = new Set<string>(KEYBINDING_ACTIONS)
+
+/**
+ * densable 2.1.246 I — known action or any `command:` prefix (regex is
+ * validated separately). Unknown names are ignored so defaults keep working.
+ */
+export function isKnownKeybindingAction(action: string): boolean {
+  return KNOWN_KEYBINDING_ACTIONS.has(action) || action.startsWith('command:')
+}
+
 /**
  * Schema for a single keybinding block.
  */

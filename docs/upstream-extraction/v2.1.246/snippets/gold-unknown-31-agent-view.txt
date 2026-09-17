@@ -1,0 +1,37 @@
+# Official 2.1.246 SEA — UNKNOWN #31 agents-view cost reset
+# HAVE 2026-09-15b — narrow: agents view = repin only. Match official.
+
+# costLedger class @205024191
+#   snapshot / restoreSnapshot / scopeTo / belongsTo / claim / reset
+#   registerSaver / runSaver
+# fork sessions share root.costLedger @205042192
+
+# Wrappers @205069380 — DEFINITIONS only
+function zv(e){k.costLedger.registerSaver(e)}
+function $v(e){n().costLedger.runSaver(e,k.costLedger)}
+function Zv(){let e=n();return e.costLedger.belongsTo(e.id)}
+function eb(){return n().costLedger.snapshot()}
+function tb(e){n().costLedger.restoreSnapshot(e)}
+function nb(){let e=n();e.costLedger.claim(e.id)}
+function ob(){let e=n();e.costLedger.scopeTo(e.id)}
+function rb(){let e=n();e.costLedger.reset(e.id),e.requestJournal.replacePromptId(null)}
+function ib(e){let t=n();t.costLedger.restore(e,t.id)}
+
+# costLedger.snapshot / restoreSnapshot: only those defs (no other call)
+# eb()/tb(/ob()/rb() hits elsewhere are name collisions (pacman / TokenSet / …)
+
+# Session-id change @205059364
+#   t.costLedger.scopeTo(a)  — session switch, not agents view
+
+# Jb/Kb/Qb/Sb @205072791+ are launchOptions / telemetry — NOT costLedger aliases.
+
+# Agents-view host @230998798 — ONLY repin
+Mc=H((J=!1,qe="?")=>{
+  if(!J&&!wB("autoScrollEnabled",!0).value)return
+  pt?.scrollToBottom(),Yp(),Gt.current=!1
+})
+x(()=>{Mc(!0,"agent-view-change")},[kt])
+# kt = viewingAgentTaskId (Kze({viewingAgentTaskId:kt,...}) @231000705)
+
+# Local already matches: viewingAgentTaskId change → repinScroll only.
+# HAVE (narrow). Changelog claims cost fix; SEA has none. Do not invent eb/tb.

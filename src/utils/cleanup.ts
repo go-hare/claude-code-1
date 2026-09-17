@@ -1,6 +1,17 @@
+import type { Dirent } from 'fs'
 import * as fs from 'fs/promises'
 import { homedir } from 'os'
-import { join } from 'path'
+import { basename, join } from 'path'
+import {
+  type BgJobState,
+  getJobsBaseDir,
+  isBhSettled,
+} from '../daemon/jobState.js'
+import { errorMessage, isENOENT } from './errors.js'
+import {
+  isProcessRunning,
+  processLstartMatches,
+} from './genericProcessUtils.js'
 import { logEvent } from '../services/analytics/index.js'
 import { CACHE_PATHS } from './cachePaths.js'
 import { logForDebugging } from './debug.js'
@@ -11,14 +22,17 @@ import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
 import { cleanupOldVersions } from './nativeInstaller/index.js'
 import { cleanupOldPastes } from './pasteStore.js'
-import { getProjectsDir } from './sessionStorage.js'
+import { getProjectsDir } from './sessionPaths.js'
 import { getSettingsWithAllErrors } from './settings/allErrors.js'
 import {
   getSettings_DEPRECATED,
   rawSettingsContainsKey,
 } from './settings/settings.js'
 import { TOOL_RESULTS_SUBDIR } from './toolResultStorage.js'
-import { cleanupStaleAgentWorktrees } from './worktree.js'
+import {
+  cleanupStaleAgentWorktrees,
+  reapJobWorktreeIfSafe,
+} from './worktree.js'
 
 const DEFAULT_CLEANUP_PERIOD_DAYS = 30
 
@@ -56,11 +70,537 @@ function getCutoffDate(): Date {
   return new Date(Date.now() - cleanupPeriodMs)
 }
 
+/**
+ * densable D — retention cutoff. `cleanupPeriodDays===0` → null (no sweep).
+ */
+function getRetentionCutoff(maxAgeDays?: number): Date | null {
+  const settings = getSettings_DEPRECATED() || {}
+  let days = settings.cleanupPeriodDays ?? DEFAULT_CLEANUP_PERIOD_DAYS
+  if (days === 0) return null
+  if (maxAgeDays !== undefined && maxAgeDays < days) {
+    days = maxAgeDays
+  }
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+}
+
+/** densable `ie("policySettings")?.cleanupPeriodDays!==void 0` */
+function hasExplicitCleanupPeriodDays(): boolean {
+  return getSettings_DEPRECATED()?.cleanupPeriodDays !== undefined
+}
+
+/** densable te(f) — job is settled/eligible for folder removal + Slu. */
+function isJobSweepSettled(state: BgJobState | null): boolean {
+  return state !== null && isBhSettled(state)
+}
+
+/**
+ * densable rt(jobDir) — state.json. ENOENT → null; other IO throws so skipIf
+ * keeps the folder (official `[cleanup] jobs/${gt}: job state read threw`).
+ */
+async function readJobStateForRetentionSweep(
+  jobDir: string,
+): Promise<BgJobState | null> {
+  try {
+    const raw = await fs.readFile(join(jobDir, 'state.json'), 'utf-8')
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return null
+    return parsed as BgJobState
+  } catch (error) {
+    if (isENOENT(error)) return null
+    throw error
+  }
+}
+
+/** densable jobs-module `I` — pins.json / roster.json file cap. */
+const PINS_JSON_MAX_BYTES = 8_388_608
+
+/** densable T.jobPins() — storageV5 key, not the disk path. */
+const JOB_PINS_STORAGE_KEY = { namespace: 'jobsRoot', file: 'pins' } as const
+
+/** densable Dt() pins screen — per-path ok/refused. */
+const pinsScreens = new Map<string, string>()
+
+type StorageV5PinsHost = {
+  statMeta: (
+    key: unknown,
+  ) => Promise<
+    | { ok: true; value: { size: number } }
+    | { ok: false; error: { code: string } }
+  >
+  readText: (
+    reqs: Array<{ key: unknown; offset: number; length: number }>,
+  ) => Promise<
+    | {
+        ok: true
+        value: {
+          items: Array<{
+            found: boolean
+            totalBytes: number
+            value?: string
+          }>
+        }
+      }
+    | { ok: false }
+  >
+}
+
+/**
+ * densable Ce / parse pins.json body.
+ */
+function parsePinnedJobShorts(raw: string | undefined): Set<string> {
+  if (raw === undefined || raw.length > PINS_JSON_MAX_BYTES) return new Set()
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((s): s is string => typeof s === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+/** densable D() — pins.json under config home; also ot screenKey. */
+function pinsJsonPath(): string {
+  return join(getClaudeConfigHomeDir(), 'pins.json')
+}
+
+/**
+ * densable te — heal a non-file (or oversized when evenRegular) pins.json.
+ */
+async function healPinsJson(opts?: {
+  evenRegular?: boolean
+}): Promise<boolean> {
+  const path = pinsJsonPath()
+  const st = await fs.stat(path).catch(() => undefined)
+  if (
+    st === undefined ||
+    (st.isFile() && !(opts?.evenRegular && st.size > PINS_JSON_MAX_BYTES))
+  ) {
+    return false
+  }
+  await fs.rm(path, { recursive: true, force: true }).catch(() => {})
+  return true
+}
+
+/**
+ * densable ot @207753120 — storageV5 read of T.jobPins() with cap + screens.
+ */
+async function readPinsViaStorageV5(
+  storage: StorageV5PinsHost,
+): Promise<string | null> {
+  const key = JOB_PINS_STORAGE_KEY
+  const screenKey = pinsJsonPath()
+  if (pinsScreens.get(screenKey) !== 'ok') {
+    const meta = await storage.statMeta(key)
+    if (!meta.ok) {
+      if (meta.error.code !== 'NotFound') {
+        pinsScreens.set(screenKey, 'refused')
+        await healPinsJson()
+      }
+      return null
+    }
+    if (meta.value.size > PINS_JSON_MAX_BYTES) {
+      pinsScreens.set(screenKey, 'refused')
+      return null
+    }
+    pinsScreens.set(screenKey, 'ok')
+  }
+  const read = await storage.readText([
+    { key, offset: 0, length: PINS_JSON_MAX_BYTES + 1 },
+  ])
+  if (!read.ok) {
+    pinsScreens.delete(screenKey)
+    await healPinsJson()
+    return null
+  }
+  const item = read.value.items[0]
+  if (!item?.found) return null
+  if (item.totalBytes > PINS_JSON_MAX_BYTES) {
+    pinsScreens.set(screenKey, 'refused')
+    return null
+  }
+  return item.value ?? null
+}
+
+/** densable er(e) @207762924 */
+async function readPinnedJobShortsFromStorageV5(
+  storageV5: unknown,
+): Promise<Set<string>> {
+  const raw = await readPinsViaStorageV5(storageV5 as StorageV5PinsHost)
+  return parsePinnedJobShorts(raw ?? undefined)
+}
+
+/**
+ * densable Fe / cleanup `nt` @207762666.
+ * `if (e) return er(e)`; else disk pins.json.
+ */
+async function readPinnedJobShorts(storageV5?: unknown): Promise<Set<string>> {
+  if (storageV5) return readPinnedJobShortsFromStorageV5(storageV5)
+  const pinsPath = pinsJsonPath()
+  try {
+    const st = await fs.stat(pinsPath)
+    if (!st.isFile() || st.size > PINS_JSON_MAX_BYTES) {
+      if (!st.isFile()) {
+        await fs.rm(pinsPath, { recursive: true, force: true }).catch(() => {})
+      }
+      return new Set()
+    }
+    return parsePinnedJobShorts(await fs.readFile(pinsPath, 'utf-8'))
+  } catch (error) {
+    if (isENOENT(error)) {
+      await fs.writeFile(pinsPath, '[]').catch((writeError: unknown) => {
+        if (!isENOENT(writeError)) {
+          logForDebugging(
+            `[cleanup] pins.json create failed: ${errorMessage(writeError)}`,
+            { level: 'error' },
+          )
+        }
+      })
+      return new Set()
+    }
+    return new Set()
+  }
+}
+
+/**
+ * densable zr roster exclude — live `daemon/roster.json` worker shorts.
+ * Official `Ne(pid, procStart?)` = kill0 + start-token match.
+ */
+async function liveRosterJobShorts(): Promise<{
+  exclude: Set<string>
+  rosterParsed: boolean
+  liveWorkers: boolean
+}> {
+  const exclude = new Set<string>()
+  let rosterParsed = false
+  let liveWorkers = false
+  const rosterPath = join(getClaudeConfigHomeDir(), 'daemon', 'roster.json')
+  try {
+    const st = await fs.lstat(rosterPath)
+    if (!st.isFile() || st.size > PINS_JSON_MAX_BYTES) {
+      return { exclude, rosterParsed, liveWorkers }
+    }
+    const parsed: unknown = JSON.parse(await fs.readFile(rosterPath, 'utf-8'))
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      !('workers' in parsed)
+    ) {
+      return { exclude, rosterParsed, liveWorkers }
+    }
+    const workers = (parsed as { workers?: unknown }).workers
+    if (workers === null || typeof workers !== 'object') {
+      return { exclude, rosterParsed, liveWorkers }
+    }
+    rosterParsed = true
+    for (const [short, entry] of Object.entries(
+      workers as Record<string, unknown>,
+    )) {
+      if (entry === null || typeof entry !== 'object' || !('pid' in entry)) {
+        continue
+      }
+      const pid = (entry as { pid?: unknown }).pid
+      const procStart =
+        'procStart' in entry &&
+        typeof (entry as { procStart?: unknown }).procStart === 'string'
+          ? (entry as { procStart: string }).procStart
+          : undefined
+      if (typeof pid === 'number' && pid > 1 && isProcessRunning(pid)) {
+        if (await processLstartMatches(pid, procStart)) {
+          exclude.add(short)
+          liveWorkers = true
+        }
+      }
+    }
+  } catch {
+    // missing/unreadable roster — official catch {}
+  }
+  return { exclude, rosterParsed, liveWorkers }
+}
+
+/**
+ * densable O @221576704 — unlink if mtime < cutoff. ENOENT → false.
+ * Fresh files increment filesRetainedFresh. Unlink throw after mtime<a
+ * increments filesPastCutoff.
+ */
+async function unlinkIfOlderThan(
+  filePath: string,
+  cutoff: Date,
+  fsImpl: FsOperations,
+  result: CleanupResult,
+  pastCutoff: Date = cutoff,
+): Promise<boolean> {
+  let stats: { mtime: Date }
+  try {
+    stats = await fsImpl.stat(filePath)
+  } catch (error) {
+    if (isENOENT(error)) return false
+    throw error
+  }
+  if (!(stats.mtime < cutoff)) {
+    result.filesRetainedFresh++
+    return false
+  }
+  try {
+    await fsImpl.unlink(filePath)
+  } catch (error) {
+    if (isENOENT(error)) return false
+    if (stats.mtime < pastCutoff) result.filesPastCutoff++
+    throw error
+  }
+  return true
+}
+
+/**
+ * densable k(e, t, r=!0) @221582127 — age files by extension, optional rmdir.
+ */
+async function cleanupAgedFilesInDirectory(
+  dirPath: string,
+  extension: string,
+  removeEmptyDir = true,
+): Promise<CleanupResult> {
+  const cutoff = getRetentionCutoff()
+  const result = emptyCleanupResult()
+  if (cutoff === null) return result
+  const fsImpl = getFsImplementation()
+  let dirents
+  try {
+    dirents = await fsImpl.readdir(dirPath)
+  } catch {
+    return result
+  }
+  for (const dirent of dirents) {
+    if (!dirent.isFile() || !dirent.name.endsWith(extension)) continue
+    try {
+      if (
+        await unlinkIfOlderThan(
+          join(dirPath, dirent.name),
+          cutoff,
+          fsImpl,
+          result,
+        )
+      ) {
+        result.messages++
+      }
+    } catch {
+      result.errors++
+    }
+  }
+  if (removeEmptyDir) {
+    await tryRmdir(dirPath, fsImpl)
+  }
+  return result
+}
+
+/**
+ * densable zr host-managed orphans: file in daemon/host-managed whose
+ * jobs/<name> is gone → O() if older than cutoff.
+ */
+async function cleanupHostManagedOrphans(): Promise<CleanupResult> {
+  const result = emptyCleanupResult()
+  const cutoff = getRetentionCutoff()
+  if (cutoff === null) return result
+  const home = getClaudeConfigHomeDir()
+  const hostManaged = join(home, 'daemon', 'host-managed')
+  const jobsDir = getJobsBaseDir()
+  const fsImpl = getFsImplementation()
+  let entries: Dirent[]
+  try {
+    entries = await fs.readdir(hostManaged, { withFileTypes: true })
+  } catch (error) {
+    if (!isENOENT(error)) result.errors++
+    return result
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    try {
+      await fs.lstat(join(jobsDir, entry.name))
+    } catch (error) {
+      if (!isENOENT(error)) {
+        result.errors++
+        continue
+      }
+      try {
+        if (
+          await unlinkIfOlderThan(
+            join(hostManaged, entry.name),
+            cutoff,
+            fsImpl,
+            result,
+          )
+        ) {
+          result.messages++
+        }
+      } catch (unlinkError) {
+        if (!isENOENT(unlinkError)) result.errors++
+      }
+    }
+  }
+  return result
+}
+
+/**
+ * densable zr @221588623.
+ * k(jobs/settled) + dispatch/rejected + dispatch(!rmdir) + daemon/auth +
+ * host-managed orphans; then `if(!n) nt(e)` pins exclude + roster; then
+ * b("jobs") skipIf → Slu; then daemon.log / roster aging.
+ * `e` is parent storageV5: Fe `if(e) return er(e)`.
+ */
+export async function cleanupJobsRetentionSweep(
+  storageV5?: unknown,
+): Promise<CleanupResult> {
+  const home = getClaudeConfigHomeDir()
+  let result = await cleanupAgedFilesInDirectory(
+    join(home, 'jobs', 'settled'),
+    '.json',
+  )
+  result = addCleanupResults(
+    result,
+    await cleanupAgedFilesInDirectory(
+      join(home, 'daemon', 'dispatch', 'rejected'),
+      '.json',
+    ),
+  )
+  result = addCleanupResults(
+    result,
+    await cleanupAgedFilesInDirectory(
+      join(home, 'daemon', 'dispatch'),
+      '.json',
+      false,
+    ),
+  )
+  result = addCleanupResults(
+    result,
+    await cleanupAgedFilesInDirectory(join(home, 'daemon', 'auth'), '.json'),
+  )
+  result = addCleanupResults(result, await cleanupHostManagedOrphans())
+
+  const cutoff = getRetentionCutoff()
+  const explicitPeriod = hasExplicitCleanupPeriodDays()
+  const exclude = new Set<string>()
+  if (!explicitPeriod) {
+    for (const short of await readPinnedJobShorts(storageV5)) {
+      exclude.add(short)
+    }
+  }
+  const roster = await liveRosterJobShorts()
+  for (const short of roster.exclude) {
+    exclude.add(short)
+  }
+
+  if (cutoff !== null) {
+    const jobsDir = getJobsBaseDir()
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(jobsDir, { withFileTypes: true })
+    } catch {
+      entries = []
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || exclude.has(entry.name)) continue
+      const jobDir = join(jobsDir, entry.name)
+      try {
+        if ((await fs.stat(jobDir)).mtime >= cutoff) continue
+        let state: BgJobState | null
+        try {
+          state = await readJobStateForRetentionSweep(jobDir)
+        } catch (error) {
+          logForDebugging(
+            `[cleanup] jobs/${basename(jobDir)}: job state read threw — keeping the folder (${errorMessage(error)})`,
+            { level: 'error' },
+          )
+          throw error
+        }
+        if (!explicitPeriod && (state === null || !isJobSweepSettled(state))) {
+          continue
+        }
+        if (state?.worktreePath && isJobSweepSettled(state) && cutoff) {
+          await reapJobWorktreeIfSafe({
+            worktreePath: state.worktreePath,
+            worktreeBranch: state.worktreeBranch,
+            originCwd: state.originCwd,
+            hookBased: state.worktreeHookBased,
+            cutoff,
+          }).catch(() => {})
+        }
+        await fs.rm(jobDir, { recursive: true, force: true })
+        result.messages++
+      } catch {
+        result.errors++
+      }
+    }
+
+    const fsImpl = getFsImplementation()
+    for (const logName of ['daemon.log', 'daemon.log.1']) {
+      try {
+        if (
+          await unlinkIfOlderThan(join(home, logName), cutoff, fsImpl, result)
+        ) {
+          result.messages++
+        }
+      } catch (error) {
+        if (!isENOENT(error)) result.errors++
+      }
+    }
+    const rosterPath = join(home, 'daemon', 'roster.json')
+    try {
+      if (
+        (await fs.lstat(rosterPath)).mtime < cutoff &&
+        !roster.liveWorkers &&
+        (roster.rosterParsed || explicitPeriod)
+      ) {
+        await fs.unlink(rosterPath)
+        result.messages++
+      }
+    } catch (error) {
+      if (!isENOENT(error)) result.errors++
+    }
+    try {
+      for (const entry of await fs.readdir(join(home, 'daemon'), {
+        withFileTypes: true,
+      })) {
+        if (!entry.isFile() || !entry.name.startsWith('roster.json.corrupt.')) {
+          continue
+        }
+        try {
+          if (
+            await unlinkIfOlderThan(
+              join(home, 'daemon', entry.name),
+              cutoff,
+              fsImpl,
+              result,
+            )
+          ) {
+            result.messages++
+          }
+        } catch {
+          result.errors++
+        }
+      }
+    } catch {
+      // official readdir(daemon).catch(()=>[])
+    }
+  }
+  return result
+}
+
 export type CleanupResult = {
   messages: number
   errors: number
+  filesRetainedFresh: number
+  filesPastCutoff: number
 }
 
+/** densable P() @221575518 */
+function emptyCleanupResult(): CleanupResult {
+  return {
+    messages: 0,
+    errors: 0,
+    filesRetainedFresh: 0,
+    filesPastCutoff: 0,
+  }
+}
+
+/** densable C(e,t) @221575558 */
 export function addCleanupResults(
   a: CleanupResult,
   b: CleanupResult,
@@ -68,6 +608,8 @@ export function addCleanupResults(
   return {
     messages: a.messages + b.messages,
     errors: a.errors + b.errors,
+    filesRetainedFresh: a.filesRetainedFresh + b.filesRetainedFresh,
+    filesPastCutoff: a.filesPastCutoff + b.filesPastCutoff,
   }
 }
 
@@ -83,7 +625,7 @@ async function cleanupOldFilesInDirectory(
   cutoffDate: Date,
   isMessagePath: boolean,
 ): Promise<CleanupResult> {
-  const result: CleanupResult = { messages: 0, errors: 0 }
+  const result = emptyCleanupResult()
 
   try {
     const files = await getFsImplementation().readdir(dirPath)
@@ -180,7 +722,7 @@ async function tryRmdir(dirPath: string, fsImpl: FsOperations): Promise<void> {
 
 export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
-  const result: CleanupResult = { messages: 0, errors: 0 }
+  const result = emptyCleanupResult()
   const projectsDir = getProjectsDir()
   const fsImpl = getFsImplementation()
 
@@ -306,7 +848,7 @@ async function cleanupSingleDirectory(
   removeEmptyDir: boolean = true,
 ): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
-  const result: CleanupResult = { messages: 0, errors: 0 }
+  const result = emptyCleanupResult()
   const fsImpl = getFsImplementation()
 
   let dirents
@@ -341,7 +883,7 @@ export function cleanupOldPlanFiles(): Promise<CleanupResult> {
 
 export async function cleanupOldFileHistoryBackups(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
-  const result: CleanupResult = { messages: 0, errors: 0 }
+  const result = emptyCleanupResult()
   const fsImpl = getFsImplementation()
 
   try {
@@ -386,7 +928,7 @@ export async function cleanupOldFileHistoryBackups(): Promise<CleanupResult> {
 
 export async function cleanupOldSessionEnvDirs(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
-  const result: CleanupResult = { messages: 0, errors: 0 }
+  const result = emptyCleanupResult()
   const fsImpl = getFsImplementation()
 
   try {
@@ -432,7 +974,7 @@ export async function cleanupOldSessionEnvDirs(): Promise<CleanupResult> {
  */
 export async function cleanupOldDebugLogs(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
-  const result: CleanupResult = { messages: 0, errors: 0 }
+  const result = emptyCleanupResult()
   const fsImpl = getFsImplementation()
   const debugDir = join(getClaudeConfigHomeDir(), 'debug')
 
@@ -633,6 +1175,10 @@ export async function cleanupOldMessageFilesInBackground(): Promise<void> {
   if (removedWorktrees > 0) {
     logEvent('tengu_worktree_cleanup', { removed: removedWorktrees })
   }
+  // densable zr b("jobs") skipIf → Slu. Not cleanupStaleAgentWorktrees.
+  // Fe(e): parent storageV5 from pin when hover-rest handed one.
+  const { getPinnedStorageV5 } = await import('./storageV5/index.js')
+  await cleanupJobsRetentionSweep(getPinnedStorageV5())
   if (process.env.USER_TYPE === 'ant') {
     await cleanupNpmCacheForAnthropicPackages()
   }

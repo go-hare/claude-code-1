@@ -742,6 +742,23 @@ export type Attachment =
       text: string
     }
   | {
+      /**
+       * densable batching_reminder — mid-conv toasty-thimble tip inserted
+       * after a tool_result user (mXn). Model-facing; C latch → ephemeral.
+       */
+      type: 'batching_reminder'
+      text: string
+    }
+  | {
+      /**
+       * densable batching_reminder_sent — transcript marker only
+       * (j9e → []). Not sent as the API reminder body.
+       */
+      type: 'batching_reminder_sent'
+      text: string
+      model: string
+    }
+  | {
       type: 'budget_usd'
       used: number
       total: number

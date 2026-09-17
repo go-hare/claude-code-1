@@ -82,6 +82,8 @@ import {
   type FleetImagePaste,
   isFleetImagePasteKey,
   materializeFleetPastedImages,
+  ALREADY_IN_LIST_MESSAGE,
+  isSessionAlreadyInJobList,
   planFleetReorder,
   shouldFleetViewReorder,
   FLEET_CLIPBOARD_IMAGE_NOT_FOUND,
@@ -1616,6 +1618,11 @@ function AgentViewApp({
 
   const resumePastAsBackground = useCallback(
     async (sessionId: string, title: string) => {
+      const jobs = await listAllJobs();
+      if (isSessionAlreadyInJobList(sessionId, jobs)) {
+        setError(ALREADY_IN_LIST_MESSAGE);
+        return;
+      }
       setResumePicker(null);
       dispatchingRef.current = true;
       try {
@@ -3332,6 +3339,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
   // Official flow: try attach → if ENOJOB → respawn → retry attach
   let result = await attachToSession(short, { alreadyInAlt: true });
   let respawned = false;
+  let waitedForBoot = false;
 
   if (result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
     // Session not in daemon — respawn it (official: S8_ / densable Xyr)
@@ -3340,124 +3348,143 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
     if (job) {
       const resumeId = job.state.resumeSessionId ?? job.state.sessionId;
       const attachShort = job.short || short;
-      // densable Xyr: hLp / D9e / gLp before IAe (Zxe after hasMessages)
-      const { xyrPreflightBeforeRespawn, findResumeSessionConflict } = await import('../daemon/xyrRespawn.js');
-      const preflightErr = await xyrPreflightBeforeRespawn({
-        short: attachShort,
-        resumeSessionId: resumeId,
-        hasMessages: false,
-        force: forceFresh,
-        forceRefusalRetry: forceFresh,
-      });
-      if (preflightErr) {
-        // densable remount restore: BwH (enterAlt + 2J + H [+ extended keys])
-        process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
-        return { error: preflightErr };
-      }
-      // densable IAe/NPn/Xyr gate (client-side preflight + daemon re-check)
-      const gate = await evaluateRespawnTranscriptGate({
-        short: attachShort,
-        sessionId: job.state.sessionId,
-        resumeSessionId: resumeId,
-        cwd: job.state.cwd,
-        bgIsolation: job.state.bgIsolation ?? 'none',
-        linkScanPath: job.state.linkScanPath,
-        forceRefusalRetry: forceFresh,
-        forceFreshPrompt: forceFresh,
-      });
-      const hasMessages = gate.allow && gate.probe.hasMessages;
-
-      // densable tYo: refuse + arm when fork handoff never materialized
-      if (!gate.allow) {
-        forceFreshNextShort = short;
-        process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
-        return { error: FLEET_FORCE_RESTART_MSG };
-      }
-
-      // densable R = hasMessages && !exec → Zxe resume_session_live_elsewhere
-      if (hasMessages) {
-        const conflict = await findResumeSessionConflict(resumeId);
-        const ownJob = conflict?.jobId !== undefined && (conflict.jobId === short || conflict.jobId === attachShort);
-        if (conflict && !ownJob) {
-          process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
-          return {
-            error:
-              'This conversation is already open in another running Claude session — use that one, or close it and try again',
-          };
-        }
-      }
-
-      // densable Xyr `$`: initialPrompt ?? queuedPrompt ?? (w||N ? void : intent)
-      // w = hasMessages; N = resumeSessionId points at a different session.
-      // Daemon re-resolves and strips client args when $ is void 0.
-      const { resolveRespawnLaunchPrompt } = await import('../daemon/transcriptProbe.js');
-      const resumePointsElsewhere =
-        job.state.resumeSessionId !== undefined && job.state.resumeSessionId !== job.state.sessionId;
-      const skipIntentReplay = hasMessages || resumePointsElsewhere;
-      const resolvedPrompt = resolveRespawnLaunchPrompt({
-        queuedPrompt: job.state.queuedPrompt,
-        intent: job.state.intent,
-        skipIntentReplay,
-      });
-      const launch =
-        hasMessages && !forceFresh
-          ? {
-              mode: 'resume' as const,
-              sessionId: resumeId,
-              fork: false,
-              flagArgs: job.state.respawnFlags ?? [],
-              // densable: only attach `-- $` when $ is defined
-              args: resolvedPrompt ? ['--', resolvedPrompt] : [],
-            }
-          : {
-              mode: 'prompt' as const,
-              args: resolvedPrompt ? ['--', resolvedPrompt] : [],
-            };
-
-      const resp = await sendControlRequest(
-        {
-          proto: 1,
-          op: 'dispatch',
-          d: {
-            short: attachShort,
-            sessionId: job.state.sessionId,
-            intent: job.state.intent,
-            source: 'respawn',
-            cwd: job.state.cwd,
-            launch,
-            env: {},
-            isolation: job.state.bgIsolation === 'worktree' ? 'worktree' : 'none',
-            respawnFlags: job.state.respawnFlags ?? [],
-            cols: process.stdout.columns || 120,
-            rows: process.stdout.rows || 30,
-            // densable Xyr forceRefusalRetry on second enter
-            ...(forceFresh ? { forceRefusalRetry: true, force: true } : {}),
-          },
-          timeoutMs: 10000,
-        },
-        { timeoutMs: 12000 },
+      const { probeJobAlive, xyrPreflightBeforeRespawn, findResumeSessionConflict } = await import(
+        '../daemon/xyrRespawn.js'
       );
-
-      if (resp.ok) {
-        respawned = true;
-        for (let i = 0; i < 20; i++) {
-          await new Promise(r => setTimeout(r, 500));
-          result = await attachToSession(attachShort, { alreadyInAlt: true });
-          if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) break;
+      // densable 2.1.246 Kn/Ti: worker still booting (present, not alive).
+      // Opening it must retry attach — not kill+respawn (Windows race).
+      if (!forceFresh) {
+        const bootProbe = await probeJobAlive(attachShort);
+        if (bootProbe.present && !bootProbe.alive) {
+          waitedForBoot = true;
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            result = await attachToSession(attachShort, { alreadyInAlt: true });
+            if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) {
+              break;
+            }
+          }
         }
-      } else {
-        process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
-        const errMsg = (resp as { error?: string; errorCode?: string; code?: string }).error ?? 'respawn failed';
-        const code = (resp as { errorCode?: string; code?: string }).errorCode ?? (resp as { code?: string }).code;
-        if (
-          code === FORK_TRANSCRIPT_NEVER_MATERIALIZED ||
-          code === 'fork_transcript_never_materialized' ||
-          errMsg.includes('no saved transcript')
-        ) {
+      }
+      if (!waitedForBoot && result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
+        // densable Xyr: hLp / D9e / gLp before IAe (Zxe after hasMessages)
+        const preflightErr = await xyrPreflightBeforeRespawn({
+          short: attachShort,
+          resumeSessionId: resumeId,
+          hasMessages: false,
+          force: forceFresh,
+          forceRefusalRetry: forceFresh,
+        });
+        if (preflightErr) {
+          // densable remount restore: BwH (enterAlt + 2J + H [+ extended keys])
+          process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
+          return { error: preflightErr };
+        }
+        // densable IAe/NPn/Xyr gate (client-side preflight + daemon re-check)
+        const gate = await evaluateRespawnTranscriptGate({
+          short: attachShort,
+          sessionId: job.state.sessionId,
+          resumeSessionId: resumeId,
+          cwd: job.state.cwd,
+          bgIsolation: job.state.bgIsolation ?? 'none',
+          linkScanPath: job.state.linkScanPath,
+          forceRefusalRetry: forceFresh,
+          forceFreshPrompt: forceFresh,
+        });
+        const hasMessages = gate.allow && gate.probe.hasMessages;
+
+        // densable tYo: refuse + arm when fork handoff never materialized
+        if (!gate.allow) {
           forceFreshNextShort = short;
+          process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
           return { error: FLEET_FORCE_RESTART_MSG };
         }
-        return { error: formatAttachError(errMsg) };
+
+        // densable R = hasMessages && !exec → Zxe resume_session_live_elsewhere
+        if (hasMessages) {
+          const conflict = await findResumeSessionConflict(resumeId);
+          const ownJob = conflict?.jobId !== undefined && (conflict.jobId === short || conflict.jobId === attachShort);
+          if (conflict && !ownJob) {
+            process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
+            return {
+              error:
+                'This conversation is already open in another running Claude session — use that one, or close it and try again',
+            };
+          }
+        }
+
+        // densable Xyr `$`: initialPrompt ?? queuedPrompt ?? (w||N ? void : intent)
+        // w = hasMessages; N = resumeSessionId points at a different session.
+        // Daemon re-resolves and strips client args when $ is void 0.
+        const { resolveRespawnLaunchPrompt } = await import('../daemon/transcriptProbe.js');
+        const resumePointsElsewhere =
+          job.state.resumeSessionId !== undefined && job.state.resumeSessionId !== job.state.sessionId;
+        const skipIntentReplay = hasMessages || resumePointsElsewhere;
+        const resolvedPrompt = resolveRespawnLaunchPrompt({
+          queuedPrompt: job.state.queuedPrompt,
+          intent: job.state.intent,
+          skipIntentReplay,
+        });
+        const launch =
+          hasMessages && !forceFresh
+            ? {
+                mode: 'resume' as const,
+                sessionId: resumeId,
+                fork: false,
+                flagArgs: job.state.respawnFlags ?? [],
+                // densable: only attach `-- $` when $ is defined
+                args: resolvedPrompt ? ['--', resolvedPrompt] : [],
+              }
+            : {
+                mode: 'prompt' as const,
+                args: resolvedPrompt ? ['--', resolvedPrompt] : [],
+              };
+
+        const resp = await sendControlRequest(
+          {
+            proto: 1,
+            op: 'dispatch',
+            d: {
+              short: attachShort,
+              sessionId: job.state.sessionId,
+              intent: job.state.intent,
+              source: 'respawn',
+              cwd: job.state.cwd,
+              launch,
+              env: {},
+              isolation: job.state.bgIsolation === 'worktree' ? 'worktree' : 'none',
+              respawnFlags: job.state.respawnFlags ?? [],
+              cols: process.stdout.columns || 120,
+              rows: process.stdout.rows || 30,
+              // densable Xyr forceRefusalRetry on second enter
+              ...(forceFresh ? { forceRefusalRetry: true, force: true } : {}),
+            },
+            timeoutMs: 10000,
+          },
+          { timeoutMs: 12000 },
+        );
+
+        if (resp.ok) {
+          respawned = true;
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            result = await attachToSession(attachShort, { alreadyInAlt: true });
+            if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) break;
+          }
+        } else {
+          process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
+          const errMsg = (resp as { error?: string; errorCode?: string; code?: string }).error ?? 'respawn failed';
+          const code = (resp as { errorCode?: string; code?: string }).errorCode ?? (resp as { code?: string }).code;
+          if (
+            code === FORK_TRANSCRIPT_NEVER_MATERIALIZED ||
+            code === 'fork_transcript_never_materialized' ||
+            errMsg.includes('no saved transcript')
+          ) {
+            forceFreshNextShort = short;
+            return { error: FLEET_FORCE_RESTART_MSG };
+          }
+          return { error: formatAttachError(errMsg) };
+        }
       }
     }
   }
@@ -3472,7 +3499,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
   }
   if (result.outcome === 'error') {
     // Official: after respawn retries still ENOJOB → still-starting settle copy.
-    if (respawned && result.msg?.includes('ENOJOB')) {
+    if ((respawned || waitedForBoot) && result.msg?.includes('ENOJOB')) {
       return { error: 'Session is still starting \u2014 try again in a moment' };
     }
     return { error: formatAttachError(result.msg) };

@@ -23,11 +23,25 @@ const realMonitorMcp = await import(
   'src/tasks/MonitorMcpTask/MonitorMcpTask.js'
 )
 const monitorMcpSnap = snapshotModuleExports(realMonitorMcp)
+const autoBgOutcome = {
+  complete: 0,
+  fail: 0,
+  notifications: [] as string[],
+}
+function resetAutoBgOutcome(): void {
+  autoBgOutcome.complete = 0
+  autoBgOutcome.fail = 0
+  autoBgOutcome.notifications = []
+}
 mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
   ...monitorMcpSnap,
   registerMonitorMcpTask: () => 'task-bg-1',
-  completeMonitorMcpTask: () => {},
-  failMonitorMcpTask: () => {},
+  completeMonitorMcpTask: () => {
+    autoBgOutcome.complete++
+  },
+  failMonitorMcpTask: () => {
+    autoBgOutcome.fail++
+  },
 }))
 const realAnalytics = await import('src/services/analytics/index.js')
 const analyticsSnap = snapshotModuleExports(realAnalytics)
@@ -44,7 +58,11 @@ mock.module('src/services/analytics/growthbook.js', () => ({
 mock.module(
   'src/utils/messageQueueManager.js',
   createMessageQueueManagerMock(realMessageQueue, {
-    enqueuePendingNotification: () => {},
+    enqueuePendingNotification: command => {
+      if (typeof command.value === 'string') {
+        autoBgOutcome.notifications.push(command.value)
+      }
+    },
   }),
 )
 afterAll(() => {
@@ -241,6 +259,51 @@ describe('callMcpToolWithAutoBackground autoBackgrounded stamp', () => {
 
     // let background promise settle to avoid unhandled rejection noise
     resolveRun({ content: [{ type: 'text', text: 'late' }] })
+  })
+
+  test('timeout then interrupted resolve fails the monitor (not completed)', async () => {
+    resetAutoBgOutcome()
+    const parent = new AbortController()
+    let resolveRun!: (v: {
+      content: string
+      interrupted: boolean
+      isError: boolean
+    }) => void
+    const run = () =>
+      new Promise<{
+        content: string
+        interrupted: boolean
+        isError: boolean
+      }>(resolve => {
+        resolveRun = resolve
+      })
+
+    await callMcpToolWithAutoBackground({
+      run,
+      serverName: 'srv',
+      toolName: 'slow',
+      parentAbortController: parent,
+      setAppState: () => {},
+      autoBackgroundMs: 20,
+      toolLabel: 'mcp__srv__slow',
+    })
+
+    resolveRun({
+      content: 'The tool call was interrupted before a result was received.',
+      interrupted: true,
+      isError: true,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(autoBgOutcome.fail).toBe(1)
+    expect(autoBgOutcome.complete).toBe(0)
+    expect(
+      autoBgOutcome.notifications.some(n => n.includes('was interrupted')),
+    ).toBe(true)
+    expect(autoBgOutcome.notifications.some(n => n.includes('completed'))).toBe(
+      false,
+    )
   })
 
   test('fast settle does not stamp autoBackgrounded', async () => {

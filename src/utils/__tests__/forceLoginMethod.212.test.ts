@@ -4,6 +4,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -18,6 +19,10 @@ import {
   snapshotModuleExports,
 } from '../../../tests/mocks/settings.js'
 
+import {
+  analyticsMock,
+  pushAnalyticsLogEvent,
+} from '../../../tests/mocks/analytics.js'
 const settingsSnap = snapshotModuleExports(realSettings)
 const settingsConstSnap = snapshotModuleExports(realSettingsConstants)
 const awsSnap = snapshotModuleExports(realAws)
@@ -65,11 +70,17 @@ mock.module('../aws.js', () => ({
   isHostManagedProviderAuth: () => mockIsHostManagedProviderAuth(),
 }))
 
-mock.module('../../services/analytics/index.js', () => ({
-  logEvent: (name: string, props?: unknown) => mockLogEvent(name, props),
-}))
+mock.module('../../services/analytics/index.js', analyticsMock)
+
+let popAnalyticsLogEvent: (() => void) | undefined
+beforeAll(() => {
+  popAnalyticsLogEvent = pushAnalyticsLogEvent((name, metadata) => {
+    mockLogEvent(name, metadata)
+  })
+})
 
 afterAll(() => {
+  popAnalyticsLogEvent?.()
   restoreSettingsMockWith(mock.module, settingsSnap, [
     '../settings/settings.js',
     'src/utils/settings/settings.js',

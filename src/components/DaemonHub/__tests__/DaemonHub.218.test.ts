@@ -81,13 +81,9 @@ describe('densable 2.1.218 DaemonHub shell (source contract)', () => {
   test('OGa empty + Add new labels use densable roi map', () => {
     expect(DAEMON_HUB_KIND_LABEL.scheduled).toBe('scheduled task')
     expect(DAEMON_HUB_KIND_LABEL.remoteControl).toBe('remote-control server')
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: densable empty template
     expect(hubSrc).toContain('(no ${DAEMON_HUB_KIND_LABEL.scheduled}s)')
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: densable empty template
     expect(hubSrc).toContain('(no ${DAEMON_HUB_KIND_LABEL.remoteControl}s)')
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: densable add template
     expect(hubSrc).toContain('+ Add new ${DAEMON_HUB_KIND_LABEL.scheduled}')
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: densable add template
     expect(hubSrc).toContain('+ Add new ${DAEMON_HUB_KIND_LABEL.remoteControl}')
   })
 

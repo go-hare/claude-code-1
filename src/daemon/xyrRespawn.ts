@@ -182,6 +182,15 @@ export async function xyrPreflightBeforeRespawn(opts: {
     return `Session ${opts.short} is already running`
   }
 
+  // densable 2.1.246 Kn: present && !alive is a booting worker. Killing it
+  // is the Windows "stopped while the respawn was in flight" race.
+  if (!force && probe.present && !probe.alive) {
+    return null
+  }
+
+  const { readBgJobState } = await import('./jobState.js')
+  const stateBefore = readBgJobState(opts.short)
+
   // densable: when daemonUp && !alive && !present && same short → skip kill (parallel Yia)
   const skipKill = probe.daemonUp && !probe.alive && !probe.present
   if (!skipKill) {
@@ -198,6 +207,14 @@ export async function xyrPreflightBeforeRespawn(opts: {
         if (!(await probeJobPresent(opts.short))) break
         await sleep(100)
       }
+    }
+  }
+
+  // densable Kn: if(!force && i.state!=="stopped") { re-read; if stopped → bail }
+  if (!force && stateBefore && stateBefore.state !== 'stopped') {
+    const stateAfter = readBgJobState(opts.short)
+    if (stateAfter?.state === 'stopped') {
+      return `Session ${opts.short} was stopped while the respawn was in flight`
     }
   }
 

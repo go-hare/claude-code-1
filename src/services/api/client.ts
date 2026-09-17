@@ -13,13 +13,16 @@ import {
   hostManagedAwsSdkCredentials,
   isClaudeAISubscriber,
   isHostManagedProviderAuth,
+  isOAuthRefreshDead,
   refreshAndGetAwsCredentials,
   refreshGcpCredentialsIfNeeded,
 } from 'src/utils/auth.js'
 import {
   getOAuthAccountOnHold,
   OAuthAccountOnHoldError,
+  OAuthRefreshDeadError,
 } from 'src/utils/accountOnHold.js'
+import type { AgentContext } from 'src/utils/agentContext.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
 import {
@@ -115,17 +118,38 @@ export async function getAnthropicClient({
   model,
   fetchOverride,
   source,
+  agentContext,
+  credentials,
+  storageV5,
 }: {
   apiKey?: string
   maxRetries: number
   model?: string
   fetchOverride?: ClientOptions['fetch']
   source?: string
+  /** densable fk `s` — omit headers when kf(s) (main / no ALS). */
+  agentContext?: AgentContext
+  /** densable fk `i` — host credentials handle (official Ce). */
+  credentials?: unknown
+  /** densable fk `a` — persist handle for Op + YOo. */
+  storageV5?: unknown
 }): Promise<Anthropic> {
   const containerId = process.env.CLAUDE_CODE_CONTAINER_ID
   const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
   const clientApp = process.env.CLAUDE_AGENT_SDK_CLIENT_APP
   const customHeaders = getCustomHeaders()
+  // densable kf(s)?void 0:s — no store / agentType==="main" ⇒ drop agent headers
+  const headerAgent =
+    agentContext && (agentContext.agentType as string) !== 'main'
+      ? agentContext
+      : undefined
+  const parentAgentId =
+    headerAgent &&
+    'parentAgentId' in headerAgent &&
+    typeof (headerAgent as { parentAgentId?: unknown }).parentAgentId ===
+      'string'
+      ? (headerAgent as { parentAgentId: string }).parentAgentId
+      : undefined
   const defaultHeaders: { [key: string]: string } = {
     'x-app': 'cli',
     'User-Agent': getUserAgent(),
@@ -137,6 +161,12 @@ export async function getAnthropicClient({
       : {}),
     // SDK consumers can identify their app/library for backend analytics
     ...(clientApp ? { 'x-client-app': clientApp } : {}),
+    ...(headerAgent?.agentId
+      ? { 'x-claude-code-agent-id': headerAgent.agentId }
+      : {}),
+    ...(parentAgentId
+      ? { 'x-claude-code-parent-agent-id': parentAgentId }
+      : {}),
     // SSH auth proxy nonce — tunneled API requests must carry this header
     ...(process.env.ANTHROPIC_AUTH_NONCE
       ? { 'x-auth-nonce': process.env.ANTHROPIC_AUTH_NONCE }
@@ -173,7 +203,7 @@ export async function getAnthropicClient({
   }
 
   logForDebugging('[API:auth] OAuth token check starting')
-  await checkAndRefreshOAuthTokenIfNeeded()
+  await checkAndRefreshOAuthTokenIfNeeded(0, false, credentials, storageV5)
   logForDebugging('[API:auth] OAuth token check complete')
 
   // Official uRi first branch: resolve + apply gateway BEFORE getAPIProvider()
@@ -233,7 +263,7 @@ export async function getAnthropicClient({
 
   // Base fetch (gzip / client-request-id), then byte-body idle watchdog when
   // NMh is on so J_ timeout:false is not a hang hole.
-  let resolvedFetch = buildFetch(fetchOverride, source)
+  let resolvedFetch = buildFetch(fetchOverride, source, storageV5)
   // densable 2.1.239: default missing Bedrock eventstream Content-Type,
   // then throw (no retry) when a proxy transformed it.
   resolvedFetch = wrapFetchWithBedrockContentTypeGuard(
@@ -721,6 +751,18 @@ export async function getAnthropicClient({
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }
 
+  // densable fk: after provider returns, if(!E&&!h&&!Ex(m).value&&await _F(i)) throw Z9
+  if (
+    !gatewaySession &&
+    !profileWire &&
+    !(apiKey || getAnthropicApiKey()) &&
+    !getClaudeAIOAuthTokens() &&
+    !extractAuthorizationHeader(defaultHeaders).value &&
+    (await isOAuthRefreshDead(credentials))
+  ) {
+    throw new OAuthRefreshDeadError()
+  }
+
   // densable 2.1.243 `FTn` — reject bad headers before `new Anthropic`.
   const oauthSubscriber = isClaudeAISubscriber()
   // densable `if (y) { const C = f$e(); if (C) throw new yz(C.url) }`
@@ -821,6 +863,7 @@ export const CLIENT_REQUEST_ID_HEADER = 'x-client-request-id'
 function buildFetch(
   fetchOverride: ClientOptions['fetch'],
   source: string | undefined,
+  storageV5?: unknown,
 ): ClientOptions['fetch'] {
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
   const inner = fetchOverride ?? globalThis.fetch
@@ -854,7 +897,7 @@ function buildFetch(
     await criPolicyPrecheckFetchInput(url || input, nextInit)
     // Official x_h: compress eligible first-party request bodies with gzip
     // and pad JSON body whitespace for length fingerprint resistance.
-    const withGzip = applyGzipRequestBodyInit(url, nextInit)
+    const withGzip = applyGzipRequestBodyInit(url, nextInit, { storageV5 })
     return inner(input, withGzip ?? nextInit)
   }
 }

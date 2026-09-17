@@ -129,7 +129,8 @@ describe('code-review command (densable WJf)', () => {
     expect(codeReview.context).toBe('fork')
     expect(codeReview.background).toBe(true)
     expect(codeReview.subcommands).toEqual({ ultra: 'ultrareview' })
-    expect(codeReview.disableModelInvocation).toBe(true)
+    // densable 2.1.246 ji() omits the flag — loader default false
+    expect('disableModelInvocation' in codeReview).toBe(false)
   })
 })
 

@@ -219,6 +219,7 @@ export {
 export {
   isSynchronizedOutputSupported,
   isXtermJs,
+  isGhosttyXtversion,
   getXtversionName,
   hasCursorUpViewportYankBug,
   supportsExtendedKeys,

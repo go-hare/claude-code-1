@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSlashCommand } from '../slashCommandParsing'
+import {
+  parseSlashCommand,
+  startsWithRegisteredSlashCommand,
+} from '../slashCommandParsing'
 
 describe('parseSlashCommand', () => {
   test('parses simple command', () => {
@@ -54,5 +57,29 @@ describe('parseSlashCommand', () => {
     const result = parseSlashCommand('  /search foo  ')
     expect(result!.commandName).toBe('search')
     expect(result!.args).toBe('foo')
+  })
+})
+
+describe('startsWithRegisteredSlashCommand densable KSe/fn', () => {
+  test('false when text does not start with /', () => {
+    expect(startsWithRegisteredSlashCommand('help', () => true)).toBe(false)
+  })
+
+  test('true when alphanumeric prefix matches', () => {
+    expect(
+      startsWithRegisteredSlashCommand(
+        '/search foo',
+        name => name === 'search',
+      ),
+    ).toBe(true)
+  })
+
+  test('true when dotted first-token matches and prefix does not', () => {
+    expect(
+      startsWithRegisteredSlashCommand(
+        '/foo.bar baz',
+        name => name === 'foo.bar',
+      ),
+    ).toBe(true)
   })
 })

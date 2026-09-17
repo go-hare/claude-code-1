@@ -289,7 +289,8 @@ type EqFs = {
   lstatSync: (p: string) => { isSymbolicLink: () => boolean }
 }
 
-function getEqFs(): EqFs {
+/** densable yt() — sync fs surface passed to Kb/eq. */
+export function getEqFs(): EqFs {
   return {
     readlinkSync,
     realpathSync,
@@ -381,8 +382,8 @@ function b_l(
 /** densable $yi — only `..` segments (stricter than Zw which also matches `.`). */
 const $yi = /(^|[\\/])\.\.([\\/]|$)/
 
-/** densable xAt — sentinel for unverified ancestry under surfaceNetworkRaw. */
-const xAt = '\0unverified-ancestry'
+/** densable IHt / xAt — sentinel for unverified ancestry under surfaceNetworkRaw. */
+export const xAt = '\0unverified-ancestry'
 
 /** densable tPm — strip `.`/`..` tail for nPm collapse. */
 function tPm(e: string): string {

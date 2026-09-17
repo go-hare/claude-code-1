@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { Command } from '../../commands.js'
+import { bunBundleMock } from '../../../tests/mocks/bunBundle.js'
 
 // Mock bun:bundle before any imports that use feature()
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 // Mock dependencies to avoid side effects
 mock.module('src/utils/attribution.ts', () => ({

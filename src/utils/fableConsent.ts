@@ -11,10 +11,6 @@ import {
 import type { QueuedCommand } from '../types/textInputTypes.js'
 import { getGlobalConfig, saveGlobalConfig } from './config.js'
 import {
-  getCommandQueueSnapshot,
-  subscribeToCommandQueue,
-} from './messageQueueManager.js'
-import {
   FABLE_OVERAGE_CONSENT_DIALOG_KIND,
   fableOverageConsentDialogSpec,
 } from './printRequestDialog.js'
@@ -389,6 +385,15 @@ export async function showFableOverageConsentDialog(
     let queuedAtPark = false
     let unsubscribe: (() => void) | undefined
     {
+      // Lazy: messageQueueManager reaches messages/sessionStorage, which makes
+      // it the heaviest edge out of this file — statically importing it put
+      // the whole model/pricing subtree (model.ts, modelCost.ts, fastMode.ts,
+      // extraUsage.ts, fableCreditsLabel.ts) inside the 554-module import
+      // cycle. Only this park-watch branch needs the queue.
+      // See docs/task/task-017-session-storage-hub-split.md.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getCommandQueueSnapshot, subscribeToCommandQueue } =
+        require('./messageQueueManager.js') as typeof import('./messageQueueManager.js')
       const seen = new Set(
         getCommandQueueSnapshot()
           .filter(isFableParkQueuePrompt)

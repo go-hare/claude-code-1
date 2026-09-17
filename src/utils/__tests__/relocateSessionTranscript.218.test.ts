@@ -8,12 +8,10 @@ import { join } from 'path'
 import { debugMock } from '../../../tests/mocks/debug.js'
 import { logMock } from '../../../tests/mocks/log.js'
 
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: <T>(v: T) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 const {
   relocateSessionTranscript,
@@ -22,11 +20,22 @@ const {
   getTranscriptPath,
   getProjectDir,
 } = await import('../sessionStorage.js')
-const { getSessionId, getSessionProjectDir, setOriginalCwd, switchSession } =
-  await import('../../bootstrap/state.js')
+const {
+  getSessionId,
+  getSessionProjectDir,
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+  switchSession,
+} = await import('../../bootstrap/state.js')
 const { asSessionId } = await import('../../types/ids.js')
 
 const temps: string[] = []
+/** Repo root at load — chdir tests must restore or `src/*` alias breaks. */
+const suiteCwd = process.cwd()
+// relocateSessionTranscript pins sessionProjectDir on temp paths — restore for co-suites.
+const suiteSessionId = getSessionId()
+const suiteSessionProjectDir = getSessionProjectDir()
 const envKeys = [
   'CLAUDE_CONFIG_DIR',
   'TEST_ENABLE_SESSION_PERSISTENCE',
@@ -50,6 +59,19 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  try {
+    process.chdir(suiteCwd)
+  } catch {
+    // ignore
+  }
+  try {
+    setCwdState(suiteCwd)
+    setOriginalCwd(suiteCwd)
+    setProjectRoot(suiteCwd)
+    switchSession(suiteSessionId, suiteSessionProjectDir)
+  } catch {
+    // ignore
+  }
   for (const t of temps.splice(0)) {
     try {
       rmSync(t, { recursive: true, force: true })
@@ -106,7 +128,8 @@ describe('relocateSessionTranscript (densable tNt)', () => {
     const body = readFileSync(newPath, 'utf8')
     expect(body).toContain('"type":"user"')
     expect(body).toContain('"type":"relocated"')
-    expect(body).toContain(b)
+    // JSON escapes Windows backslashes — match the encoded cwd string.
+    expect(body).toContain(JSON.stringify(b).slice(1, -1))
     expect(getSessionProjectDir()).toBe(getProjectDir(b))
   })
 
@@ -128,7 +151,7 @@ describe('relocateSessionTranscript (densable tNt)', () => {
     await relocateSessionTranscript()
     const body = readFileSync(path, 'utf8')
     expect(body).toContain('"type":"relocated"')
-    expect(body).toContain(a)
+    expect(body).toContain(JSON.stringify(a).slice(1, -1))
 
     // second call with same cwd should not throw / need new stamp path change
     await relocateSessionTranscript()

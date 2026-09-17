@@ -3,6 +3,7 @@
  * overwritten, and version cleanup must skip when the launcher is external.
  */
 import { describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
 import {
   isNativeInstallerSymlinkTarget,
   isNpmShimResolvedPath,
@@ -13,7 +14,7 @@ describe('isNativeInstallerSymlinkTarget', () => {
   test('accepts paths under claude/versions/', () => {
     expect(
       isNativeInstallerSymlinkTarget(
-        `/Users/u/.local/share/claude/versions/2.1.207`,
+        join('/Users/u/.local/share', 'claude', 'versions', '2.1.207'),
       ),
     ).toBe(true)
     expect(NATIVE_VERSIONS_PATH_MARKER.includes('versions')).toBe(true)
@@ -52,7 +53,12 @@ describe('external launcher ownership matrix', () => {
   })
 
   test('native versions target is owned', () => {
-    const native = '/Users/u/.local/share/claude/versions/2.1.207'
+    const native = join(
+      '/Users/u/.local/share',
+      'claude',
+      'versions',
+      '2.1.207',
+    )
     expect(isNativeInstallerSymlinkTarget(native)).toBe(true)
     expect(isNpmShimResolvedPath(native)).toBe(false)
   })

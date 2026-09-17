@@ -9,6 +9,9 @@ import {
 } from 'bun:test'
 import * as realSettings from 'src/utils/settings/settings.js'
 import * as realThinking from 'src/utils/thinking.js'
+import * as realAuth from 'src/utils/auth.js'
+import * as realGrowthbook from 'src/services/analytics/growthbook.js'
+import * as realOverrides from 'src/utils/model/modelSupportOverrides.js'
 import {
   createSettingsMock,
   restoreSettingsMockWith,
@@ -19,6 +22,9 @@ import {
 // so afterAll `() => realSettings` would restore the mock, not the real module.
 const settingsSnap = snapshotModuleExports(realSettings)
 const thinkingSnap = snapshotModuleExports(realThinking)
+const authSnap = snapshotModuleExports(realAuth)
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+const overridesSnap = snapshotModuleExports(realOverrides)
 
 // Mock heavy dependencies to avoid import chain issues.
 mock.module('src/utils/thinking.js', () => ({
@@ -33,21 +39,31 @@ mock.module(
   }),
 )
 mock.module('src/utils/auth.js', () => ({
+  ...authSnap,
   isProSubscriber: () => false,
   isMaxSubscriber: () => false,
   isTeamSubscriber: () => false,
 }))
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, defaultValue: unknown) =>
     defaultValue ?? {},
 }))
 mock.module('src/utils/model/modelSupportOverrides.js', () => ({
+  ...overridesSnap,
   get3PModelCapabilityOverride: () => undefined,
 }))
 
 afterAll(() => {
   restoreSettingsMockWith(mock.module, settingsSnap)
   mock.module('src/utils/thinking.js', () => ({ ...thinkingSnap }))
+  mock.module('src/utils/auth.js', () => ({ ...authSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+  mock.module('src/utils/model/modelSupportOverrides.js', () => ({
+    ...overridesSnap,
+  }))
 })
 
 const {

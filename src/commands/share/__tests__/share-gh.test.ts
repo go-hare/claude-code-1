@@ -19,11 +19,20 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { promisify } from 'node:util'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  clearChildProcessStubs,
+  installChildProcessHarness,
+  setChildProcessStubs,
+} from '../../../../tests/mocks/childProcessHarness.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
+import { analyticsMock } from '../../../../tests/mocks/analytics.js'
 // ── Mock control state ──
 // We use a single shared callback variable that each test can replace.
 let _execFileImpl: (
@@ -36,108 +45,10 @@ let _execFileImpl: (
 let _execFileSyncImpl: (cmd: string, args: string[], opts?: unknown) => Buffer =
   () => Buffer.from('')
 
-// The actual mock function objects (must stay the same reference in mock.module)
-const execFileMockCore = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-  cb: (err: Error | null, stdout: string, stderr: string) => void,
-) => _execFileImpl(cmd, args, opts, cb)
+installChildProcessHarness()
+mock.module('bun:bundle', bunBundleMock)
 
-// Attach promisify.custom so promisify returns { stdout, stderr }
-;(execFileMockCore as unknown as Record<symbol, unknown>)[
-  promisify.custom as symbol
-] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> => {
-  return new Promise((resolve, reject) => {
-    _execFileImpl(cmd, args, opts, (err, stdout, stderr) => {
-      if (err) reject(err)
-      else resolve({ stdout, stderr })
-    })
-  })
-}
-
-const execFileSyncMockCore = (
-  cmd: string,
-  args: string[],
-  opts?: unknown,
-): Buffer => _execFileSyncImpl(cmd, args, opts)
-
-// Spread real child_process + flag-gated stub. Default OFF; suite's
-// beforeAll flips on, afterAll flips off so projectContext.test and other
-// child_process consumers see the real impl outside this suite.
-//
-// CRITICAL: util.promisify(execFile) reads `[util.promisify.custom]` from the
-// callee. Our wrapper must forward that symbol so promisify returns the
-// proper { stdout, stderr } shape. If we just return a plain arrow, the
-// wrapper has no custom symbol and promisify falls back to the cb adapter,
-// which our test stub doesn't support.
-let useShareGhCpStubs = false
-const wrappedExecFile = ((...args: unknown[]) =>
-  useShareGhCpStubs
-    ? (execFileMockCore as (...a: unknown[]) => unknown)(...args)
-    : // eslint-disable-next-line @typescript-eslint/no-require-imports
-      (require('node:child_process').execFile as (...a: unknown[]) => unknown)(
-        ...args,
-      )) as unknown as Record<symbol, unknown> & ((...a: unknown[]) => unknown)
-;(wrappedExecFile as Record<symbol, unknown>)[promisify.custom as symbol] = (
-  cmd: string,
-  args: string[],
-  opts: unknown,
-): Promise<{ stdout: string; stderr: string }> => {
-  if (useShareGhCpStubs) {
-    return ((execFileMockCore as unknown as Record<symbol, unknown>)[
-      promisify.custom as symbol
-    ] as never)
-      ? (
-          (execFileMockCore as unknown as Record<symbol, unknown>)[
-            promisify.custom as symbol
-          ] as (
-            c: string,
-            a: string[],
-            o: unknown,
-          ) => Promise<{ stdout: string; stderr: string }>
-        )(cmd, args, opts)
-      : new Promise((resolve, reject) =>
-          execFileMockCore(cmd, args, opts, (err, stdout, stderr) =>
-            err ? reject(err) : resolve({ stdout, stderr }),
-          ),
-        )
-  }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return promisify(real.execFile as never)(cmd, args, opts) as Promise<{
-    stdout: string
-    stderr: string
-  }>
-}
-mock.module('node:child_process', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:child_process') as Record<string, unknown>
-  return {
-    ...real,
-    default: real,
-    execFile: wrappedExecFile as typeof real.execFile,
-    execFileSync: ((...args: unknown[]) =>
-      useShareGhCpStubs
-        ? (execFileSyncMockCore as (...a: unknown[]) => unknown)(...args)
-        : (real.execFileSync as (...a: unknown[]) => unknown)(
-            ...args,
-          )) as typeof real.execFileSync,
-  }
-})
-
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
-
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: (v: unknown) => v,
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // ── State ──
 let tmpDir: string
@@ -217,14 +128,17 @@ function setExecFileSequence(
   }
 }
 
-// Activate child_process stubs only for this suite.
+let popFeature: (() => void) | undefined
 beforeAll(() => {
-  useShareGhCpStubs = true
-  console.error('[share-gh beforeAll] stubs ON')
+  popFeature = pushFeatureOverride(() => true)
+  setChildProcessStubs('share-gh', {
+    execFile: (cmd, args, opts, cb) => _execFileImpl(cmd, args, opts, cb),
+    execFileSync: (cmd, args, opts) => _execFileSyncImpl(cmd, args, opts),
+  })
 })
 afterAll(() => {
-  useShareGhCpStubs = false
-  console.error('[share-gh afterAll] stubs OFF')
+  popFeature?.()
+  clearChildProcessStubs('share-gh')
 })
 
 describe('share command — gh not available paths', () => {

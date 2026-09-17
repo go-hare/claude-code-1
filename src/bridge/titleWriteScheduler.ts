@@ -13,6 +13,8 @@ export type TitleWriteOpts = {
   getAccessToken?: () => string | undefined
   shouldSend?: () => boolean
   userInitiated?: boolean
+  /** Official leftover u8o `y.credentials=s`. */
+  credentials?: unknown
 }
 
 type TitleWriteWaiter = () => void

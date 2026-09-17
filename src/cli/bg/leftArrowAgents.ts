@@ -17,6 +17,7 @@ import {
   seedForLeftArrow,
   type BackgroundSeedMessage,
 } from './helpers.js'
+import { settleBackgroundSeedName } from './jobNameSettle.js'
 import {
   readBgJobState,
   writeA8qJobState,
@@ -627,11 +628,13 @@ export async function openAgentsViaLeftArrow(
     }
   }
 
-  const seed = seedForLeftArrow(messages, {
-    sessionTitle,
-    haikuTitle: options?.haikuTitle,
-    agentColor: options?.agentColor,
-  })
+  const seed = await settleBackgroundSeedName(
+    seedForLeftArrow(messages, {
+      sessionTitle,
+      haikuTitle: options?.haikuTitle,
+      agentColor: options?.agentColor,
+    }),
+  )
 
   // Official A8q: always allocate a fresh job session id.
   const providedSessionId = randomUUID()

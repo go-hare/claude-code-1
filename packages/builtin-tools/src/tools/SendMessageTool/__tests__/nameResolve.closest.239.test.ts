@@ -5,8 +5,8 @@ import { describe, expect, test } from 'bun:test'
 import {
   closestNormalizedNames,
   damerauLevenshtein,
-  leftoverClosestPeers,
-  leftoverPrefixPeers,
+  findClosestPeerCandidates,
+  findPrefixMatchingPeerCandidates,
   resolvePeerByName,
   type PeerCandidate,
 } from '../nameResolve.js'
@@ -56,7 +56,7 @@ describe('densable 2.1.239 nQr / yRw leftover closest', () => {
       cand('alpin-bot', '/tmp/near.sock'),
       cand('alpha-bot-2', '/tmp/prefix.sock'),
     ]
-    const closest = leftoverClosestPeers('alpha-bot', peers)
+    const closest = findClosestPeerCandidates('alpha-bot', peers)
     expect(closest.map(c => c.name)).toEqual([
       'alpha-bot',
       'alpin-bot',
@@ -70,12 +70,13 @@ describe('densable 2.1.239 nQr / yRw leftover closest', () => {
       cand('worker', '/tmp/w.sock'),
       cand('work', '/tmp/short.sock'),
     ]
-    expect(leftoverPrefixPeers('wor', peers).map(c => c.name)).toEqual([
-      'worker',
-      'work',
-    ])
-    expect(leftoverPrefixPeers('wo', peers)).toEqual([])
-    expect(leftoverPrefixPeers('worker [abcdef]', peers)).toEqual([])
+    expect(
+      findPrefixMatchingPeerCandidates('wor', peers).map(c => c.name),
+    ).toEqual(['worker', 'work'])
+    expect(findPrefixMatchingPeerCandidates('wo', peers)).toEqual([])
+    expect(findPrefixMatchingPeerCandidates('worker [abcdef]', peers)).toEqual(
+      [],
+    )
   })
 
   test('resolvePeerByName exact miss with prefix hits is ambiguous prefix', () => {

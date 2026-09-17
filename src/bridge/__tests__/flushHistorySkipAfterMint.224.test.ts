@@ -27,11 +27,11 @@ describe('densable 2.1.224 #19 skipInitialHistoryFlush (Ge)', () => {
     )
     expect(setIdx).toBeGreaterThan(-1)
     expect(mintIdx).toBeGreaterThan(setIdx)
-    // only on unarchive-gone path (near reattach_fallback log)
-    const goneSlice = core.slice(
-      core.indexOf("outcome === 'gone'") - 40,
-      core.indexOf("outcome === 'gone'") + 900,
-    )
+    // mint-after-gone (not the reattach-or-fail gone branch)
+    const fallbackIdx = core.indexOf('bridge_repl_v2_reattach_fallback')
+    expect(fallbackIdx).toBeGreaterThan(-1)
+    const goneSlice = core.slice(fallbackIdx - 400, fallbackIdx + 900)
+    expect(goneSlice).toContain("outcome === 'gone'")
     expect(goneSlice).toContain('skipInitialHistoryFlush = true')
     expect(goneSlice).toContain('bridge_repl_v2_reattach_fallback')
   })
@@ -65,10 +65,8 @@ describe('densable 2.1.224 #19 skipInitialHistoryFlush (Ge)', () => {
     // densable: Pe=c??`${xAt()}-${Aet()}` before mint on unarchive gone
     expect(core).toContain('neutralFallbackTitle')
     expect(core).toContain('let sessionTitle = title')
-    const goneSlice = core.slice(
-      core.indexOf("outcome === 'gone'") - 40,
-      core.indexOf("outcome === 'gone'") + 1200,
-    )
+    const fallbackIdx = core.indexOf('bridge_repl_v2_reattach_fallback')
+    const goneSlice = core.slice(fallbackIdx - 200, fallbackIdx + 1200)
     expect(goneSlice).toContain('sessionTitle =')
     expect(goneSlice).toContain('neutralFallbackTitle')
     // createCodeSession must use sessionTitle (mutable), not raw title param

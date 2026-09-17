@@ -263,6 +263,35 @@ export function jobLabel(session: SessionEntry): string {
   return `session-${session.pid}`
 }
 
+/** densable 2.1.246 #15 — resume-picker `already_in_list`. */
+export const ALREADY_IN_LIST_MESSAGE =
+  'This session is already in the list — press enter on its row'
+
+export type JobListRow = {
+  short: string
+  state: {
+    sessionId?: string
+    resumeSessionId?: string
+  }
+}
+
+/**
+ * Official resume-picker promote: job dir for `sessionId.slice(0, 8)` exists,
+ * or any job has `sessionId` / `resumeSessionId` equal to the past session.
+ */
+export function isSessionAlreadyInJobList(
+  sessionId: string,
+  jobs: readonly JobListRow[],
+): boolean {
+  const short = sessionId.slice(0, 8)
+  if (jobs.some(job => job.short === short)) return true
+  return jobs.some(
+    job =>
+      job.state.sessionId === sessionId ||
+      job.state.resumeSessionId === sessionId,
+  )
+}
+
 /**
  * Format session age as a human-readable string.
  * Official OhO/q1q: n9(ms, { mostSignificantOnly: true }) → formatDuration.

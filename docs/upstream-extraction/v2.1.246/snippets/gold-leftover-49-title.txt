@@ -1,0 +1,169 @@
+# Official 2.1.246 SEA — #49 RC first-prompt title
+# Count-1 Haiku is the changelog fix. Leftover locks Ii done / it / count-3 / Bi / Re / Ae.
+# He/fi/en/title-ie/y4t/Ano/_4t/Cno/B=Xg/Pi bodies locked. He()+Ne leftover wired. 09-16 promoted to HAVE.
+# 2026-09-14: persist Qt=_i reverse locked; hook Gi s_e=1e4 locked.
+# 2026-09-14b: fr/xeo/Bn.transcript leftover-wired (bSa as or; B6s=262144; Peo=2097152).
+# 2026-09-14c: hook 导入名锁死 — GUa as HR←qXs; JUa as jR←KXs; MUa as FK←ZXs;
+#   ZUa as tC←r9s/b4t; FUa as zc←Xg. fe/Z 是 hook 本地 ref，不是导入。
+# 2026-09-14d: persist X/R/bo/Jt + Wt `t&&o?or:Qt` leftover-wired.
+#   hook xe/Pn/tC/fe/Z/F/Gi s_e=1e4 + handle.archive leftover-wired.
+#   qb @207548814 = `function qb(){if(!Po())return;return}` — 官方空壳已锁；listEntries/readRecords 有代码就调，无后端走 catch/Qt。
+# DIG 2026-09-16：qb 官方空壳 + UF(e=qb) 不自动 qF = 同形完整。leftover 分类拿掉，升 HAVE。
+
+# Init @233525400
+V=!1,H=!1
+# D=initialName → z=D,V=!0,H=!0
+# else if(!R): Ae(X) custom → V+H; Ae(we) AI title → V only
+# else initialMessages J: Xo(v) first-sentence 50-char → z=ue,V=!0  (no H)
+
+# Ae @233518704 leftover (R||He()||Ne(); Ne leftover Jre||Sno||xno||Ano||Cno||_4t||y4t)
+Ae=(e)=>{if(R||He()||Ne())return;let n=k();return n?e(n):void 0}
+
+# Xo @export near initReplBridge — attach-only placeholder (local deriveTitle)
+function Xo(i){
+  let d=mr(i),t=(/^(.*?[.!?])\s/.exec(d)?.[1]??d).replace(/\s+/g," ").trim()
+  if(!t)return
+  return t.length>pr?t.slice(0,pr-1)+"…":t
+}
+pr=50
+
+# Ii @233528249 — onUserMessage. Count-1 is Haiku only.
+Ii=(e,n)=>{
+  if(W)return!0
+  if(H||Bi(n)||ne===n)return!0
+  let u=Ae(X)
+  if(u){
+    if(!Re(n,u))rn(n,...).catch(()=>null).then((l)=>{
+      if(H||X(k())!==u)return
+      if(l===null)return
+      if(l.title&&!Re(n,l.title)){ Se; noteRemoteTitle; ne=n; return }
+      hn(u,n,G,!0),H=!0
+    })
+    return!0
+  }
+  if(it(n))return!0
+  if($e!==void 0&&$e!==n)G=0
+  $e=n,G++
+  if(G===1&&!V)rt(e,n,!1)          # Haiku. No Xo/deriveTitle here.
+  else if(G===3){
+    let l=R||He()||Ne()?void 0:p?.()
+    rt(l?Zr(ri(l)):e,n,l!==void 0)
+  }
+  return G>=3&&(V||H)||G>=8
+}
+
+# rt @233526302 — leftover generateAndPatch
+rt=(e,n,u)=>{
+  if(W)return
+  let l=++pn, v=G
+  ei(e,AbortSignal.timeout(15000),U).then(async(dt)=>{
+    ct = W||l!==pn||$e!==n||H||(X(k())&&X(k())!==nt)||(we(k())&&!q.has(we(k())))
+    if(!dt||ct())return
+    Pe=await rn(n,...).catch(()=>null)
+    if(ct()||Pe===null)return
+    if(Pe.title&&!Re(n,Pe.title)){ Se; noteRemoteTitle; ne=n; return }
+    hn(dt,n,v,u)
+  })
+}
+
+# it @233527459 — leftover syncLocalAiTitle. pn++ before hn.
+it=(e)=>{
+  if(!Ae(we)||Re(e,Ae(we)))return!1
+  rn(e,...).then(v=>{
+    if(H||ne===e||X(k()))return
+    if(v===null)return
+    if(v.title&&!Re(e,v.title)){ noteRemoteTitle; ne=e; return }
+    if(k() changed||Ae(we) changed)return
+    pn++; hn(Ae(we),e,G,!0)
+  })
+  return!0
+}
+
+# Leftover lock (official-has, local names):
+# H  → hasExplicitTitle
+# ne → lastAdoptedRemoteSession
+# Bi → alreadyAdoptedLocalAi (mn.bridgeSessionId===e && mn.sessionId===k())
+# Ae → sessionTitleUnlessHistorySuppressed (R||He()||Ne leftover incl Ano/_4t/Cno)
+# it → syncLocalAiTitle (Ae(we); before G++; pn++ before PATCH; sets mn)
+# Ui → adoptLocalAiTitle
+# rt → generateAndPatch (rn GET; Pe===null abort; !Re → ne)
+# Re → ownTitles.has || hasSent (not isKnownTitle)
+# hn shouldSend → !teardownStarted (ue=!gn). Ln/W/He not inlined.
+# done → (G>=3 && (V||H)) || G>=8
+# count-3 rt even when V
+# Count-1 still Haiku only (no Xo/deriveTitle).
+# Init Ae(we) → V only (not H).
+
+# He / title ie / en / fi bodies @218129661 (export @218235452)
+#   t9s as UUa = He() = eQe?.().foreign===!0
+#   n9s as WUa = fi() = eQe?.().boundSid
+#   Sno as pUa = title ie() = currentSessionHistorySuppressed
+#   pV  as YUa = en(sid) = Jre||Pno||_4t||y4t
+#   Ne=()=>en(B(k()))
+# Local Ae leftover: R||He()||Ne().
+# He = isForeignSessionBinding (optional eQe?.()).
+# Ne leftover = Jre||Sno||xno()?.noHistoryBackfill||Ano||Cno||_4t||y4t.
+# Ano = liveSuppressionProbe?.()===true.
+# _4t = currentSessionPrecautionarySuppression.has(sid).
+# Cno = _4t(Xg(We())). B = Xg = identity.
+# qXs = markPrecautionary (leftover Kn torn L(b)).
+# Official Pi inbound rename @233526810: leftover host initReplBridge
+#   onRenameSession + rename_session control. Cr=uge.
+#   Or = Jxc = isTeammate. Kr = s8n leftover 3-arg (zd/u8n/p8n/rTe/ZAt/J0/doe).
+#   BQ=Li / VAt=Ti / Pm=Oi / mhe=u8o leftover. Rt=P=ly → uge.
+#   storageV5=w=getPinnedStorageV5()
+# job re=_t=iv: n=basename(e); !rv(n)||e!==join(QF(),n) → void; else T.job(n,t)
+#   rv=C: nonempty, not /^[. ]+$/, no / \\ NUL, K only if starts with .
+#   QF=join(Ae(),"jobs")  Ae=config home
+#   T.job=(e,n)=>({namespace:"job",jobId:e,relPath:n})
+#   H: u=n?re(e,[j]):void 0; n&&u → write(u,json,{mode:384,parent:"mustExist"})
+# Oi: CLAUDE_JOB_DIR || wp()?.jobDir || sid.slice(0,8)
+#   wp=Jt().bgTakeover  uC=wp()?.jobDir??CLAUDE_JOB_DIR
+# J0=rL(e,t,n="user"): setRegisteredName + Vn(patch,t)  t=storageV5
+#   Vn: t.read([wl()]) then t.write(wl(),json,{publishDiscipline:"inPlace"})
+#   wl=ee.session(`${pid}.json`)
+# YAt 5th storageV5; if(!dp()) Reo. dp=Xto()!==null = isPersistenceSuppressed
+#   MJe/$e=join(dirname(transcript),sid,"custom-title.json")
+#   Reo leftover: Be()→isHoverRestOn(); Tg=nPb walk to getProjectsDir();
+#     leftoverE=Gad jsonl segment; leftoverRv=Ead; leftoverG=Ua sidecar lite.
+#     v5 write/delete mode 384 then return (even on fail). Else mkdir 448 / write 384.
+#   u8o else YAt(u,c,zS()??Du(),c8n(t),n); auto XAt(u,c,n) path=gu(e)
+#   s8n ZAt(d,u,zS()??Du(),c8n(t),n) 始终；再 o→userTypedName
+# i8n=ke(e,o): (u()??a()) && S(sid)===S(e) → selfTitle=V(o)
+#   stripBridgeSessionIdPrefix=lQc @206645384 strip /^(?:session|cse)_/  不是 toCompatSessionId
+#   V=nonempty string
+# fj=pt=At().remote  kind==="ccr"&&sessionId
+#   leftoverFj=At().remote; default remote:null. Kx/En SEA 无产品 JS 调用点。
+#   leftoverU8o 用 leftoverFj()，不用 leftover 239 latchCcrSessionId。
+# te=KXs as JUa: clearResilientPrecautionSids.add
+# _e=ZXs as MUa: scanUncertaintyHoldSids.delete
+# Me=YXs as KUa: scanUncertaintyHoldSids.add
+# ui=XXs as LUa: scanUncertaintyHoldSids.has===true
+#   torn/gone 不调 Me。init 在 Zn 后 ci=UXs(w)：
+#   found→De=HXs; clean→li=JXs; torn→he scan_torn;
+#   else he scan_budget_exhausted|scan_read_error + L,te,!re&&Me
+#   persist-sync leftover `ur`/`Wt`/`yo`/`zr` 1:1 (FS). Qt=_i reverse @205118281.
+#     Xt=si JSON.parse; sr=WJe; Xe=gh; ar=kno; Ke=ENOENT; Rn=5242880; Vt=20.
+#     fr @233517100 + Bn.transcript=j leftover-wired; qt=tr===void 0.
+#     or=xeo=bSa @218031079 leftover-wired (needs readRecords); else Qt.
+#     B6s=262144 Peo=2097152. Bn.transcript=j @206346298.
+#     leftoverPersistMainPath = Qe/Je/Ze (not zS()??Du).
+#     pn (X$ helper) not found as function — X$ type union leftover-hosted.
+#   Ei.onTransportPersistenceReady: R||Ne() skip ur, still ii/si.
+#   remote fire: getInternalEventWriter/Readers then Ne. Local transport 无 getter → no-op.
+#   R=Boolean($n)||ie()||re(b)||on(b)。Kn 置 Le。
+#   Xn=()=>ui(b)&&!$n&&!Le&&!ie()&&!on(b)&&S?.noHistoryBackfill!==!0&&k()===b
+#     ?{uncertaintyOnly:!0}:void 0
+#   if(R)Ce=Xn(),an?.(Ce)；scan 后 if(!R&&(ie||re||on||k!==b))R=!0,Ce=Xn(),an?.(Ce)
+#   an=onHistoryBackfillSuppressed。
+#   hook leftover et||Dt||Mo: ie=Se stash in Gi; gt=!Ye?.accountUuid;
+#     Pn=K first uuid drift; Dt=te===Ur; Mo=gt&&Pn.
+#     HR=GUa←qXs, jR=JUa←KXs, FK=MUa←ZXs, zc=FUa←Xg on stash-drop.
+#     tC=ZUa←r9s/b4t=clearBridgeSessionCache when Xo()===Ur after xe.
+#     fe/Z 不是导入：fe={fire:Dt,unregister:Ja(Dt)}；Z=F.eligible.
+#     Official fe.fire/unregister + Z eligible 未 inlined（无 handle.archive/Ja/F.current）。
+#     Gi `s_e=1e4` 已锁，teardown 顺序未锁，不 invent delay。
+# e9s(e){eQe=e}  SEA 无调用点（TUa 无调用）
+# setBgTakeover  SEA 无 JS 调用点。MB()=leftoverWp()!==null
+# titleWriter.credentials=s
+# 09-16 promoted to HAVE.

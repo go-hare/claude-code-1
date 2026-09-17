@@ -56,12 +56,16 @@ afterAll(() => {
 
 const { getProjectMcpServerStatus, getProjectMcpServerStatusStrict } =
   await import('../utils.js')
+const { getProjectPathForConfig } = await import('../../../utils/config.js')
+const { rejectSessionMcpServers, resetSessionApprovedMcpServersForTests } =
+  await import('../mcpSessionApprovedServers.js')
 
 describe('project MCP approval status', () => {
   beforeEach(() => {
     mockSettings = {}
     nonInteractive = false
     skipDangerous = false
+    resetSessionApprovedMcpServersForTests()
   })
 
   test('strict status stays pending without settings approval', () => {
@@ -88,5 +92,18 @@ describe('project MCP approval status', () => {
     skipDangerous = true
     expect(getProjectMcpServerStatusStrict('evil-server')).toBe('pending')
     expect(getProjectMcpServerStatus('evil-server')).toBe('approved')
+  })
+
+  test('session reject gates plugin MCP when persist never wrote disabled', () => {
+    rejectSessionMcpServers(getProjectPathForConfig(), ['plugin-mcp'])
+    expect(getProjectMcpServerStatusStrict('plugin-mcp')).toBe('pending')
+    expect(getProjectMcpServerStatus('plugin-mcp')).toBe('rejected')
+    expect(getProjectMcpServerStatus('other-mcp')).toBe('pending')
+  })
+
+  test('session reject wins over non-interactive auto-approve', () => {
+    nonInteractive = true
+    rejectSessionMcpServers(getProjectPathForConfig(), ['plugin-mcp'])
+    expect(getProjectMcpServerStatus('plugin-mcp')).toBe('rejected')
   })
 })

@@ -19,44 +19,55 @@ import {
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
+import {
+  analyticsMock,
+  pushAnalyticsLogEvent,
+} from '../../../../tests/mocks/analytics.js'
+import { authMock } from '../../../../tests/mocks/auth.js'
+import {
+  cronMock,
+  oauthClientMock,
+  oauthConfigMock,
+  teleportApiMock,
+} from '../../../../tests/mocks/oauthSurface.js'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 // ── Analytics mock ──────────────────────────────────────────────────────────
-const realAnalytics = await import('src/services/analytics/index.js')
-const logEventMock = mock(() => {})
-mock.module('src/services/analytics/index.js', () => ({
-  ...realAnalytics,
-  logEvent: logEventMock,
-}))
+const logEventMock = mock(
+  (_name: string, _metadata?: Record<string, unknown>) => {},
+)
+let popAnalyticsLogEvent: (() => void) | undefined
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // ── Auth / OAuth mocks ──────────────────────────────────────────────────────
-const realAuth = await import('src/utils/auth.js')
 mock.module('src/utils/auth.js', () => ({
-  ...realAuth,
+  ...authMock(),
   getClaudeAIOAuthTokens: () => ({ accessToken: 'test-token-ap' }),
 }))
-mock.module('src/services/oauth/client.js', () => ({
-  getOrganizationUUID: async () => 'org-uuid-ap',
-}))
-mock.module('src/constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-}))
-const realTeleportApi = await import('src/utils/teleport/api.js')
-mock.module('src/utils/teleport/api.js', () => ({
-  ...realTeleportApi,
-  getOAuthHeaders: (token: string) => ({ Authorization: `Bearer ${token}` }),
-  prepareWorkspaceApiRequest: async () => ({
-    apiKey: 'test-workspace-key-ap',
+mock.module('src/services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => 'org-uuid-ap',
   }),
-  prepareApiRequest: async () => ({
-    apiKey: 'test-api-key-ap',
+)
+mock.module('src/constants/oauth.js', oauthConfigMock)
+mock.module('src/utils/teleport/api.js', () =>
+  teleportApiMock({
+    getOAuthHeaders: (token: string) => ({ Authorization: `Bearer ${token}` }),
+    prepareWorkspaceApiRequest: async () => ({
+      apiKey: 'test-workspace-key-ap',
+    }),
+    prepareApiRequest: async () => ({
+      apiKey: 'test-api-key-ap',
+    }),
   }),
-}))
+)
 mock.module('src/services/auth/hostGuard.ts', () => ({
   assertSubscriptionBaseUrl: () => {},
   assertWorkspaceHost: () => {},
@@ -64,14 +75,22 @@ mock.module('src/services/auth/hostGuard.ts', () => ({
 }))
 
 // ── cron mock ───────────────────────────────────────────────────────────────
-mock.module('src/utils/cron.js', () => ({
-  parseCronExpression: (expr: string) =>
-    expr.includes('INVALID')
-      ? null
-      : { minute: [0], hour: [9], dayOfMonth: [1], month: [1], dayOfWeek: [1] },
-  cronToHuman: (expr: string) => `Human(${expr})`,
-  computeNextCronRun: () => null,
-}))
+mock.module('src/utils/cron.js', () =>
+  cronMock({
+    parseCronExpression: (expr: string) =>
+      expr.includes('INVALID')
+        ? null
+        : {
+            minute: [0],
+            hour: [9],
+            dayOfMonth: [1],
+            month: [1],
+            dayOfWeek: [1],
+          },
+    cronToHuman: (expr: string) => `Human(${expr})`,
+    computeNextCronRun: () => null,
+  }),
+)
 
 // ── Axios mock ──────────────────────────────────────────────────────────────
 const axiosGetMock = mock(async () => ({}))
@@ -100,7 +119,14 @@ beforeAll(async () => {
   callAgentsPlatform = mod.callAgentsPlatform
 })
 
+beforeAll(() => {
+  popAnalyticsLogEvent = pushAnalyticsLogEvent((name, metadata) => {
+    logEventMock(name, metadata)
+  })
+})
+
 afterAll(() => {
+  popAnalyticsLogEvent?.()
   axiosHandle.useStubs = false
 })
 
@@ -356,4 +382,12 @@ describe('callAgentsPlatform', () => {
       expect.anything(),
     )
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

@@ -201,6 +201,22 @@ export function useVirtualScroll(
   // into heightCache. Render #3 has accurate heights → normal recompute.
   const prevRangeRef = useRef<readonly [number, number] | null>(null)
   const freezeRendersRef = useRef(0)
+  // densable 2.1.246 `rg` R / C / U — abort a resize freeze when the item
+  // tail changes, sticky flips (jump-to-bottom), or a non-sticky scrollTop
+  // moves by ≥ viewport. Holding the pre-resize mid-list range through
+  // those events blanks the transcript until the next keypress (#4/#6).
+  const itemTailRef = useRef<{ count: number; lastKey: string | undefined }>({
+    count: 0,
+    lastKey: undefined,
+  })
+  const lastRangeAnchorRef = useRef<{
+    sticky: boolean
+    scrollTop: number
+  } | null>(null)
+  const freezeAnchorRef = useRef<{
+    sticky: boolean
+    scrollTop: number
+  } | null>(null)
   // Force commits after expand/collapse so heightCache + offsets catch up.
   // Measure normally avoids setState (flicker during streaming); intentional
   // layout changes need the extra frames or blank spacer sticks forever.
@@ -252,6 +268,7 @@ export function useVirtualScroll(
     offsetVersionRef.current++
     skipMeasurementRef.current = true
     freezeRendersRef.current = 2
+    freezeAnchorRef.current = lastRangeAnchorRef.current
   }
   if (prevLayoutEpoch.current !== layoutEpoch) {
     prevLayoutEpoch.current = layoutEpoch
@@ -280,7 +297,18 @@ export function useVirtualScroll(
     // once post-toggle Yoga lands (layoutEpoch path also uses needsOffsetRebuild).
     needsHeightSettleRef.current = true
   }
-  const frozenRange = freezeRendersRef.current > 0 ? prevRangeRef.current : null
+  // densable `F`: item tail identity — abort freeze + drop the pinned
+  // range so a mid-resize append remounts the live tail (also disables
+  // same-frame slide-cap against a stale mid-list range).
+  const itemTailChanged =
+    itemTailRef.current.count !== itemKeys.length ||
+    itemTailRef.current.lastKey !== itemKeys.at(-1)
+  if (freezeRendersRef.current > 0 && itemTailChanged) {
+    freezeRendersRef.current = 0
+  }
+  if (itemTailChanged) {
+    prevRangeRef.current = null
+  }
 
   // useSyncExternalStore ties re-renders to imperative scroll. Snapshot is
   // scrollTop QUANTIZED to SCROLL_QUANTUM bins — Object.is sees no change
@@ -354,6 +382,21 @@ export function useVirtualScroll(
   // directly, minus the instability. Default true: before the ref attaches,
   // assume bottom (sticky will pin us there on first Ink render).
   const isSticky = scrollRef.current?.isSticky() ?? true
+  if (freezeRendersRef.current > 0) {
+    const freezeAnchor = freezeAnchorRef.current
+    if (freezeAnchor === null) {
+      freezeAnchorRef.current = { sticky: isSticky, scrollTop }
+    } else if (
+      freezeAnchor.sticky !== isSticky ||
+      (!isSticky &&
+        Math.abs(scrollTop - freezeAnchor.scrollTop) >= Math.max(1, viewportH))
+    ) {
+      // densable `rg`: sticky / large unpinned abort is `b.current=0` only.
+      // Official does not null `x` here — slide-cap still reads prevRange.
+      freezeRendersRef.current = 0
+    }
+  }
+  const frozenRange = freezeRendersRef.current > 0 ? prevRangeRef.current : null
 
   // Official densable ALi: track unpinned dwell whenever sticky flips
   // (including renderer-driven pin / non-keybinding scroll). Cleanup pins
@@ -589,6 +632,8 @@ export function useVirtualScroll(
     freezeRendersRef.current--
   } else {
     prevRangeRef.current = [start, end]
+    itemTailRef.current = { count: n, lastKey: itemKeys.at(-1) }
+    lastRangeAnchorRef.current = { sticky: isSticky, scrollTop }
   }
   // useDeferredValue lets React render with the OLD range first (cheap —
   // all memo hits) then transition to the NEW range (expensive — fresh

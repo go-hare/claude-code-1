@@ -39,6 +39,7 @@ import type { MCPServerConnection } from './services/mcp/types.js'
 import type { AppState } from './state/AppState.js'
 import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
 import { createAppStatePermissionContextSetters } from './utils/permissions/permissionContextSetters.js'
+import { retireDepartedAdditionalDirectories } from './utils/settings/applySettingsChange.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import type { APIError } from '@anthropic-ai/sdk'
@@ -436,6 +437,17 @@ export class QueryEngine {
       setAppState,
       // densable y8r(setAppState) for headless/SDK ToolUseContext
       ...createAppStatePermissionContextSetters(setAppState),
+      retireDepartedAdditionalDirectories: directories => {
+        setAppState(prev => {
+          const next = retireDepartedAdditionalDirectories(
+            prev.toolPermissionContext,
+            directories,
+          )
+          return next === prev.toolPermissionContext
+            ? prev
+            : { ...prev, toolPermissionContext: next }
+        })
+      },
       abortController: this.abortController,
       readFileState: this.readFileState,
       nestedMemoryAttachmentTriggers: new Set<string>(),
@@ -682,6 +694,17 @@ export class QueryEngine {
       setAppState,
       // densable y8r(setAppState) for headless/SDK ToolUseContext
       ...createAppStatePermissionContextSetters(setAppState),
+      retireDepartedAdditionalDirectories: directories => {
+        setAppState(prev => {
+          const next = retireDepartedAdditionalDirectories(
+            prev.toolPermissionContext,
+            directories,
+          )
+          return next === prev.toolPermissionContext
+            ? prev
+            : { ...prev, toolPermissionContext: next }
+        })
+      },
       abortController: this.abortController,
       readFileState: this.readFileState,
       nestedMemoryAttachmentTriggers: new Set<string>(),

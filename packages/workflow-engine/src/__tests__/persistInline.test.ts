@@ -15,6 +15,20 @@ import {
   SymlinkWriteRefusedError,
 } from '../tool/persistInline.js'
 
+/** Windows without Developer Mode refuses symlink creation (EPERM). */
+async function trySymlink(
+  target: string,
+  path: string,
+  type?: 'dir' | 'file',
+): Promise<boolean> {
+  try {
+    await symlink(target, path, type)
+    return true
+  } catch {
+    return false
+  }
+}
+
 test('persists to <cwd>/.claude/workflow-runs/<runId>/script.js and returns path', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wf-pi-'))
   try {
@@ -54,7 +68,7 @@ test('refuses when .claude is escape symlink (YNn O_NOFOLLOW chain)', async () =
   const root = await mkdtemp(join(tmpdir(), 'wf-pi-'))
   const outside = await mkdtemp(join(tmpdir(), 'wf-pi-out-'))
   try {
-    await symlink(outside, join(root, '.claude'))
+    if (!(await trySymlink(outside, join(root, '.claude'), 'dir'))) return
     await expect(persistInlineScript('pwn', 'r', root)).rejects.toBeInstanceOf(
       SymlinkWriteRefusedError,
     )
@@ -72,7 +86,7 @@ test('refuses when leaf script.js is a symlink', async () => {
     await mkdir(runDir, { recursive: true })
     const secret = join(outside, 'secret')
     await writeFile(secret, 'secret')
-    await symlink(secret, join(runDir, 'script.js'))
+    if (!(await trySymlink(secret, join(runDir, 'script.js'), 'file'))) return
     await expect(persistInlineScript('pwn', 'r', root)).rejects.toBeInstanceOf(
       SymlinkWriteRefusedError,
     )

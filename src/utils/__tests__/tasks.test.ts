@@ -14,6 +14,7 @@ import {
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import { bunBundleMock } from '../../../tests/mocks/bunBundle.js'
 import {
   createSlowOperationsMock,
   restoreSlowOperationsMock,
@@ -22,9 +23,7 @@ import {
 // Mock dependencies before importing the module under test
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('bun:bundle', () => ({
-  feature: () => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 import * as realBootstrapState from 'src/bootstrap/state.js'
 import * as realTeammate from 'src/utils/teammate.js'
 import * as realSlowOps from 'src/utils/slowOperations.js'

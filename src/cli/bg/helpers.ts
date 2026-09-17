@@ -76,10 +76,12 @@ export type BackgroundSeedMessage = {
   message?: { content?: unknown }
 }
 
+export type BackgroundSeedNameSource = 'user' | 'auto' | 'collision'
+
 export type BackgroundSeed = {
   intent: string
   name?: string
-  nameSource?: 'user' | 'auto'
+  nameSource?: BackgroundSeedNameSource
   color?: string
   detail?: string
 }

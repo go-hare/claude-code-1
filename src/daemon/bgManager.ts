@@ -606,7 +606,8 @@ export async function startBgManager(opts?: {
       }
     } else {
       writeBgJobState(req.short, {
-        state: 'starting',
+        // Official sr() seed: working + rPt so z8n startup wedge can arm.
+        state: 'working',
         detail: 'starting\u2026',
         tempo: 'active',
         output: null,

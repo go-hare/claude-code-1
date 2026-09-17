@@ -5,7 +5,7 @@
  * densable 2.1.218 WJf / HBT / xol / sdr:
  * - context: fork by default (background subagent via shouldBackgroundForkedSkill)
  * - subcommands: { ultra: "ultrareview" } → `/code-review ultra` redirects to cloud
- * - disableModelInvocation: true (215)
+ * - densable 2.1.246 `ji()` omits disableModelInvocation (loader ?? false)
  * - /simplify is an alias for /code-review --fix
  *
  * densable 2.1.223:
@@ -306,8 +306,6 @@ const codeReview = {
   argumentHint:
     '[low|medium|high|xhigh|max|ultra] [--fix] [--comment] [<target>]',
   userInvocable: true,
-  // densable 2.1.215: model must not auto-run /code-review; user slash only
-  disableModelInvocation: true,
   // densable 2.1.218: fork by default → background subagent + task-notification
   context: 'fork' as const,
   // densable Cvo: background defaults true for fork

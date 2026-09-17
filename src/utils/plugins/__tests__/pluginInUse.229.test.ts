@@ -26,6 +26,16 @@ import {
 const temps: string[] = []
 const prevCacheDir = process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR
 
+/** Windows without Developer Mode refuses symlinks; skip those assertions. */
+async function trySymlink(target: string, path: string): Promise<boolean> {
+  try {
+    await symlink(target, path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 beforeEach(() => {
   _resetPluginInUseMarkersForTesting()
 })
@@ -69,7 +79,7 @@ describe('densable 2.1.229 #16 markPluginVersionInUse (IId)', () => {
     await mkdir(realVersion, { recursive: true })
     const versionPath = join(root, 'cache', 'mp', 'plug', '1.0.0')
     await mkdir(join(root, 'cache', 'mp', 'plug'), { recursive: true })
-    await symlink(realVersion, versionPath)
+    if (!(await trySymlink(realVersion, versionPath))) return
 
     await markPluginVersionInUse(versionPath)
 

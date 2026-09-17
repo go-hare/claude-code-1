@@ -105,10 +105,12 @@ import {
 } from 'src/utils/sessionState.js'
 import {
   hydratePlanModeFromRestoredWorker,
+  hydratePlanModeFromTranscript,
   isRestartedWorker,
   syncWorkerPermissionModeRecord,
   type PlanModeOnResume,
 } from 'src/utils/permissions/planModeResume.js'
+import { restoreMemoryToggleFromWorkerState } from 'src/utils/restoreMemoryToggle.js'
 import { externalMetadataToAppState } from 'src/state/onChangeAppState.js'
 import { getInMemoryErrors, logError, logMCPDebug } from 'src/utils/log.js'
 import {
@@ -227,7 +229,10 @@ import {
   getSettingsWithSources,
 } from 'src/utils/settings/settings.js'
 import { settingsChangeDetector } from 'src/utils/settings/changeDetector.js'
-import { applySettingsChange } from 'src/utils/settings/applySettingsChange.js'
+import {
+  applySettingsChange,
+  retireDepartedAdditionalDirectories,
+} from 'src/utils/settings/applySettingsChange.js'
 import {
   applyFastModeOnModelSwitch,
   clearFastModeCooldown,
@@ -280,6 +285,7 @@ import {
   saveAiGeneratedTitle,
   restoreSessionMetadata,
 } from 'src/utils/sessionStorage.js'
+import { getReplBridgeHandle } from 'src/bridge/replBridgeHandle.js'
 import { incrementPromptCount } from 'src/utils/commitAttribution.js'
 import {
   setupSdkMcpClients,
@@ -645,6 +651,11 @@ export async function runHeadless(
     setupTrigger?: 'init' | 'maintenance' | undefined
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
     setSDKStatus?: (status: SDKStatus) => void
+    /**
+     * Official `fu`: hydrate transcript plan when this is false (CLI did
+     * not pass `--permission-mode`). pL treats missing as true.
+     */
+    permissionModeSuppliedOnInvocation?: boolean
   },
 ): Promise<void> {
   // Official EXIT_AFTER_FIRST_RENDER densable — ant-only startup bench exit.
@@ -706,8 +717,8 @@ export async function runHeadless(
   // In headless mode there is no React tree, so the useSettingsChange hook
   // never runs. Subscribe directly so that settings changes (including
   // managed-settings / policy updates) are fully applied.
-  settingsChangeDetector.subscribe(source => {
-    applySettingsChange(source, setAppState)
+  settingsChangeDetector.subscribe((source, extra) => {
+    applySettingsChange(source, setAppState, extra)
 
     // In headless mode, also sync the denormalized fastMode field from
     // settings. The TUI manages fastMode via the UI so it skips this.
@@ -1046,6 +1057,8 @@ export async function runHeadless(
     forkSession: options.forkSession,
     outputFormat: options.outputFormat,
     sdkUrl: options.sdkUrl,
+    permissionModeSuppliedOnInvocation:
+      options.permissionModeSuppliedOnInvocation,
     sessionStartHooksPromise: options.sessionStartHooksPromise,
     restoredWorkerState: structuredIO.restoredWorkerState,
     // densable hydratePrefetch from RemoteIO when --resume CCR v2
@@ -1220,19 +1233,23 @@ export async function runHeadless(
 
   headlessProfilerCheckpoint('after_loadInitialMessages')
 
+  // Official EF(pt),AF(pt),DF(pt) after await restoredWorkerState.
+  // EF = dialog-kinds in loadInitialMessages; AF here; DF is empty.
+  const restoredWorker = await structuredIO.restoredWorkerState
+  restoreMemoryToggleFromWorkerState(restoredWorker)
+
   // Official XWy — enable worker_permission_mode record; skip when this is a
   // restarted worker with no restored CCR metadata.
   try {
     const { resolveWorkerEpoch } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-    const restored = await structuredIO.restoredWorkerState
     syncWorkerPermissionModeRecord({
       enable: enableWorkerPermissionModeRecord,
       notifyInternal: notifyInternalMetadataChanged,
       currentMode: getAppState().toolPermissionContext.mode,
       planModeOnResume,
-      restored,
+      restored: restoredWorker,
       restartedWorker: isRestartedWorker(resolveWorkerEpoch()),
     })
   } catch {
@@ -4494,6 +4511,17 @@ function runHeadlessStreaming(
                   (running && runPhase !== 'waiting_for_agents') ||
                   getMainThreadQueueLength() > 0,
                 toolPermissionContext: getAppState().toolPermissionContext,
+                retireDepartedAdditionalDirectories: directories => {
+                  setAppState(prev => {
+                    const next = retireDepartedAdditionalDirectories(
+                      prev.toolPermissionContext,
+                      directories,
+                    )
+                    return next === prev.toolPermissionContext
+                      ? prev
+                      : { ...prev, toolPermissionContext: next }
+                  })
+                },
                 enqueueMoveNotice: (modelMessage: string) => {
                   enqueue(buildSetCwdMoveNoticeCommand(modelMessage))
                   void run()
@@ -4582,7 +4610,9 @@ function runHeadlessStreaming(
                     clearMemoryFileCaches,
                     clearCommandsCache,
                     reloadPlugins: async () => {
-                      await refreshActivePlugins(setAppState)
+                      await refreshActivePlugins(setAppState, {
+                        applyStagedInstalls: false,
+                      })
                     },
                     logDebug: (m, opts) => {
                       logForDebugging(
@@ -4712,7 +4742,9 @@ function runHeadlessStreaming(
                 }
               }
 
-              const r = await refreshActivePlugins(setAppState)
+              const r = await refreshActivePlugins(setAppState, {
+                applyStagedInstalls: false,
+              })
 
               const sdkAgents = currentAgents.filter(
                 a => a.source === 'flagSettings',
@@ -5670,6 +5702,7 @@ function runHeadlessStreaming(
                 if (title && persist) {
                   try {
                     saveAiGeneratedTitle(getSessionId() as UUID, title)
+                    getReplBridgeHandle()?.adoptLocalAiTitle?.()
                   } catch (e) {
                     logError(e)
                   }
@@ -6953,11 +6986,21 @@ type LoadInitialMessagesResult = {
 function applyPrintPlanModeResume(
   setAppState: (f: (prev: AppState) => AppState) => void,
   restored: RestoredWorkerState,
-  options: { forkSession?: boolean; sdkUrl?: string },
+  options: {
+    forkSession?: boolean
+    sdkUrl?: string
+    permissionModeSuppliedOnInvocation?: boolean
+  },
+  messages?: Message[],
 ): PlanModeOnResume {
   return hydratePlanModeFromRestoredWorker(setAppState, restored, {
     forkSession: !!options.forkSession,
     lane: options.sdkUrl ? 'sdk_url' : 'print',
+    transcript: messages,
+    applyTranscriptHydrate: messages !== undefined,
+    sdkUrl: options.sdkUrl,
+    permissionModeSuppliedOnInvocation:
+      options.permissionModeSuppliedOnInvocation,
   })
 }
 
@@ -6972,6 +7015,7 @@ async function loadInitialMessages(
     outputFormat: string | undefined
     /** Official sdkUrl densable — enables RESUME_FROM_SESSION hydrate when empty. */
     sdkUrl?: string | undefined
+    permissionModeSuppliedOnInvocation?: boolean
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
     restoredWorkerState: Promise<RestoredWorkerState>
     /** densable hydratePrefetch — [fg, sub, tip] from RemoteIO */
@@ -7080,10 +7124,23 @@ async function loadInitialMessages(
           )
         }
 
+        // Official 246 `my(messages)` — transcript plan, not y_u.
+        const planModeOnResume = hydratePlanModeFromTranscript(
+          setAppState,
+          result.messages,
+          {
+            forkSession: !!options.forkSession,
+            sdkUrl: options.sdkUrl,
+            permissionModeSuppliedOnInvocation:
+              options.permissionModeSuppliedOnInvocation,
+          },
+        )
+
         return {
           messages: result.messages,
           turnInterruptionState: result.turnInterruptionState,
           agentSetting: result.agentSetting,
+          planModeOnResume,
           deferredToolUse: result.deferredToolUse,
         }
       }
@@ -7391,6 +7448,7 @@ async function loadInitialMessages(
         setAppState,
         restored,
         options,
+        result.messages,
       )
 
       // Restore session metadata so it's re-appended on exit via reAppendSessionMetadata

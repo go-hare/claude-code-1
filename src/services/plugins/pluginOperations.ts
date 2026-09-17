@@ -84,6 +84,7 @@ import {
 } from '../../utils/plugins/pluginInstallationHelpers.js'
 import {
   cachePlugin,
+  copyPluginCacheOptionsFromPin,
   copyPluginToVersionedCache,
   getVersionedCachePath,
   getVersionedZipCachePath,
@@ -322,6 +323,21 @@ function resolveDelistedPluginId(
   }
 
   return null
+}
+
+/**
+ * densable 2.1.246 #20 — `plugin update` bare name must resolve to the
+ * installed `name@marketplace` before `getPluginById` (FQ required there).
+ * Settings (local > project > user) then installed_plugins; FQ passes through.
+ */
+export function resolvePluginUpdateId(
+  plugin: string,
+  settingsPluginId: string | null,
+  installedPluginId: string | null,
+): string {
+  const { name, marketplace } = parsePluginIdentifier(plugin)
+  if (marketplace) return `${name}@${marketplace}`
+  return settingsPluginId ?? installedPluginId ?? plugin
 }
 
 /**
@@ -1146,10 +1162,19 @@ export async function updatePluginOp(
   // Parse the plugin identifier to get the full plugin ID
   const { name: pluginName, marketplace: marketplaceName } =
     parsePluginIdentifier(plugin)
-  const pluginId = marketplaceName ? `${pluginName}@${marketplaceName}` : plugin
+  const fromSettings = marketplaceName ? null : findPluginInSettings(plugin)
+  const fromInstalled =
+    marketplaceName || fromSettings || scope === 'managed'
+      ? null
+      : resolveDelistedPluginId(plugin, scope, getProjectPathForScope(scope))
+  const pluginId = resolvePluginUpdateId(
+    plugin,
+    fromSettings?.pluginId ?? null,
+    fromInstalled?.pluginId ?? null,
+  )
 
-  // Get plugin info from marketplace
-  const pluginInfo = await getPluginById(plugin)
+  // Get plugin info from marketplace (needs name@marketplace)
+  const pluginInfo = await getPluginById(pluginId)
   if (!pluginInfo) {
     return {
       success: false,
@@ -1554,6 +1579,8 @@ async function performPluginUpdate({
       pluginId,
       newVersion,
       entry,
+      undefined,
+      copyPluginCacheOptionsFromPin(),
     )
 
     // Store old version path for potential cleanup

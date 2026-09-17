@@ -130,6 +130,16 @@ export class OAuthAccountOnHoldError extends Error {
   }
 }
 
+/** densable 2.1.246 `Z9` — fk throws when `_F`/`dl(credentials)` is dead. */
+export class OAuthRefreshDeadError extends Error {
+  constructor() {
+    super(
+      'OAuth refresh token is no longer valid; run /login to re-authenticate',
+    )
+    this.name = 'OAuthRefreshDeadError'
+  }
+}
+
 type AxiosLikeError = {
   isAxiosError: true
   response?: {

@@ -46,6 +46,8 @@ export type PromptCommand = {
   pluginInfo?: {
     pluginManifest: PluginManifest
     repository: string
+    /** densable 2.1.246 `serverPluginId` copy from LoadedPlugin. */
+    serverPluginId?: string
   }
   disableNonInteractive?: boolean
   // Hooks to register when this skill is invoked
@@ -122,6 +124,21 @@ export type LocalJSXCommandContext = ToolUseContext & {
    * `kind==="human"`). Threaded from processUserInput.origin.
    */
   submissionOrigin?: { kind?: string }
+  /**
+   * densable `/cd` `Mt` — REPL wires `refreshActivePlugins`.
+   * Optional: official `reloadPlugins?.()` no-ops when the host has no delegate.
+   */
+  reloadPlugins?: () => Promise<void>
+  /**
+   * densable Te/`le` — `--strict-mcp-config`. When true, `/cd` `Rt` skips
+   * project `.mcp.json` / plugin MCP approval (same as startup Te).
+   */
+  strictMcpConfig?: boolean
+  /**
+   * densable `/cd` `p()` + set_cwd `ft` — retire the previous project's
+   * additionalDirectories from the live permission context after relocate.
+   */
+  retireDepartedAdditionalDirectories?: (directories: string[]) => void
 }
 
 export type ResumeEntrypoint =

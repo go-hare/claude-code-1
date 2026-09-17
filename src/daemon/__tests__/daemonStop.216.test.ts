@@ -17,8 +17,16 @@ import {
 } from '../daemonLock.js'
 
 describe('daemon stop gate helpers (densable 2.1.216)', () => {
-  test('isDaemonLockSignalable is DSr (procStart defined)', () => {
-    expect(isDaemonLockSignalable({ procStart: 'x' })).toBe(true)
+  test('isDaemonLockSignalable is DSr (procStart defined)', async () => {
+    const { isWin32ProcTimesFfiAvailable } = await import(
+      '../../utils/genericProcessUtils.js'
+    )
+    if (isWin32ProcTimesFfiAvailable()) {
+      expect(isDaemonLockSignalable({ procStart: 'x' })).toBe(false)
+      expect(isDaemonLockSignalable({ procStartFt: 'x' })).toBe(true)
+    } else {
+      expect(isDaemonLockSignalable({ procStart: 'x' })).toBe(true)
+    }
     expect(isDaemonLockSignalable({})).toBe(false)
   })
 

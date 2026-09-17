@@ -272,6 +272,44 @@ const SHARED_MOCKS: ReadonlyArray<readonly [string, string, string]> = [
     'src/services/analytics/growthbook.ts',
   ],
   ['tests/mocks/auth.ts', 'authMock', 'src/utils/auth.ts'],
+  [
+    'tests/mocks/analytics.ts',
+    'analyticsMock',
+    'src/services/analytics/index.ts',
+  ],
+  ['tests/mocks/oauthSurface.ts', 'oauthConfigMock', 'src/constants/oauth.ts'],
+  [
+    'tests/mocks/oauthSurface.ts',
+    'oauthClientMock',
+    'src/services/oauth/client.ts',
+  ],
+  [
+    'tests/mocks/oauthSurface.ts',
+    'teleportApiMock',
+    'src/utils/teleport/api.ts',
+  ],
+  ['tests/mocks/oauthSurface.ts', 'cronMock', 'src/utils/cron.ts'],
+  [
+    'tests/mocks/taskSurface.ts',
+    'speculationMock',
+    'src/services/PromptSuggestion/speculation.ts',
+  ],
+  [
+    'tests/mocks/taskSurface.ts',
+    'cleanupRegistryMock',
+    'src/utils/cleanupRegistry.ts',
+  ],
+  [
+    'tests/mocks/taskSurface.ts',
+    'abortControllerMock',
+    'src/utils/abortController.ts',
+  ],
+  ['tests/mocks/taskSurface.ts', 'xmlMock', 'src/constants/xml.ts'],
+  [
+    'tests/mocks/taskSurface.ts',
+    'collapseReadSearchMock',
+    'src/utils/collapseReadSearch.ts',
+  ],
 ]
 
 for (const [mockPath, exportName, realPath] of SHARED_MOCKS) {

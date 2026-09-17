@@ -66,6 +66,7 @@ import {
   shiftAnchor,
   shiftSelection,
   shiftSelectionForFollow,
+  selectionScopeAt,
   startSelection,
   updateSelection,
 } from './selection.js';
@@ -2378,13 +2379,20 @@ export default class Ink {
    * extend the selection word-by-word / line-by-line. Falls back to
    * char-mode startSelection if the click lands on a noSelect cell.
    */
+  /**
+   * densable `onSelectionStart` → `Tp(this.selection,e,o,Cy(...))`.
+   */
+  handleSelectionStart(col: number, row: number): void {
+    startSelection(this.selection, col, row, selectionScopeAt(this.rootNode, col, row));
+  }
+
   handleMultiClick(col: number, row: number, count: 2 | 3): void {
     if (!this.altScreenActive) return;
     const screen = this.frontFrame.screen;
     // selectWordAt/selectLineAt no-op on noSelect/out-of-bounds. Seed with
     // a char-mode selection so the press still starts a drag even if the
     // word/line scan finds nothing selectable.
-    startSelection(this.selection, col, row);
+    startSelection(this.selection, col, row, selectionScopeAt(this.rootNode, col, row));
     if (count === 2) selectWordAt(this.selection, screen, col, row);
     else selectLineAt(this.selection, screen, row);
     // Ensure hasSelection is true so release doesn't re-dispatch onClickAt.
@@ -2554,6 +2562,7 @@ export default class Ink {
         getHyperlinkAt={this.getHyperlinkAt}
         onOpenHyperlink={this.openHyperlink}
         onMultiClick={this.handleMultiClick}
+        onSelectionStart={this.handleSelectionStart}
         onSelectionDrag={this.handleSelectionDrag}
         onStdinResume={this.reassertTerminalModes}
         onRawModeEnter={this.ensureInteractive}

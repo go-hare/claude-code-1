@@ -4,12 +4,22 @@ import { logMock } from '../../../../../../tests/mocks/log'
 import { debugMock } from '../../../../../../tests/mocks/debug'
 import { growthbookMock } from '../../../../../../tests/mocks/growthbook'
 
+import { analyticsMock } from '../../../../../../tests/mocks/analytics.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+import * as realSearchExtraTools from 'src/utils/searchExtraTools.js'
+import * as realToolsConstants from 'src/constants/tools.js'
+import * as realToolIndex from 'src/services/searchExtraTools/toolIndex.js'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
+const searchExtraToolsSnap = snapshotModuleExports(realSearchExtraTools)
+const toolsConstantsSnap = snapshotModuleExports(realToolsConstants)
+const toolIndexSnap = snapshotModuleExports(realToolIndex)
+
 mock.module('src/utils/searchExtraTools.js', () => ({
+  ...searchExtraToolsSnap,
   isSearchExtraToolsEnabledOptimistic: () => true,
   getAutoSearchExtraToolsCharThreshold: () => 100,
   getSearchExtraToolsMode: () => 'tst' as const,
@@ -22,6 +32,7 @@ mock.module('src/utils/searchExtraTools.js', () => ({
 }))
 
 mock.module('src/constants/tools.js', () => ({
+  ...toolsConstantsSnap,
   CORE_TOOLS: new Set(['Read', 'Edit', 'ToolSearch', 'ExecuteExtraTool']),
 }))
 
@@ -45,14 +56,13 @@ const mockSearchTools = mock(
 const mockGetToolIndex = mock(async (_tools: unknown) => [])
 
 mock.module('src/services/searchExtraTools/toolIndex.js', () => ({
+  ...toolIndexSnap,
   getToolIndex: mockGetToolIndex,
   searchTools: mockSearchTools,
 }))
 
 // Mock analytics
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 const { SearchExtraToolsTool } = await import('../SearchExtraToolsTool.js')
 

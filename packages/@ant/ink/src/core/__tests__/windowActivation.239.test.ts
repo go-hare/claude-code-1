@@ -10,7 +10,7 @@ import App, {
 } from '../../components/App.js'
 import { ClickEvent, MOUNT_SETTLE_MS } from '../events/click-event.js'
 import type { ParsedMouse } from '../parse-keypress.js'
-import { createSelectionState } from '../selection.js'
+import { createSelectionState, startSelection } from '../selection.js'
 import {
   getTerminalFocusGainedAt,
   resetTerminalFocusState,
@@ -48,6 +48,7 @@ function stubApp(onClickAt?: App['props']['onClickAt']) {
   app.lastClickCol = -1
   app.lastClickRow = -1
   app.pendingHyperlinkTimer = null
+  app.pendingHyperlinkOpensInPanel = false
   app.lastHoverCol = -1
   app.lastHoverRow = -1
   app.consumeWindowActivationLatch = App.prototype.consumeWindowActivationLatch
@@ -58,6 +59,9 @@ function stubApp(onClickAt?: App['props']['onClickAt']) {
     onHoverAt: () => {},
     onSelectionDrag: () => {},
     onMultiClick: () => {},
+    onSelectionStart: (col, row) => {
+      startSelection(selection, col, row)
+    },
     onClickAt:
       onClickAt ??
       ((col, row, activation) => {

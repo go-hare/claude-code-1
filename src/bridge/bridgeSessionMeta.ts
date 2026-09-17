@@ -8,7 +8,9 @@
  * - kEo: clear on full teardown / user disable (paired with clearBridgeSession)
  *
  * Transcript Bkn/EGt (2.1.224 #30) lives in sessionStorage — process meta alone
- * is not enough for --resume across processes.
+ * is not enough for --resume across processes. initReplBridge reads
+ * getCurrentSessionBridge() after CXr and sets qn only on that Bkn fill so
+ * occupancy does not fire for env / CXr / hook-passed ids.
  */
 
 import { getSessionId } from '../bootstrap/state.js'

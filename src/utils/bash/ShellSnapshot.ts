@@ -20,7 +20,6 @@ import { ripgrepCommand } from '../ripgrep.js'
 import { subprocessEnv } from '../subprocessEnv.js'
 import { quote } from './shellQuote.js'
 
-const LITERAL_BACKSLASH = '\\'
 const SNAPSHOT_CREATION_TIMEOUT = 10000 // 10 seconds
 
 /**
@@ -214,7 +213,13 @@ function getUserSnapshotContent(configFile: string): string {
       done
     `
   } else {
+    // densable 2.1.246 #53 f1o — shopt before functions; %q eval, no base64 subshell
     content += `
+      # shopt before functions: a body using extglob/globstar syntax only
+      # re-parses with the option on.
+      echo "# Shopt" >> "$SNAPSHOT_FILE"
+      shopt -p | head -n 1000 >> "$SNAPSHOT_FILE"
+
       echo "# Functions" >> "$SNAPSHOT_FILE"
 
       # Force autoload all functions first
@@ -222,11 +227,11 @@ function getUserSnapshotContent(configFile: string): string {
 
       # Now get user function names - filter completion functions (single underscore prefix)
       # but keep double-underscore helpers (e.g. __zsh_like_cd from mise, __pyenv_init)
+      # One eval per function so a body that no longer parses (rc=2, not fatal
+      # in non-POSIX bash) drops only itself. The %q literal needs no fork
+      # at source time, unlike a base64 command substitution.
       declare -F | cut -d' ' -f3 | grep -vE '^_[^_]' | while read func; do
-        # Encode the function to base64, preserving all special characters
-        encoded_func=$(declare -f "$func" | base64 )
-        # Write the function definition to the snapshot
-        echo "eval ${LITERAL_BACKSLASH}"${LITERAL_BACKSLASH}$(echo '$encoded_func' | base64 -d)${LITERAL_BACKSLASH}" > /dev/null 2>&1" >> "$SNAPSHOT_FILE"
+        printf 'eval %q > /dev/null 2>&1\\n' "$(declare -f "$func")" >> "$SNAPSHOT_FILE"
       done
     `
   }
@@ -240,7 +245,6 @@ function getUserSnapshotContent(configFile: string): string {
   } else {
     content += `
       echo "# Shell Options" >> "$SNAPSHOT_FILE"
-      shopt -p | head -n 1000 >> "$SNAPSHOT_FILE"
       set -o | grep "on" | awk '{print "set -o " $1}' | head -n 1000 >> "$SNAPSHOT_FILE"
       echo "shopt -s expand_aliases" >> "$SNAPSHOT_FILE"
     `

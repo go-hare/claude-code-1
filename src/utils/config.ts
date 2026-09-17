@@ -1403,6 +1403,24 @@ export function getAutoScrollEnabled(): boolean {
   )
 }
 
+/**
+ * densable We / Y — read ~/.claude.json from disk, not the memory cache.
+ * Jn / env-handoff owner checks must see a login that changed since
+ * getGlobalConfig() last loaded. Does not write-through the cache.
+ */
+export function readGlobalConfigFromDisk(): GlobalConfig | undefined {
+  if (process.env.NODE_ENV === 'test') {
+    return TEST_GLOBAL_CONFIG_FOR_TESTING
+  }
+  try {
+    return migrateConfigFields(
+      getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig),
+    )
+  } catch {
+    return undefined
+  }
+}
+
 export function getGlobalConfig(): GlobalConfig {
   if (process.env.NODE_ENV === 'test') {
     return TEST_GLOBAL_CONFIG_FOR_TESTING

@@ -10,6 +10,7 @@ import { getMcpConfigsByScope } from '../../services/mcp/config.js';
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js';
 import { checkHasTrustDialogAccepted, saveCurrentProjectConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
+import { settingsChangeDetector } from '../../utils/settings/changeDetector.js';
 import { getFsImplementation } from '../../utils/fsOperations.js';
 import { findCanonicalGitRootUncached, findGitRootUncached } from '../../utils/git.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
@@ -183,6 +184,9 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
         hasTrustDialogAccepted: true,
       }));
     }
+
+    // Mid-session accept must re-apply gated project grants now, not on restart.
+    settingsChangeDetector.notifyChange('projectSettings', { trustFlip: true });
 
     // Do NOT write MCP server settings here. handleMcpjsonServerApprovals in
     // interactiveHelpers.tsx runs right after this dialog and shows the per-server approval

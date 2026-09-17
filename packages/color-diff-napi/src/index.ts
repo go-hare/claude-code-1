@@ -86,6 +86,96 @@ function rgb(r: number, g: number, b: number): Color {
   return { r, g, b, a: 255 }
 }
 
+/** densable Gt — ansi:name → palette index for te(). No gray/grey. */
+const ANSI_NAME_INDEX = new Map<string, number>([
+  ['black', 0],
+  ['red', 1],
+  ['green', 2],
+  ['yellow', 3],
+  ['blue', 4],
+  ['magenta', 5],
+  ['cyan', 6],
+  ['white', 7],
+  ['blackBright', 8],
+  ['redBright', 9],
+  ['greenBright', 10],
+  ['yellowBright', 11],
+  ['blueBright', 12],
+  ['magentaBright', 13],
+  ['cyanBright', 14],
+  ['whiteBright', 15],
+])
+
+/**
+ * Claude theme keys ColorDiff overlays onto its syntax palette.
+ * densable Ft reads these from the live Theme object.
+ */
+export type ClaudeDiffPalette = {
+  diffAdded: string
+  diffRemoved: string
+  diffAddedDimmed: string
+  diffRemovedDimmed: string
+  diffAddedWord: string
+  diffRemovedWord: string
+}
+
+/**
+ * densable te — parse a Claude theme color string to Color, or null.
+ */
+function parseClaudeThemeColor(value: string | undefined): Color | null {
+  if (value === undefined) return null
+  const rgbMatch = /^rgb\(\s?(\d{1,3}),\s?(\d{1,3}),\s?(\d{1,3})\s?\)$/.exec(
+    value,
+  )
+  if (rgbMatch) {
+    return rgb(Number(rgbMatch[1]), Number(rgbMatch[2]), Number(rgbMatch[3]))
+  }
+  const hex6 = /^#([0-9a-fA-F]{6})$/.exec(value)
+  if (hex6) {
+    const n = parseInt(hex6[1]!, 16)
+    return rgb(n >> 16, (n >> 8) & 255, n & 255)
+  }
+  const hex3 = /^#([0-9a-fA-F]{3})$/.exec(value)
+  if (hex3) {
+    const [r, g, b] = hex3[1]!
+    return rgb(parseInt(r! + r, 16), parseInt(g! + g, 16), parseInt(b! + b, 16))
+  }
+  const ansi256 = /^ansi256\(\s?(\d{1,3})\s?\)$/.exec(value)
+  if (ansi256) return ansiIdx(Number(ansi256[1]))
+  if (value.startsWith('ansi:')) {
+    const idx = ANSI_NAME_INDEX.get(value.slice(5))
+    return idx === undefined ? null : ansiIdx(idx)
+  }
+  return null
+}
+
+/**
+ * densable Ft — overlay Claude diffAdded/diffRemoved (and dimmed / word)
+ * onto the ColorDiff syntax theme. Failed parses keep the syntax default.
+ */
+function applyClaudeDiffPalette(
+  syntaxTheme: Theme,
+  claudeTheme: ClaudeDiffPalette,
+  dim: boolean,
+): Theme {
+  const addLine = parseClaudeThemeColor(
+    (dim ? claudeTheme.diffAddedDimmed : undefined) ?? claudeTheme.diffAdded,
+  )
+  const deleteLine = parseClaudeThemeColor(
+    (dim ? claudeTheme.diffRemovedDimmed : undefined) ??
+      claudeTheme.diffRemoved,
+  )
+  const addWord = parseClaudeThemeColor(claudeTheme.diffAddedWord)
+  const deleteWord = parseClaudeThemeColor(claudeTheme.diffRemovedWord)
+  return {
+    ...syntaxTheme,
+    addLine: addLine ?? syntaxTheme.addLine,
+    deleteLine: deleteLine ?? syntaxTheme.deleteLine,
+    addWord: addWord ?? syntaxTheme.addWord,
+    deleteWord: deleteWord ?? syntaxTheme.deleteWord,
+  }
+}
+
 function ansiIdx(index: number): Color {
   return { r: index, g: 0, b: 0, a: 0 }
 }
@@ -364,6 +454,34 @@ function buildTheme(themeName: string, mode: ColorMode): Theme {
 
 function defaultStyle(theme: Theme): Style {
   return { foreground: theme.foreground, background: theme.background }
+}
+
+/**
+ * densable 2.1.246 `fe` / `V` / `U` — hard-cap a hunk or file line before
+ * highlight+wrap so a single base64 line cannot explode Yoga/transcript.
+ * `_e` here is a surrogate-safe code-unit slice (official `_e(n, fe)`).
+ */
+const DIFF_LINE_MAX = 2000
+
+function truncateDiffLine(
+  e: string,
+  t = 0,
+): { code: string; truncatedChars: number } {
+  if (e.length - t <= DIFF_LINE_MAX) {
+    return { code: e.slice(t), truncatedChars: 0 }
+  }
+  const n = e.slice(t, t + DIFF_LINE_MAX + 1)
+  let end = DIFF_LINE_MAX
+  if (end > 0) {
+    const prev = n.charCodeAt(end - 1)
+    if (prev >= 0xd800 && prev <= 0xdbff) end -= 1
+  }
+  const i = n.slice(0, end)
+  return { code: i, truncatedChars: e.length - t - i.length }
+}
+
+function truncatedCharsMarker(e: number): string {
+  return ` \u2026 [+${e} chars]`
 }
 
 function lineBackground(marker: Marker, theme: Theme): Color {
@@ -882,9 +1000,17 @@ export class ColorDiff {
     this.prefixContent = prefixContent ?? null
   }
 
-  render(themeName: string, width: number, dim: boolean): string[] | null {
+  render(
+    themeName: string,
+    width: number,
+    dim: boolean,
+    claudeTheme?: ClaudeDiffPalette | null,
+  ): string[] | null {
     const mode = detectColorMode(themeName)
-    const theme = buildTheme(themeName, mode)
+    const built = buildTheme(themeName, mode)
+    const theme = claudeTheme
+      ? applyClaudeDiffPalette(built, claudeTheme, dim)
+      : built
     const lang = detectLanguage(this.filePath, this.firstLine)
     const hlState = { lang, stack: null }
 
@@ -897,11 +1023,16 @@ export class ColorDiff {
     let newLine = this.hunk.newStart
     const effectiveWidth = Math.max(1, width - maxDigits - 2 - 1)
 
-    // First pass: assign markers + line numbers
-    type Entry = { lineNumber: number; marker: Marker; code: string }
+    // First pass: assign markers + line numbers. densable V(p, 1).
+    type Entry = {
+      lineNumber: number
+      marker: Marker
+      code: string
+      truncatedChars: number
+    }
     const entries: Entry[] = this.hunk.lines.map(rawLine => {
       const marker = parseMarker(rawLine.slice(0, 1))
-      const code = rawLine.slice(1)
+      const { code, truncatedChars } = truncateDiffLine(rawLine, 1)
       let lineNumber: number
       switch (marker) {
         case '+':
@@ -916,7 +1047,7 @@ export class ColorDiff {
           newLine++
           break
       }
-      return { lineNumber, marker, code }
+      return { lineNumber, marker, code, truncatedChars }
     })
 
     // Word-diff ranges (skip when dim — too loud)
@@ -936,7 +1067,7 @@ export class ColorDiff {
     // Second pass: highlight + transform pipeline
     const out: string[] = []
     for (let i = 0; i < entries.length; i++) {
-      const { lineNumber, marker, code } = entries[i]!
+      const { lineNumber, marker, code, truncatedChars } = entries[i]!
       const tokens: Block[] =
         marker === '-'
           ? [[defaultStyle(theme), code]]
@@ -945,6 +1076,12 @@ export class ColorDiff {
       const h: Highlight = { marker, lineNumber, lines: [tokens] }
       removeNewlines(h)
       applyBackground(h, theme, ranges[i]!)
+      if (truncatedChars > 0) {
+        h.lines[0]!.push([
+          defaultStyle(theme),
+          truncatedCharsMarker(truncatedChars),
+        ])
+      }
       wrapText(h, effectiveWidth, theme)
       if (mode === 'ansi' && marker === '-') {
         dimContent(h)
@@ -981,7 +1118,11 @@ export class ColorFile {
 
     const out: string[] = []
     for (let i = 0; i < lines.length; i++) {
-      const tokens = highlightLine(hlState, lines[i]!, theme)
+      const { code, truncatedChars } = truncateDiffLine(lines[i]!)
+      const tokens = highlightLine(hlState, code, theme)
+      if (truncatedChars > 0) {
+        tokens.push([defaultStyle(theme), truncatedCharsMarker(truncatedChars)])
+      }
       const h: Highlight = { marker: null, lineNumber: i + 1, lines: [tokens] }
       removeNewlines(h)
       wrapText(h, effectiveWidth, theme)
@@ -1021,4 +1162,9 @@ export const __test = {
   colorToEscape,
   detectColorMode,
   detectLanguage,
+  truncateDiffLine,
+  truncatedCharsMarker,
+  DIFF_LINE_MAX,
+  parseClaudeThemeColor,
+  applyClaudeDiffPalette,
 }

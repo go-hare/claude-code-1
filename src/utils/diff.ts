@@ -41,21 +41,30 @@ function unescapeFromDiff(s: string): string {
 }
 
 /**
- * Count lines added and removed in a patch and update the total
- * For new files, pass the content string as the second parameter
+ * Count lines added and removed in a patch and update the total.
+ * For new files, pass the content string as the second parameter.
+ * densable `wme`: when patch is empty and old+new are supplied (Write omit-large
+ * update), count lines from the full strings instead of hunks.
  * @param patch Array of diff hunks
- * @param newFileContent Optional content string for new files
+ * @param newFileContent Optional content string for new files / omit-large Write
+ * @param oldFileContent Optional prior content for omit-large Write updates
  */
 export function countLinesChanged(
   patch: StructuredPatchHunk[],
   newFileContent?: string,
+  oldFileContent?: string,
 ): void {
   let numAdditions = 0
   let numRemovals = 0
 
-  if (patch.length === 0 && newFileContent) {
-    // For new files, count all lines as additions
-    numAdditions = newFileContent.split(/\r?\n/).length
+  if (patch.length === 0 && (newFileContent || oldFileContent)) {
+    // densable wme: empty hunks + full strings (create, or Write TB omit gate)
+    if (newFileContent) {
+      numAdditions = newFileContent.split(/\r?\n/).length
+    }
+    if (oldFileContent) {
+      numRemovals = oldFileContent.split(/\r?\n/).length
+    }
   } else {
     numAdditions = patch.reduce(
       (acc, hunk) => acc + count(hunk.lines, _ => _.startsWith('+')),

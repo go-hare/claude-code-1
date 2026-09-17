@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { fileURLToPath } from 'url'
 import { CONTROL_SOCKET_BIND_RETRY_MS } from '../controlSocket.js'
 
 /**
@@ -12,7 +13,7 @@ describe('startControlSocket densable aAp bind', () => {
 
   test('source: EADDRINUSE retry loop + unix live probe product', async () => {
     const src = await Bun.file(
-      new URL('../controlSocket.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('../controlSocket.ts', import.meta.url)),
     ).text()
     expect(src).toContain('CONTROL_SOCKET_BIND_RETRY_MS = 10_000')
     expect(src).toMatch(/code !== 'EADDRINUSE'/)

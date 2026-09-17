@@ -119,6 +119,7 @@ export function isEligibleBridgeMessage(m: Message): boolean {
         }
       | undefined
     if (attachment?.type === 'hook_system_message') return true
+    if (attachment?.type === 'tool_host_result_lines') return true
     return (
       attachment?.type === 'queued_command' &&
       attachment.commandMode === 'prompt' &&
@@ -360,6 +361,8 @@ export type ServerControlRequestHandlers = {
    */
   onSetModel?: (
     model: string | undefined,
+    // Load-bearing void: narrowing to `undefined` rejects `() => {}` implementors.
+    // biome-ignore lint/suspicious/noConfusingVoidType: see above
   ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   onSetPermissionMode?: (
@@ -375,6 +378,13 @@ export type ServerControlRequestHandlers = {
     serverName: string,
     mode: string | null,
   ) => { ok: true; warning?: string } | { ok: false; error: string }
+  /**
+   * Official leftover Pi. Control subtype rename_session.
+   * Missing callback → error "not registered".
+   */
+  onRenameSession?: (
+    title: string,
+  ) => { ok: true } | { ok: false; error: string }
 }
 
 const OUTBOUND_ONLY_ERROR =
@@ -454,6 +464,7 @@ export function handleServerControlRequest(
     onSetMaxThinkingTokens,
     onSetPermissionMode,
     onSetMcpPermissionModeOverride,
+    onRenameSession,
   } = handlers
   if (!transport) {
     logForDebugging(
@@ -646,6 +657,46 @@ export function handleServerControlRequest(
       }
       replyStopTaskAsync(request, transport, sessionId, onStopTask(taskId))
       return
+    }
+
+    case 'rename_session': {
+      // Official leftover @209373645: title must be a string; Le?.(title)
+      // else "not registered"; ok → success else error a.error.
+      if (typeof req.title !== 'string') {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: 'rename_session: title must be a string',
+          },
+        }
+        break
+      }
+      const verdict = onRenameSession?.(req.title) ?? {
+        ok: false,
+        error:
+          'rename_session is not supported in this context (onRenameSession callback not registered)',
+      }
+      if (verdict.ok) {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: request.request_id,
+          },
+        }
+      } else {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: (verdict as { ok: false; error: string }).error,
+          },
+        }
+      }
+      break
     }
 
     case 'set_mcp_permission_mode_override': {

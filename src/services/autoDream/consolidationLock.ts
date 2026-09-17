@@ -11,7 +11,7 @@ import { getAutoMemPath } from '../../memdir/paths.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isProcessRunning } from '../../utils/genericProcessUtils.js'
 import { listCandidates } from '../../utils/listSessionsImpl.js'
-import { getProjectDir } from '../../utils/sessionStorage.js'
+import { getProjectDir } from '../../utils/sessionPaths.js'
 
 const LOCK_FILE = '.consolidate-lock'
 

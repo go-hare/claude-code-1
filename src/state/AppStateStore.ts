@@ -186,8 +186,17 @@ export type AppState = DeepImmutable<{
   replBridgeError: string | undefined
   // densable 2.1.224 #22 — failure kind ("terminal" default); kept with error after auto-disable
   replBridgeErrorKind: string | undefined
+  /**
+   * densable `authChangeGeneration` default 0. `/login` increments so
+   * in-flight token snapshots abort and the revive attempt-cap is bypassed.
+   */
+  authChangeGeneration: number
   // Always-on bridge: session name set via `/remote-control <name>` (used as session title)
   replBridgeInitialName: string | undefined
+  /** densable leftover hook Gi `replBridgeSessionGroupingId:void 0`. */
+  replBridgeSessionGroupingId: string | undefined
+  /** densable leftover hook Gi `replBridgeSkipNextArchive:!0`. */
+  replBridgeSkipNextArchive: boolean | undefined
   // Always-on bridge: first-time remote dialog pending (set by /remote-control command)
   showRemoteCallout: boolean
   // Pipe IPC state — added at runtime when feature('PIPE_IPC') is enabled.
@@ -325,6 +334,8 @@ export type AppState = DeepImmutable<{
     deferredSince?: number
     checkinCount?: number
     lastDeferralPassAt?: number
+    /** densable 2.1.246 idleCheckinCount — burst cap, cleared by d9n. */
+    idleCheckinCount?: number
   }
   tungstenActiveSession?: {
     sessionName: string
@@ -649,7 +660,10 @@ export function getDefaultAppState(): AppState {
     replBridgeSessionId: undefined,
     replBridgeError: undefined,
     replBridgeErrorKind: undefined,
+    authChangeGeneration: 0,
     replBridgeInitialName: undefined,
+    replBridgeSessionGroupingId: undefined,
+    replBridgeSkipNextArchive: undefined,
     showRemoteCallout: false,
     toolPermissionContext: {
       ...getEmptyToolPermissionContext(),

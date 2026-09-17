@@ -2,10 +2,12 @@ import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 /**
  * densable 2.1.216 changelog #7 — resumed bg agents must not revert to
@@ -190,4 +192,12 @@ describe('resume agent identity (densable 2.1.216 #7)', () => {
     expect(mirrorIdx).toBeGreaterThan(0)
     expect(throwIdx).toBeGreaterThan(mirrorIdx)
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

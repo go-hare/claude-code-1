@@ -53,6 +53,20 @@ export type LoadedPlugin = {
   repository: string // Repository identifier, usually same as source
   enabled?: boolean
   isBuiltin?: boolean // true for built-in plugins that ship with the CLI
+  /**
+   * densable 2.1.246 hyo / sun — claude.ai sync `installation_preference`.
+   * `required` / `auto_install` → telemetry `enabled_via=admin-install`.
+   */
+  installationPreference?: 'required' | 'auto_install'
+  /**
+   * densable 2.1.246 sun / Nsn — real marketplace for synced plugins.
+   * Session telemetry uses this instead of the `@synced` repository suffix.
+   */
+  marketplaceName?: string
+  /**
+   * densable 2.1.246 `Fo="server_plugin_id"` — `plugin_[A-Za-z0-9]{1,64}`.
+   */
+  serverPluginId?: string
   sha?: string // Git commit SHA for version pinning (from marketplace entry source)
   commandsPath?: string
   commandsPaths?: string[] // Additional command paths from manifest

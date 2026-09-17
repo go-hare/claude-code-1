@@ -1,0 +1,89 @@
+# Official 2.1.246 SEA — #18 O8 plugin cache staging
+# Local host landed (r_n / kue / vue + leftover O8). 09-16 promoted to HAVE.
+
+# r_n @212732920
+function r_n(e){return`${e}${odt}${jCo(4).toString("hex")}`}
+odt=".tmp~"
+
+# vue
+function vue(e){return/\.tmp~[0-9a-f]{8}$/.test(e)}
+
+# kue @212733098
+async function kue(e,t){
+  await wue(CX(e,ag),{force:!0})
+  if(!await JC(t).then(()=>!1,(r)=>{if(eh(r))return!0;throw r}))
+    throw Object.assign(Error("plugin cache version path is occupied"),{code:"EEXIST"})
+  await _l(e,t)
+}
+
+# NT @213262344 — leftover maps Be()→isHoverRestOn(); np=Yn @210112490
+# np is NOT any of the 8 `function np(` hits. Official = Yn @210112490.
+function NT(e){return Be()&&e!==void 0&&np(No(ea(),"_","_","_"),ea())!==null}
+# Yn/Ot/Dt: cacheRoot must === Mt()=join(ee(),"plugins","cache");
+#   relative 3 segs, ce=every leftoverRv, version not .zip.
+# dummy _/_/_ still passes: leftoverRv("_") is legal (not empty / dotted / slash).
+
+# O8 @213278204 — staging only when u=NT(c)
+let _=u?r_n(d):d
+# concurrent: "was cached concurrently at ${d}; using it"
+# in-use: "deferring overwrite until it exits"
+# remove: "Removing ${P?"superseded":"incomplete"} cache directory"
+
+# BLn/AFe/QU bodies @210126375 (export @210276029)
+#   Hl as qdb = QU(source) = source==="command" && mode==="link"
+#   Bl as odb = AFe(dest) = dest has parseable .claude-plugin-link marker
+#   Vl as ndb = BLn(src,dest) = read marker, relink top-level symlinks via
+#     `${dest}.linking-${pid}`, write marker wx, atomic rename
+# O8: a=s?.linkFarm??QU(r?.source); QU → AFe already-linked / BLn(e,d)
+# Local QU twin: isCommandPluginLinkMode. Oxd is first-install (in-place dest).
+# O8 leftover now: QU → AFe already-linked / BLn relink.
+
+# ---- VFS main path LANDED (GG/T0o in pluginCacheStaging + O8 m/h).
+# ---- VFS symlink + FLn/Ut/a0n + _ue path-safety LANDED 2026-09-15.
+
+# uS @212734131
+async function uS(e){try{let t=await JC(e);return await Sue(e,t)?"symlink":"other"}
+  catch(t){return eh(t)?"absent":"unexaminable"}}
+# Sue @212733897 — junction still reports directory
+async function Sue(e,t){if(t.isSymbolicLink())return!0;if(!t.isDirectory())return!1;
+  try{return!await YC(n_n(e),t_n(e))}catch(n){return!eh(n)}}
+# YC @212701831 — readlink resolves => is a link; EINVAL => is not
+async function YC(e,t){let n=qEo(e,t);try{await WEo(n);return!1}
+  catch(r){if(De(r)==="EINVAL")return!(await Lut(n)).isSymbolicLink();throw r}}
+# pSt @213262640 — exactly 2 real segs under realpath'd cache root
+async function pSt(e){let t=ea(),n=BT(t,e),r=n.split(HT)
+  if(!n||IFe(n)||r.length!==2||r.some((a)=>a===""||a==="."||a===".."))return!1
+  let[o,s]=r;if(o===void 0||s===void 0)return!1;let i=await gm(t)
+  return await sLn(No(i,o))&&await sLn(No(i,o,s))}
+# sLn @213262912
+async function sLn(e){if((await k$(e)).isDirectory()&&await YC(Pd(e),Wl(e)))return!0
+  let n=await tB(e).catch((r)=>{if(eh(r)||De(r)==="ELOOP")return null;throw r})
+  return n!==null&&n.isDirectory()}
+# GG @213263440 / zG @213262395
+async function GG(e){try{return await pSt(Pd(e))?"real":"refused"}
+  catch(t){if(eh(t))return"absent";throw w0o(e,t)}}
+async function zG(e){return await GG(e)==="real"}
+# T0o @213264986
+async function T0o(e,t,n,r){let o=await uS(e)
+  if(o==="absent")return"absent"
+  if(o==="unexaminable")throw F8(e,t,n)
+  if(o==="symlink")return await v0o(e)?"serve":"republish"
+  return(r?await AFe(e):await kq(e,{whenUnreadable:!1}))?"serve":"republish"}
+# vFe @213263129 — k0o @213347520 leftover-wired (stage-specific telemetry).
+async function vFe(e,t,n,r,o,s){if(s===void 0&&await GG(e)==="real")return
+  throw new _e(`Could not ${r} ${t} ${n}: its plugin directory is not a directory ...`,
+    k0o[o]??"plugin cache version parent not contained")}
+# TFe @213264030 / GLn @213263690 / Qw @212702166 — clear occupant before replace
+# O8 wiring @213278883
+#   m=u?await GG(d):"real"; if(m==="refused")await f("cache","before reuse",m)
+#   h=()=>g??=m==="absent"?Promise.resolve("absent"):T0o(d,t,n,a)
+
+# DIG 2026-09-15 — invent-ban residue rechecked against SEA:
+#   FLn = fdb = Ut @210117461 (Ir side-effect). Barrel: Ut as fdb, fdb as FLn.
+#   a0n @213328435 = o_n(e,FLn). Local leftoverA0n/LEFTOVER_FLN wired.
+#   _ue @212712253 body EXISTS. Calls $Me/nx/Vyn/Gyn/rp — those are BARREL
+#   aliases of path-safety @204973621: Ir/ie/Jo/Bo/ve (NOT missing decls).
+#   Barrel @211494647+: $td as Gyn, Mtd as nx, Ztd as $Me, aud as Vyn, bud as rp.
+#   Local leftoverDollarMe/Nx/Vyn/Gyn/Rp/_ue already 1:1. No further peel.
+# DIG 2026-09-16 — B_=Mt/HCo leftover-wired. CLI 不自动 qF = UF(e=qb) 官方同形完整。
+# 09-16 promoted to HAVE. Do not invent qF.

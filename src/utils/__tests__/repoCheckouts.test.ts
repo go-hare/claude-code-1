@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
 import {
   clearRepoCheckoutCaches,
   getBaseRefs,
@@ -43,13 +44,15 @@ describe('getRepoCheckouts (official Dxi)', () => {
 
 describe('getRepoCheckoutLabelForPath (official ySc)', () => {
   test('prefix match', () => {
+    const a = join('/repos', 'a')
+    const b = join('/repos', 'b')
     const m = new Map([
-      ['a', '/repos/a'],
-      ['b', '/repos/b'],
+      ['a', a],
+      ['b', b],
     ])
-    expect(getRepoCheckoutLabelForPath('/repos/a/src/x.ts', m)).toBe('a')
-    expect(getRepoCheckoutLabelForPath('/repos/b', m)).toBe('b')
-    expect(getRepoCheckoutLabelForPath('/other', m)).toBeUndefined()
+    expect(getRepoCheckoutLabelForPath(join(a, 'src', 'x.ts'), m)).toBe('a')
+    expect(getRepoCheckoutLabelForPath(b, m)).toBe('b')
+    expect(getRepoCheckoutLabelForPath(join('/other'), m)).toBeUndefined()
   })
 })
 

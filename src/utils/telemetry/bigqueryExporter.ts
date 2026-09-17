@@ -14,7 +14,8 @@ import { getSubscriptionType, isClaudeAISubscriber } from '../auth.js'
 import { checkHasTrustDialogAccepted } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage, toError } from '../errors.js'
-import { getAuthHeaders } from '../http.js'
+import { getOauthConfig } from '../../constants/oauth.js'
+import { getAuthHeaders, withholdMisroutedCredential } from '../http.js'
 import { logError } from '../log.js'
 import { jsonStringify } from '../slowOperations.js'
 import { getClaudeCodeUserAgent } from '../userAgent.js'
@@ -39,21 +40,24 @@ type InternalMetricsPayload = {
 
 export class BigQueryMetricsExporter implements PushMetricExporter {
   private readonly endpoint: string
+  private readonly isAntEndpointOverride: boolean
   private readonly timeout: number
   private pendingExports: Promise<void>[] = []
   private isShutdown = false
 
   constructor(options: { timeout?: number } = {}) {
-    const defaultEndpoint = 'https://api.anthropic.com/api/claude_code/metrics'
+    const defaultEndpoint = `${getOauthConfig().BASE_API_URL}/api/claude_code/metrics`
 
     if (
       process.env.USER_TYPE === 'ant' &&
       process.env.ANT_CLAUDE_CODE_METRICS_ENDPOINT
     ) {
+      this.isAntEndpointOverride = true
       this.endpoint =
         process.env.ANT_CLAUDE_CODE_METRICS_ENDPOINT +
         '/api/claude_code/metrics'
     } else {
+      this.isAntEndpointOverride = false
       this.endpoint = defaultEndpoint
     }
 
@@ -101,22 +105,45 @@ export class BigQueryMetricsExporter implements PushMetricExporter {
         return
       }
 
-      // Check organization-level metrics opt-out
-      const metricsStatus = await checkMetricsEnabled()
-      if (!metricsStatus.enabled) {
-        logForDebugging('Metrics export disabled by organization setting')
+      // densable 2.1.246 #44 ky / zP / jP — withhold 3P gateway keys.
+      // Official WIF dispatch-host skip uses 0-arg helpers not locked here.
+      const auth = getAuthHeaders()
+      const metricsMisrouted =
+        withholdMisroutedCredential(auth, this.endpoint).reasonCode ===
+        'misrouted_credential'
+      if (metricsMisrouted && !this.isAntEndpointOverride) {
+        logForDebugging(
+          'BigQuery metrics export: credential does not belong to the metrics endpoint host, skipping',
+        )
         resultCallback({ code: ExportResultCode.SUCCESS })
         return
       }
 
+      const metricsEnabledUrl = `${getOauthConfig().BASE_API_URL}/api/claude_code/organizations/metrics_enabled`
+      const optOutMisrouted =
+        withholdMisroutedCredential(auth, metricsEnabledUrl).reasonCode ===
+        'misrouted_credential'
+      if (!metricsMisrouted && !optOutMisrouted) {
+        const metricsStatus = await checkMetricsEnabled()
+        if (!metricsStatus.enabled) {
+          logForDebugging('Metrics export disabled by organization setting')
+          resultCallback({ code: ExportResultCode.SUCCESS })
+          return
+        }
+      }
+
       const payload = this.transformMetricsForInternal(metrics)
 
-      const authResult = getAuthHeaders()
-      if (authResult.error) {
-        logForDebugging(`Metrics export failed: ${authResult.error}`)
+      const routed = withholdMisroutedCredential(
+        getAuthHeaders(),
+        this.endpoint,
+      )
+      const stripped = routed.reasonCode === 'misrouted_credential'
+      if (routed.error && !stripped) {
+        logForDebugging(`Metrics export failed: ${routed.error}`)
         resultCallback({
           code: ExportResultCode.FAILED,
-          error: new Error(authResult.error),
+          error: new Error(routed.error),
         })
         return
       }
@@ -124,7 +151,7 @@ export class BigQueryMetricsExporter implements PushMetricExporter {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'User-Agent': getClaudeCodeUserAgent(),
-        ...authResult.headers,
+        ...(stripped ? {} : routed.headers),
       }
 
       const response = await axios.post(this.endpoint, payload, {

@@ -25,9 +25,9 @@ import {
   formatSelfSendMessage,
   isOwnNameSearchComplete,
   isOwnSessionTarget,
-  leftoverAmbiguousIsSelfSend,
-  leftoverClosestHasSameName,
-  leftoverNotFoundIsSelfSend,
+  shouldTreatPrefixAmbiguousAsSelfSend,
+  closestCandidateHasSameNormalizedName,
+  shouldTreatNotFoundAsSelfSend,
   sanitizeOwnSessionName,
 } from '../ownSession.js'
 
@@ -227,33 +227,39 @@ describe('densable 2.1.239 #50 DHm / G1w / DEe', () => {
   test('not-found DEe needs categorical + no closest same-name + Zen', () => {
     const same = [{ name: 'alpha-bot' }]
     const other = [{ name: 'alpha-bot-2' }]
-    expect(leftoverClosestHasSameName('alpha-bot', same)).toBe(true)
-    expect(leftoverClosestHasSameName('alpha-bot [abcdef]', same)).toBe(true)
-    expect(leftoverClosestHasSameName('alpha-bot', other)).toBe(false)
+    expect(closestCandidateHasSameNormalizedName('alpha-bot', same)).toBe(true)
     expect(
-      leftoverNotFoundIsSelfSend('categorical', 'alpha-bot', same, true),
-    ).toBe(false)
-    expect(
-      leftoverNotFoundIsSelfSend('categorical', 'alpha-bot', other, true),
+      closestCandidateHasSameNormalizedName('alpha-bot [abcdef]', same),
     ).toBe(true)
-    expect(leftoverNotFoundIsSelfSend('note', 'alpha-bot', other, true)).toBe(
+    expect(closestCandidateHasSameNormalizedName('alpha-bot', other)).toBe(
       false,
     )
     expect(
-      leftoverNotFoundIsSelfSend('categorical', 'alpha-bot', other, false),
+      shouldTreatNotFoundAsSelfSend('categorical', 'alpha-bot', same, true),
+    ).toBe(false)
+    expect(
+      shouldTreatNotFoundAsSelfSend('categorical', 'alpha-bot', other, true),
+    ).toBe(true)
+    expect(
+      shouldTreatNotFoundAsSelfSend('note', 'alpha-bot', other, true),
+    ).toBe(false)
+    expect(
+      shouldTreatNotFoundAsSelfSend('categorical', 'alpha-bot', other, false),
     ).toBe(false)
   })
 
   test('ambiguous DEe needs categorical + matchedBy prefix + Zen', () => {
-    expect(leftoverAmbiguousIsSelfSend('categorical', 'prefix', true)).toBe(
-      true,
-    )
-    expect(leftoverAmbiguousIsSelfSend('categorical', 'exact', true)).toBe(
+    expect(
+      shouldTreatPrefixAmbiguousAsSelfSend('categorical', 'prefix', true),
+    ).toBe(true)
+    expect(
+      shouldTreatPrefixAmbiguousAsSelfSend('categorical', 'exact', true),
+    ).toBe(false)
+    expect(shouldTreatPrefixAmbiguousAsSelfSend('note', 'prefix', true)).toBe(
       false,
     )
-    expect(leftoverAmbiguousIsSelfSend('note', 'prefix', true)).toBe(false)
-    expect(leftoverAmbiguousIsSelfSend('categorical', 'prefix', false)).toBe(
-      false,
-    )
+    expect(
+      shouldTreatPrefixAmbiguousAsSelfSend('categorical', 'prefix', false),
+    ).toBe(false)
   })
 })

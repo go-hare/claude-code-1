@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto'
 import {
   closeSync,
   constants as fsConstants,
+  lstatSync,
   openSync,
   type PathLike,
 } from 'fs'
@@ -68,6 +69,13 @@ const O_CREAT = fsConstants.O_CREAT
 const O_EXCL = fsConstants.O_EXCL
 const O_TRUNC = fsConstants.O_TRUNC
 
+/**
+ * Bun/Node on Windows often omit O_DIRECTORY / O_NOFOLLOW (both undefined → 0).
+ * densable YNn then becomes a no-op open(O_RDONLY) that happily opens a file.
+ * Fall back to lstat when either flag is missing.
+ */
+const HAS_DIR_NOFOLLOW = O_DIRECTORY !== 0 && O_NOFOLLOW !== 0
+
 /** densable CQ — in-place fallback after rename fails (not the retry loop set) */
 const RENAME_RETRY_CODES = RENAME_INPLACE_FALLBACK_CODES
 const UNSUPPORTED_FS_CODES = new Set(['EINVAL', 'ENOTSUP', 'EPERM', 'ENOSYS'])
@@ -102,6 +110,76 @@ export function isClaudeConfigDirPath(p: string): boolean {
 }
 
 /**
+ * densable YNn segment probe — O_DIRECTORY|O_NOFOLLOW when available,
+ * else lstat refuse on symlink / non-directory.
+ */
+async function assertPathIsRealDirectory(
+  cur: string,
+): Promise<'ok' | 'missing'> {
+  if (HAS_DIR_NOFOLLOW) {
+    try {
+      const fh = await open(cur, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+      await fh.close()
+      return 'ok'
+    } catch (err) {
+      const code = errnoCode(err)
+      if (code === 'ELOOP' || code === 'ENOTDIR') {
+        throw new SymlinkWriteRefusedError(
+          `Refusing to write under symlinked or non-directory path: ${cur}`,
+        )
+      }
+      if (code === 'ENOENT' || isENOENT(err)) return 'missing'
+      throw err
+    }
+  }
+  try {
+    const st = await lstat(cur)
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new SymlinkWriteRefusedError(
+        `Refusing to write under symlinked or non-directory path: ${cur}`,
+      )
+    }
+    return 'ok'
+  } catch (err) {
+    if (err instanceof SymlinkWriteRefusedError) throw err
+    if (errnoCode(err) === 'ENOENT' || isENOENT(err)) return 'missing'
+    throw err
+  }
+}
+
+function assertPathIsRealDirectorySync(cur: string): 'ok' | 'missing' {
+  if (HAS_DIR_NOFOLLOW) {
+    try {
+      const fd = openSync(cur as PathLike, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+      closeSync(fd)
+      return 'ok'
+    } catch (err) {
+      const code = errnoCode(err)
+      if (code === 'ELOOP' || code === 'ENOTDIR') {
+        throw new SymlinkWriteRefusedError(
+          `Refusing to stage atomic write under non-directory parent: ${cur}`,
+        )
+      }
+      if (code === 'ENOENT' || isENOENT(err)) return 'missing'
+      throw err
+    }
+  }
+  try {
+    const st = lstatSync(cur)
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new SymlinkWriteRefusedError(
+        `Refusing to stage atomic write under non-directory parent: ${cur}`,
+      )
+    }
+    return 'ok'
+  } catch (err) {
+    if (err instanceof SymlinkWriteRefusedError) throw err
+    if (errnoCode(err) === 'ENOENT' || isENOENT(err)) return 'missing'
+    throw err
+  }
+}
+
+/**
  * densable YNn — open each path segment under `base` with
  * O_RDONLY|O_DIRECTORY|O_NOFOLLOW. ENOENT ends early (caller mkdir).
  * ELOOP/ENOTDIR → SymlinkWriteRefusedError.
@@ -120,19 +198,7 @@ export async function assertDirChainReal(
   const segments = rel.split(sep).filter(s => s.length > 0)
   for (const seg of segments) {
     cur = join(cur, seg)
-    try {
-      const fh = await open(cur, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
-      await fh.close()
-    } catch (err) {
-      const code = errnoCode(err)
-      if (code === 'ELOOP' || code === 'ENOTDIR') {
-        throw new SymlinkWriteRefusedError(
-          `Refusing to write under symlinked or non-directory path: ${cur}`,
-        )
-      }
-      if (code === 'ENOENT' || isENOENT(err)) return
-      throw err
-    }
+    if ((await assertPathIsRealDirectory(cur)) === 'missing') return
   }
 }
 
@@ -163,9 +229,19 @@ function resolveAtomicTempPath(
 
   const dirFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW
   try {
-    const pd = openSync(dirname(stagingDir) as PathLike, dirFlags)
-    closeSync(pd)
+    if (HAS_DIR_NOFOLLOW) {
+      const pd = openSync(dirname(stagingDir) as PathLike, dirFlags)
+      closeSync(pd)
+    } else if (
+      assertPathIsRealDirectorySync(dirname(stagingDir)) === 'missing'
+    ) {
+      return sibling
+    }
   } catch (err) {
+    if (err instanceof SymlinkWriteRefusedError) {
+      if (allowSymlink) return sibling
+      throw err
+    }
     const code = errnoCode(err)
     if (code === 'ELOOP' || code === 'ENOTDIR') {
       if (allowSymlink) return sibling
@@ -179,9 +255,16 @@ function resolveAtomicTempPath(
   }
 
   try {
-    const sd = openSync(stagingDir as PathLike, dirFlags)
-    closeSync(sd)
+    if (HAS_DIR_NOFOLLOW) {
+      const sd = openSync(stagingDir as PathLike, dirFlags)
+      closeSync(sd)
+    } else if (assertPathIsRealDirectorySync(stagingDir) === 'missing') {
+      return sibling
+    }
   } catch (err) {
+    if (err instanceof SymlinkWriteRefusedError) {
+      return sibling
+    }
     const code = errnoCode(err)
     if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
       return sibling
@@ -236,12 +319,23 @@ export async function writeFileAndFlush(
   } else {
     if (opts.checkParentDir) {
       try {
-        const fh = await open(
-          dirname(filePath),
-          O_RDONLY | O_DIRECTORY | O_NOFOLLOW,
-        )
-        await fh.close()
+        if (HAS_DIR_NOFOLLOW) {
+          const fh = await open(
+            dirname(filePath),
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW,
+          )
+          await fh.close()
+        } else {
+          if (
+            (await assertPathIsRealDirectory(dirname(filePath))) === 'missing'
+          ) {
+            throw new SymlinkWriteRefusedError(
+              `Refusing to write into missing directory: ${dirname(filePath)}`,
+            )
+          }
+        }
       } catch (err) {
+        if (err instanceof SymlinkWriteRefusedError) throw err
         const code = errnoCode(err)
         if (code === 'ELOOP' || code === 'ENOTDIR') {
           throw new SymlinkWriteRefusedError(

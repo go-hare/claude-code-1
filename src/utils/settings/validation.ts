@@ -1,5 +1,6 @@
 import type { ConfigScope } from 'src/services/mcp/types.js'
 import type { ZodError, ZodIssue } from 'zod/v4'
+import { logForDebugging } from '../debug.js'
 import { jsonParse } from '../slowOperations.js'
 import { plural } from '../stringUtils.js'
 import { validatePermissionRule } from './permissionValidation.js'
@@ -269,6 +270,14 @@ export function filterInvalidPermissionRules(
           invalidValue: rule,
         })
         return false
+      }
+      // Official filter dump only `return!0` on valid. Keep the rule;
+      // do not push validate().warning onto the settings-errors channel
+      // (that opens InvalidSettingsDialog and can Exit the process).
+      if (result.warning) {
+        logForDebugging(
+          `Permission rule "${rule}" in ${filePath}: ${result.warning}`,
+        )
       }
       return true
     })

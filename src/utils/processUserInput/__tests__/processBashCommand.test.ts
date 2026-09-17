@@ -17,6 +17,8 @@ const realGetInitialSettings =
 const getInitialSettingsMock = mock(() => ({
   ...realGetInitialSettings(),
   respondToBashCommands: true as boolean | undefined,
+  // Force BashTool mock path on Windows (default shell is powershell).
+  defaultShell: 'bash' as const,
 }))
 
 const settingsMock = createSettingsMock(settingsSnap, {
@@ -83,6 +85,7 @@ describe('processBashCommand respondToBashCommands', () => {
     getInitialSettingsMock.mockImplementation(() => ({
       ...realGetInitialSettings(),
       respondToBashCommands: true,
+      defaultShell: 'bash' as const,
     }))
     bashCallMock.mockReset()
     bashCallMock.mockImplementation(async () => ({
@@ -99,6 +102,7 @@ describe('processBashCommand respondToBashCommands', () => {
     getInitialSettingsMock.mockImplementation(() => ({
       ...realGetInitialSettings(),
       respondToBashCommands: undefined,
+      defaultShell: 'bash' as const,
     }))
     const { processBashCommand } = await import('../processBashCommand.js')
     const abortController = new AbortController()
@@ -120,6 +124,7 @@ describe('processBashCommand respondToBashCommands', () => {
     getInitialSettingsMock.mockImplementation(() => ({
       ...realGetInitialSettings(),
       respondToBashCommands: false,
+      defaultShell: 'bash' as const,
     }))
     const { processBashCommand } = await import('../processBashCommand.js')
     const abortController = new AbortController()
@@ -141,6 +146,7 @@ describe('processBashCommand respondToBashCommands', () => {
     getInitialSettingsMock.mockImplementation(() => ({
       ...realGetInitialSettings(),
       respondToBashCommands: true,
+      defaultShell: 'bash' as const,
     }))
     bashCallMock.mockImplementation(async () => ({
       data: {

@@ -15,8 +15,10 @@ import {
 } from '../../../../tests/mocks/settings.js'
 
 mock.module('src/utils/log.ts', logMock)
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 import * as realSettings from 'src/utils/settings/settings.js'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
+
 const settingsSnap = snapshotModuleExports(realSettings)
 mock.module(
   'src/utils/settings/settings.js',

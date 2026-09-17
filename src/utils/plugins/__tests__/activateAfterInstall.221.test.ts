@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { debugMock } from '../../../../tests/mocks/debug.js'
+import { logMock } from '../../../../tests/mocks/log.js'
 import {
   errorConcernsInstalledPlugin,
   formatBatchInstallActivateSuffix,
@@ -7,16 +9,8 @@ import {
 } from '../activateAfterInstall.js'
 
 // Mock analytics / log / searchExtraTools / bootstrap for assess path unit tests
-mock.module('src/utils/log.ts', () => ({
-  logError: () => {},
-  logInfo: () => {},
-  logWarn: () => {},
-  logDebug: () => {},
-}))
-
-mock.module('src/utils/debug.ts', () => ({
-  logForDebugging: () => {},
-}))
+mock.module('src/utils/log.ts', logMock)
+mock.module('src/utils/debug.ts', debugMock)
 
 describe('densable 2.1.221 #30 activate after install helpers', () => {
   test('formatSingleInstallActivateSuffix matches densable UI gold', () => {

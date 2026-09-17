@@ -21,7 +21,7 @@ import { KeybindingSetup } from './keybindings/KeybindingProviderSetup.js';
 import { startDeferredPrefetches } from './main.js';
 import { initializeGrowthBook, resetGrowthBook } from './services/analytics/growthbook.js';
 import { isQualifiedForGrove } from './services/api/grove.js';
-import { handleMcpjsonServerApprovals } from './services/mcpServerApproval.js';
+import { handleMcpjsonServerApprovals, type McpApprovalSkipWarning } from './services/mcpServerApproval.js';
 import { AppStateProvider } from './state/AppState.js';
 import { onChangeAppState } from './state/onChangeAppState.js';
 import { ThemeProvider } from '@anthropic/ink';
@@ -49,7 +49,7 @@ import {
   resolveFrameTimingSampleEvery,
 } from './utils/residualFinalEnvGates.js';
 import { getBaseRenderOptions } from './utils/renderOptions.js';
-import { getSettingsWithAllErrors } from './utils/settings/allErrors.js';
+import { isBgSession } from './utils/concurrentSessions.js';
 import { hasSkipDangerousModePermissionPrompt } from './utils/settings/settings.js';
 
 export function completeOnboarding(): void {
@@ -154,6 +154,19 @@ export async function renderAndRun(root: Root, element: React.ReactNode): Promis
   await gracefulShutdown(0);
 }
 
+/** densable `qs` return — onboarding flag plus `us` persist/skip banner. */
+export type SetupScreensResult = {
+  onboardingShown: boolean;
+  mcpApprovalSkipWarning: McpApprovalSkipWarning | null;
+};
+
+function setupScreensResult(
+  onboardingShown: boolean,
+  mcpApprovalSkipWarning: McpApprovalSkipWarning | null = null,
+): SetupScreensResult {
+  return { onboardingShown, mcpApprovalSkipWarning };
+}
+
 export async function showSetupScreens(
   root: Root,
   permissionMode: PermissionMode,
@@ -161,17 +174,30 @@ export async function showSetupScreens(
   commands?: Command[],
   claudeInChrome?: boolean,
   devChannels?: ChannelEntry[],
-): Promise<boolean> {
+  strictMcpConfig?: boolean,
+): Promise<SetupScreensResult> {
+  // densable qs: kn()||CLAUDE_BRIDGE_REATTACH_SESSION still runs us()
+  // (handleMcpjsonServerApprovals) while skipping onboarding/trust dialogs.
+  // kn() = Qo() = Is()==="bg" → isBgSession().
+  if (isBgSession() || process.env.CLAUDE_BRIDGE_REATTACH_SESSION) {
+    setSessionTrustAccepted(true);
+    const mcpApprovalSkipWarning = await handleMcpjsonServerApprovals(root, {
+      strictMcpConfig,
+    });
+    return setupScreensResult(false, mcpApprovalSkipWarning);
+  }
+
   if (
     process.env.NODE_ENV === 'test' ||
     isEnvTruthy(false) ||
     process.env.IS_DEMO // Skip onboarding in demo mode
   ) {
-    return false;
+    return setupScreensResult(false);
   }
 
   const config = getGlobalConfig();
   let onboardingShown = false;
+  let mcpApprovalSkipWarning: McpApprovalSkipWarning | null = null;
   // Official: CLAUDE_CODE_POWERUP_ONBOARDING=banner|step forces onboarding UI.
   if (
     !config.theme ||
@@ -222,11 +248,8 @@ export async function showSetupScreens(
     // Now that trust is established, prefetch system context if it wasn't already
     void getSystemContext();
 
-    // If settings are valid, check for any mcp.json servers that need approval
-    const { errors: allErrors } = getSettingsWithAllErrors();
-    if (allErrors.length === 0) {
-      await handleMcpjsonServerApprovals(root);
-    }
+    // densable `us` — always run; settings errors become the skip banner.
+    mcpApprovalSkipWarning = await handleMcpjsonServerApprovals(root, { strictMcpConfig });
 
     // Check for claude.md includes that need approval
     if (await shouldShowClaudeMdExternalIncludesWarning()) {
@@ -269,7 +292,7 @@ export async function showSetupScreens(
     if (decision === 'escape') {
       logEvent('tengu_grove_policy_exited', {});
       gracefulShutdownSync(0);
-      return false;
+      return setupScreensResult(false, mcpApprovalSkipWarning);
     }
   }
 
@@ -323,7 +346,7 @@ export async function showSetupScreens(
     await showSetupDialog(root, done => <ClaudeInChromeOnboarding onDone={done} />);
   }
 
-  return onboardingShown;
+  return setupScreensResult(onboardingShown, mcpApprovalSkipWarning);
 }
 
 export function getRenderContext(exitOnCtrlC: boolean): {

@@ -1,7 +1,21 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import * as realEnvUtils from '../../envUtils.js'
+import { getClaudeConfigHomeDir } from '../../envUtils.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import { getTeamFilePath } from '../teamHelpers.js'
+
+const envUtilsSnap = snapshotModuleExports(realEnvUtils)
 
 let terminateCalls: string[] = []
 
@@ -64,25 +78,30 @@ let tempHome: string
 let previousConfigDir: string | undefined
 let previousAnthropicApiKey: string | undefined
 let state: any
+let pendingTimers: ReturnType<typeof setTimeout>[] = []
 
 function setState(updater: (prev: any) => any): void {
   state = updater(state)
 }
 
+/** Same path TeamDelete/readTeamFile uses — not a parallel tempHome join. */
 function readTeamConfig(teamName: string): any {
-  return JSON.parse(
-    readFileSync(join(tempHome, 'teams', teamName, 'config.json'), 'utf-8'),
-  )
+  return JSON.parse(readFileSync(getTeamFilePath(teamName), 'utf-8'))
 }
 
 function writeTeamConfig(teamName: string, config: unknown): void {
-  const teamDir = join(tempHome, 'teams', teamName)
-  mkdirSync(teamDir, { recursive: true })
-  writeFileSync(join(teamDir, 'config.json'), JSON.stringify(config, null, 2))
+  const file = getTeamFilePath(teamName)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify(config, null, 2))
+}
+
+function schedule(ms: number, fn: () => void): void {
+  pendingTimers.push(setTimeout(fn, ms))
 }
 
 beforeEach(() => {
   terminateCalls = []
+  for (const t of pendingTimers.splice(0)) clearTimeout(t)
   previousConfigDir = process.env.CLAUDE_CONFIG_DIR
   previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY
   tempHome = join(
@@ -90,6 +109,23 @@ beforeEach(() => {
     `agent-teams-lifecycle-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   )
   process.env.CLAUDE_CONFIG_DIR = tempHome
+  // Prior suites pin getClaudeConfigHomeDir to a fixed path via mock.module;
+  // re-bind a live env-respecting implementation for this suite.
+  mock.module('src/utils/envUtils.js', () => ({
+    ...envUtilsSnap,
+    getClaudeConfigHomeDir: () =>
+      (process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')).normalize(
+        'NFC',
+      ),
+    getTeamsDir: () =>
+      join(
+        (process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')).normalize(
+          'NFC',
+        ),
+        'teams',
+      ),
+  }))
+  getClaudeConfigHomeDir.cache?.clear?.()
   process.env.ANTHROPIC_API_KEY = 'test-key'
   state = {
     teamContext: undefined,
@@ -109,17 +145,23 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  for (const t of pendingTimers.splice(0)) clearTimeout(t)
   if (previousConfigDir === undefined) {
     delete process.env.CLAUDE_CONFIG_DIR
   } else {
     process.env.CLAUDE_CONFIG_DIR = previousConfigDir
   }
+  getClaudeConfigHomeDir.cache?.clear?.()
   if (previousAnthropicApiKey === undefined) {
     delete process.env.ANTHROPIC_API_KEY
   } else {
     process.env.ANTHROPIC_API_KEY = previousAnthropicApiKey
   }
   rmSync(tempHome, { recursive: true, force: true })
+})
+
+afterAll(() => {
+  mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
 })
 
 describe('Agent Teams lifecycle', () => {
@@ -278,7 +320,7 @@ describe('Agent Teams lifecycle', () => {
     })
     state.teamContext = {
       teamName: 'alpha',
-      teamFilePath: join(tempHome, 'teams', 'alpha', 'config.json'),
+      teamFilePath: getTeamFilePath('alpha'),
       leadAgentId: 'team-lead@alpha',
       teammates: {
         'worker@alpha': {
@@ -291,13 +333,13 @@ describe('Agent Teams lifecycle', () => {
       },
     }
 
-    setTimeout(() => {
+    schedule(25, () => {
       const config = readTeamConfig('alpha')
       config.members = config.members.map((member: any) =>
         member.name === 'worker' ? { ...member, isActive: false } : member,
       )
       writeTeamConfig('alpha', config)
-    }, 25)
+    })
 
     const result = await TeamDeleteTool.call(
       { wait_ms: 1000 },
@@ -344,7 +386,7 @@ describe('Agent Teams lifecycle', () => {
     })
     state.teamContext = {
       teamName: 'alpha',
-      teamFilePath: join(tempHome, 'teams', 'alpha', 'config.json'),
+      teamFilePath: getTeamFilePath('alpha'),
       leadAgentId: 'team-lead@alpha',
       teammates: {
         'worker@alpha': {

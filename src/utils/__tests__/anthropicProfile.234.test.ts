@@ -5,10 +5,8 @@ import { join } from 'path'
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
 
-mock.module('../../services/analytics/index.js', () => ({
-  logEvent: () => {},
-  stripProtoFields: <T>(v: T) => v,
-}))
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+mock.module('../../services/analytics/index.js', analyticsMock)
 mock.module('../log.ts', logMock)
 mock.module('../debug.ts', debugMock)
 

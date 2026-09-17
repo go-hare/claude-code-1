@@ -22,9 +22,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+import {
+  clearChildProcessStubs,
+  installChildProcessHarness,
+  setChildProcessStubs,
+} from '../../../../tests/mocks/childProcessHarness.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
+
+installChildProcessHarness()
+mock.module('bun:bundle', bunBundleMock)
 
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
@@ -50,11 +59,6 @@ let _dynamicSessionId = `issue-test-${randomUUID()}`
 // the combined suite (alphabetical: 'autofix-pr' < 'issue') and expects
 // '/mock/cwd'. Issue's beforeAll switches this on, afterAll restores real.
 let useIssueDynamicState = false
-// Default OFF — the long-body draft-save test below flips this on for its
-// body (so execFile/execFileSync return ENOENT + a fake GitHub remote URL)
-// then flips off in finally. Without the flag the child_process stub leaked
-// process-globally into every later test file via Bun's mock.module cache.
-let useIssueLongBodyCpStubs = false
 const bootstrapOverlay = () => ({
   ...bootstrapSnap,
   getSessionId: () =>
@@ -104,9 +108,10 @@ const envUtilsOverlay = () => ({
 mock.module('src/utils/envUtils.js', envUtilsOverlay)
 mock.module('../../../utils/envUtils.js', envUtilsOverlay)
 
-// Activate dynamic state mode for this suite only.
+let popFeature: (() => void) | undefined
 beforeAll(() => {
   useIssueDynamicState = true
+  popFeature = pushFeatureOverride(() => true)
 })
 
 beforeEach(() => {
@@ -144,6 +149,7 @@ afterEach(() => {
 // Restore real bootstrap/envUtils/analytics — do not leave gated setCwd mocks.
 afterAll(() => {
   useIssueDynamicState = false
+  popFeature?.()
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
@@ -558,40 +564,14 @@ describe('issue command — with title', () => {
     // Force the fallback URL branch with a *parsed* GitHub remote so the
     // draft-path output (lines 392-393) is reached: git remote returns a
     // GitHub URL but `gh --version` fails so hasGh is false.
-    //
-    // Spread+flag pattern: the previous bare `mock.module(...)` here leaked
-    // a stub child_process to every later test file in the same `bun test`
-    // run (mock.module is process-global, last-write-wins). Now we register
-    // a flag-gated mock that delegates to real child_process by default, and
-    // only flips on for THIS test's body.
-    mock.module('node:child_process', () => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const real = require('node:child_process') as Record<string, unknown>
-      return {
-        ...real,
-        default: real,
-        execFile: ((...args: unknown[]) => {
-          if (useIssueLongBodyCpStubs) {
-            const cb = args[3] as
-              | ((e: Error | null, s: string, e2: string) => void)
-              | undefined
-            if (cb) cb(new Error('ENOENT'), '', '')
-            return
-          }
-          return (real.execFile as (...a: unknown[]) => unknown)(...args)
-        }) as typeof real.execFile,
-        execFileSync: ((...args: unknown[]) => {
-          if (useIssueLongBodyCpStubs) {
-            const cmd = args[0] as string
-            if (cmd === 'git')
-              return Buffer.from('https://github.com/owner/repo.git\n')
-            throw new Error('ENOENT')
-          }
-          return (real.execFileSync as (...a: unknown[]) => unknown)(...args)
-        }) as typeof real.execFileSync,
-      }
+    setChildProcessStubs('issue-long-body', {
+      execFile: (_cmd, _args, _opts, cb) => cb(new Error('ENOENT'), '', ''),
+      execFileSync: (cmd, _args, _opts) => {
+        if (cmd === 'git')
+          return Buffer.from('https://github.com/owner/repo.git\n')
+        throw new Error('ENOENT')
+      },
     })
-    useIssueLongBodyCpStubs = true
     Array.prototype.slice = function (
       this: unknown[],
       start?: number,
@@ -617,7 +597,7 @@ describe('issue command — with title', () => {
     } finally {
       Array.prototype.slice = origSlice
       setOriginalCwd(origCwd)
-      useIssueLongBodyCpStubs = false
+      clearChildProcessStubs('issue-long-body')
     }
   })
 })

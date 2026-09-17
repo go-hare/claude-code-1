@@ -2,7 +2,9 @@ import { logEvent } from '../services/analytics/index.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
 import { errorMessage } from '../utils/errors.js'
-import { jsonParse } from '../utils/slowOperations.js'
+import { decodeJwtExpiry, decodeJwtPayload } from '../utils/jwtExpiry.js'
+
+export { decodeJwtExpiry, decodeJwtPayload }
 
 /** Format a millisecond duration as a human-readable string (e.g. "5m 30s"). */
 function formatDuration(ms: number): string {
@@ -10,42 +12,6 @@ function formatDuration(ms: number): string {
   const m = Math.floor(ms / 60_000)
   const s = Math.round((ms % 60_000) / 1000)
   return s > 0 ? `${m}m ${s}s` : `${m}m`
-}
-
-/**
- * Decode a JWT's payload segment without verifying the signature.
- * Strips the `sk-ant-si-` session-ingress prefix if present.
- * Returns the parsed JSON payload as `unknown`, or `null` if the
- * token is malformed or the payload is not valid JSON.
- */
-export function decodeJwtPayload(token: string): unknown | null {
-  const jwt = token.startsWith('sk-ant-si-')
-    ? token.slice('sk-ant-si-'.length)
-    : token
-  const parts = jwt.split('.')
-  if (parts.length !== 3 || !parts[1]) return null
-  try {
-    return jsonParse(Buffer.from(parts[1], 'base64url').toString('utf8'))
-  } catch {
-    return null
-  }
-}
-
-/**
- * Decode the `exp` (expiry) claim from a JWT without verifying the signature.
- * @returns The `exp` value in Unix seconds, or `null` if unparseable
- */
-export function decodeJwtExpiry(token: string): number | null {
-  const payload = decodeJwtPayload(token)
-  if (
-    payload !== null &&
-    typeof payload === 'object' &&
-    'exp' in payload &&
-    typeof payload.exp === 'number'
-  ) {
-    return payload.exp
-  }
-  return null
 }
 
 /** Refresh buffer: request a new token before expiry. */

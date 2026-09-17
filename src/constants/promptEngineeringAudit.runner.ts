@@ -90,15 +90,10 @@ mock.module('src/utils/mcpInstructionsDelta.js', () => ({
 mock.module('src/memdir/memdir.js', () => ({
   loadMemoryPrompt: async () => null,
 }))
-mock.module('src/utils/debug.js', () => ({
-  logForDebugging: () => {},
-}))
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-}))
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('src/utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+mock.module('bun:bundle', bunBundleMock)
 mock.module('src/constants/systemPromptSections.js', () => ({
   systemPromptSection: (_name: string, fn: () => any) => fn(),
   DANGEROUS_uncachedSystemPromptSection: (_name: string, fn: () => any) => fn(),
@@ -195,6 +190,9 @@ import {
   getScratchpadInstructions,
 } from './prompts.js'
 import type { Tools } from '../Tool.js'
+import { bunBundleMock } from '../../tests/mocks/bunBundle.js'
+import { debugMock } from '../../tests/mocks/debug.js'
+import { growthbookMock } from '../../tests/mocks/growthbook.js'
 
 // --- 辅助 ---
 

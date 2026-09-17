@@ -9,7 +9,9 @@ import {
   isBypassPermissionsModeDisabled,
 } from '../utils/permissions/permissionSetup.js';
 import { applySettingsChange } from '../utils/settings/applySettingsChange.js';
+import type { SettingsChangeExtra } from '../utils/settings/changeDetector.js';
 import type { SettingSource } from '../utils/settings/constants.js';
+import type { SettingsJson } from '../utils/settings/types.js';
 import { createStore } from './store.js';
 
 // DCE: voice context is ant-only. External builds get a noop provider that
@@ -88,7 +90,10 @@ export function AppStateProvider({ children, initialState, onChangeAppState }: P
   // Listen for external settings changes and sync to AppState.
   // This ensures file watcher changes propagate through the app --
   // shared with the headless/SDK path via applySettingsChange.
-  const onSettingsChange = useEffectEvent((source: SettingSource) => applySettingsChange(source, store.setState));
+  const onSettingsChange = useEffectEvent(
+    (source: SettingSource, _settings: SettingsJson, extra?: SettingsChangeExtra) =>
+      applySettingsChange(source, store.setState, extra),
+  );
   useSettingsChange(onSettingsChange);
 
   // densable Wrs: useState(bGl) → Srs.Provider around children (DialogStore).

@@ -4,6 +4,7 @@ import * as path from 'path'
 import { z } from 'zod/v4'
 import { errorMessage, getErrnoCode, isENOENT } from '../errors.js'
 import { FRONTMATTER_REGEX } from '../frontmatterParser.js'
+import { stripBOM } from '../jsonRead.js'
 import { jsonParse } from '../slowOperations.js'
 import { parseYaml } from '../yaml.js'
 import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
@@ -159,7 +160,7 @@ export async function validatePluginManifest(
 
   let parsed: unknown
   try {
-    parsed = jsonParse(content)
+    parsed = jsonParse(stripBOM(content))
   } catch (error) {
     return {
       success: false,
@@ -470,7 +471,7 @@ export async function validateMarketplaceManifest(
         let manifestVersion: string | undefined
         try {
           const raw = await readFile(pluginJsonPath, { encoding: 'utf-8' })
-          const parsed = jsonParse(raw) as { version?: unknown }
+          const parsed = jsonParse(stripBOM(raw)) as { version?: unknown }
           if (typeof parsed.version === 'string') {
             manifestVersion = parsed.version
           }

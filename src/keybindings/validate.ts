@@ -4,6 +4,7 @@ import {
   getReservedShortcuts,
   normalizeKeyForComparison,
 } from './reservedShortcuts.js'
+import { isKnownKeybindingAction, KEYBINDING_ACTIONS } from './schema.js'
 import type {
   KeybindingBlock,
   KeybindingContextName,
@@ -220,6 +221,17 @@ function validateBlock(
           suggestion: 'Move this binding to a block with "context": "Chat"',
         })
       }
+    } else if (typeof action === 'string' && !isKnownKeybindingAction(action)) {
+      // densable 2.1.246 I / sn — skip unknown names; default binding keeps working
+      warnings.push({
+        type: 'invalid_action',
+        severity: 'error',
+        message: `Unknown action "${action}" for "${key}"${contextName ? ` in ${contextName}` : ''} \u2014 this binding is ignored`,
+        key,
+        context: contextName,
+        action,
+        suggestion: suggestUnknownKeybindingAction(action),
+      })
     } else if (action === 'voice:pushToTalk') {
       // Hold detection needs OS auto-repeat. Bare letters print into the
       // input during warmup and the activation strip is best-effort —
@@ -420,6 +432,64 @@ function getUserBindingsForValidation(
     }
   }
   return bindings
+}
+
+/** densable 2.1.246 on — Levenshtein used by sn. */
+function keybindingEditDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i]
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(
+        (prev[j] ?? 0) + 1,
+        (curr[j - 1] ?? 0) + 1,
+        (prev[j - 1] ?? 0) + cost,
+      )
+    }
+    prev = curr
+  }
+  return prev[b.length] ?? 0
+}
+
+function actionNamespace(action: string): string {
+  const at = action.indexOf(':')
+  return at === -1 ? action : action.slice(0, at)
+}
+
+/**
+ * densable 2.1.246 sn — did-you-mean / namespace list for an unknown action.
+ */
+export function suggestUnknownKeybindingAction(action: string): string {
+  let best: string | undefined
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const name of KEYBINDING_ACTIONS) {
+    const d = keybindingEditDistance(action.toLowerCase(), name.toLowerCase())
+    if (d < bestDist) {
+      bestDist = d
+      best = name
+    }
+  }
+  if (best && bestDist <= 2) return `Did you mean "${best}"?`
+  const ns = actionNamespace(action)
+  const sameNs = KEYBINDING_ACTIONS.filter(name => name.startsWith(`${ns}:`))
+  if (sameNs.length > 0) {
+    return `Valid "${ns}:" actions: ${sameNs.join(', ')}`
+  }
+  const namespaces = [...new Set(KEYBINDING_ACTIONS.map(actionNamespace))]
+  return `Valid action namespaces: ${namespaces.map(n => `${n}:`).join(', ')}`
+}
+
+/**
+ * densable 2.1.246 R — drop unknown actions so the default binding keeps working.
+ * Unbind (`null`) and `I(action)` stay.
+ */
+export function keepResolvedUserBindings(
+  bindings: ParsedBinding[],
+): ParsedBinding[] {
+  return bindings.filter(
+    b => b.action === null || isKnownKeybindingAction(b.action),
+  )
 }
 
 /**

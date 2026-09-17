@@ -111,7 +111,9 @@ import { captureAPIRequest, logError } from '../../utils/log.js'
 import {
   createAssistantAPIErrorMessage,
   createUserMessage,
+  decomposeBatchedToolUses,
   ensureToolResultPairing,
+  hideUnderlyingV1Tools,
   normalizeContentFromAPI,
   normalizeMessagesForAPI,
   stripAdvisorBlocks,
@@ -199,7 +201,7 @@ import {
   isValidAdvisorModel,
   modelSupportsAdvisor,
 } from 'src/utils/advisor.js'
-import { getAgentContext } from 'src/utils/agentContext.js'
+import { type AgentContext, getAgentContext } from 'src/utils/agentContext.js'
 import { isClaudeAISubscriber } from 'src/utils/auth.js'
 import {
   modelSupportsStructuredOutputs,
@@ -930,6 +932,29 @@ export type Options = {
   taskBudget?: { total: number; remaining?: number }
   /** Langfuse root trace span for observability. No-op if null/undefined. */
   langfuseTrace?: LangfuseSpan | null
+  /**
+   * densable promptTooLongIsHandled — skip cli_api_error / tengu_api_error
+   * when classifyAPIError is prompt_too_long (title / compact / hook_prompt
+   * and the main query already recover). Official Options field.
+   */
+  promptTooLongIsHandled?: boolean
+  /**
+   * densable agentContext — official Options field. queryModel falls back
+   * to getAgentContext() ALS when omitted. Title `B` passes S() explicitly.
+   */
+  agentContext?: AgentContext
+  /**
+   * densable credentials — official Options / fk `i`. Host handle (`Ce`)
+   * passed to getAnthropicClient → Op refresh + `_F`/`dl` dead-refresh throw.
+   */
+  credentials?: unknown
+  /**
+   * densable storageV5 — official Options / fk `a`. Persist handle for
+   * Op refresh (`aO`) and YOo gzip latch. Local `$t()`/`tn()` host is absent;
+   * the handle is still threaded (same as saveGlobalConfig 2nd arg).
+   * Title `B` does not pass this field.
+   */
+  storageV5?: unknown
 }
 
 export async function queryModelWithoutStreaming({
@@ -1043,6 +1068,9 @@ export async function* executeNonStreamingRequest(
     model: string
     fetchOverride?: Options['fetchOverride']
     source: string
+    agentContext?: Options['agentContext']
+    credentials?: Options['credentials']
+    storageV5?: Options['storageV5']
   },
   retryOptions: {
     model: string
@@ -1071,6 +1099,9 @@ export async function* executeNonStreamingRequest(
         model: clientOptions.model,
         fetchOverride: clientOptions.fetchOverride,
         source: clientOptions.source,
+        agentContext: clientOptions.agentContext,
+        credentials: clientOptions.credentials,
+        storageV5: clientOptions.storageV5,
       }),
     async (anthropic, attempt, context) => {
       const start = Date.now()
@@ -1299,7 +1330,8 @@ async function* queryModel(
    */
   const quotaRejectQuerySourceBucket: QuotaRejectedQuerySourceBucket = (() => {
     // Local ALS has no agentType:"main" object — undefined store ⇒ main (SEA Hz).
-    const isMainAgent = getAgentContext() === undefined
+    const isMainAgent =
+      (options.agentContext ?? getAgentContext()) === undefined
     const qs = options.querySource
     const isMainSource = qs.startsWith('repl_main_thread') || qs === 'sdk'
     return isMainAgent && isMainSource ? 'main_thread' : 'other'
@@ -1410,6 +1442,8 @@ async function* queryModel(
       t => !toolMatchesName(t, SEARCH_EXTRA_TOOLS_TOOL_NAME),
     )
   }
+  // densable v=Qzr(T) — hide v1 tools when a Batch* wrapper is in T
+  filteredTools = hideUnderlyingV1Tools(filteredTools)
 
   // densable: A = S ? Jvu() : null; if A && provider !== bedrock → betas.push(A)
   // Bedrock carries the tool-search beta via extra body params instead.
@@ -1991,13 +2025,9 @@ async function* queryModel(
     // densable Kn = r.type !== "disabled" && !bn
     // Local residual env DISABLE_THINKING still wins (even on HQt models).
     const hasThinking = thinkingConfig.type !== 'disabled' && !thinkingDisabled
-    if (
-      isTopEffortWithThinkingOff(
-        typeof effort === 'string' ? effort : undefined,
-        !hasThinking,
-      )
-    ) {
-      throw new Error(formatEffortThinkingOffError(effort))
+    const effortName = typeof effort === 'string' ? effort : undefined
+    if (isTopEffortWithThinkingOff(effortName, !hasThinking)) {
+      throw new Error(formatEffortThinkingOffError(effortName))
     }
     let thinking: BetaMessageStreamParams['thinking'] | undefined
 
@@ -2307,7 +2337,7 @@ async function* queryModel(
   const malformedFallbackBlockIndexes = new Set<number>()
   // Official $Qn/$BQn second arg (HOn) — declared outside try so finally can stop.
   const sessionActivityAgentId = resolveSessionActivityAgentId({
-    agentContext: getAgentContext(),
+    agentContext: options.agentContext ?? getAgentContext(),
     isBackgroundAgent: options.isBackgroundAgent,
     agentId: options.agentId,
   })
@@ -2328,6 +2358,9 @@ async function* queryModel(
               model: options.model,
               fetchOverride: options.fetchOverride,
               source: options.querySource,
+              agentContext: options.agentContext ?? getAgentContext(),
+              credentials: options.credentials,
+              storageV5: options.storageV5,
             }),
           async (anthropic, attempt, context) => {
             attemptNumber = attempt
@@ -3085,11 +3118,10 @@ async function* queryModel(
                 // usage so background-agent progress tracking sees non-zero
                 // input tokens as soon as they are known. message_delta still
                 // mutates this object in place with final output_tokens later.
-                const m: AssistantMessage = {
-                  message: {
-                    ...partialMessage,
-                    usage: { ...usage },
-                    content: normalizeContentFromAPI(
+                // densable {content,batchToolUses}=qXe(Owe([ar],…), r)
+                const { content: Co, batchToolUses: Fo } =
+                  decomposeBatchedToolUses(
+                    normalizeContentFromAPI(
                       [contentBlock] as BetaContentBlock[],
                       tools,
                       options.agentId,
@@ -3097,8 +3129,16 @@ async function* queryModel(
                         requestId: streamRequestId ?? undefined,
                         messageId: partialMessage.id,
                       },
-                    ) as MessageContent,
+                    ),
+                    tools,
+                  )
+                const m: AssistantMessage = {
+                  message: {
+                    ...partialMessage,
+                    usage: { ...usage },
+                    content: Co as MessageContent,
                   },
+                  ...(Fo.length > 0 && { batchToolUses: Fo }),
                   requestId: streamRequestId ?? undefined,
                   type: 'assistant',
                   uuid: randomUUID(),
@@ -3963,6 +4003,9 @@ async function* queryModel(
                 content: incompleteBanner,
                 apiError: 'server_error',
                 error: 'server_error',
+                // densable @217050118: yl&&!Xr — output and no tool_use.
+                truncatedAfterOutput:
+                  hasOutput && !hasToolUse ? true : undefined,
               })
               // densable `break e` — exit streaming successfully with partial kept
               return
@@ -4105,7 +4148,14 @@ async function* queryModel(
             stall: streamStallSnapshot,
           }
           const result = yield* executeNonStreamingRequest(
-            { model: options.model, source: options.querySource },
+            {
+              model: options.model,
+              fetchOverride: options.fetchOverride,
+              source: options.querySource,
+              agentContext: options.agentContext ?? getAgentContext(),
+              credentials: options.credentials,
+              storageV5: options.storageV5,
+            },
             {
               model: options.model,
               fallbackModel: options.fallbackModel,
@@ -4214,19 +4264,25 @@ async function* queryModel(
             // densable optional
           }
 
+          // densable {content,batchToolUses}=qXe(Owe(uY.content,…), r)
+          const { content: Pve, batchToolUses: Le } = decomposeBatchedToolUses(
+            normalizeContentFromAPI(
+              nonStreamContent as typeof result.content,
+              tools,
+              options.agentId,
+              {
+                requestId: streamRequestId ?? undefined,
+                messageId: result.id,
+              },
+            ),
+            tools,
+          )
           const m: AssistantMessage = {
             message: {
               ...result,
-              content: normalizeContentFromAPI(
-                nonStreamContent as typeof result.content,
-                tools,
-                options.agentId,
-                {
-                  requestId: streamRequestId ?? undefined,
-                  messageId: result.id,
-                },
-              ) as MessageContent,
+              content: Pve as MessageContent,
             },
+            ...(Le.length > 0 && { batchToolUses: Le }),
             requestId: streamRequestId ?? undefined,
             type: 'assistant',
             uuid: randomUUID(),
@@ -4341,7 +4397,14 @@ async function* queryModel(
               stall: null,
             }
             const result = yield* executeNonStreamingRequest(
-              { model: options.model, source: options.querySource },
+              {
+                model: options.model,
+                fetchOverride: options.fetchOverride,
+                source: options.querySource,
+                agentContext: options.agentContext ?? getAgentContext(),
+                credentials: options.credentials,
+                storageV5: options.storageV5,
+              },
               {
                 model: options.model,
                 fallbackModel: options.fallbackModel,
@@ -4440,19 +4503,25 @@ async function* queryModel(
               // densable optional
             }
 
+            // densable {content,batchToolUses}=qXe(Owe(Kr.content,…), r)
+            const { content: Br, batchToolUses: Eo } = decomposeBatchedToolUses(
+              normalizeContentFromAPI(
+                nonStreamContent404 as typeof result.content,
+                tools,
+                options.agentId,
+                {
+                  requestId: streamRequestId ?? undefined,
+                  messageId: result.id,
+                },
+              ),
+              tools,
+            )
             const m: AssistantMessage = {
               message: {
                 ...result,
-                content: normalizeContentFromAPI(
-                  nonStreamContent404 as typeof result.content,
-                  tools,
-                  options.agentId,
-                  {
-                    requestId: streamRequestId ?? undefined,
-                    messageId: result.id,
-                  },
-                ) as MessageContent,
+                content: Br as MessageContent,
               },
+              ...(Eo.length > 0 && { batchToolUses: Eo }),
               requestId: streamRequestId ?? undefined,
               type: 'assistant',
               uuid: randomUUID(),
@@ -4539,6 +4608,7 @@ async function* queryModel(
               llmSpan,
               fastMode: isFastModeRequest,
               previousRequestId,
+              promptTooLongIsHandled: options.promptTooLongIsHandled,
             })
 
             if (error instanceof APIUserAbortError) {
@@ -4598,6 +4668,7 @@ async function* queryModel(
             llmSpan,
             fastMode: isFastModeRequest,
             previousRequestId,
+            promptTooLongIsHandled: options.promptTooLongIsHandled,
           })
 
           // Don't yield an assistant error message for user aborts
@@ -4673,7 +4744,7 @@ async function* queryModel(
   // whose cache should not be evicted when the foreground session clears.
   if (
     streamRequestId &&
-    !getAgentContext() &&
+    !(options.agentContext ?? getAgentContext()) &&
     (options.querySource.startsWith('repl_main_thread') ||
       options.querySource === 'sdk')
   ) {

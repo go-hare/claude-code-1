@@ -16,6 +16,7 @@
  */
 
 import { createServer, type Server, type Socket } from 'net'
+import { basename } from 'path'
 import { unlink } from 'fs/promises'
 import { StringDecoder } from 'string_decoder'
 import { instances } from '@anthropic/ink'
@@ -29,6 +30,24 @@ import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 let server: Server | undefined
 let client: Socket | undefined
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined
+let wedgeTimer: ReturnType<typeof setTimeout> | undefined
+let wedgeDisarmed = false
+
+/**
+ * densable `e5a` / `rPt` — default startup detail. Wedge only fires while
+ * job state is still `working` + this sentinel (SEA `z8n`).
+ */
+export const STARTUP_DETAIL_RPT = 'starting…'
+
+/** densable `m1e` — written when the 45s startup wedge trips. */
+export const STUCK_STARTUP_DIALOG = 'stuck on a startup dialog'
+
+/** densable `g1e` */
+export const STUCK_STARTUP_NEEDS = 'open this session to continue setup'
+
+function jobShortFromDir(jobDir: string): string {
+  return basename(jobDir.replace(/[\\/]+$/, ''))
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -54,6 +73,10 @@ export async function startRendezvousServer(): Promise<void> {
     socket.once('close', () => {
       if (client === socket) client = undefined
     })
+
+    // densable onConnection → clearPreBootState re-evaluates the wedge.
+    const jobDir = process.env.CLAUDE_JOB_DIR
+    if (jobDir) maybeArmStartupWedge(jobDir)
 
     let buf = ''
     const decoder = new StringDecoder('utf8')
@@ -85,6 +108,10 @@ export async function startRendezvousServer(): Promise<void> {
   // Heartbeat every 30s so daemon knows we're alive
   heartbeatTimer = setInterval(() => sendRv({ type: 'heartbeat' }), 30_000)
   heartbeatTimer.unref()
+
+  // densable z8n: if the job is already working + rPt, start the 45s clock.
+  const jobDir = process.env.CLAUDE_JOB_DIR
+  if (jobDir) maybeArmStartupWedge(jobDir)
 }
 
 /**
@@ -95,10 +122,88 @@ export function stopRendezvousServer(): void {
     clearInterval(heartbeatTimer)
     heartbeatTimer = undefined
   }
+  disarmStartupWedgeWatchdog()
   client?.destroy()
   client = undefined
   server?.close()
   server = undefined
+}
+
+/**
+ * densable `z8n.armStartupWedgeWatchdog`.
+ * `CLAUDE_BG_STARTUP_WEDGE_MS || 45000`.
+ */
+export function armStartupWedgeWatchdog(jobDir: string): void {
+  if (wedgeDisarmed) return
+  clearTimeout(wedgeTimer)
+  const ms = Number(process.env.CLAUDE_BG_STARTUP_WEDGE_MS || 45000)
+  wedgeTimer = setTimeout(() => void onStartupWedgeTimeout(jobDir), ms)
+  wedgeTimer.unref()
+}
+
+/** densable `z8n.disarmStartupWedgeWatchdog`. */
+export function disarmStartupWedgeWatchdog(): void {
+  wedgeDisarmed = true
+  clearTimeout(wedgeTimer)
+  wedgeTimer = undefined
+}
+
+/**
+ * densable `z8n.onStartupWedgeTimeout`: still `working` + `detail===rPt`
+ * and not already blocked → tempo blocked + stuck-dialog copy.
+ */
+export async function onStartupWedgeTimeout(jobDir: string): Promise<void> {
+  try {
+    const { readBgJobState, writeBgJobState } = await import('./jobState.js')
+    if (wedgeDisarmed) return
+    const short = jobShortFromDir(jobDir)
+    const t = readBgJobState(short)
+    if (
+      !t ||
+      t.state !== 'working' ||
+      t.detail !== STARTUP_DETAIL_RPT ||
+      t.tempo === 'blocked'
+    ) {
+      return
+    }
+    const updatedAt = new Date().toISOString()
+    writeBgJobState(short, {
+      ...t,
+      tempo: 'blocked',
+      detail: STUCK_STARTUP_DIALOG,
+      needs: STUCK_STARTUP_NEEDS,
+      updatedAt,
+    })
+    sendRv({
+      type: 'state',
+      patch: {
+        tempo: 'blocked',
+        detail: STUCK_STARTUP_DIALOG,
+        needs: STUCK_STARTUP_NEEDS,
+      },
+    })
+  } catch {
+    // densable Et/Gp: swallow expected I/O; don't take down rv
+  }
+}
+
+/** densable: `if (t.state==="working" && t.detail===rPt) arm…` */
+export function maybeArmStartupWedge(jobDir: string): void {
+  void import('./jobState.js')
+    .then(({ readBgJobState }) => {
+      const t = readBgJobState(jobShortFromDir(jobDir))
+      if (t?.state === 'working' && t.detail === STARTUP_DETAIL_RPT) {
+        armStartupWedgeWatchdog(jobDir)
+      }
+    })
+    .catch(() => {})
+}
+
+/** Test helper — reset latch so the next arm can fire. */
+export function resetStartupWedgeForTests(): void {
+  clearTimeout(wedgeTimer)
+  wedgeTimer = undefined
+  wedgeDisarmed = false
 }
 
 /**

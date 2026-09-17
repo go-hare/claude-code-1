@@ -1,14 +1,37 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { cleanupTempDir, createTempDir } from '../../../tests/mocks/file-system'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realLockfile from '../lockfile.js'
 
 // Mock the lockfile module so tests don't need real file locks
+const lockfileSnap = snapshotModuleExports(realLockfile)
 mock.module('../lockfile.js', () => ({
+  ...lockfileSnap,
   lock: async (_file: string, _options?: unknown) => {
     return async () => {}
   },
 }))
+mock.module('src/utils/lockfile.js', () => ({
+  ...lockfileSnap,
+  lock: async (_file: string, _options?: unknown) => {
+    return async () => {}
+  },
+}))
+afterAll(() => {
+  mock.module('../lockfile.js', () => ({ ...lockfileSnap }))
+  mock.module('src/utils/lockfile.js', () => ({ ...lockfileSnap }))
+  mock.module('src/utils/lockfile.ts', () => ({ ...lockfileSnap }))
+})
 
 let tempDir = ''
 

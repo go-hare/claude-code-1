@@ -27,6 +27,7 @@ import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
 } from '../plugins/pluginIdentifier.js'
+import { SERVER_PLUGIN_ID_RE } from '../plugins/syncedPluginHydrate.js'
 
 // builtinPlugins.ts:BUILTIN_MARKETPLACE_NAME — inlined to avoid the cycle
 // through commands.js. Marketplace schemas.ts enforces 'builtin' is reserved.
@@ -89,6 +90,7 @@ export type EnabledVia =
   | 'user-install'
   | 'org-policy'
   | 'default-enable'
+  | 'admin-install'
   | 'seed-mount'
 
 /** How a skill/command invocation was triggered. */
@@ -114,6 +116,13 @@ export function getEnabledVia(
 ): EnabledVia {
   if (plugin.isBuiltin) return 'default-enable'
   if (managedNames?.has(plugin.name)) return 'org-policy'
+  // densable hyo: required | auto_install → admin-install
+  if (
+    plugin.installationPreference === 'required' ||
+    plugin.installationPreference === 'auto_install'
+  ) {
+    return 'admin-install'
+  }
   // Trailing sep: /opt/plugins must not match /opt/plugins-extra
   if (
     seedDirs.some(dir =>
@@ -170,16 +179,42 @@ export function buildPluginTelemetryFields(
  * join on plugin_id_hash to recover it. This keeps hot-path call sites free
  * of the extra settings read.
  */
+/**
+ * densable `Vsn` — `_Ae`=`Nl.test`; emit raw id through Eu (not sha256).
+ * `h1` salt-hash is only `plugin_id_hash`.
+ */
+export function telemetryServerPluginId(
+  serverPluginId: string | undefined,
+): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS | undefined {
+  if (
+    serverPluginId === undefined ||
+    !SERVER_PLUGIN_ID_RE.test(serverPluginId)
+  ) {
+    return
+  }
+  return serverPluginId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+}
+
 export function buildPluginCommandTelemetryFields(
-  pluginInfo: { pluginManifest: PluginManifest; repository: string },
+  pluginInfo: {
+    pluginManifest: PluginManifest
+    repository: string
+    serverPluginId?: string
+  },
   managedNames: Set<string> | null = null,
-): ReturnType<typeof buildPluginTelemetryFields> {
+): ReturnType<typeof buildPluginTelemetryFields> & {
+  server_plugin_id?: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+} {
   const { marketplace } = parsePluginIdentifier(pluginInfo.repository)
-  return buildPluginTelemetryFields(
-    pluginInfo.pluginManifest.name,
-    marketplace,
-    managedNames,
-  )
+  const serverPluginId = telemetryServerPluginId(pluginInfo.serverPluginId)
+  return {
+    ...buildPluginTelemetryFields(
+      pluginInfo.pluginManifest.name,
+      marketplace,
+      managedNames,
+    ),
+    ...(serverPluginId !== undefined && { server_plugin_id: serverPluginId }),
+  }
 }
 
 /**
@@ -188,13 +223,24 @@ export function buildPluginCommandTelemetryFields(
  * this for plugin-level aggregates instead of DISTINCT-on-prefix hacks.
  * A plugin with 5 skills emits 5 skill_loaded rows but 1 of these.
  */
+/** densable 2.1.246 ast(name, repoMkt) ?? repoMkt — Nsn remap on the plugin. */
+export function telemetryMarketplaceForPlugin(
+  plugin: LoadedPlugin,
+): string | undefined {
+  return (
+    plugin.marketplaceName ??
+    parsePluginIdentifier(plugin.repository).marketplace
+  )
+}
+
 export function logPluginsEnabledForSession(
   plugins: LoadedPlugin[],
   managedNames: Set<string> | null,
   seedDirs: string[],
 ): void {
   for (const plugin of plugins) {
-    const { marketplace } = parsePluginIdentifier(plugin.repository)
+    const marketplace = telemetryMarketplaceForPlugin(plugin)
+    const serverPluginId = telemetryServerPluginId(plugin.serverPluginId)
 
     logEvent('tengu_plugin_enabled_for_session', {
       _PROTO_plugin_name:
@@ -204,6 +250,7 @@ export function logPluginsEnabledForSession(
           marketplace as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
       }),
       ...buildPluginTelemetryFields(plugin.name, marketplace, managedNames),
+      ...(serverPluginId !== undefined && { server_plugin_id: serverPluginId }),
       enabled_via: getEnabledVia(
         plugin,
         managedNames,

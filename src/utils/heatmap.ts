@@ -1,6 +1,17 @@
 import chalk from 'chalk'
 import type { DailyActivity } from './stats.js'
-import { toDateString } from './statsCache.js'
+
+/**
+ * densable 2.1.246 `O0` — local calendar YYYY-MM-DD.
+ * `statsCache.toDateString` stays UTC ISO (`Ro`); using it here shifts
+ * Sunday's count under Monday east of UTC.
+ */
+export function toLocalDateString(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 export type HeatmapOptions = {
   terminalWidth?: number // Terminal width in characters
@@ -87,7 +98,7 @@ export function generateHeatmap(
         continue
       }
 
-      const dateStr = toDateString(currentDate)
+      const dateStr = toLocalDateString(currentDate)
       const activity = activityMap.get(dateStr)
 
       // Track month changes (on day 0 = Sunday of each week)

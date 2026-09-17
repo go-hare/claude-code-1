@@ -89,7 +89,8 @@ function clampFirstByteMs(ms: number): number {
 /**
  * Official ZMo — resolve the first-byte window.
  *
- * Env `CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS` wins (clamped). Else the
+ * Env `CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS` wins (clamped, finite only).
+ * Dirty values fall through like official `t.int({min:1})` miss. Else the
  * provider's byte-idle timeout, unless `API_TIMEOUT_MS - 1000` is larger.
  */
 export function resolveFirstByteTimeoutMs(
@@ -98,7 +99,12 @@ export function resolveFirstByteTimeoutMs(
 ): number {
   const explicit = env.CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS
   if (explicit !== undefined) {
-    return clampFirstByteMs(Number(explicit))
+    // Official V.CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS is t.int({min:1}).
+    // Number('abc') is NaN; Bun setTimeout(NaN) fires in ~1ms.
+    const parsed = parseTimeoutMs(explicit, Number.NaN)
+    if (Number.isFinite(parsed)) {
+      return clampFirstByteMs(parsed)
+    }
   }
   const byteIdle = resolveByteStreamIdleTimeoutMs({ provider, env })
   const apiTimeout = parseTimeoutMs(env.API_TIMEOUT_MS, 0)

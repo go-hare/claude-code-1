@@ -886,8 +886,10 @@ function parseAndOr(P: ParseState): TsNode | null {
       const op = leaf(P, t.value, t)
       skipNewlines(P)
       const right = parsePipeline(P)
+      // densable 2.1.246: empty && / || RHS is an ERROR node (fail-closed
+      // ask), not a 2-child list that security would walk as just the LHS.
       if (!right) {
-        left = mk(P, 'list', left.startIndex, op.endIndex, [left, op])
+        left = mk(P, 'ERROR', left.startIndex, op.endIndex, [left, op])
         break
       }
       // If right is a redirected_statement, hoist its redirects to wrap the list.
@@ -922,7 +924,7 @@ function skipNewlines(P: ParseState): void {
   while (true) {
     const save = saveLex(P.L)
     const t = nextToken(P.L, 'cmd')
-    if (t.type !== 'NEWLINE') {
+    if (t.type !== 'NEWLINE' && t.type !== 'COMMENT') {
       restoreLex(P.L, save)
       break
     }
@@ -947,8 +949,7 @@ function parsePipeline(P: ParseState): TsNode | null {
       skipNewlines(P)
       const next = parseCommand(P)
       if (!next) {
-        parts.push(op)
-        break
+        return mk(P, 'ERROR', parts[0]!.startIndex, op.endIndex, [...parts, op])
       }
       // Hoist trailing redirect on `next` to wrap current pipeline fragment
       if (

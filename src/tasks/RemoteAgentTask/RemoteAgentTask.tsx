@@ -1,4 +1,3 @@
-import type { ToolUseBlock } from '@anthropic-ai/sdk/resources';
 import { getRemoteSessionUrl } from '../../constants/product.js';
 import {
   OUTPUT_FILE_TAG,
@@ -16,7 +15,7 @@ import type { SDKAssistantMessage, SDKMessage } from '../../entrypoints/agentSdk
 import type { MessageContent } from '../../types/message.js';
 import type { SetAppState, Task, TaskContext, TaskStateBase } from '../../Task.js';
 import { createTaskStateBase, generateTaskId } from '../../Task.js';
-import { TodoWriteTool } from '@claude-code/builtin-tools/tools/TodoWriteTool/TodoWriteTool.js';
+import { createRemoteTodoObserver } from './remoteTodoObserver.js';
 import {
   type BackgroundRemoteSessionPrecondition,
   checkBackgroundRemoteSessionEligibility,
@@ -32,7 +31,7 @@ import {
   listRemoteAgentMetadata,
   type RemoteAgentMetadata,
   writeRemoteAgentMetadata,
-} from '../../utils/sessionStorage.js';
+} from '../../utils/sessionPaths.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
 import { appendTaskOutput, evictTaskOutput, getTaskOutputPath, initTaskOutput } from '../../utils/task/diskOutput.js';
 import { registerTask, updateTaskState } from '../../utils/task/framework.js';
@@ -574,42 +573,6 @@ Cloud review did not produce output (${reason}). Tell the user to retry /code-re
 }
 
 /**
- * Extract todo list from SDK messages (finds last TodoWrite tool use).
- */
-function extractTodoListFromLog(log: SDKMessage[]): TodoList {
-  const todoListMessage = log.findLast(
-    (msg): msg is SDKAssistantMessage =>
-      msg.type === 'assistant' &&
-      Array.isArray((msg as SDKAssistantMessage).message?.content) &&
-      (((msg as SDKAssistantMessage).message?.content ?? []) as Array<{ type: string; name?: string }>).some(
-        block => block.type === 'tool_use' && block.name === TodoWriteTool.name,
-      ),
-  );
-  if (!todoListMessage) {
-    return [];
-  }
-
-  const contentBlocks = (todoListMessage.message?.content ?? []) as Array<{
-    type: string;
-    name?: string;
-    input?: unknown;
-  }>;
-  const input = contentBlocks.find(
-    (block): block is ToolUseBlock => block.type === 'tool_use' && block.name === TodoWriteTool.name,
-  )?.input;
-  if (!input) {
-    return [];
-  }
-
-  const parsedInput = TodoWriteTool.inputSchema.safeParse(input);
-  if (!parsedInput.success) {
-    return [];
-  }
-
-  return parsedInput.data.todos;
-}
-
-/**
  * Register a remote agent task in the unified task framework.
  * Bundles task ID generation, output init, state creation, registration, and polling.
  * Callers remain responsible for custom pre-registration logic (git dialogs, transcript upload, teleport options).
@@ -794,6 +757,8 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
   let consecutiveIdlePolls = 0;
   let lastEventId: string | null = null;
   let accumulatedLog: SDKMessage[] = [];
+  // densable 2.1.246 pGn — created once per poll lifetime.
+  const observer = createRemoteTodoObserver();
   // Cached across ticks so we don't re-scan the full log. Tag appears once
   // at end of run; scanning only the delta (response.newEvents) is O(new).
   let cachedReviewContent: string | null = null;
@@ -817,6 +782,9 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
       const logGrew = response.newEvents.length > 0;
       if (logGrew) {
         accumulatedLog = [...accumulatedLog, ...response.newEvents];
+        for (const ev of response.newEvents) {
+          observer.observe(ev);
+        }
         const deltaText = response.newEvents
           .map(msg => {
             if (msg.type === 'assistant') {
@@ -998,23 +966,18 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
           raceTerminated = true;
           return prevTask;
         }
-        // No log growth and status unchanged → nothing to report. Return
-        // same ref so updateTaskState skips the spread and 18 s.tasks
-        // subscribers (REPL, Spinner, PromptInput, ...) don't re-render.
-        // newProgress only arrives via log growth (heartbeat echo is a
-        // hook_progress event), so !logGrew already covers no-update.
+        // Official kGn skip: he && ge===et.todoList && reviewProgress===undefined.
+        // Cache on observer.todos() makes idle ticks same-ref no-ops.
         const statusUnchanged = newStatus === 'running' || newStatus === 'starting';
-        if (!logGrew && statusUnchanged) {
+        const todoList = observer.todos();
+        if (statusUnchanged && todoList === prevTask.todoList && newProgress === undefined) {
           return prevTask;
         }
         return {
           ...prevTask,
           status: newStatus === 'starting' ? 'running' : newStatus,
           log: accumulatedLog,
-          // Only re-scan for TodoWrite when log grew — log is append-only,
-          // so no growth means no new tool_use blocks. Avoids findLast +
-          // some + find + safeParse every second when idle.
-          todoList: logGrew ? extractTodoListFromLog(accumulatedLog) : prevTask.todoList,
+          todoList,
           reviewProgress: newProgress ?? prevTask.reviewProgress,
           endTime: result || sessionDone || reviewTimedOut ? Date.now() : undefined,
         };

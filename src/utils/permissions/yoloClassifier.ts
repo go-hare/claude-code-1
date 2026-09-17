@@ -5,10 +5,8 @@ import {
   APIConnectionTimeoutError,
   APIError,
 } from '@anthropic-ai/sdk'
-import type { BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages.js'
 import { mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
-import { z } from 'zod/v4'
 import {
   getCachedClaudeMdContent,
   getLastClassifierRequests,
@@ -29,7 +27,6 @@ import type {
 import { isDebugMode, logForDebugging } from '../debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
 import { errorMessage, isAbortError } from '../errors.js'
-import { lazySchema } from '../lazySchema.js'
 import { extractTextContent } from '../messages.js'
 import { resolveAntModel } from '../model/antModels.js'
 import { getDefaultSonnetModel, getMainLoopModel } from '../model/model.js'
@@ -37,8 +34,10 @@ import { isPoorModeActive } from '../../commands/poor/poorMode.js'
 import { getAutoModeConfig } from '../settings/settings.js'
 import { sideQuery } from '../sideQuery.js'
 import {
+  CLASSIFIER_SIDE_QUERY_TIMEOUT_MS,
   CLASSIFIER_XML_S1_WALL_CLOCK_MS,
   CLASSIFIER_XML_S2_WALL_CLOCK_MS,
+  scaleClassifierDeadlineMs,
   sideQueryWithClassifierWallClock,
 } from './classifierWallClock.js'
 import { densableThinkingForceParams } from '../thinking.js'
@@ -49,10 +48,6 @@ import {
   getBashPromptAllowDescriptions,
   getBashPromptDenyDescriptions,
 } from './bashClassifier.js'
-import {
-  extractToolUseBlock,
-  parseClassifierResponse,
-} from './classifierShared.js'
 import { getClaudeTempDir } from './filesystem.js'
 import {
   mapAutoModeOutcomeCode,
@@ -386,40 +381,7 @@ async function dumpErrorPrompts(
   }
 }
 
-const yoloClassifierResponseSchema = lazySchema(() =>
-  z.object({
-    thinking: z.string(),
-    shouldBlock: z.boolean(),
-    reason: z.string(),
-  }),
-)
-
 export const YOLO_CLASSIFIER_TOOL_NAME = 'classify_result'
-
-const YOLO_CLASSIFIER_TOOL_SCHEMA: BetaToolUnion = {
-  type: 'custom',
-  name: YOLO_CLASSIFIER_TOOL_NAME,
-  description: 'Report the security classification result for the agent action',
-  input_schema: {
-    type: 'object',
-    properties: {
-      thinking: {
-        type: 'string',
-        description: 'Brief step-by-step reasoning.',
-      },
-      shouldBlock: {
-        type: 'boolean',
-        description:
-          'Whether the action should be blocked (true) or allowed (false)',
-      },
-      reason: {
-        type: 'string',
-        description: 'Brief explanation of the classification decision',
-      },
-    },
-    required: ['thinking', 'shouldBlock', 'reason'],
-  },
-}
 
 type TranscriptBlock =
   | { type: 'text'; text: string }
@@ -1047,6 +1009,17 @@ async function classifyYoloActionXml(
   let stage1Opts: Parameters<typeof sideQuery>[0] | undefined
   const overallStart = Date.now()
   const [disableThinking, thinkingPadding] = getClassifierThinkingConfig(model)
+  // densable 2.1.246 #17 qin / GLs: scale xml deadline with prompt size.
+  const scaledDeadlineMs = scaleClassifierDeadlineMs(
+    Math.max(
+      dumpContextInfo.classifierTokensEst,
+      dumpContextInfo.mainLoopTokens,
+    ),
+  )
+  const stage1CeilingMs = Math.max(
+    scaledDeadlineMs,
+    (getDefaultMaxRetries() + 1) * CLASSIFIER_XML_S1_WALL_CLOCK_MS,
+  )
 
   // Wrap transcript entries in <transcript> tags for the XML classifier.
   // Wrap all content (transcript + action) in <transcript> tags.
@@ -1098,8 +1071,12 @@ async function classifyYoloActionXml(
       const stage1Raw = await sideQueryWithClassifierWallClock(
         signal,
         stage1Opts,
-        CLASSIFIER_XML_S1_WALL_CLOCK_MS,
-        'per_attempt',
+        {
+          deadlineMs: scaledDeadlineMs,
+          scope: 'per_attempt',
+          attemptTimeoutMs: scaledDeadlineMs,
+          ceilingMs: stage1CeilingMs,
+        },
       )
       stage1DurationMs = Date.now() - stage1Start
       stage1Usage = extractUsage(stage1Raw)
@@ -1210,8 +1187,14 @@ async function classifyYoloActionXml(
     const stage2Raw = await sideQueryWithClassifierWallClock(
       signal,
       stage2Opts,
-      CLASSIFIER_XML_S2_WALL_CLOCK_MS,
-      'per_call',
+      {
+        deadlineMs: CLASSIFIER_XML_S2_WALL_CLOCK_MS,
+        scope: 'per_call',
+        attemptTimeoutMs: Math.max(
+          CLASSIFIER_SIDE_QUERY_TIMEOUT_MS,
+          scaledDeadlineMs,
+        ),
+      },
     )
     const stage2DurationMs = Date.now() - stage2Start
     const stage2Usage = extractUsage(stage2Raw)
@@ -1520,243 +1503,35 @@ export async function classifyYoloAction(
 
   const model = getClassifierModel()
 
-  // densable nPt: wrap primary model call with mO_/Mhd-gated fallbackModelByModel
-  // (http_401 never demotes — only OAuth recovery in sideQuery heals auth).
-  if (isTwoStageClassifierEnabled()) {
-    return withOutcomeCode(
-      await withClassifierModelFallback(
-        model,
-        m =>
-          classifyYoloActionXml(
-            prefixMessages,
-            systemPrompt,
-            userPrompt,
-            userContentBlocks,
-            m,
-            promptLengths,
-            signal,
-            {
-              mainLoopTokens:
-                mainLoopTokens ?? tokenCountWithEstimation(messages),
-              classifierChars,
-              classifierTokensEst,
-              transcriptEntries: transcriptEntries.length,
-              messages: messages.length,
-              action: actionCompact,
-            },
-            getTwoStageMode(),
-            parentSpan,
-          ),
-        signal,
-      ),
-    )
-  }
-
+  // densable 2.1.246 #17 X3: always GLs. n0s/r0s never disable XML
+  // (`false` / `true` / unset → "both"; only "fast"|"thinking" change mode).
   return withOutcomeCode(
     await withClassifierModelFallback(
       model,
-      m => classifyYoloActionToolUse(m),
+      m =>
+        classifyYoloActionXml(
+          prefixMessages,
+          systemPrompt,
+          userPrompt,
+          userContentBlocks,
+          m,
+          promptLengths,
+          signal,
+          {
+            mainLoopTokens:
+              mainLoopTokens ?? tokenCountWithEstimation(messages),
+            classifierChars,
+            classifierTokensEst,
+            transcriptEntries: transcriptEntries.length,
+            messages: messages.length,
+            action: actionCompact,
+          },
+          getTwoStageMode(),
+          parentSpan,
+        ),
       signal,
     ),
   )
-
-  async function classifyYoloActionToolUse(
-    model: string,
-  ): Promise<YoloClassifierResult> {
-    const [disableThinking, thinkingPadding] =
-      getClassifierThinkingConfig(model)
-    try {
-      const start = Date.now()
-      const sideQueryOpts = {
-        model,
-        max_tokens: 4096 + thinkingPadding,
-        system: [
-          {
-            type: 'text' as const,
-            text: systemPrompt,
-            cache_control: getCacheControl({ querySource: 'auto_mode' }),
-          },
-        ],
-        skipSystemPromptPrefix: true,
-        // densable 2.1.229 forceAttributionHeader for auto-mode classifier
-        forceAttributionHeader: true,
-        temperature: getClassifierTemperature(),
-        thinking: disableThinking,
-        messages: [
-          ...prefixMessages,
-          { role: 'user' as const, content: userContentBlocks },
-        ],
-        tools: [YOLO_CLASSIFIER_TOOL_SCHEMA],
-        tool_choice: {
-          type: 'tool' as const,
-          name: YOLO_CLASSIFIER_TOOL_NAME,
-        },
-        maxRetries: getDefaultMaxRetries(),
-        signal,
-        querySource: 'auto_mode' as const,
-        parentSpan,
-      }
-      const result = await sideQueryWithClassifierWallClock(
-        signal,
-        sideQueryOpts,
-        CLASSIFIER_XML_S1_WALL_CLOCK_MS,
-        'per_attempt',
-      )
-      void maybeDumpAutoMode(sideQueryOpts, result, start)
-      setLastClassifierRequests([sideQueryOpts])
-      const durationMs = Date.now() - start
-      const stage1RequestId = extractRequestId(result)
-      const stage1MsgId = result.id
-
-      // Extract usage for overhead telemetry
-      const usage = {
-        inputTokens: result.usage.input_tokens,
-        outputTokens: result.usage.output_tokens,
-        cacheReadInputTokens: result.usage.cache_read_input_tokens ?? 0,
-        cacheCreationInputTokens: result.usage.cache_creation_input_tokens ?? 0,
-      }
-      // Actual total input tokens the classifier API consumed (uncached + cache)
-      const classifierInputTokens =
-        usage.inputTokens +
-        usage.cacheReadInputTokens +
-        usage.cacheCreationInputTokens
-      if (isDebugMode()) {
-        logForDebugging(
-          `[auto-mode] API usage: ` +
-            `actualInputTokens=${classifierInputTokens} ` +
-            `(uncached=${usage.inputTokens} ` +
-            `cacheRead=${usage.cacheReadInputTokens} ` +
-            `cacheCreate=${usage.cacheCreationInputTokens}) ` +
-            `estimateWas=${classifierTokensEst} ` +
-            `deltaVsMainLoop=${classifierInputTokens - mainLoopTokens} ` +
-            `durationMs=${durationMs}`,
-        )
-      }
-
-      // Extract the tool use result using shared utility
-      const toolUseBlock = extractToolUseBlock(
-        result.content,
-        YOLO_CLASSIFIER_TOOL_NAME,
-      )
-
-      if (!toolUseBlock) {
-        logForDebugging('Auto mode classifier: No tool use block found', {
-          level: 'warn',
-        })
-        logAutoModeOutcome('parse_failure', model, {
-          failureKind: 'no_tool_use',
-        })
-        return {
-          shouldBlock: true,
-          reason: 'Classifier returned no tool use block - blocking for safety',
-          refusedBySafeguard: result.stop_reason === 'refusal',
-          model,
-          usage,
-          durationMs,
-          promptLengths,
-          stage1RequestId,
-          stage1MsgId,
-        }
-      }
-
-      // Parse response using shared utility
-      const parsed = parseClassifierResponse(
-        toolUseBlock,
-        yoloClassifierResponseSchema(),
-      )
-      if (!parsed) {
-        logForDebugging('Auto mode classifier: Invalid response schema', {
-          level: 'warn',
-        })
-        logAutoModeOutcome('parse_failure', model, {
-          failureKind: 'invalid_schema',
-        })
-        return {
-          shouldBlock: true,
-          reason: 'Invalid classifier response - blocking for safety',
-          refusedBySafeguard: result.stop_reason === 'refusal',
-          model,
-          usage,
-          durationMs,
-          promptLengths,
-          stage1RequestId,
-          stage1MsgId,
-        }
-      }
-
-      const classifierResult = {
-        thinking: parsed.thinking,
-        shouldBlock: parsed.shouldBlock,
-        reason: parsed.reason ?? 'No reason provided',
-        model,
-        usage,
-        durationMs,
-        promptLengths,
-        stage1RequestId,
-        stage1MsgId,
-      }
-      // Context-delta telemetry: chart classifierInputTokens / mainLoopTokens
-      // in Datadog. Expect ~0.6-0.8 steady state; alert on p95 > 1.0 (means
-      // classifier is bigger than main loop — auto-compact won't save us).
-      logAutoModeOutcome('success', model, {
-        durationMs,
-        mainLoopTokens,
-        classifierInputTokens,
-        classifierTokensEst,
-      })
-      return classifierResult
-    } catch (error) {
-      if (signal.aborted) {
-        logForDebugging('Auto mode classifier: aborted by user')
-        logAutoModeOutcome('interrupted', model)
-        return {
-          shouldBlock: true,
-          reason: 'Classifier request aborted',
-          model,
-          unavailable: true,
-        }
-      }
-      const tooLong = detectPromptTooLong(error)
-      logForDebugging(`Auto mode classifier error: ${errorMessage(error)}`, {
-        level: 'warn',
-      })
-      const errorDumpPath =
-        (await dumpErrorPrompts(systemPrompt, userPrompt, error, {
-          mainLoopTokens,
-          classifierChars,
-          classifierTokensEst,
-          transcriptEntries: transcriptEntries.length,
-          messages: messages.length,
-          action: actionCompact,
-          model,
-        })) ?? undefined
-      const errorKind = tooLong ? undefined : classifyClassifierErrorKind(error)
-      const httpStatus = extractHttpStatus(error)
-      // No API usage on error — use classifierTokensEst / mainLoopTokens
-      // for the ratio. Overflow errors are the critical divergence signal.
-      logAutoModeOutcome(tooLong ? 'transcript_too_long' : 'error', model, {
-        mainLoopTokens,
-        classifierTokensEst,
-        ...(tooLong && {
-          transcriptActualTokens: tooLong.actualTokens,
-          transcriptLimitTokens: tooLong.limitTokens,
-        }),
-        ...(!tooLong && errorKind !== undefined && { errorKind }),
-      })
-      return {
-        shouldBlock: true,
-        reason: tooLong
-          ? 'Classifier transcript exceeded context window'
-          : 'Classifier unavailable - blocking for safety',
-        model,
-        unavailable: true,
-        httpStatus,
-        errorKind,
-        transcriptTooLong: Boolean(tooLong),
-        errorDumpPath,
-      }
-    }
-  }
 }
 
 type TwoStageMode = 'both' | 'fast' | 'thinking'
@@ -1868,8 +1643,8 @@ async function withClassifierModelFallback(
 }
 
 /**
- * Resolve the XML classifier setting: ant-only env var takes precedence,
- * then GrowthBook. Returns undefined when unset (caller decides default).
+ * Official Ql()?.twoStageClassifier. Ant-only env can pin fast/thinking.
+ * `false` / `true` / unset are not an XML off-switch — n0s/r0s map them to "both".
  */
 function resolveTwoStageClassifier():
   | boolean
@@ -1884,14 +1659,6 @@ function resolveTwoStageClassifier():
   }
   // densable KD / oVf — qTa.twoStageClassifier:!0 when !KIt
   return resolveTenguAutoModeConfig()?.twoStageClassifier
-}
-
-/**
- * Check if the XML classifier is enabled (any truthy value including 'fast'/'thinking').
- */
-function isTwoStageClassifierEnabled(): boolean {
-  const v = resolveTwoStageClassifier()
-  return v === true || v === 'fast' || v === 'thinking'
 }
 
 function isJsonlTranscriptEnabled(): boolean {
@@ -1991,8 +1758,7 @@ function detectPromptTooLong(
 }
 
 /**
- * Get which stage(s) the XML classifier should run.
- * Only meaningful when isTwoStageClassifierEnabled() is true.
+ * Official n0s / r0s: fast|thinking keep that mode; everything else → both.
  */
 function getTwoStageMode(): TwoStageMode {
   const v = resolveTwoStageClassifier()

@@ -1,4 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import * as realParseDeepLink from '../parseDeepLink.js'
+import * as realRegisterProtocol from '../registerProtocol.js'
+import * as realTerminalLauncher from '../terminalLauncher.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const parseDeepLinkSnap = snapshotModuleExports(realParseDeepLink)
+const registerProtocolSnap = snapshotModuleExports(realRegisterProtocol)
+const terminalLauncherSnap = snapshotModuleExports(realTerminalLauncher)
 
 const mockParseDeepLink = mock((uri: string) => {
   if (uri === null || uri === undefined || uri === 'bad-uri') {
@@ -9,12 +17,15 @@ const mockParseDeepLink = mock((uri: string) => {
 const mockLaunchInTerminal = mock(async () => true)
 
 mock.module('../parseDeepLink.js', () => ({
+  ...parseDeepLinkSnap,
   parseDeepLink: mockParseDeepLink,
 }))
 mock.module('../registerProtocol.js', () => ({
+  ...registerProtocolSnap,
   MACOS_BUNDLE_ID: 'com.anthropic.claude-code-url-handler',
 }))
 mock.module('../terminalLauncher.js', () => ({
+  ...terminalLauncherSnap,
   launchInTerminal: mockLaunchInTerminal,
 }))
 mock.module('../banner.js', () => ({

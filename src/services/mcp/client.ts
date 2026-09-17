@@ -9,6 +9,7 @@ import {
   Client,
   createFetchWithInit,
   ProtocolErrorCode,
+  SdkError,
   SSEClientTransport,
   type SSEClientTransportOptions,
   StreamableHTTPClientTransport,
@@ -82,6 +83,7 @@ import { detectCodeIndexingFromMcpServerName } from '../../utils/codeIndexing.js
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
 import {
+  AbortError,
   errorMessage,
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../../utils/errors.js'
@@ -133,6 +135,10 @@ import {
   runElicitationHooks,
   runElicitationResultHooks,
 } from './elicitationHandler.js'
+import {
+  isMcpRequiresUserInteraction,
+  mcpToolCheckPermissionsResult,
+} from './mcpToolInteraction.js'
 import { buildMcpToolName } from './mcpStringUtils.js'
 import { filterListedMcpToolsBySchema } from './mcpToolSchema.js'
 import { normalizeNameForMCP } from './normalization.js'
@@ -167,6 +173,7 @@ import {
   classifyAuthReconnectKind,
   hasAuthReconnectInFlight,
   isConnectionClosedWhileReconnecting,
+  isMcpConnectionClosedError,
   joinOrStartAuthReconnect,
 } from './authReconnect.js'
 import { markClaudeAiMcpConnected } from './claudeai.js'
@@ -2436,6 +2443,9 @@ export const fetchToolsForClient = memoizeWithLRU(
       return listedAfterSchema
         .map((tool): Tool => {
           const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+          const requiresUserInteraction = isMcpRequiresUserInteraction(
+            tool._meta,
+          )
           return {
             ...MCPTool,
             // In skip-prefix mode, use the original name for model invocation so MCP tools
@@ -2490,25 +2500,16 @@ export const fetchToolsForClient = memoizeWithLRU(
             isSearchOrReadCommand() {
               return classifyMcpToolForCollapse(client.name, tool.name)
             },
+            requiresUserInteraction() {
+              return requiresUserInteraction
+            },
+            suppressesAlwaysAllowRule: () => requiresUserInteraction,
             inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
             async checkPermissions() {
-              return {
-                behavior: 'passthrough' as const,
-                message: 'MCPTool requires permission.',
-                suggestions: [
-                  {
-                    type: 'addRules' as const,
-                    rules: [
-                      {
-                        toolName: fullyQualifiedName,
-                        ruleContent: undefined,
-                      },
-                    ],
-                    behavior: 'allow' as const,
-                    destination: 'localSettings' as const,
-                  },
-                ],
-              }
+              return mcpToolCheckPermissionsResult(
+                requiresUserInteraction,
+                fullyQualifiedName,
+              )
             },
             async call(
               args: Record<string, unknown>,
@@ -2660,6 +2661,11 @@ export const fetchToolsForClient = memoizeWithLRU(
                           },
                         })
                       : await runMcp(context.abortController.signal)
+
+                  // densable 2.1.246 #10: `if(Ae.interrupted)throw new Rn(Q6)`
+                  // before completed progress — abort must not become empty
+                  // content → Dyo `(completed with no output)`.
+                  throwIfMcpToolCallInterrupted(mcpResult)
 
                   // densable: auto-bg returns moved-to-background tool result while
                   // the call still runs — do not emit false "completed" progress.
@@ -3104,7 +3110,10 @@ export function inertReconnectShape(
   tools: Tool[]
   commands: Command[]
 } {
-  logEvent('mcp_reconnect', { result: 'mcp_reconnect_identity_changed' })
+  logEvent('mcp_reconnect', {
+    result:
+      'mcp_reconnect_identity_changed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
   return {
     client: {
       name,
@@ -3134,6 +3143,7 @@ export async function reconnectMcpServerImpl(
   const identitySensitive = mcpConfigDependsOnAccountIdentity(config)
   const identityMoved = (): boolean =>
     identitySensitive && getMcpIdentityEpoch() !== identityEpoch
+  let live: ConnectedMCPServer | undefined
   try {
     // Invalidate the keychain cache so we read fresh credentials from disk.
     // This is necessary when another process (e.g. the VS Code extension host)
@@ -3169,6 +3179,7 @@ export async function reconnectMcpServerImpl(
         commands: [],
       }
     }
+    live = client
 
     // densable: discoveryAuthFailure from tools/list → surface needs-auth
     // (distinct from discoveryBearerRejected which stays connected + /login).
@@ -3200,6 +3211,10 @@ export async function reconnectMcpServerImpl(
     }
 
     if (client.discoveryAuthFailure) {
+      // Identity-move already detaches. tools/list 401/403 must too —
+      // otherwise lodash memo keeps the live SSE/HTTP and the next
+      // reconnect may skip redial. peekSettled === connected stays gold.
+      await detachAndCloseConnection(client)
       return {
         client: { name, type: 'needs-auth' as const, config },
         tools: [],
@@ -3234,6 +3249,9 @@ export async function reconnectMcpServerImpl(
   } catch (error) {
     // Handle errors gracefully - connection might have closed during fetch
     logMCPError(name, `Error during reconnection: ${errorMessage(error)}`)
+    if (live) {
+      await detachAndCloseConnection(live)
+    }
 
     // Return with failed status
     return {
@@ -3917,8 +3935,35 @@ function unwrapSingleTextBlock(content: MCPToolResult): string | undefined {
  */
 type MCPToolCallResult = {
   content: MCPToolResult
+  interrupted?: boolean
+  isError?: boolean
   _meta?: Record<string, unknown>
   structuredContent?: Record<string, unknown>
+}
+
+/**
+ * densable `Q6` — explicit interrupt text for an aborted MCP `tools/call`.
+ * Official: abort used to return empty content → Dyo filled
+ * `(${name} completed with no output)`.
+ */
+export const MCP_TOOL_CALL_INTERRUPTED =
+  'The tool call was interrupted before a result was received. It may or may not have completed on the server — verify before assuming it succeeded, and retry if needed.'
+
+/**
+ * densable MCP `call`: `if(Ae.interrupted)throw new Rn(Q6)`.
+ * `Rn` in that module is the interrupt Error (`instanceof` → OLr "interrupted").
+ */
+export function throwIfMcpToolCallInterrupted(
+  result: { interrupted?: boolean } | object,
+): void {
+  if (
+    result &&
+    typeof result === 'object' &&
+    'interrupted' in result &&
+    result.interrupted
+  ) {
+    throw new AbortError(MCP_TOOL_CALL_INTERRUPTED)
+  }
 }
 
 /** @internal Exported for testing. */
@@ -4168,11 +4213,7 @@ async function callMCPTool({
   onProgress?: (data: MCPProgress) => void
   imageLimits?: ImageLimits
   hasResultSizeAnnotation?: boolean
-}): Promise<{
-  content: MCPToolResult
-  _meta?: Record<string, unknown>
-  structuredContent?: Record<string, unknown>
-}> {
+}): Promise<MCPToolCallResult> {
   const toolStartTime = Date.now()
   let progressInterval: NodeJS.Timeout | undefined
   let idleTimeoutId: NodeJS.Timeout | undefined
@@ -4402,18 +4443,15 @@ async function callMCPTool({
         )
       }
 
-      // Check for session expiry — two error shapes can surface here:
-      // 1. Direct 404 + JSON-RPC -32001 from the server (StreamableHTTPError)
-      // 2. -32000 "Connection closed" (McpError) — the SDK closes the transport
-      //    after the onerror handler fires, so the pending callTool() rejects
-      //    with this derived error instead of the original 404.
-      // In both cases, clear the connection cache so the next tool call
-      // creates a fresh session.
+      // Official WZe expired arm:
+      // `te=q2t(E)` (404/-32001) OR
+      // `(E instanceof hr && E.code === mr.ConnectionClosed ||
+      //   E instanceof us && E.code === -32000 && message includes Connection closed)
+      //  && (http || claudeai-proxy)`
+      // then clear cache + throw VS (session_expired_404 / connection_closed_http).
       const isSessionExpired = isMcpSessionExpiredError(e)
       const isConnectionClosedOnHttp =
-        'code' in e &&
-        (e as Error & { code?: number }).code === -32000 &&
-        e.message.includes('Connection closed') &&
+        isMcpConnectionClosedError(e) &&
         (config.type === 'http' || config.type === 'claudeai-proxy')
       if (isSessionExpired || isConnectionClosedOnHttp) {
         logMCPDebug(
@@ -4426,11 +4464,23 @@ async function callMCPTool({
       }
     }
 
-    // When the users hits esc, avoid logspew
-    if (!(e instanceof Error) || e.name !== 'AbortError') {
+    // densable 2.1.246 #10 WZe:
+    // `if(!(E instanceof Error&&E.name==="AbortError")&&!(a?.aborted===!0&&E instanceof hr))throw E`
+    // SEA `hr` @211850148 is v2 `SdkError` (`this.name="SdkError"`,
+    // `mcpBrand:"mcp.SdkError"`). `SdkHttpError` extends it. The old
+    // `F`/`McpError` class @210489608 is a different binding (`us` in
+    // the ConnectionClosed arm), not this abort predicate.
+    if (
+      !(e instanceof Error && e.name === 'AbortError') &&
+      !(signal.aborted === true && e instanceof SdkError)
+    ) {
       throw e
     }
-    return { content: undefined }
+    return {
+      content: MCP_TOOL_CALL_INTERRUPTED,
+      interrupted: true,
+      isError: true,
+    }
   } finally {
     // Always clear intervals + mid-call drop watchdog registration
     if (progressInterval !== undefined) {

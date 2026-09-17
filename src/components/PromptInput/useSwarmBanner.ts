@@ -196,7 +196,9 @@ export function useSwarmBanner(
   ) {
     return {
       text: standaloneName || agent || '',
-      bgColor: toThemeColor(standaloneColor ?? agentDef?.color),
+      // densable 2.1.246 #24 zRr: q0(V0({userOverride,agentDefinitionColor}),"promptBorder")
+      // /rename sets a name without /color — keep theme promptBorder, not cyan.
+      bgColor: toThemeColor(standaloneColor ?? agentDef?.color, 'promptBorder'),
       gradient: prideGradient,
     }
   }
@@ -212,7 +214,8 @@ export function useSwarmBanner(
   return null
 }
 
-function toThemeColor(
+/** densable q0 — map agent color name, else fallback (default cyan). */
+export function toThemeColor(
   colorName: string | undefined,
   fallback: keyof Theme = 'cyan_FOR_SUBAGENTS_ONLY',
 ): keyof Theme {

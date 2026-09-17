@@ -585,7 +585,7 @@ export async function ensureDaemonRunning(opts?: {
 
   // 6–7. Ay6 + oCH(30000) + optional clock-jump oCH(5000)
   try {
-    await spawnDetachedTransientDaemon()
+    const spawned = await spawnDetachedTransientDaemon()
     let reachable = await waitForDaemonReachable(30_000)
     const elapsed = Date.now() - t0
     const clockJump = elapsed > 60_000
@@ -603,7 +603,16 @@ export async function ensureDaemonRunning(opts?: {
       platform_linux: platform === 'linux' || platform === 'wsl',
       platform_windows: platform === 'windows',
     })
-    if (reachable) return { ok: true, manager: null }
+    if (reachable) {
+      // Official lr success: if recoveredAfterReinstallWait,
+      // pe("daemon_ensure_running","daemon_ensure_spawn_waited_reinstall").
+      if (spawned.recoveredAfterReinstallWait) {
+        logEvent('daemon_ensure_running', {
+          daemon_ensure_spawn_waited_reinstall: true,
+        })
+      }
+      return { ok: true, manager: null }
+    }
     return {
       ok: false,
       manager: null,
@@ -623,7 +632,9 @@ export async function ensureDaemonRunning(opts?: {
  * Official Ay6 densable — spawn `daemon run --origin transient --spawned-by …`
  * so the control socket outlives the parent (Windows: WMI then rsK; Unix: rsK).
  */
-async function spawnDetachedTransientDaemon(): Promise<void> {
+async function spawnDetachedTransientDaemon(): Promise<{
+  recoveredAfterReinstallWait?: boolean
+}> {
   const { spawnDaemonCli } = await import('../utils/wmiSpawn.js')
   const spawnedBy = buildSpawnedByPayload()
   const result = await spawnDaemonCli([
@@ -636,6 +647,9 @@ async function spawnDetachedTransientDaemon(): Promise<void> {
   ])
   if (!result.success) {
     throw new Error(result.error ?? 'failed to spawn transient daemon')
+  }
+  return {
+    recoveredAfterReinstallWait: result.recoveredAfterReinstallWait,
   }
 }
 

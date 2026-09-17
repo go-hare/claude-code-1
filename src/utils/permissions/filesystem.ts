@@ -12,7 +12,11 @@ import {
   GLOBAL_CLAUDE_FOLDER_PERMISSION_PATTERN,
 } from '@claude-code/builtin-tools/tools/FileEditTool/constants.js'
 import type { z } from 'zod/v4'
-import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
+import {
+  getOriginalCwd,
+  getSessionId,
+  memoryToggledOff,
+} from '../../bootstrap/state.js'
 import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.js'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
@@ -34,7 +38,7 @@ import {
 } from '../path.js'
 import { getPlanSlug, getPlansDirectory } from '../plans.js'
 import { getPlatform } from '../platform.js'
-import { getProjectDir } from '../sessionStorage.js'
+import { getProjectDir } from '../sessionPaths.js'
 import { SETTING_SOURCES } from '../settings/constants.js'
 import {
   getSettingsFilePathForSource,
@@ -293,6 +297,34 @@ function isProjectDirPath(absolutePath: string): boolean {
   return (
     normalizedPath === projectDir || normalizedPath.startsWith(projectDir + sep)
   )
+}
+
+/** Official Mu — FS Tr() latch reason. */
+const MEMORY_ACCESS_BLOCKED_BY_PAUSE = 'memory access blocked by /pause-memory'
+
+/**
+ * Official Cr(path)&&Tr() — isAutoMemPath && memoryToggledOff.
+ * Deny before project/auto-mem allow carve-outs.
+ */
+function denyIfAutoMemoryPaused(
+  normalizedPath: string,
+  kind: 'read' | 'write',
+): PermissionResult | undefined {
+  if (!isAutoMemPath(normalizedPath) || !memoryToggledOff()) {
+    return undefined
+  }
+  return {
+    behavior: 'deny',
+    message:
+      kind === 'read'
+        ? 'Cannot read memory while it is paused. Run /pause-memory to resume automemory.'
+        : 'Cannot write to memory while it is paused. Run /pause-memory to resume automemory.',
+    decisionReason: {
+      type: 'safetyCheck',
+      reason: MEMORY_ACCESS_BLOCKED_BY_PAUSE,
+      classifierApprovable: false,
+    },
+  }
 }
 
 /**
@@ -1685,6 +1717,11 @@ export function checkEditableInternalPath(
   // This is defense-in-depth; individual helper functions also normalize
   const normalizedPath = normalize(absolutePath)
 
+  const pausedWrite = denyIfAutoMemoryPaused(normalizedPath, 'write')
+  if (pausedWrite) {
+    return pausedWrite
+  }
+
   // Plan files for current session
   if (isSessionPlanFile(normalizedPath)) {
     return {
@@ -1816,6 +1853,11 @@ export function checkReadableInternalPath(
   // SECURITY: Normalize path to prevent traversal bypasses via .. segments
   // This is defense-in-depth; individual helper functions also normalize
   const normalizedPath = normalize(absolutePath)
+
+  const pausedRead = denyIfAutoMemoryPaused(normalizedPath, 'read')
+  if (pausedRead) {
+    return pausedRead
+  }
 
   // Session memory directory
   if (isSessionMemoryPath(normalizedPath)) {

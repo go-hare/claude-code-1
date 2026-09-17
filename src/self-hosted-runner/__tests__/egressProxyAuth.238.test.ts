@@ -171,37 +171,42 @@ describe('densable 2.1.238 #5 VtC file/command minter', () => {
     }
   })
 
-  test('file minter stall-locks a hung read', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'f4y-fifo-'))
-    const fifo = join(dir, 'auth.fifo')
-    execFileSync('mkfifo', [fifo])
-    const minter = createProxyAuthorizationMinter({
-      source: { kind: 'file', path: fifo },
-      upstreamProxyUrl: 'http://egress:3128',
-      commandTimeoutMs: 80,
-    })
-    const first = minter.mint()
-    await expect(first).rejects.toThrow(/could not be read/)
-    await expect(minter.mint()).rejects.toThrow(/stalled mount/)
-    const writer = createWriteStream(fifo)
-    writer.write('Bearer unblocked\n')
-    writer.end()
-    await new Promise<void>(resolve => writer.once('close', () => resolve()))
-    await rm(dir, { recursive: true, force: true })
-  })
+  test.skipIf(process.platform === 'win32')(
+    'file minter stall-locks a hung read',
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'f4y-fifo-'))
+      const fifo = join(dir, 'auth.fifo')
+      execFileSync('mkfifo', [fifo])
+      const minter = createProxyAuthorizationMinter({
+        source: { kind: 'file', path: fifo },
+        upstreamProxyUrl: 'http://egress:3128',
+        commandTimeoutMs: 80,
+      })
+      const first = minter.mint()
+      await expect(first).rejects.toThrow(/could not be read/)
+      await expect(minter.mint()).rejects.toThrow(/stalled mount/)
+      const writer = createWriteStream(fifo)
+      writer.write('Bearer unblocked\n')
+      writer.end()
+      await new Promise<void>(resolve => writer.once('close', () => resolve()))
+      await rm(dir, { recursive: true, force: true })
+    },
+  )
 
-  test('command minter uses stdout + injects CLAUDE_CODE_PROXY_URL', async () => {
-    const minter = createProxyAuthorizationMinter({
-      source: {
-        kind: 'command',
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell interpolates CLAUDE_CODE_PROXY_URL at mint time
-        command: 'printf "%s" "Bearer ${CLAUDE_CODE_PROXY_URL}"',
-      },
-      upstreamProxyUrl: 'http://egress:3128',
-      commandEnv: () => ({ PATH: process.env.PATH }),
-    })
-    expect(await minter.mint()).toBe('Bearer http://egress:3128')
-  })
+  test.skipIf(process.platform === 'win32')(
+    'command minter uses stdout + injects CLAUDE_CODE_PROXY_URL',
+    async () => {
+      const minter = createProxyAuthorizationMinter({
+        source: {
+          kind: 'command',
+          command: 'printf "%s" "Bearer ${CLAUDE_CODE_PROXY_URL}"',
+        },
+        upstreamProxyUrl: 'http://egress:3128',
+        commandEnv: () => ({ PATH: process.env.PATH }),
+      })
+      expect(await minter.mint()).toBe('Bearer http://egress:3128')
+    },
+  )
 
   test('command minter failed exit names the code', async () => {
     const minter = createProxyAuthorizationMinter({
@@ -212,42 +217,47 @@ describe('densable 2.1.238 #5 VtC file/command minter', () => {
     await expect(minter.mint()).rejects.toThrow(/exited 7/)
   })
 
-  test('commandEnv wipes runner secrets (F4y trC overlay)', async () => {
-    const minter = createProxyAuthorizationMinter({
-      source: {
-        kind: 'command',
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell interpolates runner secret (must stay ABSENT)
-        command: 'printf "%s" "${SELF_HOSTED_RUNNER_POOL_SECRET:-ABSENT}"',
-      },
-      upstreamProxyUrl: 'http://egress:3128',
-      commandEnv: () => ({
-        PATH: process.env.PATH,
-        SELF_HOSTED_RUNNER_POOL_SECRET: undefined,
-        SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET: undefined,
-      }),
-    })
-    expect(await minter.mint()).toBe('ABSENT')
-  })
+  test.skipIf(process.platform === 'win32')(
+    'commandEnv wipes runner secrets (F4y trC overlay)',
+    async () => {
+      const minter = createProxyAuthorizationMinter({
+        source: {
+          kind: 'command',
+          command: 'printf "%s" "${SELF_HOSTED_RUNNER_POOL_SECRET:-ABSENT}"',
+        },
+        upstreamProxyUrl: 'http://egress:3128',
+        commandEnv: () => ({
+          PATH: process.env.PATH,
+          SELF_HOSTED_RUNNER_POOL_SECRET: undefined,
+          SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET: undefined,
+        }),
+      })
+      expect(await minter.mint()).toBe('ABSENT')
+    },
+  )
 })
 
 describe('densable 2.1.238 #5 erC/trC/H4y rewrite', () => {
   test('rewrites set keys; trC restores originals; H4y overlays', () => {
-    setEnv('HTTPS_PROXY', 'http://up-https:1')
-    setEnv('http_proxy', 'http://up-http:2')
-    setEnv('ALL_PROXY', 'http://all:3')
-    setEnv(PROXY_AUTH_COMMAND_ENV, 'vault read')
+    // Plain object avoids Windows process.env case-insensitive aliasing.
+    const env: NodeJS.ProcessEnv = {
+      HTTPS_PROXY: 'http://up-https:1',
+      http_proxy: 'http://up-http:2',
+      ALL_PROXY: 'http://all:3',
+      [PROXY_AUTH_COMMAND_ENV]: 'vault read',
+    }
     const listener = 'http://runner:secret@127.0.0.1:9'
-    const state = rewriteProcessProxyEnv(listener)
+    const state = rewriteProcessProxyEnv(listener, env)
     expect(state.rewritten.sort()).toEqual(['HTTPS_PROXY', 'http_proxy'])
-    expect(process.env.HTTPS_PROXY).toBe(listener)
-    expect(process.env.http_proxy).toBe(listener)
-    expect(process.env.HTTP_PROXY).toBeUndefined()
+    expect(env.HTTPS_PROXY).toBe(listener)
+    expect(env.http_proxy).toBe(listener)
+    expect(env.HTTP_PROXY).toBeUndefined()
 
-    const cmdEnv = commandEnvWithOriginalProxy()
+    const cmdEnv = commandEnvWithOriginalProxy(env)
     expect(cmdEnv.HTTPS_PROXY).toBe('http://up-https:1')
     expect(cmdEnv.http_proxy).toBe('http://up-http:2')
 
-    const overlay = sessionChildProxyEnvOverlay()
+    const overlay = sessionChildProxyEnvOverlay(env)
     expect(overlay.HTTPS_PROXY).toBe(listener)
     expect(overlay.http_proxy).toBe(listener)
     expect(overlay.HTTP_PROXY).toBeUndefined()

@@ -15,6 +15,17 @@ import {
 } from '../sessionConfine.js'
 
 const dirs: string[] = []
+
+/** Windows without Developer Mode refuses symlinks; skip those assertions. */
+function trySymlink(target: string, path: string): boolean {
+  try {
+    symlinkSync(target, path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 afterEach(() => {
   for (const d of dirs.splice(0)) {
     try {
@@ -50,12 +61,20 @@ describe('densable 2.1.224 #1 sessionConfine (kjv/EKn/tre)', () => {
 
   test('assertNoSessionDirOverlap (EKn)', () => {
     expect(() =>
-      assertNoSessionDirOverlap('/sess/cfg', 'config dir', '/sess/ws', [
-        '/sess/ws',
-      ]),
+      assertNoSessionDirOverlap(
+        join('/sess', 'cfg'),
+        'config dir',
+        join('/sess', 'ws'),
+        [join('/sess', 'ws')],
+      ),
     ).not.toThrow()
     expect(() =>
-      assertNoSessionDirOverlap('/sess/ws/cfg', 'config dir', '/sess/ws', []),
+      assertNoSessionDirOverlap(
+        join('/sess', 'ws', 'cfg'),
+        'config dir',
+        join('/sess', 'ws'),
+        [],
+      ),
     ).toThrow(/overlaps the child's auto-allowed write scope/)
   })
 
@@ -105,7 +124,7 @@ describe('densable 2.1.224 #1 sessionConfine (kjv/EKn/tre)', () => {
   test('scan throws when .claude is a symlink', async () => {
     const root = tmp()
     const outside = tmp()
-    symlinkSync(outside, join(root, '.claude'))
+    if (!trySymlink(outside, join(root, '.claude'))) return
     await expect(
       scanRepoCommittedSettings(root, [root]),
     ).rejects.toBeInstanceOf(ConfineRepoSettingsError)

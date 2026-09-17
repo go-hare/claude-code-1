@@ -19,6 +19,7 @@ import type { Tools } from '../../Tool.js';
 import { findToolByName } from '../../Tool.js';
 import type { AgentToolResult } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js';
 import { VERIFICATION_AGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
+import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js';
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js';
 import { asAgentId } from '../../types/ids.js';
@@ -968,6 +969,7 @@ export async function enqueueAgentNotification({
   error,
   setAppState,
   finalMessage,
+  maxTurnsReached,
   usage,
   toolUseId,
   worktreePath,
@@ -977,6 +979,8 @@ export async function enqueueAgentNotification({
   taskId: string;
   description: string;
   status: 'completed' | 'failed' | 'killed';
+  /** densable 2.1.246 #54 `a` — when set, completed summary is the partial-turn string. */
+  maxTurnsReached?: number;
   /**
    * Official BRt killedBy — only affects killed summary:
    * parent→"was stopped by Claude", user→"was stopped by user", else "was stopped".
@@ -1084,9 +1088,13 @@ export async function enqueueAgentNotification({
   // densable BRt summary wording
   const killedSummary =
     killedBy === 'parent' ? 'was stopped by Claude' : killedBy === 'user' ? 'was stopped by user' : 'was stopped';
+  // densable 2.1.246 #54 b2: `_=a?stopped at its ${a}-turn limit…:Pqn`
+  const completedSummary = maxTurnsReached
+    ? `stopped at its ${maxTurnsReached}-turn limit (partial result; ${SEND_MESSAGE_TOOL_NAME} to task-id to continue)`
+    : 'finished';
   const summary =
     status === 'completed'
-      ? `Agent "${description}" finished`
+      ? `Agent "${description}" ${completedSummary}`
       : status === 'failed'
         ? `Agent "${description}" failed: ${error || 'Unknown error'}`
         : `Agent "${description}" ${killedSummary}`;

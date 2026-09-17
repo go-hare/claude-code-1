@@ -25,7 +25,7 @@ import type {
   SystemMemorySavedMessage,
 } from '../../types/message.js';
 import { SystemAPIErrorMessage } from './SystemAPIErrorMessage.js';
-import { formatDuration, formatNumber, formatSecondsShort } from '../../utils/format.js';
+import { formatDuration, formatNumber, formatResetTime, formatSecondsShort } from '../../utils/format.js';
 import { getGlobalConfig } from '../../utils/config.js';
 import ThemedText from '../design-system/ThemedText.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
@@ -304,6 +304,15 @@ function TurnDurationMessage({
   const showTurnDuration = getGlobalConfig().showTurnDuration ?? true;
 
   const duration = formatDuration(message.durationMs as number);
+  // densable 2.1.246 #3 Vs(timestamp) → ` · done ${TN}` (official L/ct).
+  const rawTimestamp = message.timestamp;
+  const timestamp =
+    typeof rawTimestamp === 'string' || typeof rawTimestamp === 'number'
+      ? rawTimestamp
+      : rawTimestamp instanceof Date
+        ? rawTimestamp
+        : undefined;
+  const doneAt = timestamp !== undefined ? formatResetTime(Math.floor(new Date(timestamp).getTime() / 1000)) : '';
   const hasBudget = message.budgetLimit !== undefined;
   const budgetSuffix = (() => {
     if (!hasBudget) return '';
@@ -341,7 +350,7 @@ function TurnDurationMessage({
         <Text dimColor>{TEARDROP_ASTERISK}</Text>
       </Box>
       <Text dimColor>
-        {showTurnDuration && `${verb} for ${duration}`}
+        {showTurnDuration && `${verb} for ${duration}${doneAt ? ` \u00B7 done ${doneAt}` : ''}`}
         {budgetSuffix}
         {backgroundTaskSummary && ` \u00B7 ${backgroundTaskSummary} still running`}
         {briefHiddenSuffix}

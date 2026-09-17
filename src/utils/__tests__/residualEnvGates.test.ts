@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
 import { isAutoModeEnvEnabled } from '../autoModeEnv.js'
 import {
   getCoordinatorExtraTools,
@@ -833,6 +834,14 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
     expect(
       resolveIdleTokenThreshold({ CLAUDE_CODE_IDLE_TOKEN_THRESHOLD: '50000' }),
     ).toBe(50_000)
+    expect(
+      resolveIdleThresholdMinutes({
+        CLAUDE_CODE_IDLE_THRESHOLD_MINUTES: 'abc',
+      }),
+    ).toBe(DEFAULT_IDLE_THRESHOLD_MINUTES)
+    expect(
+      resolveIdleTokenThreshold({ CLAUDE_CODE_IDLE_TOKEN_THRESHOLD: 'abc' }),
+    ).toBe(DEFAULT_IDLE_TOKEN_THRESHOLD)
     // Official timeout densables (sessionend/pwsh/api-key/aws/mcp idle)
     expect(resolveSessionEndHooksTimeoutMs({})).toBe(
       DEFAULT_SESSIONEND_HOOKS_TIMEOUT_MS,
@@ -1283,7 +1292,7 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
       }),
     ).toEqual([])
     expect(getGatewayModelsCachePath('/home/u/.claude')).toBe(
-      '/home/u/.claude/cache/gateway-models.json',
+      join('/home/u/.claude', 'cache', 'gateway-models.json'),
     )
     // Official q5l densable pure plan + injectable fetch/write
     expect(
@@ -1331,11 +1340,11 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
       })
       expect(fetchResult).toEqual({
         ok: true,
-        path: '/tmp/claude-gw-cache-test/cache/gateway-models.json',
+        path: join('/tmp/claude-gw-cache-test', 'cache', 'gateway-models.json'),
         modelCount: 1,
       })
       expect(written?.path).toBe(
-        '/tmp/claude-gw-cache-test/cache/gateway-models.json',
+        join('/tmp/claude-gw-cache-test', 'cache', 'gateway-models.json'),
       )
       expect(JSON.parse(written?.body ?? '{}')).toEqual({
         baseUrl: 'https://gateway.example.com',

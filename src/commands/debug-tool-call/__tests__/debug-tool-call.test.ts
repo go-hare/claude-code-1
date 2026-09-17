@@ -1,4 +1,5 @@
 import {
+  beforeAll,
   afterAll,
   afterEach,
   beforeEach,
@@ -11,10 +12,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import {
+  bunBundleMock,
+  pushFeatureOverride,
+} from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => true,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 const realAnalytics = await import('../../../services/analytics/index.js')
 const analyticsSnap = snapshotModuleExports(realAnalytics)
@@ -645,4 +648,12 @@ describe('debug-tool-call command', () => {
       expect(result.value).not.toContain('Last 1 Tool Calls')
     }
   })
+})
+
+let popFeatureBunBundle: (() => void) | undefined
+beforeAll(() => {
+  popFeatureBunBundle = pushFeatureOverride(() => true)
+})
+afterAll(() => {
+  popFeatureBunBundle?.()
 })

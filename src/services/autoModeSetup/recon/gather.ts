@@ -33,7 +33,7 @@ import {
   getProjectDir,
   getProjectsDir,
   getTranscriptPath,
-} from '../../../utils/sessionStorage.js'
+} from '../../../utils/sessionPaths.js'
 import type { AutoModeReconFlags } from '../answers.js'
 import { isRemovableAllowRule } from '../write.js'
 

@@ -2,12 +2,17 @@
  * densable 2.1.218 #11 — bn/qO/_Kr/YDu/bb/yor permissionLayers consumers.
  */
 import { describe, expect, mock, test } from 'bun:test'
+import * as realPermissionSetup from 'src/utils/permissions/permissionSetup.js'
 import { debugMock } from '../../../tests/mocks/debug.js'
 import { logMock } from '../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+const permissionSetupSnap = snapshotModuleExports(realPermissionSetup)
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/permissions/permissionSetup.js', () => ({
+  ...permissionSetupSnap,
   isBypassPermissionsModeDisabled: () => false,
 }))
 

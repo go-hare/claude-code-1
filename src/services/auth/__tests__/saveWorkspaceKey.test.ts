@@ -13,9 +13,10 @@ import { debugMock } from '../../../../tests/mocks/debug'
 // Mock side-effect modules first
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 // Snapshot BEFORE mock.module — live namespace rebinds under Bun mock.module,
 // so afterAll `() => _realConfig` would restore the mock, not the real module.
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 import {
   restoreSettingsMockWith,
   snapshotModuleExports,
@@ -72,7 +73,10 @@ afterAll(() => {
 })
 // Provide a stable path so tryChmod600 at least knows which file to chmod
 // (it will fail gracefully for a non-existent file and log via logError)
+const _realEnv = await import('src/utils/env.js')
+const envSnap = snapshotModuleExports(_realEnv)
 mock.module('src/utils/env.ts', () => ({
+  ...envSnap,
   getGlobalClaudeFile: () => '/tmp/.claude-saveWorkspaceKey-test.json',
   getClaudeConfigHomeDir: () => '/tmp/.claude-test',
 }))

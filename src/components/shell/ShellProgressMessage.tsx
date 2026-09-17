@@ -26,8 +26,10 @@ export function ShellProgressMessage({
   timeoutMs,
   verbose,
 }: Props): React.ReactNode {
-  const strippedFullOutput = stripAnsi(fullOutput.trim());
-  const strippedOutput = stripAnsi(output.trim());
+  // Callers read these off a progress tick typed `any` (ShellProgress), so the
+  // string contract above is unenforced at the call site.
+  const strippedFullOutput = stripAnsi(fullOutput?.trim() ?? '');
+  const strippedOutput = stripAnsi(output?.trim() ?? '');
   const lines = strippedOutput.split('\n').filter(line => line);
   const displayLines = verbose ? strippedFullOutput : lines.slice(-5).join('\n');
 

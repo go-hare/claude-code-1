@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { debugMock } from '../../../tests/mocks/debug.js'
+import { logMock } from '../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realAnalytics from 'src/services/analytics/index.js'
 import { AnthropicProfileOauthError } from '../anthropicProfile.js'
 import {
   clearWifCredentialRaceStateForTests,
@@ -13,17 +17,21 @@ import {
   wrapWifSiblingRotatedTokenAdoption,
 } from '../wifCredentialRace.js'
 
+const analyticsSnap = snapshotModuleExports(realAnalytics)
+
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
 
-mock.module('src/utils/debug.js', () => ({
-  logForDebugging: () => {},
-}))
+mock.module('src/utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
+mock.module('src/utils/log.js', logMock)
+mock.module('src/utils/log.ts', logMock)
 
-mock.module('src/utils/log.js', () => ({
-  logError: () => {},
-}))
+afterAll(() => {
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+})
 
 let tempDir = ''
 

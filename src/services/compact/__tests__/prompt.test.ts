@@ -1,6 +1,7 @@
 import { mock, describe, expect, test } from 'bun:test'
+import { bunBundleMock } from '../../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({ feature: () => false }))
+mock.module('bun:bundle', bunBundleMock)
 
 const { formatCompactSummary } = await import('../prompt')
 

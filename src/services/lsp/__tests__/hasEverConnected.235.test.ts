@@ -55,6 +55,7 @@ function fakeManager(
     closeFile: async () => {},
     isFileOpen: () => false,
     closeAllFiles: async () => {},
+    didLastConfigLoadFail: () => false,
   }
 }
 

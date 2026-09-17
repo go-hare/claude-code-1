@@ -1,6 +1,7 @@
 /**
  * densable 2.1.238 #10 Zdu/w5y/E5y — pollWork HTTP timeout 10s + timeout/transport
- * exponential backoff + 5xx lease clamp. Does **not** invent warmup_complete.
+ * exponential backoff + 5xx lease clamp. 246 wires warmup_complete on the
+ * poll loop (`warmupComplete.246.test.ts`).
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -91,7 +92,7 @@ describe('densable 2.1.238 #10 E5y lease clamp', () => {
     expect(timeoutTransportBackoffMs(1, lease, now, () => 1)).toBe(2_000)
   })
 
-  test('poll loop source gold: 404 does not reset consecutiveTimeout; no warmup_complete', () => {
+  test('poll loop source gold: 404 does not reset consecutiveTimeout', () => {
     const src = readFileSync(
       join(ROOT, 'self-hosted-runner/rootRunner.ts'),
       'utf8',
@@ -100,6 +101,5 @@ describe('densable 2.1.238 #10 E5y lease clamp', () => {
     expect(src).toContain('timeoutTransportBackoffMs(')
     expect(src).toContain('clampPollDelayToLease(')
     expect(src).toContain('POLL_5XX_LEASE_FLOOR_MS')
-    expect(src).not.toContain('warmup_complete')
   })
 })

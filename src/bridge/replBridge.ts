@@ -135,7 +135,34 @@ export type ReplBridgeHandle = {
    * suppression). Compact-pair uploads must be withheld (2.1.225 #7).
    */
   noHistoryBackfill?: boolean
+  /**
+   * densable leftover hook `gt.archive` @215503763.
+   * POST archive only — not full teardown. Gi `fe.fire` calls this.
+   */
+  archive?(): Promise<void>
   teardown(opts?: ReplBridgeTeardownOpts): Promise<void>
+  /**
+   * densable 2.1.246 `Ui` / `adoptLocalAiTitle` — after REPL Haiku saves an
+   * AI title, PATCH it onto the live CCR/bridge session. Optional: only
+   * assigned when initReplBridge is the host.
+   */
+  adoptLocalAiTitle?(): void
+  /** Official leftover `M.selfTitle` — last inbound / derived RC title. */
+  selfTitle?: string
+  /** Official leftover `p.titleWriter` on cb() — u8o inbound rename. */
+  titleWriter?: {
+    update: (
+      sessionId: string,
+      title: string,
+      opts?: {
+        baseUrl?: string
+        getAccessToken?: () => string | undefined
+        shouldSend?: () => boolean
+        userInitiated?: boolean
+        credentials?: unknown
+      },
+    ) => Promise<void>
+  }
 }
 
 export type BridgeState = 'ready' | 'connected' | 'reconnecting' | 'failed'
@@ -237,6 +264,7 @@ export type BridgeCoreParams = {
   onStopTask?: (taskId: string) => Promise<unknown>
   onSetModel?: (
     model: string | undefined,
+    // biome-ignore lint/suspicious/noConfusingVoidType: load-bearing, see bridgeMessaging.ts
   ) => void | { ok: true } | { ok: false; error: string }
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   /**
@@ -257,6 +285,13 @@ export type BridgeCoreParams = {
     serverName: string,
     mode: string | null,
   ) => { ok: true; warning?: string } | { ok: false; error: string }
+  /**
+   * Official leftover Pi / MCc onRenameSession. Control subtype
+   * rename_session. `{ok:false}` → error control_response.
+   */
+  onRenameSession?: (
+    title: string,
+  ) => { ok: true } | { ok: false; error: string }
   onStateChange?: (state: BridgeState, detail?: string) => void
   /**
    * Fires on each real user message to flow through writeMessages() until
@@ -366,6 +401,7 @@ export async function initBridgeCore(
     onSetMaxThinkingTokens,
     onSetPermissionMode,
     onSetMcpPermissionModeOverride,
+    onRenameSession,
     onStateChange,
     onUserMessage,
     perpetual,
@@ -1305,6 +1341,7 @@ export async function initBridgeCore(
           onSetMaxThinkingTokens,
           onSetPermissionMode,
           onSetMcpPermissionModeOverride,
+          onRenameSession,
         })
 
       let initialFlushDone = false
@@ -2034,6 +2071,9 @@ export async function initBridgeCore(
       logForDebugging(
         `[bridge:repl] Sent result for session=${currentSessionId}`,
       )
+    },
+    async archive() {
+      await archiveSession(currentSessionId)
     },
     async teardown(opts?: ReplBridgeTeardownOpts) {
       // densable To/Ks: honor skipArchive so left-arrow reattach does not

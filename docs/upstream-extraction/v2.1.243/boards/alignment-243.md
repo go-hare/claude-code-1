@@ -2,7 +2,7 @@
 
 > Living board · 2026-09-03 · SEA **已下载**（win32-x64 sha256 `895a32a6…`）  
 > 计数 HAVE **49** / PARTIAL **0** / GAP **0** / UNKNOWN **0** / N/A **11**  
-> tip：npm **2.7.47** + 239 leftover · **不**折入 240/241 空节、245+  
+> tip：npm **2.7.48** + 243 · **不**折入 240/241 空节、245+  
 > 计数以 `official-243-checklist.md` 为准。
 
 ## 桶

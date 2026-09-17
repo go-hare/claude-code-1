@@ -56,6 +56,14 @@ data
 teach-me
 credentials.json
 
+# Upstream-extraction scratch: peel scripts, SEA excerpts, per-file junit
+# dumps, bisect helpers. Written during alignment digs, never committed.
+.tmp-*
+.review-*
+tmp-junit/
+tmp-*.mjs
+_tmp_*.py
+
 # Session-scoped progress / state files written by agents and skills
 # (autofix-pr persistence, test-progress checkpoint, recovery notes).
 # Transient, never meant to enter the repo.

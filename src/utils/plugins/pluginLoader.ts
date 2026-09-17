@@ -40,7 +40,6 @@ import {
   realpath,
   rename,
   rm,
-  rmdir,
   stat,
   symlink,
 } from 'fs/promises'
@@ -56,6 +55,10 @@ import {
   ensureSyncedPluginDirsHydrated,
   getSyncedPluginSyncErrors,
 } from './syncedPluginCloudSync.js'
+import {
+  applySyncedPluginAttribution,
+  readSyncedPluginAttributionMap,
+} from './syncedPluginHydrate.js'
 import {
   downloadZpfUrlZip,
   extractZpfInlineZip,
@@ -90,6 +93,7 @@ import {
   getErrnoPath,
   isENOENT,
   isFsInaccessible,
+  TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   toError,
 } from '../errors.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.js'
@@ -98,6 +102,12 @@ import { getFsImplementation } from '../fsOperations.js'
 import { gitExe } from '../git.js'
 import { lazySchema } from '../lazySchema.js'
 import { logError } from '../log.js'
+import {
+  getPinnedCredentials,
+  getPinnedStorageV5,
+  type StorageV5,
+} from '../storageV5/index.js'
+import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import {
   clearPluginSettingsBase,
@@ -108,6 +118,7 @@ import {
 import type { HooksSettings } from '../settings/types.js'
 import type { HookMatcher } from '../../schemas/hooks.js'
 import { SettingsSchema } from '../settings/types.js'
+import { stripBOM } from '../jsonRead.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { getAddDirEnabledPlugins } from './addDirPluginSettings.js'
 import { verifyAndDemote } from './dependencyResolver.js'
@@ -131,7 +142,10 @@ import {
   loadKnownMarketplacesConfigSafe,
 } from './marketplaceManager.js'
 import {
+  hasCommandPluginLinkFarm,
   installCommandPluginSource,
+  isCommandPluginLinkMode,
+  relinkCommandPluginLinkFarm,
   type CommandSourceConsent,
 } from './pluginCommandSource.js'
 import { getPluginSeedDirs, getPluginsDirectory } from './pluginDirectories.js'
@@ -154,11 +168,48 @@ import {
 } from './schemas.js'
 import { installFromArchive, isSameOrigin } from './pluginArchive.js'
 import {
+  assertPluginCacheVersionParentReal,
+  clearPluginCacheOccupant,
+  decidePluginCacheServe,
+  isPluginCacheStorageV5,
+  pluginCacheHasPayload,
+  probePluginCacheVersionParent,
+  publishStagedPluginCache,
+  removePluginCacheStaging,
+  stagePluginCachePath,
+  sweepStalePluginCacheStaging,
+  type PluginCacheServeDecision,
+  type PluginCacheVersionParentProbe,
+} from './pluginCacheStaging.js'
+import { pluginVersionHasLiveUsers } from './pluginInUseMarkers.js'
+import {
   convertDirectoryToZipInPlace,
   extractZipToDirectory,
   getSessionPluginCachePath,
   isPluginZipCacheEnabled,
 } from './zipCache.js'
+
+/** densable O8 `s` bag. `linkFarm` is leftover eB hint; BLn gates on QU(source). */
+export type CopyPluginToVersionedCacheOptions = {
+  linkFarm?: boolean
+  forceOverwrite?: boolean
+  storageV5?: StorageV5
+  credentials?: unknown
+}
+
+/**
+ * densable O8 call-site pin: `{storageV5: Be() ? handle : void 0, credentials}`.
+ * Official default FromEnv factory is still qb (empty). Do not invent qF.
+ */
+export function copyPluginCacheOptionsFromPin(
+  extra?: CopyPluginToVersionedCacheOptions,
+): CopyPluginToVersionedCacheOptions {
+  return {
+    storageV5: isHoverRestOn() ? getPinnedStorageV5() : undefined,
+    credentials: getPinnedCredentials(),
+    ...extra,
+  }
+}
 
 /**
  * Get the path where plugin cache is stored
@@ -388,19 +439,15 @@ export async function copyDir(src: string, dest: string): Promise<void> {
 }
 
 /**
- * Copy plugin files to versioned cache directory.
+ * densable O8 @213278204 — copy plugin files to the versioned cache.
  *
- * For local plugins: Uses entry.source from marketplace.json as the single source of truth.
- * For remote plugins: Falls back to copying sourcePath (the downloaded content).
+ * Zip/dir dual path; in-use defer overwrite; remove superseded/incomplete;
+ * seed; stage via r_n `${dest}.tmp~${hex8}` then kue rename when NT(storageV5).
+ * Concurrent publish reuses dest ("was cached concurrently").
  *
- * @param sourcePath - Path to the plugin source (used as fallback for remote plugins)
- * @param pluginId - Plugin identifier in format "name@marketplace"
- * @param version - Version string for versioned path
- * @param entry - Optional marketplace entry containing the source field
- * @param marketplaceDir - Marketplace directory for resolving entry.source (undefined for remote plugins)
- * @returns Path to the cached plugin directory
- * @throws Error if the source directory is not found
- * @throws Error if the destination directory is empty after copy
+ * Official QU/AFe/BLn: command+link dest with marker is already-linked;
+ * else relink via `${dest}.linking-${pid}`. VFS GG/T0o main path inlined;
+ * canServeSymlinkedVersionPath = versionPathIsTrustedForServe && versionDirHasPluginShapeMarkers && kq; FLn=Ut official list.
  */
 export async function copyPluginToVersionedCache(
   sourcePath: string,
@@ -408,37 +455,175 @@ export async function copyPluginToVersionedCache(
   version: string,
   entry?: PluginMarketplaceEntry,
   marketplaceDir?: string,
+  options?: CopyPluginToVersionedCacheOptions,
 ): Promise<string> {
-  // When zip cache is enabled, the canonical format is a ZIP file
   const zipCacheMode = isPluginZipCacheEnabled()
+  const forceOverwrite = options?.forceOverwrite ?? false
+  const storageV5 = options?.storageV5
+  const useStorageV5 = isPluginCacheStorageV5(storageV5)
   const cachePath = getVersionedCachePath(pluginId, version)
   const zipPath = getVersionedZipCachePath(pluginId, version)
+  const commandLink = isCommandPluginLinkMode(entry?.source)
 
-  // If cache already exists (directory or ZIP), return it
+  // densable O8 `m = u ? await GG(d) : "real"` — refuse a version path whose
+  // parent escapes the cache root before anything else touches it.
+  const parentProbe: PluginCacheVersionParentProbe = useStorageV5
+    ? await probePluginCacheVersionParent(cachePath)
+    : 'real'
+  if (parentProbe === 'refused') {
+    await assertPluginCacheVersionParentReal(
+      cachePath,
+      pluginId,
+      version,
+      'cache',
+      'before reuse',
+      parentProbe,
+    )
+  }
+
+  // densable O8 `h = () => g ??= ...` — T0o memoized for the whole call.
+  let serveDecision: Promise<PluginCacheServeDecision> | undefined
+  const serve = (): Promise<PluginCacheServeDecision> =>
+    (serveDecision ??=
+      parentProbe === 'absent'
+        ? Promise.resolve<PluginCacheServeDecision>('absent')
+        : decidePluginCacheServe(cachePath, pluginId, version, commandLink))
+
+  if (commandLink) {
+    if (
+      useStorageV5 ? (await serve()) !== 'absent' : await pathExists(cachePath)
+    ) {
+      const complete = useStorageV5
+        ? (await serve()) === 'serve'
+        : await hasCommandPluginLinkFarm(cachePath)
+      if (!forceOverwrite && complete) {
+        logForDebugging(
+          `Plugin ${pluginId} version ${version} already cached at ${cachePath}`,
+        )
+        return cachePath
+      }
+      if (complete) {
+        let inUse = false
+        try {
+          inUse = await pluginVersionHasLiveUsers(cachePath, {
+            excludeSelf: true,
+          })
+        } catch {
+          inUse = true
+        }
+        if (inUse) {
+          logForDebugging(
+            `Cache for ${pluginId} at ${cachePath} is in use by another session; deferring overwrite until it exits`,
+          )
+          return cachePath
+        }
+      }
+      if (useStorageV5) {
+        await assertPluginCacheVersionParentReal(
+          cachePath,
+          pluginId,
+          version,
+          'link',
+          'during relink',
+        )
+      }
+      if (
+        !useStorageV5 ||
+        (await clearPluginCacheOccupant(
+          cachePath,
+          pluginId,
+          version,
+          'link',
+        )) === 'recurse'
+      ) {
+        logForDebugging(
+          `Removing ${complete ? 'superseded' : 'incomplete'} cache directory for ${pluginId} at ${cachePath}`,
+        )
+        await rm(cachePath, { recursive: true, force: true })
+      }
+    }
+
+    const seedPath = await probeSeedCache(pluginId, version)
+    if (seedPath) {
+      logForDebugging(
+        `Using seed cache for ${pluginId}@${version} at ${seedPath}`,
+      )
+      return seedPath
+    }
+
+    await getFsImplementation().mkdir(dirname(cachePath))
+    await relinkCommandPluginLinkFarm(sourcePath, cachePath)
+    logForDebugging(`Successfully cached plugin ${pluginId} at ${cachePath}`)
+    return cachePath
+  }
+
   if (zipCacheMode) {
     if (await pathExists(zipPath)) {
-      logForDebugging(
-        `Plugin ${pluginId} version ${version} already cached at ${zipPath}`,
-      )
-      return zipPath
+      if (!forceOverwrite) {
+        logForDebugging(
+          `Plugin ${pluginId} version ${version} already cached at ${zipPath}`,
+        )
+        if (useStorageV5 && (await pathExists(cachePath))) {
+          await Promise.all([
+            sweepStalePluginCacheStaging(cachePath),
+            sweepStalePluginCacheStaging(zipPath),
+          ])
+        }
+        return zipPath
+      }
+      await rm(zipPath, { force: true })
     }
-  } else if (await pathExists(cachePath)) {
-    const entries = await readdir(cachePath)
-    if (entries.length > 0) {
+  } else if (
+    useStorageV5 ? (await serve()) !== 'absent' : await pathExists(cachePath)
+  ) {
+    const complete = useStorageV5
+      ? (await serve()) === 'serve'
+      : await pluginCacheHasPayload(cachePath, {
+          whenUnreadable: false,
+        })
+    if (!forceOverwrite && complete) {
       logForDebugging(
         `Plugin ${pluginId} version ${version} already cached at ${cachePath}`,
       )
       return cachePath
     }
-    // Directory exists but is empty, remove it so we can recreate with content
-    logForDebugging(
-      `Removing empty cache directory for ${pluginId} at ${cachePath}`,
-    )
-    await rmdir(cachePath)
+    if (complete) {
+      let inUse = false
+      try {
+        inUse = await pluginVersionHasLiveUsers(cachePath, {
+          excludeSelf: true,
+        })
+      } catch {
+        inUse = true
+      }
+      if (inUse) {
+        logForDebugging(
+          `Cache for ${pluginId} at ${cachePath} is in use by another session; deferring overwrite until it exits`,
+        )
+        return cachePath
+      }
+    }
+    if (useStorageV5) {
+      await assertPluginCacheVersionParentReal(
+        cachePath,
+        pluginId,
+        version,
+        'cache',
+        'before overwrite',
+      )
+    }
+    if (
+      !useStorageV5 ||
+      (await clearPluginCacheOccupant(cachePath, pluginId, version)) ===
+        'recurse'
+    ) {
+      logForDebugging(
+        `Removing ${complete ? 'superseded' : 'incomplete'} cache directory for ${pluginId} at ${cachePath}`,
+      )
+      await rm(cachePath, { recursive: true, force: true })
+    }
   }
 
-  // Seed cache hit — return seed path in place (read-only, no copy).
-  // Callers handle both directory and .zip paths; this returns a directory.
   const seedPath = await probeSeedCache(pluginId, version)
   if (seedPath) {
     logForDebugging(
@@ -447,53 +632,86 @@ export async function copyPluginToVersionedCache(
     return seedPath
   }
 
-  // Create parent directories
   await getFsImplementation().mkdir(dirname(cachePath))
 
-  // For local plugins: copy entry.source directory (the single source of truth)
-  // For remote plugins: marketplaceDir is undefined, fall back to copying sourcePath
-  if (entry && typeof entry.source === 'string' && marketplaceDir) {
-    const sourceDir = validatePathWithinBase(marketplaceDir, entry.source)
-
-    logForDebugging(
-      `Copying source directory ${entry.source} for plugin ${pluginId}`,
-    )
-    try {
-      await copyDir(sourceDir, cachePath)
-    } catch (e: unknown) {
-      // Only remap ENOENT from the top-level sourceDir itself — nested ENOENTs
-      // from recursive copyDir (broken symlinks, raced deletes) should preserve
-      // their original path in the error.
-      if (isENOENT(e) && getErrnoPath(e) === sourceDir) {
-        throw new Error(
-          `Plugin source directory not found: ${sourceDir} (from entry.source: ${entry.source})`,
-        )
+  const stagingPath = useStorageV5 ? stagePluginCachePath(cachePath) : cachePath
+  let published = false
+  let usedConcurrent = false
+  try {
+    if (entry && typeof entry.source === 'string' && marketplaceDir) {
+      const sourceDir = validatePathWithinBase(marketplaceDir, entry.source)
+      logForDebugging(
+        `Copying source directory ${entry.source} for plugin ${pluginId}`,
+      )
+      try {
+        await copyDir(sourceDir, stagingPath)
+      } catch (e: unknown) {
+        if (isENOENT(e) && getErrnoPath(e) === sourceDir) {
+          throw new Error(
+            `Plugin source directory not found: ${sourceDir} (from entry.source: ${entry.source})`,
+          )
+        }
+        throw e
       }
-      throw e
+    } else {
+      logForDebugging(
+        `Copying plugin ${pluginId} to versioned cache (fallback to full copy)`,
+      )
+      await copyDir(sourcePath, stagingPath)
     }
-  } else {
-    // Fallback for remote plugins (already downloaded) or plugins without entry.source
-    logForDebugging(
-      `Copying plugin ${pluginId} to versioned cache (fallback to full copy)`,
-    )
-    await copyDir(sourcePath, cachePath)
+
+    await rm(join(stagingPath, '.git'), { recursive: true, force: true })
+
+    const cacheEntries = await readdir(stagingPath)
+    if (cacheEntries.length === 0) {
+      throw new Error(
+        `Failed to copy plugin ${pluginId} to versioned cache: destination is empty after copy`,
+      )
+    }
+
+    if (useStorageV5 && !zipCacheMode) {
+      try {
+        await publishStagedPluginCache(stagingPath, cachePath)
+        published = true
+      } catch (error) {
+        if (await pluginCacheHasPayload(cachePath, { whenUnreadable: false })) {
+          logForDebugging(
+            `Plugin ${pluginId} version ${version} was cached concurrently at ${cachePath}; using it (${errorMessage(error)})`,
+          )
+          usedConcurrent = true
+        } else {
+          throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+            `Could not publish ${pluginId} ${version} into the plugin cache (${errorMessage(error)}); retry the load or the install.`,
+            'plugin cache staged publish could not complete',
+          )
+        }
+      }
+    } else {
+      published = true
+    }
+  } finally {
+    if (useStorageV5 && !published && !usedConcurrent) {
+      await removePluginCacheStaging(stagingPath)
+    }
   }
 
-  // Remove .git directory from cache if present
-  const gitPath = join(cachePath, '.git')
-  await rm(gitPath, { recursive: true, force: true })
-
-  // Validate that cache has content - if empty, throw so fallback can be used
-  const cacheEntries = await readdir(cachePath)
-  if (cacheEntries.length === 0) {
-    throw new Error(
-      `Failed to copy plugin ${pluginId} to versioned cache: destination is empty after copy`,
-    )
+  if (usedConcurrent) {
+    return cachePath
   }
 
-  // Zip cache mode: convert directory to ZIP and remove the directory
+  const materialized = useStorageV5 && !zipCacheMode ? cachePath : stagingPath
+
   if (zipCacheMode) {
-    await convertDirectoryToZipInPlace(cachePath, zipPath)
+    // densable O8 zip arm: convert after staging publish latch. Always clear
+    // the `.tmp~` tree when storageV5 (success or convert throw) — published
+    // was set true above so the outer finally will not.
+    try {
+      await convertDirectoryToZipInPlace(materialized, zipPath)
+    } finally {
+      if (useStorageV5 && stagingPath !== cachePath) {
+        await removePluginCacheStaging(stagingPath)
+      }
+    }
     logForDebugging(
       `Successfully cached plugin ${pluginId} as ZIP at ${zipPath}`,
     )
@@ -1172,7 +1390,7 @@ export async function cachePlugin(
   if (await pathExists(manifestPath)) {
     try {
       const content = await readFile(manifestPath, { encoding: 'utf-8' })
-      const parsed = jsonParse(content)
+      const parsed = jsonParse(stripBOM(content))
       const result = PluginManifestSchema().safeParse(parsed)
 
       if (result.success) {
@@ -1218,7 +1436,7 @@ export async function cachePlugin(
       const content = await readFile(legacyManifestPath, {
         encoding: 'utf-8',
       })
-      const parsed = jsonParse(content)
+      const parsed = jsonParse(stripBOM(content))
       const result = PluginManifestSchema().safeParse(parsed)
 
       if (result.success) {
@@ -1352,7 +1570,7 @@ export async function loadPluginManifest(
   try {
     // Read and parse the manifest JSON file
     const content = await readFile(manifestPath, { encoding: 'utf-8' })
-    const parsedJson = jsonParse(content)
+    const parsedJson = jsonParse(stripBOM(content))
 
     // Validate against the PluginManifest schema
     const result = PluginManifestSchema().safeParse(parsedJson)
@@ -2516,14 +2734,26 @@ async function loadPluginFromMarketplaceEntry(
         version,
         entry,
         marketplaceDir,
+        copyPluginCacheOptionsFromPin(),
       )
 
       logForDebugging(
         `Resolved local plugin ${entry.name} to versioned cache: ${pluginPath}`,
       )
     } catch (error) {
-      // If copy fails, fall back to loading from marketplace directly
       const errorMsg = errorMessage(error)
+      if (isPluginCacheStorageV5(copyPluginCacheOptionsFromPin().storageV5)) {
+        logForDebugging(
+          `Failed to copy plugin ${entry.name} to versioned cache: ${errorMsg}. Not loading it from the marketplace clone (strict plugin cache).`,
+          { level: 'error' },
+        )
+        errorsOut.push({
+          type: 'generic-error',
+          source: pluginId,
+          error: `Plugin ${entry.name} could not be copied into the plugin cache (${error instanceof TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS ? errorMsg : 'see debug log'}); it is not loaded from the marketplace copy. Reinstalling the plugin retries the copy.`,
+        })
+        return null
+      }
       logForDebugging(
         `Failed to copy plugin ${entry.name} to versioned cache: ${errorMsg}. Using marketplace path.`,
         { level: 'warn' },
@@ -2623,6 +2853,7 @@ async function loadPluginFromMarketplaceEntry(
             actualVersion,
             entry,
             undefined,
+            copyPluginCacheOptionsFromPin(),
           )
 
           // Clean up temp path
@@ -3441,6 +3672,12 @@ export async function loadSyncedPlugins(
   const plugins = items.flatMap(item => (item.plugin ? [item.plugin] : []))
   const errors = items.flatMap(item => item.errors)
   const warnings = items.flatMap(item => item.warnings)
+
+  // densable 2.1.246 hyo load copy — Gbn fields onto LoadedPlugin
+  const attribution = await readSyncedPluginAttributionMap()
+  for (const plugin of plugins) {
+    applySyncedPluginAttribution(plugin, attribution.get(plugin.name))
+  }
 
   if (plugins.length > 0) {
     logForDebugging(`Loaded ${plugins.length} claude.ai-synced plugins`)

@@ -1,9 +1,13 @@
-import { describe, test, expect } from 'bun:test'
+import { afterAll, describe, test, expect } from 'bun:test'
 import { mock } from 'bun:test'
 import { z } from 'zod/v4'
 import { logMock } from '../../../../../../tests/mocks/log'
 import { debugMock } from '../../../../../../tests/mocks/debug'
 import { growthbookMock } from '../../../../../../tests/mocks/growthbook'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+import * as realSearchExtraTools from 'src/utils/searchExtraTools.js'
+import * as realToolsConstants from 'src/constants/tools.js'
+import * as realMessages from 'src/utils/messages.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -11,7 +15,12 @@ mock.module('src/utils/debug.ts', debugMock)
 // Mock all heavy dependencies before importing ExecuteTool
 mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
+const searchExtraToolsSnap = snapshotModuleExports(realSearchExtraTools)
+const toolsConstantsSnap = snapshotModuleExports(realToolsConstants)
+const messagesSnap = snapshotModuleExports(realMessages)
+
 mock.module('src/utils/searchExtraTools.js', () => ({
+  ...searchExtraToolsSnap,
   isSearchExtraToolsEnabledOptimistic: () => true,
   getAutoSearchExtraToolsCharThreshold: () => 100,
   getSearchExtraToolsMode: () => 'tst' as const,
@@ -33,11 +42,13 @@ mock.module('src/utils/searchExtraTools.js', () => ({
 }))
 
 mock.module('src/constants/tools.js', () => ({
+  ...toolsConstantsSnap,
   CORE_TOOLS: new Set(['ExecuteExtraTool', 'ToolSearch']),
 }))
 
 // Mock messages module
 mock.module('src/utils/messages.js', () => ({
+  ...messagesSnap,
   createUserMessage: ({ content }: { content: string }) => ({
     type: 'user' as const,
     content,
@@ -45,6 +56,14 @@ mock.module('src/utils/messages.js', () => ({
   }),
   INTERRUPT_MESSAGE_FOR_TOOL_USE: '[Request interrupted]',
 }))
+
+afterAll(() => {
+  mock.module('src/utils/searchExtraTools.js', () => ({
+    ...searchExtraToolsSnap,
+  }))
+  mock.module('src/constants/tools.js', () => ({ ...toolsConstantsSnap }))
+  mock.module('src/utils/messages.js', () => ({ ...messagesSnap }))
+})
 
 const { ExecuteTool } = await import('../ExecuteTool.js')
 const { EXECUTE_TOOL_NAME } = await import('../constants.js')

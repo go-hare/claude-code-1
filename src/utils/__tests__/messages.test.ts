@@ -613,6 +613,97 @@ describe('ensureToolResultPairing', () => {
     const lastMsg = result[result.length - 1]!
     expect(lastMsg.type).toBe('user')
   })
+
+  test('ZWr inserts [Tool use removed] between thinking blocks', () => {
+    const toolUseId = 'toolu_sandwich_001'
+    const messages: (UserMessage | AssistantMessage)[] = [
+      makeAssistantMsg([
+        {
+          type: 'tool_use',
+          id: toolUseId,
+          name: 'Bash',
+          input: { command: 'pwd' },
+        },
+      ]),
+      createUserMessage({
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: '/tmp',
+          },
+        ],
+      }),
+      makeAssistantMsg([
+        { type: 'thinking', thinking: 'one' },
+        {
+          type: 'tool_use',
+          id: toolUseId,
+          name: 'Bash',
+          input: { command: 'pwd' },
+        },
+        { type: 'thinking', thinking: 'two' },
+      ]),
+    ]
+
+    const result = ensureToolResultPairing(messages)
+    const lastAsst = result.findLast(m => m.type === 'assistant')
+    expect(lastAsst?.type).toBe('assistant')
+    if (lastAsst?.type !== 'assistant') return
+    const content = lastAsst.message.content
+    expect(Array.isArray(content)).toBe(true)
+    if (!Array.isArray(content)) return
+    const types = content.map(b => (typeof b === 'string' ? 'string' : b.type))
+    expect(types).toEqual(['thinking', 'text', 'thinking'])
+    const text = content.find(b => typeof b !== 'string' && b.type === 'text')
+    expect(text && 'text' in text ? text.text : undefined).toBe(
+      '[Tool use removed]',
+    )
+  })
+})
+
+describe('normalizeMessagesForAPI tHr batch-entry merge (2.1.246)', () => {
+  test('merges parent_n tool_results onto the parent tool_use id', () => {
+    const parentId = 'toolu_batch_parent'
+    const messages: Message[] = [
+      makeAssistantMsg([
+        {
+          type: 'tool_use',
+          id: parentId,
+          name: 'Bash',
+          input: { command: 'echo' },
+        },
+      ]),
+      createUserMessage({
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: `${parentId}_0`,
+            content: 'first',
+          },
+          {
+            type: 'tool_result',
+            tool_use_id: `${parentId}_1`,
+            content: 'second',
+          },
+        ],
+      }),
+    ]
+
+    const out = normalizeMessagesForAPI(messages, [])
+    const user = out.find(m => m.type === 'user')
+    expect(user?.type).toBe('user')
+    if (user?.type !== 'user' || !Array.isArray(user.message.content)) {
+      return
+    }
+    const results = user.message.content.filter(b => b.type === 'tool_result')
+    expect(results).toHaveLength(1)
+    expect(results[0]?.tool_use_id).toBe(parentId)
+    expect(results[0]?.content).toContain('--- entry 1 ---')
+    expect(results[0]?.content).toContain('first')
+    expect(results[0]?.content).toContain('--- entry 2 ---')
+    expect(results[0]?.content).toContain('second')
+  })
 })
 
 // ─── densable 2.1.216 LN: same-id assistants merge across transparent tool_result ──

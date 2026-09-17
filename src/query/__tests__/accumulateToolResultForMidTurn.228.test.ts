@@ -3,9 +3,8 @@
  */
 import { describe, expect, mock, test } from 'bun:test'
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+import { analyticsMock } from '../../../tests/mocks/analytics.js'
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 import { accumulateToolResultForMidTurn } from '../accumulateToolResultForMidTurn.js'
 import type { AttachmentMessage, UserMessage } from '../../types/message.js'

@@ -6,6 +6,8 @@ import * as realConfig from '../../../utils/config.js';
 import { renderToString } from '../../../utils/staticRender.js';
 import type { Message } from '../../../types/message.js';
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js';
+import * as realPolicy from '../../../services/policyLimits/index.js';
+import * as realSubmitTranscriptShare from '../submitTranscriptShare.js';
 
 let transcriptShareDismissed = false;
 let productFeedbackAllowed = true;
@@ -14,6 +16,8 @@ const mockSubmitTranscriptShare = mock(async () => ({ success: true }));
 
 // Snapshot BEFORE mock — thin config mock no-ops saveGlobalConfig for co-suites.
 const configSnap = snapshotModuleExports(realConfig);
+const policySnap = snapshotModuleExports(realPolicy);
+const submitTranscriptShareSnap = snapshotModuleExports(realSubmitTranscriptShare);
 const realGetGlobalConfig = configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig;
 
 function configMock() {
@@ -38,14 +42,22 @@ mock.module('src/utils/config.js', configMock);
 afterAll(() => {
   mock.module('../../../utils/config.js', () => ({ ...configSnap }));
   mock.module('src/utils/config.js', () => ({ ...configSnap }));
+  mock.module('../../../services/policyLimits/index.js', () => ({
+    ...policySnap,
+  }));
+  mock.module('../submitTranscriptShare.js', () => ({
+    ...submitTranscriptShareSnap,
+  }));
 });
 mock.module('../../../services/policyLimits/index.js', () => ({
+  ...policySnap,
   isPolicyAllowed: (policy: string) => {
     policyKeys.push(policy);
     return productFeedbackAllowed;
   },
 }));
 mock.module('../submitTranscriptShare.js', () => ({
+  ...submitTranscriptShareSnap,
   submitTranscriptShare: mockSubmitTranscriptShare,
 }));
 

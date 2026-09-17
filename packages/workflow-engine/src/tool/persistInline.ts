@@ -18,6 +18,8 @@ export class SymlinkWriteRefusedError extends Error {
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
 const O_DIRECTORY = fsConstants.O_DIRECTORY ?? 0
 const O_RDONLY = fsConstants.O_RDONLY
+/** Bun/Windows often omit these flags — densable YNn must fall back to lstat. */
+const HAS_DIR_NOFOLLOW = O_DIRECTORY !== 0 && O_NOFOLLOW !== 0
 
 function errnoCode(err: unknown): string | undefined {
   if (err && typeof err === 'object' && 'code' in err) {
@@ -25,6 +27,40 @@ function errnoCode(err: unknown): string | undefined {
     return typeof c === 'string' ? c : undefined
   }
   return undefined
+}
+
+async function assertPathIsRealDirectory(
+  cur: string,
+): Promise<'ok' | 'missing'> {
+  if (HAS_DIR_NOFOLLOW) {
+    try {
+      const fh = await open(cur, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+      await fh.close()
+      return 'ok'
+    } catch (err) {
+      const code = errnoCode(err)
+      if (code === 'ELOOP' || code === 'ENOTDIR') {
+        throw new SymlinkWriteRefusedError(
+          `Refusing to write under symlinked or non-directory path: ${cur}`,
+        )
+      }
+      if (code === 'ENOENT') return 'missing'
+      throw err
+    }
+  }
+  try {
+    const st = await lstat(cur)
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new SymlinkWriteRefusedError(
+        `Refusing to write under symlinked or non-directory path: ${cur}`,
+      )
+    }
+    return 'ok'
+  } catch (err) {
+    if (err instanceof SymlinkWriteRefusedError) throw err
+    if (errnoCode(err) === 'ENOENT') return 'missing'
+    throw err
+  }
 }
 
 /**
@@ -49,19 +85,7 @@ export async function assertDirChainReal(
   const segments = rel.split(sep).filter(s => s.length > 0)
   for (const seg of segments) {
     cur = join(cur, seg)
-    try {
-      const fh = await open(cur, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
-      await fh.close()
-    } catch (err) {
-      const code = errnoCode(err)
-      if (code === 'ELOOP' || code === 'ENOTDIR') {
-        throw new SymlinkWriteRefusedError(
-          `Refusing to write under symlinked or non-directory path: ${cur}`,
-        )
-      }
-      if (code === 'ENOENT') return
-      throw err
-    }
+    if ((await assertPathIsRealDirectory(cur)) === 'missing') return
   }
 }
 
@@ -93,17 +117,10 @@ export async function persistInlineScript(
   const filePath = join(dir, 'script.js')
 
   // Parent must not be a symlink (post-mkdir TOCTOU densable-same as L1a wx path)
-  try {
-    const fh = await open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
-    await fh.close()
-  } catch (err) {
-    const code = errnoCode(err)
-    if (code === 'ELOOP' || code === 'ENOTDIR') {
-      throw new SymlinkWriteRefusedError(
-        `Refusing to write into symlinked directory: ${dir}`,
-      )
-    }
-    throw err
+  if ((await assertPathIsRealDirectory(dir)) === 'missing') {
+    throw new SymlinkWriteRefusedError(
+      `Refusing to write into missing directory: ${dir}`,
+    )
   }
 
   // Leaf must not already be a symlink

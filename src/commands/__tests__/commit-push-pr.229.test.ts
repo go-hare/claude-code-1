@@ -3,10 +3,9 @@
  */
 import { describe, expect, mock, test } from 'bun:test'
 import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
+import { bunBundleMock } from '../../../tests/mocks/bunBundle.js'
 
-mock.module('bun:bundle', () => ({
-  feature: (_name: string) => false,
-}))
+mock.module('bun:bundle', bunBundleMock)
 
 mock.module('src/utils/attribution.ts', () => ({
   getAttributionTexts: () => ({ commit: '', pr: '' }),

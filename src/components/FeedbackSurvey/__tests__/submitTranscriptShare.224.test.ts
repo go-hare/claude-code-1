@@ -21,6 +21,9 @@ import {
 import { logMock } from '../../../../tests/mocks/log.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import * as realFeedback from '../../Feedback.js'
+
+const feedbackSnap = snapshotModuleExports(realFeedback)
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/log.js', logMock)
@@ -84,9 +87,11 @@ mock.module('src/utils/sessionStorage.js', sessionStorageOverlay)
 // Controllable redact — default identity; fail-closed tests override.
 let redactImpl: (s: string) => string = (s: string) => s
 mock.module('../../Feedback.js', () => ({
+  ...feedbackSnap,
   redactSensitiveInfo: (s: string) => redactImpl(s),
 }))
 mock.module('../Feedback.js', () => ({
+  ...feedbackSnap,
   redactSensitiveInfo: (s: string) => redactImpl(s),
 }))
 
@@ -132,6 +137,8 @@ mock.module('src/utils/model/providers.ts', providersOverlay)
 mock.module('src/utils/model/providers.js', providersOverlay)
 
 afterAll(() => {
+  mock.module('../../Feedback.js', () => ({ ...feedbackSnap }))
+  mock.module('../Feedback.js', () => ({ ...feedbackSnap }))
   mock.module('src/utils/auth.ts', () => ({ ...authSnap }))
   mock.module('src/utils/auth.js', () => ({ ...authSnap }))
   mock.module('src/utils/http.ts', () => ({ ...httpSnap }))
